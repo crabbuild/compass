@@ -1,5 +1,6 @@
 //! Command compatibility layer for Trail's graph namespace.
 
+mod hook_commands;
 mod integration_commands;
 mod provider_commands;
 mod result_commands;
@@ -139,6 +140,9 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "merge-driver" => integration_commands::command_merge_driver(frontend, &args),
         "global" => integration_commands::command_global(frontend, &args),
         "clone" => integration_commands::command_clone(frontend, &args),
+        "hook" => hook_commands::command_hook(frontend, &args),
+        "hook-spawn" => hook_commands::command_hook_spawn(frontend, &args),
+        "hook-refresh" => command_hook_refresh(frontend, &args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -894,6 +898,43 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
+    let launch_root = args
+        .iter()
+        .find(|argument| !argument.starts_with('-'))
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let marker = launch_root.join(&output_name).join(".graphify_root");
+    let recorded_root = hook_commands::read_text_bounded(&marker, 16 * 1024)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty() && !value.contains('\0'));
+    let build_args = recorded_root.map_or_else(
+        || args.to_vec(),
+        |recorded| {
+            vec![
+                recorded,
+                "--out".to_owned(),
+                launch_root.to_string_lossy().into_owned(),
+            ]
+        },
+    );
+    let result = command_build(&build_args, false);
+    if result.code != 0 {
+        return result;
+    }
+    let memory = launch_root.join(&output_name).join("memory");
+    let has_memories = fs::read_dir(memory).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("md"))
+    });
+    if has_memories {
+        let _ = result_commands::command_reflect(frontend, &["--if-stale".to_owned()]);
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1908,7 +1949,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -1937,6 +1978,7 @@ fn trail_command_help(command: &str) -> String {
         "merge-driver" => integration_commands::merge_driver_help(Frontend::Trail),
         "global" => integration_commands::global_help(Frontend::Trail),
         "clone" => integration_commands::clone_help(Frontend::Trail),
+        "hook" => hook_commands::hook_help(Frontend::Trail),
         _ => trail_help(),
     }
 }
@@ -1947,6 +1989,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
