@@ -109,6 +109,9 @@ impl Engine {
         if spec.name == "apex" {
             return Ok(crate::apex::extract(path, &source));
         }
+        if spec.name == "dart" {
+            return Ok(crate::dart::extract(path, &source));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

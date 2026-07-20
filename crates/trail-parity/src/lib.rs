@@ -552,6 +552,134 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn dart_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("test_app_bloc.dart");
+        fs::write(
+            &source,
+            r#"
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+export 'package:flutter_bloc/flutter_bloc.dart';
+
+@injectable
+@HiveType(typeId: 10)
+class UserBloc extends Bloc<UserEvent, UserState> with MyMixin implements Disposable {
+  UserBloc() : super(InitialState()) {
+    on<AuthLogin>((event, emit) { emit(AuthLoading()); });
+  }
+}
+
+@jsonSerializable
+enum UserRole { admin, user }
+
+extension StringExtensions on String {
+  bool get isEmail => contains('@');
+}
+
+final authServiceProvider = Provider<AuthService>((ref) => AuthService());
+final myData = 42;
+
+void checkDependencies(BuildContext context) {
+  final custom = context.dependOnInheritedWidgetOfExactType<CustomService>();
+  final auth = context.read<AuthService>();
+  final bloc = BlocProvider.of<UserBloc>(context);
+  final getItService = GetIt.I<DatabaseService>();
+  final locatorService = locator<api.NetworkFactory>();
+  context.read<AuthBloc>().add(AuthLogin());
+  context.go('/home?id=123&type=auth');
+  Navigator.pushNamed(context, Routes.login);
+  context.router.push(ProfileRoute());
+}
+"#,
+        )?;
+        compare_extraction_path(&source, "extract_dart")?;
+
+        let namespaces = directory.path().join("test_namespaces.dart");
+        fs::write(
+            &namespaces,
+            r#"
+class MyWidget extends foo.Bar<Map<String, int>> implements ui.Widget, db.Model {}
+final Map<String, int> myVar = 10;
+const List<Map<String, int>> myList = [];
+late final auth.AuthService authService;
+Map<String, Map<String, int>> myMethod(String a) {}
+auth.AuthService init() {}
+"#,
+        )?;
+        compare_extraction_path(&namespaces, "extract_dart")?;
+
+        let advanced = directory.path().join("test_advanced.dart");
+        fs::write(
+            &advanced,
+            r#"
+import 'package:riverpod/riverpod.dart';
+abstract base class MyBaseClass {}
+abstract interface class MyInterface {}
+mixin class MyMixinClass {}
+@riverpod
+class MyNotifier extends _$MyNotifier {
+  @override
+  String build() { ref.watch(anotherProvider); return "hello"; }
+}
+@riverpod
+String myValue(MyValueRef ref) { return "world"; }
+class MyModel {
+  late final String lateField;
+  final int noInitField;
+  final String initField = "init";
+}
+final (int, String) typedRecord = (1, "one");
+var (recA, recB) = (10, 20);
+(double, double) getCoordinates() {
+  var localVal = switch (typedRecord) { _ => (0.0, 0.0) };
+  return localVal;
+}
+"#,
+        )?;
+        compare_extraction_path(&advanced, "extract_dart")?;
+
+        let specifics = directory.path().join("test_specifics.dart");
+        fs::write(
+            &specifics,
+            r#"
+mixin AuthMixin on BaseWidget {}
+typedef JsonMap = ApiJsonMap;
+extension type UserId(int value) implements Object {}
+class MyService {
+  final AuthService api;
+  MyService(this.api);
+  factory MyService.fromJson() {}
+  void navigate(BuildContext context) {
+    context.go('/home');
+    Navigator.pushNamed(context, Routes.login);
+    context.router.push(ProfileRoute());
+  }
+}
+"#,
+        )?;
+        compare_extraction_path(&specifics, "extract_dart")?;
+
+        let parent = directory.path().join("parent_lib.dart");
+        fs::write(&parent, "library parent_lib;\npart 'child_part.dart';\n")?;
+        let child = directory.path().join("child_part.dart");
+        fs::write(
+            &child,
+            r#"
+part of 'parent_lib.dart';
+class ChildClass extends Bloc<Pair<UserEvent, MyState>, State> {}
+var User(name: myVar, age: myAge) = user;
+void runDI(BuildContext context) {
+  final repo = locator<Repository<User>>();
+  context.go('/home?id=123&type=auth');
+}
+"#,
+        )?;
+        compare_extraction_path(&child, "extract_dart")?;
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
