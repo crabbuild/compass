@@ -8,12 +8,16 @@ repository.workspace = true
 
 [dependencies]
 serde_json.workspace = true
+sha1.workspace = true
 thiserror.workspace = true
 time.workspace = true
 trail-files = { path = "../trail-files" }
 trail-graph = { path = "../trail-graph" }
 trail-model = { path = "../trail-model" }
 unicode-normalization.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

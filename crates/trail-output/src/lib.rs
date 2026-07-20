@@ -1,13 +1,17 @@
 //! Safe, deterministic output formats for Trail graphs.
 
+mod canvas;
 mod cypher;
 mod graphml;
 mod json;
+mod obsidian;
 mod report;
 
+pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
 pub use json::{JsonExportOptions, export_json_value, write_json};
+pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
 pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
 
 #[derive(Debug, thiserror::Error)]
@@ -18,4 +22,6 @@ pub enum OutputError {
     MalformedGraph(std::path::PathBuf),
     #[error("refusing to shrink graph from {existing} nodes to {new}; use force to override")]
     ShrinkRefused { existing: usize, new: usize },
+    #[error("invalid Obsidian output path: {0}")]
+    InvalidObsidianPath(std::path::PathBuf),
 }

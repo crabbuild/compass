@@ -23,8 +23,9 @@ mod tests {
     };
     use trail_languages::Engine;
     use trail_output::{
-        DetectionSummary, JsonExportOptions, ReportOptions, TokenCost, cypher_document,
-        generate_report, graphml_document, write_json,
+        CanvasOptions, DetectionSummary, JsonExportOptions, ObsidianOptions, ReportOptions,
+        TokenCost, canvas_document, cypher_document, export_obsidian, generate_report,
+        graphml_document, write_json,
     };
     use trail_resolve::resolve;
 
@@ -1295,10 +1296,101 @@ hydrate();
         Ok(())
     }
 
+    #[test]
+    fn obsidian_and_canvas_exports_match_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let fixture_path = repo.join("tests/fixtures/extraction.json");
+        let extraction: trail_languages::Extraction =
+            serde_json::from_slice(&fs::read(&fixture_path)?)?;
+        let graph = build_from_extraction(&extraction, false, None);
+        let communities = cluster(&graph, ClusterOptions::default());
+        let labels = label_communities_by_hub(&graph, &communities);
+        let cohesion = score_communities(&graph, &communities);
+        let directory = tempfile::tempdir()?;
+        let rust_vault = directory.path().join("rust-vault");
+        let python_vault = directory.path().join("python-vault");
+        let rust_result = export_obsidian(
+            &graph,
+            &communities,
+            &rust_vault,
+            &ObsidianOptions {
+                community_labels: Some(&labels),
+                cohesion: Some(&cohesion),
+            },
+        )?;
+        let rust_canvas = canvas_document(
+            &graph,
+            &communities,
+            &CanvasOptions {
+                community_labels: Some(&labels),
+                node_filenames: None,
+            },
+        );
+        let labels_json = serde_json::to_string(&labels)?;
+        let cohesion_json = serde_json::to_string(&cohesion)?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from graphify.build import build_from_json; from graphify.cluster import cluster,label_communities_by_hub,score_all; from graphify.export import to_obsidian,to_canvas; x=json.load(open(sys.argv[1])); G=build_from_json(x); c=cluster(G); labels={int(k):v for k,v in json.loads(sys.argv[4]).items()}; cohesion={int(k):v for k,v in json.loads(sys.argv[5]).items()}; n=to_obsidian(G,c,sys.argv[2],labels,cohesion); to_canvas(G,c,sys.argv[3],labels); print(n)",
+            ])
+            .arg(&fixture_path)
+            .arg(&python_vault)
+            .arg(directory.path().join("python.canvas"))
+            .arg(labels_json)
+            .arg(cohesion_json)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            rust_result.notes_written.to_string(),
+            String::from_utf8(output.stdout)?.trim()
+        );
+        assert_eq!(
+            rust_canvas,
+            fs::read_to_string(directory.path().join("python.canvas"))?
+        );
+        assert_eq!(directory_tree(&rust_vault)?, directory_tree(&python_vault)?);
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
         compare_extraction_path(&source, extractor).map(|_| ())
+    }
+
+    fn directory_tree(
+        root: &Path,
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, Box<dyn Error>> {
+        fn visit(
+            root: &Path,
+            directory: &Path,
+            files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+        ) -> Result<(), Box<dyn Error>> {
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    visit(root, &path, files)?;
+                } else {
+                    files.insert(
+                        path.strip_prefix(root)?
+                            .to_string_lossy()
+                            .replace('\\', "/"),
+                        fs::read(path)?,
+                    );
+                }
+            }
+            Ok(())
+        }
+        let mut files = std::collections::BTreeMap::new();
+        visit(root, root, &mut files)?;
+        Ok(files)
     }
 
     fn compare_graph_build(source: &Path) -> Result<(), Box<dyn Error>> {

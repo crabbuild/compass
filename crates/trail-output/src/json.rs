@@ -197,7 +197,7 @@ fn graph_size_cap() -> u64 {
         .unwrap_or(DEFAULT_GRAPH_SIZE_CAP)
 }
 
-fn escape_non_ascii(value: &str) -> String {
+pub(crate) fn escape_non_ascii(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for character in value.chars() {
         let code = character as u32;

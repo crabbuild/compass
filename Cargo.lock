@@ -1178,6 +1178,8 @@ name = "trail-output"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "sha1",
+ "tempfile",
  "thiserror 2.0.19",
  "time",
  "trail-files",
