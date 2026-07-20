@@ -36,6 +36,9 @@ trail graph export
 trail graph benchmark
 trail graph diagnose multigraph
 trail graph merge-graphs
+trail graph cache-check
+trail graph merge-chunks
+trail graph merge-semantic
 ```
 
 The deterministic language registry is checked against every extension handled

@@ -1808,6 +1808,184 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
     }
 
     #[test]
+    fn semantic_merge_commands_match_python_cli() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let python_root = directory.path().join("python");
+        let rust_root = directory.path().join("rust");
+        fs::create_dir_all(&python_root)?;
+        fs::create_dir_all(&rust_root)?;
+        let chunks = [
+            json!({
+                "nodes":[{"id":"a","label":"cached priority"}],
+                "edges":[],
+                "hyperedges":[],
+                "input_tokens":9_007_199_254_740_992_u64,
+                "output_tokens":5,
+            }),
+            json!({
+                "nodes":[{"id":"a","label":"duplicate"},{"id":"b","label":"fresh"}],
+                "edges":[{"source":"a","target":"b","type":"RELATED_TO"}],
+                "hyperedges":[{"id":"h","nodes":["a","b"]}],
+                "input_tokens":7.5,
+                "output_tokens":3,
+            }),
+        ];
+        for root in [&python_root, &rust_root] {
+            for (index, chunk) in chunks.iter().enumerate() {
+                fs::write(
+                    root.join(format!(".graphify_chunk_{index}.json")),
+                    serde_json::to_vec(chunk)?,
+                )?;
+            }
+        }
+        let python_merged = python_root.join("merged.json");
+        let repo = repository_root();
+        let python = Command::new(python_executable(&repo))
+            .args(["-m", "graphify", "merge-chunks"])
+            .arg(python_root.join(".graphify_chunk_*.json"))
+            .args(["--out"])
+            .arg(&python_merged)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env("PYTHONHASHSEED", "0")
+            .output()?;
+        assert!(
+            python.status.success(),
+            "{}",
+            String::from_utf8_lossy(&python.stderr)
+        );
+        let rust_merged = rust_root.join("merged.json");
+        let rust = trail_cli::run(
+            Frontend::Graphify,
+            [
+                OsString::from("merge-chunks"),
+                rust_root.join(".graphify_chunk_*.json").into_os_string(),
+                OsString::from("--out"),
+                rust_merged.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(rust.code, 0, "{}", rust.stderr);
+        assert_eq!(
+            with_newline(&rust.stdout),
+            String::from_utf8(python.stdout)?
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(&rust_merged)?)?,
+            serde_json::from_slice::<Value>(&fs::read(&python_merged)?)?
+        );
+
+        let fresh = json!({
+            "nodes":[{"id":"a","label":"must lose"},{"id":"c","label":"new"}],
+            "edges":[{"source":"b","target":"c","type":"RELATED_TO"}],
+            "hyperedges":[],
+        });
+        let python_fresh = python_root.join("fresh.json");
+        let rust_fresh = rust_root.join("fresh.json");
+        fs::write(&python_fresh, serde_json::to_vec(&fresh)?)?;
+        fs::write(&rust_fresh, serde_json::to_vec(&fresh)?)?;
+        let python_combined = python_root.join("combined.json");
+        let python = Command::new(python_executable(&repo))
+            .args(["-m", "graphify", "merge-semantic", "--cached"])
+            .arg(&python_merged)
+            .args(["--new"])
+            .arg(&python_fresh)
+            .args(["--out"])
+            .arg(&python_combined)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env("PYTHONHASHSEED", "0")
+            .output()?;
+        assert!(
+            python.status.success(),
+            "{}",
+            String::from_utf8_lossy(&python.stderr)
+        );
+        let rust_combined = rust_root.join("combined.json");
+        let rust = trail_cli::run(
+            Frontend::Graphify,
+            [
+                OsString::from("merge-semantic"),
+                OsString::from("--cached"),
+                rust_merged.into_os_string(),
+                OsString::from("--new"),
+                rust_fresh.into_os_string(),
+                OsString::from("--out"),
+                rust_combined.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(rust.code, 0, "{}", rust.stderr);
+        assert_eq!(
+            with_newline(&rust.stdout),
+            String::from_utf8(python.stdout)?
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(rust_combined)?)?,
+            serde_json::from_slice::<Value>(&fs::read(python_combined)?)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cache_check_command_matches_python_cli() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = fs::canonicalize(directory.path())?;
+        let cached = root.join("guide.md");
+        fs::write(&cached, "# Guide\n")?;
+        fs::write(root.join("uncached.md"), "# Uncached\n")?;
+        let fragment = json!({
+            "nodes":[{"id":"guide","source_file":"guide.md"}],
+            "edges":[],
+            "hyperedges":[],
+        });
+        let mut cache = Cache::new(&root, None)?;
+        cache.save(&cached, &fragment, &CacheKind::Semantic, None)?;
+        cache.flush()?;
+        fs::write(root.join("files.txt"), "guide.md\nuncached.md\n")?;
+        let repo = repository_root();
+        let python = Command::new(python_executable(&repo))
+            .args(["-m", "graphify", "cache-check"])
+            .arg(root.join("files.txt"))
+            .args(["--root"])
+            .arg(&root)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env("PYTHONHASHSEED", "0")
+            .output()?;
+        assert!(
+            python.status.success(),
+            "{}",
+            String::from_utf8_lossy(&python.stderr)
+        );
+        let python_cached = fs::read(root.join("graphify-out/.graphify_cached.json"))?;
+        let python_uncached = fs::read(root.join("graphify-out/.graphify_uncached.txt"))?;
+        let rust = trail_cli::run(
+            Frontend::Graphify,
+            [
+                OsString::from("cache-check"),
+                root.join("files.txt").into_os_string(),
+                OsString::from("--root"),
+                root.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(rust.code, 0, "{}", rust.stderr);
+        assert_eq!(
+            with_newline(&rust.stdout),
+            String::from_utf8(python.stdout)?
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(
+                root.join("graphify-out/.graphify_cached.json")
+            )?)?,
+            serde_json::from_slice::<Value>(&python_cached)?
+        );
+        assert_eq!(
+            fs::read(root.join("graphify-out/.graphify_uncached.txt"))?,
+            python_uncached
+        );
+        Ok(())
+    }
+
+    #[test]
     fn python_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.py", "extract_python")
     }

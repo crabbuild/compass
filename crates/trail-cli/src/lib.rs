@@ -1,5 +1,7 @@
 //! Command compatibility layer for Trail's graph namespace.
 
+mod semantic_commands;
+
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
@@ -106,6 +108,9 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "export" => command_export(&args),
         "benchmark" => command_benchmark(&args),
         "merge-graphs" => command_merge_graphs(&args),
+        "cache-check" => semantic_commands::command_cache_check(frontend, &args),
+        "merge-chunks" => semantic_commands::command_merge_chunks(frontend, &args),
+        "merge-semantic" => semantic_commands::command_merge_semantic(frontend, &args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -1868,7 +1873,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic"
         .to_owned()
 }
 
@@ -1887,6 +1892,9 @@ fn trail_command_help(command: &str) -> String {
         "benchmark" => "Usage: trail graph benchmark [GRAPH_JSON]".to_owned(),
         "diagnose" => "Usage: trail graph diagnose multigraph [--graph PATH] [--json] [--max-examples N] [--directed|--undirected] [--extract-path PATH]".to_owned(),
         "merge-graphs" => "Usage: trail graph merge-graphs <graph1.json> <graph2.json> [...] [--out merged.json]".to_owned(),
+        "cache-check" => semantic_commands::cache_check_help(Frontend::Trail),
+        "merge-chunks" => semantic_commands::merge_chunks_help(Frontend::Trail),
+        "merge-semantic" => semantic_commands::merge_semantic_help(Frontend::Trail),
         _ => trail_help(),
     }
 }
@@ -1897,6 +1905,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic"
         .to_owned()
 }

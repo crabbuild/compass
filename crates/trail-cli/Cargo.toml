@@ -24,6 +24,7 @@ path = "src/bin/graphify.rs"
 
 [dependencies]
 ctrlc.workspace = true
+glob.workspace = true
 serde_json.workspace = true
 trail-core = { path = "../trail-core", version = "0.1.0" }
 trail-files = { path = "../trail-files", version = "0.1.0" }

@@ -1043,11 +1043,27 @@ pub fn check_semantic_cache(
     deep_mode: bool,
     prompt: &str,
 ) -> Result<SemanticCacheCheck, SemanticError> {
-    let kind = semantic_cache_kind(deep_mode);
-    let fingerprint = prompt_fingerprint(prompt);
+    check_semantic_cache_mode(cache, files, deep_mode.then_some("deep"), Some(prompt))
+}
+
+/// Compatibility cache reader for agent-managed extraction workflows.
+///
+/// A missing prompt reads the historical flat namespace. Supplying a prompt
+/// selects its fingerprinted namespace while retaining legacy fallback, just
+/// like Python's `check_semantic_cache`.
+pub fn check_semantic_cache_mode(
+    cache: &mut Cache,
+    files: &[PathBuf],
+    mode: Option<&str>,
+    prompt: Option<&str>,
+) -> Result<SemanticCacheCheck, SemanticError> {
+    let kind = mode.map_or(CacheKind::Semantic, |mode| {
+        CacheKind::SemanticMode(mode.to_owned())
+    });
+    let fingerprint = prompt.map(prompt_fingerprint);
     let mut checked = SemanticCacheCheck::default();
     for file in files {
-        let Some(entry) = cache.load(file, &kind, Some(&fingerprint), true, false)? else {
+        let Some(entry) = cache.load(file, &kind, fingerprint.as_deref(), true, false)? else {
             checked.uncached.push(file.clone());
             continue;
         };
