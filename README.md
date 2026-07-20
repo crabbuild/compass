@@ -63,8 +63,9 @@ extraction for documents, papers, PDFs, office files, and images. It supports
 built-in and trusted custom providers, standard/deep cache namespaces, adaptive
 chunk recovery, root-confined image loading, bounded pure-Rust PDF/DOCX/XLSX
 ingestion, and guarded incremental replacement. Use `--code-only` to guarantee
-that no model is invoked. Integrations that have not reached compatibility are
-rejected explicitly instead of being accepted silently.
+that no model is invoked; add `--cargo` to include workspace-internal crate
+dependency edges from local Cargo manifests. Integrations that have not reached
+compatibility are rejected explicitly instead of being accepted silently.
 
 Native Whisper inference, verified model and URL artifact acquisition, and
 bounded audio/video decoding—including AVI—are implemented internally; their

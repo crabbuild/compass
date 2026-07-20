@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use trail_core::{
     BuildOptions, BuildPurpose, BuildResult, ClusterExistingOptions, ExportInputs, LoadedGraph,
-    SemanticLayer, WatchOptions, WatchStatus, build_graph_with_semantic, build_local_graph,
+    SemanticLayer, WatchOptions, WatchStatus, build_graph_with_layers, build_local_graph,
     cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
     format_diagnostic_report, merge_graphs, watch_local_graph,
 };
@@ -656,6 +656,7 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     let mut no_viz = false;
     let mut gitignore = true;
     let mut code_only = false;
+    let mut cargo = false;
     let mut backend = None;
     let mut model = None;
     let mut deep_mode = false;
@@ -674,6 +675,7 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             "--no-viz" => no_viz = true,
             "--no-gitignore" => gitignore = false,
             "--code-only" => code_only = true,
+            "--cargo" if extract => cargo = true,
             "--allow-partial" if extract => allow_partial = true,
             "--backend" if extract && index + 1 < args.len() => {
                 backend = Some(args[index + 1].clone());
@@ -801,9 +803,7 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 }
                 exclude_hubs = Some(parsed);
             }
-            "--dedup-llm" | "--google-workspace" | "--global" | "--cargo" | "--timing"
-                if extract =>
-            {
+            "--dedup-llm" | "--google-workspace" | "--global" | "--timing" if extract => {
                 return Outcome::failure(format!(
                     "error: {} is not yet available in native Trail",
                     args[index]
@@ -863,6 +863,21 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     } else {
         BuildPurpose::Update
     };
+    let cargo_graph = if cargo {
+        match trail_cargo::introspect_cargo(&root) {
+            Ok(graph) => Some(graph),
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        }
+    } else {
+        None
+    };
+    let cargo_counts = cargo_graph
+        .as_ref()
+        .map(|graph| (graph.nodes.len(), graph.edges.len()));
+    let auxiliary_fragments = cargo_graph
+        .map(trail_cargo::CargoGraph::into_fragment)
+        .into_iter()
+        .collect::<Vec<_>>();
     let built = if extract && !code_only {
         build_semantic_graph(
             &options,
@@ -873,14 +888,25 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             max_concurrency,
             api_timeout,
             allow_partial,
+            &auxiliary_fragments,
         )
+    } else if extract && !auxiliary_fragments.is_empty() {
+        build_graph_with_layers(&options, None, &auxiliary_fragments)
+            .map(|result| (result, Vec::new()))
+            .map_err(|error| error.to_string())
     } else {
         build_local_graph(&options)
             .map(|result| (result, Vec::new()))
             .map_err(|error| error.to_string())
     };
     match built {
-        Ok((result, notes)) => {
+        Ok((result, mut notes)) => {
+            if let Some((nodes, edges)) = cargo_counts {
+                notes.insert(
+                    0,
+                    format!("[trail graph extract] Cargo: {nodes} nodes, {edges} edges"),
+                );
+            }
             let mode = if no_cluster {
                 "without clustering"
             } else {
@@ -953,6 +979,7 @@ fn build_semantic_graph(
     max_concurrency: Option<usize>,
     api_timeout: Option<f64>,
     allow_partial: bool,
+    auxiliary_fragments: &[serde_json::Value],
 ) -> Result<(BuildResult, Vec<String>), String> {
     let root = fs::canonicalize(&options.root)
         .map_err(|error| format!("could not resolve {}: {error}", options.root.display()))?;
@@ -1173,7 +1200,8 @@ fn build_semantic_graph(
             .unwrap_or_default(),
         allow_partial,
     };
-    let result = build_graph_with_semantic(options, &layer).map_err(|error| error.to_string())?;
+    let result = build_graph_with_layers(options, Some(&layer), auxiliary_fragments)
+        .map_err(|error| error.to_string())?;
     Ok((result, notes))
 }
 
@@ -1258,7 +1286,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: trail graph extract [PATH] [--code-only] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--api-timeout SECONDS] [--allow-partial] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: trail graph extract [PATH] [--code-only] [--cargo] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--api-timeout SECONDS] [--allow-partial] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {

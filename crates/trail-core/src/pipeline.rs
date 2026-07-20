@@ -32,6 +32,11 @@ pub struct BuildOptions {
     pub extra_excludes: Vec<String>,
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
+    /// Override the commit recorded in update artifacts.
+    ///
+    /// This is primarily useful for reproducible builds and compatibility
+    /// tests whose oracle and native halves must share one source revision.
+    pub built_at_commit: Option<String>,
     pub purpose: BuildPurpose,
 }
 
@@ -55,6 +60,7 @@ impl BuildOptions {
             extra_excludes: Vec::new(),
             resolution: 1.0,
             exclude_hubs: None,
+            built_at_commit: None,
             purpose: BuildPurpose::Update,
         }
     }
@@ -119,6 +125,8 @@ pub enum CoreError {
     InvalidDiagnostic,
     #[error("invalid semantic extraction fragment: {0}")]
     InvalidSemanticFragment(serde_json::Error),
+    #[error("invalid supplemental extraction fragment: {0}")]
+    InvalidSupplementalFragment(serde_json::Error),
     #[error(
         "semantic extraction was incomplete and would shrink the graph ({new} < {existing} nodes)"
     )]
@@ -130,7 +138,7 @@ pub enum CoreError {
 /// Run the complete deterministic local graph pipeline without invoking Python,
 /// an LLM, a network service, or a dynamically installed grammar.
 pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreError> {
-    build_graph(options, None)
+    build_graph(options, None, &[])
 }
 
 /// Merge a completed semantic provider result into the native graph pipeline.
@@ -138,12 +146,29 @@ pub fn build_graph_with_semantic(
     options: &BuildOptions,
     semantic: &SemanticLayer,
 ) -> Result<BuildResult, CoreError> {
-    build_graph(options, Some(semantic))
+    build_graph(options, Some(semantic), &[])
+}
+
+/// Merge deterministic supplemental facts, such as Cargo or database schema
+/// introspection, into the same atomic native graph build.
+pub fn build_graph_with_layers(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[serde_json::Value],
+) -> Result<BuildResult, CoreError> {
+    let supplemental = supplemental
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<Extraction>, _>>()
+        .map_err(CoreError::InvalidSupplementalFragment)?;
+    build_graph(options, semantic, &supplemental)
 }
 
 fn build_graph(
     options: &BuildOptions,
     semantic: Option<&SemanticLayer>,
+    supplemental: &[Extraction],
 ) -> Result<BuildResult, CoreError> {
     if !options.root.exists() {
         return Err(CoreError::MissingRoot(options.root.clone()));
@@ -212,6 +237,7 @@ fn build_graph(
     sources.dedup();
 
     if semantic.is_none()
+        && supplemental.is_empty()
         && options.purpose == BuildPurpose::Update
         && !options.force
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast)
@@ -338,6 +364,13 @@ fn build_graph(
         resolved.edges.extend(extracted.edges);
         resolved.hyperedges.extend(extracted.hyperedges);
     }
+    for extracted in supplemental {
+        resolved.nodes.extend(extracted.nodes.iter().cloned());
+        resolved.edges.extend(extracted.edges.iter().cloned());
+        resolved
+            .hyperedges
+            .extend(extracted.hyperedges.iter().cloned());
+    }
     if options.no_cluster {
         let (nodes, edges) = (dedupe_nodes(&resolved.nodes), dedupe_edges(&resolved.edges));
         enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
@@ -386,6 +419,7 @@ fn build_graph(
     }
 
     if semantic.is_none()
+        && supplemental.is_empty()
         && options.purpose == BuildPurpose::Update
         && update_artifacts_complete(&output_dir)
         && GraphDocument::load(&output_dir.join("graph.json"))
@@ -435,9 +469,11 @@ fn build_graph(
         remap_communities_to_previous(&current, &previous)
     };
     let labels = label_communities_by_hub(&document, &communities);
-    let commit = std::env::current_dir()
-        .ok()
-        .and_then(|directory| git_commit(&directory));
+    let commit = options.built_at_commit.clone().or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|directory| git_commit(&directory))
+    });
 
     let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
     write_json(

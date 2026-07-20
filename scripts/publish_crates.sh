@@ -30,6 +30,7 @@ crates=(
   trail-files
   trail-media
   trail-whisper
+  trail-cargo
   trail-prs
   trail-query
   trail-reflect

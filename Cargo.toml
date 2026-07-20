@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/trail-cargo",
     "crates/trail-cli",
     "crates/trail-core",
     "crates/trail-files",

@@ -1407,9 +1407,19 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
         );
         let python_out = project.join("graphify-out");
         let python = directory_tree(&python_out)?;
+        let python_graph: Value = serde_json::from_slice(
+            python
+                .get("graph.json")
+                .ok_or("Python artifact missing: graph.json")?,
+        )?;
+        let built_at_commit = python_graph
+            .get("built_at_commit")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         fs::remove_dir_all(&python_out)?;
 
-        let options = BuildOptions::new(&project);
+        let mut options = BuildOptions::new(&project);
+        options.built_at_commit = built_at_commit;
         build_local_graph(&options)?;
         let rust = directory_tree(&python_out)?;
         for artifact in [
