@@ -1,5 +1,6 @@
 //! Command compatibility layer for Trail's graph namespace.
 
+mod integration_commands;
 mod provider_commands;
 mod result_commands;
 mod semantic_commands;
@@ -48,6 +49,8 @@ pub struct Outcome {
     pub code: u8,
     pub stdout: String,
     pub stderr: String,
+    pub stdout_trailing_newline: bool,
+    pub stderr_trailing_newline: bool,
 }
 
 impl Outcome {
@@ -56,6 +59,18 @@ impl Outcome {
             code: 0,
             stdout,
             stderr: String::new(),
+            stdout_trailing_newline: true,
+            stderr_trailing_newline: true,
+        }
+    }
+
+    fn success_exact(stdout: String) -> Self {
+        Self {
+            code: 0,
+            stdout,
+            stderr: String::new(),
+            stdout_trailing_newline: false,
+            stderr_trailing_newline: true,
         }
     }
 
@@ -64,6 +79,8 @@ impl Outcome {
             code: 1,
             stdout: String::new(),
             stderr,
+            stdout_trailing_newline: true,
+            stderr_trailing_newline: true,
         }
     }
 }
@@ -116,6 +133,10 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "provider" => provider_commands::command_provider(frontend, &args),
         "save-result" => result_commands::command_save_result(frontend, &args),
         "reflect" => result_commands::command_reflect(frontend, &args),
+        "check-update" => integration_commands::command_check_update(frontend, &args),
+        "hook-check" => integration_commands::command_hook_check(frontend, &args),
+        "hook-guard" => integration_commands::command_hook_guard(frontend, &args),
+        "merge-driver" => integration_commands::command_merge_driver(frontend, &args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -1733,7 +1754,7 @@ fn command_query(args: &[String]) -> Outcome {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    Outcome::success(query_graph_text(
+    let output = query_graph_text(
         &loaded.graph,
         question,
         mode,
@@ -1741,7 +1762,9 @@ fn command_query(args: &[String]) -> Outcome {
         budget,
         &contexts,
         &loaded.overlay,
-    ))
+    );
+    integration_commands::touch_query_stamp(&graph_path);
+    Outcome::success(output)
 }
 
 fn command_path(args: &[String]) -> Outcome {
@@ -1756,7 +1779,10 @@ fn command_path(args: &[String]) -> Outcome {
         Err(outcome) => return outcome,
     };
     match render_shortest_path(&loaded.graph, &args[0], &args[1]) {
-        Ok(output) => Outcome::success(output),
+        Ok(output) => {
+            integration_commands::touch_query_stamp(&graph_path);
+            Outcome::success(output)
+        }
         Err(error) => Outcome::failure(error),
     }
 }
@@ -1770,7 +1796,9 @@ fn command_explain(args: &[String]) -> Outcome {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    Outcome::success(render_explanation(&loaded.graph, label, &loaded.overlay))
+    let output = render_explanation(&loaded.graph, label, &loaded.overlay);
+    integration_commands::touch_query_stamp(&graph_path);
+    Outcome::success(output)
 }
 
 fn command_affected(args: &[String]) -> Outcome {
@@ -1878,7 +1906,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -1903,6 +1931,8 @@ fn trail_command_help(command: &str) -> String {
         "provider" => provider_commands::provider_help(Frontend::Trail),
         "save-result" => result_commands::save_result_help(Frontend::Trail),
         "reflect" => result_commands::reflect_help(Frontend::Trail),
+        "check-update" => integration_commands::check_update_help(Frontend::Trail),
+        "merge-driver" => integration_commands::merge_driver_help(Frontend::Trail),
         _ => trail_help(),
     }
 }
@@ -1913,6 +1943,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }

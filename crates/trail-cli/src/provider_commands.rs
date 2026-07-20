@@ -30,6 +30,8 @@ fn command_provider_at(frontend: Frontend, args: &[String], path: &Path) -> Outc
             code: u8::from(!subcommand.is_empty()),
             stdout: String::new(),
             stderr: provider_help(frontend),
+            stdout_trailing_newline: true,
+            stderr_trailing_newline: true,
         },
     };
     if !startup_warnings.is_empty() {
@@ -180,6 +182,8 @@ fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
         code: 0,
         stdout: format!("Provider '{name}' added. Use with: {invocation} . --backend {name}"),
         stderr: endpoint_warning.unwrap_or_default(),
+        stdout_trailing_newline: true,
+        stderr_trailing_newline: true,
     }
 }
 

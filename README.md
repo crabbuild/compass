@@ -42,6 +42,10 @@ trail graph merge-semantic
 trail graph provider
 trail graph save-result
 trail graph reflect
+trail graph check-update
+trail graph hook-check
+trail graph hook-guard
+trail graph merge-driver
 ```
 
 The deterministic language registry is checked against every extension handled
