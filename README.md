@@ -49,6 +49,7 @@ trail graph merge-driver
 trail graph global
 trail graph clone
 trail graph add
+trail graph label
 trail graph hook
 ```
 

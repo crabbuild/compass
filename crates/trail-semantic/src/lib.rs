@@ -2,6 +2,8 @@
 
 mod bedrock;
 pub use bedrock::*;
+mod community_labels;
+pub use community_labels::*;
 mod plain_text;
 pub use plain_text::*;
 
@@ -1332,6 +1334,30 @@ pub fn provider_base_url_check(base_url: &str, name: &str) -> EndpointCheck {
     EndpointCheck::allowed(warning)
 }
 
+#[must_use]
+pub fn graphify_endpoint_warning(base_url: &str, name: &str, allowed: bool) -> Option<String> {
+    let parsed = url::Url::parse(base_url);
+    if !allowed {
+        return Some(match parsed {
+            Ok(parsed) => format!(
+                "[graphify] WARNING: provider '{name}' base_url scheme '{}' is not http/https; ignoring.",
+                parsed.scheme()
+            ),
+            Err(_) => format!(
+                "[graphify] WARNING: provider '{name}' has an unparseable base_url; ignoring."
+            ),
+        });
+    }
+    let Ok(parsed) = parsed else { return None };
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let loopback = host == "localhost" || host == "::1" || host.starts_with("127.");
+    (parsed.scheme() == "http" && !loopback).then(|| {
+        format!(
+            "[graphify] WARNING: provider '{name}' sends your corpus to '{host}' over plaintext http. Use https unless this is a trusted local endpoint."
+        )
+    })
+}
+
 /// Validate Ollama routing, including aliases that resolve to link-local or
 /// cloud-metadata addresses. General LAN hosts remain allowed with a warning.
 #[must_use]
@@ -1462,7 +1488,7 @@ pub fn load_custom_providers(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let endpoint = provider_base_url_check(base_url, &name);
-            if let Some(warning) = endpoint.warning {
+            if let Some(warning) = graphify_endpoint_warning(base_url, &name, endpoint.allowed) {
                 loaded.warnings.push(warning);
             }
             if !endpoint.allowed {

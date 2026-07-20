@@ -3,6 +3,7 @@
 mod hook_commands;
 mod ingest_commands;
 mod integration_commands;
+mod label_commands;
 mod provider_commands;
 mod result_commands;
 mod semantic_commands;
@@ -142,6 +143,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "global" => integration_commands::command_global(frontend, &args),
         "clone" => integration_commands::command_clone(frontend, &args),
         "add" => ingest_commands::command_add(frontend, &args),
+        "label" => label_commands::command_label(frontend, &args),
         "hook" => hook_commands::command_hook(frontend, &args),
         "hook-spawn" => hook_commands::command_hook_spawn(frontend, &args),
         "hook-refresh" => command_hook_refresh(frontend, &args),
@@ -1951,7 +1953,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -1961,6 +1963,7 @@ fn trail_command_help(command: &str) -> String {
         "extract" => extract_help(),
         "watch" => watch_help(),
         "cluster-only" => "Usage: trail graph cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
+        "label" => label_commands::label_help(Frontend::Trail),
         "query" => "Usage: trail graph query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH]".to_owned(),
         "path" => "Usage: trail graph path \"<source>\" \"<target>\" [--graph PATH]".to_owned(),
         "explain" => "Usage: trail graph explain \"<node>\" [--graph PATH]".to_owned(),
@@ -1992,6 +1995,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }

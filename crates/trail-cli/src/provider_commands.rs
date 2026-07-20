@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 use trail_files::write_text_atomic;
-use trail_semantic::{builtin_backend, provider_base_url_check};
+use trail_semantic::{builtin_backend, graphify_endpoint_warning, provider_base_url_check};
 
 use crate::{Frontend, Outcome};
 
@@ -150,7 +150,7 @@ fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
         );
     }
     let endpoint = provider_base_url_check(&base_url, name);
-    let endpoint_warning = python_endpoint_warning(&base_url, name, endpoint.allowed);
+    let endpoint_warning = graphify_endpoint_warning(&base_url, name, endpoint.allowed);
     if !endpoint.allowed {
         return Outcome::failure(format!(
             "{}\nError: refusing to add provider with unsafe base_url '{}'.",
@@ -226,7 +226,7 @@ fn provider_registry_warnings(path: &Path) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let check = provider_base_url_check(base_url, &name);
-            python_endpoint_warning(base_url, &name, check.allowed)
+            graphify_endpoint_warning(base_url, &name, check.allowed)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -253,29 +253,6 @@ fn parse_price(value: &str, option: &str) -> Result<f64, String> {
         .ok()
         .filter(|value| value.is_finite())
         .ok_or_else(|| format!("error: {option} must be a finite number, got {value:?}"))
-}
-
-fn python_endpoint_warning(base_url: &str, name: &str, allowed: bool) -> Option<String> {
-    let parsed = url::Url::parse(base_url);
-    if !allowed {
-        return Some(match parsed {
-            Ok(parsed) => format!(
-                "[graphify] WARNING: provider '{name}' base_url scheme '{}' is not http/https; ignoring.",
-                parsed.scheme()
-            ),
-            Err(_) => format!(
-                "[graphify] WARNING: provider '{name}' has an unparseable base_url; ignoring."
-            ),
-        });
-    }
-    let Ok(parsed) = parsed else { return None };
-    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
-    let loopback = host == "localhost" || host == "::1" || host.starts_with("127.");
-    (parsed.scheme() == "http" && !loopback).then(|| {
-        format!(
-            "[graphify] WARNING: provider '{name}' sends your corpus to '{host}' over plaintext http. Use https unless this is a trusted local endpoint."
-        )
-    })
 }
 
 fn python_pretty_json(value: &Value) -> Result<String, serde_json::Error> {

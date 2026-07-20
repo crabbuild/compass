@@ -70,24 +70,36 @@ impl GraphDocument {
         if path.extension().and_then(|part| part.to_str()) != Some("json") {
             return Err(GraphError::InvalidExtension(path.to_path_buf()));
         }
-        if !path.exists() {
-            return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
-        }
-        let cap = crate::graph::graph_size_cap();
-        if let Ok(metadata) = path.metadata()
-            && metadata.len() > cap
-        {
+        if let Some((size, cap)) = Self::size_cap_exceeded(path) {
             return Err(GraphError::TooLarge {
                 path: crate::graph::absolute_path(path),
-                size: metadata.len(),
+                size,
                 cap,
             });
+        }
+        Self::load_for_recluster_compatibility(path)
+    }
+
+    /// Load a node-link document like Python's re-clustering command.
+    ///
+    /// That command accepts arbitrary filenames and warns on oversized files
+    /// while still refreshing the core graph artifacts.
+    pub fn load_for_recluster_compatibility(path: &Path) -> Result<Self, GraphError> {
+        if !path.exists() {
+            return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
         }
         let bytes = fs::read(path).map_err(|source| GraphError::Read {
             path: crate::graph::absolute_path(path),
             source,
         })?;
         serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)
+    }
+
+    #[must_use]
+    pub fn size_cap_exceeded(path: &Path) -> Option<(u64, u64)> {
+        let size = path.metadata().ok()?.len();
+        let cap = crate::graph::graph_size_cap();
+        (size > cap).then_some((size, cap))
     }
 }
 

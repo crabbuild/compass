@@ -1,5 +1,6 @@
 //! Safe, deterministic output formats for Trail graphs.
 
+mod backup;
 mod callflow;
 mod canvas;
 mod cypher;
@@ -12,6 +13,7 @@ mod svg;
 mod tree;
 mod wiki;
 
+pub use backup::{BackupResult, backup_if_protected};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,

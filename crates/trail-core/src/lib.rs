@@ -6,7 +6,10 @@ mod merge;
 mod pipeline;
 mod watch;
 
-pub use cluster_existing::{ClusterExistingOptions, ClusterExistingResult, cluster_existing_graph};
+pub use cluster_existing::{
+    ClusterExistingOptions, ClusterExistingResult, ClusterLabelContext, ClusterLabelSelection,
+    cluster_existing_graph, cluster_existing_graph_with_labeler,
+};
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
@@ -176,6 +179,41 @@ fn load_learning_overlay(graph_path: &Path) -> HashMap<String, Map<String, Value
             Some((id.clone(), entry))
         })
         .collect()
+}
+
+fn load_learning_for_report(graph_path: &Path) -> Option<Value> {
+    let overlay = load_learning_overlay(graph_path);
+    let memory_dir = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("memory");
+    let docs = trail_reflect::load_memory_docs(&memory_dir);
+    let aggregate = trail_reflect::aggregate_lessons(
+        &docs,
+        None,
+        None,
+        time::OffsetDateTime::now_utc(),
+        trail_reflect::DEFAULT_HALF_LIFE_DAYS,
+        trail_reflect::DEFAULT_MIN_CORROBORATION,
+    );
+    if overlay.is_empty() && aggregate.dead_ends.is_empty() {
+        return None;
+    }
+    let dead_ends = aggregate
+        .dead_ends
+        .into_iter()
+        .map(|dead_end| {
+            serde_json::json!({
+                "question": dead_end.question,
+                "nodes": dead_end.nodes,
+                "date": dead_end.date,
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(serde_json::json!({
+        "overlay": overlay,
+        "dead_ends": dead_ends,
+    }))
 }
 
 fn is_stale(entry: &Map<String, Value>, graph_path: &Path) -> bool {

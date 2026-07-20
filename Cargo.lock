@@ -3644,11 +3644,13 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.19",
+ "time",
  "trail-files",
  "trail-graph",
  "trail-languages",
  "trail-model",
  "trail-output",
+ "trail-reflect",
  "trail-resolve",
 ]
 
