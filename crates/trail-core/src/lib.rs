@@ -1,7 +1,9 @@
 //! Application services shared by the Trail and Graphify command frontends.
 
+mod merge;
 mod pipeline;
 
+pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{BuildOptions, BuildResult, CoreError, build_local_graph};
 
 use std::collections::HashMap;

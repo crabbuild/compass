@@ -1,11 +1,13 @@
 //! Native graph search, traversal, explanation, and impact analysis.
 
 mod affected;
+mod benchmark;
 mod score;
 mod text;
 mod traversal;
 
 pub use affected::{DEFAULT_AFFECTED_RELATIONS, affected_nodes, format_affected, resolve_seed};
+pub use benchmark::{BenchmarkQuestion, BenchmarkResult, format_benchmark, run_benchmark};
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{TraversalMode, query_graph_text, render_explanation, render_shortest_path};

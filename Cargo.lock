@@ -1213,6 +1213,7 @@ dependencies = [
  "trail-languages",
  "trail-model",
  "trail-output",
+ "trail-query",
  "trail-resolve",
 ]
 

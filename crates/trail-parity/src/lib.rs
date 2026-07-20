@@ -197,11 +197,138 @@ mod tests {
         assert_eq!(update.code, 0, "{}", update.stderr);
         assert!(update.stdout.contains("0 extracted, 1 cached"));
 
+        let tree = trail_cli::run(
+            Frontend::Trail,
+            [
+                "graph",
+                "tree",
+                "--graph",
+                output.join("graph.json").to_string_lossy().as_ref(),
+            ]
+            .into_iter()
+            .map(OsString::from),
+        );
+        assert_eq!(tree.code, 0, "{}", tree.stderr);
+        assert!(output.join("GRAPH_TREE.html").is_file());
+
         let legacy = trail_cli::run(
             Frontend::Graphify,
             ["update", &root].into_iter().map(OsString::from),
         );
         assert_ne!(legacy.code, 0, "uncertified legacy command was exposed");
+        Ok(())
+    }
+
+    #[test]
+    fn token_reduction_benchmark_matches_python() -> Result<(), Box<dyn Error>> {
+        let fixture = json!({
+            "directed":false,"multigraph":false,"graph":{},
+            "nodes":[
+                {"id":"n1","label":"authentication","source_file":"auth.py","source_location":"L1"},
+                {"id":"n2","label":"api_handler","source_file":"api.py","source_location":"L5"},
+                {"id":"n3","label":"main_entry","source_file":"main.py","source_location":"L1"},
+                {"id":"n4","label":"error_handler","source_file":"errors.py","source_location":"L1"},
+                {"id":"n5","label":"database_layer","source_file":"db.py","source_location":"L1"}
+            ],
+            "links":[
+                {"source":"n1","target":"n2","relation":"calls","confidence":"INFERRED"},
+                {"source":"n2","target":"n3","relation":"imports","confidence":"EXTRACTED"},
+                {"source":"n3","target":"n4","relation":"uses","confidence":"EXTRACTED"},
+                {"source":"n5","target":"n2","relation":"provides","confidence":"EXTRACTED"}
+            ]
+        });
+        let document: trail_model::GraphDocument = serde_json::from_value(fixture.clone())?;
+        let rust = trail_query::run_benchmark(&document, Some(10_000), None);
+        let rust = json!({
+            "corpus_tokens":rust.corpus_tokens,
+            "corpus_words":rust.corpus_words,
+            "nodes":rust.nodes,
+            "edges":rust.edges,
+            "avg_query_tokens":rust.avg_query_tokens,
+            "reduction_ratio":rust.reduction_ratio,
+            "per_question":rust.per_question.iter().map(|item| json!({
+                "question":item.question,
+                "query_tokens":item.query_tokens,
+                "reduction":item.reduction,
+            })).collect::<Vec<_>>()
+        });
+        let repo = repository_root();
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys,tempfile,pathlib; from graphify.benchmark import run_benchmark; p=pathlib.Path(tempfile.mktemp(suffix='.json')); p.write_text(json.dumps(json.load(sys.stdin))); print(json.dumps(run_benchmark(str(p),corpus_words=10000),sort_keys=True)); p.unlink()",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env("PYTHONHASHSEED", "0")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python benchmark oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&fixture)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(rust, serde_json::from_slice::<Value>(&output.stdout)?);
+        let directory = tempfile::tempdir()?;
+        let graph_path = directory.path().join("graph.json");
+        fs::write(&graph_path, serde_json::to_vec(&fixture)?)?;
+        compare(&["benchmark", graph_path.to_string_lossy().as_ref()])?;
+        Ok(())
+    }
+
+    #[test]
+    fn merge_graphs_command_matches_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let first = directory.path().join("src/graphify-out/graph.json");
+        let second = directory
+            .path()
+            .join("frontend/src/graphify-out/graph.json");
+        fs::create_dir_all(first.parent().ok_or("first graph parent missing")?)?;
+        fs::create_dir_all(second.parent().ok_or("second graph parent missing")?)?;
+        fs::write(
+            &first,
+            serde_json::to_vec(&json!({
+                "directed":true,"multigraph":false,"graph":{"left":1},
+                "nodes":[{"id":"app","label":"app.js"},{"id":"db","label":"DB"}],
+                "links":[{"source":"db","target":"app","relation":"calls"}]
+            }))?,
+        )?;
+        fs::write(
+            &second,
+            serde_json::to_vec(&json!({
+                "directed":false,"multigraph":true,"graph":{"right":2},
+                "nodes":[{"id":"app","label":"App.jsx"},{"id":"view","label":"View"}],
+                "links":[
+                    {"source":"app","target":"view","relation":"renders","key":"one"},
+                    {"source":"app","target":"view","relation":"tests","key":"two"}
+                ]
+            }))?,
+        )?;
+        let output = directory.path().join("merged.json");
+        let first_text = first.to_string_lossy().into_owned();
+        let second_text = second.to_string_lossy().into_owned();
+        let output_text = output.to_string_lossy().into_owned();
+        let arguments = [
+            "merge-graphs",
+            first_text.as_str(),
+            second_text.as_str(),
+            "--out",
+            output_text.as_str(),
+        ];
+        let rust = trail_cli::run(Frontend::Graphify, arguments.iter().map(OsString::from));
+        assert_eq!(rust.code, 0, "{}", rust.stderr);
+        let rust_graph: Value = serde_json::from_slice(&fs::read(&output)?)?;
+        compare(&arguments)?;
+        let python_graph: Value = serde_json::from_slice(&fs::read(&output)?)?;
+        assert_eq!(rust_graph, python_graph);
         Ok(())
     }
 

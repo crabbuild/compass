@@ -4,17 +4,19 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use trail_core::{BuildOptions, ExportInputs, LoadedGraph, build_local_graph, default_graph_path};
+use trail_core::{
+    BuildOptions, ExportInputs, LoadedGraph, build_local_graph, default_graph_path, merge_graphs,
+};
 use trail_graph::god_nodes;
 use trail_model::GraphError;
 use trail_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
-    WikiOptions, export_obsidian, export_wiki, node_filenames, write_callflow_html, write_canvas,
-    write_graphml, write_html, write_svg,
+    TreeOptions, WikiOptions, export_obsidian, export_wiki, node_filenames, write_callflow_html,
+    write_canvas, write_graphml, write_html, write_svg, write_tree_html,
 };
 use trail_query::{
-    DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, query_graph_text,
-    render_explanation, render_shortest_path,
+    DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
+    render_explanation, render_shortest_path, run_benchmark,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +76,9 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "explain" => command_explain(&args),
         "affected" => command_affected(&args),
         "export" => command_export(&args),
+        "benchmark" => command_benchmark(&args),
+        "merge-graphs" => command_merge_graphs(&args),
+        "tree" if frontend == Frontend::Trail => command_tree(&args),
         "update" if frontend == Frontend::Trail => command_build(&args, false),
         "extract" if frontend == Frontend::Trail => command_build(&args, true),
         "--help" | "-h" | "help" => Outcome::success(if frontend == Frontend::Trail {
@@ -84,6 +89,160 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "--version" | "-V" => Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION"))),
         _ => Outcome::failure(format!("error: unknown graph command '{command}'")),
     }
+}
+
+fn command_tree(args: &[String]) -> Outcome {
+    let mut graph_path = default_graph_path();
+    let mut output_path = None;
+    let mut root = None;
+    let mut max_children = 200_usize;
+    let mut label = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--graph" if index + 1 < args.len() => {
+                graph_path = PathBuf::from(&args[index + 1]);
+                index += 1;
+            }
+            "--output" if index + 1 < args.len() => {
+                output_path = Some(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            "--root" if index + 1 < args.len() => {
+                root = Some(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            "--max-children" if index + 1 < args.len() => {
+                let Ok(value) = args[index + 1].parse::<usize>() else {
+                    return Outcome::failure(
+                        "error: --max-children requires an integer".to_owned(),
+                    );
+                };
+                max_children = value;
+                index += 1;
+            }
+            "--top-k-edges" if index + 1 < args.len() => {
+                if args[index + 1].parse::<usize>().is_err() {
+                    return Outcome::failure("error: --top-k-edges requires an integer".to_owned());
+                }
+                index += 1;
+            }
+            "--label" if index + 1 < args.len() => {
+                label = Some(args[index + 1].clone());
+                index += 1;
+            }
+            "-h" | "--help" => return Outcome::success(tree_help()),
+            value => return Outcome::failure(format!("error: unknown tree option {value}")),
+        }
+        index += 1;
+    }
+    if !graph_path.is_file() {
+        return Outcome::failure(format!(
+            "error: graph.json not found at {}",
+            graph_path.display()
+        ));
+    }
+    let document = match trail_model::GraphDocument::load(&graph_path) {
+        Ok(document) => document,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    let output_path = output_path.unwrap_or_else(|| {
+        graph_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("GRAPH_TREE.html")
+    });
+    if let Err(error) = write_tree_html(
+        &document,
+        &output_path,
+        &TreeOptions {
+            root: root.as_deref(),
+            max_children,
+            project_label: label.as_deref(),
+            ..TreeOptions::default()
+        },
+    ) {
+        return Outcome::failure(format!("error: {error}"));
+    }
+    let size = fs::metadata(&output_path)
+        .map(|metadata| metadata.len() as f64 / 1024.0)
+        .unwrap_or_default();
+    let absolute =
+        fs::canonicalize(&output_path).unwrap_or_else(|_| absolutize(output_path.clone()));
+    Outcome::success(format!(
+        "wrote {} ({size:.1} KB)\nopen with: xdg-open {}  (or file://{})",
+        output_path.display(),
+        output_path.display(),
+        absolute.display()
+    ))
+}
+
+fn tree_help() -> String {
+    "Usage: trail graph tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default graphify-out/graph.json)\n  --output HTML        output path (default graphify-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      accepted for Graphify compatibility (currently ignored there too)\n  --label NAME         project label shown in the page header".to_owned()
+}
+
+fn command_merge_graphs(args: &[String]) -> Outcome {
+    let mut paths = Vec::new();
+    let mut output = default_graph_path()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("merged-graph.json");
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--out" && index + 1 < args.len() {
+            output = PathBuf::from(&args[index + 1]);
+            index += 2;
+        } else {
+            paths.push(PathBuf::from(&args[index]));
+            index += 1;
+        }
+    }
+    if paths.len() < 2 {
+        return Outcome::failure(
+            "Usage: graphify merge-graphs <graph1.json> <graph2.json> [...] [--out merged.json]"
+                .to_owned(),
+        );
+    }
+    for path in &paths {
+        if !path.exists() {
+            return Outcome::failure(format!("error: not found: {}", path.display()));
+        }
+    }
+    match merge_graphs(&paths, &output) {
+        Ok(result) => {
+            let mut lines = Vec::new();
+            if result.naive_tags_collided {
+                lines.push(format!(
+                    "  note: repo dir names collide; using distinct tags: {}",
+                    result.tags.join(", ")
+                ));
+            }
+            lines.push(format!(
+                "Merged {} graphs -> {} nodes, {} edges",
+                result.graphs, result.nodes, result.edges
+            ));
+            lines.push(format!("Written to: {}", result.output_path.display()));
+            Outcome::success(lines.join("\n"))
+        }
+        Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+fn command_benchmark(args: &[String]) -> Outcome {
+    let graph_path = args.first().map_or_else(default_graph_path, PathBuf::from);
+    let document = match trail_model::GraphDocument::load(&graph_path) {
+        Ok(document) => document,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    let corpus_words = fs::read(".graphify_detect.json")
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.get("total_words").and_then(serde_json::Value::as_u64))
+        .and_then(|value| usize::try_from(value).ok());
+    Outcome::success(format_benchmark(
+        &run_benchmark(&document, corpus_words, None),
+        true,
+    ))
 }
 
 fn command_build(args: &[String], extract: bool) -> Outcome {
@@ -882,11 +1041,11 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  query\n  path\n  explain\n  affected\n  export"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  merge-graphs"
         .to_owned()
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs"
         .to_owned()
 }
