@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{Map, Value};
 use trail_files::write_text_atomic;
+use trail_global::{GlobalError, GlobalPaths, global_add, global_list, global_remove};
 
 use crate::{Frontend, Outcome};
 
@@ -27,6 +28,127 @@ const SOURCE_EXTENSIONS: &[&str] = &[
 
 pub(super) fn command_hook_check(_frontend: Frontend, _args: &[String]) -> Outcome {
     Outcome::success(String::new())
+}
+
+pub(super) fn command_global(frontend: Frontend, args: &[String]) -> Outcome {
+    let paths = match GlobalPaths::discover() {
+        Ok(paths) => paths,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    match args.first().map(String::as_str).unwrap_or_default() {
+        "add" => global_add_command(frontend, args, &paths),
+        "remove" => global_remove_command(frontend, args, &paths),
+        "list" => {
+            let loaded = global_list(&paths);
+            let repos = loaded
+                .value
+                .get("repos")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let stdout = if repos.is_empty() {
+                "Global graph is empty. Use 'graphify global add' to add a project.".to_owned()
+            } else {
+                let mut lines = vec![format!("Global graph: {}", paths.graph.display())];
+                for (tag, value) in repos {
+                    let nodes = value
+                        .get("node_count")
+                        .map(python_string_value)
+                        .unwrap_or_else(|| "?".to_owned());
+                    let added = value.get("added_at").and_then(Value::as_str).unwrap_or("?");
+                    lines.push(format!(
+                        "  {tag}: {nodes} nodes, added {}",
+                        added.get(..10).unwrap_or(added)
+                    ));
+                }
+                lines.join("\n")
+            };
+            outcome_with_warnings(stdout, loaded.warnings)
+        }
+        "path" => Outcome::success(paths.graph.display().to_string()),
+        _ => Outcome::failure(global_help(frontend)),
+    }
+}
+
+fn global_add_command(frontend: Frontend, args: &[String], paths: &GlobalPaths) -> Outcome {
+    let mut source = None;
+    let mut tag = None;
+    let mut index = 1;
+    while index < args.len() {
+        if args[index] == "--as" && index + 1 < args.len() {
+            tag = Some(args[index + 1].clone());
+            index += 2;
+        } else if source.is_none() {
+            source = Some(PathBuf::from(&args[index]));
+            index += 1;
+        } else {
+            index += 1;
+        }
+    }
+    let Some(source) = source else {
+        return Outcome::failure(global_add_help(frontend));
+    };
+    let tag = tag.unwrap_or_else(|| {
+        source
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned()
+    });
+    match global_add(paths, &source, &tag, time::OffsetDateTime::now_utc()) {
+        Ok(result) => {
+            let stdout = if result.skipped {
+                format!("'{tag}' unchanged since last add - global graph not modified.")
+            } else {
+                format!(
+                    "Added '{tag}' to global graph: +{} nodes, -{} pruned. Global: {}",
+                    result.nodes_added,
+                    result.nodes_removed,
+                    paths.graph.display()
+                )
+            };
+            outcome_with_warnings(stdout, result.warnings)
+        }
+        Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+fn global_remove_command(frontend: Frontend, args: &[String], paths: &GlobalPaths) -> Outcome {
+    let tag = args.get(1).map(String::as_str).unwrap_or_default();
+    if tag.is_empty() {
+        return Outcome::failure(global_remove_help(frontend));
+    }
+    match global_remove(paths, tag) {
+        Ok((removed, warnings)) => outcome_with_warnings(
+            format!("Removed '{tag}' from global graph ({removed} nodes pruned)."),
+            warnings,
+        ),
+        Err(GlobalError::UnknownRepo(_)) => {
+            Outcome::failure(format!("error: \"repo '{tag}' not in global graph\""))
+        }
+        Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+fn outcome_with_warnings(stdout: String, warnings: Vec<String>) -> Outcome {
+    Outcome {
+        code: 0,
+        stdout,
+        stderr: warnings.join("\n"),
+        stdout_trailing_newline: true,
+        stderr_trailing_newline: true,
+    }
+}
+
+fn python_string_value(value: &Value) -> String {
+    match value {
+        Value::Null => "None".to_owned(),
+        Value::Bool(value) => if *value { "True" } else { "False" }.to_owned(),
+        Value::String(value) => value.clone(),
+        value => value.to_string(),
+    }
 }
 
 pub(super) fn command_check_update(frontend: Frontend, args: &[String]) -> Outcome {
@@ -726,6 +848,30 @@ pub(super) fn merge_driver_help(frontend: Frontend) -> String {
     match frontend {
         Frontend::Trail => "Usage: trail graph merge-driver <base> <current> <other>",
         Frontend::Graphify => "Usage: graphify merge-driver <base> <current> <other>",
+    }
+    .to_owned()
+}
+
+pub(super) fn global_help(frontend: Frontend) -> String {
+    match frontend {
+        Frontend::Trail => "Usage: trail graph global [add|remove|list|path]",
+        Frontend::Graphify => "Usage: graphify global [add|remove|list|path]",
+    }
+    .to_owned()
+}
+
+fn global_add_help(frontend: Frontend) -> String {
+    match frontend {
+        Frontend::Trail => "Usage: trail graph global add <graph.json> [--as <repo-tag>]",
+        Frontend::Graphify => "Usage: graphify global add <graph.json> [--as <repo-tag>]",
+    }
+    .to_owned()
+}
+
+fn global_remove_help(frontend: Frontend) -> String {
+    match frontend {
+        Frontend::Trail => "Usage: trail graph global remove <repo-tag>",
+        Frontend::Graphify => "Usage: graphify global remove <repo-tag>",
     }
     .to_owned()
 }

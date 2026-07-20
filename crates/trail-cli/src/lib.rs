@@ -137,6 +137,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "hook-check" => integration_commands::command_hook_check(frontend, &args),
         "hook-guard" => integration_commands::command_hook_guard(frontend, &args),
         "merge-driver" => integration_commands::command_merge_driver(frontend, &args),
+        "global" => integration_commands::command_global(frontend, &args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -1906,7 +1907,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -1933,6 +1934,7 @@ fn trail_command_help(command: &str) -> String {
         "reflect" => result_commands::reflect_help(Frontend::Trail),
         "check-update" => integration_commands::check_update_help(Frontend::Trail),
         "merge-driver" => integration_commands::merge_driver_help(Frontend::Trail),
+        "global" => integration_commands::global_help(Frontend::Trail),
         _ => trail_help(),
     }
 }
@@ -1943,6 +1945,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }

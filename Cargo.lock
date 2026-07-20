@@ -3623,6 +3623,7 @@ dependencies = [
  "time",
  "trail-core",
  "trail-files",
+ "trail-global",
  "trail-graph",
  "trail-model",
  "trail-output",
@@ -3662,6 +3663,19 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "trail-global"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "trail-files",
+ "trail-model",
 ]
 
 [[package]]
