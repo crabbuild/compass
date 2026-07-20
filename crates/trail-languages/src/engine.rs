@@ -125,6 +125,9 @@ impl Engine {
         if spec.name == "php" {
             return Ok(crate::php::extract(path, &source, root));
         }
+        if spec.name == "swift" {
+            return Ok(crate::swift::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

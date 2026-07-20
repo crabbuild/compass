@@ -19,6 +19,7 @@ mod pascal_forms;
 mod php;
 mod registry;
 mod rust_lang;
+mod swift;
 mod terraform;
 mod xaml;
 
