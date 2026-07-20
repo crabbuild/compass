@@ -55,7 +55,9 @@ impl Registry {
         if name.ends_with(".blade.php") {
             return Some(spec("blade", "blade", ExtractorKind::Template));
         }
-        let extension = path.extension()?.to_str()?;
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            return shebang_spec(path);
+        };
         let extension_lower = extension.to_ascii_lowercase();
         let spec = match extension_lower.as_str() {
             "py" => spec("python", "python", ExtractorKind::Generic),
@@ -154,6 +156,138 @@ impl Registry {
             "xaml", "razor", "cls",
         ]
     }
+}
+
+fn shebang_spec(path: &Path) -> Option<LanguageSpec> {
+    let source = std::fs::read(path).ok()?;
+    let first_line = source.split(|byte| *byte == b'\n').next()?;
+    let line = std::str::from_utf8(first_line)
+        .ok()?
+        .strip_prefix("#!")?
+        .trim();
+    let mut arguments = split_command_line(line)?;
+    let first = arguments.first()?;
+    let mut interpreter = Path::new(first).file_name()?.to_str()?.to_owned();
+    if interpreter == "env" {
+        arguments.remove(0);
+        interpreter = env_interpreter(&arguments)?;
+    }
+    match interpreter.as_str() {
+        "python" | "python2" | "python3" => Some(spec("python", "python", ExtractorKind::Generic)),
+        "bash" | "sh" | "dash" | "zsh" | "ksh" => {
+            Some(spec("bash", "bash", ExtractorKind::Generic))
+        }
+        "node" | "nodejs" => Some(spec("javascript", "javascript", ExtractorKind::Generic)),
+        "ruby" => Some(spec("ruby", "ruby", ExtractorKind::Generic)),
+        "lua" => Some(spec("lua", "lua", ExtractorKind::Generic)),
+        "php" => Some(spec("php", "php", ExtractorKind::Generic)),
+        "julia" => Some(spec("julia", "julia", ExtractorKind::Generic)),
+        _ => None,
+    }
+}
+
+fn env_interpreter(arguments: &[String]) -> Option<String> {
+    let mut index = 0;
+    while index < arguments.len() {
+        let argument = &arguments[index];
+        if argument == "-S" || argument == "--split-string" {
+            let packed = arguments.get(index + 1)?;
+            let split = split_command_line(packed)?;
+            return split
+                .first()
+                .and_then(|value| Path::new(value).file_name())
+                .and_then(|value| value.to_str())
+                .map(str::to_owned);
+        }
+        if let Some(packed) = argument
+            .strip_prefix("-S")
+            .filter(|value| !value.is_empty())
+            .or_else(|| argument.strip_prefix("--split-string="))
+        {
+            let split = split_command_line(packed)?;
+            return split
+                .first()
+                .and_then(|value| Path::new(value).file_name())
+                .and_then(|value| value.to_str())
+                .map(str::to_owned);
+        }
+        if matches!(
+            argument.as_str(),
+            "-u" | "-C" | "-P" | "-a" | "--unset" | "--chdir"
+        ) {
+            index += 2;
+            continue;
+        }
+        if argument.starts_with("--unset=")
+            || argument.starts_with("--chdir=")
+            || argument.starts_with("--argv0=")
+            || (argument.starts_with("-u") && argument.len() > 2)
+            || (argument.starts_with("-C") && argument.len() > 2)
+            || (argument.starts_with("-P") && argument.len() > 2)
+            || (argument.starts_with("-a") && argument.len() > 2)
+            || matches!(
+                argument.as_str(),
+                "-i" | "-v" | "-0" | "--ignore-environment" | "--null" | "--debug"
+            )
+        {
+            index += 1;
+            continue;
+        }
+        if argument.contains('=') && !argument.starts_with('=') {
+            index += 1;
+            continue;
+        }
+        if argument.starts_with('-') {
+            return None;
+        }
+        return Path::new(argument)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_owned);
+    }
+    None
+}
+
+fn split_command_line(line: &str) -> Option<Vec<String>> {
+    let mut output = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for character in line.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(active) = quote {
+            if character == active {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if character.is_whitespace() {
+            if !current.is_empty() {
+                output.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(character);
+        }
+    }
+    if escaped || quote.is_some() {
+        return None;
+    }
+    if !current.is_empty() {
+        output.push(current);
+    }
+    Some(output)
 }
 
 const fn spec(name: &'static str, grammar: &'static str, kind: ExtractorKind) -> LanguageSpec {

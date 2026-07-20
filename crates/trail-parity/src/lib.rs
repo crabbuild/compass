@@ -770,6 +770,32 @@ hydrate();
         Ok(())
     }
 
+    #[test]
+    fn extensionless_shebang_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let python = directory.path().join("pytool");
+        fs::write(
+            &python,
+            "#!/usr/bin/env -S python3 -u\ndef main():\n    print('ok')\n",
+        )?;
+        compare_extraction_path(&python, "extract_python")?;
+
+        let shell = directory.path().join("devctl");
+        fs::write(
+            &shell,
+            "#!/usr/bin/env -i DEBUG=1 bash\nrun() { echo ok; }\nrun\n",
+        )?;
+        compare_extraction_path(&shell, "extract_bash")?;
+
+        let node = directory.path().join("serve");
+        fs::write(
+            &node,
+            "#!/usr/bin/node\nfunction serve() { console.log('ok') }\nserve()\n",
+        )?;
+        compare_extraction_path(&node, "extract_js")?;
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
