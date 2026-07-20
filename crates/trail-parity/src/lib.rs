@@ -24,8 +24,9 @@ mod tests {
     use trail_languages::Engine;
     use trail_output::{
         CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions, ObsidianOptions,
-        ReportOptions, TokenCost, canvas_document, cypher_document, export_obsidian,
-        generate_report, graphml_document, html_document, write_json,
+        ReportOptions, TokenCost, TreeOptions, build_tree as build_output_tree, canvas_document,
+        cypher_document, export_obsidian, generate_report, graphml_document, html_document,
+        write_json,
     };
     use trail_resolve::resolve;
 
@@ -1428,6 +1429,46 @@ hydrate();
             );
         }
         assert!(!rust.contains("onclick=\"focusNode("));
+        Ok(())
+    }
+
+    #[test]
+    fn hierarchy_tree_matches_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let extraction: trail_languages::Extraction =
+            serde_json::from_slice(&fs::read(repo.join("tests/fixtures/extraction.json"))?)?;
+        let graph = build_from_extraction(&extraction, false, None);
+        let rust = serde_json::to_value(build_output_tree(
+            &graph,
+            &TreeOptions {
+                max_children: 2,
+                project_label: Some("Trail </script>"),
+                ..TreeOptions::default()
+            },
+        ))?;
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from graphify.tree_html import build_tree; print(json.dumps(build_tree(json.load(sys.stdin),max_children=2,project_label='Trail </script>')))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python tree oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&graph)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(rust, serde_json::from_slice::<Value>(&output.stdout)?);
         Ok(())
     }
 
