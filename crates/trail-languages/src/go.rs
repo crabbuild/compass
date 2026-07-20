@@ -410,6 +410,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                         source_file: self.source_file.clone(),
                         source_location: format!("L{}", line(node)),
                         receiver: None,
+                        receiver_type: None,
                         lang: None,
                     });
                 }

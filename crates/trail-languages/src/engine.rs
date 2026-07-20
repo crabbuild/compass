@@ -126,7 +126,6 @@ impl Engine {
 
 struct FunctionBody<'tree> {
     id: String,
-    class_id: Option<String>,
     node: Node<'tree>,
 }
 
@@ -203,6 +202,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     self.add_edge(&self.file_id.clone(), &id, "contains", duplicate_line, None);
                     return;
                 }
+            } else if self.language == "ruby" {
+                self.add_ruby_parent_edge(node, &id);
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
@@ -242,11 +243,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_c_function_references(node, &id);
             }
             self.callables.entry(name).or_default().push(id.clone());
-            self.functions.push(FunctionBody {
-                id,
-                class_id: parent_class.map(str::to_owned),
-                node,
-            });
+            self.functions.push(FunctionBody { id, node });
             return;
         }
 
@@ -259,22 +256,11 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn walk_function_calls(&mut self) {
         let functions = std::mem::take(&mut self.functions);
         for function in functions {
-            self.walk_calls(
-                function.node,
-                &function.id,
-                function.class_id.as_deref(),
-                true,
-            );
+            self.walk_calls(function.node, &function.id, true);
         }
     }
 
-    fn walk_calls(
-        &mut self,
-        node: Node<'tree>,
-        caller: &str,
-        class_id: Option<&str>,
-        is_root: bool,
-    ) {
+    fn walk_calls(&mut self, node: Node<'tree>, caller: &str, is_root: bool) {
         let kind = node.kind();
         if !is_root && self.config.function_boundaries.contains(&kind) {
             return;
@@ -284,18 +270,18 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             && !BUILTIN_GLOBALS.contains(&call.name.as_str())
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
-            let target = if let Some(class) = class_id {
-                candidates
-                    .iter()
-                    .find(|candidate| candidate.starts_with(class))
-                    .cloned()
-                    .or_else(|| (candidates.len() == 1).then(|| candidates[0].clone()))
-            } else {
-                (candidates.len() == 1).then(|| candidates[0].clone())
-            };
-            if let Some(target) = target {
-                self.add_edge(caller, &target, "calls", line(node), Some("call"));
-            } else {
+            let defer_member = call.member
+                && (self.language == "java"
+                    || call
+                        .receiver
+                        .as_deref()
+                        .is_some_and(|receiver| receiver.starts_with(char::is_uppercase)));
+            let target = (!defer_member)
+                .then(|| candidates.last().cloned())
+                .flatten();
+            if let Some(target) = target.as_ref().filter(|target| target.as_str() != caller) {
+                self.add_edge(caller, target, "calls", line(node), Some("call"));
+            } else if target.is_none() {
                 self.extraction.raw_calls.push(RawCall {
                     caller_nid: caller.to_owned(),
                     callee: call.name,
@@ -303,13 +289,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     source_file: self.source_file.clone(),
                     source_location: format!("L{}", line(node)),
                     receiver: Some(call.receiver),
+                    receiver_type: (self.language == "ruby" && call.member).then_some(None),
                     lang: (self.language == "java").then(|| "java".to_owned()),
                 });
             }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.walk_calls(child, caller, class_id, false);
+            self.walk_calls(child, caller, false);
         }
     }
 
@@ -336,6 +323,21 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn call_name(&self, node: Node<'tree>) -> Option<CallName> {
+        if self.language == "ruby" {
+            let name = node
+                .child_by_field_name("method")
+                .and_then(|method| self.node_text(method))
+                .map(clean_name)?;
+            let receiver = node
+                .child_by_field_name("receiver")
+                .and_then(|receiver| self.node_text(receiver))
+                .map(|receiver| receiver.rsplit("::").next().unwrap_or_default().to_owned());
+            return Some(CallName {
+                name,
+                member: receiver.is_some(),
+                receiver,
+            });
+        }
         if self.language == "java" {
             if node.kind() == "method_invocation" {
                 let name = node
@@ -518,6 +520,20 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_edge(class_id, &target, "implements", line(node), None);
             }
         }
+    }
+
+    fn add_ruby_parent_edge(&mut self, node: Node<'tree>, class_id: &str) {
+        let Some(superclass) = node.child_by_field_name("superclass") else {
+            return;
+        };
+        let Some(name_node) = first_descendant(superclass, "constant") else {
+            return;
+        };
+        let Some(name) = self.node_text(name_node).map(clean_name) else {
+            return;
+        };
+        let target = self.ensure_type_node(&name, true);
+        self.add_edge(class_id, &target, "inherits", line(node), None);
     }
 
     fn add_java_enum_constants(&mut self, node: Node<'tree>, enum_id: &str) {

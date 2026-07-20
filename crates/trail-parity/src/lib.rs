@@ -241,6 +241,11 @@ mod tests {
         compare_extraction("sample.c", "extract_c")
     }
 
+    #[test]
+    fn ruby_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.rb", "extract_ruby")
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

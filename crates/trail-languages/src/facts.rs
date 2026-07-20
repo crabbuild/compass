@@ -12,6 +12,8 @@ pub struct RawCall {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_type: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
 }
 
