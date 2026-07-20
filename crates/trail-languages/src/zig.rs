@@ -186,7 +186,7 @@ impl<'a> State<'a> {
                 self.extraction.raw_calls_mut().push(RawCall {
                     caller_nid: body.id.clone(),
                     callee: callee.to_owned(),
-                    is_member_call: raw.contains('.'),
+                    is_member_call: Some(raw.contains('.')),
                     source_file: self.source_file.clone(),
                     source_location: format!("L{at}"),
                     receiver: None,

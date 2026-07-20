@@ -6,7 +6,8 @@ use trail_model::{EdgeRecord, NodeRecord};
 pub struct RawCall {
     pub caller_nid: String,
     pub callee: String,
-    pub is_member_call: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_member_call: Option<bool>,
     pub source_file: String,
     pub source_location: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

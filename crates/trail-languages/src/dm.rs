@@ -352,7 +352,7 @@ impl<'tree> SourceState<'_, '_, 'tree> {
             self.extraction.raw_calls_mut().push(RawCall {
                 caller_nid: caller.to_owned(),
                 callee: callee.to_owned(),
-                is_member_call: is_member,
+                is_member_call: Some(is_member),
                 source_file: self.source_file.clone(),
                 source_location: format!("L{line}"),
                 receiver: None,

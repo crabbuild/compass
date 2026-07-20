@@ -103,6 +103,9 @@ impl Engine {
         if spec.name == "sql" {
             return Ok(crate::sql::extract(path, &source));
         }
+        if spec.name == "pascal" {
+            return Ok(crate::pascal::extract(path, &source));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 
@@ -409,7 +412,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.extraction.raw_calls_mut().push(RawCall {
                     caller_nid: caller.to_owned(),
                     callee: call.name,
-                    is_member_call: call.member,
+                    is_member_call: Some(call.member),
                     source_file: self.source_file.clone(),
                     source_location: format!("L{}", line(node)),
                     receiver: Some(call.receiver),

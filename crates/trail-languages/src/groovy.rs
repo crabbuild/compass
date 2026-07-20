@@ -226,7 +226,7 @@ fn extract_regular(path: &Path, source: &str) -> Extraction {
                         state.extraction.raw_calls_mut().push(RawCall {
                             caller_nid: caller.clone(),
                             callee: callee.to_owned(),
-                            is_member_call: false,
+                            is_member_call: Some(false),
                             source_file: state.source_file.clone(),
                             source_location: format!("L{}", index + 1),
                             receiver: Some(None),

@@ -539,7 +539,7 @@ impl<'tree> State<'_, 'tree> {
                     self.extraction.raw_calls_mut().push(RawCall {
                         caller_nid: caller.to_owned(),
                         callee,
-                        is_member_call: member,
+                        is_member_call: Some(member),
                         source_file: self.source_file.clone(),
                         source_location: format!("L{}", node.start_position().row + 1),
                         receiver: Some(receiver),

@@ -529,6 +529,21 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn pascal_source_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.pas", "extract_pascal")?;
+        compare_extraction("sample_scoped_calls.pas", "extract_pascal")?;
+        let repo = repository_root();
+        for fixture in [
+            "pascal_cross_file/BaseGadget.pas",
+            "pascal_cross_file/DerivedGadget.pas",
+            "pascal_cross_file/OtherGadget.pas",
+        ] {
+            compare_extraction_path(&repo.join("tests/fixtures").join(fixture), "extract_pascal")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

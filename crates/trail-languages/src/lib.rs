@@ -20,6 +20,7 @@ mod markdown;
 mod mcp;
 mod objc;
 mod package_manifest;
+mod pascal;
 mod pascal_forms;
 mod php;
 mod powershell;
