@@ -101,6 +101,9 @@ impl Engine {
             path: path.to_path_buf(),
             source,
         })?;
+        if spec.name == "groovy" {
+            return Ok(crate::groovy::extract(path, &source));
+        }
         let tree = self.parse(path, spec, &source)?;
         let config = generic_config(spec);
         let root = tree.root_node();

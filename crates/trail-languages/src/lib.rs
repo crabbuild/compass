@@ -9,6 +9,7 @@ mod dotnet_project;
 mod engine;
 mod facts;
 mod go;
+mod groovy;
 mod ids;
 mod json_config;
 mod markdown;

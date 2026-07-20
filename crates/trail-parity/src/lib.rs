@@ -444,6 +444,14 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn groovy_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.groovy", "sample_spock.groovy"] {
+            compare_extraction(fixture, "extract_groovy")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
