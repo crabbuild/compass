@@ -1,8 +1,13 @@
 //! Deterministic graph construction and graph algorithms for Trail.
 
+mod analyze;
 mod cluster;
 mod dedup;
 
+pub use analyze::{
+    DiffEdge, DiffNode, GodNode, GraphDiff, ImportCycle, SuggestedQuestion, SurpriseConnection,
+    find_import_cycles, god_nodes, graph_diff, suggest_questions, surprising_connections,
+};
 pub use cluster::{
     ClusterOptions, cluster, cohesion_score, community_member_signatures, label_communities_by_hub,
     remap_communities_to_previous, score_communities,

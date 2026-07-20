@@ -18,7 +18,8 @@ mod tests {
     };
     use trail_graph::{
         ClusterOptions, build_from_extraction, cluster, community_member_signatures,
-        deduplicate_entities, label_communities_by_hub, score_communities,
+        deduplicate_entities, find_import_cycles, god_nodes, graph_diff, label_communities_by_hub,
+        score_communities, suggest_questions, surprising_connections,
     };
     use trail_languages::Engine;
     use trail_resolve::resolve;
@@ -1035,6 +1036,138 @@ hydrate();
             let python: Value = serde_json::from_slice(&output.stdout)?;
             assert_eq!(rust, python, "hub percentile {percentile:?}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn deterministic_analysis_matches_python() -> Result<(), Box<dyn Error>> {
+        let fixture = json!({
+            "directed": false,
+            "multigraph": false,
+            "graph": {},
+            "nodes": [
+                {"id":"a","label":"AuthService","source_file":"src/a.py","file_type":"code"},
+                {"id":"b","label":"BillingService","source_file":"src/b.py","file_type":"code"},
+                {"id":"c","label":"Cache","source_file":"lib/c.ts","file_type":"code"},
+                {"id":"d","label":"Dispatcher","source_file":"lib/d.ts","file_type":"code"},
+                {"id":"weak","label":"WeakLink","source_file":"src/weak.py","file_type":"code"}
+            ],
+            "links": [
+                {"source":"a","target":"b","relation":"calls","confidence":"AMBIGUOUS","source_file":"src/a.py","_src":"a","_tgt":"b"},
+                {"source":"a","target":"c","relation":"uses","confidence":"INFERRED","source_file":"src/a.py","_src":"a","_tgt":"c"},
+                {"source":"b","target":"c","relation":"calls","confidence":"EXTRACTED","source_file":"src/b.py","_src":"b","_tgt":"c"},
+                {"source":"c","target":"d","relation":"imports_from","confidence":"EXTRACTED","source_file":"lib/c.ts","_src":"c","_tgt":"d"},
+                {"source":"d","target":"c","relation":"imports_from","confidence":"EXTRACTED","source_file":"lib/d.ts","_src":"d","_tgt":"c"}
+            ]
+        });
+        let graph: trail_model::GraphDocument = serde_json::from_value(fixture.clone())?;
+        let communities = std::collections::BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned(), "weak".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+        let labels =
+            std::collections::BTreeMap::from([(0, "Auth".to_owned()), (1, "Runtime".to_owned())]);
+        let mut newer = graph.clone();
+        newer.nodes.push(serde_json::from_value(json!({
+            "id":"new","label":"NewNode","source_file":"src/new.py","file_type":"code"
+        }))?);
+        newer.links.push(serde_json::from_value(json!({
+            "source":"weak","target":"new","relation":"uses","confidence":"INFERRED"
+        }))?);
+        let rust = json!({
+            "gods": god_nodes(&graph, 10),
+            "surprises": surprising_connections(&graph, &communities, 5),
+            "questions": suggest_questions(&graph, &communities, &labels, 10),
+            "diff": graph_diff(&graph, &newer),
+            "cycles": find_import_cycles(&graph, 5, 20),
+        });
+
+        let input = json!({
+            "graph": fixture,
+            "communities": communities,
+            "labels": labels,
+            "new_graph": serde_json::to_value(&newer)?,
+        });
+        let repo = repository_root();
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys,networkx as nx; from graphify.analyze import god_nodes,surprising_connections,suggest_questions,graph_diff,find_import_cycles; x=json.load(sys.stdin); G=nx.node_link_graph(x['graph'],edges='links'); N=nx.node_link_graph(x['new_graph'],edges='links'); c={int(k):v for k,v in x['communities'].items()}; l={int(k):v for k,v in x['labels'].items()}; print(json.dumps({'gods':god_nodes(G,10),'surprises':surprising_connections(G,c,5),'questions':suggest_questions(G,c,l,10),'diff':graph_diff(G,N),'cycles':find_import_cycles(G,5,20)},sort_keys=True))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python analysis oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&input)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn import_cycle_analysis_matches_python() -> Result<(), Box<dyn Error>> {
+        let fixture = json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {},
+            "nodes": [
+                {"id":"a","label":"a.ts","source_file":"src/a.ts"},
+                {"id":"b","label":"b.ts","source_file":"src/b.ts"},
+                {"id":"c","label":"c.ts","source_file":"src/c.ts"},
+                {"id":"d","label":"d.ts","source_file":"src/d.ts"},
+                {"id":"external","label":"react"}
+            ],
+            "links": [
+                {"source":"a","target":"b","relation":"imports_from","source_file":"src/a.ts"},
+                {"source":"b","target":"a","relation":"imports_from","source_file":"src/b.ts"},
+                {"source":"b","target":"c","relation":"imports_from","source_file":"src/b.ts"},
+                {"source":"c","target":"d","relation":"imports_from","source_file":"src/c.ts"},
+                {"source":"d","target":"b","relation":"re_exports","source_file":"src/d.ts"},
+                {"source":"c","target":"c","relation":"imports_from","source_file":"src/c.ts"},
+                {"source":"a","target":"external","relation":"imports_from","source_file":"src/a.ts"},
+                {"source":"d","target":"a","relation":"imports_from","source_file":"src/d.ts","deferred":true}
+            ]
+        });
+        let graph: trail_model::GraphDocument = serde_json::from_value(fixture.clone())?;
+        let rust = serde_json::to_value(find_import_cycles(&graph, 5, 20))?;
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys,networkx as nx; from graphify.analyze import find_import_cycles; G=nx.node_link_graph(json.load(sys.stdin),edges='links'); print(json.dumps(find_import_cycles(G,5,20)))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        let mut child = output;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python cycle oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&fixture)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(rust, python);
         Ok(())
     }
 

@@ -730,13 +730,13 @@ fn canonical_attributes(attributes: &serde_json::Map<String, Value>) -> String {
     serde_json::to_string(&canonical(&Value::Object(attributes.clone()))).unwrap_or_default()
 }
 
-struct PythonRandom {
+pub(crate) struct PythonRandom {
     state: [u32; 624],
     index: usize,
 }
 
 impl PythonRandom {
-    fn seeded(seed: u32) -> Self {
+    pub(crate) fn seeded(seed: u32) -> Self {
         let mut random = Self {
             state: [0; 624],
             index: 624,
@@ -824,6 +824,37 @@ impl PythonRandom {
             let replacement = self.below(index + 1);
             values.swap(index, replacement);
         }
+    }
+
+    pub(crate) fn sample_indices(&mut self, population: usize, count: usize) -> Vec<usize> {
+        let mut result = Vec::with_capacity(count);
+        let mut set_size = 21_usize;
+        if count > 5 {
+            let mut power = 1_usize;
+            while power < count * 3 {
+                power *= 4;
+            }
+            set_size += power;
+        }
+        if population <= set_size {
+            let mut pool = (0..population).collect::<Vec<_>>();
+            for index in 0..count {
+                let selected = self.below(population - index);
+                result.push(pool[selected]);
+                pool[selected] = pool[population - index - 1];
+            }
+        } else {
+            let mut selected = HashSet::new();
+            for _ in 0..count {
+                let mut candidate = self.below(population);
+                while selected.contains(&candidate) {
+                    candidate = self.below(population);
+                }
+                selected.insert(candidate);
+                result.push(candidate);
+            }
+        }
+        result
     }
 }
 
