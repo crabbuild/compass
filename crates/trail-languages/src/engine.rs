@@ -238,6 +238,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             );
             if self.language == "java" {
                 self.add_java_function_references(node, &id);
+            } else if self.language == "c" {
+                self.add_c_function_references(node, &id);
             }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody {
@@ -593,6 +595,36 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
     }
 
+    fn add_c_function_references(&mut self, node: Node<'tree>, function_id: &str) {
+        if let Some(return_type) = node.child_by_field_name("type") {
+            let mut names = Vec::new();
+            collect_c_type_names(return_type, self.source, &mut names);
+            self.add_c_type_references(function_id, &names, "return_type", line(node));
+        }
+        let mut parameters = Vec::new();
+        collect_nodes_of_kind(node, "parameter_declaration", &mut parameters);
+        for parameter in parameters {
+            if let Some(type_node) = parameter.child_by_field_name("type") {
+                let mut names = Vec::new();
+                collect_c_type_names(type_node, self.source, &mut names);
+                self.add_c_type_references(function_id, &names, "parameter_type", line(node));
+            }
+        }
+    }
+
+    fn add_c_type_references(
+        &mut self,
+        function_id: &str,
+        names: &[String],
+        context: &str,
+        line: usize,
+    ) {
+        for name in names {
+            let target = self.ensure_type_node(name, true);
+            self.add_edge(function_id, &target, "references", line, Some(context));
+        }
+    }
+
     fn add_java_type_references(
         &mut self,
         function_id: &str,
@@ -811,6 +843,19 @@ fn collect_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_type_names(child, source, output);
+    }
+}
+
+fn collect_c_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
+    if node.kind() == "type_identifier" {
+        if let Ok(text) = node.utf8_text(source) {
+            output.push(text.to_owned());
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_c_type_names(child, source, output);
     }
 }
 
