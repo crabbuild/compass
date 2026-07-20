@@ -7,6 +7,7 @@ pub enum ExtractorKind {
     JsonConfig,
     Terraform,
     PascalForm,
+    LazarusPackage,
     DreamMaker,
     Solution,
     ProjectXml,
@@ -101,13 +102,18 @@ impl Registry {
                 grammar: None,
                 kind: ExtractorKind::Markdown,
             },
-            "pas" | "pp" | "dpr" | "dpk" | "lpr" | "inc" | "lpk" => {
+            "pas" | "pp" | "dpr" | "dpk" | "lpr" | "inc" => {
                 spec("pascal", "pascal", ExtractorKind::Generic)
             }
             "dfm" | "lfm" => LanguageSpec {
                 name: "pascal-form",
                 grammar: None,
                 kind: ExtractorKind::PascalForm,
+            },
+            "lpk" => LanguageSpec {
+                name: "lazarus-package",
+                grammar: None,
+                kind: ExtractorKind::LazarusPackage,
             },
             "sh" | "bash" => spec("bash", "bash", ExtractorKind::Generic),
             "json" => spec("json", "json", ExtractorKind::JsonConfig),

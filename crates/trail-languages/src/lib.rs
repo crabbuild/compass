@@ -10,6 +10,7 @@ mod json_config;
 mod markdown;
 mod mcp;
 mod package_manifest;
+mod pascal_forms;
 mod registry;
 mod rust_lang;
 mod terraform;

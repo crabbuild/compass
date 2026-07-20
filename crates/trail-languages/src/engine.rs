@@ -82,6 +82,8 @@ impl Engine {
             ExtractorKind::McpConfig => crate::mcp::extract(path),
             ExtractorKind::PackageManifest => crate::package_manifest::extract(path),
             ExtractorKind::Terraform => self.extract_terraform(path, spec),
+            ExtractorKind::PascalForm => crate::pascal_forms::extract_form(path),
+            ExtractorKind::LazarusPackage => crate::pascal_forms::extract_package(path),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }

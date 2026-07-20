@@ -351,6 +351,18 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn pascal_form_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for (fixture, extractor) in [
+            ("sample.dfm", "extract_delphi_form"),
+            ("sample.lfm", "extract_lazarus_form"),
+            ("sample.lpk", "extract_lazarus_package"),
+        ] {
+            compare_extraction(fixture, extractor)?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
