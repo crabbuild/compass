@@ -9,8 +9,8 @@ pub use analyze::{
     find_import_cycles, god_nodes, graph_diff, suggest_questions, surprising_connections,
 };
 pub use cluster::{
-    ClusterOptions, cluster, cohesion_score, community_member_signatures, label_communities_by_hub,
-    remap_communities_to_previous, score_communities,
+    ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
+    label_communities_by_hub, remap_communities_to_previous, score_communities,
 };
 pub use dedup::{DedupError, DedupResult, DedupStats, deduplicate_entities};
 

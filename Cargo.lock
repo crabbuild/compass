@@ -1126,6 +1126,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "trail-output"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.19",
+ "trail-files",
+ "trail-graph",
+ "trail-model",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "trail-parity"
 version = "0.1.0"
 dependencies = [
@@ -1136,6 +1148,7 @@ dependencies = [
  "trail-graph",
  "trail-languages",
  "trail-model",
+ "trail-output",
  "trail-resolve",
 ]
 

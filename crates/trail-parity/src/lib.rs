@@ -22,6 +22,7 @@ mod tests {
         score_communities, suggest_questions, surprising_connections,
     };
     use trail_languages::Engine;
+    use trail_output::{JsonExportOptions, cypher_document, write_json};
     use trail_resolve::resolve;
 
     #[test]
@@ -1168,6 +1169,57 @@ hydrate();
         );
         let python: Value = serde_json::from_slice(&output.stdout)?;
         assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn json_and_cypher_exports_match_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let fixture_path = repo.join("tests/fixtures/extraction.json");
+        let extraction: trail_languages::Extraction =
+            serde_json::from_slice(&fs::read(&fixture_path)?)?;
+        let graph = build_from_extraction(&extraction, false, None);
+        let communities = cluster(&graph, ClusterOptions::default());
+        let labels = label_communities_by_hub(&graph, &communities);
+        let directory = tempfile::tempdir()?;
+        let rust_json = directory.path().join("rust.json");
+        write_json(
+            &graph,
+            &communities,
+            &rust_json,
+            &JsonExportOptions {
+                force: true,
+                built_at_commit: Some("0123456789abcdef"),
+                community_labels: Some(&labels),
+            },
+        )?;
+        let python_json = directory.path().join("python.json");
+        let labels_json = serde_json::to_string(&labels)?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from graphify.build import build_from_json; from graphify.cluster import cluster,label_communities_by_hub; from graphify.export import to_json,to_cypher; x=json.load(open(sys.argv[1])); G=build_from_json(x); c=cluster(G); labels=label_communities_by_hub(G,c); assert labels=={int(k):v for k,v in json.loads(sys.argv[4]).items()}; to_json(G,c,sys.argv[2],force=True,built_at_commit='0123456789abcdef',community_labels=labels); to_cypher(G,sys.argv[3])",
+            ])
+            .arg(&fixture_path)
+            .arg(&python_json)
+            .arg(directory.path().join("python.cypher"))
+            .arg(labels_json)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rust_value: Value = serde_json::from_slice(&fs::read(&rust_json)?)?;
+        let python_value: Value = serde_json::from_slice(&fs::read(&python_json)?)?;
+        assert_eq!(rust_value, python_value);
+        assert_eq!(fs::read(&rust_json)?, fs::read(&python_json)?);
+        assert_eq!(
+            cypher_document(&graph),
+            fs::read_to_string(directory.path().join("python.cypher"))?
+        );
         Ok(())
     }
 

@@ -6,6 +6,7 @@ members = [
     "crates/trail-graph",
     "crates/trail-languages",
     "crates/trail-model",
+    "crates/trail-output",
     "crates/trail-parity",
     "crates/trail-query",
     "crates/trail-resolve",
