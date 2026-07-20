@@ -58,6 +58,12 @@ trail graph --help
 No Python environment is needed by the installed binaries. Python is used only
 by the development parity suite.
 
+After a release is published to crates.io, the registry install is:
+
+```bash
+cargo install --locked trail-cli
+```
+
 ## Build and verify
 
 ```bash
@@ -67,6 +73,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 ```
+
+The scheduled hardening workflow additionally enforces native line coverage,
+runs the safe graph model and traversal crates under Miri, executes the native
+workspace with AddressSanitizer, and fuzzes hostile graph JSON/query input.
 
 The compatibility tests use the Python checkout at the repository root as the
 behavioral oracle. Set `GRAPHIFY_PYTHON` when its interpreter is not located at
@@ -81,4 +91,6 @@ current local baseline are documented in [PERFORMANCE.md](PERFORMANCE.md).
 x86-64 and ARM64. Every archive contains standalone `trail` and compatibility
 `graphify` executables, a SHA-256 checksum, and GitHub build-provenance
 attestation. The crate manifests are package-ready for an ordered crates.io
-publish and `cargo install trail-cli` after the first release is published.
+publish. `rust-publish.yml` is a separately approved environment-protected
+workflow that validates an exact release tag and confirmation string, then
+publishes the crates in dependency order.

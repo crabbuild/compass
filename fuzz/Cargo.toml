@@ -1,0 +1,22 @@
+[package]
+name = "trail-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+trail-model = { version = "0.1.0", path = "../crates/trail-model" }
+trail-query = { version = "0.1.0", path = "../crates/trail-query" }
+
+[[bin]]
+name = "graph_input"
+path = "fuzz_targets/graph_input.rs"
+test = false
+doc = false
+bench = false

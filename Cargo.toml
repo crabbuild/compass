@@ -12,6 +12,7 @@ members = [
     "crates/trail-resolve",
 ]
 resolver = "3"
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

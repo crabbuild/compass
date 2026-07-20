@@ -1,0 +1,1 @@
+{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"caller","label":"caller()"},{"id":"target","label":"target()"}],"links":[{"source":"caller","target":"target","relation":"calls","confidence":"EXTRACTED"}]}
