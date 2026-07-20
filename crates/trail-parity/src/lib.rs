@@ -488,6 +488,11 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn elixir_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.ex", "extract_elixir")
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

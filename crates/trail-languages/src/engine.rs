@@ -8,63 +8,11 @@ use serde_json::{Map, Value};
 use trail_model::{EdgeRecord, NodeRecord};
 use tree_sitter::{Node, Parser, Tree};
 
+use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
 use crate::config::{GenericConfig, generic_config};
 use crate::{
     ExtractError, Extraction, ExtractorKind, LanguageSpec, RawCall, Registry, file_stem, make_id,
 };
-
-const BUILTIN_GLOBALS: &[&str] = &[
-    "String",
-    "Number",
-    "Boolean",
-    "Object",
-    "Array",
-    "Symbol",
-    "BigInt",
-    "Date",
-    "RegExp",
-    "Error",
-    "Promise",
-    "Map",
-    "Set",
-    "JSON",
-    "Math",
-    "Reflect",
-    "Proxy",
-    "URL",
-    "console",
-    "parseInt",
-    "parseFloat",
-    "isNaN",
-    "str",
-    "int",
-    "float",
-    "bool",
-    "list",
-    "dict",
-    "set",
-    "tuple",
-    "bytes",
-    "len",
-    "range",
-    "enumerate",
-    "zip",
-    "map",
-    "filter",
-    "sum",
-    "min",
-    "max",
-    "print",
-    "open",
-    "isinstance",
-    "type",
-    "super",
-    "sorted",
-    "any",
-    "all",
-    "abs",
-    "round",
-];
 
 #[derive(Default)]
 pub struct Engine {
@@ -136,6 +84,9 @@ impl Engine {
         }
         if spec.name == "powershell" {
             return Ok(crate::powershell::extract(path, &source, root));
+        }
+        if spec.name == "elixir" {
+            return Ok(crate::elixir::extract(path, &source, root));
         }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
@@ -423,7 +374,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
         if self.config.call_types.contains(&kind)
             && let Some(call) = self.call_name(node)
-            && !BUILTIN_GLOBALS.contains(&call.name.as_str())
+            && !LANGUAGE_BUILTIN_GLOBALS.contains(&call.name.as_str())
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
             let defer_member = call.member

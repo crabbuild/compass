@@ -1,11 +1,13 @@
 //! Statically linked deterministic language extraction for Trail.
 
 mod bash;
+mod builtins;
 mod config;
 mod cpp;
 mod csharp;
 mod dm;
 mod dotnet_project;
+mod elixir;
 mod engine;
 mod facts;
 mod go;
