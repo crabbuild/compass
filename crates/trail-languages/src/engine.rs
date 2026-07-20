@@ -84,6 +84,7 @@ impl Engine {
             ExtractorKind::Terraform => self.extract_terraform(path, spec),
             ExtractorKind::PascalForm => crate::pascal_forms::extract_form(path),
             ExtractorKind::LazarusPackage => crate::pascal_forms::extract_package(path),
+            ExtractorKind::DreamMaker => self.extract_dreammaker(path),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }
@@ -148,6 +149,38 @@ impl Engine {
         })?;
         let tree = self.parse(path, spec, &source)?;
         Ok(crate::terraform::extract(path, &source, tree.root_node()))
+    }
+
+    fn extract_dreammaker(&mut self, path: &Path) -> Result<Extraction, ExtractError> {
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !matches!(extension.as_str(), "dm" | "dme") {
+            return crate::dm::extract_asset(path);
+        }
+        let source = fs::read(path).map_err(|source| trail_files::FileError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let parser = if let Some(parser) = self.parsers.get_mut("dm") {
+            parser
+        } else {
+            let language = tree_sitter_dm::LANGUAGE.into();
+            let mut parser = Parser::new();
+            parser
+                .set_language(&language)
+                .map_err(|error| ExtractError::MissingGrammar {
+                    language: "dm".to_owned(),
+                    detail: error.to_string(),
+                })?;
+            self.parsers.entry("dm").or_insert(parser)
+        };
+        let tree = parser
+            .parse(&source, None)
+            .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
+        Ok(crate::dm::extract_source(path, &source, tree.root_node()))
     }
 
     fn parse(

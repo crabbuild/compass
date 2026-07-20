@@ -2,6 +2,7 @@
 
 mod bash;
 mod config;
+mod dm;
 mod engine;
 mod facts;
 mod go;

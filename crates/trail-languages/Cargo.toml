@@ -10,6 +10,7 @@ repository.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+flate2.workspace = true
 roxmltree.workspace = true
 serde_yaml_ng.workspace = true
 thiserror.workspace = true
@@ -17,6 +18,7 @@ toml.workspace = true
 trail-files = { path = "../trail-files" }
 trail-model = { path = "../trail-model" }
 tree-sitter.workspace = true
+tree-sitter-dm.workspace = true
 tree-sitter-language-pack.workspace = true
 unicode-normalization.workspace = true
 unicode-casefold.workspace = true

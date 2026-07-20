@@ -1064,6 +1064,7 @@ dependencies = [
 name = "trail-languages"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "regex",
  "roxmltree",
  "serde",
@@ -1075,6 +1076,7 @@ dependencies = [
  "trail-files",
  "trail-model",
  "tree-sitter",
+ "tree-sitter-dm",
  "tree-sitter-language-pack",
  "unicode-casefold",
  "unicode-normalization",
@@ -1120,6 +1122,16 @@ dependencies = [
  "regex-syntax",
  "serde_json",
  "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-dm"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e7cb9dcfcd10c84ec03e3a0717a1d6fc7d6454ae5e54d03e3b17cc25564e4f6"
+dependencies = [
+ "cc",
  "tree-sitter-language",
 ]
 

@@ -363,6 +363,23 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn dreammaker_asset_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for (fixture, extractor) in [
+            ("sample.dmi", "extract_dmi"),
+            ("sample.dmm", "extract_dmm"),
+            ("sample.dmf", "extract_dmf"),
+        ] {
+            compare_extraction(fixture, extractor)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn dreammaker_source_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.dm", "extract_dm")
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
