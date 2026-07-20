@@ -30,6 +30,7 @@ mod registry;
 mod rust_lang;
 mod sql;
 mod swift;
+mod templates;
 mod terraform;
 mod verilog;
 mod xaml;

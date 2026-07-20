@@ -680,6 +680,96 @@ void runDI(BuildContext context) {
         Ok(())
     }
 
+    #[test]
+    fn razor_and_blade_extraction_match_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.razor", "extract_razor")?;
+
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("dashboard.blade.php");
+        fs::write(
+            &source,
+            r#"
+@include('layouts.header')
+@include("shared.alert")
+<livewire:user.profile />
+<livewire:admin-panel>
+<button wire:click="save">Save</button>
+<button wire:click='delete(42)'>Delete</button>
+"#,
+        )?;
+        compare_extraction_path(&source, "extract_blade")?;
+        Ok(())
+    }
+
+    #[test]
+    fn web_template_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        fs::create_dir_all(directory.path().join("components"))?;
+        fs::write(
+            directory.path().join("helper.ts"),
+            "export function helper() {}\n",
+        )?;
+        fs::write(
+            directory.path().join("Lazy.vue"),
+            "<template><div/></template>\n",
+        )?;
+        let vue = directory.path().join("Host.vue");
+        fs::write(
+            &vue,
+            r#"<template><Lazy /></template>
+<script setup lang="ts" generic="T extends Record<string, unknown>">
+import { helper } from './helper'
+const count = 1
+function onClick(): void { helper() }
+const Lazy = defineAsyncComponent(() => import('./Lazy.vue'))
+</script>
+"#,
+        )?;
+        compare_extraction_path(&vue, "extract_vue")?;
+
+        fs::write(directory.path().join("Card.svelte"), "<div>card</div>\n")?;
+        fs::write(
+            directory.path().join("Heavy.svelte.ts"),
+            "export const heavy = true\n",
+        )?;
+        let svelte = directory.path().join("Page.svelte");
+        fs::write(
+            &svelte,
+            r#"<script lang="ts">
+import Card from './Card.svelte'
+const lazy = () => import('./Heavy.svelte')
+</script>
+{#await import('./Card.svelte')}<p>loading</p>{/await}
+"#,
+        )?;
+        compare_extraction_path(&svelte, "extract_svelte")?;
+
+        fs::write(
+            directory.path().join("components/Hero.astro"),
+            "---\n---\n<h1>hero</h1>\n",
+        )?;
+        fs::write(
+            directory.path().join("client.ts"),
+            "export function hydrate() {}\n",
+        )?;
+        let astro = directory.path().join("Page.astro");
+        fs::write(
+            &astro,
+            r#"---
+import Hero from './components/Hero.astro';
+const Mod = await import('./components/Hero.astro');
+---
+<Hero />
+<script>
+import { hydrate } from './client.ts';
+hydrate();
+</script>
+"#,
+        )?;
+        compare_extraction_path(&astro, "extract_astro")?;
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

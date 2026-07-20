@@ -36,8 +36,30 @@ impl Engine {
             ExtractorKind::Solution => crate::dotnet_project::extract_solution(path),
             ExtractorKind::ProjectXml => crate::dotnet_project::extract_project(path),
             ExtractorKind::Xaml => crate::xaml::extract(self, path),
-            _ => Err(ExtractError::Unsupported(path.to_path_buf())),
+            ExtractorKind::Template => crate::templates::extract(self, path, spec.name),
         }
+    }
+
+    pub(super) fn extract_embedded_script(
+        &mut self,
+        path: &Path,
+        source: &[u8],
+        language: &'static str,
+        grammar: &'static str,
+    ) -> Result<Extraction, ExtractError> {
+        let spec = LanguageSpec {
+            name: language,
+            grammar: Some(grammar),
+            kind: ExtractorKind::Generic,
+        };
+        let tree = self.parse(path, spec, source)?;
+        Ok(extract_tree(
+            path,
+            source,
+            tree.root_node(),
+            &generic_config(spec),
+            language,
+        ))
     }
 
     fn extract_generic(
@@ -378,6 +400,21 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             self.add_scala_field_reference(node, class_id);
         }
 
+        if matches!(self.language, "javascript" | "typescript" | "tsx")
+            && kind == "lexical_declaration"
+            && parent_class.is_none()
+            && node.parent().is_some_and(|parent| {
+                parent.kind() == "program"
+                    || (parent.kind() == "export_statement"
+                        && parent
+                            .parent()
+                            .is_some_and(|grandparent| grandparent.kind() == "program"))
+            })
+        {
+            self.add_js_module_bindings(node);
+            return;
+        }
+
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.walk_declarations(child, parent_class);
@@ -624,17 +661,17 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         };
         let source_path = Path::new(&self.source_file);
         let target_path = if raw_module.starts_with('.') {
-            lexical_normalize(
+            resolve_js_import_path(&lexical_normalize(
                 &source_path
                     .parent()
                     .unwrap_or_else(|| Path::new("."))
                     .join(&raw_module),
-            )
+            ))
         } else {
             Path::new(&raw_module).to_path_buf()
         };
-        let target_stem = target_path.to_string_lossy().replace('\\', "/");
-        let module_id = make_id(&[&target_stem]);
+        let target_path_text = target_path.to_string_lossy().replace('\\', "/");
+        let module_id = make_id(&[&target_path_text]);
         self.add_edge(
             &self.file_id.clone(),
             &module_id,
@@ -654,6 +691,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         let mut identifiers = Vec::new();
         collect_identifiers(clause, self.source, &mut identifiers);
         identifiers.dedup();
+        let target_stem = file_stem(&target_path);
         for identifier in identifiers {
             let target = make_id(&[&target_stem, &identifier]);
             self.add_edge(
@@ -663,6 +701,56 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 line(node),
                 Some("import"),
             );
+        }
+    }
+
+    fn add_js_module_bindings(&mut self, node: Node<'tree>) {
+        let mut cursor = node.walk();
+        let declarations: Vec<_> = node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "variable_declarator")
+            .collect();
+        for declaration in declarations {
+            let Some(name_node) = declaration.child_by_field_name("name") else {
+                continue;
+            };
+            let Some(value) = declaration.child_by_field_name("value") else {
+                continue;
+            };
+            let Some(name) = self.node_text(name_node).map(clean_name) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            let id = make_id(&[&self.stem, &name]);
+            if matches!(
+                value.kind(),
+                "arrow_function" | "function_expression" | "function"
+            ) {
+                self.add_node(&id, &format!("{name}()"), line(declaration), true, None);
+                self.add_edge(
+                    &self.file_id.clone(),
+                    &id,
+                    "contains",
+                    line(declaration),
+                    None,
+                );
+                self.callables.entry(name).or_default().push(id.clone());
+                self.functions.push(FunctionBody { id, node: value });
+            } else if matches!(
+                value.kind(),
+                "object" | "array" | "as_expression" | "call_expression" | "new_expression"
+            ) {
+                self.add_node(&id, &name, line(declaration), false, None);
+                self.add_edge(
+                    &self.file_id.clone(),
+                    &id,
+                    "contains",
+                    line(declaration),
+                    None,
+                );
+            }
         }
     }
 
@@ -1425,4 +1513,50 @@ fn lexical_normalize(path: &Path) -> std::path::PathBuf {
         }
     }
     output
+}
+
+fn resolve_js_import_path(path: &Path) -> std::path::PathBuf {
+    if path.is_file() {
+        return path.to_path_buf();
+    }
+    if path.extension().and_then(|value| value.to_str()) == Some("js") {
+        let candidate = path.with_extension("ts");
+        if candidate.is_file() {
+            return candidate;
+        }
+    } else if path.extension().and_then(|value| value.to_str()) == Some("jsx") {
+        let candidate = path.with_extension("tsx");
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    for extension in [
+        "ts", "tsx", "mts", "cts", "svelte", "js", "jsx", "mjs", "cjs",
+    ] {
+        let candidate = path.with_file_name(format!(
+            "{}.{extension}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+        ));
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    if path.is_dir() {
+        for name in [
+            "index.ts",
+            "index.tsx",
+            "index.svelte",
+            "index.js",
+            "index.jsx",
+            "index.mjs",
+        ] {
+            let candidate = path.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    path.to_path_buf()
 }
