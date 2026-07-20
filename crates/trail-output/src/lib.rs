@@ -1,10 +1,14 @@
 //! Safe, deterministic output formats for Trail graphs.
 
 mod cypher;
+mod graphml;
 mod json;
+mod report;
 
 pub use cypher::{cypher_document, write_cypher};
+pub use graphml::{graphml_document, write_graphml};
 pub use json::{JsonExportOptions, export_json_value, write_json};
+pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {

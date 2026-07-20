@@ -22,7 +22,10 @@ mod tests {
         score_communities, suggest_questions, surprising_connections,
     };
     use trail_languages::Engine;
-    use trail_output::{JsonExportOptions, cypher_document, write_json};
+    use trail_output::{
+        DetectionSummary, JsonExportOptions, ReportOptions, TokenCost, cypher_document,
+        generate_report, graphml_document, write_json,
+    };
     use trail_resolve::resolve;
 
     #[test]
@@ -1198,12 +1201,13 @@ hydrate();
         let output = Command::new(python_executable(&repo))
             .args([
                 "-c",
-                "import json,sys; from graphify.build import build_from_json; from graphify.cluster import cluster,label_communities_by_hub; from graphify.export import to_json,to_cypher; x=json.load(open(sys.argv[1])); G=build_from_json(x); c=cluster(G); labels=label_communities_by_hub(G,c); assert labels=={int(k):v for k,v in json.loads(sys.argv[4]).items()}; to_json(G,c,sys.argv[2],force=True,built_at_commit='0123456789abcdef',community_labels=labels); to_cypher(G,sys.argv[3])",
+                "import json,sys; from graphify.build import build_from_json; from graphify.cluster import cluster,label_communities_by_hub; from graphify.export import to_json,to_cypher,to_graphml; x=json.load(open(sys.argv[1])); G=build_from_json(x); c=cluster(G); labels=label_communities_by_hub(G,c); assert labels=={int(k):v for k,v in json.loads(sys.argv[4]).items()}; to_json(G,c,sys.argv[2],force=True,built_at_commit='0123456789abcdef',community_labels=labels); to_cypher(G,sys.argv[3]); to_graphml(G,c,sys.argv[5])",
             ])
             .arg(&fixture_path)
             .arg(&python_json)
             .arg(directory.path().join("python.cypher"))
             .arg(labels_json)
+            .arg(directory.path().join("python.graphml"))
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
             .output()?;
@@ -1220,6 +1224,74 @@ hydrate();
             cypher_document(&graph),
             fs::read_to_string(directory.path().join("python.cypher"))?
         );
+        assert_eq!(
+            graphml_document(&graph, &communities),
+            fs::read_to_string(directory.path().join("python.graphml"))?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_report_matches_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let fixture_path = repo.join("tests/fixtures/extraction.json");
+        let extraction: trail_languages::Extraction =
+            serde_json::from_slice(&fs::read(&fixture_path)?)?;
+        let graph = build_from_extraction(&extraction, false, None);
+        let communities = cluster(&graph, ClusterOptions::default());
+        let cohesion = score_communities(&graph, &communities);
+        let labels = communities
+            .keys()
+            .map(|community| (*community, format!("Community {community}")))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let gods = god_nodes(&graph, 10);
+        let surprises = surprising_connections(&graph, &std::collections::BTreeMap::new(), 5);
+        let mut options = ReportOptions::new("./project");
+        options.min_community_size = 1;
+        options.built_at_commit = Some("0123456789abcdef");
+        let rust = generate_report(
+            &graph,
+            &communities,
+            &cohesion,
+            &labels,
+            &gods,
+            &surprises,
+            &DetectionSummary {
+                total_files: 4,
+                total_words: 62_400,
+                warning: None,
+            },
+            TokenCost {
+                input: extraction
+                    .extensions
+                    .get("input_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
+                output: extraction
+                    .extensions
+                    .get("output_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
+            },
+            None,
+            None,
+            &options,
+        );
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from graphify.build import build_from_json; from graphify.cluster import cluster,score_all; from graphify.analyze import god_nodes,surprising_connections; from graphify.report import generate; x=json.load(open(sys.argv[1])); G=build_from_json(x); c=cluster(G); labels={cid:f'Community {cid}' for cid in c}; print(generate(G,c,score_all(G,c),labels,god_nodes(G),surprising_connections(G),{'total_files':4,'total_words':62400,'needs_graph':True,'warning':None},{'input':x['input_tokens'],'output':x['output_tokens']},'./project',min_community_size=1,built_at_commit='0123456789abcdef'),end='')",
+            ])
+            .arg(&fixture_path)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(rust, String::from_utf8(output.stdout)?);
         Ok(())
     }
 
