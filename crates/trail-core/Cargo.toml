@@ -10,6 +10,7 @@ repository.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 trail-model = { path = "../trail-model" }
+trail-graph = { path = "../trail-graph" }
 
 [lints]
 workspace = true

@@ -76,7 +76,7 @@ const JSON_NOISE_LABELS: &[&str] = &[
     "bundledependencies",
 ];
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct GodNode {
     pub id: String,
     pub label: String,

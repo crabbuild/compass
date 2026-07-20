@@ -1,7 +1,11 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+use crate::GraphError;
 
 /// One node in `NetworkX` node-link form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,6 +62,33 @@ pub struct GraphDocument {
     pub links: Vec<EdgeRecord>,
     pub extras: BTreeMap<String, Value>,
     pub used_legacy_edges_key: bool,
+}
+
+impl GraphDocument {
+    /// Load a node-link document under the compatible extension and size guards.
+    pub fn load(path: &Path) -> Result<Self, GraphError> {
+        if path.extension().and_then(|part| part.to_str()) != Some("json") {
+            return Err(GraphError::InvalidExtension(path.to_path_buf()));
+        }
+        if !path.exists() {
+            return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
+        }
+        let cap = crate::graph::graph_size_cap();
+        if let Ok(metadata) = path.metadata()
+            && metadata.len() > cap
+        {
+            return Err(GraphError::TooLarge {
+                path: crate::graph::absolute_path(path),
+                size: metadata.len(),
+                cap,
+            });
+        }
+        let bytes = fs::read(path).map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?;
+        serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)
+    }
 }
 
 #[derive(Deserialize)]

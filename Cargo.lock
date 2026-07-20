@@ -1097,8 +1097,11 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 name = "trail-cli"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "trail-core",
+ "trail-graph",
  "trail-model",
+ "trail-output",
  "trail-query",
 ]
 
@@ -1108,6 +1111,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "sha2 0.10.9",
+ "trail-graph",
  "trail-model",
 ]
 

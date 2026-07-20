@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -43,28 +42,7 @@ impl Graph {
     }
 
     fn load_with_direction(path: &Path, force_directed: bool) -> Result<Self, GraphError> {
-        if path.extension().and_then(|part| part.to_str()) != Some("json") {
-            return Err(GraphError::InvalidExtension(path.to_path_buf()));
-        }
-        if !path.exists() {
-            return Err(GraphError::NotFound(absolute_path(path)));
-        }
-        let cap = graph_size_cap();
-        if let Ok(metadata) = path.metadata()
-            && metadata.len() > cap
-        {
-            return Err(GraphError::TooLarge {
-                path: absolute_path(path),
-                size: metadata.len(),
-                cap,
-            });
-        }
-        let bytes = fs::read(path).map_err(|source| GraphError::Read {
-            path: absolute_path(path),
-            source,
-        })?;
-        let mut document =
-            serde_json::from_slice::<GraphDocument>(&bytes).map_err(GraphError::Corrupt)?;
+        let mut document = GraphDocument::load(path)?;
         if force_directed {
             document.directed = true;
         }
@@ -286,7 +264,7 @@ fn ensure_endpoint(id: &str, nodes: &mut Vec<NodeRecord>, ids: &mut HashMap<Stri
     });
 }
 
-fn graph_size_cap() -> u64 {
+pub(crate) fn graph_size_cap() -> u64 {
     const DEFAULT: u64 = 512 * 1024 * 1024;
     let Ok(raw) = std::env::var("GRAPHIFY_MAX_GRAPH_BYTES") else {
         return DEFAULT;
@@ -308,7 +286,7 @@ fn graph_size_cap() -> u64 {
         .unwrap_or(DEFAULT)
 }
 
-fn absolute_path(path: &Path) -> PathBuf {
+pub(crate) fn absolute_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
     } else {

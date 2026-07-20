@@ -13,8 +13,8 @@ mod tree;
 mod wiki;
 
 pub use callflow::{
-    CallflowOptions, CallflowSection, callflow_html_document, derive_callflow_sections,
-    write_callflow_html,
+    CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
+    derive_callflow_sections, write_callflow_html,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cypher::{cypher_document, write_cypher};

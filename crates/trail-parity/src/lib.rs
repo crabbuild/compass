@@ -78,6 +78,90 @@ mod tests {
     }
 
     #[test]
+    fn local_export_commands_match_python_cli() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let output = directory.path().join("graphify-out");
+        fs::create_dir(&output)?;
+        let graph = output.join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": false,
+                "multigraph": false,
+                "graph": {"project_name": "Parity Project"},
+                "nodes": [
+                    {"id":"a","label":"Alpha","file_type":"code","source_file":"src/a.py","source_location":"L1","community":0},
+                    {"id":"b","label":"Beta","file_type":"code","source_file":"src/b.py","source_location":"L2","community":0},
+                    {"id":"c","label":"Gamma","file_type":"code","source_file":"src/c.py","source_location":"L3","community":1}
+                ],
+                "links": [
+                    {"source":"a","target":"b","relation":"calls","confidence":"EXTRACTED"},
+                    {"source":"b","target":"c","relation":"imports","confidence":"INFERRED"}
+                ]
+            }))?,
+        )?;
+        fs::write(
+            output.join(".graphify_analysis.json"),
+            serde_json::to_vec(&json!({
+                "communities":{"0":["a","b"],"1":["c"]},
+                "cohesion":{"0":0.5,"1":0.0},
+                "gods":[{"id":"b","label":"Beta","degree":2}]
+            }))?,
+        )?;
+        fs::write(
+            output.join(".graphify_labels.json"),
+            serde_json::to_vec(&json!({"0":"Core","1":"Boundary"}))?,
+        )?;
+        fs::write(
+            output.join("GRAPH_REPORT.md"),
+            "# Knowledge Graph Report\n\n## Summary\n\nParity fixture.\n",
+        )?;
+        let graph = graph.to_string_lossy().into_owned();
+        let vault = directory
+            .path()
+            .join("vault")
+            .to_string_lossy()
+            .into_owned();
+        let callflow = directory
+            .path()
+            .join("callflow.html")
+            .to_string_lossy()
+            .into_owned();
+
+        compare_export(&["export", "html", "--graph", &graph, "--no-viz"], &output)?;
+        compare_export(&["export", "html", "--graph", &graph], &output)?;
+        compare_export(
+            &["export", "obsidian", "--graph", &graph, "--dir", &vault],
+            &output,
+        )?;
+        compare_export(&["export", "wiki", "--graph", &graph], &output)?;
+        // The Python SVG command is optional and this repository's oracle venv
+        // deliberately has no matplotlib. Exercise the native command here;
+        // spring-layout and SVG structure have separate Python differential tests.
+        let svg = trail_cli::run(
+            Frontend::Graphify,
+            ["export", "svg", "--graph", &graph]
+                .into_iter()
+                .map(OsString::from),
+        );
+        assert_eq!(svg.code, 0, "{}", svg.stderr);
+        assert!(output.join("graph.svg").is_file());
+        compare_export(&["export", "graphml", "--graph", &graph], &output)?;
+        compare_export(
+            &[
+                "export",
+                "callflow-html",
+                "--graph",
+                &graph,
+                "--output",
+                &callflow,
+            ],
+            &output,
+        )?;
+        Ok(())
+    }
+
+    #[test]
     fn deterministic_files_match_python() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         let root = directory.path();
@@ -1978,25 +2062,39 @@ hydrate();
     }
 
     fn compare(arguments: &[&str]) -> Result<(), Box<dyn Error>> {
+        compare_cli(arguments, None)
+    }
+
+    fn compare_export(arguments: &[&str], output: &Path) -> Result<(), Box<dyn Error>> {
+        compare_cli(arguments, Some(output))
+    }
+
+    fn compare_cli(arguments: &[&str], graphify_out: Option<&Path>) -> Result<(), Box<dyn Error>> {
         let rust = trail_cli::run(
             Frontend::Graphify,
             arguments.iter().map(|argument| OsString::from(*argument)),
         );
         let repo = repository_root();
         let python = python_executable(&repo);
-        let output = Command::new(&python)
+        let mut command = Command::new(&python);
+        command
             .arg("-m")
             .arg("graphify")
             .args(arguments)
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
             .env("PYTHONHASHSEED", "0")
-            .env("GRAPHIFY_QUERY_LOG_DISABLE", "1")
-            .output()?;
+            .env("GRAPHIFY_QUERY_LOG_DISABLE", "1");
+        if let Some(graphify_out) = graphify_out {
+            command.env("GRAPHIFY_OUT", graphify_out);
+        }
+        let output = command.output()?;
         assert_eq!(
             rust.code,
             output.status.code().unwrap_or(1) as u8,
-            "{arguments:?}"
+            "{arguments:?}: Rust stderr={} Python stderr={}",
+            rust.stderr,
+            String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
             with_newline(&rust.stdout),

@@ -32,6 +32,14 @@ pub struct CallflowOptions<'a> {
     pub generated_at: Option<&'a str>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallflowExport {
+    pub loaded_sections: usize,
+    pub rendered_sections: usize,
+    pub mermaid_diagrams: usize,
+    pub call_tables: usize,
+}
+
 impl Default for CallflowOptions<'_> {
     fn default() -> Self {
         Self {
@@ -474,12 +482,30 @@ pub fn write_callflow_html(
     communities: &Communities,
     output_path: impl AsRef<Path>,
     options: &CallflowOptions<'_>,
-) -> Result<(), OutputError> {
-    write_text_atomic(
-        output_path,
-        &callflow_html_document(document, communities, options)?,
-    )?;
-    Ok(())
+) -> Result<CallflowExport, OutputError> {
+    let language = detect_language(options.language, document, options.community_labels);
+    let raw_sections = options.sections.map_or_else(
+        || {
+            derive_callflow_sections(
+                document,
+                communities,
+                options.community_labels,
+                language,
+                options.max_sections,
+            )
+        },
+        <[CallflowSection]>::to_vec,
+    );
+    let loaded_sections = normalize_sections(&raw_sections, language).len();
+    let html = callflow_html_document(document, communities, options)?;
+    let result = CallflowExport {
+        loaded_sections,
+        rendered_sections: html.matches("<h2 id=").count(),
+        mermaid_diagrams: html.matches("<div class=\"mermaid\">").count(),
+        call_tables: html.matches("<table class=\"call-table\">").count(),
+    };
+    write_text_atomic(output_path, &html)?;
+    Ok(result)
 }
 
 fn normalize_sections(sections: &[CallflowSection], language: &str) -> Vec<CallflowSection> {

@@ -6,7 +6,110 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use trail_model::{Graph, GraphError};
+use trail_graph::{Communities, GodNode};
+use trail_model::{Graph, GraphDocument, GraphError};
+
+pub struct ExportInputs {
+    pub document: GraphDocument,
+    pub communities: Communities,
+    pub labels: std::collections::BTreeMap<usize, String>,
+    pub cohesion: std::collections::BTreeMap<usize, f64>,
+    pub gods: Vec<GodNode>,
+    pub report: String,
+}
+
+impl ExportInputs {
+    pub fn load(graph_path: &Path) -> Result<Self, GraphError> {
+        let document = GraphDocument::load(graph_path)?;
+        let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
+        let analysis = read_json_value(&output_dir.join(".graphify_analysis.json"));
+        let mut communities = analysis
+            .as_ref()
+            .and_then(|value| value.get("communities"))
+            .and_then(Value::as_object)
+            .map(parse_communities)
+            .unwrap_or_default();
+        if communities.is_empty() {
+            for node in &document.nodes {
+                let community = node
+                    .attributes
+                    .get("community")
+                    .and_then(|value| {
+                        value
+                            .as_u64()
+                            .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+                    })
+                    .and_then(|value| usize::try_from(value).ok());
+                if let Some(community) = community {
+                    communities
+                        .entry(community)
+                        .or_default()
+                        .push(node.id.clone());
+                }
+            }
+        }
+        let cohesion = analysis
+            .as_ref()
+            .and_then(|value| value.get("cohesion"))
+            .and_then(Value::as_object)
+            .map(parse_float_map)
+            .unwrap_or_default();
+        let gods = analysis
+            .as_ref()
+            .and_then(|value| value.get("gods"))
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default();
+        let labels = read_json_value(&output_dir.join(".graphify_labels.json"))
+            .and_then(|value| value.as_object().map(parse_string_map))
+            .unwrap_or_default();
+        let report = fs::read_to_string(output_dir.join("GRAPH_REPORT.md")).unwrap_or_default();
+        Ok(Self {
+            document,
+            communities,
+            labels,
+            cohesion,
+            gods,
+            report,
+        })
+    }
+}
+
+fn read_json_value(path: &Path) -> Option<Value> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+}
+
+fn parse_communities(object: &Map<String, Value>) -> Communities {
+    object
+        .iter()
+        .filter_map(|(key, value)| {
+            let key = key.parse::<usize>().ok()?;
+            let members = value
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect();
+            Some((key, members))
+        })
+        .collect()
+}
+
+fn parse_float_map(object: &Map<String, Value>) -> std::collections::BTreeMap<usize, f64> {
+    object
+        .iter()
+        .filter_map(|(key, value)| Some((key.parse().ok()?, value.as_f64()?)))
+        .collect()
+}
+
+fn parse_string_map(object: &Map<String, Value>) -> std::collections::BTreeMap<usize, String> {
+    object
+        .iter()
+        .filter_map(|(key, value)| Some((key.parse().ok()?, value.as_str()?.to_owned())))
+        .collect()
+}
 
 pub struct LoadedGraph {
     pub graph: Graph,
