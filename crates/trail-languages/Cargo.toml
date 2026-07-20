@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+regex.workspace = true
 thiserror.workspace = true
 trail-files = { path = "../trail-files" }
 trail-model = { path = "../trail-model" }

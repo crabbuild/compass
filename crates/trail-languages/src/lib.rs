@@ -6,6 +6,7 @@ mod engine;
 mod facts;
 mod go;
 mod ids;
+mod markdown;
 mod registry;
 mod rust_lang;
 

@@ -75,6 +75,7 @@ impl Engine {
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         match spec.kind {
             ExtractorKind::Generic => self.extract_generic(path, spec),
+            ExtractorKind::Markdown => crate::markdown::extract(path),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }

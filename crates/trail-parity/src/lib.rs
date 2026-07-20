@@ -265,6 +265,15 @@ mod tests {
     fn bash_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.sh", "extract_bash")
     }
+
+    #[test]
+    fn markdown_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.md", "deploy_guide.md"] {
+            compare_extraction(fixture, "extract_markdown")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
