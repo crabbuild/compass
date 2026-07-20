@@ -179,7 +179,7 @@ fn extract_tree(
 impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<&str>) {
         let kind = node.kind();
-        if self.config.import_types.contains(&kind) {
+        if self.config.import_types.contains(&kind) && self.language != "kotlin" {
             self.add_import(node);
         }
 
@@ -188,7 +188,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             let id = make_id(&[&self.stem, &name]);
             self.add_node(&id, &name, line(node), true, None);
-            self.types.insert(name, id.clone());
+            self.types.insert(name.clone(), id.clone());
+            self.callables.entry(name).or_default().push(id.clone());
             let source = parent_class.unwrap_or(&self.file_id).to_owned();
             self.add_edge(&source, &id, "contains", line(node), None);
             if self.language == "java" {
@@ -204,6 +205,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 }
             } else if self.language == "ruby" {
                 self.add_ruby_parent_edge(node, &id);
+            } else if self.language == "kotlin" {
+                self.add_kotlin_parent_edges(node, &id);
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
@@ -241,9 +244,31 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_java_function_references(node, &id);
             } else if self.language == "c" {
                 self.add_c_function_references(node, &id);
+            } else if self.language == "kotlin" {
+                self.add_kotlin_function_references(node, &id);
             }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody { id, node });
+            return;
+        }
+
+        if self.language == "kotlin" && kind == "enum_entry" {
+            if let Some(class_id) = parent_class
+                && let Some(name_node) = first_descendant(node, "simple_identifier")
+                    .or_else(|| first_descendant(node, "identifier"))
+                && let Some(name) = self.node_text(name_node).map(clean_name)
+            {
+                let id = make_id(&[class_id, &name]);
+                self.add_node(&id, &name, line(node), false, None);
+                self.add_edge(class_id, &id, "case_of", line(node), None);
+            }
+            return;
+        }
+
+        if self.language == "kotlin" && kind == "property_declaration" {
+            if let Some(class_id) = parent_class {
+                self.add_kotlin_property_reference(node, class_id);
+            }
             return;
         }
 
@@ -301,6 +326,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn declaration_name(&self, node: Node<'tree>) -> Option<String> {
+        if self.language == "kotlin"
+            && self.config.class_types.contains(&node.kind())
+            && let Some(name) = first_descendant(node, "type_identifier")
+                .and_then(|name| self.node_text(name))
+                .map(clean_name)
+        {
+            return Some(name);
+        }
         node.child_by_field_name("name")
             .and_then(|name| self.node_text(name))
             .or_else(|| {
@@ -534,6 +567,124 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         };
         let target = self.ensure_type_node(&name, true);
         self.add_edge(class_id, &target, "inherits", line(node), None);
+    }
+
+    fn add_kotlin_parent_edges(&mut self, node: Node<'tree>, class_id: &str) {
+        let mut specifiers = Vec::new();
+        collect_nodes_of_kind(node, "delegation_specifier", &mut specifiers);
+        for specifier in specifiers {
+            let relation = if first_descendant(specifier, "constructor_invocation").is_some() {
+                "inherits"
+            } else {
+                "implements"
+            };
+            let Some(user_type) = first_descendant(specifier, "user_type") else {
+                continue;
+            };
+            let Some(name_node) = first_descendant(user_type, "type_identifier")
+                .or_else(|| first_descendant(user_type, "simple_identifier"))
+                .or_else(|| first_descendant(user_type, "identifier"))
+            else {
+                continue;
+            };
+            let Some(name) = self.node_text(name_node).map(clean_name) else {
+                continue;
+            };
+            let target = self.ensure_type_node(&name, true);
+            self.add_edge(class_id, &target, relation, line(node), None);
+
+            let mut arguments = Vec::new();
+            collect_nodes_of_kind(user_type, "type_projection", &mut arguments);
+            for argument in arguments {
+                let mut refs = Vec::new();
+                collect_kotlin_type_refs(argument, self.source, true, &mut refs);
+                self.add_kotlin_type_references(class_id, &refs, "generic_arg", line(node));
+            }
+        }
+    }
+
+    fn add_kotlin_property_reference(&mut self, node: Node<'tree>, class_id: &str) {
+        let Some(type_node) = first_descendant(node, "user_type")
+            .or_else(|| first_descendant(node, "nullable_type"))
+            .or_else(|| first_descendant(node, "type_reference"))
+        else {
+            return;
+        };
+        let mut refs = Vec::new();
+        collect_kotlin_type_refs(type_node, self.source, false, &mut refs);
+        for (name, generic) in refs {
+            let target = self.ensure_type_node(&name, true);
+            if target != class_id {
+                self.add_edge(
+                    class_id,
+                    &target,
+                    "references",
+                    line(node),
+                    Some(if generic { "generic_arg" } else { "field" }),
+                );
+            }
+        }
+    }
+
+    fn add_kotlin_function_references(&mut self, node: Node<'tree>, function_id: &str) {
+        if let Some(parameters) = first_descendant(node, "function_value_parameters") {
+            let mut cursor = parameters.walk();
+            for parameter in parameters
+                .children(&mut cursor)
+                .filter(|child| child.kind() == "parameter")
+            {
+                let Some(type_node) = first_descendant(parameter, "user_type")
+                    .or_else(|| first_descendant(parameter, "nullable_type"))
+                    .or_else(|| first_descendant(parameter, "type_reference"))
+                else {
+                    continue;
+                };
+                let mut refs = Vec::new();
+                collect_kotlin_type_refs(type_node, self.source, false, &mut refs);
+                self.add_kotlin_type_references(function_id, &refs, "parameter_type", line(node));
+            }
+        }
+
+        let mut saw_parameters = false;
+        let mut saw_colon = false;
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "function_value_parameters" {
+                saw_parameters = true;
+                continue;
+            }
+            if saw_parameters && child.kind() == ":" {
+                saw_colon = true;
+                continue;
+            }
+            if saw_colon && child.is_named() {
+                let mut refs = Vec::new();
+                collect_kotlin_type_refs(child, self.source, false, &mut refs);
+                self.add_kotlin_type_references(function_id, &refs, "return_type", line(node));
+                break;
+            }
+        }
+    }
+
+    fn add_kotlin_type_references(
+        &mut self,
+        source: &str,
+        refs: &[(String, bool)],
+        context: &str,
+        at: usize,
+    ) {
+        for (name, generic) in refs {
+            let target = self.ensure_type_node(name, true);
+            if target != source {
+                self.add_edge(
+                    source,
+                    &target,
+                    "references",
+                    at,
+                    Some(if *generic { "generic_arg" } else { context }),
+                );
+            }
+        }
     }
 
     fn add_java_enum_constants(&mut self, node: Node<'tree>, enum_id: &str) {
@@ -873,6 +1024,69 @@ fn collect_c_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>)
     for child in node.children(&mut cursor) {
         collect_c_type_names(child, source, output);
     }
+}
+
+fn collect_kotlin_type_refs(
+    node: Node<'_>,
+    source: &[u8],
+    generic: bool,
+    output: &mut Vec<(String, bool)>,
+) {
+    if matches!(node.kind(), "integral_literal" | "boolean_literal") {
+        return;
+    }
+    if node.kind() == "user_type" {
+        if let Some(name_node) = first_descendant(node, "type_identifier")
+            .or_else(|| first_descendant(node, "simple_identifier"))
+            .or_else(|| first_descendant(node, "identifier"))
+            && let Ok(name) = name_node.utf8_text(source)
+            && !kotlin_builtin_type(name)
+        {
+            output.push((name.to_owned(), generic));
+        }
+        let mut arguments = Vec::new();
+        collect_nodes_of_kind(node, "type_projection", &mut arguments);
+        for argument in arguments {
+            let mut cursor = argument.walk();
+            for child in argument
+                .children(&mut cursor)
+                .filter(|child| child.is_named())
+            {
+                collect_kotlin_type_refs(child, source, true, output);
+            }
+        }
+        return;
+    }
+    if matches!(node.kind(), "identifier" | "type_identifier") {
+        if let Ok(name) = node.utf8_text(source)
+            && !kotlin_builtin_type(name)
+        {
+            output.push((name.to_owned(), generic));
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_kotlin_type_refs(child, source, generic, output);
+    }
+}
+
+fn kotlin_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "String"
+            | "Int"
+            | "Long"
+            | "Short"
+            | "Byte"
+            | "Boolean"
+            | "Char"
+            | "Float"
+            | "Double"
+            | "Unit"
+            | "Any"
+            | "Nothing"
+    )
 }
 
 fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
