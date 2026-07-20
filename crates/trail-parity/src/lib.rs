@@ -498,6 +498,14 @@ output "instance_id" { value = aws_instance.web.id }
         compare_extraction("sample.jl", "extract_julia")
     }
 
+    #[test]
+    fn fortran_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.f90", "sample_preprocessed.F90"] {
+            compare_extraction(fixture, "extract_fortran")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

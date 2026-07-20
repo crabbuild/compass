@@ -91,6 +91,9 @@ impl Engine {
         if spec.name == "julia" {
             return Ok(crate::julia::extract(path, &source, root));
         }
+        if spec.name == "fortran" {
+            return Ok(crate::fortran::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

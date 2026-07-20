@@ -10,6 +10,7 @@ mod dotnet_project;
 mod elixir;
 mod engine;
 mod facts;
+mod fortran;
 mod go;
 mod groovy;
 mod ids;
