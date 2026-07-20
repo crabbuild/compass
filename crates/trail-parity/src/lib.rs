@@ -23,10 +23,10 @@ mod tests {
     };
     use trail_languages::Engine;
     use trail_output::{
-        CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions, ObsidianOptions,
-        ReportOptions, TokenCost, TreeOptions, build_tree as build_output_tree, canvas_document,
-        cypher_document, export_obsidian, generate_report, graphml_document, html_document,
-        write_json,
+        CallflowOptions, CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions,
+        ObsidianOptions, ReportOptions, TokenCost, TreeOptions, build_tree as build_output_tree,
+        callflow_html_document, canvas_document, cypher_document, derive_callflow_sections,
+        export_obsidian, generate_report, graphml_document, html_document, write_json,
     };
     use trail_resolve::resolve;
 
@@ -1469,6 +1469,68 @@ hydrate();
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(rust, serde_json::from_slice::<Value>(&output.stdout)?);
+        Ok(())
+    }
+
+    #[test]
+    fn callflow_section_derivation_matches_python() -> Result<(), Box<dyn Error>> {
+        let graph: trail_model::GraphDocument = serde_json::from_value(json!({
+            "nodes":[
+                {"id":"extract_py","label":"extract_python","source_file":"graphify/extract.py","community":0},
+                {"id":"extract_js","label":"extract_js","source_file":"graphify/extract.py","community":0},
+                {"id":"to_html","label":"to_html","source_file":"graphify/export.py","community":1},
+                {"id":"test_html","label":"test_export_html","source_file":"tests/test_export.py","community":2}
+            ],"links":[]
+        }))?;
+        let communities = std::collections::BTreeMap::from([
+            (0, vec!["extract_py".into(), "extract_js".into()]),
+            (1, vec!["to_html".into()]),
+            (2, vec!["test_html".into()]),
+        ]);
+        let rust = serde_json::to_value(derive_callflow_sections(
+            &graph,
+            &communities,
+            None,
+            "en",
+            6,
+        ))?;
+        let repo = repository_root();
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from graphify.callflow_html import derive_sections_from_communities; print(json.dumps(derive_sections_from_communities(json.load(sys.stdin)['nodes'],{},'en',6)))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python callflow oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&graph)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(rust, serde_json::from_slice::<Value>(&output.stdout)?);
+
+        let html = callflow_html_document(
+            &graph,
+            &communities,
+            &CallflowOptions {
+                report: "## God Nodes (most connected)\n1. `Transformer` - 2 edges",
+                project_name: "Trail",
+                generated_at: Some("2026-07-19 12:00 UTC"),
+                ..CallflowOptions::default()
+            },
+        )?;
+        assert!(html.contains("Graph Report Highlights"));
+        assert!(html.contains("Transformer"));
         Ok(())
     }
 

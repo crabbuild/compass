@@ -1,5 +1,6 @@
 //! Safe, deterministic output formats for Trail graphs.
 
+mod callflow;
 mod canvas;
 mod cypher;
 mod graphml;
@@ -9,6 +10,10 @@ mod obsidian;
 mod report;
 mod tree;
 
+pub use callflow::{
+    CallflowOptions, CallflowSection, callflow_html_document, derive_callflow_sections,
+    write_callflow_html,
+};
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
@@ -32,4 +37,8 @@ pub enum OutputError {
         "graph has {nodes} nodes - too large for HTML viz (limit: {limit}). Use --no-viz, raise GRAPHIFY_VIZ_NODE_LIMIT, or reduce input size."
     )]
     HtmlTooLarge { nodes: usize, limit: isize },
+    #[error("graph.json contains 0 nodes")]
+    EmptyCallflowGraph,
+    #[error("no sections defined")]
+    NoCallflowSections,
 }
