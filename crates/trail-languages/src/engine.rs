@@ -207,6 +207,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_ruby_parent_edge(node, &id);
             } else if self.language == "kotlin" {
                 self.add_kotlin_parent_edges(node, &id);
+            } else if self.language == "scala" {
+                self.add_scala_class_references(node, &id);
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
@@ -246,6 +248,8 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_c_function_references(node, &id);
             } else if self.language == "kotlin" {
                 self.add_kotlin_function_references(node, &id);
+            } else if self.language == "scala" {
+                self.add_scala_function_references(node, &id);
             }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody { id, node });
@@ -270,6 +274,13 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_kotlin_property_reference(node, class_id);
             }
             return;
+        }
+
+        if self.language == "scala"
+            && matches!(kind, "val_definition" | "var_definition")
+            && let Some(class_id) = parent_class
+        {
+            self.add_scala_field_reference(node, class_id);
         }
 
         let mut cursor = node.walk();
@@ -438,6 +449,30 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn add_import(&mut self, node: Node<'tree>) {
+        if self.language == "scala" {
+            let mut cursor = node.walk();
+            if let Some(target_node) = node
+                .children(&mut cursor)
+                .find(|child| matches!(child.kind(), "stable_id" | "identifier"))
+            {
+                let raw = self.node_text(target_node).unwrap_or_default();
+                let target = raw
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or_default()
+                    .trim_matches(['{', '}', ' ']);
+                if !target.is_empty() && target != "_" {
+                    self.add_edge(
+                        &self.file_id.clone(),
+                        &make_id(&[target]),
+                        "imports",
+                        line(node),
+                        Some("import"),
+                    );
+                }
+            }
+            return;
+        }
         let text = self.node_text(node).unwrap_or_default();
         if matches!(self.language, "javascript" | "typescript" | "tsx")
             && node.kind() == "import_statement"
@@ -667,6 +702,111 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn add_kotlin_type_references(
+        &mut self,
+        source: &str,
+        refs: &[(String, bool)],
+        context: &str,
+        at: usize,
+    ) {
+        for (name, generic) in refs {
+            let target = self.ensure_type_node(name, true);
+            if target != source {
+                self.add_edge(
+                    source,
+                    &target,
+                    "references",
+                    at,
+                    Some(if *generic { "generic_arg" } else { context }),
+                );
+            }
+        }
+    }
+
+    fn add_scala_class_references(&mut self, node: Node<'tree>, class_id: &str) {
+        let extends = node
+            .child_by_field_name("extend")
+            .or_else(|| first_descendant(node, "extends_clause"));
+        if let Some(extends) = extends {
+            let mut bases = Vec::new();
+            let mut cursor = extends.walk();
+            for child in extends.children(&mut cursor) {
+                let name_node = if child.kind() == "type_identifier" {
+                    Some(child)
+                } else if child.kind() == "generic_type" {
+                    child
+                        .child_by_field_name("type")
+                        .or_else(|| first_descendant(child, "type_identifier"))
+                } else {
+                    None
+                };
+                if let Some(name) = name_node
+                    .and_then(|name| self.node_text(name))
+                    .map(clean_name)
+                {
+                    bases.push((name, line(child)));
+                }
+            }
+            for (index, (name, at)) in bases.into_iter().enumerate() {
+                let target = self.ensure_type_node(&name, true);
+                if target != class_id {
+                    self.add_edge(
+                        class_id,
+                        &target,
+                        if index == 0 { "inherits" } else { "mixes_in" },
+                        at,
+                        None,
+                    );
+                }
+            }
+        }
+
+        let mut parameters = Vec::new();
+        collect_nodes_of_kind(node, "class_parameter", &mut parameters);
+        for parameter in parameters {
+            if let Some(type_node) = parameter.child_by_field_name("type") {
+                let mut refs = Vec::new();
+                collect_scala_type_refs(type_node, self.source, false, &mut refs);
+                self.add_scala_type_references(class_id, &refs, "field", line(parameter));
+            }
+        }
+    }
+
+    fn add_scala_field_reference(&mut self, node: Node<'tree>, class_id: &str) {
+        let Some(type_node) = node.child_by_field_name("type") else {
+            return;
+        };
+        let mut refs = Vec::new();
+        collect_scala_type_refs(type_node, self.source, false, &mut refs);
+        self.add_scala_type_references(class_id, &refs, "field", line(node));
+    }
+
+    fn add_scala_function_references(&mut self, node: Node<'tree>, function_id: &str) {
+        if let Some(parameters) = first_descendant(node, "parameters") {
+            let mut cursor = parameters.walk();
+            for parameter in parameters
+                .children(&mut cursor)
+                .filter(|child| child.kind() == "parameter")
+            {
+                if let Some(type_node) = parameter.child_by_field_name("type") {
+                    let mut refs = Vec::new();
+                    collect_scala_type_refs(type_node, self.source, false, &mut refs);
+                    self.add_scala_type_references(
+                        function_id,
+                        &refs,
+                        "parameter_type",
+                        line(node),
+                    );
+                }
+            }
+        }
+        if let Some(return_type) = node.child_by_field_name("return_type") {
+            let mut refs = Vec::new();
+            collect_scala_type_refs(return_type, self.source, false, &mut refs);
+            self.add_scala_type_references(function_id, &refs, "return_type", line(node));
+        }
+    }
+
+    fn add_scala_type_references(
         &mut self,
         source: &str,
         refs: &[(String, bool)],
@@ -1087,6 +1227,61 @@ fn kotlin_builtin_type(name: &str) -> bool {
             | "Any"
             | "Nothing"
     )
+}
+
+fn collect_scala_type_refs(
+    node: Node<'_>,
+    source: &[u8],
+    generic: bool,
+    output: &mut Vec<(String, bool)>,
+) {
+    if node.kind() == "type_identifier" {
+        if let Ok(name) = node.utf8_text(source)
+            && !name.is_empty()
+        {
+            output.push((name.to_owned(), generic));
+        }
+        return;
+    }
+    if node.kind() == "generic_type" {
+        let base = node
+            .child_by_field_name("type")
+            .or_else(|| first_descendant(node, "type_identifier"));
+        if let Some(base) = base
+            && let Ok(name) = base.utf8_text(source)
+            && !name.is_empty()
+        {
+            output.push((name.to_owned(), generic));
+        }
+        let mut cursor = node.walk();
+        for arguments in node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "type_arguments")
+        {
+            let mut argument_cursor = arguments.walk();
+            for argument in arguments
+                .children(&mut argument_cursor)
+                .filter(|child| child.is_named())
+            {
+                collect_scala_type_refs(argument, source, true, output);
+            }
+        }
+        return;
+    }
+    if matches!(
+        node.kind(),
+        "compound_type"
+            | "infix_type"
+            | "function_type"
+            | "tuple_type"
+            | "annotated_type"
+            | "projected_type"
+    ) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_scala_type_refs(child, source, generic, output);
+        }
+    }
 }
 
 fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {

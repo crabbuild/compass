@@ -250,6 +250,11 @@ mod tests {
     fn kotlin_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.kt", "extract_kotlin")
     }
+
+    #[test]
+    fn scala_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.scala", "extract_scala")
+    }
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
