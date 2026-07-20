@@ -3627,6 +3627,7 @@ dependencies = [
  "trail-model",
  "trail-output",
  "trail-query",
+ "trail-reflect",
  "trail-semantic",
  "url",
 ]
@@ -3745,6 +3746,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "tempfile",
+ "time",
  "trail-cli",
  "trail-core",
  "trail-files",
@@ -3754,6 +3756,7 @@ dependencies = [
  "trail-model",
  "trail-output",
  "trail-query",
+ "trail-reflect",
  "trail-resolve",
  "trail-semantic",
  "trail-transcribe",
@@ -3766,6 +3769,21 @@ dependencies = [
  "serde_json",
  "trail-model",
  "unicode-normalization",
+]
+
+[[package]]
+name = "trail-reflect"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "trail-files",
+ "trail-model",
 ]
 
 [[package]]

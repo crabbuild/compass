@@ -115,6 +115,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "merge-semantic" => semantic_commands::command_merge_semantic(frontend, &args),
         "provider" => provider_commands::command_provider(frontend, &args),
         "save-result" => result_commands::command_save_result(frontend, &args),
+        "reflect" => result_commands::command_reflect(frontend, &args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -1877,7 +1878,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect"
         .to_owned()
 }
 
@@ -1901,6 +1902,7 @@ fn trail_command_help(command: &str) -> String {
         "merge-semantic" => semantic_commands::merge_semantic_help(Frontend::Trail),
         "provider" => provider_commands::provider_help(Frontend::Trail),
         "save-result" => result_commands::save_result_help(Frontend::Trail),
+        "reflect" => result_commands::reflect_help(Frontend::Trail),
         _ => trail_help(),
     }
 }
@@ -1911,6 +1913,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect"
         .to_owned()
 }

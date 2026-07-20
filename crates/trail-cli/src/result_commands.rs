@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use time::{Month, OffsetDateTime};
 use trail_files::write_text_atomic;
+use trail_reflect::{
+    DEFAULT_HALF_LIFE_DAYS, DEFAULT_MIN_CORROBORATION, ReflectOptions, lessons_fresh, reflect,
+};
 
 use crate::{Frontend, Outcome};
 
@@ -67,6 +70,128 @@ pub(super) fn command_save_result(frontend: Frontend, args: &[String]) -> Outcom
     ) {
         Ok(path) => Outcome::success(format!("Saved to {}", path.display())),
         Err(error) => Outcome::failure(error),
+    }
+}
+
+pub(super) fn command_reflect(frontend: Frontend, args: &[String]) -> Outcome {
+    let output_root = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let mut memory_dir = PathBuf::from(&output_root).join("memory");
+    let mut output = PathBuf::from(&output_root).join("reflections/LESSONS.md");
+    let mut graph = None;
+    let mut analysis = None;
+    let mut labels = None;
+    let mut half_life_days = DEFAULT_HALF_LIFE_DAYS;
+    let mut min_corroboration = DEFAULT_MIN_CORROBORATION;
+    let mut if_stale = false;
+    let mut index = 0;
+    while index < args.len() {
+        let argument = &args[index];
+        if matches!(argument.as_str(), "--help" | "-h") {
+            return Outcome::success(reflect_help(frontend));
+        }
+        if argument == "--if-stale" {
+            if_stale = true;
+            index += 1;
+            continue;
+        }
+        let (name, inline) = argument
+            .split_once('=')
+            .map_or((argument.as_str(), None), |(name, value)| {
+                (name, Some(value))
+            });
+        let value = match name {
+            "--memory-dir"
+            | "--out"
+            | "--graph"
+            | "--analysis"
+            | "--labels"
+            | "--half-life-days"
+            | "--min-corroboration" => match option_value(args, &mut index, name, inline) {
+                Ok(value) => value,
+                Err(error) => return Outcome::failure(error),
+            },
+            _ => {
+                return Outcome::failure(format!(
+                    "{}\nerror: unrecognized arguments: {argument}",
+                    reflect_help(frontend)
+                ));
+            }
+        };
+        match name {
+            "--memory-dir" => memory_dir = PathBuf::from(value),
+            "--out" => output = PathBuf::from(value),
+            "--graph" => graph = Some(PathBuf::from(value)),
+            "--analysis" => analysis = Some(PathBuf::from(value)),
+            "--labels" => labels = Some(PathBuf::from(value)),
+            "--half-life-days" => {
+                half_life_days = match value.parse::<f64>() {
+                    Ok(value) if value.is_finite() => value,
+                    _ => {
+                        return Outcome::failure(format!(
+                            "error: argument --half-life-days: invalid float value: {value:?}"
+                        ));
+                    }
+                };
+            }
+            "--min-corroboration" => {
+                min_corroboration = match value.parse::<usize>() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return Outcome::failure(format!(
+                            "error: argument --min-corroboration: invalid int value: {value:?}"
+                        ));
+                    }
+                };
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if graph.is_none() {
+        let default_graph = PathBuf::from(&output_root).join("graph.json");
+        if default_graph.exists() {
+            graph = Some(default_graph);
+        }
+    }
+    if let Some(graph_path) = graph.as_deref() {
+        let parent = graph_path.parent().unwrap_or_else(|| Path::new("."));
+        analysis.get_or_insert_with(|| parent.join(".graphify_analysis.json"));
+        labels.get_or_insert_with(|| parent.join(".graphify_labels.json"));
+    }
+    if if_stale
+        && lessons_fresh(
+            &output,
+            &memory_dir,
+            graph.as_deref(),
+            analysis.as_deref(),
+            labels.as_deref(),
+        )
+    {
+        return Outcome::success(format!(
+            "Lessons already up to date -> {} (skipped; omit --if-stale to force)",
+            output.display()
+        ));
+    }
+    let options = ReflectOptions {
+        memory_dir,
+        output,
+        graph,
+        analysis,
+        labels,
+        now: OffsetDateTime::now_utc(),
+        half_life_days,
+        min_corroboration,
+    };
+    match reflect(&options) {
+        Ok(result) => Outcome::success(format!(
+            "Reflected {} memories ({} useful, {} dead ends, {} corrected) -> {}",
+            result.aggregate.total,
+            result.aggregate.counts.useful,
+            result.aggregate.counts.dead_end,
+            result.aggregate.counts.corrected,
+            result.output.display()
+        )),
+        Err(error) => Outcome::failure(format!("error: {error}")),
     }
 }
 
@@ -296,6 +421,16 @@ pub(super) fn save_result_help(frontend: Frontend) -> String {
     };
     format!(
         "Usage: {prefix} --question Q (--answer A | --answer-file PATH) [--type T] [--nodes N1 N2 ...] [--outcome useful|dead_end|corrected] [--correction TEXT] [--memory-dir DIR]"
+    )
+}
+
+pub(super) fn reflect_help(frontend: Frontend) -> String {
+    let prefix = match frontend {
+        Frontend::Trail => "trail graph reflect",
+        Frontend::Graphify => "graphify reflect",
+    };
+    format!(
+        "Usage: {prefix} [--memory-dir DIR] [--out PATH] [--graph PATH] [--analysis PATH] [--labels PATH] [--half-life-days N] [--min-corroboration N] [--if-stale]"
     )
 }
 

@@ -15,6 +15,7 @@ publish = false
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
+time.workspace = true
 trail-cli = { version = "0.1.0", path = "../trail-cli" }
 trail-core = { version = "0.1.0", path = "../trail-core" }
 trail-files = { version = "0.1.0", path = "../trail-files" }
@@ -24,6 +25,7 @@ trail-media = { version = "0.1.0", path = "../trail-media" }
 trail-model = { version = "0.1.0", path = "../trail-model" }
 trail-output = { version = "0.1.0", path = "../trail-output" }
 trail-query = { version = "0.1.0", path = "../trail-query" }
+trail-reflect = { version = "0.1.0", path = "../trail-reflect" }
 trail-resolve = { version = "0.1.0", path = "../trail-resolve" }
 trail-semantic = { version = "0.1.0", path = "../trail-semantic" }
 trail-transcribe = { version = "0.1.0", path = "../trail-transcribe" }

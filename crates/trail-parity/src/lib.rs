@@ -31,6 +31,7 @@ mod tests {
         derive_callflow_sections, export_obsidian, export_wiki, generate_report, graphml_document,
         html_document, spring_layout, write_json,
     };
+    use trail_reflect::{MemoryDoc, aggregate_lessons, render_lessons_markdown};
     use trail_resolve::{resolve, resolve_language_calls};
     use trail_semantic::{
         EvidenceSource, ImageRef, SemanticCacheSaveOptions, SemanticUnit, ValidationLimits,
@@ -1804,6 +1805,98 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
                 "uncached":rust.uncached,
             })
         );
+        Ok(())
+    }
+
+    #[test]
+    fn reflection_markdown_matches_python_oracle() -> Result<(), Box<dyn Error>> {
+        let cases = [
+            (
+                "useful",
+                "2026-05-01T00:00:00+00:00",
+                "auth?",
+                "",
+                &["Auth", "Auth"][..],
+            ),
+            (
+                "useful",
+                "2026-05-20T00:00:00+00:00",
+                "login?",
+                "",
+                &["Auth", "Cache"],
+            ),
+            (
+                "dead_end",
+                "2026-05-25T00:00:00+00:00",
+                "cache?",
+                "",
+                &["Cache"],
+            ),
+            (
+                "corrected",
+                "2026-05-27T00:00:00+00:00",
+                "hash?",
+                "Use bcrypt",
+                &["Hasher"],
+            ),
+            (
+                "useful",
+                "2026-05-01T00:00:00+00:00",
+                "old hash?",
+                "",
+                &["Hasher"],
+            ),
+        ];
+        let docs = cases
+            .iter()
+            .enumerate()
+            .map(
+                |(index, (outcome, date, question, correction, nodes))| MemoryDoc {
+                    query_type: "query".to_owned(),
+                    date: (*date).to_owned(),
+                    question: (*question).to_owned(),
+                    outcome: (*outcome).to_owned(),
+                    correction: (*correction).to_owned(),
+                    contributor: "graphify".to_owned(),
+                    source_nodes: nodes.iter().map(|node| (*node).to_owned()).collect(),
+                    path: format!("{index}.md"),
+                },
+            )
+            .collect::<Vec<_>>();
+        let input = cases
+            .iter()
+            .map(|(outcome, date, question, correction, nodes)| {
+                json!({
+                    "type":"query",
+                    "date":date,
+                    "question":question,
+                    "outcome":outcome,
+                    "correction":correction,
+                    "source_nodes":nodes,
+                })
+            })
+            .collect::<Vec<_>>();
+        let now = time::OffsetDateTime::parse(
+            "2026-06-01T00:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )?;
+        let rust = render_lessons_markdown(&aggregate_lessons(&docs, None, None, now, 30.0, 2));
+        let repo = repository_root();
+        let python = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from datetime import datetime; from graphify.reflect import aggregate_lessons,render_lessons_md; docs=json.loads(sys.argv[1]); a=aggregate_lessons(docs,now=datetime.fromisoformat('2026-06-01T00:00:00+00:00'),half_life_days=30.0,min_corroboration=2); print(render_lessons_md(a),end='')",
+            ])
+            .arg(serde_json::to_string(&input)?)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            python.status.success(),
+            "{}",
+            String::from_utf8_lossy(&python.stderr)
+        );
+        assert_eq!(rust, String::from_utf8(python.stdout)?);
         Ok(())
     }
 
