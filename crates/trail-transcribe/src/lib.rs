@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use sha1::{Digest, Sha1};
 
 pub mod audio;
+pub mod downloader;
 pub mod models;
 pub mod native;
 

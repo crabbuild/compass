@@ -3801,6 +3801,8 @@ dependencies = [
  "thiserror 2.0.19",
  "trail-whisper",
  "ureq",
+ "url",
+ "wait-timeout",
 ]
 
 [[package]]
