@@ -1,9 +1,10 @@
 # Trail
 
 Trail is the native Rust implementation of Graphify. It maps source code and
-structured project files into a traversable knowledge graph without an LLM,
-embeddings, a vector database, Python, runtime grammar downloads, or separately
-installed native libraries.
+structured project files into a traversable knowledge graph without embeddings,
+a vector database, Python, runtime grammar downloads, or separately installed
+native libraries. Code remains fully local and deterministic; semantic formats
+use the selected model provider.
 
 The public command surface is namespaced under `trail graph`:
 
@@ -23,7 +24,7 @@ tests against the Python implementation.
 
 ```text
 trail graph update
-trail graph extract --code-only
+trail graph extract
 trail graph watch
 trail graph cluster-only
 trail graph query
@@ -41,16 +42,18 @@ The deterministic language registry is checked against every extension handled
 by Python, and all Tree-sitter grammars are statically linked into the binary.
 Graph edges retain their `EXTRACTED`, `INFERRED`, or `AMBIGUOUS` provenance.
 
-Semantic extraction for prose, PDFs, images, office files, audio, and video is a
-later compatibility phase. Until that phase lands, `trail graph update` preserves
-an existing semantic layer but never invokes a model or sends data off-machine.
-The native semantic boundary now includes validated provider contracts,
-adaptive chunk recovery, root-confined image loading, and bounded pure-Rust
-PDF/DOCX/XLSX text ingestion. Native Whisper inference, verified model and URL
-artifact acquisition, and bounded audio/video decoding—including AVI—are also
-implemented behind that internal boundary. These components are
-differential-tested but remain internal until the complete extraction path
-meets the same compatibility standard.
+`trail graph extract` now combines local AST facts with native semantic
+extraction for documents, papers, PDFs, office files, and images. It supports
+built-in and trusted custom providers, standard/deep cache namespaces, adaptive
+chunk recovery, root-confined image loading, bounded pure-Rust PDF/DOCX/XLSX
+ingestion, and guarded incremental replacement. Use `--code-only` to guarantee
+that no model is invoked. Integrations that have not reached compatibility are
+rejected explicitly instead of being accepted silently.
+
+Native Whisper inference, verified model and URL artifact acquisition, and
+bounded audio/video decoding—including AVI—are implemented internally; their
+public commands remain hidden until the corresponding Python command workflows
+pass strict compatibility tests.
 
 ## Install from source
 

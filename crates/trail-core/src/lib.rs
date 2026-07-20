@@ -9,7 +9,10 @@ mod watch;
 pub use cluster_existing::{ClusterExistingOptions, ClusterExistingResult, cluster_existing_graph};
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use merge::{MergeResult, merge_graphs};
-pub use pipeline::{BuildOptions, BuildPurpose, BuildResult, CoreError, build_local_graph};
+pub use pipeline::{
+    BuildOptions, BuildPurpose, BuildResult, CoreError, SemanticLayer, build_graph_with_semantic,
+    build_local_graph,
+};
 pub use watch::{WatchError, WatchOptions, WatchStatus, watch_local_graph};
 
 use std::collections::HashMap;

@@ -1,5 +1,6 @@
 //! Command compatibility layer for Trail's graph namespace.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
@@ -9,11 +10,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use trail_core::{
-    BuildOptions, BuildPurpose, ClusterExistingOptions, ExportInputs, LoadedGraph, WatchOptions,
-    WatchStatus, build_local_graph, cluster_existing_graph, default_graph_path,
-    diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
-    watch_local_graph,
+    BuildOptions, BuildPurpose, BuildResult, ClusterExistingOptions, ExportInputs, LoadedGraph,
+    SemanticLayer, WatchOptions, WatchStatus, build_graph_with_semantic, build_local_graph,
+    cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
+    format_diagnostic_report, merge_graphs, watch_local_graph,
 };
+use trail_files::{DetectOptions, Manifest, ManifestKind};
 use trail_graph::god_nodes;
 use trail_model::GraphError;
 use trail_output::{
@@ -24,6 +26,11 @@ use trail_output::{
 use trail_query::{
     DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
     render_explanation, render_shortest_path, run_benchmark,
+};
+use trail_semantic::{
+    CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
+    extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
+    resolve_builtin_backend, resolve_custom_backend,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -407,7 +414,7 @@ fn command_cluster_only(args: &[String]) -> Outcome {
         .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
     if !graph_path.exists() {
         return Outcome::failure(format!(
-            "error: no graph found at {} — run `trail graph extract {} --code-only` first",
+            "error: no graph found at {} — run `trail graph extract {}` first",
             graph_path.display(),
             root.display()
         ));
@@ -601,11 +608,18 @@ fn command_benchmark(args: &[String]) -> Outcome {
 fn command_build(args: &[String], extract: bool) -> Outcome {
     let mut root = None;
     let mut output_root = None;
-    let mut force = false;
+    let mut force = environment_truthy("GRAPHIFY_FORCE");
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut gitignore = true;
     let mut code_only = false;
+    let mut backend = None;
+    let mut model = None;
+    let mut deep_mode = false;
+    let mut token_budget = None;
+    let mut max_concurrency = None;
+    let mut api_timeout = None;
+    let mut allow_partial = false;
     let mut excludes = Vec::new();
     let mut resolution = 1.0;
     let mut exclude_hubs = None;
@@ -617,6 +631,80 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             "--no-viz" => no_viz = true,
             "--no-gitignore" => gitignore = false,
             "--code-only" => code_only = true,
+            "--allow-partial" if extract => allow_partial = true,
+            "--backend" if extract && index + 1 < args.len() => {
+                backend = Some(args[index + 1].clone());
+                index += 1;
+            }
+            value if extract && value.starts_with("--backend=") => {
+                backend = Some(value[10..].to_owned());
+            }
+            "--model" if extract && index + 1 < args.len() => {
+                model = Some(args[index + 1].clone());
+                index += 1;
+            }
+            value if extract && value.starts_with("--model=") => {
+                model = Some(value[8..].to_owned());
+            }
+            "--mode" if extract && index + 1 < args.len() => {
+                if args[index + 1] != "deep" {
+                    return Outcome::failure(format!(
+                        "error: unknown --mode '{}'. Available: deep",
+                        args[index + 1]
+                    ));
+                }
+                deep_mode = true;
+                index += 1;
+            }
+            value if extract && value.starts_with("--mode=") => {
+                if &value[7..] != "deep" {
+                    return Outcome::failure(format!(
+                        "error: unknown --mode '{}'. Available: deep",
+                        &value[7..]
+                    ));
+                }
+                deep_mode = true;
+            }
+            "--token-budget" if extract && index + 1 < args.len() => {
+                token_budget = match parse_positive_usize(&args[index + 1], "--token-budget") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--token-budget=") => {
+                token_budget = match parse_positive_usize(&value[15..], "--token-budget") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+            }
+            "--max-concurrency" if extract && index + 1 < args.len() => {
+                max_concurrency = match parse_positive_usize(&args[index + 1], "--max-concurrency")
+                {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--max-concurrency=") => {
+                max_concurrency = match parse_positive_usize(&value[18..], "--max-concurrency") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+            }
+            "--api-timeout" if extract && index + 1 < args.len() => {
+                api_timeout = match parse_positive_f64(&args[index + 1], "--api-timeout") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--api-timeout=") => {
+                api_timeout = match parse_positive_f64(&value[14..], "--api-timeout") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+            }
             "--out" if index + 1 < args.len() => {
                 output_root = Some(PathBuf::from(&args[index + 1]));
                 index += 1;
@@ -641,6 +729,17 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 resolution = value;
                 index += 1;
             }
+            value if value.starts_with("--resolution=") => {
+                let Ok(parsed) = value[13..].parse::<f64>() else {
+                    return Outcome::failure(
+                        "error: --resolution must be a positive number".to_owned(),
+                    );
+                };
+                if !parsed.is_finite() || parsed <= 0.0 {
+                    return Outcome::failure("error: --resolution must be > 0".to_owned());
+                }
+                resolution = parsed;
+            }
             "--exclude-hubs" if index + 1 < args.len() => {
                 let Ok(value) = args[index + 1].parse::<f64>() else {
                     return Outcome::failure("error: --exclude-hubs must be a number".to_owned());
@@ -648,9 +747,45 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 exclude_hubs = Some(value);
                 index += 1;
             }
+            value if value.starts_with("--exclude-hubs=") => {
+                let Ok(parsed) = value[15..].parse::<f64>() else {
+                    return Outcome::failure("error: --exclude-hubs must be a number".to_owned());
+                };
+                if !parsed.is_finite() {
+                    return Outcome::failure(
+                        "error: --exclude-hubs must be a finite number".to_owned(),
+                    );
+                }
+                exclude_hubs = Some(parsed);
+            }
+            "--dedup-llm" | "--google-workspace" | "--global" | "--cargo" | "--timing"
+                if extract =>
+            {
+                return Outcome::failure(format!(
+                    "error: {} is not yet available in native Trail",
+                    args[index]
+                ));
+            }
+            "--postgres" | "--as" | "--max-workers" if extract => {
+                return Outcome::failure(format!(
+                    "error: {} is not yet available in native Trail",
+                    args[index]
+                ));
+            }
+            value
+                if extract
+                    && (value.starts_with("--postgres=")
+                        || value.starts_with("--as=")
+                        || value.starts_with("--max-workers=")) =>
+            {
+                let option = value.split('=').next().unwrap_or(value);
+                return Outcome::failure(format!(
+                    "error: {option} is not yet available in native Trail"
+                ));
+            }
             "-h" | "--help" => {
                 return Outcome::success(if extract {
-                    "Usage: trail graph extract <path> --code-only [--out DIR] [--no-cluster] [--force] [--no-gitignore] [--exclude PATTERN]".to_owned()
+                    extract_help()
                 } else {
                     "Usage: trail graph update [path] [--no-cluster] [--force] [--no-viz]"
                         .to_owned()
@@ -667,11 +802,6 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             }
         }
         index += 1;
-    }
-    if extract && !code_only {
-        return Outcome::failure(
-            "error: native semantic extraction is not available yet; pass --code-only".to_owned(),
-        );
     }
     let root = root
         .or_else(saved_graph_root)
@@ -690,14 +820,30 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     } else {
         BuildPurpose::Update
     };
-    match build_local_graph(&options) {
-        Ok(result) => {
+    let built = if extract && !code_only {
+        build_semantic_graph(
+            &options,
+            backend.as_deref(),
+            model.as_deref(),
+            deep_mode,
+            token_budget,
+            max_concurrency,
+            api_timeout,
+            allow_partial,
+        )
+    } else {
+        build_local_graph(&options)
+            .map(|result| (result, Vec::new()))
+            .map_err(|error| error.to_string())
+    };
+    match built {
+        Ok((result, notes)) => {
             let mode = if no_cluster {
                 "without clustering"
             } else {
                 "with clustering"
             };
-            Outcome::success(format!(
+            let mut output = format!(
                 "Trail indexed {} files ({} extracted, {} cached): {} nodes, {} edges, {} communities {mode}.\nWritten to: {}",
                 result.files_considered,
                 result.files_extracted,
@@ -706,10 +852,333 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 result.edges,
                 result.communities,
                 result.output_dir.display()
-            ))
+            );
+            if !notes.is_empty() {
+                output.push('\n');
+                output.push_str(&notes.join("\n"));
+            }
+            Outcome::success(output)
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_semantic_graph(
+    options: &BuildOptions,
+    requested_backend: Option<&str>,
+    requested_model: Option<&str>,
+    deep_mode: bool,
+    token_budget: Option<usize>,
+    max_concurrency: Option<usize>,
+    api_timeout: Option<f64>,
+    allow_partial: bool,
+) -> Result<(BuildResult, Vec<String>), String> {
+    let root = fs::canonicalize(&options.root)
+        .map_err(|error| format!("could not resolve {}: {error}", options.root.display()))?;
+    let output_root = options
+        .output_root
+        .as_deref()
+        .map(absolute_cli_path)
+        .unwrap_or_else(|| root.clone());
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let manifest_path = output_root.join(&output_name).join("manifest.json");
+    let detect_options = DetectOptions {
+        gitignore: options.gitignore,
+        extra_excludes: options.extra_excludes.clone(),
+        output_name,
+        ..DetectOptions::default()
+    };
+    let incremental = Manifest::incremental(
+        &root,
+        &manifest_path,
+        &detect_options,
+        ManifestKind::Semantic,
+    )
+    .map_err(|error| error.to_string())?;
+    let live_semantic = semantic_files(&incremental.detection.files);
+    let semantic_files = if options.force || deep_mode {
+        live_semantic.clone()
+    } else {
+        semantic_files(&incremental.new_files)
+    };
+    let mut notes = Vec::new();
+    if deep_mode {
+        notes.push(format!(
+            "[trail graph extract] deep mode: {} live semantic file(s)",
+            semantic_files.len()
+        ));
+    }
+
+    let mut environment = std::env::vars().collect::<HashMap<_, _>>();
+    if let Some(timeout) = api_timeout {
+        environment.insert("GRAPHIFY_API_TIMEOUT".to_owned(), timeout.to_string());
+    }
+    let mut extraction_options = CorpusExtractionOptions::default();
+    if let Some(token_budget) = token_budget {
+        extraction_options.token_budget = Some(token_budget);
+    }
+    if let Some(max_concurrency) = max_concurrency {
+        extraction_options.max_concurrency = max_concurrency;
+    }
+    let cached_options = CachedCorpusExtractionOptions {
+        extraction: extraction_options,
+        deep_mode,
+        force: options.force,
+        cache_enabled: true,
+        prune_live_files: Some(live_semantic),
+    };
+    let cache_root = (output_root != root).then_some(output_root.as_path());
+
+    let extracted = if semantic_files.is_empty() {
+        None
+    } else {
+        let global_providers = home_directory()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".graphify")
+            .join("providers.json");
+        let local_providers = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(".graphify")
+            .join("providers.json");
+        let custom = load_custom_providers(
+            &global_providers,
+            &local_providers,
+            environment_truthy_from(&environment, "GRAPHIFY_ALLOW_LOCAL_PROVIDERS"),
+        );
+        notes.extend(
+            custom
+                .warnings
+                .iter()
+                .map(|warning| format!("[trail graph extract] warning: {warning}")),
+        );
+        let selected = requested_backend
+            .map(str::to_owned)
+            .or_else(|| {
+                detect_backend_with_custom(&custom.providers, &environment).map(str::to_owned)
+            })
+            .ok_or_else(|| {
+                format!(
+                    "no LLM API key found ({} doc/paper/image file(s) need semantic extraction). Set GEMINI_API_KEY or GOOGLE_API_KEY, MOONSHOT_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY; pass --backend; or use --code-only",
+                    semantic_files.len()
+                )
+            })?;
+        let mut completed_chunks = 0_usize;
+        let mut progress = |index: usize,
+                            total: usize,
+                            _units: &[trail_semantic::SemanticUnit],
+                            _fragment: &serde_json::Value| {
+            completed_chunks = completed_chunks.saturating_add(1);
+            notes.push(format!(
+                "[trail graph extract] chunk {}/{} done",
+                index + 1,
+                total
+            ));
+        };
+        let result = if let Some(backend) = trail_semantic::builtin_backend(&selected) {
+            let resolved = resolve_builtin_backend(&selected, &environment, requested_model)
+                .map_err(|error| error.to_string())?;
+            if !backend.api_key_variables.is_empty() && resolved.api_key().is_none() {
+                return Err(format!(
+                    "backend '{selected}' requires {} to be set",
+                    backend.api_key_variables.join(" or ")
+                ));
+            }
+            if selected == "bedrock"
+                && !["AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ACCESS_KEY_ID"]
+                    .into_iter()
+                    .any(|key| environment.get(key).is_some_and(|value| !value.is_empty()))
+            {
+                return Err(
+                    "backend 'bedrock' requires AWS credentials or region configuration"
+                        .to_owned(),
+                );
+            }
+            if selected == "claude-cli" && !executable_on_path("claude") {
+                return Err(
+                    "backend 'claude-cli' requires the `claude` CLI on PATH (install Claude Code and authenticate once)"
+                        .to_owned(),
+                );
+            }
+            extract_builtin_corpus_cached(
+                &semantic_files,
+                &resolved,
+                &root,
+                cache_root,
+                &cached_options,
+                &environment,
+                &mut progress,
+            )
+        } else if let Some(config) = custom.providers.get(&selected) {
+            let resolved = resolve_custom_backend(
+                &selected,
+                config,
+                &environment,
+                requested_model,
+                None,
+            )
+            .map_err(|error| error.to_string())?;
+            extract_custom_corpus_cached(
+                &semantic_files,
+                &resolved,
+                &root,
+                cache_root,
+                &cached_options,
+                &environment,
+                &mut progress,
+            )
+        } else {
+            let mut available = trail_semantic::BUILTIN_BACKENDS
+                .iter()
+                .map(|backend| backend.name.to_owned())
+                .chain(custom.providers.keys().cloned())
+                .collect::<Vec<_>>();
+            available.sort();
+            return Err(format!(
+                "unknown backend '{selected}'. Available: {}",
+                available.join(", ")
+            ));
+        }
+        .map_err(|error| error.to_string())?;
+        if result.cache_misses > 0 && completed_chunks == 0 {
+            return Err(format!(
+                "all semantic chunks failed for backend '{selected}' ({} uncached file(s))",
+                result.cache_misses
+            ));
+        }
+        notes.push(format!(
+            "[trail graph extract] semantic cache: {} hit / {} miss",
+            result.cache_hits, result.cache_misses
+        ));
+        notes.extend(
+            result
+                .provider_warnings
+                .iter()
+                .map(|warning| format!("[trail graph extract] provider warning: {warning}")),
+        );
+        notes.extend(
+            result
+                .cache_issues
+                .iter()
+                .map(|issue| format!("[trail graph extract] cache warning: {}", issue.message)),
+        );
+        notes.extend(result.failures.iter().map(|failure| {
+            format!(
+                "[trail graph extract] chunk {} failed: {}",
+                failure.index + 1,
+                failure.message
+            )
+        }));
+        Some(result)
+    };
+
+    let layer = SemanticLayer {
+        fragment: extracted.as_ref().map_or_else(
+            || {
+                serde_json::json!({
+                    "nodes": [],
+                    "edges": [],
+                    "hyperedges": [],
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "failed_chunks": 0,
+                })
+            },
+            |result| result.fragment.clone(),
+        ),
+        refreshed_files: semantic_files,
+        partial_files: extracted
+            .as_ref()
+            .map(|result| result.partial_files.clone())
+            .unwrap_or_default(),
+        allow_partial,
+    };
+    let result = build_graph_with_semantic(options, &layer).map_err(|error| error.to_string())?;
+    Ok((result, notes))
+}
+
+fn semantic_files(files: &std::collections::BTreeMap<String, Vec<String>>) -> Vec<PathBuf> {
+    ["document", "paper", "image"]
+        .into_iter()
+        .filter_map(|kind| files.get(kind))
+        .flatten()
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| format!("error: {option} must be a positive integer (got {value:?})"))
+}
+
+fn parse_positive_f64(value: &str, option: &str) -> Result<f64, String> {
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| format!("error: {option} must be a positive number (got {value:?})"))
+}
+
+fn environment_truthy(key: &str) -> bool {
+    std::env::var(key).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
+fn environment_truthy_from(environment: &HashMap<String, String>, key: &str) -> bool {
+    environment.get(key).is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
+fn absolute_cli_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
+    }
+}
+
+fn home_directory() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+fn executable_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let extensions = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned())
+            .split(';')
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    } else {
+        vec![String::new()]
+    };
+    std::env::split_paths(&path).any(|directory| {
+        extensions.iter().any(|extension| {
+            directory
+                .join(format!("{name}{extension}"))
+                .metadata()
+                .is_ok_and(|metadata| metadata.is_file())
+        })
+    })
+}
+
+fn extract_help() -> String {
+    "Usage: trail graph extract [PATH] [--code-only] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--api-timeout SECONDS] [--allow-partial] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -1406,7 +1875,7 @@ fn trail_help() -> String {
 fn trail_command_help(command: &str) -> String {
     match command {
         "update" => "Usage: trail graph update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
-        "extract" => "Usage: trail graph extract [PATH] --code-only [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
+        "extract" => extract_help(),
         "watch" => watch_help(),
         "cluster-only" => "Usage: trail graph cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
         "query" => "Usage: trail graph query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH]".to_owned(),

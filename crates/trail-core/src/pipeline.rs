@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -75,6 +75,20 @@ pub struct BuildResult {
     pub html_written: bool,
 }
 
+/// Validated semantic output to merge into one atomic graph build.
+///
+/// `refreshed_files` is the exact set dispatched for this run. Existing
+/// semantic facts owned by those sources are removed before the replacement
+/// fragment is appended. Partial or uncovered files remain unstamped so the
+/// next incremental run retries them.
+#[derive(Clone, Debug)]
+pub struct SemanticLayer {
+    pub fragment: serde_json::Value,
+    pub refreshed_files: Vec<PathBuf>,
+    pub partial_files: Vec<PathBuf>,
+    pub allow_partial: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error(transparent)]
@@ -103,11 +117,34 @@ pub enum CoreError {
     EmptyGraph,
     #[error("diagnostic input must be a JSON object")]
     InvalidDiagnostic,
+    #[error("invalid semantic extraction fragment: {0}")]
+    InvalidSemanticFragment(serde_json::Error),
+    #[error(
+        "semantic extraction was incomplete and would shrink the graph ({new} < {existing} nodes)"
+    )]
+    IncompleteSemanticShrink { existing: usize, new: usize },
+    #[error("semantic extraction was incomplete and the existing graph is unreadable: {0}")]
+    IncompleteSemanticExisting(PathBuf),
 }
 
 /// Run the complete deterministic local graph pipeline without invoking Python,
 /// an LLM, a network service, or a dynamically installed grammar.
 pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreError> {
+    build_graph(options, None)
+}
+
+/// Merge a completed semantic provider result into the native graph pipeline.
+pub fn build_graph_with_semantic(
+    options: &BuildOptions,
+    semantic: &SemanticLayer,
+) -> Result<BuildResult, CoreError> {
+    build_graph(options, Some(semantic))
+}
+
+fn build_graph(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+) -> Result<BuildResult, CoreError> {
     if !options.root.exists() {
         return Err(CoreError::MissingRoot(options.root.clone()));
     }
@@ -142,13 +179,16 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
             ..DetectOptions::default()
         },
     )?;
-    let semantic_documents = if options.purpose == BuildPurpose::Update
+    let mut semantic_documents = if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
         semantic_document_sources(&output_dir.join("graph.json"), &root)
     } else {
         HashSet::new()
     };
+    if let Some(layer) = semantic {
+        semantic_documents.extend(canonical_source_set(&layer.refreshed_files, &root));
+    }
     let mut sources = detection
         .files
         .get("code")
@@ -171,7 +211,8 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
     sources.sort();
     sources.dedup();
 
-    if options.purpose == BuildPurpose::Update
+    if semantic.is_none()
+        && options.purpose == BuildPurpose::Update
         && !options.force
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast)
         && let Some(document) = unchanged_output_document(options, &output_dir)
@@ -271,17 +312,44 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
     if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
-        preserve_semantic_layer(&mut resolved, &output_dir.join("graph.json"), &root);
+        let refreshed = semantic
+            .map(|layer| {
+                let mut refreshed = canonical_source_set(&layer.refreshed_files, &root);
+                refreshed.extend(stale_semantic_sources(
+                    &output_dir.join("graph.json"),
+                    &root,
+                    &detection.files,
+                ));
+                refreshed
+            })
+            .unwrap_or_default();
+        preserve_semantic_layer(
+            &mut resolved,
+            &output_dir.join("graph.json"),
+            &root,
+            &refreshed,
+        );
+    }
+    if let Some(layer) = semantic {
+        let mut extracted: Extraction = serde_json::from_value(layer.fragment.clone())
+            .map_err(CoreError::InvalidSemanticFragment)?;
+        finalize_semantic_extraction(&mut extracted, &root);
+        resolved.nodes.extend(extracted.nodes);
+        resolved.edges.extend(extracted.edges);
+        resolved.hyperedges.extend(extracted.hyperedges);
     }
     if options.no_cluster {
         let (nodes, edges) = (dedupe_nodes(&resolved.nodes), dedupe_edges(&resolved.edges));
+        enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
         write_raw_graph(
             &output_dir.join("graph.json"),
             &resolved,
             &nodes,
             &edges,
             options.purpose,
+            semantic_tokens(semantic),
         )?;
+        write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
                 output_dir.join(".graphify_root"),
@@ -289,13 +357,12 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
             )?;
         }
         let mut manifest = prior_manifest;
-        manifest.save(
+        save_build_manifest(
+            &mut manifest,
             &detection.files,
             &manifest_path,
-            ManifestKind::Ast,
-            Some(&root),
-            None,
-            None,
+            &root,
+            semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
         guard.commit()?;
@@ -318,7 +385,8 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
         return Err(CoreError::EmptyGraph);
     }
 
-    if options.purpose == BuildPurpose::Update
+    if semantic.is_none()
+        && options.purpose == BuildPurpose::Update
         && update_artifacts_complete(&output_dir)
         && GraphDocument::load(&output_dir.join("graph.json"))
             .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
@@ -329,13 +397,12 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
             .collect::<HashSet<_>>()
             .len();
         let mut manifest = prior_manifest;
-        manifest.save(
+        save_build_manifest(
+            &mut manifest,
             &detection.files,
             &manifest_path,
-            ManifestKind::Ast,
-            Some(&root),
-            None,
-            None,
+            &root,
+            semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
         guard.commit()?;
@@ -372,12 +439,15 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
         .ok()
         .and_then(|directory| git_commit(&directory));
 
+    let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
     write_json(
         &document,
         &communities,
         output_dir.join("graph.json"),
         &JsonExportOptions {
-            force: options.force || has_confirmed_deletion,
+            force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
+                !incomplete_semantic || layer.allow_partial
+            }),
             built_at_commit: (options.purpose == BuildPurpose::Update)
                 .then_some(commit.as_deref())
                 .flatten(),
@@ -398,13 +468,14 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
         let gods = god_nodes(&document, 10);
         let surprises = surprising_connections(&document, &communities, 5);
         let questions = suggest_questions(&document, &communities, &labels, 10);
+        let tokens = semantic_tokens(semantic);
         let analysis = if options.purpose == BuildPurpose::Extract {
             json!({
                 "communities": communities.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
                 "cohesion": cohesion.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
                 "gods": gods,
                 "surprises": surprises,
-                "tokens": {"input": 0, "output": 0},
+                "tokens": {"input": tokens.0, "output": tokens.1},
             })
         } else {
             json!({
@@ -476,14 +547,15 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
         }
     }
 
+    write_semantic_marker(&output_dir, semantic)?;
+
     let mut manifest = prior_manifest;
-    manifest.save(
+    save_build_manifest(
+        &mut manifest,
         &detection.files,
         &manifest_path,
-        ManifestKind::Ast,
-        Some(&root),
-        None,
-        None,
+        &root,
+        semantic,
     )?;
     guard.commit()?;
     Ok(BuildResult {
@@ -499,6 +571,21 @@ pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreErro
         communities: communities.len(),
         html_written,
     })
+}
+
+fn write_semantic_marker(
+    output_dir: &Path,
+    semantic: Option<&SemanticLayer>,
+) -> Result<(), CoreError> {
+    let (_, output_tokens) = semantic_tokens(semantic);
+    if output_tokens > 0 {
+        write_json_atomic(
+            output_dir.join(".graphify_semantic_marker"),
+            &json!({"output_tokens": output_tokens}),
+            false,
+        )?;
+    }
+    Ok(())
 }
 
 fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
@@ -517,6 +604,33 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
         edge.attributes.insert(
             "_origin".to_owned(),
             serde_json::Value::String("ast".to_owned()),
+        );
+    }
+}
+
+fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
+    for node in &mut extraction.nodes {
+        normalize_source_attribute(&mut node.attributes, root);
+        node.attributes.insert(
+            "_origin".to_owned(),
+            serde_json::Value::String("semantic".to_owned()),
+        );
+    }
+    for edge in &mut extraction.edges {
+        normalize_source_attribute(&mut edge.attributes, root);
+        edge.attributes.insert(
+            "_origin".to_owned(),
+            serde_json::Value::String("semantic".to_owned()),
+        );
+    }
+    for hyperedge in &mut extraction.hyperedges {
+        let Some(attributes) = hyperedge.as_object_mut() else {
+            continue;
+        };
+        normalize_source_attribute(attributes, root);
+        attributes.insert(
+            "_origin".to_owned(),
+            serde_json::Value::String("semantic".to_owned()),
         );
     }
 }
@@ -596,7 +710,12 @@ fn normalize_source_attribute(
     );
 }
 
-fn preserve_semantic_layer(extraction: &mut Extraction, graph_path: &Path, root: &Path) {
+fn preserve_semantic_layer(
+    extraction: &mut Extraction,
+    graph_path: &Path,
+    root: &Path,
+    refreshed: &HashSet<PathBuf>,
+) {
     let Ok(existing) = GraphDocument::load(graph_path) else {
         return;
     };
@@ -615,6 +734,7 @@ fn preserve_semantic_layer(extraction: &mut Extraction, graph_path: &Path, root:
                     .get("_origin")
                     .and_then(serde_json::Value::as_str)
                     != Some("ast")
+                && !source_in_set(node.attributes.get("source_file"), root, refreshed)
                 && !source_was_deleted(node.attributes.get("source_file"), root)
         })
         .collect::<Vec<_>>();
@@ -635,6 +755,7 @@ fn preserve_semantic_layer(extraction: &mut Extraction, graph_path: &Path, root:
                     .get("_origin")
                     .and_then(serde_json::Value::as_str)
                     != Some("ast")
+                && !source_in_set(edge.attributes.get("source_file"), root, refreshed)
                 && !source_was_deleted(edge.attributes.get("source_file"), root)
         })
         .collect::<Vec<_>>();
@@ -661,6 +782,7 @@ fn preserve_semantic_layer(extraction: &mut Extraction, graph_path: &Path, root:
                 .get("id")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|id| new_hyperedge_ids.contains(id))
+                || source_in_set(object.get("source_file"), root, refreshed)
                 || source_was_deleted(object.get("source_file"), root)
             {
                 return false;
@@ -678,6 +800,239 @@ fn preserve_semantic_layer(extraction: &mut Extraction, graph_path: &Path, root:
         })
         .collect::<Vec<_>>();
     extraction.hyperedges.extend(existing_hyperedges);
+}
+
+fn canonical_source_set(paths: &[PathBuf], root: &Path) -> HashSet<PathBuf> {
+    paths
+        .iter()
+        .map(|path| {
+            let absolute = if path.is_absolute() {
+                path.clone()
+            } else {
+                root.join(path)
+            };
+            canonical_identity(&absolute)
+        })
+        .collect()
+}
+
+fn source_in_set(
+    value: Option<&serde_json::Value>,
+    root: &Path,
+    sources: &HashSet<PathBuf>,
+) -> bool {
+    let Some(source) = value.and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let path = Path::new(source);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    sources.contains(&canonical_identity(&absolute))
+}
+
+fn semantic_source_set(fragment: &serde_json::Value, root: &Path) -> HashSet<PathBuf> {
+    ["nodes", "edges", "hyperedges"]
+        .into_iter()
+        .filter_map(|bucket| fragment.get(bucket).and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(|item| item.get("source_file").and_then(serde_json::Value::as_str))
+        .map(|source| {
+            let path = Path::new(source);
+            let absolute = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root.join(path)
+            };
+            canonical_identity(&absolute)
+        })
+        .collect()
+}
+
+fn stale_semantic_sources(
+    graph_path: &Path,
+    root: &Path,
+    detected: &BTreeMap<String, Vec<String>>,
+) -> HashSet<PathBuf> {
+    let Ok(existing) = GraphDocument::load(graph_path) else {
+        return HashSet::new();
+    };
+    let live = detected
+        .values()
+        .flatten()
+        .map(|path| canonical_identity(Path::new(path)))
+        .collect::<HashSet<_>>();
+    let mut stale = existing
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.attributes
+                .get("_origin")
+                .and_then(serde_json::Value::as_str)
+                != Some("ast")
+        })
+        .filter_map(|node| semantic_source_under_root(node.attributes.get("source_file"), root))
+        .filter(|source| !live.contains(source))
+        .collect::<HashSet<_>>();
+    stale.extend(
+        existing
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.attributes
+                    .get("_origin")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("ast")
+            })
+            .filter_map(|edge| semantic_source_under_root(edge.attributes.get("source_file"), root))
+            .filter(|source| !live.contains(source)),
+    );
+    let hyperedges = existing
+        .extras
+        .get("hyperedges")
+        .or_else(|| existing.graph.get("hyperedges"))
+        .and_then(serde_json::Value::as_array);
+    stale.extend(
+        hyperedges
+            .into_iter()
+            .flatten()
+            .filter_map(|hyperedge| semantic_source_under_root(hyperedge.get("source_file"), root))
+            .filter(|source| !live.contains(source)),
+    );
+    stale
+}
+
+fn semantic_source_under_root(value: Option<&serde_json::Value>, root: &Path) -> Option<PathBuf> {
+    let source = value.and_then(serde_json::Value::as_str)?;
+    let path = Path::new(source);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let identity = canonical_identity(&absolute);
+    identity.starts_with(root).then_some(identity)
+}
+
+fn semantic_tokens(semantic: Option<&SemanticLayer>) -> (u64, u64) {
+    let numeric = |key| {
+        semantic
+            .and_then(|layer| layer.fragment.get(key))
+            .and_then(|value| {
+                value
+                    .as_u64()
+                    .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
+                    .or_else(|| value.as_f64().map(|number| number.max(0.0) as u64))
+            })
+            .unwrap_or_default()
+    };
+    (numeric("input_tokens"), numeric("output_tokens"))
+}
+
+fn semantic_is_incomplete(layer: &SemanticLayer, root: &Path) -> bool {
+    if !layer.partial_files.is_empty()
+        || layer
+            .fragment
+            .get("failed_chunks")
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|count| count > 0)
+    {
+        return true;
+    }
+    let extracted = semantic_source_set(&layer.fragment, root);
+    canonical_source_set(&layer.refreshed_files, root)
+        .iter()
+        .any(|source| !extracted.contains(source))
+}
+
+fn save_build_manifest(
+    manifest: &mut Manifest,
+    files: &BTreeMap<String, Vec<String>>,
+    path: &Path,
+    root: &Path,
+    semantic: Option<&SemanticLayer>,
+) -> Result<(), CoreError> {
+    let Some(layer) = semantic else {
+        manifest.save(files, path, ManifestKind::Ast, Some(root), None, None)?;
+        return Ok(());
+    };
+
+    let extracted = semantic_source_set(&layer.fragment, root);
+    let partial = canonical_source_set(&layer.partial_files, root);
+    let semantic_types = ["document", "paper", "image"];
+    let stamped = files
+        .iter()
+        .map(|(file_type, bucket)| {
+            let retained = bucket
+                .iter()
+                .filter(|file| {
+                    if !semantic_types.contains(&file_type.as_str()) {
+                        return true;
+                    }
+                    let canonical = canonical_identity(Path::new(file));
+                    extracted.contains(&canonical) && !partial.contains(&canonical)
+                })
+                .cloned()
+                .collect();
+            (file_type.clone(), retained)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let scan_corpus = files.values().flatten().cloned().collect::<BTreeSet<_>>();
+    let successfully_stamped = stamped
+        .values()
+        .flatten()
+        .map(|file| canonical_identity(Path::new(file)))
+        .collect::<HashSet<_>>();
+    let clear_semantic = layer
+        .refreshed_files
+        .iter()
+        .map(|file| {
+            let absolute = if file.is_absolute() {
+                file.clone()
+            } else {
+                root.join(file)
+            };
+            canonical_identity(&absolute)
+        })
+        .filter(|file| !successfully_stamped.contains(file))
+        .map(|file| file.to_string_lossy().into_owned())
+        .collect::<BTreeSet<_>>();
+    manifest.save(
+        &stamped,
+        path,
+        ManifestKind::Both,
+        Some(root),
+        Some(&scan_corpus),
+        Some(&clear_semantic),
+    )?;
+    Ok(())
+}
+
+fn enforce_incomplete_raw_guard(
+    semantic: Option<&SemanticLayer>,
+    graph_path: &Path,
+    root: &Path,
+    new_count: usize,
+) -> Result<(), CoreError> {
+    let Some(layer) = semantic else {
+        return Ok(());
+    };
+    if layer.allow_partial || !semantic_is_incomplete(layer, root) || !graph_path.exists() {
+        return Ok(());
+    }
+    let existing = GraphDocument::load(graph_path)
+        .map_err(|_| CoreError::IncompleteSemanticExisting(graph_path.to_path_buf()))?
+        .nodes
+        .len();
+    if new_count < existing {
+        return Err(CoreError::IncompleteSemanticShrink {
+            existing,
+            new: new_count,
+        });
+    }
+    Ok(())
 }
 
 fn semantic_document_sources(graph_path: &Path, root: &Path) -> HashSet<PathBuf> {
@@ -738,6 +1093,7 @@ fn write_raw_graph(
     nodes: &[NodeRecord],
     edges: &[EdgeRecord],
     purpose: BuildPurpose,
+    tokens: (u64, u64),
 ) -> Result<(), CoreError> {
     let mut output = serde_json::Map::new();
     let nodes = serde_json::to_value(nodes).map_err(|source| CoreError::SerializeExtraction {
@@ -753,8 +1109,11 @@ fn write_raw_graph(
         output.insert("nodes".to_owned(), nodes);
         output.insert("edges".to_owned(), edges);
         output.insert("hyperedges".to_owned(), hyperedges);
-        output.insert("input_tokens".to_owned(), serde_json::Value::from(0));
-        output.insert("output_tokens".to_owned(), serde_json::Value::from(0));
+        output.insert("input_tokens".to_owned(), serde_json::Value::from(tokens.0));
+        output.insert(
+            "output_tokens".to_owned(),
+            serde_json::Value::from(tokens.1),
+        );
     } else {
         output.insert("hyperedges".to_owned(), hyperedges);
         output.insert("input_tokens".to_owned(), serde_json::Value::from(0));
@@ -1210,6 +1569,212 @@ mod tests {
             fs::read(warm.output_dir.join("manifest.json"))?,
             manifest_bytes
         );
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_layer_replaces_owned_facts_and_stamps_manifest() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::write(root.join("main.py"), "def main():\n    return 1\n")?;
+        fs::write(root.join("diagram.png"), b"not-decoded-by-core")?;
+        let mut options = BuildOptions::new(root);
+        options.purpose = BuildPurpose::Extract;
+        options.no_viz = true;
+        let source = root.join("diagram.png");
+        let first_layer = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "old_concept",
+                    "label": "Old concept",
+                    "file_type": "concept",
+                    "source_file": source,
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 13,
+                "output_tokens": 7,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![source.clone()],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let first = build_graph_with_semantic(&options, &first_layer)?;
+        let graph_path = first.output_dir.join("graph.json");
+        let graph = GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.id == "old_concept"));
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+        assert!(
+            manifest["diagram.png"]["ast_hash"]
+                .as_str()
+                .is_some_and(|hash| !hash.is_empty())
+        );
+        assert!(
+            manifest["diagram.png"]["semantic_hash"]
+                .as_str()
+                .is_some_and(|hash| !hash.is_empty())
+        );
+        let analysis: Value =
+            serde_json::from_slice(&fs::read(first.output_dir.join(".graphify_analysis.json"))?)?;
+        assert_eq!(analysis["tokens"], json!({"input": 13, "output": 7}));
+
+        let second_layer = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "new_concept",
+                    "label": "New concept",
+                    "file_type": "concept",
+                    "source_file": "diagram.png",
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 3,
+                "output_tokens": 2,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![source],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        build_graph_with_semantic(&options, &second_layer)?;
+        let graph = GraphDocument::load(&graph_path)?;
+        assert!(!graph.nodes.iter().any(|node| node.id == "old_concept"));
+        assert!(graph.nodes.iter().any(|node| node.id == "new_concept"));
+        let Some(semantic) = graph.nodes.iter().find(|node| node.id == "new_concept") else {
+            return Err("new semantic node was not written".into());
+        };
+        assert_eq!(semantic.string("source_file"), "diagram.png");
+        assert_eq!(semantic.string("_origin"), "semantic");
+        Ok(())
+    }
+
+    #[test]
+    fn incomplete_raw_semantic_shrink_requires_explicit_override() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::write(root.join("main.py"), "def main():\n    return 1\n")?;
+        fs::write(root.join("diagram.png"), b"not-decoded-by-core")?;
+        let mut options = BuildOptions::new(root);
+        options.purpose = BuildPurpose::Extract;
+        options.no_cluster = true;
+        options.no_viz = true;
+        let source = root.join("diagram.png");
+        let complete = SemanticLayer {
+            fragment: json!({
+                "nodes": [
+                    {"id":"concept_a", "source_file":"diagram.png"},
+                    {"id":"concept_b", "source_file":"diagram.png"}
+                ],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 5,
+                "output_tokens": 4,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![source.clone()],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let first = build_graph_with_semantic(&options, &complete)?;
+        let graph_path = first.output_dir.join("graph.json");
+        let original = fs::read(&graph_path)?;
+        let mut incomplete = SemanticLayer {
+            fragment: json!({
+                "nodes": [{"id":"concept_a", "source_file":"diagram.png"}],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 2,
+                "output_tokens": 1,
+                "failed_chunks": 1,
+            }),
+            refreshed_files: vec![source],
+            partial_files: vec![PathBuf::from("diagram.png")],
+            allow_partial: false,
+        };
+        let error = match build_graph_with_semantic(&options, &incomplete) {
+            Ok(_) => return Err("incomplete semantic shrink unexpectedly succeeded".into()),
+            Err(error) => error,
+        };
+        assert!(matches!(error, CoreError::IncompleteSemanticShrink { .. }));
+        assert_eq!(fs::read(&graph_path)?, original);
+
+        incomplete.allow_partial = true;
+        build_graph_with_semantic(&options, &incomplete)?;
+        let graph = GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.id == "concept_a"));
+        assert!(!graph.nodes.iter().any(|node| node.id == "concept_b"));
+        let raw: Value = serde_json::from_slice(&fs::read(&graph_path)?)?;
+        assert_eq!(raw["input_tokens"], 2);
+        assert_eq!(raw["output_tokens"], 1);
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+        assert_eq!(manifest["diagram.png"]["semantic_hash"], "");
+        Ok(())
+    }
+
+    #[test]
+    fn complete_semantic_run_may_shrink_and_prunes_retired_sources() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::write(root.join("main.py"), "def main():\n    return 1\n")?;
+        let image = root.join("diagram.png");
+        fs::write(&image, b"not-decoded-by-core")?;
+        let mut options = BuildOptions::new(root);
+        options.purpose = BuildPurpose::Extract;
+        options.no_viz = true;
+        let complete = SemanticLayer {
+            fragment: json!({
+                "nodes": [
+                    {"id":"concept_a", "source_file":"diagram.png"},
+                    {"id":"concept_b", "source_file":"diagram.png"}
+                ],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![image.clone()],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let first = build_graph_with_semantic(&options, &complete)?;
+
+        let smaller = SemanticLayer {
+            fragment: json!({
+                "nodes": [{"id":"concept_a", "source_file":"diagram.png"}],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![image.clone()],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        build_graph_with_semantic(&options, &smaller)?;
+        let graph_path = first.output_dir.join("graph.json");
+        let graph = GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.id == "concept_a"));
+        assert!(!graph.nodes.iter().any(|node| node.id == "concept_b"));
+
+        fs::remove_file(&image)?;
+        let empty = SemanticLayer {
+            fragment: json!({
+                "nodes": [],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        build_graph_with_semantic(&options, &empty)?;
+        let graph = GraphDocument::load(&graph_path)?;
+        assert!(!graph.nodes.iter().any(|node| node.id == "concept_a"));
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+        assert!(manifest.get("diagram.png").is_none());
         Ok(())
     }
 }

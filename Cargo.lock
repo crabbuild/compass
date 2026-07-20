@@ -3611,11 +3611,14 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "serde_json",
+ "tempfile",
  "trail-core",
+ "trail-files",
  "trail-graph",
  "trail-model",
  "trail-output",
  "trail-query",
+ "trail-semantic",
 ]
 
 [[package]]
