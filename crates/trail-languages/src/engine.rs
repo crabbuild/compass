@@ -179,7 +179,7 @@ fn extract_tree(
 impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<&str>) {
         let kind = node.kind();
-        if self.config.import_types.contains(&kind) && self.language != "kotlin" {
+        if self.config.import_types.contains(&kind) && !matches!(self.language, "kotlin" | "lua") {
             self.add_import(node);
         }
 
@@ -317,7 +317,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 .flatten();
             if let Some(target) = target.as_ref().filter(|target| target.as_str() != caller) {
                 self.add_edge(caller, target, "calls", line(node), Some("call"));
-            } else if target.is_none() {
+            } else if target.is_none()
+                && !(self.language == "lua" && (call.member || call.name.contains('.')))
+            {
                 self.extraction.raw_calls.push(RawCall {
                     caller_nid: caller.to_owned(),
                     callee: call.name,
