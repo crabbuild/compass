@@ -1,6 +1,6 @@
 //! Validation and cleanup for untrusted semantic extraction fragments.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use base64::Engine as _;
 use regex::Regex;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use trail_files::{FileSlice, bisect_slice, split_file};
 
 pub const MAX_SEMANTIC_FRAGMENT_BYTES: u64 = 25 * 1024 * 1024;
 pub const MAX_SEMANTIC_FRAGMENT_NODES: usize = 10_000;
@@ -683,6 +684,266 @@ pub fn strip_partial_markers(result: &mut Value) {
             item.remove("_partial");
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SemanticUnit {
+    File(PathBuf),
+    Slice(FileSlice),
+}
+
+impl SemanticUnit {
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::File(path) => path,
+            Self::Slice(slice) => &slice.path,
+        }
+    }
+}
+
+/// Expand oversized splittable documents into complete, gap-free slices.
+#[must_use]
+pub fn expand_oversized_semantic_files(paths: &[PathBuf], max_chars: usize) -> Vec<SemanticUnit> {
+    let mut units = Vec::new();
+    for path in paths {
+        let splittable = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                ["md", "mdx", "markdown", "txt", "rst"]
+                    .iter()
+                    .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+            });
+        if !splittable {
+            units.push(SemanticUnit::File(path.clone()));
+            continue;
+        }
+        match split_file(path, max_chars) {
+            Ok(slices) if slices.len() > 1 => {
+                units.extend(slices.into_iter().map(SemanticUnit::Slice));
+            }
+            _ => units.push(SemanticUnit::File(path.clone())),
+        }
+    }
+    units
+}
+
+/// Estimate prompt cost using Graphify's deterministic chars-per-token
+/// fallback. Raster images use a fixed vision charge.
+#[must_use]
+pub fn estimate_semantic_unit_tokens(unit: &SemanticUnit) -> usize {
+    if matches!(unit, SemanticUnit::File(path) if is_vision_image(path)) {
+        return IMAGE_TOKEN_ESTIMATE;
+    }
+    let chars = match unit {
+        SemanticUnit::Slice(slice) => slice.end.saturating_sub(slice.start).min(FILE_CHAR_CAP),
+        SemanticUnit::File(path) => match fs::metadata(path) {
+            Ok(metadata) => usize::try_from(metadata.len())
+                .unwrap_or(usize::MAX)
+                .min(FILE_CHAR_CAP),
+            Err(_) => return 0,
+        },
+    };
+    chars.saturating_add(160) / 4
+}
+
+/// Greedily pack semantically related units by directory while respecting
+/// both token and image-count limits.
+pub fn pack_semantic_chunks(
+    units: &[SemanticUnit],
+    token_budget: usize,
+) -> Result<Vec<Vec<SemanticUnit>>, SemanticError> {
+    if token_budget == 0 {
+        return Err(SemanticError::InvalidProviderConfiguration(
+            "token_budget must be positive, got 0".to_owned(),
+        ));
+    }
+    let mut by_directory = BTreeMap::<PathBuf, Vec<SemanticUnit>>::new();
+    for unit in units {
+        let directory = unit
+            .path()
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .to_path_buf();
+        by_directory
+            .entry(directory)
+            .or_default()
+            .push(unit.clone());
+    }
+    let mut chunks = Vec::new();
+    let mut current = Vec::new();
+    let mut current_tokens = 0_usize;
+    let mut current_images = 0_usize;
+    for units in by_directory.into_values() {
+        for unit in units {
+            let cost = estimate_semantic_unit_tokens(&unit);
+            let image = matches!(&unit, SemanticUnit::File(path) if is_vision_image(path));
+            let exceeds_budget = current_tokens.saturating_add(cost) > token_budget;
+            let exceeds_images = image && current_images >= MAX_IMAGES_PER_CHUNK;
+            if !current.is_empty() && (exceeds_budget || exceeds_images) {
+                chunks.push(std::mem::take(&mut current));
+                current_tokens = 0;
+                current_images = 0;
+            }
+            current.push(unit);
+            current_tokens = current_tokens.saturating_add(cost);
+            current_images += usize::from(image);
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    Ok(chunks)
+}
+
+fn is_vision_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["png", "jpg", "jpeg", "gif", "webp"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
+/// Execute one semantic chunk and recursively bisect known context or output
+/// truncation failures. The callback is the provider boundary, which keeps the
+/// recovery algorithm deterministic and directly testable.
+pub fn extract_with_adaptive_retry<F>(
+    chunk: &[SemanticUnit],
+    model: Option<&str>,
+    max_depth: usize,
+    extract: &F,
+) -> Result<Value, SemanticError>
+where
+    F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError>,
+{
+    adaptive_extract_at_depth(chunk, model, max_depth, 0, extract)
+}
+
+fn adaptive_extract_at_depth<F>(
+    chunk: &[SemanticUnit],
+    model: Option<&str>,
+    max_depth: usize,
+    depth: usize,
+    extract: &F,
+) -> Result<Value, SemanticError>
+where
+    F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError>,
+{
+    let result = match extract(chunk) {
+        Ok(result) => result,
+        Err(error) if looks_like_context_exceeded(&error.to_string()) => {
+            if let Some((left, right)) = split_semantic_chunk(chunk, depth, max_depth) {
+                return extract_split(&left, &right, model, max_depth, depth, extract);
+            }
+            return Ok(empty_semantic_result(model));
+        }
+        Err(error) => return Err(error),
+    };
+    if result.get("finish_reason").and_then(Value::as_str) != Some("length") {
+        return Ok(result);
+    }
+    if let Some((left, right)) = split_semantic_chunk(chunk, depth, max_depth) {
+        return extract_split(&left, &right, model, max_depth, depth, extract);
+    }
+    let mut partial = result;
+    mark_partial(&mut partial);
+    let mut files = partial
+        .get("_partial_files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    files.extend(
+        chunk
+            .iter()
+            .map(|unit| unit.path().to_string_lossy().into_owned()),
+    );
+    partial["_partial_files"] = Value::Array(files.into_iter().map(Value::String).collect());
+    Ok(partial)
+}
+
+fn split_semantic_chunk(
+    chunk: &[SemanticUnit],
+    depth: usize,
+    max_depth: usize,
+) -> Option<(Vec<SemanticUnit>, Vec<SemanticUnit>)> {
+    if depth >= max_depth || chunk.is_empty() {
+        return None;
+    }
+    if let [SemanticUnit::Slice(slice)] = chunk {
+        let (left, right) = bisect_slice(slice).ok().flatten()?;
+        return Some((
+            vec![SemanticUnit::Slice(left)],
+            vec![SemanticUnit::Slice(right)],
+        ));
+    }
+    if chunk.len() <= 1 {
+        return None;
+    }
+    let midpoint = chunk.len() / 2;
+    Some((chunk[..midpoint].to_vec(), chunk[midpoint..].to_vec()))
+}
+
+fn extract_split<F>(
+    left: &[SemanticUnit],
+    right: &[SemanticUnit],
+    model: Option<&str>,
+    max_depth: usize,
+    depth: usize,
+    extract: &F,
+) -> Result<Value, SemanticError>
+where
+    F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError>,
+{
+    let left = adaptive_extract_at_depth(left, model, max_depth, depth + 1, extract)?;
+    let right = adaptive_extract_at_depth(right, model, max_depth, depth + 1, extract)?;
+    Ok(merge_semantic_results(&left, &right, model))
+}
+
+#[must_use]
+pub fn merge_semantic_results(left: &Value, right: &Value, model: Option<&str>) -> Value {
+    let merged_bucket = |name: &str| {
+        left.get(name)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .chain(
+                right
+                    .get(name)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten(),
+            )
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    serde_json::json!({
+        "nodes": merged_bucket("nodes"),
+        "edges": merged_bucket("edges"),
+        "hyperedges": merged_bucket("hyperedges"),
+        "input_tokens": numeric_u64(left.get("input_tokens")).saturating_add(numeric_u64(right.get("input_tokens"))),
+        "output_tokens": numeric_u64(left.get("output_tokens")).saturating_add(numeric_u64(right.get("output_tokens"))),
+        "model": model,
+        "finish_reason":"stop",
+        "_partial_files": merged_partial_files(&[left.clone(), right.clone()]),
+    })
+}
+
+fn empty_semantic_result(model: Option<&str>) -> Value {
+    serde_json::json!({
+        "nodes":[],
+        "edges":[],
+        "hyperedges":[],
+        "input_tokens":0,
+        "output_tokens":0,
+        "model":model,
+        "finish_reason":"stop"
+    })
 }
 
 /// True for OpenAI reasoning-model families that reject explicit temperature.
@@ -2613,6 +2874,77 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("outside the corpus root"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_chunk_packing_groups_directories_and_caps_images() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let first_dir = directory.path().join("a");
+        let second_dir = directory.path().join("b");
+        fs::create_dir_all(&first_dir)?;
+        fs::create_dir_all(&second_dir)?;
+        let first = first_dir.join("first.md");
+        let second = second_dir.join("second.md");
+        fs::write(&first, "a".repeat(40))?;
+        fs::write(&second, "b".repeat(40))?;
+        let units = vec![
+            SemanticUnit::File(second.clone()),
+            SemanticUnit::File(first.clone()),
+        ];
+        let chunks = pack_semantic_chunks(&units, 10_000)?;
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0][0].path(), first);
+        assert_eq!(chunks[0][1].path(), second);
+
+        let images = (0..21)
+            .map(|index| SemanticUnit::File(first_dir.join(format!("{index}.png"))))
+            .collect::<Vec<_>>();
+        let image_chunks = pack_semantic_chunks(&images, usize::MAX)?;
+        assert_eq!(
+            image_chunks.iter().map(Vec::len).collect::<Vec<_>>(),
+            [20, 1]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn adaptive_retry_splits_context_errors_and_marks_terminal_truncation()
+    -> Result<(), SemanticError> {
+        let units = vec![
+            SemanticUnit::File(PathBuf::from("a.md")),
+            SemanticUnit::File(PathBuf::from("b.md")),
+        ];
+        let extracted = extract_with_adaptive_retry(&units, Some("model"), 3, &|chunk| {
+            if chunk.len() > 1 {
+                return Err(SemanticError::Transport(
+                    "maximum context length exceeded".to_owned(),
+                ));
+            }
+            let source = chunk[0].path().to_string_lossy();
+            Ok(json!({
+                "nodes":[{"id":source,"source_file":source}],
+                "edges":[],
+                "hyperedges":[],
+                "input_tokens":1,
+                "output_tokens":2,
+                "finish_reason":"stop"
+            }))
+        })?;
+        assert_eq!(extracted["nodes"].as_array().map(Vec::len), Some(2));
+        assert_eq!(extracted["input_tokens"], 2);
+        assert_eq!(extracted["output_tokens"], 4);
+
+        let partial = extract_with_adaptive_retry(&units[..1], Some("model"), 3, &|_| {
+            Ok(json!({
+                "nodes":[{"id":"a","source_file":"a.md"}],
+                "edges":[],
+                "hyperedges":[],
+                "finish_reason":"length"
+            }))
+        })?;
+        assert_eq!(partial["nodes"][0]["_partial"], true);
+        assert_eq!(partial["_partial_files"], json!(["a.md"]));
         Ok(())
     }
 

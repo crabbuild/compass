@@ -32,18 +32,18 @@ mod tests {
     };
     use trail_resolve::{resolve, resolve_language_calls};
     use trail_semantic::{
-        EvidenceSource, ImageRef, ValidationLimits, anthropic_content,
+        EvidenceSource, ImageRef, SemanticUnit, ValidationLimits, anthropic_content,
         anthropic_http_request_with_images, backend_api_key, bind_node_evidence,
         build_untrusted_prompt, builtin_backend, claude_cli_envelope, detect_builtin_backend,
-        estimate_cost, extraction_prompt, image_notes, label_identifiers,
-        looks_like_context_exceeded, mark_partial, merged_partial_files,
+        estimate_cost, extract_with_adaptive_retry, extraction_prompt, image_notes,
+        label_identifiers, looks_like_context_exceeded, mark_partial, merged_partial_files,
         model_requires_default_temperature, neutralize_injection_sentinels,
         normalize_anthropic_response, normalize_openai_response, ollama_base_url_check,
-        openai_call_parameters, openai_content, parse_llm_json, partial_source_files,
-        provider_base_url_check, resolve_builtin_backend, resolve_max_retries,
-        resolve_positive_seconds, resolve_positive_usize, resolve_temperature, response_is_hollow,
-        sanitize_semantic_fragment, strip_partial_markers, validate_semantic_fragment,
-        validate_semantic_fragment_with_limits, wrap_untrusted_source,
+        openai_call_parameters, openai_content, pack_semantic_chunks, parse_llm_json,
+        partial_source_files, provider_base_url_check, resolve_builtin_backend,
+        resolve_max_retries, resolve_positive_seconds, resolve_positive_usize, resolve_temperature,
+        response_is_hollow, sanitize_semantic_fragment, strip_partial_markers,
+        validate_semantic_fragment, validate_semantic_fragment_with_limits, wrap_untrusted_source,
     };
 
     #[test]
@@ -185,6 +185,58 @@ mod tests {
                 looks_like_context_exceeded("maximum context length exceeded"),
                 looks_like_context_exceeded("authentication failed"),
             ]
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_chunk_packing_and_adaptive_retry_match_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let first_dir = directory.path().join("a");
+        let second_dir = directory.path().join("b");
+        fs::create_dir_all(&first_dir)?;
+        fs::create_dir_all(&second_dir)?;
+        let first = first_dir.join("first.md");
+        let second = second_dir.join("second.md");
+        fs::write(&first, "a".repeat(40))?;
+        fs::write(&second, "b".repeat(40))?;
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from graphify import llm; root=Path(sys.argv[1]); units=[root/'b'/'second.md',root/'a'/'first.md']; llm._TOKENIZER=None; chunks=llm._pack_chunks_by_tokens(units,60)\ndef fake(chunk,**kwargs):\n  if len(chunk)>1: raise RuntimeError('maximum context length exceeded')\n  source=str(llm.unit_path(chunk[0])); return {'nodes':[{'id':source,'source_file':source}],'edges':[],'hyperedges':[],'input_tokens':1,'output_tokens':2,'finish_reason':'stop'}\nllm.extract_files_direct=fake\nadaptive=llm._extract_with_adaptive_retry(units,'openai',None,'model',root,3)\nprint(json.dumps({'chunks':[[str(p) for p in c] for c in chunks],'adaptive':adaptive}))",
+            ])
+            .arg(directory.path())
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let units = vec![SemanticUnit::File(second), SemanticUnit::File(first)];
+        let chunks = pack_semantic_chunks(&units, 60)?;
+        let adaptive = extract_with_adaptive_retry(&units, Some("model"), 3, &|chunk| {
+            if chunk.len() > 1 {
+                return Err(trail_semantic::SemanticError::Transport(
+                    "maximum context length exceeded".to_owned(),
+                ));
+            }
+            let source = chunk[0].path().to_string_lossy().into_owned();
+            Ok(json!({
+                "nodes":[{"id":source,"source_file":source}],
+                "edges":[],
+                "hyperedges":[],
+                "input_tokens":1,
+                "output_tokens":2,
+                "finish_reason":"stop"
+            }))
+        })?;
+        let rust = json!({
+            "chunks": chunks.iter().map(|chunk| chunk.iter().map(|unit| unit.path().to_string_lossy()).collect::<Vec<_>>()).collect::<Vec<_>>(),
+            "adaptive": adaptive,
         });
         assert_eq!(rust, python);
         Ok(())
