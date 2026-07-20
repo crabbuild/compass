@@ -3,6 +3,7 @@
 mod config;
 mod engine;
 mod facts;
+mod go;
 mod ids;
 mod registry;
 

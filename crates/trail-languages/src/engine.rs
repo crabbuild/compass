@@ -113,13 +113,11 @@ impl Engine {
             .parse(&source, None)
             .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
         let config = generic_config(spec);
-        Ok(extract_tree(
-            path,
-            &source,
-            tree.root_node(),
-            &config,
-            spec.name,
-        ))
+        let root = tree.root_node();
+        if spec.name == "go" {
+            return Ok(crate::go::extract(path, &source, root));
+        }
+        Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 }
 
@@ -299,7 +297,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     is_member_call: call.member,
                     source_file: self.source_file.clone(),
                     source_location: format!("L{}", line(node)),
-                    receiver: call.receiver,
+                    receiver: Some(call.receiver),
                     lang: (self.language == "java").then(|| "java".to_owned()),
                 });
             }

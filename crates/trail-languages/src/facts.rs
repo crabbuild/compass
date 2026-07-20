@@ -9,7 +9,8 @@ pub struct RawCall {
     pub is_member_call: bool,
     pub source_file: String,
     pub source_location: String,
-    pub receiver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
 }

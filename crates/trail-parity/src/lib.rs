@@ -286,6 +286,31 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn go_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let source = repo.join("tests/fixtures/sample.go");
+        let mut engine = Engine::default();
+        let rust = serde_json::to_value(engine.extract(&source)?)?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from graphify.extract import extract_go; print(json.dumps(extract_go(Path(sys.argv[1])), ensure_ascii=False))",
+            ])
+            .arg(&source)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
     fn compare(arguments: &[&str]) -> Result<(), Box<dyn Error>> {
         let rust = trail_cli::run(
             Frontend::Graphify,
