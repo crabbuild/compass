@@ -2,6 +2,8 @@
 
 mod bedrock;
 pub use bedrock::*;
+mod plain_text;
+pub use plain_text::*;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;

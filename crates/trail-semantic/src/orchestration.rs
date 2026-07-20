@@ -1,8 +1,7 @@
 //! Corpus-level semantic extraction, reconciliation, and caching.
 
 use super::*;
-use rayon::prelude::*;
-use trail_files::{Cache, CacheKind, bisect_slice, prompt_fingerprint, split_file};
+use trail_files::{Cache, CacheKind, bisect_slice, file_hash, prompt_fingerprint, split_file};
 
 /// Load one semantic chunk, call a resolved provider, validate its untrusted
 /// graph fragment, and bind code-symbol evidence to the exact text sent to the
@@ -492,6 +491,51 @@ pub struct CorpusExtractionResult {
     pub reconciliation: ScopeReconciliation,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CachedCorpusExtractionOptions {
+    pub extraction: CorpusExtractionOptions,
+    pub deep_mode: bool,
+    pub force: bool,
+    pub cache_enabled: bool,
+    /// Full live semantic corpus used for orphan pruning. `None` skips pruning;
+    /// callers must never substitute an incremental changed-file subset.
+    pub prune_live_files: Option<Vec<PathBuf>>,
+}
+
+impl Default for CachedCorpusExtractionOptions {
+    fn default() -> Self {
+        Self {
+            extraction: CorpusExtractionOptions::default(),
+            deep_mode: false,
+            force: false,
+            cache_enabled: true,
+            prune_live_files: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticCacheIssue {
+    pub chunk_index: Option<usize>,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CachedCorpusExtractionResult {
+    pub fragment: Value,
+    pub failures: Vec<ChunkFailure>,
+    pub reconciliation: ScopeReconciliation,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub checkpointed_files: usize,
+    pub finalized_files: usize,
+    pub pruned_entries: usize,
+    pub partial_files: Vec<PathBuf>,
+    pub cache_issues: Vec<SemanticCacheIssue>,
+    pub provider_warnings: Vec<String>,
+    pub unverified_nodes: usize,
+}
+
 /// Apply provider-specific serialization constraints to a requested worker
 /// count while preserving the Python opt-in overrides.
 #[must_use]
@@ -551,6 +595,31 @@ pub fn extract_corpus_parallel_with<F>(
 where
     F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError> + Sync,
 {
+    extract_corpus_parallel_with_progress(
+        files,
+        root,
+        options,
+        environment,
+        extract,
+        &mut |_, _, _, _| {},
+    )
+}
+
+/// Progress-aware counterpart to [`extract_corpus_parallel_with`]. Successful
+/// top-level chunks invoke the callback in completion order, while the returned
+/// graph is always merged in deterministic submission order.
+pub fn extract_corpus_parallel_with_progress<F, P>(
+    files: &[PathBuf],
+    root: &Path,
+    options: &CorpusExtractionOptions,
+    environment: &HashMap<String, String>,
+    extract: &F,
+    on_chunk_done: &mut P,
+) -> Result<CorpusExtractionResult, SemanticError>
+where
+    F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError> + Sync,
+    P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
+{
     let units = expand_oversized_semantic_files(files, FILE_CHAR_CAP);
     let chunks = if let Some(token_budget) = options.token_budget {
         pack_semantic_chunks(&units, token_budget)?
@@ -571,24 +640,67 @@ where
         chunks.len(),
         environment,
     );
-    let run = |(index, chunk): (usize, &Vec<SemanticUnit>)| {
-        let result = extract_with_adaptive_retry(
-            chunk,
-            options.model.as_deref(),
-            options.max_retry_depth,
-            extract,
-        );
-        (index, result)
-    };
-    let results = if workers == 1 {
-        chunks.iter().enumerate().map(run).collect::<Vec<_>>()
+    let total = chunks.len();
+    let mut results = if workers == 1 {
+        let mut results = Vec::with_capacity(total);
+        for (index, chunk) in chunks.iter().enumerate() {
+            let result = extract_with_adaptive_retry(
+                chunk,
+                options.model.as_deref(),
+                options.max_retry_depth,
+                extract,
+            );
+            if let Ok(fragment) = &result {
+                on_chunk_done(index, total, chunk, fragment);
+            }
+            results.push((index, result));
+        }
+        results
     } else {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(workers)
-            .build()
-            .map_err(|error| SemanticError::Transport(format!("worker pool: {error}")))?
-            .install(|| chunks.par_iter().enumerate().map(run).collect::<Vec<_>>())
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                let sender = sender.clone();
+                let next = &next;
+                let chunks = &chunks;
+                scope.spawn(move || {
+                    loop {
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(chunk) = chunks.get(index) else {
+                            break;
+                        };
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            extract_with_adaptive_retry(
+                                chunk,
+                                options.model.as_deref(),
+                                options.max_retry_depth,
+                                extract,
+                            )
+                        }))
+                        .unwrap_or_else(|_| {
+                            Err(SemanticError::Transport(
+                                "semantic chunk worker panicked".to_owned(),
+                            ))
+                        });
+                        if sender.send((index, result)).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(sender);
+            let mut results = Vec::with_capacity(total);
+            for (index, result) in receiver {
+                if let Ok(fragment) = &result {
+                    on_chunk_done(index, total, &chunks[index], fragment);
+                }
+                results.push((index, result));
+            }
+            results
+        })
     };
+    results.sort_by_key(|(index, _)| *index);
     let mut merged = serde_json::json!({
         "nodes":[],
         "edges":[],
@@ -618,6 +730,258 @@ where
         failures,
         reconciliation,
     })
+}
+
+/// Replay compatible semantic cache entries, checkpoint every successful
+/// top-level chunk as it completes, and finalize authoritative per-file cache
+/// entries after scope reconciliation. Cache write failures are reported but do
+/// not discard successfully extracted graph data.
+pub fn extract_corpus_cached_with<F, P>(
+    files: &[PathBuf],
+    root: &Path,
+    cache_root: Option<&Path>,
+    options: &CachedCorpusExtractionOptions,
+    environment: &HashMap<String, String>,
+    extract: &F,
+    on_chunk_done: &mut P,
+) -> Result<CachedCorpusExtractionResult, SemanticError>
+where
+    F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError> + Sync,
+    P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
+{
+    let prompt = extraction_prompt(options.deep_mode);
+    let cache_enabled =
+        options.cache_enabled && !environment.contains_key("GRAPHIFY_NO_INCREMENTAL_CACHE");
+    let mut cache = cache_enabled
+        .then(|| Cache::new(root, cache_root))
+        .transpose()?;
+    let checked = if options.force || !cache_enabled {
+        SemanticCacheCheck {
+            uncached: files.to_vec(),
+            ..SemanticCacheCheck::default()
+        }
+    } else {
+        check_semantic_cache(
+            cache.as_mut().ok_or_else(|| {
+                SemanticError::InvalidProviderConfiguration(
+                    "semantic cache was unexpectedly unavailable".to_owned(),
+                )
+            })?,
+            files,
+            options.deep_mode,
+            &prompt,
+        )?
+    };
+    let cache_hits = files.len().saturating_sub(checked.uncached.len());
+    let cache_misses = checked.uncached.len();
+    let mut checkpointed_files = 0_usize;
+    let mut cache_issues = Vec::new();
+    let fresh = {
+        let mut checkpoint =
+            |index: usize, total: usize, chunk: &[SemanticUnit], fragment: &Value| {
+                let Some(cache) = cache.as_mut() else {
+                    on_chunk_done(index, total, chunk, fragment);
+                    return;
+                };
+                let partial_files = partial_source_files(fragment)
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>();
+                let save_options = SemanticCacheSaveOptions {
+                    merge_existing: true,
+                    allowed_source_files: Some(
+                        chunk.iter().map(|unit| unit.path().to_path_buf()).collect(),
+                    ),
+                    partial_source_files: partial_files,
+                    deep_mode: options.deep_mode,
+                    prompt: prompt.clone(),
+                };
+                match save_semantic_cache(cache, root, fragment, &save_options) {
+                    Ok(report) => {
+                        checkpointed_files = checkpointed_files.saturating_add(report.saved);
+                    }
+                    Err(error) => cache_issues.push(SemanticCacheIssue {
+                        chunk_index: Some(index),
+                        message: error.to_string(),
+                    }),
+                }
+                on_chunk_done(index, total, chunk, fragment);
+            };
+        extract_corpus_parallel_with_progress(
+            &checked.uncached,
+            root,
+            &options.extraction,
+            environment,
+            extract,
+            &mut checkpoint,
+        )?
+    };
+
+    let partial_files = partial_source_files(&fresh.fragment)
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let mut finalized_files = 0_usize;
+    if let Some(cache) = cache.as_mut() {
+        let save_options = SemanticCacheSaveOptions {
+            merge_existing: false,
+            allowed_source_files: Some(checked.uncached.clone()),
+            partial_source_files: partial_files.clone(),
+            deep_mode: options.deep_mode,
+            prompt: prompt.clone(),
+        };
+        match save_semantic_cache(cache, root, &fresh.fragment, &save_options) {
+            Ok(report) => finalized_files = report.saved,
+            Err(error) => cache_issues.push(SemanticCacheIssue {
+                chunk_index: None,
+                message: error.to_string(),
+            }),
+        }
+    }
+
+    let mut fresh_fragment = fresh.fragment;
+    strip_partial_markers(&mut fresh_fragment);
+    let mut combined = serde_json::json!({
+        "nodes":checked.nodes,
+        "edges":checked.edges,
+        "hyperedges":checked.hyperedges,
+        "input_tokens":numeric_u64(fresh_fragment.get("input_tokens")),
+        "output_tokens":numeric_u64(fresh_fragment.get("output_tokens")),
+        "failed_chunks":fresh.failures.len(),
+    });
+    for bucket in ["nodes", "edges", "hyperedges"] {
+        if let (Some(target), Some(incoming)) = (
+            combined.get_mut(bucket).and_then(Value::as_array_mut),
+            fresh_fragment.get(bucket).and_then(Value::as_array),
+        ) {
+            target.extend(incoming.iter().cloned());
+        }
+    }
+
+    let pruned_entries = if let (Some(cache), Some(live_files)) =
+        (cache.as_ref(), options.prune_live_files.as_ref())
+    {
+        let live_hashes = live_files
+            .iter()
+            .filter_map(|path| file_hash(path, root).ok())
+            .collect::<BTreeSet<_>>();
+        cache.prune_semantic(&live_hashes)
+    } else {
+        0
+    };
+    Ok(CachedCorpusExtractionResult {
+        fragment: combined,
+        failures: fresh.failures,
+        reconciliation: fresh.reconciliation,
+        cache_hits,
+        cache_misses,
+        checkpointed_files,
+        finalized_files,
+        pruned_entries,
+        partial_files,
+        cache_issues,
+        provider_warnings: Vec::new(),
+        unverified_nodes: 0,
+    })
+}
+
+/// Execute the complete cached corpus pipeline for a resolved built-in
+/// provider while retaining non-fatal source/image and evidence diagnostics.
+pub fn extract_builtin_corpus_cached<P>(
+    files: &[PathBuf],
+    backend: &ResolvedBackend,
+    root: &Path,
+    cache_root: Option<&Path>,
+    options: &CachedCorpusExtractionOptions,
+    environment: &HashMap<String, String>,
+    on_chunk_done: &mut P,
+) -> Result<CachedCorpusExtractionResult, SemanticError>
+where
+    P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
+{
+    let mut effective = options.clone();
+    effective.extraction.backend_name = backend.backend.name.to_owned();
+    effective.extraction.model = Some(backend.model.clone());
+    let warnings = std::sync::Mutex::new(Vec::new());
+    let unverified = std::sync::atomic::AtomicUsize::new(0);
+    let mut result = extract_corpus_cached_with(
+        files,
+        root,
+        cache_root,
+        &effective,
+        environment,
+        &|units| {
+            let direct =
+                extract_semantic_units(units, backend, root, effective.deep_mode, environment)?;
+            unverified.fetch_add(
+                direct.unverified_nodes,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            if let Ok(mut collected) = warnings.lock() {
+                collected.extend(direct.warnings);
+            }
+            Ok(direct.fragment)
+        },
+        on_chunk_done,
+    )?;
+    result.provider_warnings = match warnings.into_inner() {
+        Ok(warnings) => warnings,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    result.unverified_nodes = unverified.load(std::sync::atomic::Ordering::Relaxed);
+    Ok(result)
+}
+
+/// Custom OpenAI-compatible counterpart to
+/// [`extract_builtin_corpus_cached`].
+pub fn extract_custom_corpus_cached<P>(
+    files: &[PathBuf],
+    backend: &ResolvedCustomBackend,
+    root: &Path,
+    cache_root: Option<&Path>,
+    options: &CachedCorpusExtractionOptions,
+    environment: &HashMap<String, String>,
+    on_chunk_done: &mut P,
+) -> Result<CachedCorpusExtractionResult, SemanticError>
+where
+    P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
+{
+    let mut effective = options.clone();
+    effective.extraction.backend_name = backend.name.clone();
+    effective.extraction.model = Some(backend.model.clone());
+    let warnings = std::sync::Mutex::new(Vec::new());
+    let unverified = std::sync::atomic::AtomicUsize::new(0);
+    let mut result = extract_corpus_cached_with(
+        files,
+        root,
+        cache_root,
+        &effective,
+        environment,
+        &|units| {
+            let direct = extract_semantic_units_custom(
+                units,
+                backend,
+                root,
+                effective.deep_mode,
+                environment,
+            )?;
+            unverified.fetch_add(
+                direct.unverified_nodes,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            if let Ok(mut collected) = warnings.lock() {
+                collected.extend(direct.warnings);
+            }
+            Ok(direct.fragment)
+        },
+        on_chunk_done,
+    )?;
+    result.provider_warnings = match warnings.into_inner() {
+        Ok(warnings) => warnings,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    result.unverified_nodes = unverified.load(std::sync::atomic::Ordering::Relaxed);
+    Ok(result)
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

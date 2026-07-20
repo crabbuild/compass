@@ -41,8 +41,8 @@ mod tests {
         looks_like_context_exceeded, mark_partial, merged_partial_files,
         model_requires_default_temperature, neutralize_injection_sentinels,
         normalize_anthropic_response, normalize_openai_response, ollama_base_url_check,
-        openai_call_parameters, openai_content, pack_semantic_chunks, parse_llm_json,
-        partial_source_files, provider_base_url_check, read_semantic_units,
+        openai_call_parameters, openai_content, openai_plain_call_parameters, pack_semantic_chunks,
+        parse_llm_json, partial_source_files, provider_base_url_check, read_semantic_units,
         reconcile_semantic_scope, resolve_builtin_backend, resolve_custom_backend,
         resolve_max_retries, resolve_positive_seconds, resolve_positive_usize, resolve_temperature,
         response_is_hollow, sanitize_semantic_fragment, save_semantic_cache, strip_partial_markers,
@@ -449,6 +449,51 @@ print(json.dumps({
                 claude_cli_envelope(r#"[{"type":"system"},{"type":"result","result":"first"},{"type":"result","result":"last"}]"#)?,
                 claude_cli_envelope(r#"[{"type":"assistant","message":"fallback"}]"#)?,
             ],
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_lightweight_call_contract_matches_python() -> Result<(), Box<dyn Error>> {
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                r#"import json,os,sys,types
+from types import SimpleNamespace as N
+captured=[]
+response=N(choices=[N(message=N(content='label'))],usage=N(prompt_tokens=7,completion_tokens=2))
+C=type('C',(),{'__init__':lambda s,*a,**k:(setattr(s,'chat',s),setattr(s,'completions',s),None)[-1],'create':lambda s,**k:(captured.append(k),response)[1]})
+m=types.ModuleType('openai'); m.OpenAI=C; sys.modules['openai']=m
+from graphify import llm
+os.environ['MOONSHOT_API_KEY']='secret'
+os.environ.pop('GRAPHIFY_LLM_TEMPERATURE',None)
+usage={}
+reply=llm._call_llm('name this',backend='kimi',max_tokens=321,usage_out=usage)
+print(json.dumps({'params':captured[0],'text':reply,'usage':usage},ensure_ascii=False))"#,
+            ])
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let rust = json!({
+            "params":openai_plain_call_parameters(
+                "https://api.moonshot.ai/v1",
+                "kimi-k2.6",
+                "name this",
+                321,
+                None,
+                None,
+                None,
+                false,
+            ),
+            "text":"label",
+            "usage":{"input":7,"output":2},
         });
         assert_eq!(rust, python);
         Ok(())

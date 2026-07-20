@@ -821,7 +821,8 @@ fn corpus_parallel_merge_is_ordered_and_failures_are_explicit() -> Result<(), Bo
         max_concurrency: 3,
         max_retry_depth: 0,
     };
-    let result = extract_corpus_parallel_with(
+    let mut completed = Vec::new();
+    let result = extract_corpus_parallel_with_progress(
         &files,
         directory.path(),
         &options,
@@ -847,6 +848,7 @@ fn corpus_parallel_merge_is_ordered_and_failures_are_explicit() -> Result<(), Bo
                 "finish_reason":"stop"
             }))
         },
+        &mut |index, total, _, _| completed.push((index, total)),
     )?;
     assert_eq!(result.fragment["failed_chunks"], 1);
     assert_eq!(result.fragment["input_tokens"], 2);
@@ -861,10 +863,198 @@ fn corpus_parallel_merge_is_ordered_and_failures_are_explicit() -> Result<(), Bo
         .filter_map(|node| node.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
     assert_eq!(identifiers, ["a.md", "c.md"]);
+    assert_eq!(completed, [(2, 3), (0, 3)]);
     assert_eq!(
         effective_semantic_concurrency("claude-cli", 8, 4, &HashMap::new()),
         1
     );
+    Ok(())
+}
+
+#[test]
+fn cached_corpus_orchestration_checkpoints_replays_and_prunes() -> Result<(), Box<dyn Error>> {
+    let corpus = tempfile::tempdir()?;
+    let output = tempfile::tempdir()?;
+    let files = ["a.md", "b.md"]
+        .into_iter()
+        .map(|name| {
+            let file = corpus.path().join(name);
+            fs::write(&file, name)?;
+            Ok(file)
+        })
+        .collect::<Result<Vec<_>, std::io::Error>>()?;
+    let orphan = corpus.path().join("orphan.md");
+    fs::write(&orphan, "orphan")?;
+    let mut seed_cache = Cache::new(corpus.path(), Some(output.path()))?;
+    save_semantic_cache(
+        &mut seed_cache,
+        corpus.path(),
+        &json!({
+            "nodes":[{"id":"orphan","source_file":&orphan}],
+            "edges":[],
+            "hyperedges":[],
+        }),
+        &SemanticCacheSaveOptions::for_extraction(false),
+    )?;
+    fs::remove_file(&orphan)?;
+    drop(seed_cache);
+    let options = CachedCorpusExtractionOptions {
+        extraction: CorpusExtractionOptions {
+            backend_name: "openai".to_owned(),
+            model: Some("model".to_owned()),
+            chunk_size: 1,
+            token_budget: None,
+            max_concurrency: 2,
+            max_retry_depth: 0,
+        },
+        prune_live_files: Some(files.clone()),
+        ..CachedCorpusExtractionOptions::default()
+    };
+    let checkpoint_observations = std::sync::Mutex::new(Vec::new());
+    let first = extract_corpus_cached_with(
+        &files,
+        corpus.path(),
+        Some(output.path()),
+        &options,
+        &HashMap::new(),
+        &|chunk| {
+            let path = chunk[0].path();
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            if name == "a.md" {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Ok(json!({
+                "nodes":[{"id":name,"source_file":path}],
+                "edges":[],
+                "hyperedges":[],
+                "input_tokens":1,
+                "output_tokens":2,
+                "finish_reason":"stop"
+            }))
+        },
+        &mut |index, total, chunk, _| {
+            if let Ok(mut observations) = checkpoint_observations.lock() {
+                let mut probe = Cache::new(corpus.path(), Some(output.path())).ok();
+                let cached = probe.as_mut().and_then(|cache| {
+                    check_semantic_cache(
+                        cache,
+                        &[chunk[0].path().to_path_buf()],
+                        false,
+                        &extraction_prompt(false),
+                    )
+                    .ok()
+                });
+                observations.push((
+                    index,
+                    total,
+                    cached.is_some_and(|entry| entry.uncached.is_empty()),
+                ));
+            }
+        },
+    )?;
+    assert_eq!(first.cache_hits, 0);
+    assert_eq!(first.cache_misses, 2);
+    assert_eq!(first.checkpointed_files, 2);
+    assert_eq!(first.finalized_files, 2);
+    assert_eq!(first.pruned_entries, 1);
+    assert!(first.cache_issues.is_empty());
+    assert_eq!(first.fragment["input_tokens"], 2);
+    assert_eq!(first.fragment["output_tokens"], 4);
+    let mut observations = checkpoint_observations
+        .into_inner()
+        .map_err(|_| std::io::Error::other("checkpoint observation lock was poisoned"))?;
+    observations.sort_by_key(|(index, _, _)| *index);
+    assert_eq!(observations, [(0, 2, true), (1, 2, true)]);
+
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let replayed = extract_corpus_cached_with(
+        &files,
+        corpus.path(),
+        Some(output.path()),
+        &options,
+        &HashMap::new(),
+        &|_| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(SemanticError::Transport(
+                "cache replay unexpectedly called provider".to_owned(),
+            ))
+        },
+        &mut |_, _, _, _| {},
+    )?;
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(replayed.cache_hits, 2);
+    assert_eq!(replayed.cache_misses, 0);
+    assert_eq!(replayed.fragment["nodes"].as_array().map(Vec::len), Some(2));
+    assert_eq!(replayed.fragment["input_tokens"], 0);
+    assert!(!corpus.path().join("graphify-out").exists());
+    Ok(())
+}
+
+#[test]
+fn resolved_provider_corpus_runner_executes_then_replays_cache() -> Result<(), Box<dyn Error>> {
+    let corpus = tempfile::tempdir()?;
+    let output = tempfile::tempdir()?;
+    let source = corpus.path().join("guide.md");
+    fs::write(&source, "# Guide\n")?;
+    let fragment = serde_json::to_string(&json!({
+        "nodes":[{
+            "id":"guide",
+            "label":"Guide",
+            "type":"document",
+            "file_type":"document",
+            "source_file":&source,
+        }],
+        "edges":[],
+        "hyperedges":[],
+    }))?;
+    let response = json!({
+        "choices":[{"message":{"content":fragment},"finish_reason":"stop"}],
+        "usage":{"prompt_tokens":9,"completion_tokens":4}
+    });
+    let (address, server) = spawn_http_server(vec![successful_json_response(&response)?])?;
+    let environment = HashMap::from([
+        ("OPENAI_API_KEY".to_owned(), "key".to_owned()),
+        ("OPENAI_BASE_URL".to_owned(), format!("http://{address}/v1")),
+        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+    ]);
+    let backend = resolve_builtin_backend("openai", &environment, Some("model"))?;
+    let options = CachedCorpusExtractionOptions::default();
+    let mut completed = 0_usize;
+    let first = extract_builtin_corpus_cached(
+        std::slice::from_ref(&source),
+        &backend,
+        corpus.path(),
+        Some(output.path()),
+        &options,
+        &environment,
+        &mut |_, _, _, _| completed = completed.saturating_add(1),
+    )?;
+    assert_eq!(completed, 1);
+    assert_eq!(first.cache_misses, 1);
+    assert_eq!(first.fragment["nodes"][0]["id"], "guide");
+    assert_eq!(first.fragment["input_tokens"], 9);
+    assert_eq!(first.fragment["output_tokens"], 4);
+    assert!(first.provider_warnings.is_empty());
+    server
+        .join()
+        .map_err(|_| std::io::Error::other("provider corpus server panicked"))??;
+
+    let replayed = extract_builtin_corpus_cached(
+        std::slice::from_ref(&source),
+        &backend,
+        corpus.path(),
+        Some(output.path()),
+        &options,
+        &environment,
+        &mut |_, _, _, _| {},
+    )?;
+    assert_eq!(replayed.cache_hits, 1);
+    assert_eq!(replayed.cache_misses, 0);
+    assert_eq!(replayed.fragment["nodes"][0]["id"], "guide");
+    assert_eq!(replayed.fragment["input_tokens"], 0);
     Ok(())
 }
 
@@ -967,6 +1157,92 @@ fn provider_parameters_and_responses_normalize_hollow_results() -> Result<(), Se
     assert_eq!(cli["input_tokens"], 60);
     assert_eq!(cli["model"], "claude-sonnet");
     assert_eq!(cli["finish_reason"], "length");
+    Ok(())
+}
+
+#[test]
+fn lightweight_provider_calls_omit_extraction_prompt_and_track_usage() -> Result<(), Box<dyn Error>>
+{
+    let openai_response = json!({
+        "choices":[{"message":{"content":"short label"},"finish_reason":"stop"}],
+        "usage":{"prompt_tokens":4,"completion_tokens":2}
+    });
+    let anthropic_response = json!({
+        "content":[{"type":"text","text":"anthropic label"}],
+        "usage":{"input_tokens":5,"output_tokens":3}
+    });
+    let (address, server) = spawn_http_server(vec![
+        successful_json_response(&openai_response)?,
+        successful_json_response(&anthropic_response)?,
+    ])?;
+    let environment = HashMap::from([
+        ("OPENAI_API_KEY".to_owned(), "openai-key".to_owned()),
+        ("ANTHROPIC_API_KEY".to_owned(), "anthropic-key".to_owned()),
+        ("OPENAI_BASE_URL".to_owned(), format!("http://{address}/v1")),
+        ("ANTHROPIC_BASE_URL".to_owned(), format!("http://{address}")),
+        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+    ]);
+    let options = PlainTextOptions {
+        max_tokens: 200,
+        ..PlainTextOptions::default()
+    };
+    let openai = resolve_builtin_backend("openai", &environment, Some("small-model"))?;
+    let openai_result = execute_plain_text_backend(&openai, "name this", &options, &environment)?;
+    assert_eq!(
+        openai_result,
+        PlainTextResponse {
+            text: "short label".to_owned(),
+            input_tokens: 4,
+            output_tokens: 2,
+            model: "small-model".to_owned(),
+        }
+    );
+    let anthropic = resolve_builtin_backend("claude", &environment, Some("claude-model"))?;
+    let anthropic_result =
+        execute_plain_text_backend(&anthropic, "name this", &options, &environment)?;
+    assert_eq!(anthropic_result.text, "anthropic label");
+    assert_eq!(anthropic_result.input_tokens, 5);
+    assert_eq!(anthropic_result.output_tokens, 3);
+
+    let captured = server
+        .join()
+        .map_err(|_| std::io::Error::other("plain-text test server panicked"))??;
+    let openai_body = captured[0]
+        .split_once("\r\n\r\n")
+        .and_then(|(_, body)| serde_json::from_str::<Value>(body).ok())
+        .ok_or_else(|| std::io::Error::other("invalid OpenAI plain-text body"))?;
+    assert_eq!(
+        openai_body["messages"],
+        json!([{"role":"user","content":"name this"}])
+    );
+    assert!(openai_body.get("system").is_none());
+    assert_eq!(openai_body["max_completion_tokens"], 200);
+    assert_eq!(openai_body["stream"], false);
+    let anthropic_body = captured[1]
+        .split_once("\r\n\r\n")
+        .and_then(|(_, body)| serde_json::from_str::<Value>(body).ok())
+        .ok_or_else(|| std::io::Error::other("invalid Anthropic plain-text body"))?;
+    assert_eq!(
+        anthropic_body["messages"],
+        json!([{"role":"user","content":"name this"}])
+    );
+    assert!(anthropic_body.get("system").is_none());
+    assert_eq!(anthropic_body["max_tokens"], 200);
+
+    let moonshot = openai_plain_call_parameters(
+        "https://api.moonshot.ai/v1",
+        "kimi",
+        "label",
+        50,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(
+        moonshot["extra_body"],
+        json!({"thinking":{"type":"disabled"}})
+    );
     Ok(())
 }
 

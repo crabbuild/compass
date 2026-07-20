@@ -2978,7 +2978,6 @@ dependencies = [
  "aws-sdk-bedrockruntime",
  "aws-smithy-http-client",
  "base64",
- "rayon",
  "regex",
  "serde_json",
  "sha2 0.10.9",
