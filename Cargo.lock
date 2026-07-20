@@ -2949,6 +2949,7 @@ dependencies = [
  "trail-query",
  "trail-resolve",
  "trail-semantic",
+ "trail-transcribe",
 ]
 
 [[package]]
@@ -2990,6 +2991,15 @@ dependencies = [
  "ureq",
  "url",
  "wait-timeout",
+]
+
+[[package]]
+name = "trail-transcribe"
+version = "0.1.0"
+dependencies = [
+ "sha1",
+ "tempfile",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

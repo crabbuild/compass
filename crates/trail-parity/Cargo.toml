@@ -26,6 +26,7 @@ trail-output = { version = "0.1.0", path = "../trail-output" }
 trail-query = { version = "0.1.0", path = "../trail-query" }
 trail-resolve = { version = "0.1.0", path = "../trail-resolve" }
 trail-semantic = { version = "0.1.0", path = "../trail-semantic" }
+trail-transcribe = { version = "0.1.0", path = "../trail-transcribe" }
 
 [lints]
 workspace = true

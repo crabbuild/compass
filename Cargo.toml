@@ -12,6 +12,7 @@ members = [
     "crates/trail-query",
     "crates/trail-resolve",
     "crates/trail-semantic",
+    "crates/trail-transcribe",
 ]
 resolver = "3"
 exclude = ["fuzz"]

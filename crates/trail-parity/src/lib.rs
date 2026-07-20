@@ -49,6 +49,65 @@ mod tests {
         validate_semantic_fragment, validate_semantic_fragment_with_limits, with_image_notes,
         wrap_untrusted_source,
     };
+    use trail_transcribe::{
+        VIDEO_EXTENSIONS, audio_cache_key, build_whisper_prompt_with_override, is_url,
+    };
+
+    #[test]
+    fn transcription_contracts_match_python_oracle() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                r#"import hashlib,json
+from graphify.transcribe import VIDEO_EXTENSIONS, build_whisper_prompt, is_url
+
+cases = [
+    [],
+    [{"label": "one"}, {"label": ""}, {"label": "two"}, {"label": "three"}, {"label": "four"}, {"label": "five"}, {"label": "six"}],
+    [{"id": "1"}, {"label": ""}],
+]
+urls = ["http://example.com/a", "https://example.com/a", "www.example.com/a", "HTTPS://example.com/a", "/tmp/https://clip.mp4"]
+target = "https://example.com/watch?v=42"
+print(json.dumps({
+    "extensions": sorted(VIDEO_EXTENSIONS),
+    "urls": [is_url(value) for value in urls],
+    "prompts": [build_whisper_prompt(case) for case in cases],
+    "hash": hashlib.sha1(target.encode(), usedforsecurity=False).hexdigest()[:12],
+}))"#,
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env_remove("GRAPHIFY_WHISPER_PROMPT")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let mut extensions = VIDEO_EXTENSIONS.to_vec();
+        extensions.sort_unstable();
+        let urls = [
+            "http://example.com/a",
+            "https://example.com/a",
+            "www.example.com/a",
+            "HTTPS://example.com/a",
+            "/tmp/https://clip.mp4",
+        ];
+        let rust = json!({
+            "extensions": extensions,
+            "urls": urls.map(is_url),
+            "prompts": [
+                build_whisper_prompt_with_override([], None),
+                build_whisper_prompt_with_override(["one", "", "two", "three", "four", "five", "six"], None),
+                build_whisper_prompt_with_override([""], None),
+            ],
+            "hash": audio_cache_key("https://example.com/watch?v=42"),
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
 
     #[test]
     fn native_document_text_matches_python_oracle() -> Result<(), Box<dyn Error>> {
