@@ -85,6 +85,8 @@ impl Engine {
             ExtractorKind::PascalForm => crate::pascal_forms::extract_form(path),
             ExtractorKind::LazarusPackage => crate::pascal_forms::extract_package(path),
             ExtractorKind::DreamMaker => self.extract_dreammaker(path),
+            ExtractorKind::Solution => crate::dotnet_project::extract_solution(path),
+            ExtractorKind::ProjectXml => crate::dotnet_project::extract_project(path),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }

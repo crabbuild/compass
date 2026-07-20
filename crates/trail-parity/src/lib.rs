@@ -380,6 +380,18 @@ output "instance_id" { value = aws_instance.web.id }
         compare_extraction("sample.dm", "extract_dm")
     }
 
+    #[test]
+    fn dotnet_project_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for (fixture, extractor) in [
+            ("sample.sln", "extract_sln"),
+            ("sample.slnx", "extract_slnx"),
+            ("sample.csproj", "extract_csproj"),
+        ] {
+            compare_extraction(fixture, extractor)?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

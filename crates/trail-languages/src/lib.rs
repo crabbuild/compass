@@ -3,6 +3,7 @@
 mod bash;
 mod config;
 mod dm;
+mod dotnet_project;
 mod engine;
 mod facts;
 mod go;
