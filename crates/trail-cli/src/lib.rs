@@ -26,11 +26,12 @@ use trail_core::{
 };
 use trail_files::{DetectOptions, Manifest, ManifestKind};
 use trail_graph::god_nodes;
+use trail_graphdb::{push_to_falkordb, push_to_neo4j};
 use trail_model::GraphError;
 use trail_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
     TreeOptions, WikiOptions, export_obsidian, export_wiki, node_filenames, write_callflow_html,
-    write_canvas, write_graphml, write_html, write_svg, write_tree_html,
+    write_canvas, write_cypher, write_graphml, write_html, write_svg, write_tree_html,
 };
 use trail_query::{
     DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
@@ -1341,7 +1342,7 @@ fn command_export(args: &[String]) -> Outcome {
     };
     if !matches!(
         format,
-        "html" | "callflow-html" | "obsidian" | "wiki" | "svg" | "graphml"
+        "html" | "callflow-html" | "obsidian" | "wiki" | "svg" | "graphml" | "neo4j" | "falkordb"
     ) {
         return Outcome::failure(export_help());
     }
@@ -1370,6 +1371,14 @@ fn command_export(args: &[String]) -> Outcome {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("obsidian");
+    let mut push_uri = None;
+    let mut push_user = "neo4j".to_owned();
+    let mut push_password = if format == "falkordb" {
+        std::env::var("FALKORDB_PASSWORD").ok()
+    } else {
+        std::env::var("NEO4J_PASSWORD").ok()
+    }
+    .filter(|value| !value.is_empty());
     let mut index = 1;
     while index < args.len() {
         let argument = args[index].as_str();
@@ -1418,6 +1427,27 @@ fn command_export(args: &[String]) -> Outcome {
                     return Outcome::failure("error: --dir requires a path".to_owned());
                 };
                 obsidian_dir = PathBuf::from(value);
+                index += 2;
+            }
+            "--push" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --push requires a URI".to_owned());
+                };
+                push_uri = Some(value);
+                index += 2;
+            }
+            "--user" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --user requires a value".to_owned());
+                };
+                push_user = value;
+                index += 2;
+            }
+            "--password" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --password requires a value".to_owned());
+                };
+                push_password = Some(value);
                 index += 2;
             }
             "--lang" => {
@@ -1553,11 +1583,87 @@ fn command_export(args: &[String]) -> Outcome {
         )
         .map(|()| "graph.graphml written - open in Gephi, yEd, or any GraphML tool".to_owned())
         .map_err(|error| error.to_string()),
+        "neo4j" => export_neo4j(
+            &inputs,
+            output_dir,
+            push_uri.as_deref(),
+            &push_user,
+            push_password.as_deref(),
+        ),
+        "falkordb" => export_falkordb(
+            &inputs,
+            output_dir,
+            push_uri.as_deref(),
+            &push_user,
+            push_password.as_deref(),
+        ),
         _ => Err("unsupported export format".to_owned()),
     };
     match result {
         Ok(output) => Outcome::success(output),
         Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+fn export_neo4j(
+    inputs: &ExportInputs,
+    output_dir: &Path,
+    push_uri: Option<&str>,
+    user: &str,
+    password: Option<&str>,
+) -> Result<String, String> {
+    if let Some(uri) = push_uri {
+        let password = password.ok_or_else(|| "--password required for --push".to_owned())?;
+        let result = push_to_neo4j(
+            &inputs.document,
+            uri,
+            user,
+            password,
+            Some(&inputs.communities),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(format!(
+            "Pushed to Neo4j: {} nodes, {} edges",
+            result.nodes, result.edges
+        ))
+    } else {
+        let path = output_dir.join("cypher.txt");
+        write_cypher(&inputs.document, &path).map_err(|error| error.to_string())?;
+        Ok(format!(
+            "cypher.txt written - import with: cypher-shell < {}",
+            path.display()
+        ))
+    }
+}
+
+fn export_falkordb(
+    inputs: &ExportInputs,
+    output_dir: &Path,
+    push_uri: Option<&str>,
+    user: &str,
+    password: Option<&str>,
+) -> Result<String, String> {
+    if let Some(uri) = push_uri {
+        let result = push_to_falkordb(
+            &inputs.document,
+            uri,
+            Some(user),
+            password,
+            Some(&inputs.communities),
+            "graphify",
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(format!(
+            "Pushed to FalkorDB: {} nodes, {} edges",
+            result.nodes, result.edges
+        ))
+    } else {
+        let path = output_dir.join("cypher.txt");
+        write_cypher(&inputs.document, &path).map_err(|error| error.to_string())?;
+        Ok(format!(
+            "cypher.txt written ({}) - statements are OpenCypher. FalkorDB's GRAPH.QUERY runs one statement at a time (no bulk script import), so load a graph with: graphify export falkordb --push falkordb://localhost:6379",
+            path.display()
+        ))
     }
 }
 
@@ -1799,7 +1905,7 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: graphify export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]".to_owned()
+    "Usage: graphify export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
 }
 
 fn callflow_help() -> String {

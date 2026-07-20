@@ -27,6 +27,7 @@ cargo package --workspace --locked --no-verify
 # so downstream crates can be published immediately in topological order.
 crates=(
   trail-model
+  trail-graphdb
   trail-files
   trail-media
   trail-whisper

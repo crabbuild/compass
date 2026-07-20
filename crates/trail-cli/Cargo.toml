@@ -32,6 +32,7 @@ trail-core = { path = "../trail-core", version = "0.1.0" }
 trail-cargo = { path = "../trail-cargo", version = "0.1.0" }
 trail-files = { path = "../trail-files", version = "0.1.0" }
 trail-graph = { path = "../trail-graph", version = "0.1.0" }
+trail-graphdb = { path = "../trail-graphdb", version = "0.1.0" }
 trail-global = { path = "../trail-global", version = "0.1.0" }
 trail-google-workspace = { path = "../trail-google-workspace", version = "0.1.0" }
 trail-ingest = { path = "../trail-ingest", version = "0.1.0" }

@@ -69,6 +69,13 @@ schema introspection, or `--google-workspace` to export Drive shortcuts through
 the configured `gws` CLI. Integrations that have not reached compatibility are
 rejected explicitly instead of being accepted silently.
 
+`trail graph export neo4j` and `trail graph export falkordb` emit compatible
+OpenCypher locally. Adding `--push URI` performs native, bounded live upserts:
+Neo4j uses Bolt (including verified TLS and explicit self-signed modes), while
+FalkorDB uses RESP directly. Passwords can come from `NEO4J_PASSWORD` or
+`FALKORDB_PASSWORD` and are redacted from failures; neither path needs Python,
+a database SDK, or a native client library.
+
 Native Whisper inference, verified model and URL artifact acquisition, and
 bounded audio/video decoding—including AVI—are implemented internally; their
 public commands remain hidden until the corresponding Python command workflows

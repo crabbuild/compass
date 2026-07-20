@@ -3896,6 +3896,7 @@ dependencies = [
  "trail-global",
  "trail-google-workspace",
  "trail-graph",
+ "trail-graphdb",
  "trail-ingest",
  "trail-model",
  "trail-output",
@@ -3982,6 +3983,18 @@ dependencies = [
  "trail-model",
  "unicode-casefold",
  "unicode-normalization",
+]
+
+[[package]]
+name = "trail-graphdb"
+version = "0.1.0"
+dependencies = [
+ "rustls",
+ "rustls-platform-verifier",
+ "serde_json",
+ "thiserror 2.0.19",
+ "trail-model",
+ "url",
 ]
 
 [[package]]
