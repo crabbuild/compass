@@ -10,6 +10,8 @@ pub struct RawCall {
     pub source_file: String,
     pub source_location: String,
     pub receiver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

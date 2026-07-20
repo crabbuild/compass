@@ -140,6 +140,7 @@ struct ExtractState<'source, 'tree> {
     seen_nodes: HashSet<String>,
     functions: Vec<FunctionBody<'tree>>,
     callables: HashMap<String, Vec<String>>,
+    types: HashMap<String, String>,
 }
 
 fn extract_tree(
@@ -163,6 +164,7 @@ fn extract_tree(
         seen_nodes: HashSet::new(),
         functions: Vec::new(),
         callables: HashMap::new(),
+        types: HashMap::new(),
     };
     let file_label = path
         .file_name()
@@ -186,8 +188,21 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             let id = make_id(&[&self.stem, &name]);
             self.add_node(&id, &name, line(node), true, None);
+            self.types.insert(name, id.clone());
             let source = parent_class.unwrap_or(&self.file_id).to_owned();
             self.add_edge(&source, &id, "contains", line(node), None);
+            if self.language == "java" {
+                self.add_java_parent_edges(node, &id);
+                if kind == "enum_declaration" {
+                    self.add_java_enum_constants(node, &id);
+                    let mut constructors = Vec::new();
+                    collect_nodes_of_kind(node, "constructor_declaration", &mut constructors);
+                    let duplicate_line =
+                        constructors.first().map_or(line(node), |node| line(*node));
+                    self.add_edge(&self.file_id.clone(), &id, "contains", duplicate_line, None);
+                    return;
+                }
+            }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 self.walk_declarations(child, Some(&id));
@@ -220,6 +235,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 line(node),
                 None,
             );
+            if self.language == "java" {
+                self.add_java_function_references(node, &id);
+            }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody {
                 id,
@@ -282,6 +300,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     source_file: self.source_file.clone(),
                     source_location: format!("L{}", line(node)),
                     receiver: call.receiver,
+                    lang: (self.language == "java").then(|| "java".to_owned()),
                 });
             }
         }
@@ -314,6 +333,33 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn call_name(&self, node: Node<'tree>) -> Option<CallName> {
+        if self.language == "java" {
+            if node.kind() == "method_invocation" {
+                let name = node
+                    .child_by_field_name("name")
+                    .and_then(|name| self.node_text(name))
+                    .map(clean_name)?;
+                let receiver = node
+                    .child_by_field_name("object")
+                    .and_then(|receiver| self.node_text(receiver))
+                    .map(clean_name);
+                return Some(CallName {
+                    name,
+                    member: receiver.is_some(),
+                    receiver,
+                });
+            }
+            if node.kind() == "object_creation_expression" {
+                let type_node = node.child_by_field_name("type")?;
+                let name_node = first_identifier(type_node).unwrap_or(type_node);
+                let name = self.node_text(name_node).map(clean_name)?;
+                return Some(CallName {
+                    name,
+                    member: false,
+                    receiver: None,
+                });
+            }
+        }
         let function = if self.config.call_function_field.is_empty() {
             None
         } else {
@@ -448,6 +494,147 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 Some("import"),
             );
         }
+    }
+
+    fn add_java_parent_edges(&mut self, node: Node<'tree>, class_id: &str) {
+        if let Some(superclass) = node.child_by_field_name("superclass")
+            && let Some(name_node) = first_identifier(superclass)
+            && let Some(name) = self.node_text(name_node).map(clean_name)
+        {
+            let target = self.ensure_type_node(&name, false);
+            self.add_edge(class_id, &target, "inherits", line(node), None);
+        }
+        if let Some(interfaces) = node.child_by_field_name("interfaces") {
+            let mut names = Vec::new();
+            collect_type_names(interfaces, self.source, &mut names);
+            for name in names {
+                if java_builtin_type(&name) {
+                    continue;
+                }
+                let target = self.ensure_type_node(&name, false);
+                self.add_edge(class_id, &target, "implements", line(node), None);
+            }
+        }
+    }
+
+    fn add_java_enum_constants(&mut self, node: Node<'tree>, enum_id: &str) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.add_java_enum_constants_recursive(child, enum_id);
+        }
+    }
+
+    fn add_java_enum_constants_recursive(&mut self, node: Node<'tree>, enum_id: &str) {
+        if node.kind() == "enum_constant" {
+            if let Some(name) = node
+                .child_by_field_name("name")
+                .and_then(|name| self.node_text(name))
+                .map(clean_name)
+            {
+                let id = make_id(&[enum_id, &name]);
+                self.add_node(&id, &name, line(node), false, None);
+                self.add_edge(enum_id, &id, "case_of", line(node), None);
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.add_java_enum_constants_recursive(child, enum_id);
+        }
+    }
+
+    fn add_java_function_references(&mut self, node: Node<'tree>, function_id: &str) {
+        let mut parameters = Vec::new();
+        collect_nodes_of_kind(node, "formal_parameter", &mut parameters);
+        for parameter in parameters {
+            if let Some(type_node) = parameter.child_by_field_name("type") {
+                let mut names = Vec::new();
+                collect_type_names(type_node, self.source, &mut names);
+                self.add_java_type_references(function_id, &names, "parameter_type", line(node));
+            }
+        }
+
+        if let Some(return_type) = node.child_by_field_name("type") {
+            let mut names = Vec::new();
+            collect_type_names(return_type, self.source, &mut names);
+            if let Some((base, generic)) = names.split_first() {
+                if !java_builtin_type(base) {
+                    let target = self.ensure_type_node(base, true);
+                    self.add_edge(
+                        function_id,
+                        &target,
+                        "references",
+                        line(node),
+                        Some("return_type"),
+                    );
+                }
+                self.add_java_type_references(function_id, generic, "generic_arg", line(node));
+            }
+        }
+
+        let mut annotations = Vec::new();
+        collect_nodes_of_kind(node, "marker_annotation", &mut annotations);
+        for annotation in annotations {
+            if let Some(name) = annotation
+                .child_by_field_name("name")
+                .and_then(|name| self.node_text(name))
+                .map(clean_name)
+            {
+                let target = self.ensure_type_node(&name, true);
+                self.add_edge(
+                    function_id,
+                    &target,
+                    "references",
+                    line(node),
+                    Some("attribute"),
+                );
+            }
+        }
+    }
+
+    fn add_java_type_references(
+        &mut self,
+        function_id: &str,
+        names: &[String],
+        context: &str,
+        line: usize,
+    ) {
+        for name in names {
+            if java_builtin_type(name) {
+                continue;
+            }
+            let target = self.ensure_type_node(name, true);
+            self.add_edge(function_id, &target, "references", line, Some(context));
+        }
+    }
+
+    fn ensure_type_node(&mut self, name: &str, origin_file: bool) -> String {
+        if let Some(id) = self.types.get(name) {
+            return id.clone();
+        }
+        let local_id = make_id(&[&self.stem, name]);
+        if self.seen_nodes.contains(&local_id) {
+            return local_id;
+        }
+        let id = make_id(&[name]);
+        if self.seen_nodes.insert(id.clone()) {
+            let mut attributes = Map::new();
+            attributes.insert("label".to_owned(), Value::String(name.to_owned()));
+            attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+            attributes.insert("source_file".to_owned(), Value::String(String::new()));
+            attributes.insert("source_location".to_owned(), Value::String(String::new()));
+            if origin_file {
+                attributes.insert(
+                    "origin_file".to_owned(),
+                    Value::String(self.source_file.clone()),
+                );
+            }
+            self.extraction.nodes.push(NodeRecord {
+                id: id.clone(),
+                attributes,
+            });
+        }
+        id
     }
 
     fn node_text(&self, node: Node<'tree>) -> Option<String> {
@@ -611,6 +798,49 @@ fn collect_identifiers(node: Node<'_>, source: &[u8], output: &mut Vec<String>) 
     for child in node.children(&mut cursor) {
         collect_identifiers(child, source, output);
     }
+}
+
+fn collect_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>) {
+    if matches!(node.kind(), "type_identifier" | "scoped_type_identifier")
+        && let Ok(text) = node.utf8_text(source)
+    {
+        output.push(text.to_owned());
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_type_names(child, source, output);
+    }
+}
+
+fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == kind {
+            output.push(child);
+        } else {
+            collect_nodes_of_kind(child, kind, output);
+        }
+    }
+}
+
+fn java_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "String"
+            | "List"
+            | "Map"
+            | "Set"
+            | "ArrayList"
+            | "HashMap"
+            | "Integer"
+            | "Long"
+            | "Double"
+            | "Float"
+            | "Boolean"
+            | "Object"
+            | "Class"
+    )
 }
 
 fn lexical_normalize(path: &Path) -> std::path::PathBuf {
