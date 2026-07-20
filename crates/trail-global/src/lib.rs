@@ -107,8 +107,9 @@ pub fn global_add(
         && existing_path != absolute_source.to_string_lossy()
     {
         loaded_manifest.warnings.push(format!(
-            "[graphify global] warning: repo tag '{repo_tag}' previously pointed to {existing_path:?}, now updating to {:?}. Use --as <tag> to give it a different name.",
-            absolute_source.to_string_lossy()
+            "[graphify global] warning: repo tag '{repo_tag}' previously pointed to {}, now updating to {}. Use --as <tag> to give it a different name.",
+            python_repr(existing_path),
+            python_repr(&absolute_source.to_string_lossy())
         ));
     }
     if existing.get("source_hash").and_then(Value::as_str) == Some(&source_hash) {
@@ -594,6 +595,10 @@ fn home_directory() -> Option<PathBuf> {
 
 fn non_empty(value: &OsString) -> bool {
     value != OsStr::new("")
+}
+
+fn python_repr(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 #[cfg(test)]

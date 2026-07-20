@@ -47,6 +47,7 @@ trail graph hook-check
 trail graph hook-guard
 trail graph merge-driver
 trail graph global
+trail graph clone
 ```
 
 The deterministic language registry is checked against every extension handled

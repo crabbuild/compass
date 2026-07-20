@@ -246,3 +246,49 @@ fn check_update_and_merge_driver_match_python() -> Result<(), Box<dyn Error>> {
     assert_eq!(merged["nodes"].as_array().map(Vec::len), Some(3));
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn clone_command_matches_python_without_network() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = tempfile::tempdir()?;
+    let bin = directory.path().join("bin");
+    std::fs::create_dir_all(&bin)?;
+    let git = bin.join("git");
+    std::fs::write(&git, "#!/bin/sh\nexit 0\n")?;
+    let mut permissions = std::fs::metadata(&git)?.permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&git, permissions)?;
+    let destination = directory.path().join("checkout");
+    let destination_text = destination.to_string_lossy().into_owned();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let arguments = [
+        "clone",
+        "git@github.com:Graphify-Labs/graphify.git",
+        "--branch",
+        "main",
+        "--out",
+        &destination_text,
+    ];
+    let (python, native) = compare(directory.path(), &arguments, "", &[("PATH", &path)])?;
+    assert_eq!(native.status.code(), python.status.code());
+    assert_eq!(native.stdout, python.stdout);
+    assert_eq!(native.stderr, python.stderr);
+
+    let invalid = [
+        "clone",
+        "https://github.com/a/b",
+        "--branch",
+        "--upload-pack=x",
+    ];
+    let (python, native) = compare(directory.path(), &invalid, "", &[])?;
+    assert_eq!(native.status.code(), python.status.code());
+    assert_eq!(native.stdout, python.stdout);
+    assert_eq!(native.stderr, python.stderr);
+    Ok(())
+}

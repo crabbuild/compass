@@ -2,8 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, SystemTime};
 
+use regex::Regex;
 use serde_json::{Map, Value};
 use trail_files::write_text_atomic;
 use trail_global::{GlobalError, GlobalPaths, global_add, global_list, global_remove};
@@ -68,6 +70,141 @@ pub(super) fn command_global(frontend: Frontend, args: &[String]) -> Outcome {
         "path" => Outcome::success(paths.graph.display().to_string()),
         _ => Outcome::failure(global_help(frontend)),
     }
+}
+
+pub(super) fn command_clone(frontend: Frontend, args: &[String]) -> Outcome {
+    let Some(url) = args.first() else {
+        return Outcome::failure(clone_help(frontend));
+    };
+    let mut branch = None;
+    let mut destination = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--branch" if index + 1 < args.len() => {
+                branch = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--out" if index + 1 < args.len() => {
+                destination = Some(PathBuf::from(&args[index + 1]));
+                index += 2;
+            }
+            _ => index += 1,
+        }
+    }
+    if branch
+        .as_deref()
+        .is_some_and(|branch| branch.starts_with('-'))
+    {
+        return Outcome::failure(format!(
+            "error: invalid branch name: {}",
+            python_repr(&branch.unwrap_or_default())
+        ));
+    }
+    let normalized = url.trim_end_matches('/');
+    let without_git = normalized.strip_suffix(".git").unwrap_or(normalized);
+    let Some(captures) = github_url_pattern().captures(without_git) else {
+        return Outcome::failure(format!("error: not a recognised GitHub URL: {without_git}"));
+    };
+    let owner = captures
+        .get(1)
+        .map(|value| value.as_str())
+        .unwrap_or_default();
+    let repo = captures
+        .get(2)
+        .map(|value| value.as_str())
+        .unwrap_or_default();
+    let destination = match destination {
+        Some(destination) => destination,
+        None => {
+            let Ok(paths) = GlobalPaths::discover() else {
+                return Outcome::failure(
+                    "error: could not determine the user home directory".to_owned(),
+                );
+            };
+            paths.directory.join("repos").join(owner).join(repo)
+        }
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = String::new();
+    if destination.exists() {
+        stdout.push(format!(
+            "Repo already cloned at {} - pulling latest...",
+            destination.display()
+        ));
+        let mut command = Command::new("git");
+        command.args(["-C", destination.to_string_lossy().as_ref(), "pull"]);
+        if let Some(branch) = branch.as_deref() {
+            command.args(["origin", "--", branch]);
+        }
+        match command.output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                stderr = format!(
+                    "warning: git pull failed:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            Err(error) => stderr = format!("warning: git pull failed:\n{error}"),
+        }
+    } else {
+        if let Some(parent) = destination.parent()
+            && let Err(error) = fs::create_dir_all(parent)
+        {
+            return Outcome::failure(format!("error: git clone failed:\n{error}"));
+        }
+        stdout.push(format!(
+            "Cloning {without_git} -> {} ...",
+            destination.display()
+        ));
+        let git_url = format!("{without_git}.git");
+        let mut command = Command::new("git");
+        command.args(["clone", "--depth", "1"]);
+        if let Some(branch) = branch.as_deref() {
+            command.args(["--branch", branch]);
+        }
+        command.arg("--").arg(git_url).arg(&destination);
+        match command.output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                return Outcome {
+                    code: 1,
+                    stdout: stdout.join("\n"),
+                    stderr: format!(
+                        "error: git clone failed:\n{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ),
+                    stdout_trailing_newline: true,
+                    stderr_trailing_newline: true,
+                };
+            }
+            Err(error) => {
+                return Outcome {
+                    code: 1,
+                    stdout: stdout.join("\n"),
+                    stderr: format!("error: git clone failed:\n{error}"),
+                    stdout_trailing_newline: true,
+                    stderr_trailing_newline: true,
+                };
+            }
+        }
+    }
+    stdout.push(format!("Ready at: {}", destination.display()));
+    stdout.push(destination.display().to_string());
+    Outcome {
+        code: 0,
+        stdout: stdout.join("\n"),
+        stderr,
+        stdout_trailing_newline: true,
+        stderr_trailing_newline: true,
+    }
+}
+
+fn github_url_pattern() -> &'static Regex {
+    static PATTERN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    PATTERN.get_or_init(|| {
+        Regex::new(r"github\.com[:/]([^/]+)/([^/]+?)$").unwrap_or_else(|_| std::process::abort())
+    })
 }
 
 fn global_add_command(frontend: Frontend, args: &[String], paths: &GlobalPaths) -> Outcome {
@@ -149,6 +286,10 @@ fn python_string_value(value: &Value) -> String {
         Value::String(value) => value.clone(),
         value => value.to_string(),
     }
+}
+
+fn python_repr(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 pub(super) fn command_check_update(frontend: Frontend, args: &[String]) -> Outcome {
@@ -872,6 +1013,18 @@ fn global_remove_help(frontend: Frontend) -> String {
     match frontend {
         Frontend::Trail => "Usage: trail graph global remove <repo-tag>",
         Frontend::Graphify => "Usage: graphify global remove <repo-tag>",
+    }
+    .to_owned()
+}
+
+pub(super) fn clone_help(frontend: Frontend) -> String {
+    match frontend {
+        Frontend::Trail => {
+            "Usage: trail graph clone <github-url> [--branch <branch>] [--out <dir>]"
+        }
+        Frontend::Graphify => {
+            "Usage: graphify clone <github-url> [--branch <branch>] [--out <dir>]"
+        }
     }
     .to_owned()
 }
