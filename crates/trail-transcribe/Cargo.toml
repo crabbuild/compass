@@ -13,10 +13,14 @@ categories.workspace = true
 
 [dependencies]
 sha1.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 symphonia.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 rubato.workspace = true
+ureq.workspace = true
 
 [lints]
 workspace = true

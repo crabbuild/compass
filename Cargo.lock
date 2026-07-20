@@ -3266,10 +3266,14 @@ name = "trail-transcribe"
 version = "0.1.0"
 dependencies = [
  "rubato",
+ "serde",
+ "serde_json",
  "sha1",
+ "sha2 0.10.9",
  "symphonia",
  "tempfile",
  "thiserror 2.0.19",
+ "ureq",
 ]
 
 [[package]]
