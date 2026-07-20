@@ -32,13 +32,16 @@ mod tests {
     };
     use trail_resolve::{resolve, resolve_language_calls};
     use trail_semantic::{
-        EvidenceSource, ValidationLimits, backend_api_key, bind_node_evidence,
+        EvidenceSource, ImageRef, ValidationLimits, anthropic_content,
+        anthropic_http_request_with_images, backend_api_key, bind_node_evidence,
         build_untrusted_prompt, builtin_backend, claude_cli_envelope, detect_builtin_backend,
-        estimate_cost, extraction_prompt, label_identifiers, looks_like_context_exceeded,
-        mark_partial, merged_partial_files, model_requires_default_temperature,
-        neutralize_injection_sentinels, normalize_openai_response, openai_call_parameters,
-        parse_llm_json, partial_source_files, resolve_max_retries, resolve_positive_seconds,
-        resolve_positive_usize, resolve_temperature, response_is_hollow,
+        estimate_cost, extraction_prompt, image_notes, label_identifiers,
+        looks_like_context_exceeded, mark_partial, merged_partial_files,
+        model_requires_default_temperature, neutralize_injection_sentinels,
+        normalize_anthropic_response, normalize_openai_response, ollama_base_url_check,
+        openai_call_parameters, openai_content, parse_llm_json, partial_source_files,
+        provider_base_url_check, resolve_builtin_backend, resolve_max_retries,
+        resolve_positive_seconds, resolve_positive_usize, resolve_temperature, response_is_hollow,
         sanitize_semantic_fragment, strip_partial_markers, validate_semantic_fragment,
         validate_semantic_fragment_with_limits, wrap_untrusted_source,
     };
@@ -293,6 +296,124 @@ mod tests {
     }
 
     #[test]
+    fn semantic_provider_endpoint_policy_matches_python() -> Result<(), Box<dyn Error>> {
+        let provider_urls = [
+            "https://api.example/v1",
+            "http://localhost:11434/v1",
+            "file:///etc/passwd",
+            "gopher://example.com/",
+            "http://example.com/v1",
+        ];
+        let ollama_urls = [
+            "http://169.254.169.254/v1",
+            "http://metadata.google.internal/v1",
+            "http://127.0.0.1:11434/v1",
+        ];
+        let input = json!({"providers":provider_urls,"ollama":ollama_urls});
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("urls.json");
+        fs::write(&path, serde_json::to_vec(&input)?)?;
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from urllib.parse import urlparse; from graphify import llm; x=json.loads(Path(sys.argv[1]).read_text()); print(json.dumps({'providers':[llm.provider_base_url_ok(u,'test',warn=False) for u in x['providers']], 'ollama':[not llm._ollama_host_is_link_local_or_metadata(urlparse(u).hostname or '') for u in x['ollama']]}))",
+            ])
+            .arg(&path)
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(output.status.success());
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let rust = json!({
+            "providers": provider_urls.map(|url| provider_base_url_check(url, "test").allowed),
+            "ollama": ollama_urls.map(|url| ollama_base_url_check(url).allowed),
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_builtin_provider_resolution_matches_python() -> Result<(), Box<dyn Error>> {
+        let environment = std::collections::HashMap::from([
+            (
+                "OPENAI_BASE_URL".to_owned(),
+                "https://gateway.example/v1".to_owned(),
+            ),
+            ("OPENAI_MODEL".to_owned(), "fallback-model".to_owned()),
+            (
+                "GRAPHIFY_OPENAI_MODEL".to_owned(),
+                "openai/gpt-5.2".to_owned(),
+            ),
+            ("OPENAI_API_KEY".to_owned(), "secret-key".to_owned()),
+            ("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), "4096".to_owned()),
+            ("GRAPHIFY_API_TIMEOUT".to_owned(), "45.5".to_owned()),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "3".to_owned()),
+        ]);
+        let mut command = Command::new(python_executable(&repository_root()));
+        command
+            .args([
+                "-c",
+                "import json; from graphify import llm; b=llm.BACKENDS['openai']; m=llm._default_model_for_backend('openai'); print(json.dumps({'base_url':b['base_url'],'model':m,'api_key':llm._get_backend_api_key('openai'),'temperature':llm._resolve_temperature(b.get('temperature'),m),'max_output_tokens':llm._resolve_max_tokens(b['max_tokens']),'timeout':llm._resolve_api_timeout(),'max_retries':llm._resolve_max_retries()}))",
+            ])
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root());
+        for (key, value) in &environment {
+            command.env(key, value);
+        }
+        let output = command.output()?;
+        assert!(output.status.success());
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let resolved = resolve_builtin_backend("openai", &environment, None)?;
+        let rust = json!({
+            "base_url": resolved.base_url,
+            "model": resolved.model,
+            "api_key": resolved.api_key().unwrap_or_default(),
+            "temperature": resolved.temperature,
+            "max_output_tokens": resolved.max_output_tokens,
+            "timeout": resolved.timeout.as_secs_f64(),
+            "max_retries": resolved.max_retries,
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_vision_payloads_match_python() -> Result<(), Box<dyn Error>> {
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                "import json; from pathlib import Path; from graphify import llm; images=[llm._ImageRef(Path('/corpus/diagram.png'),'diagram.png','image/png',b'\\x00\\x01\\x02'),llm._ImageRef(Path('/corpus/large.webp'),'large.webp','image/webp',None)]; print(json.dumps({'notes':llm._image_notes(images),'path_notes':llm._image_notes(images,with_paths=True),'openai':llm._openai_content('source',images),'anthropic':llm._anthropic_content('source',images)}))",
+            ])
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(output.status.success());
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let images = vec![
+            ImageRef {
+                path: PathBuf::from("/corpus/diagram.png"),
+                relative_path: "diagram.png".to_owned(),
+                media_type: "image/png".to_owned(),
+                raw: Some(vec![0, 1, 2]),
+            },
+            ImageRef {
+                path: PathBuf::from("/corpus/large.webp"),
+                relative_path: "large.webp".to_owned(),
+                media_type: "image/webp".to_owned(),
+                raw: None,
+            },
+        ];
+        let rust = json!({
+            "notes": image_notes(&images, false),
+            "path_notes": image_notes(&images, true),
+            "openai": openai_content("source", &images),
+            "anthropic": anthropic_content("source", &images),
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
     fn semantic_extraction_prompts_match_python_bytes() -> Result<(), Box<dyn Error>> {
         let output = Command::new(python_executable(&repository_root()))
             .args([
@@ -383,6 +504,50 @@ mod tests {
                 normalize_openai_response(&responses[0], "kimi-k2.6")?,
                 normalize_openai_response(&responses[1], "qwen")?,
             ],
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_anthropic_call_contract_matches_python() -> Result<(), Box<dyn Error>> {
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                "import json,sys,types; from pathlib import Path; from types import SimpleNamespace as N; captured=[]; response=N(content=[N(text='{\"nodes\":[{\"id\":\"a\"}],\"edges\":[],\"hyperedges\":[]}')],usage=N(input_tokens=11,output_tokens=22),stop_reason='end_turn'); C=type('C',(),{'__init__':lambda s,*a,**k:(setattr(s,'messages',s),None)[-1],'create':lambda s,**k:(captured.append(k),response)[1]}); m=types.ModuleType('anthropic'); m.Anthropic=C; sys.modules['anthropic']=m; from graphify import llm; images=[llm._ImageRef(Path('/corpus/diagram.png'),'diagram.png','image/png',b'\\x00\\x01\\x02')]; result=llm._call_claude('key','claude-test','source',max_tokens=4096,images=images); print(json.dumps({'params':captured[0],'result':result}))",
+            ])
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let images = vec![ImageRef {
+            path: PathBuf::from("/corpus/diagram.png"),
+            relative_path: "diagram.png".to_owned(),
+            media_type: "image/png".to_owned(),
+            raw: Some(vec![0, 1, 2]),
+        }];
+        let request = anthropic_http_request_with_images(
+            "https://api.anthropic.com",
+            "key",
+            "claude-test",
+            "source",
+            &images,
+            4_096,
+            false,
+        );
+        let response = json!({
+            "content":[{"text":"{\"nodes\":[{\"id\":\"a\"}],\"edges\":[],\"hyperedges\":[]}"}],
+            "usage":{"input_tokens":11,"output_tokens":22},
+            "stop_reason":"end_turn"
+        });
+        let rust = json!({
+            "params": request.body,
+            "result": normalize_anthropic_response(&response, "claude-test")?,
         });
         assert_eq!(rust, python);
         Ok(())

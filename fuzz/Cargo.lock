@@ -739,11 +739,13 @@ dependencies = [
 name = "trail-semantic"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "regex",
  "serde_json",
  "sha2",
  "thiserror",
  "ureq",
+ "url",
 ]
 
 [[package]]

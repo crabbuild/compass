@@ -2,11 +2,13 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
+use base64::Engine as _;
 use regex::Regex;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -20,6 +22,9 @@ pub const MAX_SEMANTIC_ID_LENGTH: usize = 256;
 pub const LLM_JSON_MAX_CHARS: usize = 10 * 1024 * 1024;
 pub const PROVIDER_RESPONSE_MAX_BYTES: u64 = 10 * 1024 * 1024;
 pub const FILE_CHAR_CAP: usize = 20_000;
+pub const MAX_INLINE_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
+pub const IMAGE_TOKEN_ESTIMATE: usize = 1_600;
+pub const MAX_IMAGES_PER_CHUNK: usize = 20;
 
 const EXTRACTION_PROMPT: &str = include_str!("../prompts/extraction.txt");
 const DEEP_EXTRACTION_SUFFIX: &str = include_str!("../prompts/deep.txt");
@@ -85,6 +90,8 @@ pub enum SemanticError {
     InvalidEnvelope(String),
     #[error("invalid provider response: {0}")]
     InvalidProviderResponse(String),
+    #[error("invalid provider configuration: {0}")]
+    InvalidProviderConfiguration(String),
     #[error("provider transport failed: {0}")]
     Transport(String),
 }
@@ -739,7 +746,7 @@ pub fn resolve_positive_seconds(default: f64, raw_override: Option<&str>) -> f64
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| *value > 0.0)
+        .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(default)
 }
 
@@ -987,6 +994,510 @@ pub fn estimate_cost(backend: &BackendSpec, input_tokens: u64, output_tokens: u6
         / 1_000_000.0
 }
 
+#[derive(Clone, PartialEq)]
+pub struct ResolvedBackend {
+    pub backend: &'static BackendSpec,
+    pub base_url: Option<String>,
+    pub model: String,
+    api_key: Option<String>,
+    pub temperature: Option<f64>,
+    pub max_output_tokens: usize,
+    pub timeout: Duration,
+    pub max_retries: usize,
+}
+
+impl ResolvedBackend {
+    #[must_use]
+    pub fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
+    }
+}
+
+/// Resolve a built-in provider using the same environment precedence as the
+/// Python implementation. The returned value intentionally has no `Debug` or
+/// serialization implementation because it owns the provider credential.
+pub fn resolve_builtin_backend(
+    name: &str,
+    environment: &HashMap<String, String>,
+    explicit_model: Option<&str>,
+) -> Result<ResolvedBackend, SemanticError> {
+    let backend = builtin_backend(name).ok_or_else(|| {
+        SemanticError::InvalidProviderConfiguration(format!("unknown built-in provider {name:?}"))
+    })?;
+    let base_url = resolved_base_url(name, backend, environment)?;
+    if name == "ollama"
+        && let Some(url) = base_url.as_deref()
+    {
+        let endpoint = ollama_base_url_check(url);
+        if !endpoint.allowed {
+            return Err(SemanticError::InvalidProviderConfiguration(
+                endpoint
+                    .warning
+                    .unwrap_or_else(|| "unsafe Ollama endpoint".to_owned()),
+            ));
+        }
+    }
+    let model = explicit_model
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| resolved_default_model(name, backend, environment));
+    let retries_override = environment.get("GRAPHIFY_MAX_RETRIES").map(String::as_str);
+    let retry_default =
+        if name == "ollama" && retries_override.is_none_or(|value| value.trim().is_empty()) {
+            0
+        } else {
+            6
+        };
+    let timeout_seconds = resolve_positive_seconds(
+        600.0,
+        environment.get("GRAPHIFY_API_TIMEOUT").map(String::as_str),
+    );
+    Ok(ResolvedBackend {
+        backend,
+        base_url,
+        model: model.clone(),
+        api_key: backend_api_key(backend, environment).map(str::to_owned),
+        temperature: resolve_temperature(
+            backend.temperature,
+            &model,
+            environment
+                .get("GRAPHIFY_LLM_TEMPERATURE")
+                .map(String::as_str),
+        ),
+        max_output_tokens: resolve_positive_usize(
+            backend.max_output_tokens,
+            environment
+                .get("GRAPHIFY_MAX_OUTPUT_TOKENS")
+                .map(String::as_str),
+        ),
+        timeout: Duration::from_secs_f64(timeout_seconds),
+        max_retries: resolve_max_retries(retry_default, retries_override),
+    })
+}
+
+fn resolved_base_url(
+    name: &str,
+    backend: &BackendSpec,
+    environment: &HashMap<String, String>,
+) -> Result<Option<String>, SemanticError> {
+    let variable = match name {
+        "claude" => Some("ANTHROPIC_BASE_URL"),
+        "kimi" => Some("KIMI_BASE_URL"),
+        "ollama" => Some("OLLAMA_BASE_URL"),
+        "gemini" => Some("GEMINI_BASE_URL"),
+        "openai" => Some("OPENAI_BASE_URL"),
+        "deepseek" => Some("DEEPSEEK_BASE_URL"),
+        "azure" => {
+            let endpoint = environment
+                .get("AZURE_OPENAI_ENDPOINT")
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    SemanticError::InvalidProviderConfiguration(
+                        "Azure OpenAI backend requires AZURE_OPENAI_ENDPOINT".to_owned(),
+                    )
+                })?;
+            return Ok(Some(endpoint.to_owned()));
+        }
+        _ => None,
+    };
+    Ok(variable
+        .and_then(|key| environment.get(key).cloned())
+        .or_else(|| backend.base_url.map(str::to_owned)))
+}
+
+fn resolved_default_model(
+    name: &str,
+    backend: &BackendSpec,
+    environment: &HashMap<String, String>,
+) -> String {
+    let bootstrap = match name {
+        "claude" => environment.get("ANTHROPIC_MODEL"),
+        "ollama" => environment.get("OLLAMA_MODEL"),
+        "openai" => environment.get("OPENAI_MODEL"),
+        "azure" => environment
+            .get("AZURE_OPENAI_DEPLOYMENT")
+            .or_else(|| environment.get("GRAPHIFY_AZURE_MODEL")),
+        _ => None,
+    }
+    .cloned()
+    .unwrap_or_else(|| backend.default_model.to_owned());
+    backend
+        .model_variable
+        .and_then(|key| environment.get(key))
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .unwrap_or(bootstrap)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EndpointCheck {
+    pub allowed: bool,
+    pub warning: Option<String>,
+}
+
+impl EndpointCheck {
+    fn allowed(warning: Option<String>) -> Self {
+        Self {
+            allowed: true,
+            warning,
+        }
+    }
+
+    fn rejected(warning: String) -> Self {
+        Self {
+            allowed: false,
+            warning: Some(warning),
+        }
+    }
+}
+
+/// Validate a custom provider endpoint before it can receive corpus content.
+#[must_use]
+pub fn provider_base_url_check(base_url: &str, name: &str) -> EndpointCheck {
+    let Ok(parsed) = url::Url::parse(base_url) else {
+        return EndpointCheck::rejected(format!(
+            "provider {name:?} has an unparseable base_url; ignoring"
+        ));
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return EndpointCheck::rejected(format!(
+            "provider {name:?} base_url scheme {:?} is not http/https; ignoring",
+            parsed.scheme()
+        ));
+    }
+    let Some(host) = parsed.host_str() else {
+        return EndpointCheck::rejected(format!(
+            "provider {name:?} base_url has no host; ignoring"
+        ));
+    };
+    let loopback = is_loopback_host(host);
+    let warning = (parsed.scheme() == "http" && !loopback).then(|| {
+        format!(
+            "provider {name:?} sends your corpus to {host:?} over plaintext http; use https unless this is a trusted local endpoint"
+        )
+    });
+    EndpointCheck::allowed(warning)
+}
+
+/// Validate Ollama routing, including aliases that resolve to link-local or
+/// cloud-metadata addresses. General LAN hosts remain allowed with a warning.
+#[must_use]
+pub fn ollama_base_url_check(base_url: &str) -> EndpointCheck {
+    let Ok(parsed) = url::Url::parse(base_url) else {
+        return EndpointCheck::allowed(Some(format!(
+            "OLLAMA_BASE_URL={base_url:?} is not a parseable URL"
+        )));
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return EndpointCheck::allowed(Some(format!(
+            "OLLAMA_BASE_URL has unexpected scheme {:?}; expected http or https",
+            parsed.scheme()
+        )));
+    }
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    if ollama_host_is_link_local_or_metadata(&host, port) {
+        return EndpointCheck::rejected(format!(
+            "OLLAMA_BASE_URL points at a link-local/metadata address ({host:?}); refusing to send the corpus there"
+        ));
+    }
+    if is_loopback_host(&host) {
+        return EndpointCheck::allowed(None);
+    }
+    let encryption = if parsed.scheme() == "http" {
+        " (UNENCRYPTED)"
+    } else {
+        ""
+    };
+    EndpointCheck::allowed(Some(format!(
+        "OLLAMA_BASE_URL points to non-loopback host {host:?}{encryption}; your full corpus will be sent to that endpoint"
+    )))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn ollama_host_is_link_local_or_metadata(host: &str, port: u16) -> bool {
+    if matches!(
+        host,
+        "metadata.google.internal" | "metadata.google.com" | "0.0.0.0" | "::" | "[::]"
+    ) || host.starts_with("169.254.")
+    {
+        return true;
+    }
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .into_iter()
+        .flatten()
+        .any(|address| match address.ip() {
+            IpAddr::V4(ip) => ip.is_link_local(),
+            IpAddr::V6(ip) => ip.is_unicast_link_local(),
+        })
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CustomProviderLoad {
+    pub providers: Map<String, Value>,
+    pub warnings: Vec<String>,
+}
+
+/// Load trusted global providers and, only with explicit opt-in, project-local
+/// providers. Local definitions win because Python reads them first.
+#[must_use]
+pub fn load_custom_providers(
+    global_path: &Path,
+    local_path: &Path,
+    allow_local: bool,
+) -> CustomProviderLoad {
+    let mut loaded = CustomProviderLoad::default();
+    if local_path.is_file() && !allow_local {
+        loaded.warnings.push(format!(
+            "ignoring project-local {} because custom providers control where corpus content and API keys are sent",
+            local_path.display()
+        ));
+    }
+    let paths = if allow_local {
+        [Some(local_path), Some(global_path)]
+    } else {
+        [None, Some(global_path)]
+    };
+    for path in paths.into_iter().flatten().filter(|path| path.is_file()) {
+        let Ok(raw) = fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(Value::Object(providers)) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        for (name, mut provider) in providers {
+            if builtin_backend(&name).is_some() || loaded.providers.contains_key(&name) {
+                continue;
+            }
+            let Some(config) = provider.as_object_mut() else {
+                continue;
+            };
+            let base_url = config
+                .get("base_url")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let endpoint = provider_base_url_check(base_url, &name);
+            if let Some(warning) = endpoint.warning {
+                loaded.warnings.push(warning);
+            }
+            if !endpoint.allowed {
+                continue;
+            }
+            config.entry("pricing").or_insert_with(|| {
+                serde_json::json!({
+                    "input": 0.0,
+                    "output": 0.0
+                })
+            });
+            loaded.providers.insert(name, provider);
+        }
+    }
+    loaded
+}
+
+pub struct ImageRef {
+    pub path: PathBuf,
+    pub relative_path: String,
+    pub media_type: String,
+    pub raw: Option<Vec<u8>>,
+}
+
+#[derive(Default)]
+pub struct ImageRefBuild {
+    pub images: Vec<ImageRef>,
+    pub warnings: Vec<String>,
+}
+
+/// Resolve image paths under the corpus root and load only bounded inline
+/// payloads. Oversized or unreadable images remain reference-only nodes.
+pub fn build_image_refs(
+    paths: &[PathBuf],
+    root: &Path,
+    read_bytes: bool,
+) -> Result<ImageRefBuild, SemanticError> {
+    let canonical_root = fs::canonicalize(root).map_err(|source| SemanticError::Read {
+        path: root.to_path_buf(),
+        source,
+    })?;
+    let mut built = ImageRefBuild::default();
+    for path in paths {
+        let candidate = if path.is_absolute() {
+            path.clone()
+        } else {
+            root.join(path)
+        };
+        let Ok(canonical_path) = fs::canonicalize(&candidate) else {
+            built
+                .warnings
+                .push(format!("could not resolve image {}", path.display()));
+            continue;
+        };
+        if !canonical_path.starts_with(&canonical_root) {
+            built.warnings.push(format!(
+                "skipping image {} because its symlink target is outside the corpus root",
+                path.display()
+            ));
+            continue;
+        }
+        let relative_path = candidate
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
+        let media_type = image_media_type(&candidate).to_owned();
+        let raw = if read_bytes {
+            match fs::metadata(&canonical_path) {
+                Ok(metadata) if metadata.len() > MAX_INLINE_IMAGE_BYTES => {
+                    built.warnings.push(format!(
+                        "image {relative_path} is over the inline-image limit and will be reference-only"
+                    ));
+                    None
+                }
+                Ok(_) => match fs::read(&canonical_path) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) => {
+                        built
+                            .warnings
+                            .push(format!("could not read image {relative_path}: {error}"));
+                        None
+                    }
+                },
+                Err(error) => {
+                    built
+                        .warnings
+                        .push(format!("could not inspect image {relative_path}: {error}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        built.images.push(ImageRef {
+            path: canonical_path,
+            relative_path,
+            media_type,
+            raw,
+        });
+    }
+    Ok(built)
+}
+
+fn image_media_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    }
+}
+
+#[must_use]
+pub fn image_notes(images: &[ImageRef], with_paths: bool) -> String {
+    if images.is_empty() {
+        return String::new();
+    }
+    let header = if with_paths {
+        "Use the Read tool to open and view each image file at the path below, then emit one node per image"
+    } else {
+        "The following image file(s) are attached as visual input. Emit one node per image"
+    };
+    let mut lines = vec![
+        "=== IMAGES ===".to_owned(),
+        format!(
+            "{header} with \"file_type\":\"image\" and the listed source_file, a label describing what it depicts (diagram, screenshot, chart, photo, UI, logo), and edges to any code/doc nodes the image clearly references."
+        ),
+    ];
+    for (index, image) in images.iter().enumerate() {
+        let mut note = format!("[image {}] source_file: {}", index + 1, image.relative_path);
+        if with_paths {
+            note.push_str(&format!("  path: {}", image.path.display()));
+        } else if image.raw.is_none() {
+            note.push_str(" (not shown: unreadable or exceeds size limit)");
+        }
+        lines.push(note);
+    }
+    lines.join("\n")
+}
+
+#[must_use]
+pub fn with_image_notes(user_message: &str, images: &[ImageRef], with_paths: bool) -> String {
+    let notes = image_notes(images, with_paths);
+    if notes.is_empty() {
+        return user_message.to_owned();
+    }
+    if user_message.trim().is_empty() {
+        notes
+    } else {
+        format!("{user_message}\n\n{notes}")
+    }
+}
+
+#[must_use]
+pub fn anthropic_content(user_message: &str, images: &[ImageRef]) -> Value {
+    let text = with_image_notes(user_message, images, false);
+    let mut blocks = images
+        .iter()
+        .filter_map(|image| {
+            let raw = image.raw.as_deref()?;
+            Some(serde_json::json!({
+                "type":"image",
+                "source": {
+                    "type":"base64",
+                    "media_type":image.media_type,
+                    "data":base64::engine::general_purpose::STANDARD.encode(raw)
+                }
+            }))
+        })
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        Value::String(text)
+    } else {
+        blocks.push(serde_json::json!({"type":"text","text":text}));
+        Value::Array(blocks)
+    }
+}
+
+#[must_use]
+pub fn openai_content(user_message: &str, images: &[ImageRef]) -> Value {
+    let text = with_image_notes(user_message, images, false);
+    let image_parts = images.iter().filter_map(|image| {
+        let raw = image.raw.as_deref()?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw);
+        Some(serde_json::json!({
+            "type":"image_url",
+            "image_url": {
+                "url":format!("data:{};base64,{encoded}", image.media_type),
+                "detail":"auto"
+            }
+        }))
+    });
+    let parts = std::iter::once(serde_json::json!({"type":"text","text":text}))
+        .chain(image_parts)
+        .collect::<Vec<_>>();
+    if parts.len() == 1 {
+        parts.into_iter().next().map_or(Value::Null, |part| {
+            part.get("text").cloned().unwrap_or(Value::Null)
+        })
+    } else {
+        Value::Array(parts)
+    }
+}
+
 /// Return the compatibility extraction prompt used for cache fingerprinting
 /// and provider system messages.
 #[must_use]
@@ -1058,6 +1569,41 @@ pub fn openai_call_parameters(
             ),
         );
     }
+    parameters
+}
+
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn openai_call_parameters_with_images(
+    base_url: &str,
+    model: &str,
+    user_message: &str,
+    images: &[ImageRef],
+    temperature: Option<f64>,
+    reasoning_effort: Option<&str>,
+    max_completion_tokens: usize,
+    backend: &str,
+    deep_mode: bool,
+    explicit_extra_body: Option<&Value>,
+    disable_thinking: bool,
+    ollama_num_ctx: Option<&str>,
+    ollama_keep_alive: Option<&str>,
+) -> Value {
+    let mut parameters = openai_call_parameters(
+        base_url,
+        model,
+        user_message,
+        temperature,
+        reasoning_effort,
+        max_completion_tokens,
+        backend,
+        deep_mode,
+        explicit_extra_body,
+        disable_thinking,
+        ollama_num_ctx,
+        ollama_keep_alive,
+    );
+    parameters["messages"][1]["content"] = openai_content(user_message, images);
     parameters
 }
 
@@ -1157,6 +1703,60 @@ pub fn normalize_anthropic_response(response: &Value, model: &str) -> Result<Val
     Ok(result)
 }
 
+/// Normalize the Claude Code CLI result envelope to the shared extraction
+/// response contract.
+pub fn normalize_claude_cli_response(envelope: &Value) -> Result<Value, SemanticError> {
+    let object = envelope.as_object().ok_or_else(|| {
+        SemanticError::InvalidProviderResponse(
+            "Claude CLI result envelope must be an object".to_owned(),
+        )
+    })?;
+    let raw_content = object.get("result").and_then(Value::as_str).unwrap_or("");
+    let mut result = parse_llm_json(if raw_content.is_empty() {
+        "{}"
+    } else {
+        raw_content
+    });
+    let Some(parsed) = result.as_object_mut() else {
+        return Err(SemanticError::InvalidProviderResponse(
+            "parsed Claude CLI fragment was not an object".to_owned(),
+        ));
+    };
+    let usage = object.get("usage");
+    let input_tokens = numeric_u64(usage.and_then(|value| value.get("input_tokens")))
+        .saturating_add(numeric_u64(
+            usage.and_then(|value| value.get("cache_read_input_tokens")),
+        ))
+        .saturating_add(numeric_u64(
+            usage.and_then(|value| value.get("cache_creation_input_tokens")),
+        ));
+    parsed.insert("input_tokens".to_owned(), Value::from(input_tokens));
+    parsed.insert(
+        "output_tokens".to_owned(),
+        Value::from(numeric_u64(
+            usage.and_then(|value| value.get("output_tokens")),
+        )),
+    );
+    let model = object
+        .get("modelUsage")
+        .and_then(Value::as_object)
+        .and_then(|models| models.keys().next())
+        .map_or("claude-code-plan", String::as_str);
+    parsed.insert("model".to_owned(), Value::String(model.to_owned()));
+    let finish = if object.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
+        "length"
+    } else {
+        "stop"
+    };
+    parsed.insert("finish_reason".to_owned(), Value::String(finish.to_owned()));
+    if response_is_hollow(Some(raw_content), &result)
+        && result.get("finish_reason").and_then(Value::as_str) != Some("length")
+    {
+        result["finish_reason"] = Value::String("length".to_owned());
+    }
+    Ok(result)
+}
+
 fn numeric_u64(value: Option<&Value>) -> u64 {
     value
         .and_then(Value::as_u64)
@@ -1210,6 +1810,45 @@ pub fn anthropic_http_request(
     max_tokens: usize,
     deep_mode: bool,
 ) -> JsonRequest {
+    anthropic_http_request_with_content(
+        base_url,
+        api_key,
+        model,
+        Value::String(user_message.to_owned()),
+        max_tokens,
+        deep_mode,
+    )
+}
+
+/// Construct an Anthropic Messages API request with optional image blocks.
+#[must_use]
+pub fn anthropic_http_request_with_images(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    user_message: &str,
+    images: &[ImageRef],
+    max_tokens: usize,
+    deep_mode: bool,
+) -> JsonRequest {
+    anthropic_http_request_with_content(
+        base_url,
+        api_key,
+        model,
+        anthropic_content(user_message, images),
+        max_tokens,
+        deep_mode,
+    )
+}
+
+fn anthropic_http_request_with_content(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    user_content: Value,
+    max_tokens: usize,
+    deep_mode: bool,
+) -> JsonRequest {
     JsonRequest {
         url: format!("{}/v1/messages", base_url.trim_end_matches('/')),
         headers: vec![
@@ -1220,7 +1859,7 @@ pub fn anthropic_http_request(
             "model": model,
             "max_tokens": max_tokens,
             "system": extraction_prompt(deep_mode),
-            "messages": [{"role":"user","content":user_message}]
+            "messages": [{"role":"user","content":user_content}]
         }),
     }
 }
@@ -1805,6 +2444,179 @@ mod tests {
     }
 
     #[test]
+    fn provider_endpoint_checks_block_unsafe_schemes_and_metadata() {
+        assert!(provider_base_url_check("https://api.example/v1", "safe").allowed);
+        assert!(
+            provider_base_url_check("http://localhost:11434/v1", "local")
+                .warning
+                .is_none()
+        );
+        assert!(!provider_base_url_check("file:///etc/passwd", "bad").allowed);
+        assert!(
+            provider_base_url_check("http://example.com/v1", "plain")
+                .warning
+                .is_some()
+        );
+        assert!(!ollama_base_url_check("http://169.254.169.254/v1").allowed);
+        assert!(!ollama_base_url_check("http://metadata.google.internal/v1").allowed);
+        assert!(
+            ollama_base_url_check("http://127.0.0.1:11434/v1")
+                .warning
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn custom_provider_loading_requires_local_opt_in_and_protects_builtins()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let local = directory.path().join("local.json");
+        let global = directory.path().join("global.json");
+        fs::write(
+            &local,
+            r#"{
+                "local": {"base_url":"https://local.example/v1","default_model":"l","env_key":"L_KEY"},
+                "claude": {"base_url":"https://evil.example/v1"}
+            }"#,
+        )?;
+        fs::write(
+            &global,
+            r#"{
+                "global": {"base_url":"http://localhost:8080/v1","default_model":"g","env_key":"G_KEY"},
+                "bad": {"base_url":"file:///etc/passwd"}
+            }"#,
+        )?;
+
+        let guarded = load_custom_providers(&global, &local, false);
+        assert!(!guarded.providers.contains_key("local"));
+        assert!(guarded.providers.contains_key("global"));
+        assert!(!guarded.providers.contains_key("bad"));
+        assert!(
+            guarded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ignoring project-local"))
+        );
+        assert_eq!(
+            guarded.providers["global"]["pricing"],
+            json!({"input":0.0,"output":0.0})
+        );
+
+        let opted_in = load_custom_providers(&global, &local, true);
+        assert!(opted_in.providers.contains_key("local"));
+        assert!(opted_in.providers.contains_key("global"));
+        assert!(!opted_in.providers.contains_key("claude"));
+        Ok(())
+    }
+
+    #[test]
+    fn builtin_provider_resolution_honors_precedence_and_safe_defaults() -> Result<(), SemanticError>
+    {
+        let environment = HashMap::from([
+            (
+                "OPENAI_BASE_URL".to_owned(),
+                "https://gateway.example/v1".to_owned(),
+            ),
+            ("OPENAI_MODEL".to_owned(), "fallback-model".to_owned()),
+            (
+                "GRAPHIFY_OPENAI_MODEL".to_owned(),
+                "openai/gpt-5.2".to_owned(),
+            ),
+            ("OPENAI_API_KEY".to_owned(), "secret-key".to_owned()),
+            ("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), "4096".to_owned()),
+            ("GRAPHIFY_API_TIMEOUT".to_owned(), "45.5".to_owned()),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "3".to_owned()),
+        ]);
+        let resolved = resolve_builtin_backend("openai", &environment, None)?;
+        assert_eq!(
+            resolved.base_url.as_deref(),
+            Some("https://gateway.example/v1")
+        );
+        assert_eq!(resolved.model, "openai/gpt-5.2");
+        assert_eq!(resolved.api_key(), Some("secret-key"));
+        assert_eq!(resolved.temperature, None);
+        assert_eq!(resolved.max_output_tokens, 4_096);
+        assert_eq!(resolved.timeout, Duration::from_secs_f64(45.5));
+        assert_eq!(resolved.max_retries, 3);
+
+        let ollama = resolve_builtin_backend(
+            "ollama",
+            &HashMap::from([(
+                "OLLAMA_BASE_URL".to_owned(),
+                "http://127.0.0.1:11434/v1".to_owned(),
+            )]),
+            None,
+        )?;
+        assert_eq!(ollama.max_retries, 0);
+        assert!(
+            resolve_builtin_backend(
+                "ollama",
+                &HashMap::from([(
+                    "OLLAMA_BASE_URL".to_owned(),
+                    "http://169.254.169.254/v1".to_owned(),
+                )]),
+                None,
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn vision_content_inlines_bounded_pixels_and_preserves_reference_only_images() {
+        let images = vec![
+            ImageRef {
+                path: PathBuf::from("/corpus/diagram.png"),
+                relative_path: "diagram.png".to_owned(),
+                media_type: "image/png".to_owned(),
+                raw: Some(vec![0, 1, 2]),
+            },
+            ImageRef {
+                path: PathBuf::from("/corpus/large.webp"),
+                relative_path: "large.webp".to_owned(),
+                media_type: "image/webp".to_owned(),
+                raw: None,
+            },
+        ];
+        let openai = openai_content("source", &images);
+        assert_eq!(openai[0]["type"], "text");
+        assert_eq!(openai[1]["image_url"]["url"], "data:image/png;base64,AAEC");
+        assert!(
+            openai[0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("large.webp (not shown"))
+        );
+        let anthropic = anthropic_content("source", &images);
+        assert_eq!(anthropic[0]["source"]["data"], "AAEC");
+        assert_eq!(anthropic[1]["type"], "text");
+    }
+
+    #[test]
+    fn image_loading_rejects_paths_outside_corpus() -> Result<(), Box<dyn Error>> {
+        let corpus = tempfile::tempdir()?;
+        let outside = tempfile::tempdir()?;
+        let image = corpus.path().join("small.png");
+        fs::write(&image, [0_u8, 1, 2])?;
+        let outside_image = outside.path().join("outside.png");
+        fs::write(&outside_image, [3_u8, 4, 5])?;
+        let paths = vec![image, outside_image];
+        let built = build_image_refs(&paths, corpus.path(), true)?;
+        assert_eq!(built.images.len(), 1);
+        assert_eq!(built.images[0].relative_path, "small.png");
+        assert_eq!(
+            built.images[0].raw.as_deref(),
+            Some([0_u8, 1, 2].as_slice())
+        );
+        assert!(
+            built
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("outside the corpus root"))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn provider_parameters_and_responses_normalize_hollow_results() -> Result<(), SemanticError> {
         let call = openai_call_parameters(
             "http://localhost:11434/v1",
@@ -1829,6 +2641,20 @@ mod tests {
         let normalized = normalize_openai_response(&response, "qwen")?;
         assert_eq!(normalized["finish_reason"], "length");
         assert_eq!(normalized["input_tokens"], 10);
+        let cli = normalize_claude_cli_response(&json!({
+            "result":"{\"nodes\":[],\"edges\":[]}",
+            "usage":{
+                "input_tokens":10,
+                "cache_read_input_tokens":20,
+                "cache_creation_input_tokens":30,
+                "output_tokens":4
+            },
+            "modelUsage":{"claude-sonnet":{}},
+            "stop_reason":"max_tokens"
+        }))?;
+        assert_eq!(cli["input_tokens"], 60);
+        assert_eq!(cli["model"], "claude-sonnet");
+        assert_eq!(cli["finish_reason"], "length");
         Ok(())
     }
 

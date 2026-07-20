@@ -28,6 +28,7 @@ keywords = ["knowledge-graph", "tree-sitter", "code-analysis", "graph", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
+base64 = "0.22.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
@@ -51,6 +52,7 @@ tree-sitter = "0.26"
 tree-sitter-dm = "0.25.1"
 tree-sitter-language-pack = { version = "=1.13.1", default-features = false }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"] }
+url = "2.5.8"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
