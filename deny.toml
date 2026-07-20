@@ -4,6 +4,9 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "Candle's GEMM stack uses paste only as a compile-time proc macro; it contributes no runtime code, and Trail will remove this exception when Candle migrates to pastey" },
+]
 
 [licenses]
 version = 2
@@ -17,7 +20,6 @@ allow = [
   "ISC",
   "MIT",
   "MPL-2.0",
-  "NCSA",
   "Unicode-3.0",
   "Zlib",
 ]

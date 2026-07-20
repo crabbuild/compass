@@ -21,6 +21,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 rubato.workspace = true
 ureq.workspace = true
+trail-whisper = { version = "0.1.0", path = "../trail-whisper" }
 
 [lints]
 workspace = true
