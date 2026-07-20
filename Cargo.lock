@@ -3617,8 +3617,10 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "glob",
+ "regex",
  "serde_json",
  "tempfile",
+ "time",
  "trail-core",
  "trail-files",
  "trail-graph",
