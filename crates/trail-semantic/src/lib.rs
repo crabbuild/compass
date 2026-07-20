@@ -12,7 +12,8 @@ use base64::Engine as _;
 use regex::Regex;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use trail_files::{FileSlice, bisect_slice, split_file};
+use trail_files::{FileSlice, bisect_slice, read_slice_text, split_file};
+use trail_media::extract_text;
 
 pub const MAX_SEMANTIC_FRAGMENT_BYTES: u64 = 25 * 1024 * 1024;
 pub const MAX_SEMANTIC_FRAGMENT_NODES: usize = 10_000;
@@ -438,6 +439,36 @@ pub struct EvidenceSource<'a> {
     pub content: &'a str,
 }
 
+/// Owned source text loaded from a root-confined semantic work unit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadedSemanticSource {
+    pub path: PathBuf,
+    pub relative_path: String,
+    pub content: String,
+}
+
+/// Prompt material plus non-fatal compatibility skips encountered while loading.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticReadResult {
+    pub prompt: String,
+    pub sources: Vec<LoadedSemanticSource>,
+    pub warnings: Vec<String>,
+}
+
+impl SemanticReadResult {
+    /// Borrow loaded source bodies for evidence validation after extraction.
+    #[must_use]
+    pub fn evidence_sources(&self) -> Vec<EvidenceSource<'_>> {
+        self.sources
+            .iter()
+            .map(|source| EvidenceSource {
+                path: &source.path,
+                content: &source.content,
+            })
+            .collect()
+    }
+}
+
 /// Build the user-message source blocks for already decoded text units.
 /// Sources outside the canonical corpus root are omitted.
 #[must_use]
@@ -700,6 +731,89 @@ impl SemanticUnit {
             Self::Slice(slice) => &slice.path,
         }
     }
+}
+
+/// Load semantic work units without allowing symlink escapes from the corpus.
+/// Malformed binary documents produce an empty, path-bearing source block just
+/// like the Python extractors; unreadable ordinary text units are skipped.
+#[must_use]
+pub fn read_semantic_units(units: &[SemanticUnit], root: &Path) -> SemanticReadResult {
+    let mut result = SemanticReadResult {
+        prompt: String::new(),
+        sources: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let Ok(resolved_root) = root.canonicalize() else {
+        result
+            .warnings
+            .push(format!("could not resolve corpus root {}", root.display()));
+        return result;
+    };
+    for unit in units {
+        let path = unit.path();
+        let Ok(resolved_path) = path.canonicalize() else {
+            result.warnings.push(format!(
+                "could not resolve semantic source {}",
+                path.display()
+            ));
+            continue;
+        };
+        if !resolved_path.starts_with(&resolved_root) {
+            result.warnings.push(format!(
+                "skipping {} because its symlink target is outside the corpus root",
+                path.display()
+            ));
+            continue;
+        }
+        let relative_path = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
+        let loaded = match unit {
+            SemanticUnit::Slice(slice) => {
+                let safe_slice = FileSlice {
+                    path: resolved_path.clone(),
+                    ..slice.clone()
+                };
+                read_slice_text(&safe_slice).ok()
+            }
+            SemanticUnit::File(_) => match extract_text(&resolved_path) {
+                Ok(content) => Some(content),
+                Err(_) if is_compat_binary_document(&resolved_path) => Some(String::new()),
+                Err(_) => None,
+            },
+        };
+        let Some(content) = loaded else {
+            result
+                .warnings
+                .push(format!("could not read semantic source {}", path.display()));
+            continue;
+        };
+        let content = content.chars().take(FILE_CHAR_CAP).collect::<String>();
+        result.sources.push(LoadedSemanticSource {
+            path: resolved_path,
+            relative_path,
+            content,
+        });
+    }
+    result.prompt = result
+        .sources
+        .iter()
+        .map(|source| wrap_untrusted_source(&source.relative_path, &source.content))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    result
+}
+
+fn is_compat_binary_document(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["pdf", "docx", "xlsx"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
 }
 
 /// Expand oversized splittable documents into complete, gap-free slices.
@@ -2635,6 +2749,38 @@ mod tests {
         assert!(prompt.contains("path=\"doc.md\""));
         assert!(!prompt.contains("secret"));
         assert_eq!(prompt.matches('x').count(), FILE_CHAR_CAP);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_unit_reader_confines_paths_and_preserves_slice_characters()
+    -> Result<(), Box<dyn Error>> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("notes.md");
+        fs::write(&path, "αβγδε")?;
+        let outside_root = tempfile::tempdir()?;
+        let outside = outside_root.path().join("secret.md");
+        fs::write(&outside, "secret")?;
+        let units = vec![
+            SemanticUnit::Slice(FileSlice {
+                path: path.clone(),
+                start: 1,
+                end: 4,
+                index: 0,
+                total: 1,
+            }),
+            SemanticUnit::File(outside),
+        ];
+
+        let read = read_semantic_units(&units, root.path());
+
+        assert_eq!(read.sources.len(), 1);
+        assert_eq!(read.sources[0].relative_path, "notes.md");
+        assert_eq!(read.sources[0].content, "βγδ");
+        assert!(read.prompt.contains("βγδ"));
+        assert!(!read.prompt.contains("secret"));
+        assert_eq!(read.warnings.len(), 1);
+        assert_eq!(read.evidence_sources()[0].content, "βγδ");
         Ok(())
     }
 

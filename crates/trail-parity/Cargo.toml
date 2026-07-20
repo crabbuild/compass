@@ -20,6 +20,7 @@ trail-core = { version = "0.1.0", path = "../trail-core" }
 trail-files = { version = "0.1.0", path = "../trail-files" }
 trail-graph = { version = "0.1.0", path = "../trail-graph" }
 trail-languages = { version = "0.1.0", path = "../trail-languages" }
+trail-media = { version = "0.1.0", path = "../trail-media" }
 trail-model = { version = "0.1.0", path = "../trail-model" }
 trail-output = { version = "0.1.0", path = "../trail-output" }
 trail-query = { version = "0.1.0", path = "../trail-query" }

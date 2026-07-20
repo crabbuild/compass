@@ -5,6 +5,7 @@ members = [
     "crates/trail-files",
     "crates/trail-graph",
     "crates/trail-languages",
+    "crates/trail-media",
     "crates/trail-model",
     "crates/trail-output",
     "crates/trail-parity",
@@ -35,6 +36,7 @@ sha2 = "0.10"
 sha1 = "0.10"
 md-5 = "0.10"
 notify = "8.2.0"
+oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compression"] }
 ctrlc = "3.5.2"
 strsim = "0.11"
 rayon = "1"
@@ -53,6 +55,7 @@ tree-sitter-dm = "0.25.1"
 tree-sitter-language-pack = { version = "=1.13.1", default-features = false }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"] }
 url = "2.5.8"
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

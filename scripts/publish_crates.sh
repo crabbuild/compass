@@ -28,6 +28,7 @@ cargo package --workspace --locked --no-verify
 crates=(
   trail-model
   trail-files
+  trail-media
   trail-semantic
   trail-languages
   trail-graph

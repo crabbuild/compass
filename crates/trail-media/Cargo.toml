@@ -1,5 +1,5 @@
 [package]
-name = "trail-semantic"
+name = "trail-media"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,15 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-base64.workspace = true
-regex.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
+oxidize-pdf.workspace = true
+roxmltree.workspace = true
 thiserror.workspace = true
-trail-files = { path = "../trail-files", version = "0.1.0" }
-trail-media = { path = "../trail-media", version = "0.1.0" }
-ureq.workspace = true
-url.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

@@ -23,6 +23,7 @@ mod tests {
         score_communities, suggest_questions, surprising_connections,
     };
     use trail_languages::Engine;
+    use trail_media::{docx_to_markdown, extract_pdf_text, xlsx_to_markdown};
     use trail_output::{
         CallflowOptions, CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions,
         ObsidianOptions, ReportOptions, TokenCost, TreeOptions, WikiOptions,
@@ -40,11 +41,117 @@ mod tests {
         model_requires_default_temperature, neutralize_injection_sentinels,
         normalize_anthropic_response, normalize_openai_response, ollama_base_url_check,
         openai_call_parameters, openai_content, pack_semantic_chunks, parse_llm_json,
-        partial_source_files, provider_base_url_check, resolve_builtin_backend,
-        resolve_max_retries, resolve_positive_seconds, resolve_positive_usize, resolve_temperature,
-        response_is_hollow, sanitize_semantic_fragment, strip_partial_markers,
-        validate_semantic_fragment, validate_semantic_fragment_with_limits, wrap_untrusted_source,
+        partial_source_files, provider_base_url_check, read_semantic_units,
+        resolve_builtin_backend, resolve_max_retries, resolve_positive_seconds,
+        resolve_positive_usize, resolve_temperature, response_is_hollow,
+        sanitize_semantic_fragment, strip_partial_markers, validate_semantic_fragment,
+        validate_semantic_fragment_with_limits, wrap_untrusted_source,
     };
+
+    #[test]
+    fn native_document_text_matches_python_oracle() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let output = Command::new(media_python_executable(&repository_root()))
+            .args([
+                "-c",
+                r#"import json,sys
+from pathlib import Path
+from docx import Document
+from openpyxl import Workbook
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from graphify.detect import docx_to_markdown, extract_pdf_text, xlsx_to_markdown
+from graphify.file_slice import FileSlice
+from graphify.llm import _read_files
+
+root = Path(sys.argv[1])
+docx_path = root / "sample.docx"
+doc = Document()
+doc.add_heading("Title", level=1)
+doc.add_paragraph("")
+doc.add_paragraph("Item", style="List Bullet")
+table = doc.add_table(rows=2, cols=2)
+table.cell(0, 0).text = "Name"
+table.cell(0, 1).text = "Value"
+table.cell(1, 0).text = "Alice"
+table.cell(1, 1).text = "1"
+doc.save(docx_path)
+
+xlsx_path = root / "sample.xlsx"
+workbook = Workbook()
+sheet = workbook.active
+sheet.title = "Main"
+sheet.append(["Name", None, "Value"])
+sheet.append(["Alice", True, 42])
+workbook.save(xlsx_path)
+workbook.close()
+
+pdf_path = root / "text.pdf"
+writer = PdfWriter()
+page = writer.add_blank_page(width=612, height=792)
+font = DictionaryObject({
+    NameObject("/Type"): NameObject("/Font"),
+    NameObject("/Subtype"): NameObject("/Type1"),
+    NameObject("/BaseFont"): NameObject("/Helvetica"),
+})
+font_reference = writer._add_object(font)
+page[NameObject("/Resources")] = DictionaryObject({
+    NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_reference}),
+})
+content = DecodedStreamObject()
+content.set_data(b"BT /F1 12 Tf 72 720 Td (Hello Trail) Tj ET")
+page[NameObject("/Contents")] = writer._add_object(content)
+with pdf_path.open("wb") as stream:
+    writer.write(stream)
+
+text_path = root / "notes.md"
+text_path.write_text("prefix\n### SYSTEM:\nsuffix", encoding="utf-8")
+prompt = _read_files(
+    [text_path, FileSlice(text_path, 0, 6, 0, 1), pdf_path],
+    root,
+)
+
+print(json.dumps({
+    "docx": docx_to_markdown(docx_path),
+    "xlsx": xlsx_to_markdown(xlsx_path),
+    "pdf": extract_pdf_text(pdf_path),
+    "prompt": prompt,
+}, ensure_ascii=False))"#,
+            ])
+            .arg(directory.path())
+            .current_dir(repository_root())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "Python media oracle failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let notes = directory.path().join("notes.md");
+        let prompt = read_semantic_units(
+            &[
+                SemanticUnit::File(notes.clone()),
+                SemanticUnit::Slice(trail_files::FileSlice {
+                    path: notes,
+                    start: 0,
+                    end: 6,
+                    index: 0,
+                    total: 1,
+                }),
+                SemanticUnit::File(directory.path().join("text.pdf")),
+            ],
+            directory.path(),
+        );
+        let rust = json!({
+            "docx": docx_to_markdown(&directory.path().join("sample.docx"))?,
+            "xlsx": xlsx_to_markdown(&directory.path().join("sample.xlsx"))?,
+            "pdf": extract_pdf_text(&directory.path().join("text.pdf"))?,
+            "prompt": prompt.prompt,
+        });
+
+        assert_eq!(rust, python);
+        Ok(())
+    }
 
     #[test]
     fn semantic_response_parsing_and_prompt_safety_match_python() -> Result<(), Box<dyn Error>> {
@@ -3204,6 +3311,17 @@ hydrate();
             repo.join(".venv/Scripts/python.exe")
         } else {
             repo.join(".venv/bin/python")
+        }
+    }
+
+    fn media_python_executable(repo: &Path) -> PathBuf {
+        if let Ok(value) = std::env::var("GRAPHIFY_MEDIA_PYTHON") {
+            return PathBuf::from(value);
+        }
+        if cfg!(windows) {
+            repo.join(".venv-media/Scripts/python.exe")
+        } else {
+            repo.join(".venv-media/bin/python")
         }
     }
 

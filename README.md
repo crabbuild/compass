@@ -44,9 +44,11 @@ Graph edges retain their `EXTRACTED`, `INFERRED`, or `AMBIGUOUS` provenance.
 Semantic extraction for prose, PDFs, images, office files, audio, and video is a
 later compatibility phase. Until that phase lands, `trail graph update` preserves
 an existing semantic layer but never invokes a model or sends data off-machine.
-The native semantic-fragment validation and cleanup boundary is already in place
-and differential-tested, but remains internal until the complete extraction path
-meets the same compatibility standard.
+The native semantic boundary now includes validated provider contracts,
+adaptive chunk recovery, root-confined image loading, and bounded pure-Rust
+PDF/DOCX/XLSX text ingestion. These components are differential-tested but
+remain internal until the complete extraction path meets the same compatibility
+standard.
 
 ## Install from source
 
@@ -84,8 +86,10 @@ It separately fuzzes untrusted semantic fragments before they can reach graph
 construction.
 
 The compatibility tests use the Python checkout at the repository root as the
-behavioral oracle. Set `GRAPHIFY_PYTHON` when its interpreter is not located at
-`.venv/bin/python` or `.venv/Scripts/python.exe`.
+behavioral oracle. Office/PDF dependencies live in a separate `.venv-media`
+environment so installing `lxml` cannot alter unrelated GraphML oracle output.
+Set `GRAPHIFY_PYTHON` and `GRAPHIFY_MEDIA_PYTHON` when those interpreters are in
+different locations.
 
 Performance methodology, the reproducible qualification harness, and the
 current local baseline are documented in [PERFORMANCE.md](PERFORMANCE.md).
