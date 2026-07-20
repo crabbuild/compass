@@ -1,0 +1,5 @@
+[env]
+# Every parser is compiled into Trail. Runtime grammar downloads and dynamic
+# libraries are disabled in Cargo.toml, preserving the local-only code path.
+TSLP_LANGUAGES = "apex,astro,bash,blade,c,cpp,csharp,dart,elixir,fortran,go,groovy,hcl,java,javascript,json,julia,kotlin,lua,objc,pascal,php,powershell,python,razor,ruby,rust,scala,sql,svelte,swift,tsx,typescript,verilog,vue,zig"
+TSLP_LINK_MODE = "static"
