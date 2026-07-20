@@ -116,6 +116,9 @@ impl Engine {
         if spec.name == "csharp" {
             return Ok(crate::csharp::extract(path, &source, root));
         }
+        if spec.name == "cpp" {
+            return Ok(crate::cpp::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

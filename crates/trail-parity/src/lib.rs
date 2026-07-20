@@ -408,6 +408,28 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn cpp_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.cpp", "sample.cu", "sample.metal"] {
+            compare_extraction(fixture, "extract_cpp")?;
+        }
+        let repo = repository_root();
+        for fixture in [
+            "cpp_paired/Foo.cpp",
+            "cpp_paired/Foo.h",
+            "cpp_paired/Main.cpp",
+            "cpp_samedir/Alpha.h",
+            "cpp_samedir/Beta.h",
+            "cpp_logger/a/Logger.cpp",
+            "cpp_logger/a/Logger.h",
+            "cpp_logger/b/Logger.cpp",
+            "cpp_logger/b/Logger.h",
+        ] {
+            compare_extraction_path(&repo.join("tests/fixtures").join(fixture), "extract_cpp")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

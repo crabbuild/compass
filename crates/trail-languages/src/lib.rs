@@ -2,6 +2,7 @@
 
 mod bash;
 mod config;
+mod cpp;
 mod csharp;
 mod dm;
 mod dotnet_project;
