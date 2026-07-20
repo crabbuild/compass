@@ -657,6 +657,8 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     let mut gitignore = true;
     let mut code_only = false;
     let mut cargo = false;
+    let mut google_workspace = false;
+    let mut postgres_dsn = None;
     let mut backend = None;
     let mut model = None;
     let mut deep_mode = false;
@@ -676,6 +678,14 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             "--no-gitignore" => gitignore = false,
             "--code-only" => code_only = true,
             "--cargo" if extract => cargo = true,
+            "--google-workspace" if extract => google_workspace = true,
+            "--postgres" if extract && index + 1 < args.len() => {
+                postgres_dsn = Some(args[index + 1].clone());
+                index += 1;
+            }
+            value if extract && value.starts_with("--postgres=") => {
+                postgres_dsn = Some(value[11..].to_owned());
+            }
             "--allow-partial" if extract => allow_partial = true,
             "--backend" if extract && index + 1 < args.len() => {
                 backend = Some(args[index + 1].clone());
@@ -803,13 +813,13 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 }
                 exclude_hubs = Some(parsed);
             }
-            "--dedup-llm" | "--google-workspace" | "--global" | "--timing" if extract => {
+            "--dedup-llm" | "--global" | "--timing" if extract => {
                 return Outcome::failure(format!(
                     "error: {} is not yet available in native Trail",
                     args[index]
                 ));
             }
-            "--postgres" | "--as" | "--max-workers" if extract => {
+            "--as" | "--max-workers" if extract => {
                 return Outcome::failure(format!(
                     "error: {} is not yet available in native Trail",
                     args[index]
@@ -817,9 +827,7 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             }
             value
                 if extract
-                    && (value.starts_with("--postgres=")
-                        || value.starts_with("--as=")
-                        || value.starts_with("--max-workers=")) =>
+                    && (value.starts_with("--as=") || value.starts_with("--max-workers=")) =>
             {
                 let option = value.split('=').next().unwrap_or(value);
                 return Outcome::failure(format!(
@@ -846,10 +854,20 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
         }
         index += 1;
     }
-    let root = root
-        .or_else(saved_graph_root)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let has_explicit_root = root.is_some();
+    if extract && !has_explicit_root && postgres_dsn.is_none() {
+        return Outcome::failure(
+            "error: must specify a path to scan or a --postgres DSN".to_owned(),
+        );
+    }
+    let root = if extract && !has_explicit_root {
+        PathBuf::from(".")
+    } else {
+        root.or_else(saved_graph_root)
+            .unwrap_or_else(|| PathBuf::from("."))
+    };
     let mut options = BuildOptions::new(&root);
+    options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
     options.force = force;
     options.no_cluster = no_cluster;
@@ -863,6 +881,19 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     } else {
         BuildPurpose::Update
     };
+    options.google_workspace =
+        google_workspace || trail_google_workspace::google_workspace_enabled(None);
+    let postgres_graph = if let Some(dsn) = postgres_dsn.as_deref() {
+        match trail_postgres::introspect_postgres(Some(dsn)) {
+            Ok(graph) => Some(graph),
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        }
+    } else {
+        None
+    };
+    let postgres_counts = postgres_graph
+        .as_ref()
+        .map(|graph| (graph.node_count(), graph.edge_count()));
     let cargo_graph = if cargo {
         match trail_cargo::introspect_cargo(&root) {
             Ok(graph) => Some(graph),
@@ -874,10 +905,13 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     let cargo_counts = cargo_graph
         .as_ref()
         .map(|graph| (graph.nodes.len(), graph.edges.len()));
-    let auxiliary_fragments = cargo_graph
-        .map(trail_cargo::CargoGraph::into_fragment)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let mut auxiliary_fragments = Vec::new();
+    if let Some(graph) = postgres_graph {
+        auxiliary_fragments.push(graph.into_fragment());
+    }
+    if let Some(graph) = cargo_graph {
+        auxiliary_fragments.push(graph.into_fragment());
+    }
     let built = if extract && !code_only {
         build_semantic_graph(
             &options,
@@ -901,11 +935,15 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     };
     match built {
         Ok((result, mut notes)) => {
+            if let Some((nodes, edges)) = postgres_counts {
+                notes.push(format!(
+                    "[trail graph extract] PostgreSQL: {nodes} nodes, {edges} edges"
+                ));
+            }
             if let Some((nodes, edges)) = cargo_counts {
-                notes.insert(
-                    0,
-                    format!("[trail graph extract] Cargo: {nodes} nodes, {edges} edges"),
-                );
+                notes.push(format!(
+                    "[trail graph extract] Cargo: {nodes} nodes, {edges} edges"
+                ));
             }
             let mode = if no_cluster {
                 "without clustering"
@@ -991,6 +1029,7 @@ fn build_semantic_graph(
     let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
     let manifest_path = output_root.join(&output_name).join("manifest.json");
     let detect_options = DetectOptions {
+        scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
         extra_excludes: options.extra_excludes.clone(),
         output_name,
@@ -1286,7 +1325,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: trail graph extract [PATH] [--code-only] [--cargo] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--api-timeout SECONDS] [--allow-partial] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: trail graph extract [PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--api-timeout SECONDS] [--allow-partial] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {

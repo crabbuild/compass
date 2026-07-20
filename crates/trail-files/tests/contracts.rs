@@ -9,6 +9,68 @@ use trail_files::{
 };
 
 #[test]
+fn database_only_detection_does_not_read_local_files() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("local.rs"), "fn local() {}\n")?;
+    fs::write(directory.path().join(".graphifyignore"), "[invalid\n")?;
+    let detection = trail_files::detect(
+        directory.path(),
+        &DetectOptions {
+            scan_filesystem: false,
+            ..DetectOptions::default()
+        },
+    )?;
+    assert_eq!(detection.total_files, 0);
+    assert!(detection.files.values().all(Vec::is_empty));
+    assert!(detection.ignored.is_empty());
+    Ok(())
+}
+
+#[test]
+fn google_workspace_shortcuts_are_opt_in_and_sidecars_are_explicit() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let shortcut = directory.path().join("notes.gdoc");
+    std::fs::write(&shortcut, r#"{"doc_id":"doc-1"}"#)?;
+
+    let default = trail_files::detect(directory.path(), &DetectOptions::default())?;
+    assert!(default.files["document"].is_empty());
+    assert_eq!(
+        default.google_workspace_shortcuts,
+        [std::fs::canonicalize(&shortcut)?]
+    );
+    assert!(
+        default
+            .skipped_sensitive
+            .iter()
+            .any(|message| message.contains("Google Workspace shortcut skipped"))
+    );
+
+    let converted_dir = directory.path().join("converted");
+    std::fs::create_dir_all(&converted_dir)?;
+    let sidecar = converted_dir.join("notes.md");
+    std::fs::write(&sidecar, "# Notes\n\nConverted content.\n")?;
+    let enabled = trail_files::detect(
+        directory.path(),
+        &DetectOptions {
+            google_workspace: true,
+            additional_files: vec![sidecar.clone()],
+            ..DetectOptions::default()
+        },
+    )?;
+    assert_eq!(
+        enabled.files["document"],
+        [std::fs::canonicalize(&sidecar)?.to_string_lossy()]
+    );
+    assert!(
+        !enabled
+            .skipped_sensitive
+            .iter()
+            .any(|message| message.contains("Google Workspace shortcut skipped"))
+    );
+    Ok(())
+}
+
+#[test]
 fn markdown_frontmatter_matches_legacy_bytes() {
     let cases: &[(&[u8], &[u8])] = &[
         (

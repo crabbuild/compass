@@ -54,3 +54,12 @@ pub enum ExtractError {
     File(#[from] trail_files::FileError),
 }
 pub use engine::Engine;
+
+/// Extract deterministic SQL facts from in-memory content.
+///
+/// Live schema introspectors use a virtual path so credentials and temporary
+/// files never enter the graph.
+#[must_use]
+pub fn extract_sql_content(path: &std::path::Path, content: &[u8]) -> Extraction {
+    sql::extract(path, content)
+}

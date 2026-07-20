@@ -7,6 +7,12 @@ use trail_model::{EdgeRecord, NodeRecord};
 
 use crate::{Extraction, file_stem, make_id};
 
+// SQL object references may contain quoted identifiers, including escaped
+// double quotes, and may be schema-qualified. Keep the quotes in the captured
+// label to match tree-sitter-sql and Python's public extraction contract.
+const OBJECT_REFERENCE: &str =
+    r#"(?:(?:"(?:""|[^"])*")|[\w$]+)(?:\.(?:(?:"(?:""|[^"])*")|[\w$]+))*"#;
+
 pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
     State::new(path, source).run()
 }
@@ -84,7 +90,8 @@ impl<'a> State<'a> {
             statement_end(self.text, statement.offset).unwrap_or(self.text.len())
         });
         let block = &self.text[open..close.min(self.text.len())];
-        let Ok(references) = Regex::new(r"(?i)\bREFERENCES\s+([\w$.]+)") else {
+        let Ok(references) = Regex::new(&format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"))
+        else {
             return;
         };
         let mut emitted = HashSet::new();
@@ -150,7 +157,8 @@ impl<'a> State<'a> {
         };
         let end = statement_end(self.text, statement.offset).unwrap_or(self.text.len());
         let body = &self.text[statement.offset..end];
-        let Ok(references) = Regex::new(r"(?i)\bREFERENCES\s+([\w$.]+)") else {
+        let Ok(references) = Regex::new(&format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"))
+        else {
             return;
         };
         for reference in references.captures_iter(body) {
@@ -162,9 +170,9 @@ impl<'a> State<'a> {
     }
 
     fn add_reads(&mut self, source: &str, start: usize, end: usize, include_writes: bool) {
-        let mut patterns = vec![r"(?i)\b(?:FROM|JOIN|INTO)\s+([\w$]+)"];
+        let mut patterns = vec![format!(r"(?i)\b(?:FROM|JOIN|INTO)\s+({OBJECT_REFERENCE})")];
         if include_writes {
-            patterns.push(r"(?i)\bUPDATE\s+([\w$]+)");
+            patterns.push(format!(r"(?i)\bUPDATE\s+({OBJECT_REFERENCE})"));
         }
         let non_tables = [
             "select", "where", "set", "dual", "null", "true", "false", "first", "skip", "rows",
@@ -173,7 +181,7 @@ impl<'a> State<'a> {
         let body = &self.text[start..end.min(self.text.len())];
         let mut seen = HashSet::new();
         for pattern in patterns {
-            let Ok(regex) = Regex::new(pattern) else {
+            let Ok(regex) = Regex::new(&pattern) else {
                 continue;
             };
             for reference in regex.captures_iter(body) {
@@ -265,9 +273,9 @@ impl<'a> State<'a> {
 }
 
 fn statements(source: &str) -> Vec<Statement> {
-    let Ok(pattern) = Regex::new(
-        r"(?i)\b(?:CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)|((?:ALTER)\s+TABLE))\s+([\w$.]+)",
-    ) else {
+    let Ok(pattern) = Regex::new(&format!(
+        r"(?i)\b(?:CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)|((?:ALTER)\s+TABLE))\s+({OBJECT_REFERENCE})"
+    )) else {
         return Vec::new();
     };
     pattern

@@ -31,6 +31,7 @@ crates=(
   trail-media
   trail-whisper
   trail-cargo
+  trail-google-workspace
   trail-prs
   trail-query
   trail-reflect
@@ -39,6 +40,7 @@ crates=(
   trail-transcribe
   trail-ingest
   trail-languages
+  trail-postgres
   trail-graph
   trail-resolve
   trail-output

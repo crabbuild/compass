@@ -64,8 +64,10 @@ built-in and trusted custom providers, standard/deep cache namespaces, adaptive
 chunk recovery, root-confined image loading, bounded pure-Rust PDF/DOCX/XLSX
 ingestion, and guarded incremental replacement. Use `--code-only` to guarantee
 that no model is invoked; add `--cargo` to include workspace-internal crate
-dependency edges from local Cargo manifests. Integrations that have not reached
-compatibility are rejected explicitly instead of being accepted silently.
+dependency edges from local Cargo manifests, `--postgres DSN` for read-only
+schema introspection, or `--google-workspace` to export Drive shortcuts through
+the configured `gws` CLI. Integrations that have not reached compatibility are
+rejected explicitly instead of being accepted silently.
 
 Native Whisper inference, verified model and URL artifact acquisition, and
 bounded audio/video decoding—including AVI—are implemented internally; their

@@ -129,22 +129,28 @@ impl FileType {
 
 #[derive(Debug, Clone)]
 pub struct DetectOptions {
+    pub scan_filesystem: bool,
     pub follow_symlinks: bool,
     pub gitignore: bool,
     pub extra_excludes: Vec<String>,
     pub output_name: String,
     pub cache_root: Option<PathBuf>,
+    pub google_workspace: bool,
+    pub additional_files: Vec<PathBuf>,
 }
 
 impl Default for DetectOptions {
     fn default() -> Self {
         Self {
+            scan_filesystem: true,
             follow_symlinks: false,
             gitignore: true,
             extra_excludes: Vec::new(),
             output_name: std::env::var("GRAPHIFY_OUT")
                 .unwrap_or_else(|_| "graphify-out".to_owned()),
             cache_root: None,
+            google_workspace: false,
+            additional_files: Vec::new(),
         }
     }
 }
@@ -162,6 +168,8 @@ pub struct Detection {
     pub ignored: Vec<String>,
     pub graphifyignore_patterns: usize,
     pub scan_root: String,
+    #[serde(skip)]
+    pub google_workspace_shortcuts: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -808,10 +816,13 @@ impl WalkState<'_> {
 
 pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileError> {
     let root = fs::canonicalize(root).map_err(|source| io_error(root, source))?;
-    let mut patterns = initial_ignore_patterns(&root, options.gitignore);
-    patterns.extend(options.extra_excludes.iter().filter_map(|raw| {
-        parse_ignore_line(raw).and_then(|line| IgnorePattern::new(root.clone(), &line))
-    }));
+    let mut patterns = Vec::new();
+    if options.scan_filesystem {
+        patterns = initial_ignore_patterns(&root, options.gitignore);
+        patterns.extend(options.extra_excludes.iter().filter_map(|raw| {
+            parse_ignore_line(raw).and_then(|line| IgnorePattern::new(root.clone(), &line))
+        }));
+    }
     let mut state = WalkState {
         root: &root,
         options,
@@ -821,11 +832,13 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         walk_errors: Vec::new(),
         skipped_sensitive: Vec::new(),
     };
-    let mut ancestors = vec![root.clone()];
-    state.walk(&root, &mut ancestors);
     let memory = root.join(&options.output_name).join("memory");
-    if memory.is_dir() {
-        collect_memory_files(&memory, &mut state.all_files, &mut state.walk_errors);
+    if options.scan_filesystem {
+        let mut ancestors = vec![root.clone()];
+        state.walk(&root, &mut ancestors);
+        if memory.is_dir() {
+            collect_memory_files(&memory, &mut state.all_files, &mut state.walk_errors);
+        }
     }
     state.all_files.sort();
     state.all_files.dedup();
@@ -835,6 +848,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         .map(|kind| (kind.key().to_owned(), Vec::new()))
         .collect::<BTreeMap<_, _>>();
     let mut unclassified = Vec::new();
+    let mut google_workspace_shortcuts = Vec::new();
     let mut total_words = 0;
     let cache_root = options.cache_root.as_deref().unwrap_or(&root);
     let mut stat_index = StatHashIndex::load(cache_root, &options.output_name);
@@ -861,11 +875,42 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
             unclassified.push(path.to_string_lossy().into_owned());
             continue;
         };
+        if is_google_workspace_shortcut(&path) {
+            google_workspace_shortcuts.push(path.clone());
+            if !options.google_workspace {
+                state.skipped_sensitive.push(format!(
+                    "{} [Google Workspace shortcut skipped - pass --google-workspace or set GRAPHIFY_GOOGLE_WORKSPACE=1]",
+                    path.display()
+                ));
+            }
+            continue;
+        }
         if file_type != FileType::Video {
             total_words += stat_index.word_count(&path, count_words);
         }
         if let Some(bucket) = files.get_mut(file_type.key()) {
             bucket.push(path.to_string_lossy().into_owned());
+        }
+    }
+    for path in &options.additional_files {
+        if !path_is_under(path, &root)
+            || has_noise_ancestor(path, &root, &options.output_name)
+            || ignored(path, &root, &state.patterns)
+            || sensitive(path)
+        {
+            continue;
+        }
+        let Some(file_type) = classify_file(path) else {
+            continue;
+        };
+        if file_type != FileType::Video {
+            total_words += stat_index.word_count(path, count_words);
+        }
+        if let Some(bucket) = files.get_mut(file_type.key()) {
+            let value = path.to_string_lossy().into_owned();
+            if !bucket.contains(&value) {
+                bucket.push(value);
+            }
         }
     }
     for bucket in files.values_mut() {
@@ -901,7 +946,27 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         ignored: state.ignored,
         graphifyignore_patterns,
         scan_root: root.to_string_lossy().into_owned(),
+        google_workspace_shortcuts,
     })
+}
+
+fn is_google_workspace_shortcut(path: &Path) -> bool {
+    matches!(extension(path).as_str(), "gdoc" | "gsheet" | "gslides")
+}
+
+fn has_noise_ancestor(path: &Path, root: &Path, output_name: &str) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return true;
+    };
+    let mut ancestor = root.to_path_buf();
+    let components = relative.components().collect::<Vec<_>>();
+    components
+        .iter()
+        .take(components.len().saturating_sub(1))
+        .any(|component| {
+            ancestor.push(component);
+            is_noise_dir(&ancestor, output_name)
+        })
 }
 
 fn collect_memory_files(directory: &Path, files: &mut Vec<PathBuf>, errors: &mut Vec<String>) {

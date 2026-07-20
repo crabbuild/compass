@@ -24,6 +24,7 @@ use trail_resolve::resolve_with_root;
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
     pub root: PathBuf,
+    pub scan_filesystem: bool,
     pub output_root: Option<PathBuf>,
     pub force: bool,
     pub no_cluster: bool,
@@ -32,6 +33,7 @@ pub struct BuildOptions {
     pub extra_excludes: Vec<String>,
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
+    pub google_workspace: bool,
     /// Override the commit recorded in update artifacts.
     ///
     /// This is primarily useful for reproducible builds and compatibility
@@ -52,6 +54,7 @@ impl BuildOptions {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
+            scan_filesystem: true,
             output_root: None,
             force: false,
             no_cluster: false,
@@ -60,6 +63,7 @@ impl BuildOptions {
             extra_excludes: Vec::new(),
             resolution: 1.0,
             exclude_hubs: None,
+            google_workspace: false,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
         }
@@ -195,15 +199,41 @@ fn build_graph(
         .keys()
         .any(|path| !Path::new(path).exists());
 
-    let detection = detect(
-        &root,
-        &DetectOptions {
-            gitignore: options.gitignore,
-            extra_excludes: options.extra_excludes.clone(),
-            output_name: output_name.clone(),
-            ..DetectOptions::default()
-        },
-    )?;
+    let detect_options = DetectOptions {
+        scan_filesystem: options.scan_filesystem,
+        gitignore: options.gitignore,
+        extra_excludes: options.extra_excludes.clone(),
+        output_name: output_name.clone(),
+        ..DetectOptions::default()
+    };
+    let mut detection = detect(&root, &detect_options)?;
+    if options.google_workspace {
+        let converted_dir = root.join(&output_name).join("converted");
+        let mut sidecars = Vec::new();
+        let mut failures = Vec::new();
+        for shortcut in &detection.google_workspace_shortcuts {
+            match trail_google_workspace::convert_google_workspace_file(shortcut, &converted_dir) {
+                Ok(Some(sidecar)) => sidecars.push(sidecar),
+                Ok(None) => failures.push(format!(
+                    "{} [Google Workspace export produced no readable text]",
+                    shortcut.display()
+                )),
+                Err(error) => failures.push(format!(
+                    "{} [Google Workspace export failed: {error}]",
+                    shortcut.display()
+                )),
+            }
+        }
+        detection = detect(
+            &root,
+            &DetectOptions {
+                google_workspace: true,
+                additional_files: sidecars,
+                ..detect_options
+            },
+        )?;
+        detection.skipped_sensitive.extend(failures);
+    }
     let mut semantic_documents = if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
