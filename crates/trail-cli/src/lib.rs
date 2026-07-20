@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use trail_core::{
-    BuildOptions, ClusterExistingOptions, ExportInputs, LoadedGraph, WatchOptions, WatchStatus,
-    build_local_graph, cluster_existing_graph, default_graph_path, diagnose_graph_file,
-    format_diagnostic_json, format_diagnostic_report, merge_graphs, watch_local_graph,
+    BuildOptions, BuildPurpose, ClusterExistingOptions, ExportInputs, LoadedGraph, WatchOptions,
+    WatchStatus, build_local_graph, cluster_existing_graph, default_graph_path,
+    diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
+    watch_local_graph,
 };
 use trail_graph::god_nodes;
 use trail_model::GraphError;
@@ -63,6 +64,13 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     if frontend == Frontend::Trail {
+        match args.first().map(String::as_str) {
+            Some("--help" | "-h" | "help") => return Outcome::success(trail_help()),
+            Some("--version" | "-V") => {
+                return Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION")));
+            }
+            _ => {}
+        }
         if args.first().map(String::as_str) != Some("graph") {
             return Outcome::failure(trail_help());
         }
@@ -76,6 +84,13 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         });
     };
     args.remove(0);
+    if frontend == Frontend::Trail
+        && args
+            .iter()
+            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+    {
+        return Outcome::success(trail_command_help(&command));
+    }
     match command.as_str() {
         "query" => command_query(&args),
         "path" => command_path(&args),
@@ -670,6 +685,11 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     options.extra_excludes = excludes;
     options.resolution = resolution;
     options.exclude_hubs = exclude_hubs;
+    options.purpose = if extract {
+        BuildPurpose::Extract
+    } else {
+        BuildPurpose::Update
+    };
     match build_local_graph(&options) {
         Ok(result) => {
             let mode = if no_cluster {
@@ -1381,6 +1401,25 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 fn trail_help() -> String {
     "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs"
         .to_owned()
+}
+
+fn trail_command_help(command: &str) -> String {
+    match command {
+        "update" => "Usage: trail graph update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
+        "extract" => "Usage: trail graph extract [PATH] --code-only [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
+        "watch" => watch_help(),
+        "cluster-only" => "Usage: trail graph cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
+        "query" => "Usage: trail graph query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH]".to_owned(),
+        "path" => "Usage: trail graph path \"<source>\" \"<target>\" [--graph PATH]".to_owned(),
+        "explain" => "Usage: trail graph explain \"<node>\" [--graph PATH]".to_owned(),
+        "affected" => "Usage: trail graph affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),
+        "tree" => tree_help(),
+        "export" => export_help().replacen("graphify export", "trail graph export", 1),
+        "benchmark" => "Usage: trail graph benchmark [GRAPH_JSON]".to_owned(),
+        "diagnose" => "Usage: trail graph diagnose multigraph [--graph PATH] [--json] [--max-examples N] [--directed|--undirected] [--extract-path PATH]".to_owned(),
+        "merge-graphs" => "Usage: trail graph merge-graphs <graph1.json> <graph2.json> [...] [--out merged.json]".to_owned(),
+        _ => trail_help(),
+    }
 }
 
 fn watch_help() -> String {

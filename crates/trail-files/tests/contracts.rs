@@ -55,7 +55,10 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
     fs::write(&source, "def main(): pass\n")?;
     let absolute = source.to_string_lossy().into_owned();
     let value = json!({
-        "nodes": [{"id": "main", "source_file": absolute}],
+        "nodes": [
+            {"id": "main", "source_file": absolute},
+            {"id": "external_type", "source_file": "", "origin_file": absolute}
+        ],
         "edges": [],
         "partial": false
     });

@@ -271,6 +271,9 @@ fn relativize_source_files(value: &mut Value, root: &Path) {
         let Some(source) = item.get("source_file").and_then(Value::as_str) else {
             return;
         };
+        if source.is_empty() {
+            return;
+        }
         let path = Path::new(source);
         if !path.is_absolute() {
             return;
@@ -290,6 +293,9 @@ fn absolutize_source_files(value: &mut Value, root: &Path) {
         let Some(source) = item.get("source_file").and_then(Value::as_str) else {
             return;
         };
+        if source.is_empty() {
+            return;
+        }
         if Path::new(source).is_absolute() {
             return;
         }

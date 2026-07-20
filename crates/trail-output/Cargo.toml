@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde.workspace = true
@@ -13,9 +18,9 @@ sha1.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
-trail-files = { path = "../trail-files" }
-trail-graph = { path = "../trail-graph" }
-trail-model = { path = "../trail-model" }
+trail-files = { path = "../trail-files", version = "0.1.0" }
+trail-graph = { path = "../trail-graph", version = "0.1.0" }
+trail-model = { path = "../trail-model", version = "0.1.0" }
 unicode-normalization.workspace = true
 
 [dev-dependencies]

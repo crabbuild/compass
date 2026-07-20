@@ -5,11 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde_json.workspace = true
-trail-languages = { path = "../trail-languages" }
-trail-model = { path = "../trail-model" }
+sha1.workspace = true
+trail-languages = { path = "../trail-languages", version = "0.1.0" }
+trail-model = { path = "../trail-model", version = "0.1.0" }
 
 [lints]
 workspace = true

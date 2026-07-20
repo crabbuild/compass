@@ -19,6 +19,11 @@ edition = "2024"
 rust-version = "1.97"
 license = "Apache-2.0"
 repository = "https://github.com/Graphify-Labs/graphify"
+homepage = "https://github.com/Graphify-Labs/graphify"
+readme = "README.md"
+description = "Native local-first knowledge graph engine for source code and project artifacts"
+keywords = ["knowledge-graph", "tree-sitter", "code-analysis", "graph", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

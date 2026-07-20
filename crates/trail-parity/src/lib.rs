@@ -12,6 +12,7 @@ mod tests {
     use serde_json::{Value, json};
     use tempfile::TempDir;
     use trail_cli::Frontend;
+    use trail_core::{BuildOptions, BuildPurpose, build_local_graph};
     use trail_files::{
         Cache, CacheKind, DetectOptions, Manifest, ManifestKind, detect, file_hash,
         prompt_fingerprint,
@@ -178,15 +179,11 @@ mod tests {
         assert_eq!(extract.code, 0, "{}", extract.stderr);
         assert!(extract.stdout.contains("Trail indexed 1 files"));
         let output = directory.path().join("graphify-out");
-        for artifact in [
-            "graph.json",
-            "manifest.json",
-            ".graphify_analysis.json",
-            ".graphify_labels.json",
-            "GRAPH_REPORT.md",
-        ] {
+        for artifact in ["graph.json", "manifest.json", ".graphify_analysis.json"] {
             assert!(output.join(artifact).is_file(), "missing {artifact}");
         }
+        assert!(!output.join(".graphify_labels.json").exists());
+        assert!(!output.join("GRAPH_REPORT.md").exists());
 
         let update = trail_cli::run(
             Frontend::Trail,
@@ -196,6 +193,8 @@ mod tests {
         );
         assert_eq!(update.code, 0, "{}", update.stderr);
         assert!(update.stdout.contains("0 extracted, 1 cached"));
+        assert!(output.join(".graphify_labels.json").is_file());
+        assert!(output.join("GRAPH_REPORT.md").is_file());
 
         let tree = trail_cli::run(
             Frontend::Trail,
@@ -231,6 +230,149 @@ mod tests {
             ["update", &root].into_iter().map(OsString::from),
         );
         assert_ne!(legacy.code, 0, "uncertified legacy command was exposed");
+        Ok(())
+    }
+
+    #[test]
+    fn trail_help_and_version_do_not_execute_commands() {
+        for arguments in [
+            vec!["--help"],
+            vec!["graph", "query", "--help"],
+            vec!["graph", "path", "--help"],
+            vec!["graph", "export", "html", "--help"],
+            vec!["graph", "diagnose", "multigraph", "--help"],
+        ] {
+            let outcome =
+                trail_cli::run(Frontend::Trail, arguments.into_iter().map(OsString::from));
+            assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+            assert!(outcome.stdout.starts_with("Usage: trail"));
+            assert!(outcome.stderr.is_empty());
+        }
+        let version = trail_cli::run(Frontend::Trail, [OsString::from("--version")]);
+        assert_eq!(version.code, 0);
+        assert!(version.stdout.starts_with("trail "));
+        assert!(version.stderr.is_empty());
+    }
+
+    #[test]
+    fn code_only_raw_extract_matches_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let directory = tempfile::tempdir()?;
+        let rust_project = directory.path().join("rust-project");
+        let python_project = directory.path().join("python-project");
+        let rust_output = directory.path().join("rust-output");
+        let python_output = directory.path().join("python-output");
+        fs::create_dir(&rust_project)?;
+        fs::create_dir(&python_project)?;
+        fs::copy(
+            repo.join("tests/fixtures/sample_calls.py"),
+            rust_project.join("sample_calls.py"),
+        )?;
+        fs::copy(
+            repo.join("tests/fixtures/sample_calls.py"),
+            python_project.join("sample_calls.py"),
+        )?;
+
+        let mut options = BuildOptions::new(&rust_project);
+        options.output_root = Some(rust_output.clone());
+        options.no_cluster = true;
+        options.purpose = BuildPurpose::Extract;
+        build_local_graph(&options)?;
+        let output = Command::new(python_executable(&repo))
+            .args(["-m", "graphify", "extract"])
+            .arg(&python_project)
+            .args(["--code-only", "--no-cluster", "--out"])
+            .arg(&python_output)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env("PYTHONHASHSEED", "0")
+            .env("GRAPHIFY_NO_TIPS", "1")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rust: Value =
+            serde_json::from_slice(&fs::read(rust_output.join("graphify-out/graph.json"))?)?;
+        let python: Value =
+            serde_json::from_slice(&fs::read(python_output.join("graphify-out/graph.json"))?)?;
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn native_update_artifacts_match_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let directory = tempfile::tempdir()?;
+        let project = directory.path().join("project");
+        fs::create_dir(&project)?;
+        fs::copy(
+            repo.join("tests/fixtures/sample_calls.py"),
+            project.join("sample_calls.py"),
+        )?;
+        let output = Command::new(python_executable(&repo))
+            .args(["-m", "graphify", "update"])
+            .arg(&project)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .env("PYTHONHASHSEED", "0")
+            .env("GRAPHIFY_NO_TIPS", "1")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python_out = project.join("graphify-out");
+        let python = directory_tree(&python_out)?;
+        fs::remove_dir_all(&python_out)?;
+
+        let options = BuildOptions::new(&project);
+        build_local_graph(&options)?;
+        let rust = directory_tree(&python_out)?;
+        for artifact in [
+            "graph.json",
+            ".graphify_labels.json",
+            "GRAPH_REPORT.md",
+            ".graphify_root",
+        ] {
+            let rust_bytes = rust
+                .get(artifact)
+                .ok_or_else(|| format!("Rust artifact missing: {artifact}"))?;
+            let python_bytes = python
+                .get(artifact)
+                .ok_or_else(|| format!("Python artifact missing: {artifact}"))?;
+            if artifact.ends_with(".json") || artifact == "manifest.json" {
+                assert_eq!(
+                    serde_json::from_slice::<Value>(rust_bytes)?,
+                    serde_json::from_slice::<Value>(python_bytes)?,
+                    "{artifact}"
+                );
+            } else {
+                assert_eq!(rust_bytes, python_bytes, "{artifact}");
+            }
+        }
+        assert!(!rust.contains_key(".graphify_analysis.json"));
+        assert!(!rust.contains_key(".graphify_labels.json.sig"));
+        let rust_html = String::from_utf8(
+            rust.get("graph.html")
+                .ok_or("Rust artifact missing: graph.html")?
+                .clone(),
+        )?;
+        let python_html = String::from_utf8(
+            python
+                .get("graph.html")
+                .ok_or("Python artifact missing: graph.html")?
+                .clone(),
+        )?;
+        for name in ["RAW_NODES", "RAW_EDGES", "LEGEND"] {
+            assert_eq!(
+                embedded_json(&rust_html, name)?,
+                embedded_json(&python_html, name)?,
+                "graph.html {name}"
+            );
+        }
         Ok(())
     }
 
@@ -531,6 +673,18 @@ mod tests {
     #[test]
     fn python_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.py", "extract_python")
+    }
+
+    #[test]
+    fn python_rationale_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("rationale.py");
+        fs::write(
+            &source,
+            "\"\"\"Module rationale long enough to become graph evidence.\"\"\"\n\n# WHY: preserve this decision\ndef run():\n    \"\"\"Function rationale long enough to become graph evidence.\"\"\"\n    return 1\n\nclass Worker:\n    \"\"\"Class rationale long enough to become graph evidence.\"\"\"\n    def work(self):\n        \"\"\"Method rationale long enough to become graph evidence.\"\"\"\n        return run()\n",
+        )?;
+        compare_extraction_path(&source, "extract_python")?;
+        Ok(())
     }
 
     #[test]
@@ -1192,6 +1346,15 @@ hydrate();
                 "imported.js",
                 "import { importedTarget } from './dep.js';\nexport function accepted() { return importedTarget() }\n",
             ),
+            (
+                "nested.py",
+                "def outer():\n    def inner():\n        from .b import target as alias\n        return alias()\n    return inner()\n",
+            ),
+            ("models.py", "class Response:\n    pass\n"),
+            (
+                "client.py",
+                "from .models import Response\nclass Client:\n    pass\n",
+            ),
         ];
         let mut paths = Vec::new();
         let mut engine = Engine::default();
@@ -1213,23 +1376,30 @@ hydrate();
         let mut rust = resolved
             .edges
             .iter()
-            .filter(|edge| edge.string("relation") == "calls")
+            .filter(|edge| matches!(edge.string("relation").as_str(), "calls" | "uses"))
             .filter_map(|edge| {
                 Some(json!({
                     "source": labels.get(edge.source.as_str())?,
                     "target": labels.get(edge.target.as_str())?,
+                    "relation": edge.string("relation"),
                     "confidence": edge.string("confidence"),
                     "score": edge.attributes.get("confidence_score").cloned().unwrap_or(Value::Null),
                 }))
             })
             .collect::<Vec<_>>();
-        rust.sort_by_key(ToString::to_string);
+        rust.sort_by_key(|row| {
+            (
+                row["source"].as_str().unwrap_or_default().to_owned(),
+                row["target"].as_str().unwrap_or_default().to_owned(),
+                row["relation"].as_str().unwrap_or_default().to_owned(),
+            )
+        });
 
         let repo = repository_root();
         let output = Command::new(python_executable(&repo))
             .args([
                 "-c",
-                "import json,sys; from pathlib import Path; from graphify.extract import extract; ps=[Path(p) for p in sys.argv[2:]]; x=extract(ps, cache_root=Path(sys.argv[1])); labels={n['id']:n.get('label',n['id']) for n in x['nodes']}; rows=[{'source':labels[e['source']],'target':labels[e['target']],'confidence':e.get('confidence',''),'score':e.get('confidence_score')} for e in x['edges'] if e.get('relation')=='calls' and e['source'] in labels and e['target'] in labels]; print(json.dumps(sorted(rows,key=lambda r:json.dumps(r,sort_keys=True)),ensure_ascii=False))",
+                "import json,sys; from pathlib import Path; from graphify.extract import extract; ps=[Path(p) for p in sys.argv[2:]]; x=extract(ps, cache_root=Path(sys.argv[1])); labels={n['id']:n.get('label',n['id']) for n in x['nodes']}; rows=[{'source':labels[e['source']],'target':labels[e['target']],'relation':e.get('relation',''),'confidence':e.get('confidence',''),'score':e.get('confidence_score')} for e in x['edges'] if e.get('relation') in ('calls','uses') and e['source'] in labels and e['target'] in labels]; print(json.dumps(sorted(rows,key=lambda r:json.dumps(r,sort_keys=True)),ensure_ascii=False))",
             ])
             .arg(directory.path())
             .args(&paths)
@@ -1241,7 +1411,14 @@ hydrate();
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let python: Vec<Value> = serde_json::from_slice(&output.stdout)?;
+        let mut python: Vec<Value> = serde_json::from_slice(&output.stdout)?;
+        python.sort_by_key(|row| {
+            (
+                row["source"].as_str().unwrap_or_default().to_owned(),
+                row["target"].as_str().unwrap_or_default().to_owned(),
+                row["relation"].as_str().unwrap_or_default().to_owned(),
+            )
+        });
         assert_eq!(rust, python);
         Ok(())
     }

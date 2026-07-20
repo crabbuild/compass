@@ -8,12 +8,23 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde_json::{Map, Value};
-use trail_languages::{Extraction, RawCall};
+use sha1::{Digest, Sha1};
+use trail_languages::{Extraction, RawCall, make_id};
 use trail_model::{EdgeRecord, NodeRecord};
 
 /// Merge per-file facts in source order, then resolve shared cross-file calls.
 #[must_use]
 pub fn resolve(extractions: &[Extraction], sources: &HashMap<String, String>) -> Extraction {
+    resolve_with_root(extractions, sources, Path::new("."))
+}
+
+/// Merge and resolve facts with an explicit corpus root for portable collision salts.
+#[must_use]
+pub fn resolve_with_root(
+    extractions: &[Extraction],
+    sources: &HashMap<String, String>,
+    root: &Path,
+) -> Extraction {
     let mut merged = Extraction::default();
     for extraction in extractions {
         merged.nodes.extend(extraction.nodes.iter().cloned());
@@ -29,14 +40,252 @@ pub fn resolve(extractions: &[Extraction], sources: &HashMap<String, String>) ->
         }
         merged.extensions.extend(extraction.extensions.clone());
     }
+    canonicalize_import_targets(&mut merged);
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    disambiguate_colliding_node_ids(&mut merged, &canonical_root);
+    rewire_unique_stub_nodes(&mut merged);
     resolve_cross_file_calls(&mut merged, sources);
     members::resolve_language_calls(extractions, &mut merged);
     merged
 }
 
+fn canonicalize_import_targets(extraction: &mut Extraction) {
+    let aliases = extraction
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let source = string_attribute(node, "source_file");
+            is_file_node(node, &source).then_some((make_id(&[&source]), node.id.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    for edge in &mut extraction.edges {
+        if matches!(relation(edge), "imports" | "imports_from" | "re_exports")
+            && let Some(target) = aliases.get(&edge.target)
+        {
+            edge.target.clone_from(target);
+        }
+    }
+}
+
+fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
+    let mut types = HashMap::<String, Vec<String>>::new();
+    let mut functions = HashMap::<String, Vec<String>>::new();
+    let mut stubs = Vec::<(String, String)>::new();
+    for node in &extraction.nodes {
+        let label = node
+            .label()
+            .trim()
+            .trim_matches(['(', ')'])
+            .trim_start_matches('.')
+            .to_owned();
+        if label.is_empty() {
+            continue;
+        }
+        let source = string_attribute(node, "source_file");
+        if source.is_empty() {
+            stubs.push((node.id.clone(), label));
+        } else if is_type_like_definition(node) {
+            types.entry(label).or_default().push(node.id.clone());
+        } else if node.label().ends_with("()") && !node.label().starts_with('.') {
+            functions.entry(label).or_default().push(node.id.clone());
+        }
+    }
+    let supertype_stubs = extraction
+        .edges
+        .iter()
+        .filter(|edge| matches!(relation(edge), "inherits" | "implements" | "extends"))
+        .map(|edge| edge.target.as_str())
+        .collect::<HashSet<_>>();
+    let mut remap = HashMap::new();
+    for (stub, label) in stubs {
+        let candidates = types
+            .get(&label)
+            .filter(|items| items.len() == 1)
+            .or_else(|| {
+                (!supertype_stubs.contains(stub.as_str()))
+                    .then(|| functions.get(&label).filter(|items| items.len() == 1))
+                    .flatten()
+            });
+        if let Some(target) = candidates.and_then(|items| items.first())
+            && target != &stub
+        {
+            remap.insert(stub, target.clone());
+        }
+    }
+    if remap.is_empty() {
+        return;
+    }
+    for edge in &mut extraction.edges {
+        if let Some(target) = remap.get(&edge.source) {
+            edge.source.clone_from(target);
+        }
+        if let Some(target) = remap.get(&edge.target) {
+            edge.target.clone_from(target);
+        }
+    }
+    let referenced = extraction
+        .edges
+        .iter()
+        .flat_map(|edge| [&edge.source, &edge.target])
+        .collect::<HashSet<_>>();
+    extraction
+        .nodes
+        .retain(|node| !remap.contains_key(&node.id) || referenced.contains(&node.id));
+}
+
+fn is_type_like_definition(node: &NodeRecord) -> bool {
+    if string_attribute(node, "type") == "namespace"
+        || string_attribute(node, "file_type") != "code"
+    {
+        return false;
+    }
+    let label = node.label().trim();
+    !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
+}
+
+fn disambiguate_colliding_node_ids(extraction: &mut Extraction, root: &Path) {
+    let mut groups = HashMap::<String, Vec<usize>>::new();
+    for (index, node) in extraction.nodes.iter().enumerate() {
+        if matches!(
+            string_attribute(node, "type").as_str(),
+            "module" | "namespace"
+        ) {
+            continue;
+        }
+        if !node.id.is_empty() {
+            groups.entry(node.id.clone()).or_default().push(index);
+        }
+    }
+    let mut remap = HashMap::<(String, String), String>::new();
+    let mut ambiguous = HashSet::new();
+    for (old_id, indexes) in &groups {
+        let source_keys = indexes
+            .iter()
+            .map(|index| node_source_key(&extraction.nodes[*index], root))
+            .collect::<HashSet<_>>();
+        if indexes.len() < 2 || source_keys.len() < 2 {
+            continue;
+        }
+        ambiguous.insert(old_id.clone());
+        let naive = source_keys
+            .iter()
+            .filter(|key| !key.is_empty())
+            .map(|key| (key.clone(), make_id(&[key, old_id])))
+            .collect::<HashMap<_, _>>();
+        let mut counts = HashMap::<String, usize>::new();
+        for value in naive.values() {
+            *counts.entry(value.clone()).or_default() += 1;
+        }
+        for index in indexes {
+            let source_key = node_source_key(&extraction.nodes[*index], root);
+            if source_key.is_empty() {
+                continue;
+            }
+            let naive_id = naive
+                .get(&source_key)
+                .cloned()
+                .unwrap_or_else(|| make_id(&[&source_key, old_id]));
+            let new_id = if counts.get(&naive_id).copied().unwrap_or_default() > 1 {
+                let digest = Sha1::digest(source_key.as_bytes());
+                let salt = format!("{digest:x}");
+                make_id(&[&source_key, old_id, &salt[..6]])
+            } else {
+                naive_id
+            };
+            remap.insert((old_id.clone(), source_key), new_id.clone());
+            extraction.nodes[*index].id = new_id;
+        }
+    }
+    if remap.is_empty() {
+        for edge in &mut extraction.edges {
+            edge.attributes.remove("target_file");
+        }
+        return;
+    }
+    let mut header_remaps = HashMap::new();
+    for old_id in &ambiguous {
+        if let Some(indexes) = groups.get(old_id) {
+            for index in indexes {
+                let key = node_source_key(&extraction.nodes[*index], root);
+                if matches!(
+                    Path::new(&key)
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                    Some("h" | "hpp" | "hh" | "hxx")
+                ) && let Some(new_id) = remap.get(&(old_id.clone(), key))
+                {
+                    header_remaps.insert(old_id.clone(), new_id.clone());
+                    break;
+                }
+            }
+        }
+    }
+    for edge in &mut extraction.edges {
+        let edge_key = source_key(&edge.string("source_file"), root);
+        if let Some(new_id) = remap.get(&(edge.source.clone(), edge_key.clone())) {
+            edge.source.clone_from(new_id);
+        }
+        let target_file = edge
+            .attributes
+            .remove("target_file")
+            .and_then(|value| value.as_str().map(str::to_owned));
+        let relation = relation(edge);
+        let target_key = if matches!(relation, "imports" | "imports_from" | "re_exports") {
+            target_file
+                .as_deref()
+                .map_or(edge_key, |path| source_key(path, root))
+        } else {
+            edge_key
+        };
+        if matches!(relation, "imports" | "imports_from")
+            && let Some(new_id) = header_remaps.get(&edge.target)
+        {
+            edge.target.clone_from(new_id);
+        } else if let Some(new_id) = remap.get(&(edge.target.clone(), target_key)) {
+            edge.target.clone_from(new_id);
+        }
+    }
+    if let Some(raw_calls) = extraction.raw_calls.as_mut() {
+        for raw in raw_calls {
+            let key = source_key(&raw.source_file, root);
+            if let Some(new_id) = remap.get(&(raw.caller_nid.clone(), key)) {
+                raw.caller_nid.clone_from(new_id);
+            }
+        }
+    }
+}
+
+fn node_source_key(node: &NodeRecord, root: &Path) -> String {
+    let source = string_attribute(node, "source_file");
+    if source.is_empty() {
+        source_key(&string_attribute(node, "origin_file"), root)
+    } else {
+        source_key(&source, root)
+    }
+}
+
+fn source_key(source: &str, root: &Path) -> String {
+    if source.is_empty() {
+        return String::new();
+    }
+    let path = Path::new(source);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    absolute.strip_prefix(root).map_or_else(
+        |_| path.to_string_lossy().replace('\\', "/"),
+        |relative| relative.to_string_lossy().replace('\\', "/"),
+    )
+}
+
 /// Resolve non-member raw calls using unique definitions and import evidence.
 pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<String, String>) {
     resolve_python_import_guided(extraction, sources);
+    resolve_python_class_uses(extraction, sources);
     let mut exact = HashMap::<String, Vec<String>>::new();
     let mut folded = HashMap::<String, Vec<String>>::new();
     let mut source_by_id = HashMap::<String, String>::new();
@@ -138,6 +387,15 @@ pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<S
         let Some((target, import_evidence)) = selection else {
             continue;
         };
+        if raw
+            .extensions
+            .get("symbol_import_use")
+            .and_then(Value::as_bool)
+            == Some(true)
+            && !imported_symbols.is_some_and(|imports| imports.contains(&target))
+        {
+            continue;
+        }
         let indirect = raw.extensions.get("indirect").and_then(Value::as_bool) == Some(true);
         if indirect {
             if target != raw.caller_nid
@@ -167,7 +425,7 @@ pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<S
             continue;
         }
         if existing.insert((raw.caller_nid.clone(), target.clone())) {
-            extraction.edges.push(resolved_edge(
+            let mut edge = resolved_edge(
                 &raw,
                 &target,
                 if import_evidence {
@@ -176,13 +434,22 @@ pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<S
                     "INFERRED"
                 },
                 if import_evidence { 1.0 } else { 0.8 },
-            ));
+            );
+            if raw
+                .extensions
+                .get("symbol_import_use")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                edge.attributes.remove("confidence_score");
+            }
+            extraction.edges.push(edge);
         }
     }
 }
 
 fn resolve_python_import_guided(extraction: &mut Extraction, sources: &HashMap<String, String>) {
-    let mut definitions = HashMap::<(String, String), Vec<String>>::new();
+    let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
         if extension(&source) != "py" {
@@ -195,9 +462,9 @@ fn resolve_python_import_guided(extraction: &mut Extraction, sources: &HashMap<S
             .trim_start_matches('.')
             .to_owned();
         definitions
-            .entry((source, label))
+            .entry(label)
             .or_default()
-            .push(node.id.clone());
+            .push((source, node.id.clone()));
     }
     let mut known = extraction
         .edges
@@ -210,15 +477,77 @@ fn resolve_python_import_guided(extraction: &mut Extraction, sources: &HashMap<S
             )
         })
         .collect::<HashSet<_>>();
-    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
-    for raw in raw_calls {
-        if raw.is_member_call == Some(true) || extension(&raw.source_file) != "py" {
+    let file_nodes = extraction
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let source = string_attribute(node, "source_file");
+            is_file_node(node, &source).then_some((source, node.id.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    for (source_file, source) in sources {
+        if extension(source_file) != "py" {
             continue;
         }
-        let Some(source) = sources.get(&raw.source_file) else {
+        let Some(file_node) = file_nodes.get(source_file) else {
             continue;
         };
-        let aliases = python_import_aliases(source);
+        for imported in python_symbol_imports(source) {
+            let candidates = python_definition_candidates(
+                Path::new(source_file),
+                &imported.module,
+                &imported.imported,
+                &definitions,
+                false,
+            );
+            if candidates.len() != 1 {
+                continue;
+            }
+            let target = &candidates[0];
+            if !known.insert((file_node.clone(), target.clone(), "imports".to_owned())) {
+                continue;
+            }
+            let mut attributes = Map::new();
+            attributes.insert("relation".to_owned(), Value::String("imports".to_owned()));
+            attributes.insert("context".to_owned(), Value::String("import".to_owned()));
+            attributes.insert(
+                "confidence".to_owned(),
+                Value::String("EXTRACTED".to_owned()),
+            );
+            attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
+            attributes.insert(
+                "source_location".to_owned(),
+                Value::String(format!("L{}", imported.line)),
+            );
+            attributes.insert("weight".to_owned(), Value::from(1.0));
+            extraction.edges.push(EdgeRecord {
+                source: file_node.clone(),
+                target: target.clone(),
+                attributes,
+            });
+        }
+    }
+    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
+    let aliases_by_source = sources
+        .iter()
+        .filter(|(source_file, _)| extension(source_file) == "py")
+        .map(|(source_file, source)| (source_file.as_str(), python_import_aliases(source)))
+        .collect::<HashMap<_, _>>();
+    for raw in raw_calls {
+        if raw.is_member_call == Some(true)
+            || extension(&raw.source_file) != "py"
+            || raw.extensions.get("indirect").and_then(Value::as_bool) == Some(true)
+            || raw
+                .extensions
+                .get("symbol_import_use")
+                .and_then(Value::as_bool)
+                == Some(true)
+        {
+            continue;
+        }
+        let Some(aliases) = aliases_by_source.get(raw.source_file.as_str()) else {
+            continue;
+        };
         let Some((module, imported)) = aliases.get(&raw.callee) else {
             continue;
         };
@@ -227,6 +556,7 @@ fn resolve_python_import_guided(extraction: &mut Extraction, sources: &HashMap<S
             module,
             imported,
             &definitions,
+            false,
         );
         if candidates.len() != 1 {
             continue;
@@ -243,38 +573,160 @@ fn resolve_python_import_guided(extraction: &mut Extraction, sources: &HashMap<S
     }
 }
 
+fn resolve_python_class_uses(extraction: &mut Extraction, sources: &HashMap<String, String>) {
+    let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
+    let mut local_classes = HashMap::<String, Vec<String>>::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if extension(&source) != "py" {
+            continue;
+        }
+        let label = node.label();
+        if !label.is_empty()
+            && !label.ends_with(')')
+            && !label.ends_with(".py")
+            && !label.starts_with('_')
+            && string_attribute(node, "file_type") != "rationale"
+        {
+            definitions
+                .entry(label.to_owned())
+                .or_default()
+                .push((source.clone(), node.id.clone()));
+        }
+        if !label.ends_with(')')
+            && !label.ends_with(".py")
+            && string_attribute(node, "file_type") != "rationale"
+            && !is_file_node(node, &source)
+        {
+            local_classes
+                .entry(source)
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+    let mut known = extraction
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.source.clone(),
+                edge.target.clone(),
+                relation(edge).to_owned(),
+            )
+        })
+        .collect::<HashSet<_>>();
+    for (source_file, source) in sources {
+        if extension(source_file) != "py" {
+            continue;
+        }
+        let Some(classes) = local_classes.get(source_file) else {
+            continue;
+        };
+        for imported in python_symbol_imports(source) {
+            let candidates = python_definition_candidates(
+                Path::new(source_file),
+                &imported.module,
+                &imported.imported,
+                &definitions,
+                true,
+            );
+            if candidates.len() != 1 {
+                continue;
+            }
+            for source_id in classes {
+                let target = &candidates[0];
+                if !known.insert((source_id.clone(), target.clone(), "uses".to_owned())) {
+                    continue;
+                }
+                let mut attributes = Map::new();
+                attributes.insert("relation".to_owned(), Value::String("uses".to_owned()));
+                attributes.insert(
+                    "confidence".to_owned(),
+                    Value::String("INFERRED".to_owned()),
+                );
+                attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
+                attributes.insert(
+                    "source_location".to_owned(),
+                    Value::String(format!("L{}", imported.line)),
+                );
+                attributes.insert("weight".to_owned(), Value::from(0.8));
+                extraction.edges.push(EdgeRecord {
+                    source: source_id.clone(),
+                    target: target.clone(),
+                    attributes,
+                });
+            }
+        }
+    }
+}
+
 fn python_import_aliases(source: &str) -> HashMap<String, (String, String)> {
-    let mut aliases = HashMap::new();
-    for line in source.lines() {
-        let line = line.trim();
-        let Some(rest) = line.strip_prefix("from ") else {
+    python_symbol_imports(source)
+        .into_iter()
+        .map(|import| (import.local, (import.module, import.imported)))
+        .collect()
+}
+
+struct PythonImport {
+    module: String,
+    imported: String,
+    local: String,
+    line: usize,
+}
+
+fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut output = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        let Some(rest) = line.trim().strip_prefix("from ") else {
+            index += 1;
             continue;
         };
-        let Some((module, imports)) = rest.split_once(" import ") else {
+        let Some((module, first_imports)) = rest.split_once(" import ") else {
+            index += 1;
             continue;
         };
+        let start_line = index + 1;
+        let mut imports = first_imports.to_owned();
+        while imports.contains('(') && !imports.contains(')') && index + 1 < lines.len() {
+            index += 1;
+            imports.push(' ');
+            imports.push_str(lines[index].trim());
+        }
         for item in imports
             .trim_matches(['(', ')'])
             .split(',')
             .map(str::trim)
             .filter(|item| !item.is_empty() && *item != "*")
         {
+            let item = item.split('#').next().unwrap_or_default().trim();
             let (imported, local) = item
                 .split_once(" as ")
                 .map_or((item, item), |(imported, local)| {
                     (imported.trim(), local.trim())
                 });
-            aliases.insert(local.to_owned(), (module.to_owned(), imported.to_owned()));
+            if !imported.is_empty() && !local.is_empty() {
+                output.push(PythonImport {
+                    module: module.to_owned(),
+                    imported: imported.to_owned(),
+                    local: local.to_owned(),
+                    line: start_line,
+                });
+            }
         }
+        index += 1;
     }
-    aliases
+    output
 }
 
 fn python_definition_candidates(
     caller: &Path,
     module: &str,
     imported: &str,
-    definitions: &HashMap<(String, String), Vec<String>>,
+    definitions: &HashMap<String, Vec<(String, String)>>,
+    allow_module_tail: bool,
 ) -> Vec<String> {
     let bare_module = module.trim_start_matches('.');
     let module_tail = bare_module.rsplit('.').next().unwrap_or_default();
@@ -283,16 +735,17 @@ fn python_definition_candidates(
         .unwrap_or_else(|| Path::new("."))
         .join(format!("{}.py", bare_module.replace('.', "/")));
     let mut output = Vec::new();
-    for ((source, label), ids) in definitions {
-        if label != imported {
-            continue;
-        }
+    for (source, id) in definitions.get(imported).into_iter().flatten() {
         let source_path = Path::new(source);
         let exact_relative = source_path == relative_candidate;
         let matching_stem =
             source_path.file_stem().and_then(|value| value.to_str()) == Some(module_tail);
-        if exact_relative || (!module.starts_with('.') && matching_stem) {
-            output.extend(ids.iter().cloned());
+        if exact_relative
+            || (!module.starts_with('.')
+                && (!module.contains('.') || allow_module_tail)
+                && matching_stem)
+        {
+            output.push(id.clone());
         }
     }
     output

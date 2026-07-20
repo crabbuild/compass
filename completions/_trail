@@ -1,0 +1,29 @@
+#compdef trail
+
+_trail() {
+  local -a commands
+  commands=(
+    'update:incrementally update a local graph'
+    'extract:extract deterministic code facts'
+    'watch:watch and incrementally rebuild'
+    'cluster-only:cluster an existing graph'
+    'query:query graph context'
+    'path:find a shortest graph path'
+    'explain:explain a graph node'
+    'affected:show blast radius'
+    'tree:render the hierarchy tree'
+    'export:export a local graph'
+    'benchmark:measure graph token reduction'
+    'diagnose:run graph diagnostics'
+    'merge-graphs:merge repository graphs'
+  )
+  if (( CURRENT == 2 )); then
+    _values 'namespace' graph
+  elif (( CURRENT == 3 )); then
+    _describe 'graph command' commands
+  else
+    _arguments '*:path:_files'
+  fi
+}
+
+_trail "$@"

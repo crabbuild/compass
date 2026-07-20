@@ -64,6 +64,21 @@ impl Manifest {
         &self.entries
     }
 
+    /// Return true when the detected corpus is exactly the manifest corpus and
+    /// every relevant content stamp is still valid.
+    #[must_use]
+    pub fn is_unchanged(&self, files: &BTreeMap<String, Vec<String>>, kind: ManifestKind) -> bool {
+        if self.entries.is_empty() {
+            return false;
+        }
+        let current = files.values().flatten().cloned().collect::<BTreeSet<_>>();
+        let stored = self.entries.keys().cloned().collect::<BTreeSet<_>>();
+        current == stored
+            && current
+                .into_iter()
+                .all(|file| !changed(Path::new(&file), self.entries.get(&file), kind))
+    }
+
     pub fn save(
         &mut self,
         files: &BTreeMap<String, Vec<String>>,

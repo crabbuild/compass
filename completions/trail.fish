@@ -1,0 +1,10 @@
+complete -c trail -f -n '__fish_use_subcommand' -a graph -d 'Knowledge graph commands'
+complete -c trail -f -n '__fish_seen_subcommand_from graph; and not __fish_seen_subcommand_from update extract watch cluster-only query path explain affected tree export benchmark diagnose merge-graphs' -a 'update extract watch cluster-only query path explain affected tree export benchmark diagnose merge-graphs'
+complete -c trail -f -n '__fish_seen_subcommand_from export' -a 'html callflow-html obsidian wiki svg graphml'
+complete -c trail -f -n '__fish_seen_subcommand_from diagnose' -a multigraph
+complete -c trail -l help -d 'Show help'
+complete -c trail -l version -d 'Show version'
+complete -c trail -l graph -r -d 'Path to graph.json'
+complete -c trail -l out -r -d 'Output directory'
+complete -c trail -l no-cluster -d 'Skip clustering'
+complete -c trail -l no-viz -d 'Skip visualization'

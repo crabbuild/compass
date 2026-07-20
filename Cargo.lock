@@ -1387,6 +1387,7 @@ name = "trail-resolve"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "sha1",
  "trail-languages",
  "trail-model",
 ]
