@@ -33,19 +33,20 @@ mod tests {
     };
     use trail_resolve::{resolve, resolve_language_calls};
     use trail_semantic::{
-        EvidenceSource, ImageRef, SemanticUnit, ValidationLimits, anthropic_content,
-        anthropic_http_request_with_images, backend_api_key, bind_node_evidence,
-        build_untrusted_prompt, builtin_backend, claude_cli_envelope, detect_builtin_backend,
-        estimate_cost, extract_with_adaptive_retry, extraction_prompt, image_notes,
-        label_identifiers, looks_like_context_exceeded, mark_partial, merged_partial_files,
+        EvidenceSource, ImageRef, SemanticCacheSaveOptions, SemanticUnit, ValidationLimits,
+        anthropic_content, anthropic_http_request_with_images, backend_api_key, bind_node_evidence,
+        build_untrusted_prompt, builtin_backend, check_semantic_cache, claude_cli_envelope,
+        detect_backend_with_custom, detect_builtin_backend, estimate_cost,
+        extract_with_adaptive_retry, extraction_prompt, image_notes, label_identifiers,
+        looks_like_context_exceeded, mark_partial, merged_partial_files,
         model_requires_default_temperature, neutralize_injection_sentinels,
         normalize_anthropic_response, normalize_openai_response, ollama_base_url_check,
         openai_call_parameters, openai_content, pack_semantic_chunks, parse_llm_json,
         partial_source_files, provider_base_url_check, read_semantic_units,
-        resolve_builtin_backend, resolve_max_retries, resolve_positive_seconds,
-        resolve_positive_usize, resolve_temperature, response_is_hollow,
-        sanitize_semantic_fragment, strip_partial_markers, validate_semantic_fragment,
-        validate_semantic_fragment_with_limits, wrap_untrusted_source,
+        reconcile_semantic_scope, resolve_builtin_backend, resolve_custom_backend,
+        resolve_max_retries, resolve_positive_seconds, resolve_positive_usize, resolve_temperature,
+        response_is_hollow, sanitize_semantic_fragment, save_semantic_cache, strip_partial_markers,
+        validate_semantic_fragment, validate_semantic_fragment_with_limits, wrap_untrusted_source,
     };
 
     #[test]
@@ -350,6 +351,59 @@ print(json.dumps({
     }
 
     #[test]
+    fn semantic_scope_reconciliation_matches_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        for name in ["a.md", "b.md", "c.md"] {
+            fs::write(directory.path().join(name), name)?;
+        }
+        let input = json!({
+            "nodes":[
+                {"id":"a","source_file":"a.md"},
+                {"id":"c","source_file":"c.md"},
+                {"id":"concept","source_file":"not-a-real-file"}
+            ],
+            "edges":[
+                {"source":"a","target":"c"},
+                {"source":"a","target":"concept","source_file":"c.md"},
+                {"source":"a","target":"concept"}
+            ],
+            "hyperedges":[
+                {"id":"removed","nodes":["a","c"]},
+                {"id":"kept","nodes":["a","concept"]}
+            ],
+            "input_tokens":0,
+            "output_tokens":0
+        });
+        let input_path = directory.path().join("fragment.json");
+        fs::write(&input_path, serde_json::to_vec(&input)?)?;
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                "import json,os,sys; from pathlib import Path; from graphify import llm; root=Path(sys.argv[1]); fragment=json.loads(Path(sys.argv[2]).read_text()); llm._extract_with_adaptive_retry=lambda *a,**k: fragment; os.environ['GRAPHIFY_NO_INCREMENTAL_CACHE']='1'; result=llm.extract_corpus_parallel([root/'a.md',root/'b.md'],root=root,token_budget=None,chunk_size=2,max_concurrency=1); print(json.dumps(result,sort_keys=True))",
+            ])
+            .arg(directory.path())
+            .arg(&input_path)
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let mut rust = input;
+        rust["failed_chunks"] = Value::from(0);
+        reconcile_semantic_scope(
+            &mut rust,
+            &[directory.path().join("a.md"), directory.path().join("b.md")],
+            directory.path(),
+        )?;
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
     fn semantic_provider_options_and_envelopes_match_python() -> Result<(), Box<dyn Error>> {
         let output = Command::new(python_executable(&repository_root()))
             .args([
@@ -531,6 +585,67 @@ print(json.dumps({
             "max_output_tokens": resolved.max_output_tokens,
             "timeout": resolved.timeout.as_secs_f64(),
             "max_retries": resolved.max_retries,
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_custom_provider_resolution_matches_python() -> Result<(), Box<dyn Error>> {
+        let config = json!({
+            "base_url": "https://gateway.example/v1",
+            "default_model": "default-model",
+            "model_env_key": "CUSTOM_MODEL",
+            "env_keys": ["MISSING_KEY", "CUSTOM_KEY"],
+            "temperature": 0.25,
+            "max_completion_tokens": 12000,
+            "reasoning_effort": "low",
+            "vision": true,
+            "extra_body": {"chat_template_kwargs":{"enable_thinking":false}}
+        });
+        let environment = std::collections::HashMap::from([
+            ("CUSTOM_KEY".to_owned(), "secret-key".to_owned()),
+            ("CUSTOM_MODEL".to_owned(), "environment-model".to_owned()),
+            ("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), "9000".to_owned()),
+            ("GRAPHIFY_API_TIMEOUT".to_owned(), "45.5".to_owned()),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "3".to_owned()),
+        ]);
+        let directory = tempfile::tempdir()?;
+        let config_path = directory.path().join("provider.json");
+        fs::write(&config_path, serde_json::to_vec(&config)?)?;
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                "import json,os,sys; from pathlib import Path; from graphify import llm; cfg=json.loads(Path(sys.argv[1]).read_text()); llm.BACKENDS={**llm.BACKENDS,'gateway':cfg}; builtin=['GEMINI_API_KEY','GOOGLE_API_KEY','MOONSHOT_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY','DEEPSEEK_API_KEY','AZURE_OPENAI_API_KEY','AZURE_OPENAI_ENDPOINT','AWS_PROFILE','AWS_REGION','AWS_DEFAULT_REGION','OLLAMA_BASE_URL']; [os.environ.pop(k,None) for k in builtin]; m=llm._default_model_for_backend('gateway'); print(json.dumps({'detected':llm.detect_backend(),'base_url':cfg['base_url'],'model':m,'api_key':llm._get_backend_api_key('gateway'),'temperature':llm._resolve_temperature(cfg.get('temperature'),m),'max_output_tokens':llm._resolve_max_tokens(cfg.get('max_completion_tokens') or cfg.get('max_tokens',8192)),'timeout':llm._resolve_api_timeout(),'max_retries':llm._resolve_max_retries(),'reasoning_effort':cfg.get('reasoning_effort'),'vision':bool(cfg.get('vision',False)),'extra_body':cfg.get('extra_body')}))",
+            ])
+            .arg(&config_path)
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .envs(&environment)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let providers = config
+            .as_object()
+            .map(|_| serde_json::Map::from_iter([("gateway".to_owned(), config.clone())]))
+            .ok_or("custom provider fixture must be an object")?;
+        let resolved = resolve_custom_backend("gateway", &config, &environment, None, None)?;
+        let rust = json!({
+            "detected": detect_backend_with_custom(&providers, &environment),
+            "base_url": resolved.base_url,
+            "model": resolved.model,
+            "api_key": resolved.api_key(),
+            "temperature": resolved.temperature,
+            "max_output_tokens": resolved.max_output_tokens,
+            "timeout": resolved.timeout.as_secs_f64(),
+            "max_retries": resolved.max_retries,
+            "reasoning_effort": resolved.reasoning_effort,
+            "vision": resolved.vision,
+            "extra_body": resolved.extra_body,
         });
         assert_eq!(rust, python);
         Ok(())
@@ -1450,6 +1565,63 @@ print(json.dumps({
         );
         let python_cache: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         assert_eq!(python_cache, cached);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_cache_cross_reads_with_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = fs::canonicalize(directory.path())?;
+        let source = root.join("guide.md");
+        fs::write(&source, "# Guide\n")?;
+        let prompt = "semantic prompt v1";
+        let source_string = source.to_string_lossy().into_owned();
+        let fragment = json!({
+            "nodes":[{"id":"guide","source_file":source_string}],
+            "edges":[],
+            "hyperedges":[]
+        });
+        let mut cache = Cache::new(&root, None)?;
+        save_semantic_cache(
+            &mut cache,
+            &root,
+            &fragment,
+            &SemanticCacheSaveOptions {
+                merge_existing: false,
+                allowed_source_files: Some(vec![source.clone()]),
+                partial_source_files: Vec::new(),
+                deep_mode: false,
+                prompt: prompt.to_owned(),
+            },
+        )?;
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from graphify.cache import check_semantic_cache; n,e,h,u=check_semantic_cache([sys.argv[1]],root=Path(sys.argv[2]),prompt=sys.argv[3]); print(json.dumps({'nodes':n,'edges':e,'hyperedges':h,'uncached':u},sort_keys=True))",
+            ])
+            .arg(&source)
+            .arg(&root)
+            .arg(prompt)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let rust = check_semantic_cache(&mut cache, std::slice::from_ref(&source), false, prompt)?;
+        assert_eq!(
+            python,
+            json!({
+                "nodes":rust.nodes,
+                "edges":rust.edges,
+                "hyperedges":rust.hyperedges,
+                "uncached":rust.uncached,
+            })
+        );
         Ok(())
     }
 
