@@ -50,6 +50,7 @@ trail graph global
 trail graph clone
 trail graph add
 trail graph label
+trail graph prs
 trail graph hook
 ```
 

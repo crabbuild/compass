@@ -11,6 +11,7 @@ members = [
     "crates/trail-model",
     "crates/trail-output",
     "crates/trail-parity",
+    "crates/trail-prs",
     "crates/trail-query",
     "crates/trail-reflect",
     "crates/trail-resolve",

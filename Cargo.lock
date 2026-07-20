@@ -3628,6 +3628,7 @@ dependencies = [
  "trail-ingest",
  "trail-model",
  "trail-output",
+ "trail-prs",
  "trail-query",
  "trail-reflect",
  "trail-semantic",
@@ -3792,6 +3793,19 @@ dependencies = [
  "trail-resolve",
  "trail-semantic",
  "trail-transcribe",
+]
+
+[[package]]
+name = "trail-prs"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "trail-model",
+ "wait-timeout",
 ]
 
 [[package]]
