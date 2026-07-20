@@ -239,8 +239,8 @@ fn execute(stream: &mut impl ReadWrite, operation: &CypherOperation) -> Result<(
         operation
             .params
             .iter()
-            .map(|(key, value)| (key.clone(), PValue::from_json(value)))
-            .collect(),
+            .map(|(key, value)| Ok((key.clone(), PValue::from_json(value)?)))
+            .collect::<Result<_, GraphDbError>>()?,
     );
     let run = structure(
         0x10,
@@ -366,22 +366,39 @@ enum PValue {
 }
 
 impl PValue {
-    fn from_json(value: &Value) -> Self {
+    fn from_json(value: &Value) -> Result<Self, GraphDbError> {
         match value {
-            Value::Null => Self::Null,
-            Value::Bool(value) => Self::Bool(*value),
-            Value::Number(value) => value.as_i64().map_or_else(
-                || Self::Float(value.as_f64().unwrap_or_default()),
-                Self::Integer,
-            ),
-            Value::String(value) => Self::String(value.clone()),
-            Value::Array(values) => Self::List(values.iter().map(Self::from_json).collect()),
-            Value::Object(values) => Self::Map(
+            Value::Null => Ok(Self::Null),
+            Value::Bool(value) => Ok(Self::Bool(*value)),
+            Value::Number(value) => {
+                if let Some(value) = value.as_i64() {
+                    Ok(Self::Integer(value))
+                } else if value.is_u64() {
+                    Err(GraphDbError::Protocol(
+                        "Neo4j integer exceeded signed 64-bit range",
+                    ))
+                } else {
+                    value
+                        .as_f64()
+                        .map(Self::Float)
+                        .ok_or(GraphDbError::Protocol(
+                            "Neo4j number could not be represented",
+                        ))
+                }
+            }
+            Value::String(value) => Ok(Self::String(value.clone())),
+            Value::Array(values) => Ok(Self::List(
                 values
                     .iter()
-                    .map(|(key, value)| (key.clone(), Self::from_json(value)))
-                    .collect(),
-            ),
+                    .map(Self::from_json)
+                    .collect::<Result<_, _>>()?,
+            )),
+            Value::Object(values) => Ok(Self::Map(
+                values
+                    .iter()
+                    .map(|(key, value)| Ok((key.clone(), Self::from_json(value)?)))
+                    .collect::<Result<_, GraphDbError>>()?,
+            )),
         }
     }
 
@@ -1054,6 +1071,7 @@ mod tests {
             usize::try_from(cursor.position()).unwrap_or_default(),
             encoded.len()
         );
+        assert!(PValue::from_json(&Value::from(u64::MAX)).is_err());
         Ok(())
     }
 
