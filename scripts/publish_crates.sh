@@ -29,12 +29,18 @@ crates=(
   trail-model
   trail-files
   trail-media
+  trail-whisper
+  trail-prs
+  trail-query
+  trail-reflect
+  trail-global
   trail-semantic
+  trail-transcribe
+  trail-ingest
   trail-languages
   trail-graph
-  trail-output
   trail-resolve
-  trail-query
+  trail-output
   trail-core
   trail-cli
 )
