@@ -25,6 +25,7 @@ mod php;
 mod powershell;
 mod registry;
 mod rust_lang;
+mod sql;
 mod swift;
 mod terraform;
 mod verilog;

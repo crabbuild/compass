@@ -100,6 +100,9 @@ impl Engine {
         if spec.name == "verilog" {
             return Ok(crate::verilog::extract(path, &source));
         }
+        if spec.name == "sql" {
+            return Ok(crate::sql::extract(path, &source));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

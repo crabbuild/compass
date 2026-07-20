@@ -516,6 +516,19 @@ output "instance_id" { value = aws_instance.web.id }
         compare_extraction("sample.sv", "extract_verilog")
     }
 
+    #[test]
+    fn sql_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in [
+            "sample.sql",
+            "sample_alter_fk.sql",
+            "sample_plpgsql.sql",
+            "sample_schema_qualified.sql",
+        ] {
+            compare_extraction(fixture, "extract_sql")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
