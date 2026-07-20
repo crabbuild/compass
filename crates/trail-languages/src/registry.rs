@@ -29,7 +29,18 @@ pub struct Registry;
 impl Registry {
     #[must_use]
     pub fn resolve(path: &Path) -> Option<LanguageSpec> {
-        let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+        let raw_name = path.file_name()?.to_str()?;
+        let name = raw_name.to_ascii_lowercase();
+        if matches!(
+            raw_name,
+            ".mcp.json" | "claude_desktop_config.json" | "mcp.json" | "mcp_servers.json"
+        ) {
+            return Some(LanguageSpec {
+                name: "mcp-config",
+                grammar: None,
+                kind: ExtractorKind::McpConfig,
+            });
+        }
         if matches!(
             name.as_str(),
             "apm.yml" | "apm.yaml" | "pyproject.toml" | "go.mod" | "pom.xml"

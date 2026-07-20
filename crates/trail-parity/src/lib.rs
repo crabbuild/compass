@@ -274,17 +274,82 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn json_config_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.json", "sample_tsconfig.json", "extraction.json"] {
+            compare_extraction(fixture, "extract_json")?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_config_extraction_matches_exactly_without_leaking_values() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join(".mcp.json");
+        fs::copy(
+            repository_root().join("tests/fixtures/sample.mcp.json"),
+            &source,
+        )?;
+        let extraction = compare_extraction_path(&source, "extract_mcp_config")?;
+        let serialized = serde_json::to_string(&extraction)?;
+        assert!(!serialized.contains("ghp_PLACEHOLDER_NOT_A_REAL_TOKEN"));
+        assert!(!serialized.contains("/tmp/workspace"));
+        Ok(())
+    }
+
+    #[test]
+    fn package_manifest_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let fixtures = [
+            (
+                "apm.yml",
+                "name: trail-apm\nversion: 1.2.3\ndependencies:\n  - alpha\n  - beta\n",
+            ),
+            (
+                "pyproject.toml",
+                "[project]\nname = \"trail-python\"\nversion = \"2.0.0\"\ndependencies = [\"requests>=2\", \"rich[pretty]==13\"]\n",
+            ),
+            (
+                "go.mod",
+                "module example.com/trail\n\nrequire (\n example.com/alpha v1.2.3\n example.com/beta v0.4.0 // indirect\n)\n",
+            ),
+            (
+                "pom.xml",
+                "<project><groupId>dev.trail</groupId><artifactId>trail-maven</artifactId><version>3.0</version><dependencies><dependency><groupId>org.example</groupId><artifactId>alpha</artifactId></dependency></dependencies></project>",
+            ),
+        ];
+        for (name, contents) in fixtures {
+            let source = directory.path().join(name);
+            fs::write(&source, contents)?;
+            compare_extraction_path(&source, "extract_package_manifest")?;
+        }
+        compare_extraction_path(
+            &repository_root().join("pyproject.toml"),
+            "extract_package_manifest",
+        )?;
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
-        let rust = serde_json::to_value(Engine::default().extract(&source)?)?;
+        compare_extraction_path(&source, extractor).map(|_| ())
+    }
+
+    fn compare_extraction_path(
+        source: &Path,
+        extractor: &str,
+    ) -> Result<serde_json::Value, Box<dyn Error>> {
+        let repo = repository_root();
+        let rust = serde_json::to_value(Engine::default().extract(source)?)?;
         let output = Command::new(python_executable(&repo))
             .args([
                 "-c",
                 "import json,sys; from pathlib import Path; import graphify.extract as e; print(json.dumps(getattr(e, sys.argv[1])(Path(sys.argv[2])), ensure_ascii=False))",
                 extractor,
             ])
-            .arg(&source)
+            .arg(source)
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
             .output()?;
@@ -294,8 +359,8 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        assert_eq!(rust, python, "fixture: {fixture}");
-        Ok(())
+        assert_eq!(rust, python, "fixture: {}", source.display());
+        Ok(rust)
     }
 
     fn compare(arguments: &[&str]) -> Result<(), Box<dyn Error>> {

@@ -86,6 +86,8 @@ fn ids_match_python_unicode_casefold_contract() {
     assert_eq!(normalize_id("Straße / API"), "strasse_api");
     assert_eq!(normalize_id("ＡＰＩ café"), "api_café");
     assert_eq!(normalize_id("用户/服务"), "用户_服务");
+    assert_eq!(normalize_id("ref_@scope//package"), "ref_scope_package");
+    assert_eq!(normalize_id("a___b"), "a_b");
     assert_eq!(
         make_id(&["src/auth/session.py", "ValidateToken"]),
         "src_auth_session_py_validatetoken"

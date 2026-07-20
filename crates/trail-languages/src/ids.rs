@@ -9,7 +9,7 @@ pub fn normalize_id(value: &str) -> String {
     let mut output = String::with_capacity(normalized.len());
     let mut separator = false;
     for character in normalized.chars() {
-        if character.is_alphanumeric() || character == '_' {
+        if character.is_alphanumeric() {
             if separator && !output.is_empty() {
                 output.push('_');
             }

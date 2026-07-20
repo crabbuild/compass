@@ -6,7 +6,10 @@ mod engine;
 mod facts;
 mod go;
 mod ids;
+mod json_config;
 mod markdown;
+mod mcp;
+mod package_manifest;
 mod registry;
 mod rust_lang;
 

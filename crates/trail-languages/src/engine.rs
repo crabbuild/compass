@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 use serde_json::{Map, Value};
 use trail_model::{EdgeRecord, NodeRecord};
-use tree_sitter::{Node, Parser};
+use tree_sitter::{Node, Parser, Tree};
 
 use crate::config::{GenericConfig, generic_config};
 use crate::{
@@ -76,6 +78,9 @@ impl Engine {
         match spec.kind {
             ExtractorKind::Generic => self.extract_generic(path, spec),
             ExtractorKind::Markdown => crate::markdown::extract(path),
+            ExtractorKind::JsonConfig => self.extract_json(path, spec),
+            ExtractorKind::McpConfig => crate::mcp::extract(path),
+            ExtractorKind::PackageManifest => crate::package_manifest::extract(path),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }
@@ -85,13 +90,59 @@ impl Engine {
         path: &Path,
         spec: LanguageSpec,
     ) -> Result<Extraction, ExtractError> {
-        let grammar = spec
-            .grammar
-            .ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         let source = fs::read(path).map_err(|source| trail_files::FileError::Io {
             path: path.to_path_buf(),
             source,
         })?;
+        let tree = self.parse(path, spec, &source)?;
+        let config = generic_config(spec);
+        let root = tree.root_node();
+        if spec.name == "go" {
+            return Ok(crate::go::extract(path, &source, root));
+        }
+        if spec.name == "rust" {
+            return Ok(crate::rust_lang::extract(path, &source, root));
+        }
+        if spec.name == "bash" {
+            return Ok(crate::bash::extract(path, &source, root));
+        }
+        Ok(extract_tree(path, &source, root, &config, spec.name))
+    }
+
+    fn extract_json(
+        &mut self,
+        path: &Path,
+        spec: LanguageSpec,
+    ) -> Result<Extraction, ExtractError> {
+        const MAX_BYTES: u64 = 1_048_576;
+        let mut source = Vec::new();
+        File::open(path)
+            .map_err(|source| trail_files::FileError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?
+            .take(MAX_BYTES + 1)
+            .read_to_end(&mut source)
+            .map_err(|source| trail_files::FileError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if source.len() > MAX_BYTES as usize {
+            return Ok(crate::json_config::error("json file too large to index"));
+        }
+        let tree = self.parse(path, spec, &source)?;
+        Ok(crate::json_config::extract(path, &source, tree.root_node()))
+    }
+
+    fn parse(
+        &mut self,
+        path: &Path,
+        spec: LanguageSpec,
+        source: &[u8],
+    ) -> Result<Tree, ExtractError> {
+        let grammar = spec
+            .grammar
+            .ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         let parser = if let Some(parser) = self.parsers.get_mut(grammar) {
             parser
         } else {
@@ -111,20 +162,9 @@ impl Engine {
             self.parsers.entry(grammar).or_insert(parser)
         };
         let tree = parser
-            .parse(&source, None)
+            .parse(source, None)
             .ok_or_else(|| ExtractError::ParseCancelled(path.to_path_buf()))?;
-        let config = generic_config(spec);
-        let root = tree.root_node();
-        if spec.name == "go" {
-            return Ok(crate::go::extract(path, &source, root));
-        }
-        if spec.name == "rust" {
-            return Ok(crate::rust_lang::extract(path, &source, root));
-        }
-        if spec.name == "bash" {
-            return Ok(crate::bash::extract(path, &source, root));
-        }
-        Ok(extract_tree(path, &source, root, &config, spec.name))
+        Ok(tree)
     }
 }
 
