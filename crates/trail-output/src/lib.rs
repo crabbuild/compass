@@ -8,6 +8,7 @@ mod html;
 mod json;
 mod obsidian;
 mod report;
+mod svg;
 mod tree;
 
 pub use callflow::{
@@ -21,6 +22,7 @@ pub use html::{HtmlOptions, HtmlRender, html_document, write_html};
 pub use json::{JsonExportOptions, export_json_value, write_json};
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
 pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
+pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 
 #[derive(Debug, thiserror::Error)]

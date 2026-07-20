@@ -26,7 +26,8 @@ mod tests {
         CallflowOptions, CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions,
         ObsidianOptions, ReportOptions, TokenCost, TreeOptions, build_tree as build_output_tree,
         callflow_html_document, canvas_document, cypher_document, derive_callflow_sections,
-        export_obsidian, generate_report, graphml_document, html_document, write_json,
+        export_obsidian, generate_report, graphml_document, html_document, spring_layout,
+        write_json,
     };
     use trail_resolve::resolve;
 
@@ -1531,6 +1532,48 @@ hydrate();
         )?;
         assert!(html.contains("Graph Report Highlights"));
         assert!(html.contains("Transformer"));
+        Ok(())
+    }
+
+    #[test]
+    fn spring_layout_matches_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let extraction: trail_languages::Extraction =
+            serde_json::from_slice(&fs::read(repo.join("tests/fixtures/extraction.json"))?)?;
+        let graph = build_from_extraction(&extraction, false, None);
+        let rust = spring_layout(&graph);
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys,networkx as nx; x=json.load(sys.stdin); G=nx.node_link_graph(x,edges='links'); p=nx.spring_layout(G,seed=42,k=2.0/(len(G)**0.5+1)); print(json.dumps([[float(p[n['id']][0]),float(p[n['id']][1])] for n in x['nodes']]))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python spring-layout oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&graph)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Vec<[f64; 2]> = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(python.len(), graph.nodes.len());
+        for (node, expected) in graph.nodes.iter().zip(python) {
+            let actual = rust.get(&node.id).ok_or("Rust layout omitted a node")?;
+            assert!(
+                (actual.0 - expected[0]).abs() <= 1e-12 && (actual.1 - expected[1]).abs() <= 1e-12,
+                "layout mismatch for {}: Rust {actual:?}, Python {expected:?}",
+                node.id
+            );
+        }
         Ok(())
     }
 
