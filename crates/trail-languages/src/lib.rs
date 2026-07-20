@@ -27,6 +27,7 @@ mod registry;
 mod rust_lang;
 mod swift;
 mod terraform;
+mod verilog;
 mod xaml;
 mod zig;
 

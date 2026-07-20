@@ -511,6 +511,11 @@ output "instance_id" { value = aws_instance.web.id }
         compare_extraction("sample.zig", "extract_zig")
     }
 
+    #[test]
+    fn verilog_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.sv", "extract_verilog")
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
