@@ -10,6 +10,7 @@ mod obsidian;
 mod report;
 mod svg;
 mod tree;
+mod wiki;
 
 pub use callflow::{
     CallflowOptions, CallflowSection, callflow_html_document, derive_callflow_sections,
@@ -24,6 +25,7 @@ pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filena
 pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
+pub use wiki::{WikiExport, WikiOptions, export_wiki};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {
@@ -43,4 +45,18 @@ pub enum OutputError {
     EmptyCallflowGraph,
     #[error("no sections defined")]
     NoCallflowSections,
+    #[error(
+        "communities dict is empty — refusing to clear wiki/. Run `graphify extract .` or `graphify cluster-only .` first."
+    )]
+    EmptyWikiCommunities,
+    #[error(
+        "all community node IDs are stale — none exist in the graph. Re-run `graphify extract .` to regenerate .graphify_analysis.json."
+    )]
+    StaleWikiCommunities,
+    #[error("wiki filesystem error at {path}: {source}")]
+    WikiIo {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }

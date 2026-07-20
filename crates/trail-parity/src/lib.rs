@@ -24,10 +24,10 @@ mod tests {
     use trail_languages::Engine;
     use trail_output::{
         CallflowOptions, CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions,
-        ObsidianOptions, ReportOptions, TokenCost, TreeOptions, build_tree as build_output_tree,
-        callflow_html_document, canvas_document, cypher_document, derive_callflow_sections,
-        export_obsidian, generate_report, graphml_document, html_document, spring_layout,
-        write_json,
+        ObsidianOptions, ReportOptions, TokenCost, TreeOptions, WikiOptions,
+        build_tree as build_output_tree, callflow_html_document, canvas_document, cypher_document,
+        derive_callflow_sections, export_obsidian, export_wiki, generate_report, graphml_document,
+        html_document, spring_layout, write_json,
     };
     use trail_resolve::{resolve, resolve_language_calls};
 
@@ -1387,6 +1387,83 @@ hydrate();
             fs::read_to_string(directory.path().join("python.canvas"))?
         );
         assert_eq!(directory_tree(&rust_vault)?, directory_tree(&python_vault)?);
+        Ok(())
+    }
+
+    #[test]
+    fn wiki_export_matches_python() -> Result<(), Box<dyn Error>> {
+        let graph: trail_model::GraphDocument = serde_json::from_value(json!({
+            "nodes": [
+                {"id":"n1","label":"parse","file_type":"code","source_file":"parser.py","community":0},
+                {"id":"n2","label":"validate","file_type":"code","source_file":"parser.py","community":0},
+                {"id":"n3","label":"render","file_type":"code","source_file":"renderer.py","community":1},
+                {"id":"n4","label":"stream","file_type":"code","source_file":null,"community":1}
+            ],
+            "links": [
+                {"source":"n1","target":"n2","relation":"calls","confidence":"EXTRACTED","weight":1.0},
+                {"source":"n1","target":"n3","relation":"references","confidence":"INFERRED","weight":1.0},
+                {"source":"n3","target":"n4","relation":"calls","confidence":"EXTRACTED","weight":1.0}
+            ]
+        }))?;
+        let communities = std::collections::BTreeMap::from([
+            (
+                0,
+                vec!["n1".to_owned(), "n2".to_owned(), "stale".to_owned()],
+            ),
+            (1, vec!["n3".to_owned(), "n4".to_owned()]),
+        ]);
+        let labels = std::collections::BTreeMap::from([
+            (0, "C# & Parsing (v2)".to_owned()),
+            (1, "c# & parsing (v2)".to_owned()),
+        ]);
+        let cohesion = std::collections::BTreeMap::from([(0, 0.85), (1, 0.72)]);
+        let gods = vec![trail_graph::GodNode {
+            id: "n1".to_owned(),
+            label: "parse".to_owned(),
+            degree: 2,
+        }];
+        let directory = tempfile::tempdir()?;
+        let rust_dir = directory.path().join("rust-wiki");
+        let python_dir = directory.path().join("python-wiki");
+        let result = export_wiki(
+            &graph,
+            &communities,
+            &rust_dir,
+            &WikiOptions {
+                community_labels: Some(&labels),
+                cohesion: Some(&cohesion),
+                god_nodes: Some(&gods),
+            },
+        )?;
+        assert_eq!(result.stale_nodes_dropped, 1);
+
+        let repo = repository_root();
+        let graph_path = directory.path().join("wiki-graph.json");
+        fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys,networkx as nx; from graphify.wiki import to_wiki; x=json.load(open(sys.argv[1])); G=nx.node_link_graph(x,edges='links'); c={int(k):v for k,v in json.loads(sys.argv[3]).items()}; l={int(k):v for k,v in json.loads(sys.argv[4]).items()}; h={int(k):v for k,v in json.loads(sys.argv[5]).items()}; g=json.loads(sys.argv[6]); print(to_wiki(G,c,sys.argv[2],l,h,g))",
+            ])
+            .arg(&graph_path)
+            .arg(&python_dir)
+            .arg(serde_json::to_string(&communities)?)
+            .arg(serde_json::to_string(&labels)?)
+            .arg(serde_json::to_string(&cohesion)?)
+            .arg(serde_json::to_string(&gods)?)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            result.articles_written.to_string(),
+            String::from_utf8(output.stdout)?.trim()
+        );
+        assert_eq!(directory_tree(&rust_dir)?, directory_tree(&python_dir)?);
         Ok(())
     }
 
