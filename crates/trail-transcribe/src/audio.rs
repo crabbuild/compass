@@ -73,13 +73,28 @@ pub fn decode_audio(path: &Path, limits: AudioLimits) -> Result<DecodedAudio, Au
             limits.max_source_bytes
         )));
     }
+    if crate::avi::is_avi(path)? {
+        return crate::avi::decode_avi_audio(path, limits);
+    }
     let file = File::open(path).map_err(|source| AudioError::Io {
         path: path.to_path_buf(),
         source,
     })?;
+    decode_audio_file(
+        file,
+        path.extension().and_then(|extension| extension.to_str()),
+        limits,
+    )
+}
+
+pub(crate) fn decode_audio_file(
+    file: File,
+    extension: Option<&str>,
+    limits: AudioLimits,
+) -> Result<DecodedAudio, AudioError> {
     let source = MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
     let mut hint = Hint::new();
-    if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
+    if let Some(extension) = extension {
         hint.with_extension(extension);
     }
     let mut format = symphonia::default::get_probe()
@@ -167,6 +182,14 @@ pub fn decode_audio(path: &Path, limits: AudioLimits) -> Result<DecodedAudio, Au
     }
 
     let rate = source_rate.ok_or_else(|| AudioError::Decode("audio is empty".to_owned()))?;
+    finalize_pcm(pcm, rate, limits)
+}
+
+pub(crate) fn finalize_pcm(
+    pcm: Vec<f32>,
+    rate: usize,
+    limits: AudioLimits,
+) -> Result<DecodedAudio, AudioError> {
     let samples = if rate == WHISPER_SAMPLE_RATE {
         pcm
     } else {

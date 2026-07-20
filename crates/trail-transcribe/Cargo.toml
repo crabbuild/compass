@@ -11,6 +11,10 @@ description.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["native-whisper"]
+native-whisper = ["dep:trail-whisper"]
+
 [dependencies]
 sha1.workspace = true
 sha2.workspace = true
@@ -23,7 +27,7 @@ rubato.workspace = true
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true
-trail-whisper = { version = "0.1.0", path = "../trail-whisper" }
+trail-whisper = { version = "0.1.0", path = "../trail-whisper", optional = true }
 
 [lints]
 workspace = true

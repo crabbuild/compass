@@ -46,9 +46,11 @@ later compatibility phase. Until that phase lands, `trail graph update` preserve
 an existing semantic layer but never invokes a model or sends data off-machine.
 The native semantic boundary now includes validated provider contracts,
 adaptive chunk recovery, root-confined image loading, and bounded pure-Rust
-PDF/DOCX/XLSX text ingestion. These components are differential-tested but
-remain internal until the complete extraction path meets the same compatibility
-standard.
+PDF/DOCX/XLSX text ingestion. Native Whisper inference, verified model and URL
+artifact acquisition, and bounded audio/video decoding—including AVI—are also
+implemented behind that internal boundary. These components are
+differential-tested but remain internal until the complete extraction path
+meets the same compatibility standard.
 
 ## Install from source
 
@@ -82,8 +84,8 @@ cargo test --workspace --all-targets --locked
 The scheduled hardening workflow additionally enforces native line coverage,
 runs the safe graph model and traversal crates under Miri, executes the native
 workspace with AddressSanitizer, and fuzzes hostile graph JSON/query input.
-It separately fuzzes untrusted semantic fragments before they can reach graph
-construction.
+It separately fuzzes untrusted semantic fragments and AVI/audio containers
+before they can reach graph construction or transcription.
 
 The compatibility tests use the Python checkout at the repository root as the
 behavioral oracle. Office/PDF dependencies live in a separate `.venv-media`

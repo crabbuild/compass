@@ -10,8 +10,10 @@ use std::path::{Path, PathBuf};
 use sha1::{Digest, Sha1};
 
 pub mod audio;
+mod avi;
 pub mod downloader;
 pub mod models;
+#[cfg(feature = "native-whisper")]
 pub mod native;
 
 pub const VIDEO_EXTENSIONS: &[&str] = &[

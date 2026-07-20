@@ -11,9 +11,11 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 serde_json = "1"
+tempfile = "3"
 trail-model = { version = "0.1.0", path = "../crates/trail-model" }
 trail-query = { version = "0.1.0", path = "../crates/trail-query" }
 trail-semantic = { version = "0.1.0", path = "../crates/trail-semantic" }
+trail-transcribe = { version = "0.1.0", path = "../crates/trail-transcribe", default-features = false }
 
 [[bin]]
 name = "graph_input"
@@ -25,6 +27,13 @@ bench = false
 [[bin]]
 name = "semantic_fragment"
 path = "fuzz_targets/semantic_fragment.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "avi_audio"
+path = "fuzz_targets/avi_audio.rs"
 test = false
 doc = false
 bench = false

@@ -3,4 +3,5 @@
 !/corpus/graph_input/seed.json
 /corpus/semantic_fragment/*
 !/corpus/semantic_fragment/seed.json
+/corpus/avi_audio/*
 /target/
