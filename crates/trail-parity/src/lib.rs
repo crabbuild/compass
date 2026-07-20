@@ -46,7 +46,8 @@ mod tests {
         reconcile_semantic_scope, resolve_builtin_backend, resolve_custom_backend,
         resolve_max_retries, resolve_positive_seconds, resolve_positive_usize, resolve_temperature,
         response_is_hollow, sanitize_semantic_fragment, save_semantic_cache, strip_partial_markers,
-        validate_semantic_fragment, validate_semantic_fragment_with_limits, wrap_untrusted_source,
+        validate_semantic_fragment, validate_semantic_fragment_with_limits, with_image_notes,
+        wrap_untrusted_source,
     };
 
     #[test]
@@ -585,6 +586,83 @@ print(json.dumps({
             "max_output_tokens": resolved.max_output_tokens,
             "timeout": resolved.timeout.as_secs_f64(),
             "max_retries": resolved.max_retries,
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_bedrock_request_contract_matches_python() -> Result<(), Box<dyn Error>> {
+        let output = Command::new(python_executable(&repository_root()))
+            .args([
+                "-c",
+                r#"import json,os
+from pathlib import Path
+from graphify import llm
+
+refs = [
+    llm._ImageRef(Path('/corpus/diagram.png'), 'diagram.png', 'image/png', b'\x00\x01\x02'),
+    llm._ImageRef(Path('/corpus/large.webp'), 'large.webp', 'image/webp', None),
+]
+content = llm._bedrock_content('source', refs)
+for block in content:
+    if 'image' in block:
+        block['image']['source']['bytes'] = list(block['image']['source']['bytes'])
+os.environ.pop('GRAPHIFY_LLM_TEMPERATURE', None)
+default = llm._bedrock_inference_config(16384, 'bedrock-model')
+default['temperature'] = float(default['temperature'])
+os.environ['GRAPHIFY_LLM_TEMPERATURE'] = 'omit'
+omitted = llm._bedrock_inference_config(16384, 'bedrock-model')
+print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, ensure_ascii=False))"#,
+            ])
+            .current_dir(repository_root())
+            .env("PYTHONPATH", repository_root())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let images = [
+            ImageRef {
+                path: PathBuf::from("/corpus/diagram.png"),
+                relative_path: "diagram.png".to_owned(),
+                media_type: "image/png".to_owned(),
+                raw: Some(vec![0, 1, 2]),
+            },
+            ImageRef {
+                path: PathBuf::from("/corpus/large.webp"),
+                relative_path: "large.webp".to_owned(),
+                media_type: "image/webp".to_owned(),
+                raw: None,
+            },
+        ];
+        let default_backend = resolve_builtin_backend(
+            "bedrock",
+            &std::collections::HashMap::new(),
+            Some("bedrock-model"),
+        )?;
+        let omitted_backend = resolve_builtin_backend(
+            "bedrock",
+            &std::collections::HashMap::from([(
+                "GRAPHIFY_LLM_TEMPERATURE".to_owned(),
+                "omit".to_owned(),
+            )]),
+            Some("bedrock-model"),
+        )?;
+        let rust = json!({
+            "content": [
+                {"image": {"format": "png", "source": {"bytes": [0, 1, 2]}}},
+                {"text": with_image_notes("source", &images, false)},
+            ],
+            "default": {
+                "maxTokens": default_backend.max_output_tokens,
+                "temperature": default_backend.temperature,
+            },
+            "omitted": {
+                "maxTokens": omitted_backend.max_output_tokens,
+            },
         });
         assert_eq!(rust, python);
         Ok(())

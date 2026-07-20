@@ -1,5 +1,8 @@
 //! Validation and cleanup for untrusted semantic extraction fragments.
 
+mod bedrock;
+pub use bedrock::*;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
@@ -15,6 +18,7 @@ use base64::Engine as _;
 use regex::Regex;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use time::{OffsetDateTime, format_description::well_known::Rfc2822};
 use trail_files::{FileError, FileSlice, read_slice_text};
 use trail_media::extract_text;
 use wait_timeout::ChildExt;
@@ -2465,7 +2469,9 @@ pub fn execute_json_request(
                         });
                 }
                 if attempt < max_retries && transient_http_status(status) {
-                    thread::sleep(retry_delay(attempt));
+                    let delay = retry_after_delay(response.headers(), OffsetDateTime::now_utc())
+                        .unwrap_or_else(|| retry_delay(attempt));
+                    thread::sleep(delay);
                     continue;
                 }
                 return Err(SemanticError::Transport(format!(
@@ -2588,10 +2594,12 @@ pub fn execute_resolved_backend(
     deep_mode: bool,
     environment: &HashMap<String, String>,
 ) -> Result<Value, SemanticError> {
-    if backend.backend.name == "claude-cli" {
-        execute_claude_cli_backend(backend, user_message, images, deep_mode, environment)
-    } else {
-        execute_resolved_http_backend(backend, user_message, images, deep_mode, environment)
+    match backend.backend.name {
+        "bedrock" => execute_bedrock_backend(backend, user_message, images, deep_mode, environment),
+        "claude-cli" => {
+            execute_claude_cli_backend(backend, user_message, images, deep_mode, environment)
+        }
+        _ => execute_resolved_http_backend(backend, user_message, images, deep_mode, environment),
     }
 }
 
@@ -2648,6 +2656,23 @@ fn transient_transport_error(error: &ureq::Error) -> bool {
             | ureq::Error::HostNotFound
             | ureq::Error::ConnectionFailed
     )
+}
+
+fn retry_after_delay(headers: &ureq::http::HeaderMap, now: OffsetDateTime) -> Option<Duration> {
+    let milliseconds = headers
+        .get("retry-after-ms")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .map(|value| value / 1_000.0);
+    let seconds = milliseconds.or_else(|| {
+        let value = headers.get("retry-after")?.to_str().ok()?.trim();
+        value.parse::<f64>().ok().or_else(|| {
+            let retry_at = OffsetDateTime::parse(value, &Rfc2822).ok()?;
+            Some((retry_at - now).as_seconds_f64())
+        })
+    })?;
+    (seconds.is_finite() && seconds > 0.0 && seconds <= 60.0)
+        .then(|| Duration::from_secs_f64(seconds))
 }
 
 fn retry_delay(attempt: usize) -> Duration {

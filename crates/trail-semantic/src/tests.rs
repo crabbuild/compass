@@ -1,4 +1,3 @@
-
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -1180,7 +1179,7 @@ fn direct_http_extraction_loads_validates_and_binds_evidence() -> Result<(), Box
 #[test]
 fn native_json_transport_retries_transient_status() -> Result<(), Box<dyn Error>> {
     let (address, server) = spawn_http_server(vec![
-            "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            "HTTP/1.1 429 Too Many Requests\r\nRetry-After-Ms: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 .to_owned(),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"retried\":true}"
                 .to_owned(),
@@ -1198,6 +1197,31 @@ fn native_json_transport_retries_transient_status() -> Result<(), Box<dyn Error>
         .join()
         .map_err(|_| std::io::Error::other("test server panicked"))??;
     assert_eq!(requests.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn retry_after_supports_milliseconds_seconds_and_http_dates() -> Result<(), Box<dyn Error>> {
+    let mut headers = ureq::http::HeaderMap::new();
+    headers.insert("retry-after-ms", "1500".parse()?);
+    assert_eq!(
+        retry_after_delay(&headers, OffsetDateTime::UNIX_EPOCH),
+        Some(Duration::from_millis(1_500))
+    );
+    headers.remove("retry-after-ms");
+    headers.insert("retry-after", "2.5".parse()?);
+    assert_eq!(
+        retry_after_delay(&headers, OffsetDateTime::UNIX_EPOCH),
+        Some(Duration::from_millis(2_500))
+    );
+    let now = OffsetDateTime::parse("Sun, 06 Nov 1994 08:49:07 GMT", &Rfc2822)?;
+    headers.insert("retry-after", "Sun, 06 Nov 1994 08:49:37 GMT".parse()?);
+    assert_eq!(
+        retry_after_delay(&headers, now),
+        Some(Duration::from_secs(30))
+    );
+    headers.insert("retry-after", "61".parse()?);
+    assert_eq!(retry_after_delay(&headers, now), None);
     Ok(())
 }
 
