@@ -21,6 +21,7 @@ trail-files = { path = "../trail-files", version = "0.1.0" }
 trail-media = { path = "../trail-media", version = "0.1.0" }
 ureq.workspace = true
 url.workspace = true
+wait-timeout.workspace = true
 
 [lints]
 workspace = true

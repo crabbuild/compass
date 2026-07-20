@@ -2,9 +2,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
+use std::io::{Read, Write};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
@@ -14,6 +17,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use trail_files::{FileSlice, bisect_slice, read_slice_text, split_file};
 use trail_media::extract_text;
+use wait_timeout::ChildExt;
 
 pub const MAX_SEMANTIC_FRAGMENT_BYTES: u64 = 25 * 1024 * 1024;
 pub const MAX_SEMANTIC_FRAGMENT_NODES: usize = 10_000;
@@ -455,6 +459,13 @@ pub struct SemanticReadResult {
     pub warnings: Vec<String>,
 }
 
+/// Result of one native semantic-provider call before corpus-level merging.
+pub struct DirectExtractionResult {
+    pub fragment: Value,
+    pub warnings: Vec<String>,
+    pub unverified_nodes: usize,
+}
+
 impl SemanticReadResult {
     /// Borrow loaded source bodies for evidence validation after extraction.
     #[must_use]
@@ -814,6 +825,54 @@ fn is_compat_binary_document(path: &Path) -> bool {
                 .iter()
                 .any(|candidate| extension.eq_ignore_ascii_case(candidate))
         })
+}
+
+/// Load one semantic chunk, call a resolved provider, validate its untrusted
+/// graph fragment, and bind code-symbol evidence to the exact text sent to the
+/// model.
+pub fn extract_semantic_units(
+    units: &[SemanticUnit],
+    backend: &ResolvedBackend,
+    root: &Path,
+    deep_mode: bool,
+    environment: &HashMap<String, String>,
+) -> Result<DirectExtractionResult, SemanticError> {
+    let mut text_units = Vec::new();
+    let mut image_paths = Vec::new();
+    for unit in units {
+        match unit {
+            SemanticUnit::File(path) if is_vision_image(path) => image_paths.push(path.clone()),
+            _ => text_units.push(unit.clone()),
+        }
+    }
+    let read = read_semantic_units(&text_units, root);
+    let vision = backend.backend.vision
+        || (backend.backend.name == "ollama"
+            && environment
+                .get("GRAPHIFY_OLLAMA_VISION")
+                .is_some_and(|value| value.trim() == "1"));
+    let inline_images = vision && backend.backend.name != "claude-cli";
+    let built_images = build_image_refs(&image_paths, root, inline_images)?;
+    let mut fragment = execute_resolved_backend(
+        backend,
+        &read.prompt,
+        &built_images.images,
+        deep_mode,
+        environment,
+    )?;
+    let errors = validate_semantic_fragment(&mut fragment);
+    if !errors.is_empty() {
+        return Err(SemanticError::InvalidFragment(errors.join("; ")));
+    }
+    let evidence = read.evidence_sources();
+    let unverified_nodes = bind_node_evidence(&mut fragment, &evidence, root);
+    let mut warnings = read.warnings;
+    warnings.extend(built_images.warnings);
+    Ok(DirectExtractionResult {
+        fragment,
+        warnings,
+        unverified_nodes,
+    })
 }
 
 /// Expand oversized splittable documents into complete, gap-free slices.
@@ -2175,6 +2234,45 @@ pub fn openai_http_request(
     })
 }
 
+/// Construct the Azure OpenAI chat-completions wire request produced by the
+/// Python SDK for a resource endpoint, deployment name, and API version.
+pub fn azure_openai_http_request(
+    endpoint: &str,
+    api_key: &str,
+    deployment: &str,
+    api_version: &str,
+    body: Value,
+) -> Result<JsonRequest, SemanticError> {
+    let mut url = url::Url::parse(endpoint).map_err(|error| {
+        SemanticError::InvalidProviderConfiguration(format!(
+            "invalid Azure OpenAI endpoint: {error}"
+        ))
+    })?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(SemanticError::InvalidProviderConfiguration(
+            "Azure OpenAI endpoint must be an absolute HTTP(S) URL".to_owned(),
+        ));
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    {
+        let mut segments = url.path_segments_mut().map_err(|()| {
+            SemanticError::InvalidProviderConfiguration(
+                "Azure OpenAI endpoint cannot be used as a hierarchical URL".to_owned(),
+            )
+        })?;
+        segments.pop_if_empty();
+        segments.extend(["openai", "deployments", deployment, "chat", "completions"]);
+    }
+    url.query_pairs_mut()
+        .append_pair("api-version", api_version);
+    Ok(JsonRequest {
+        url: url.into(),
+        headers: vec![("api-key".to_owned(), api_key.to_owned())],
+        body,
+    })
+}
+
 /// Construct an Anthropic Messages API request for text extraction.
 #[must_use]
 pub fn anthropic_http_request(
@@ -2239,6 +2337,204 @@ fn anthropic_http_request_with_content(
     }
 }
 
+fn claude_cli_message(user_message: &str, images: &[ImageRef], deep_mode: bool) -> String {
+    let user_message = with_image_notes(user_message, images, true);
+    format!(
+        "{}\n\n---\nNow extract the knowledge graph from the following source file(s) and output ONLY the JSON object described above. No prose, no preamble, no markdown fences.\n\n{}",
+        extraction_prompt(deep_mode),
+        user_message
+    )
+}
+
+fn read_process_stream<R: Read>(mut stream: R, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut retained = Vec::new();
+    let mut overflowed = false;
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let count = stream.read(&mut buffer)?;
+        if count == 0 {
+            return Ok((retained, overflowed));
+        }
+        let remaining = limit.saturating_sub(retained.len());
+        let retain = remaining.min(count);
+        retained.extend_from_slice(&buffer[..retain]);
+        overflowed |= retain < count;
+    }
+}
+
+fn receive_process_stream(
+    receiver: &Receiver<std::io::Result<(Vec<u8>, bool)>>,
+    name: &str,
+) -> Result<(Vec<u8>, bool), SemanticError> {
+    match receiver.recv_timeout(Duration::from_secs(2)) {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(SemanticError::Transport(format!(
+            "Claude CLI {name}: {error}"
+        ))),
+        Err(RecvTimeoutError::Timeout) => Err(SemanticError::Transport(format!(
+            "Claude CLI {name} remained open after the process exited"
+        ))),
+        Err(RecvTimeoutError::Disconnected) => Err(SemanticError::Transport(format!(
+            "Claude CLI {name} reader stopped unexpectedly"
+        ))),
+    }
+}
+
+fn execute_bounded_process(
+    program: &Path,
+    arguments: &[String],
+    stdin: &str,
+    timeout: Duration,
+) -> Result<String, SemanticError> {
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().map_err(|error| {
+        SemanticError::Transport(format!(
+            "could not start Claude Code CLI at {}: {error}",
+            program.display()
+        ))
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        SemanticError::Transport("could not capture Claude CLI stdout".to_owned())
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        SemanticError::Transport("could not capture Claude CLI stderr".to_owned())
+    })?;
+    let (stdout_sender, stdout_receiver) = mpsc::channel();
+    let (stderr_sender, stderr_receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = stdout_sender.send(read_process_stream(
+            stdout,
+            PROVIDER_RESPONSE_MAX_BYTES as usize,
+        ));
+    });
+    thread::spawn(move || {
+        let _ = stderr_sender.send(read_process_stream(stderr, 64 * 1024));
+    });
+
+    let write_result = child
+        .stdin
+        .take()
+        .ok_or_else(|| SemanticError::Transport("could not open Claude CLI stdin".to_owned()))
+        .and_then(|mut input| {
+            input
+                .write_all(stdin.as_bytes())
+                .map_err(|error| SemanticError::Transport(format!("Claude CLI stdin: {error}")))
+        });
+    if let Err(error) = write_result {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+
+    let status = match child.wait_timeout(timeout) {
+        Ok(Some(status)) => status,
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(SemanticError::Transport(format!(
+                "Claude CLI timed out after {:.3} seconds",
+                timeout.as_secs_f64()
+            )));
+        }
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(SemanticError::Transport(format!(
+                "could not wait for Claude CLI: {error}"
+            )));
+        }
+    };
+    let (stdout, stdout_overflowed) = receive_process_stream(&stdout_receiver, "stdout")?;
+    let (stderr, _) = receive_process_stream(&stderr_receiver, "stderr")?;
+    if stdout_overflowed {
+        return Err(SemanticError::Transport(format!(
+            "Claude CLI response exceeded {PROVIDER_RESPONSE_MAX_BYTES} bytes"
+        )));
+    }
+    if !status.success() {
+        let message = String::from_utf8_lossy(&stderr)
+            .chars()
+            .take(500)
+            .collect::<String>();
+        return Err(SemanticError::Transport(format!(
+            "Claude CLI exited {}: {}",
+            status
+                .code()
+                .map_or_else(|| "without a status".to_owned(), |code| code.to_string()),
+            message.trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+/// Execute the authenticated local Claude Code CLI without invoking a shell.
+pub fn execute_claude_cli_backend(
+    backend: &ResolvedBackend,
+    user_message: &str,
+    images: &[ImageRef],
+    deep_mode: bool,
+    environment: &HashMap<String, String>,
+) -> Result<Value, SemanticError> {
+    if backend.backend.name != "claude-cli" {
+        return Err(SemanticError::InvalidProviderConfiguration(format!(
+            "backend {:?} is not the Claude CLI backend",
+            backend.backend.name
+        )));
+    }
+    let program = if cfg!(windows) {
+        Path::new("claude.cmd")
+    } else {
+        Path::new("claude")
+    };
+    let arguments = claude_cli_arguments(images, environment);
+    let stdout = execute_bounded_process(
+        program,
+        &arguments,
+        &claude_cli_message(user_message, images, deep_mode),
+        backend.timeout,
+    )?;
+    let envelope = claude_cli_envelope(&stdout)?;
+    normalize_claude_cli_response(&envelope)
+}
+
+fn claude_cli_arguments(images: &[ImageRef], environment: &HashMap<String, String>) -> Vec<String> {
+    let mut arguments = vec![
+        "-p".to_owned(),
+        "--output-format".to_owned(),
+        "json".to_owned(),
+        "--no-session-persistence".to_owned(),
+    ];
+    let mut directories = HashSet::new();
+    for image in images {
+        if let Some(directory) = image.path.parent() {
+            let directory = directory.to_string_lossy().into_owned();
+            if directories.insert(directory.clone()) {
+                arguments.push("--add-dir".to_owned());
+                arguments.push(directory);
+            }
+        }
+    }
+    if let Some(model) = environment
+        .get("GRAPHIFY_CLAUDE_CLI_MODEL")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        arguments.push("--model".to_owned());
+        arguments.push(model.to_owned());
+    }
+    arguments
+}
+
 /// Execute a bounded, non-redirecting provider request with transient retries.
 pub fn execute_json_request(
     request: &JsonRequest,
@@ -2286,6 +2582,124 @@ pub fn execute_json_request(
     Err(SemanticError::Transport(
         "provider retry loop exhausted".to_owned(),
     ))
+}
+
+/// Execute a fully resolved built-in HTTP provider and normalize its response.
+/// Non-HTTP providers (Bedrock and Claude CLI) intentionally remain separate
+/// transports so their credential and subprocess boundaries cannot be confused
+/// with bearer-token APIs.
+pub fn execute_resolved_http_backend(
+    backend: &ResolvedBackend,
+    user_message: &str,
+    images: &[ImageRef],
+    deep_mode: bool,
+    environment: &HashMap<String, String>,
+) -> Result<Value, SemanticError> {
+    let name = backend.backend.name;
+    if matches!(name, "bedrock" | "claude-cli") {
+        return Err(SemanticError::InvalidProviderConfiguration(format!(
+            "backend {name:?} does not use the built-in JSON HTTP transport"
+        )));
+    }
+    let base_url = backend.base_url.as_deref().ok_or_else(|| {
+        SemanticError::InvalidProviderConfiguration(format!(
+            "backend {name:?} has no resolved base URL"
+        ))
+    })?;
+    let api_key = match backend.api_key() {
+        Some(value) => value,
+        None if name == "ollama" => "ollama",
+        None => {
+            return Err(SemanticError::InvalidProviderConfiguration(format!(
+                "backend {name:?} has no API key"
+            )));
+        }
+    };
+    if name == "claude" {
+        let request = anthropic_http_request_with_images(
+            base_url,
+            api_key,
+            &backend.model,
+            user_message,
+            images,
+            backend.max_output_tokens,
+            deep_mode,
+        );
+        let response = execute_json_request(&request, backend.timeout, backend.max_retries)?;
+        return normalize_anthropic_response(&response, &backend.model);
+    }
+
+    if name == "azure" {
+        let parameters = openai_call_parameters(
+            base_url,
+            &backend.model,
+            user_message,
+            backend.temperature,
+            None,
+            backend.max_output_tokens,
+            name,
+            deep_mode,
+            None,
+            false,
+            None,
+            None,
+        );
+        let api_version = environment
+            .get("AZURE_OPENAI_API_VERSION")
+            .map_or("2024-12-01-preview", String::as_str)
+            .trim();
+        let request =
+            azure_openai_http_request(base_url, api_key, &backend.model, api_version, parameters)?;
+        let response = execute_json_request(&request, backend.timeout, backend.max_retries)?;
+        return normalize_openai_response(&response, &backend.model);
+    }
+
+    let disable_thinking = environment
+        .get("GRAPHIFY_DISABLE_THINKING")
+        .is_some_and(|value| env_truthy(value));
+    let parameters = openai_call_parameters_with_images(
+        base_url,
+        &backend.model,
+        user_message,
+        images,
+        backend.temperature,
+        backend.backend.reasoning_effort,
+        backend.max_output_tokens,
+        name,
+        deep_mode,
+        None,
+        disable_thinking,
+        environment
+            .get("GRAPHIFY_OLLAMA_NUM_CTX")
+            .map(String::as_str),
+        environment
+            .get("GRAPHIFY_OLLAMA_KEEP_ALIVE")
+            .map(String::as_str),
+    );
+    let request = openai_http_request(base_url, api_key, parameters)?;
+    let response = execute_json_request(&request, backend.timeout, backend.max_retries)?;
+    normalize_openai_response(&response, &backend.model)
+}
+
+/// Dispatch a resolved provider through its native transport boundary.
+pub fn execute_resolved_backend(
+    backend: &ResolvedBackend,
+    user_message: &str,
+    images: &[ImageRef],
+    deep_mode: bool,
+    environment: &HashMap<String, String>,
+) -> Result<Value, SemanticError> {
+    if backend.backend.name == "claude-cli" {
+        execute_claude_cli_backend(backend, user_message, images, deep_mode, environment)
+    } else {
+        execute_resolved_http_backend(backend, user_message, images, deep_mode, environment)
+    }
+}
+
+fn env_truthy(value: &str) -> bool {
+    ["1", "true", "yes", "on"]
+        .iter()
+        .any(|candidate| value.trim().eq_ignore_ascii_case(candidate))
 }
 
 fn transient_http_status(status: u16) -> bool {
@@ -2566,6 +2980,14 @@ mod tests {
         Ok((address, server))
     }
 
+    fn successful_json_response(body: &Value) -> Result<String, serde_json::Error> {
+        let body = serde_json::to_string(body)?;
+        Ok(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
+    }
+
     #[test]
     fn validation_rejects_hostile_ids_and_normalizes_aliases() {
         let mut fragment = valid_fragment();
@@ -2832,6 +3254,94 @@ mod tests {
             r#"[{"type":"system"},{"type":"result","result":"first"},{"type":"result","result":"last"}]"#,
         )?;
         assert_eq!(envelope["result"], "last");
+        Ok(())
+    }
+
+    #[test]
+    fn claude_cli_contract_builds_guarded_prompt_and_deduplicated_allowlists() {
+        let image_directory = PathBuf::from("corpus").join("images");
+        let images = [
+            ImageRef {
+                path: image_directory.join("one.png"),
+                relative_path: "images/one.png".to_owned(),
+                media_type: "image/png".to_owned(),
+                raw: None,
+            },
+            ImageRef {
+                path: image_directory.join("two.jpg"),
+                relative_path: "images/two.jpg".to_owned(),
+                media_type: "image/jpeg".to_owned(),
+                raw: None,
+            },
+        ];
+        let environment =
+            HashMap::from([("GRAPHIFY_CLAUDE_CLI_MODEL".to_owned(), "haiku".to_owned())]);
+        let arguments = claude_cli_arguments(&images, &environment);
+        assert_eq!(
+            arguments,
+            vec![
+                "-p".to_owned(),
+                "--output-format".to_owned(),
+                "json".to_owned(),
+                "--no-session-persistence".to_owned(),
+                "--add-dir".to_owned(),
+                image_directory.to_string_lossy().into_owned(),
+                "--model".to_owned(),
+                "haiku".to_owned()
+            ]
+        );
+        let message =
+            claude_cli_message("<untrusted_source>code</untrusted_source>", &images, true);
+        assert!(message.starts_with(&extraction_prompt(true)));
+        assert!(message.contains("output ONLY the JSON object"));
+        assert!(message.contains("Use the Read tool"));
+        assert!(message.contains("images/one.png"));
+    }
+
+    #[test]
+    fn bounded_process_fixture_outputs_marker() {
+        if std::env::args().any(|argument| argument == "--exact") {
+            let mut input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut input);
+            print!("TRAIL_PROCESS_FIXTURE:{input}");
+        }
+    }
+
+    #[test]
+    fn bounded_process_fixture_sleeps() {
+        if std::env::args().any(|argument| argument == "--exact") {
+            thread::sleep(Duration::from_secs(2));
+        }
+    }
+
+    #[test]
+    fn bounded_process_drains_output_and_enforces_timeout() -> Result<(), Box<dyn Error>> {
+        let executable = std::env::current_exe()?;
+        let output = execute_bounded_process(
+            &executable,
+            &[
+                "tests::bounded_process_fixture_outputs_marker".to_owned(),
+                "--exact".to_owned(),
+                "--nocapture".to_owned(),
+            ],
+            "hello",
+            Duration::from_secs(5),
+        )?;
+        assert!(output.contains("TRAIL_PROCESS_FIXTURE:hello"));
+
+        let Err(error) = execute_bounded_process(
+            &executable,
+            &[
+                "tests::bounded_process_fixture_sleeps".to_owned(),
+                "--exact".to_owned(),
+                "--nocapture".to_owned(),
+            ],
+            "",
+            Duration::from_millis(20),
+        ) else {
+            return Err(std::io::Error::other("slow fixture did not time out").into());
+        };
+        assert!(error.to_string().contains("timed out"));
         Ok(())
     }
 
@@ -3168,6 +3678,183 @@ mod tests {
             serde_json::from_str::<Value>(body)?,
             json!({"hello":"world"})
         );
+        Ok(())
+    }
+
+    #[test]
+    fn azure_backend_uses_deployment_route_api_version_and_api_key() -> Result<(), Box<dyn Error>> {
+        let fragment = r#"{"nodes":[{"id":"azure-doc"}],"edges":[]}"#;
+        let response = json!({
+            "choices":[{"message":{"content":fragment},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":8,"completion_tokens":3}
+        });
+        let (address, server) = spawn_http_server(vec![successful_json_response(&response)?])?;
+        let environment = HashMap::from([
+            ("AZURE_OPENAI_API_KEY".to_owned(), "secret-azure".to_owned()),
+            (
+                "AZURE_OPENAI_ENDPOINT".to_owned(),
+                format!("http://{address}"),
+            ),
+            (
+                "AZURE_OPENAI_API_VERSION".to_owned(),
+                "2025-01-01-preview".to_owned(),
+            ),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ]);
+        let backend = resolve_builtin_backend("azure", &environment, Some("deploy/model"))?;
+        let result = execute_resolved_http_backend(&backend, "source", &[], false, &environment)?;
+        assert_eq!(result["nodes"][0]["id"], "azure-doc");
+        assert_eq!(result["model"], "deploy/model");
+
+        let captured = server
+            .join()
+            .map_err(|_| std::io::Error::other("Azure test server panicked"))??
+            .pop()
+            .ok_or_else(|| std::io::Error::other("Azure request was not captured"))?;
+        assert!(captured.starts_with(
+            "POST /openai/deployments/deploy%2Fmodel/chat/completions?api-version=2025-01-01-preview "
+        ));
+        assert!(
+            captured
+                .to_ascii_lowercase()
+                .contains("api-key: secret-azure")
+        );
+        let (_, body) = captured
+            .split_once("\r\n\r\n")
+            .ok_or_else(|| std::io::Error::other("Azure request headers were incomplete"))?;
+        let body = serde_json::from_str::<Value>(body)?;
+        assert_eq!(body["model"], "deploy/model");
+        assert_eq!(body["max_completion_tokens"], 16_384);
+        assert_eq!(body["messages"][0]["role"], "system");
+        Ok(())
+    }
+
+    #[test]
+    fn resolved_openai_and_anthropic_backends_execute_end_to_end() -> Result<(), Box<dyn Error>> {
+        let fragment = r#"{"nodes":[{"id":"doc","label":"Doc"}],"edges":[]}"#;
+        let openai_response = json!({
+            "choices":[{"message":{"content":fragment},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":12,"completion_tokens":7}
+        });
+        let (openai_address, openai_server) =
+            spawn_http_server(vec![successful_json_response(&openai_response)?])?;
+        let openai_environment = HashMap::from([
+            ("OPENAI_API_KEY".to_owned(), "secret-openai".to_owned()),
+            (
+                "OPENAI_BASE_URL".to_owned(),
+                format!("http://{openai_address}/v1"),
+            ),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ]);
+        let openai = resolve_builtin_backend("openai", &openai_environment, Some("model-a"))?;
+        let openai_result =
+            execute_resolved_http_backend(&openai, "source", &[], false, &openai_environment)?;
+        assert_eq!(openai_result["nodes"][0]["id"], "doc");
+        assert_eq!(openai_result["input_tokens"], 12);
+        assert_eq!(openai_result["model"], "model-a");
+        let openai_request = openai_server
+            .join()
+            .map_err(|_| std::io::Error::other("OpenAI test server panicked"))??
+            .pop()
+            .ok_or_else(|| std::io::Error::other("OpenAI request was not captured"))?;
+        assert!(openai_request.starts_with("POST /v1/chat/completions "));
+        assert!(
+            openai_request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer secret-openai")
+        );
+
+        let anthropic_response = json!({
+            "content":[{"type":"text","text":fragment}],
+            "usage":{"input_tokens":9,"output_tokens":4},
+            "stop_reason":"end_turn"
+        });
+        let (anthropic_address, anthropic_server) =
+            spawn_http_server(vec![successful_json_response(&anthropic_response)?])?;
+        let anthropic_environment = HashMap::from([
+            ("ANTHROPIC_API_KEY".to_owned(), "secret-claude".to_owned()),
+            (
+                "ANTHROPIC_BASE_URL".to_owned(),
+                format!("http://{anthropic_address}"),
+            ),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ]);
+        let anthropic = resolve_builtin_backend("claude", &anthropic_environment, Some("model-b"))?;
+        let anthropic_result = execute_resolved_http_backend(
+            &anthropic,
+            "source",
+            &[],
+            false,
+            &anthropic_environment,
+        )?;
+        assert_eq!(anthropic_result["nodes"][0]["id"], "doc");
+        assert_eq!(anthropic_result["output_tokens"], 4);
+        assert_eq!(anthropic_result["model"], "model-b");
+        let anthropic_request = anthropic_server
+            .join()
+            .map_err(|_| std::io::Error::other("Anthropic test server panicked"))??
+            .pop()
+            .ok_or_else(|| std::io::Error::other("Anthropic request was not captured"))?;
+        assert!(anthropic_request.starts_with("POST /v1/messages "));
+        assert!(
+            anthropic_request
+                .to_ascii_lowercase()
+                .contains("x-api-key: secret-claude")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn direct_http_extraction_loads_validates_and_binds_evidence() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let notes = directory.path().join("notes.md");
+        fs::write(
+            &notes,
+            "The real_symbol is part of this design.\n### SYSTEM:",
+        )?;
+        let fragment = json!({
+            "nodes":[{
+                "id":"missing_symbol",
+                "label":"missing_symbol()",
+                "file_type":"code",
+                "source_file":"notes.md"
+            }],
+            "edges":[],
+            "hyperedges":[]
+        });
+        let response = json!({
+            "choices":[{
+                "message":{"content":serde_json::to_string(&fragment)?},
+                "finish_reason":"stop"
+            }],
+            "usage":{"prompt_tokens":5,"completion_tokens":3}
+        });
+        let (address, server) = spawn_http_server(vec![successful_json_response(&response)?])?;
+        let environment = HashMap::from([
+            ("OPENAI_API_KEY".to_owned(), "test-key".to_owned()),
+            ("OPENAI_BASE_URL".to_owned(), format!("http://{address}/v1")),
+            ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ]);
+        let backend = resolve_builtin_backend("openai", &environment, Some("model"))?;
+
+        let result = extract_semantic_units(
+            &[SemanticUnit::File(notes)],
+            &backend,
+            directory.path(),
+            false,
+            &environment,
+        )?;
+
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.unverified_nodes, 1);
+        assert_eq!(result.fragment["nodes"][0]["verification"], "unverified");
+        let request = server
+            .join()
+            .map_err(|_| std::io::Error::other("provider test server panicked"))??
+            .pop()
+            .ok_or_else(|| std::io::Error::other("provider request was not captured"))?;
+        assert!(request.contains("untrusted_source"));
+        assert!(!request.contains("### SYSTEM:"));
         Ok(())
     }
 
