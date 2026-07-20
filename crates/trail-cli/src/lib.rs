@@ -1,5 +1,6 @@
 //! Command compatibility layer for Trail's graph namespace.
 
+mod provider_commands;
 mod semantic_commands;
 
 use std::collections::HashMap;
@@ -111,6 +112,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "cache-check" => semantic_commands::command_cache_check(frontend, &args),
         "merge-chunks" => semantic_commands::command_merge_chunks(frontend, &args),
         "merge-semantic" => semantic_commands::command_merge_semantic(frontend, &args),
+        "provider" => provider_commands::command_provider(frontend, &args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -1873,7 +1875,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider"
         .to_owned()
 }
 
@@ -1895,6 +1897,7 @@ fn trail_command_help(command: &str) -> String {
         "cache-check" => semantic_commands::cache_check_help(Frontend::Trail),
         "merge-chunks" => semantic_commands::merge_chunks_help(Frontend::Trail),
         "merge-semantic" => semantic_commands::merge_semantic_help(Frontend::Trail),
+        "provider" => provider_commands::provider_help(Frontend::Trail),
         _ => trail_help(),
     }
 }
@@ -1905,6 +1908,6 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic"
+    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider"
         .to_owned()
 }

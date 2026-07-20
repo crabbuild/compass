@@ -3626,6 +3626,7 @@ dependencies = [
  "trail-output",
  "trail-query",
  "trail-semantic",
+ "url",
 ]
 
 [[package]]

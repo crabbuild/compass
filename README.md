@@ -39,6 +39,7 @@ trail graph merge-graphs
 trail graph cache-check
 trail graph merge-chunks
 trail graph merge-semantic
+trail graph provider
 ```
 
 The deterministic language registry is checked against every extension handled
