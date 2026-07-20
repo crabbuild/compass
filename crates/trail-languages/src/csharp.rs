@@ -545,6 +545,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(receiver),
                         receiver_type: None,
                         lang: Some("csharp".to_owned()),
+                        extensions: Map::new(),
                     });
                 }
             }

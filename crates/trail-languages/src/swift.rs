@@ -446,6 +446,7 @@ impl<'tree> State<'_, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: None,
                     lang: None,
+                    extensions: Map::new(),
                 });
             }
         }

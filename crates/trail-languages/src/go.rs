@@ -412,6 +412,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
+                        extensions: Map::new(),
                     });
                 }
             }

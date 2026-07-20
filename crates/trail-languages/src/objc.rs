@@ -399,6 +399,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(Some(receiver)),
                         receiver_type: None,
                         lang: Some("objc".to_owned()),
+                        extensions: Map::new(),
                     });
                 }
             }

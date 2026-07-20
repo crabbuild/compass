@@ -1,5 +1,9 @@
 //! Deterministic cross-file resolution over immutable extraction facts.
 
+mod members;
+
+pub use members::resolve_language_calls;
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -26,6 +30,7 @@ pub fn resolve(extractions: &[Extraction], sources: &HashMap<String, String>) ->
         merged.extensions.extend(extraction.extensions.clone());
     }
     resolve_cross_file_calls(&mut merged, sources);
+    members::resolve_language_calls(extractions, &mut merged);
     merged
 }
 
@@ -81,8 +86,12 @@ pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<S
     let mut symbol_imports = HashMap::<String, HashSet<String>>::new();
     let mut module_imports = HashMap::<String, HashSet<String>>::new();
     let mut existing = HashSet::new();
+    let mut call_like = HashSet::new();
     for edge in &extraction.edges {
         existing.insert((edge.source.clone(), edge.target.clone()));
+        if matches!(relation(edge), "calls" | "indirect_call") {
+            call_like.insert((edge.source.clone(), edge.target.clone()));
+        }
         match relation(edge) {
             "imports" => {
                 symbol_imports
@@ -102,7 +111,11 @@ pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<S
 
     let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
     for raw in raw_calls {
-        if raw.callee.is_empty() || raw.is_member_call == Some(true) {
+        if raw.callee.is_empty()
+            || raw.is_member_call == Some(true)
+            || is_builtin(&raw.callee)
+            || raw.extensions.get("is_mixin").and_then(Value::as_bool) == Some(true)
+        {
             continue;
         }
         let candidates = candidate_calls(&raw, &exact, &folded, &source_by_id);
@@ -114,11 +127,42 @@ pub fn resolve_cross_file_calls(extraction: &mut Extraction, sources: &HashMap<S
             .or_else(|| file_by_id.get(&raw.caller_nid));
         let imported_symbols = caller_file.and_then(|id| symbol_imports.get(id));
         let imported_modules = caller_file.and_then(|id| module_imports.get(id));
-        let selection =
-            select_candidate(&candidates, imported_symbols, imported_modules, &file_by_id);
+        let selection = select_candidate(
+            &candidates,
+            imported_symbols,
+            imported_modules,
+            &file_by_id,
+            &source_by_id,
+            &raw.source_file,
+        );
         let Some((target, import_evidence)) = selection else {
             continue;
         };
+        let indirect = raw.extensions.get("indirect").and_then(Value::as_bool) == Some(true);
+        if indirect {
+            if target != raw.caller_nid
+                && extraction.nodes.iter().any(|node| {
+                    node.id == target
+                        && node.attributes.get("_callable").and_then(Value::as_bool) == Some(true)
+                })
+                && call_like.insert((raw.caller_nid.clone(), target.clone()))
+            {
+                let mut edge = resolved_edge(&raw, &target, "INFERRED", 0.8);
+                edge.attributes.insert(
+                    "relation".to_owned(),
+                    Value::String("indirect_call".to_owned()),
+                );
+                edge.attributes.insert(
+                    "context".to_owned(),
+                    raw.extensions
+                        .get("context")
+                        .cloned()
+                        .unwrap_or_else(|| Value::String("argument".to_owned())),
+                );
+                extraction.edges.push(edge);
+            }
+            continue;
+        }
         if target == raw.caller_nid || (!import_evidence && is_javascript(&raw.source_file)) {
             continue;
         }
@@ -283,6 +327,8 @@ fn select_candidate(
     symbol_imports: Option<&HashSet<String>>,
     module_imports: Option<&HashSet<String>>,
     file_by_id: &HashMap<String, String>,
+    source_by_id: &HashMap<String, String>,
+    call_site_file: &str,
 ) -> Option<(String, bool)> {
     if candidates.len() == 1 {
         let candidate = candidates[0].clone();
@@ -309,7 +355,164 @@ fn select_candidate(
         })
         .cloned()
         .collect::<Vec<_>>();
-    (module_matches.len() == 1).then(|| (module_matches[0].clone(), true))
+    if module_matches.len() == 1 {
+        return Some((module_matches[0].clone(), true));
+    }
+    disambiguate_candidates(candidates, source_by_id, call_site_file)
+        .map(|candidate| (candidate, false))
+}
+
+fn disambiguate_candidates(
+    candidates: &[String],
+    source_by_id: &HashMap<String, String>,
+    call_site_file: &str,
+) -> Option<String> {
+    if candidates.len() == 1 {
+        return candidates.first().cloned();
+    }
+    let call_is_test = is_test_path(call_site_file);
+    let test_candidates = candidates
+        .iter()
+        .filter(|candidate| {
+            source_by_id
+                .get(*candidate)
+                .is_some_and(|path| is_test_path(path))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let test_set = test_candidates.iter().collect::<HashSet<_>>();
+    let non_test_candidates = candidates
+        .iter()
+        .filter(|candidate| !test_set.contains(candidate))
+        .cloned()
+        .collect::<Vec<_>>();
+    let survivors = if call_is_test {
+        let normalized_call = normalize_path(call_site_file);
+        let same_file = test_candidates
+            .iter()
+            .filter(|candidate| {
+                source_by_id
+                    .get(*candidate)
+                    .is_some_and(|path| normalize_path(path) == normalized_call)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if same_file.len() == 1 {
+            return same_file.first().cloned();
+        }
+        if test_candidates.is_empty() {
+            if non_test_candidates.is_empty() {
+                candidates.to_vec()
+            } else {
+                non_test_candidates
+            }
+        } else {
+            test_candidates
+        }
+    } else {
+        non_test_candidates
+    };
+    if survivors.len() == 1 {
+        return survivors.first().cloned();
+    }
+    path_proximity(&survivors, source_by_id, call_site_file)
+}
+
+fn path_proximity(
+    candidates: &[String],
+    source_by_id: &HashMap<String, String>,
+    call_site_file: &str,
+) -> Option<String> {
+    if call_site_file.is_empty() {
+        return None;
+    }
+    let call = normalize_path(call_site_file);
+    let call_dir = parent_segments(&call);
+    let same_file = candidates
+        .iter()
+        .filter(|candidate| {
+            source_by_id
+                .get(*candidate)
+                .is_some_and(|path| normalize_path(path) == call)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if same_file.len() == 1 {
+        return same_file.first().cloned();
+    }
+    if same_file.len() > 1 {
+        return None;
+    }
+    let same_dir = candidates
+        .iter()
+        .filter(|candidate| {
+            source_by_id
+                .get(*candidate)
+                .is_some_and(|path| parent_segments(&normalize_path(path)) == call_dir)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if same_dir.len() == 1 {
+        return same_dir.first().cloned();
+    }
+    if same_dir.len() > 1 {
+        return None;
+    }
+    let scores = candidates
+        .iter()
+        .map(|candidate| {
+            let parts = source_by_id
+                .get(candidate)
+                .map(|path| parent_segments(&normalize_path(path)))
+                .unwrap_or_default();
+            let score = call_dir
+                .iter()
+                .zip(parts.iter())
+                .take_while(|(left, right)| left == right)
+                .count();
+            (candidate, score)
+        })
+        .collect::<Vec<_>>();
+    let best = scores.iter().map(|(_, score)| *score).max()?;
+    let winners = scores
+        .iter()
+        .filter(|(_, score)| *score == best)
+        .collect::<Vec<_>>();
+    (best > 0 && winners.len() == 1).then(|| (*winners[0].0).clone())
+}
+
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn parent_segments(path: &str) -> Vec<String> {
+    path.rsplit_once('/').map_or_else(Vec::new, |(parent, _)| {
+        parent.split('/').map(str::to_owned).collect()
+    })
+}
+
+fn is_test_path(path: &str) -> bool {
+    let normalized = normalize_path(path);
+    let parts = normalized.split('/').collect::<Vec<_>>();
+    if parts.iter().any(|part| {
+        matches!(
+            part.to_ascii_lowercase().as_str(),
+            "tests" | "test" | "spec" | "specs" | "__tests__"
+        )
+    }) {
+        return true;
+    }
+    let filename = parts.last().copied().unwrap_or_default();
+    let folded = filename.to_ascii_lowercase();
+    folded.starts_with("test_")
+        || folded.contains("_test.")
+        || folded.contains(".test.")
+        || folded.contains(".spec.")
+        || folded.contains("_spec.")
+        || folded.ends_with(".tests.ps1")
+        || filename.ends_with("Test.java")
+        || filename.ends_with("Tests.java")
+        || filename.ends_with("Tests.cs")
 }
 
 fn resolved_edge(raw: &RawCall, target: &str, confidence: &str, score: f64) -> EdgeRecord {
@@ -374,20 +577,121 @@ fn is_javascript(source: &str) -> bool {
     )
 }
 
+fn is_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "String"
+            | "Number"
+            | "Boolean"
+            | "Object"
+            | "Array"
+            | "Symbol"
+            | "BigInt"
+            | "Date"
+            | "RegExp"
+            | "Error"
+            | "TypeError"
+            | "RangeError"
+            | "SyntaxError"
+            | "ReferenceError"
+            | "EvalError"
+            | "URIError"
+            | "Promise"
+            | "Map"
+            | "Set"
+            | "WeakMap"
+            | "WeakSet"
+            | "JSON"
+            | "Math"
+            | "Reflect"
+            | "Proxy"
+            | "Intl"
+            | "parseInt"
+            | "parseFloat"
+            | "isNaN"
+            | "isFinite"
+            | "encodeURIComponent"
+            | "decodeURIComponent"
+            | "encodeURI"
+            | "decodeURI"
+            | "URL"
+            | "URLSearchParams"
+            | "FormData"
+            | "Blob"
+            | "File"
+            | "Headers"
+            | "Request"
+            | "Response"
+            | "AbortController"
+            | "AbortSignal"
+            | "TextEncoder"
+            | "TextDecoder"
+            | "console"
+            | "str"
+            | "int"
+            | "float"
+            | "bool"
+            | "list"
+            | "dict"
+            | "set"
+            | "tuple"
+            | "bytes"
+            | "len"
+            | "range"
+            | "enumerate"
+            | "zip"
+            | "map"
+            | "filter"
+            | "sum"
+            | "min"
+            | "max"
+            | "print"
+            | "open"
+            | "isinstance"
+            | "type"
+            | "super"
+            | "sorted"
+            | "reversed"
+            | "any"
+            | "all"
+            | "abs"
+            | "round"
+            | "next"
+            | "iter"
+            | "hash"
+            | "id"
+            | "repr"
+            | "callable"
+            | "getattr"
+            | "setattr"
+            | "hasattr"
+            | "delattr"
+            | "vars"
+            | "dir"
+    )
+}
+
 fn language_family(source: &str) -> Option<&'static str> {
     match extension(source).as_str() {
         "py" | "pyi" => Some("py"),
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => Some("js"),
         "java" | "kt" | "kts" | "scala" | "groovy" | "gradle" => Some("jvm"),
-        "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "cu" | "cuh" | "metal" | "m" | "mm" => Some("c"),
+        "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "cu" | "cuh" | "metal" | "m" | "mm"
+        | "swift" => Some("native"),
         "go" => Some("go"),
         "rs" => Some("rs"),
         "rb" | "rake" => Some("rb"),
         "php" => Some("php"),
         "cs" => Some("cs"),
-        "swift" => Some("swift"),
         "lua" | "luau" => Some("lua"),
+        "razor" | "cshtml" | "xaml" => Some("cs"),
+        "zig" => Some("zig"),
+        "ex" | "exs" => Some("elixir"),
+        "jl" => Some("julia"),
+        "dart" => Some("dart"),
+        "sh" | "bash" => Some("shell"),
+        "ps1" | "psm1" | "psd1" => Some("powershell"),
         _ => None,
     }
 }

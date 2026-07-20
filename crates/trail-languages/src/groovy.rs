@@ -232,6 +232,7 @@ fn extract_regular(path: &Path, source: &str) -> Extraction {
                             receiver: Some(None),
                             receiver_type: None,
                             lang: None,
+                            extensions: Map::new(),
                         });
                     }
                 }

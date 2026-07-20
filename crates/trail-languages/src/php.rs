@@ -462,6 +462,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(None),
                         receiver_type: None,
                         lang: None,
+                        extensions: Map::new(),
                     });
                 }
                 if call.name == "config" {

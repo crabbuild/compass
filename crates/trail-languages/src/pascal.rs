@@ -373,6 +373,7 @@ impl<'a> State<'a> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
+                        extensions: Map::new(),
                     });
                 }
             }

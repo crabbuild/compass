@@ -456,6 +456,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
+                        extensions: Map::new(),
                     });
                 }
             }

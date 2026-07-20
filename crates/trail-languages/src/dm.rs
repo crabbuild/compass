@@ -358,6 +358,7 @@ impl<'tree> SourceState<'_, '_, 'tree> {
                 receiver: None,
                 receiver_type: None,
                 lang: None,
+                extensions: Map::new(),
             });
         }
     }

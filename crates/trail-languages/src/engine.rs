@@ -461,6 +461,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: (self.language == "ruby" && call.member).then_some(None),
                     lang: (self.language == "java").then(|| "java".to_owned()),
+                    extensions: Map::new(),
                 });
             }
         }

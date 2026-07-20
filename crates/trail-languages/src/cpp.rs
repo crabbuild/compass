@@ -385,6 +385,7 @@ impl<'tree> State<'_, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: None,
                     lang: Some("cpp".to_owned()),
+                    extensions: Map::new(),
                 });
             }
         }

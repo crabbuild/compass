@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use trail_model::{EdgeRecord, NodeRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,6 +16,10 @@ pub struct RawCall {
     pub receiver_type: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
+    /// Language-specific deterministic facts used by later resolution passes.
+    /// Keeping these fields lossless is required for forward-compatible caches.
+    #[serde(flatten)]
+    pub extensions: Map<String, Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

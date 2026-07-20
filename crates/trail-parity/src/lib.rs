@@ -29,7 +29,7 @@ mod tests {
         export_obsidian, generate_report, graphml_document, html_document, spring_layout,
         write_json,
     };
-    use trail_resolve::resolve;
+    use trail_resolve::{resolve, resolve_language_calls};
 
     #[test]
     fn read_commands_match_python_cli() -> Result<(), Box<dyn Error>> {
@@ -1574,6 +1574,203 @@ hydrate();
                 node.id
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn language_member_resolvers_match_python() -> Result<(), Box<dyn Error>> {
+        let cases = [
+            member_fixture(
+                "swift_type_table",
+                "Use.swift",
+                None,
+                "SwiftService",
+                None,
+                "graphify.extract",
+                "_resolve_swift_member_calls",
+            )?,
+            member_fixture(
+                "ts_type_table",
+                "use.ts",
+                None,
+                "service",
+                Some("TsService"),
+                "graphify.extract",
+                "_resolve_typescript_member_calls",
+            )?,
+            member_fixture(
+                "cpp_type_table",
+                "use.cpp",
+                Some("cpp"),
+                "service",
+                Some("CppService"),
+                "graphify.extract",
+                "_resolve_cpp_member_calls",
+            )?,
+            member_fixture(
+                "csharp_type_table",
+                "Use.cs",
+                Some("csharp"),
+                "service",
+                Some("CsService"),
+                "graphify.extract",
+                "_resolve_csharp_member_calls",
+            )?,
+            member_fixture(
+                "",
+                "Use.java",
+                Some("java"),
+                "service",
+                Some("JavaService"),
+                "graphify.extract",
+                "_resolve_java_member_calls",
+            )?,
+            member_fixture(
+                "objc_type_table",
+                "Use.m",
+                Some("objc"),
+                "service",
+                Some("ObjcService"),
+                "graphify.extract",
+                "_resolve_objc_member_calls",
+            )?,
+            member_fixture(
+                "",
+                "use.py",
+                None,
+                "PyService",
+                None,
+                "graphify.extract",
+                "_resolve_python_member_calls",
+            )?,
+            member_fixture(
+                "",
+                "use.rb",
+                None,
+                "service",
+                Some("RubyService"),
+                "graphify.ruby_resolution",
+                "resolve_ruby_member_calls",
+            )?,
+        ];
+        for (fixture, module, resolver) in cases {
+            compare_member_resolver(&fixture, module, resolver)?;
+        }
+        compare_member_resolver(
+            &pascal_member_fixture()?,
+            "graphify.pascal_resolution",
+            "resolve_pascal_inherited_calls",
+        )?;
+        Ok(())
+    }
+
+    fn member_fixture(
+        table_name: &str,
+        source_file: &str,
+        language: Option<&str>,
+        receiver: &str,
+        receiver_type: Option<&str>,
+        python_module: &'static str,
+        python_resolver: &'static str,
+    ) -> Result<(trail_languages::Extraction, &'static str, &'static str), Box<dyn Error>> {
+        let type_name = receiver_type.unwrap_or(receiver);
+        let mut fixture = json!({
+            "nodes": [
+                {"id":"file","label":source_file,"file_type":"code","source_file":source_file},
+                {"id":"type","label":type_name,"file_type":"code","source_file":format!("{type_name}.{}", Path::new(source_file).extension().and_then(|value| value.to_str()).unwrap_or_default())},
+                {"id":"method","label":".run()","file_type":"code","source_file":format!("{type_name}.{}", Path::new(source_file).extension().and_then(|value| value.to_str()).unwrap_or_default())},
+                {"id":"caller","label":"caller()","file_type":"code","source_file":source_file}
+            ],
+            "edges": [
+                {"source":"file","target":"type","relation":"contains"},
+                {"source":"type","target":"method","relation":"method"},
+                {"source":"file","target":"caller","relation":"contains"}
+            ],
+            "raw_calls": [{
+                "caller_nid":"caller","callee":"run","is_member_call":true,
+                "source_file":source_file,"source_location":"L7","receiver":receiver,
+                "receiver_type":receiver_type,"lang":language
+            }]
+        });
+        if !table_name.is_empty() {
+            fixture
+                .as_object_mut()
+                .ok_or("member fixture must be an object")?
+                .insert(
+                    table_name.to_owned(),
+                    json!({"path":source_file,"table":{(receiver):type_name}}),
+                );
+        }
+        Ok((
+            serde_json::from_value(fixture)?,
+            python_module,
+            python_resolver,
+        ))
+    }
+
+    fn pascal_member_fixture() -> Result<trail_languages::Extraction, Box<dyn Error>> {
+        Ok(serde_json::from_value(json!({
+            "nodes": [
+                {"id":"base","label":"TBase","file_type":"code","source_file":"Base.pas"},
+                {"id":"derived","label":"TDerived","file_type":"code","source_file":"Derived.pas"},
+                {"id":"inherited","label":"run()","file_type":"code","source_file":"Base.pas"},
+                {"id":"caller","label":"caller()","file_type":"code","source_file":"Derived.pas"}
+            ],
+            "edges": [
+                {"source":"base_file","target":"base","relation":"contains"},
+                {"source":"derived_file","target":"derived","relation":"contains"},
+                {"source":"derived","target":"base","relation":"inherits"},
+                {"source":"base","target":"inherited","relation":"method"},
+                {"source":"derived","target":"caller","relation":"method"}
+            ],
+            "raw_calls": [{"caller_nid":"caller","callee":"run","source_file":"Derived.pas","source_location":"L8"}]
+        }))?)
+    }
+
+    fn compare_member_resolver(
+        fixture: &trail_languages::Extraction,
+        python_module: &str,
+        python_resolver: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut rust_graph = fixture.clone();
+        let initial_edges = rust_graph.edges.len();
+        resolve_language_calls(std::slice::from_ref(fixture), &mut rust_graph);
+        let mut rust = rust_graph.edges[initial_edges..]
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()?;
+        rust.sort_by_key(ToString::to_string);
+
+        let repo = repository_root();
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import importlib,json,sys; x=json.load(sys.stdin); nodes=list(x['nodes']); edges=list(x['edges']); base=len(edges); getattr(importlib.import_module(sys.argv[1]),sys.argv[2])([x],nodes,edges); print(json.dumps(sorted(edges[base:],key=lambda e:json.dumps(e,sort_keys=True)),sort_keys=True))",
+                python_module,
+                python_resolver,
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python member resolver stdin unavailable")?
+            .write_all(&serde_json::to_vec(fixture)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{python_resolver}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            rust,
+            serde_json::from_slice::<Vec<Value>>(&output.stdout)?,
+            "{python_resolver}"
+        );
         Ok(())
     }
 
