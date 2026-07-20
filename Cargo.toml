@@ -2,6 +2,7 @@
 members = [
     "crates/trail-cli",
     "crates/trail-core",
+    "crates/trail-files",
     "crates/trail-model",
     "crates/trail-parity",
     "crates/trail-query",
@@ -19,6 +20,9 @@ repository = "https://github.com/Graphify-Labs/graphify"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+md-5 = "0.10"
+rayon = "1"
+regex = "1"
 thiserror = "2"
 unicode-normalization = "0.1"
 tempfile = "3"
