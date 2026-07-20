@@ -214,3 +214,34 @@ pub(crate) fn escape_non_ascii(value: &str) -> String {
     }
     output
 }
+
+pub(crate) fn python_json_compact(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => {
+            let encoded = serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned());
+            escape_non_ascii(&encoded)
+        }
+        Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(python_json_compact)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Object(map) => format!(
+            "{{{}}}",
+            map.iter()
+                .map(|(key, value)| format!(
+                    "{}: {}",
+                    python_json_compact(&Value::String(key.clone())),
+                    python_json_compact(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}

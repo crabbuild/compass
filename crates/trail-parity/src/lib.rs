@@ -23,9 +23,9 @@ mod tests {
     };
     use trail_languages::Engine;
     use trail_output::{
-        CanvasOptions, DetectionSummary, JsonExportOptions, ObsidianOptions, ReportOptions,
-        TokenCost, canvas_document, cypher_document, export_obsidian, generate_report,
-        graphml_document, write_json,
+        CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions, ObsidianOptions,
+        ReportOptions, TokenCost, canvas_document, cypher_document, export_obsidian,
+        generate_report, graphml_document, html_document, write_json,
     };
     use trail_resolve::resolve;
 
@@ -1358,6 +1358,79 @@ hydrate();
         Ok(())
     }
 
+    #[test]
+    fn interactive_html_data_matches_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let fixture_path = repo.join("tests/fixtures/extraction.json");
+        let extraction: trail_languages::Extraction =
+            serde_json::from_slice(&fs::read(&fixture_path)?)?;
+        let graph = build_from_extraction(&extraction, false, None);
+        let communities = cluster(&graph, ClusterOptions::default());
+        let labels = label_communities_by_hub(&graph, &communities);
+        let overlay = std::collections::BTreeMap::from([
+            (
+                "n_transformer".to_owned(),
+                json!({"status":"preferred","uses":3,"score":2.4,"stale":false,"neg":0}),
+            ),
+            (
+                "n_attention".to_owned(),
+                json!({"status":"contested","uses":2,"neg":1,"stale":true}),
+            ),
+        ]);
+        let directory = tempfile::tempdir()?;
+        let output_path = directory.path().join("graph.html");
+        let rust = html_document(
+            &graph,
+            &communities,
+            &output_path,
+            &HtmlOptions {
+                community_labels: Some(&labels),
+                member_counts: None,
+                node_limit: None,
+                learning_overlay: Some(&overlay),
+            },
+        )?
+        .ok_or("fixture unexpectedly skipped HTML output")?
+        .html;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from graphify.build import build_from_json; from graphify.cluster import cluster,label_communities_by_hub; from graphify.export import to_html; x=json.load(open(sys.argv[1])); G=build_from_json(x); c=cluster(G); labels=label_communities_by_hub(G,c); to_html(G,c,sys.argv[2],labels,learning_overlay=json.loads(sys.argv[3]))",
+            ])
+            .arg(&fixture_path)
+            .arg(&output_path)
+            .arg(serde_json::to_string(&overlay)?)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python = fs::read_to_string(&output_path)?;
+        for name in ["RAW_NODES", "RAW_EDGES", "LEGEND"] {
+            assert_eq!(
+                embedded_json(&rust, name)?,
+                embedded_json(&python, name)?,
+                "{name}"
+            );
+        }
+        for security_contract in [
+            "vis-network@9.1.6/standalone/umd/vis-network.min.js",
+            "sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1",
+            "data-nid=\"${esc(nid)}\"",
+            "closest('.neighbor-link')",
+        ] {
+            assert!(
+                rust.contains(security_contract),
+                "missing {security_contract}"
+            );
+        }
+        assert!(!rust.contains("onclick=\"focusNode("));
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
@@ -1391,6 +1464,18 @@ hydrate();
         let mut files = std::collections::BTreeMap::new();
         visit(root, root, &mut files)?;
         Ok(files)
+    }
+
+    fn embedded_json(html: &str, name: &str) -> Result<Value, Box<dyn Error>> {
+        let marker = format!("const {name} = ");
+        let start = html.find(&marker).ok_or("embedded JSON marker missing")? + marker.len();
+        let end = html[start..]
+            .find(';')
+            .ok_or("embedded JSON terminator missing")?
+            + start;
+        Ok(serde_json::from_str(
+            &html[start..end].replace("<\\/", "</"),
+        )?)
     }
 
     fn compare_graph_build(source: &Path) -> Result<(), Box<dyn Error>> {
