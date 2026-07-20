@@ -1,8 +1,12 @@
 //! Application services shared by the Trail and Graphify command frontends.
 
+mod cluster_existing;
+mod diagnostics;
 mod merge;
 mod pipeline;
 
+pub use cluster_existing::{ClusterExistingOptions, ClusterExistingResult, cluster_existing_graph};
+pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{BuildOptions, BuildResult, CoreError, build_local_graph};
 

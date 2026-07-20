@@ -1208,6 +1208,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "trail-cli",
+ "trail-core",
  "trail-files",
  "trail-graph",
  "trail-languages",

@@ -211,6 +211,21 @@ mod tests {
         assert_eq!(tree.code, 0, "{}", tree.stderr);
         assert!(output.join("GRAPH_TREE.html").is_file());
 
+        let clustered = trail_cli::run(
+            Frontend::Trail,
+            [
+                "graph",
+                "cluster-only",
+                "--graph",
+                output.join("graph.json").to_string_lossy().as_ref(),
+                "--no-viz",
+            ]
+            .into_iter()
+            .map(OsString::from),
+        );
+        assert_eq!(clustered.code, 0, "{}", clustered.stderr);
+        assert!(clustered.stdout.contains("communities"));
+
         let legacy = trail_cli::run(
             Frontend::Graphify,
             ["update", &root].into_iter().map(OsString::from),
@@ -329,6 +344,39 @@ mod tests {
         compare(&arguments)?;
         let python_graph: Value = serde_json::from_slice(&fs::read(&output)?)?;
         assert_eq!(rust_graph, python_graph);
+        Ok(())
+    }
+
+    #[test]
+    fn multigraph_diagnostic_matches_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let graph = directory.path().join("raw.json");
+        let producer = directory.path().join("producer.py");
+        fs::write(&producer, "# no suppression sites\n")?;
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "nodes":[{"id":"a"},{"id":"b"},{"id":"c","verification":"unverified"}],
+                "edges":[
+                    {"source":"a","target":"b","relation":"calls","source_file":"a.py","source_location":"L1","context":"call"},
+                    {"source":"a","target":"b","relation":"imports","source_file":"a.py","source_location":"L2","context":"import"},
+                    {"source":"a","target":"b","relation":"calls","source_file":"a.py","source_location":"L1","context":"call"},
+                    {"source":"a","target":"missing","relation":"calls"},
+                    {"source":"c","target":"c","relation":"references"}
+                ]
+            }))?,
+        )?;
+        let rust = trail_core::diagnose_graph_file(&graph, Some(true), 5, Some(&producer))?;
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args(["-c", "import json,sys; from graphify.diagnostics import diagnose_file; print(json.dumps(diagnose_file(sys.argv[1],directed=True,max_examples=5,extract_path=sys.argv[2]),sort_keys=True))"])
+            .arg(&graph).arg(&producer).current_dir(&repo).env("PYTHONPATH", &repo).output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(rust, serde_json::from_slice::<Value>(&output.stdout)?);
         Ok(())
     }
 

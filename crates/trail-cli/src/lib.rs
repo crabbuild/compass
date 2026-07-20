@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use trail_core::{
-    BuildOptions, ExportInputs, LoadedGraph, build_local_graph, default_graph_path, merge_graphs,
+    BuildOptions, ClusterExistingOptions, ExportInputs, LoadedGraph, build_local_graph,
+    cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
+    format_diagnostic_report, merge_graphs,
 };
 use trail_graph::god_nodes;
 use trail_model::GraphError;
@@ -79,6 +81,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "benchmark" => command_benchmark(&args),
         "merge-graphs" => command_merge_graphs(&args),
         "tree" if frontend == Frontend::Trail => command_tree(&args),
+        "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
+        "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
         "update" if frontend == Frontend::Trail => command_build(&args, false),
         "extract" if frontend == Frontend::Trail => command_build(&args, true),
         "--help" | "-h" | "help" => Outcome::success(if frontend == Frontend::Trail {
@@ -88,6 +92,158 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         }),
         "--version" | "-V" => Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION"))),
         _ => Outcome::failure(format!("error: unknown graph command '{command}'")),
+    }
+}
+
+fn command_diagnose(args: &[String]) -> Outcome {
+    if args.first().map(String::as_str) != Some("multigraph") {
+        return Outcome::failure("Usage: trail graph diagnose multigraph [--graph path] [--json] [--max-examples N] [--directed] [--undirected] [--extract-path path]".to_owned());
+    }
+    let mut graph_path = default_graph_path();
+    let mut max_examples = 5_usize;
+    let mut directed = None;
+    let mut json_output = false;
+    let mut extract_path = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--graph" if index + 1 < args.len() => {
+                graph_path = PathBuf::from(&args[index + 1]);
+                index += 1;
+            }
+            "--json" => json_output = true,
+            "--max-examples" if index + 1 < args.len() => {
+                let Ok(value) = args[index + 1].parse::<usize>() else {
+                    return Outcome::failure(
+                        "error: --max-examples requires a non-negative integer".to_owned(),
+                    );
+                };
+                max_examples = value;
+                index += 1;
+            }
+            "--directed" if directed != Some(false) => directed = Some(true),
+            "--undirected" if directed != Some(true) => directed = Some(false),
+            "--directed" | "--undirected" => {
+                return Outcome::failure(
+                    "error: --directed and --undirected are mutually exclusive".to_owned(),
+                );
+            }
+            "--extract-path" if index + 1 < args.len() => {
+                extract_path = Some(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            value => return Outcome::failure(format!("error: unknown diagnose option {value}")),
+        }
+        index += 1;
+    }
+    match diagnose_graph_file(&graph_path, directed, max_examples, extract_path.as_deref()) {
+        Ok(summary) if json_output => {
+            match serde_json::to_string_pretty(&format_diagnostic_json(&summary)) {
+                Ok(output) => Outcome::success(output),
+                Err(error) => Outcome::failure(format!("error: {error}")),
+            }
+        }
+        Ok(summary) => Outcome::success(format_diagnostic_report(&summary)),
+        Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+fn command_cluster_only(args: &[String]) -> Outcome {
+    let mut root = PathBuf::from(".");
+    let mut root_set = false;
+    let mut graph_override = None;
+    let mut no_viz = false;
+    let mut no_label = false;
+    let mut resolution = 1.0;
+    let mut exclude_hubs = None;
+    let mut min_community_size = 3_usize;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--graph" if index + 1 < args.len() => {
+                graph_override = Some(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            "--no-viz" => no_viz = true,
+            "--no-label" => no_label = true,
+            "--resolution" if index + 1 < args.len() => {
+                let Ok(value) = args[index + 1].parse::<f64>() else {
+                    return Outcome::failure("error: --resolution requires a number".to_owned());
+                };
+                resolution = value;
+                index += 1;
+            }
+            "--exclude-hubs" if index + 1 < args.len() => {
+                let Ok(value) = args[index + 1].parse::<f64>() else {
+                    return Outcome::failure("error: --exclude-hubs requires a number".to_owned());
+                };
+                exclude_hubs = Some(value);
+                index += 1;
+            }
+            value if value.starts_with("--min-community-size=") => {
+                let Ok(parsed) = value[21..].parse::<usize>() else {
+                    return Outcome::failure(
+                        "error: --min-community-size requires an integer".to_owned(),
+                    );
+                };
+                min_community_size = parsed;
+            }
+            "-h" | "--help" => {
+                return Outcome::success("Usage: trail graph cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned());
+            }
+            value if value.starts_with('-') => {
+                return Outcome::failure(format!(
+                    "error: unsupported native cluster-only option: {value}"
+                ));
+            }
+            value if !root_set => {
+                root = PathBuf::from(value);
+                root_set = true;
+            }
+            value => return Outcome::failure(format!("error: unexpected path: {value}")),
+        }
+        index += 1;
+    }
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let graph_path = graph_override
+        .clone()
+        .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
+    if !graph_path.exists() {
+        return Outcome::failure(format!(
+            "error: no graph found at {} — run `trail graph extract {} --code-only` first",
+            graph_path.display(),
+            root.display()
+        ));
+    }
+    let output_dir = if graph_override.is_some()
+        && graph_path.parent().and_then(Path::file_name) == Path::new(&output_name).file_name()
+    {
+        graph_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    } else {
+        root.join(&output_name)
+    };
+    match cluster_existing_graph(&ClusterExistingOptions {
+        graph_path,
+        output_dir: output_dir.clone(),
+        root,
+        no_viz,
+        no_label,
+        resolution,
+        exclude_hubs,
+        min_community_size,
+    }) {
+        Ok(result) => Outcome::success(format!(
+            "Trail clustered {} nodes and {} edges into {} communities ({} labels reused).\nWritten to: {}",
+            result.nodes,
+            result.edges,
+            result.communities,
+            result.labels_reused,
+            output_dir.display()
+        )),
+        Err(error) => Outcome::failure(format!("error: {error}")),
     }
 }
 
@@ -1041,7 +1197,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  merge-graphs"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs"
         .to_owned()
 }
 

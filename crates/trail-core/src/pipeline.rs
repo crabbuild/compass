@@ -92,6 +92,8 @@ pub enum CoreError {
     MissingRoot(PathBuf),
     #[error("graph is empty — deterministic extraction produced no nodes")]
     EmptyGraph,
+    #[error("diagnostic input must be a JSON object")]
+    InvalidDiagnostic,
 }
 
 /// Run the complete deterministic local graph pipeline without invoking Python,
@@ -357,7 +359,7 @@ fn previous_communities(path: &Path) -> HashMap<String, usize> {
         .unwrap_or_default()
 }
 
-fn remove_if_exists(path: &Path) -> Result<(), CoreError> {
+pub(crate) fn remove_if_exists(path: &Path) -> Result<(), CoreError> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -377,7 +379,7 @@ fn absolutize(path: &Path) -> PathBuf {
     }
 }
 
-fn git_commit(root: &Path) -> Option<String> {
+pub(crate) fn git_commit(root: &Path) -> Option<String> {
     let dot_git = root.join(".git");
     let git_dir = if dot_git.is_dir() {
         dot_git
