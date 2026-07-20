@@ -18,6 +18,7 @@ mod objc;
 mod package_manifest;
 mod pascal_forms;
 mod php;
+mod powershell;
 mod registry;
 mod rust_lang;
 mod swift;

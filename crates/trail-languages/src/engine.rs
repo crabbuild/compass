@@ -134,6 +134,9 @@ impl Engine {
         if spec.name == "objc" {
             return Ok(crate::objc::extract(path, &source, root));
         }
+        if spec.name == "powershell" {
+            return Ok(crate::powershell::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 
