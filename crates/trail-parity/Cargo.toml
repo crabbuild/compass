@@ -12,7 +12,9 @@ serde_json.workspace = true
 tempfile.workspace = true
 trail-cli = { path = "../trail-cli" }
 trail-files = { path = "../trail-files" }
+trail-graph = { path = "../trail-graph" }
 trail-languages = { path = "../trail-languages" }
+trail-resolve = { path = "../trail-resolve" }
 
 [lints]
 workspace = true

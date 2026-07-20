@@ -8,14 +8,16 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use serde_json::json;
+    use serde_json::{Value, json};
     use tempfile::TempDir;
     use trail_cli::Frontend;
     use trail_files::{
         Cache, CacheKind, DetectOptions, Manifest, ManifestKind, detect, file_hash,
         prompt_fingerprint,
     };
+    use trail_graph::build_from_extraction;
     use trail_languages::Engine;
+    use trail_resolve::resolve;
 
     #[test]
     fn read_commands_match_python_cli() -> Result<(), Box<dyn Error>> {
@@ -796,10 +798,136 @@ hydrate();
         Ok(())
     }
 
+    #[test]
+    fn graph_construction_matches_python() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        compare_graph_build(&repo.join("tests/fixtures/extraction.json"))?;
+
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("edge-cases.json");
+        fs::write(
+            &source,
+            serde_json::to_vec(&json!({
+                "nodes": [
+                    {"id": "a", "label": "A", "source": "src\\a.py"},
+                    {"id": "b", "label": "B", "file_type": "tool", "source_file": "src/b.py"},
+                    {"id": "a", "label": "A2", "file_type": "code", "source_file": "src/a.py"}
+                ],
+                "edges": [
+                    {"source": "A", "target": "b", "relation": "calls", "weight": null, "confidence_score": "bad"},
+                    {"source": "a", "target": "external", "relation": "imports"},
+                    {"source": "b", "target": "a", "relation": "calls", "weight": 2.5}
+                ],
+                "hyperedges": [
+                    {"id": "flow", "members": ["a", "a", "b", "missing"], "source_file": "src\\a.py"}
+                ]
+            }))?,
+        )?;
+        compare_graph_build(&source)?;
+        Ok(())
+    }
+
+    #[test]
+    fn shared_cross_file_call_resolution_matches_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let files = [
+            (
+                "a.py",
+                "from b import target\ndef caller():\n    return target()\n",
+            ),
+            ("b.py", "def target():\n    return 1\n"),
+            ("c.py", "def inferred():\n    return target()\n"),
+            ("helper.js", "export function jsTarget() { return 1 }\n"),
+            (
+                "caller.js",
+                "export function blocked() { return jsTarget() }\n",
+            ),
+            ("dep.js", "export function importedTarget() { return 1 }\n"),
+            (
+                "imported.js",
+                "import { importedTarget } from './dep.js';\nexport function accepted() { return importedTarget() }\n",
+            ),
+        ];
+        let mut paths = Vec::new();
+        let mut engine = Engine::default();
+        let mut extractions = Vec::new();
+        let mut sources = std::collections::HashMap::new();
+        for (name, contents) in files {
+            let path = directory.path().join(name);
+            fs::write(&path, contents)?;
+            paths.push(path.clone());
+            extractions.push(engine.extract(&path)?);
+            sources.insert(path.to_string_lossy().into_owned(), contents.to_owned());
+        }
+        let resolved = resolve(&extractions, &sources);
+        let labels = resolved
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.label()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut rust = resolved
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "calls")
+            .filter_map(|edge| {
+                Some(json!({
+                    "source": labels.get(edge.source.as_str())?,
+                    "target": labels.get(edge.target.as_str())?,
+                    "confidence": edge.string("confidence"),
+                    "score": edge.attributes.get("confidence_score").cloned().unwrap_or(Value::Null),
+                }))
+            })
+            .collect::<Vec<_>>();
+        rust.sort_by_key(ToString::to_string);
+
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from graphify.extract import extract; ps=[Path(p) for p in sys.argv[2:]]; x=extract(ps, cache_root=Path(sys.argv[1])); labels={n['id']:n.get('label',n['id']) for n in x['nodes']}; rows=[{'source':labels[e['source']],'target':labels[e['target']],'confidence':e.get('confidence',''),'score':e.get('confidence_score')} for e in x['edges'] if e.get('relation')=='calls' and e['source'] in labels and e['target'] in labels]; print(json.dumps(sorted(rows,key=lambda r:json.dumps(r,sort_keys=True)),ensure_ascii=False))",
+            ])
+            .arg(directory.path())
+            .args(&paths)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Vec<Value> = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
         compare_extraction_path(&source, extractor).map(|_| ())
+    }
+
+    fn compare_graph_build(source: &Path) -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let extraction: trail_languages::Extraction = serde_json::from_slice(&fs::read(source)?)?;
+        let rust = serde_json::to_value(build_from_extraction(&extraction, false, None))?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from networkx.readwrite import json_graph; from graphify.build import build_from_json; x=json.loads(Path(sys.argv[1]).read_text()); g=build_from_json(x, directed=False); print(json.dumps(json_graph.node_link_data(g, edges='links'), ensure_ascii=False, allow_nan=False))",
+            ])
+            .arg(source)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(rust, python, "graph build: {}", source.display());
+        Ok(())
     }
 
     fn compare_extraction_path(

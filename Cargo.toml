@@ -3,10 +3,12 @@ members = [
     "crates/trail-cli",
     "crates/trail-core",
     "crates/trail-files",
+    "crates/trail-graph",
     "crates/trail-languages",
     "crates/trail-model",
     "crates/trail-parity",
     "crates/trail-query",
+    "crates/trail-resolve",
 ]
 resolver = "3"
 

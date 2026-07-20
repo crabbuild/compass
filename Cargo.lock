@@ -1072,6 +1072,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trail-graph"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "trail-languages",
+ "trail-model",
+]
+
+[[package]]
 name = "trail-languages"
 version = "0.1.0"
 dependencies = [
@@ -1111,7 +1120,9 @@ dependencies = [
  "tempfile",
  "trail-cli",
  "trail-files",
+ "trail-graph",
  "trail-languages",
+ "trail-resolve",
 ]
 
 [[package]]
@@ -1121,6 +1132,15 @@ dependencies = [
  "serde_json",
  "trail-model",
  "unicode-normalization",
+]
+
+[[package]]
+name = "trail-resolve"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "trail-languages",
+ "trail-model",
 ]
 
 [[package]]
