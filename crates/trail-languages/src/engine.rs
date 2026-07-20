@@ -120,6 +120,9 @@ impl Engine {
         if spec.name == "rust" {
             return Ok(crate::rust_lang::extract(path, &source, root));
         }
+        if spec.name == "bash" {
+            return Ok(crate::bash::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 }
@@ -320,7 +323,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             } else if target.is_none()
                 && !(self.language == "lua" && (call.member || call.name.contains('.')))
             {
-                self.extraction.raw_calls.push(RawCall {
+                self.extraction.raw_calls_mut().push(RawCall {
                     caller_nid: caller.to_owned(),
                     callee: call.name,
                     is_member_call: call.member,

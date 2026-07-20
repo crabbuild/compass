@@ -447,7 +447,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                 } else if !scoped
                     && !TRAIT_METHOD_BLOCKLIST.contains(&callee.to_lowercase().as_str())
                 {
-                    self.extraction.raw_calls.push(RawCall {
+                    self.extraction.raw_calls_mut().push(RawCall {
                         caller_nid: caller.to_owned(),
                         callee,
                         is_member_call: member,

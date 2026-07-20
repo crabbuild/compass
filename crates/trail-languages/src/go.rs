@@ -403,7 +403,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                         self.add_edge(caller, target, "calls", line(node), Some("call"));
                     }
                 } else {
-                    self.extraction.raw_calls.push(RawCall {
+                    self.extraction.raw_calls_mut().push(RawCall {
                         caller_nid: caller.to_owned(),
                         callee,
                         is_member_call: member,

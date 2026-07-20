@@ -260,6 +260,11 @@ mod tests {
     fn lua_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.luau", "extract_lua")
     }
+
+    #[test]
+    fn bash_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.sh", "extract_bash")
+    }
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

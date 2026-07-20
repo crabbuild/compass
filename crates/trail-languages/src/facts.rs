@@ -17,16 +17,35 @@ pub struct RawCall {
     pub lang: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Extraction {
     pub nodes: Vec<NodeRecord>,
     pub edges: Vec<EdgeRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hyperedges: Vec<Value>,
-    #[serde(default)]
-    pub raw_calls: Vec<RawCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_calls: Option<Vec<RawCall>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(flatten)]
     pub extensions: serde_json::Map<String, Value>,
+}
+
+impl Default for Extraction {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            hyperedges: Vec::new(),
+            raw_calls: Some(Vec::new()),
+            error: None,
+            extensions: serde_json::Map::new(),
+        }
+    }
+}
+
+impl Extraction {
+    pub(crate) fn raw_calls_mut(&mut self) -> &mut Vec<RawCall> {
+        self.raw_calls.get_or_insert_with(Vec::new)
+    }
 }
