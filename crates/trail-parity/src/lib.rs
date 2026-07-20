@@ -162,6 +162,50 @@ mod tests {
     }
 
     #[test]
+    fn native_trail_build_commands_are_complete() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        fs::write(
+            directory.path().join("app.rs"),
+            "fn main() { helper(); }\nfn helper() {}\n",
+        )?;
+        let root = directory.path().to_string_lossy().into_owned();
+        let extract = trail_cli::run(
+            Frontend::Trail,
+            ["graph", "extract", &root, "--code-only", "--no-viz"]
+                .into_iter()
+                .map(OsString::from),
+        );
+        assert_eq!(extract.code, 0, "{}", extract.stderr);
+        assert!(extract.stdout.contains("Trail indexed 1 files"));
+        let output = directory.path().join("graphify-out");
+        for artifact in [
+            "graph.json",
+            "manifest.json",
+            ".graphify_analysis.json",
+            ".graphify_labels.json",
+            "GRAPH_REPORT.md",
+        ] {
+            assert!(output.join(artifact).is_file(), "missing {artifact}");
+        }
+
+        let update = trail_cli::run(
+            Frontend::Trail,
+            ["graph", "update", &root, "--no-viz"]
+                .into_iter()
+                .map(OsString::from),
+        );
+        assert_eq!(update.code, 0, "{}", update.stderr);
+        assert!(update.stdout.contains("0 extracted, 1 cached"));
+
+        let legacy = trail_cli::run(
+            Frontend::Graphify,
+            ["update", &root].into_iter().map(OsString::from),
+        );
+        assert_ne!(legacy.code, 0, "uncertified legacy command was exposed");
+        Ok(())
+    }
+
+    #[test]
     fn deterministic_files_match_python() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         let root = directory.path();

@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use trail_core::{ExportInputs, LoadedGraph, default_graph_path};
+use trail_core::{BuildOptions, ExportInputs, LoadedGraph, build_local_graph, default_graph_path};
 use trail_graph::god_nodes;
 use trail_model::GraphError;
 use trail_output::{
@@ -74,6 +74,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "explain" => command_explain(&args),
         "affected" => command_affected(&args),
         "export" => command_export(&args),
+        "update" if frontend == Frontend::Trail => command_build(&args, false),
+        "extract" if frontend == Frontend::Trail => command_build(&args, true),
         "--help" | "-h" | "help" => Outcome::success(if frontend == Frontend::Trail {
             trail_help()
         } else {
@@ -82,6 +84,122 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "--version" | "-V" => Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION"))),
         _ => Outcome::failure(format!("error: unknown graph command '{command}'")),
     }
+}
+
+fn command_build(args: &[String], extract: bool) -> Outcome {
+    let mut root = None;
+    let mut output_root = None;
+    let mut force = false;
+    let mut no_cluster = false;
+    let mut no_viz = false;
+    let mut gitignore = true;
+    let mut code_only = false;
+    let mut excludes = Vec::new();
+    let mut resolution = 1.0;
+    let mut exclude_hubs = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--force" => force = true,
+            "--no-cluster" => no_cluster = true,
+            "--no-viz" => no_viz = true,
+            "--no-gitignore" => gitignore = false,
+            "--code-only" => code_only = true,
+            "--out" if index + 1 < args.len() => {
+                output_root = Some(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            value if value.starts_with("--out=") => {
+                output_root = Some(PathBuf::from(&value[6..]));
+            }
+            "--exclude" if index + 1 < args.len() => {
+                excludes.push(args[index + 1].clone());
+                index += 1;
+            }
+            value if value.starts_with("--exclude=") => excludes.push(value[10..].to_owned()),
+            "--resolution" if index + 1 < args.len() => {
+                let Ok(value) = args[index + 1].parse::<f64>() else {
+                    return Outcome::failure(
+                        "error: --resolution must be a positive number".to_owned(),
+                    );
+                };
+                if value <= 0.0 {
+                    return Outcome::failure("error: --resolution must be > 0".to_owned());
+                }
+                resolution = value;
+                index += 1;
+            }
+            "--exclude-hubs" if index + 1 < args.len() => {
+                let Ok(value) = args[index + 1].parse::<f64>() else {
+                    return Outcome::failure("error: --exclude-hubs must be a number".to_owned());
+                };
+                exclude_hubs = Some(value);
+                index += 1;
+            }
+            "-h" | "--help" => {
+                return Outcome::success(if extract {
+                    "Usage: trail graph extract <path> --code-only [--out DIR] [--no-cluster] [--force] [--no-gitignore] [--exclude PATTERN]".to_owned()
+                } else {
+                    "Usage: trail graph update [path] [--no-cluster] [--force] [--no-viz]"
+                        .to_owned()
+                });
+            }
+            value if value.starts_with('-') => {
+                return Outcome::failure(format!("error: unknown graph build option: {value}"));
+            }
+            value if root.is_none() => root = Some(PathBuf::from(value)),
+            value => {
+                return Outcome::failure(format!(
+                    "error: graph build accepts one path, unexpected: {value}"
+                ));
+            }
+        }
+        index += 1;
+    }
+    if extract && !code_only {
+        return Outcome::failure(
+            "error: native semantic extraction is not available yet; pass --code-only".to_owned(),
+        );
+    }
+    let root = root
+        .or_else(saved_graph_root)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mut options = BuildOptions::new(&root);
+    options.output_root = output_root;
+    options.force = force;
+    options.no_cluster = no_cluster;
+    options.no_viz = no_viz;
+    options.gitignore = gitignore;
+    options.extra_excludes = excludes;
+    options.resolution = resolution;
+    options.exclude_hubs = exclude_hubs;
+    match build_local_graph(&options) {
+        Ok(result) => {
+            let mode = if no_cluster {
+                "without clustering"
+            } else {
+                "with clustering"
+            };
+            Outcome::success(format!(
+                "Trail indexed {} files ({} extracted, {} cached): {} nodes, {} edges, {} communities {mode}.\nWritten to: {}",
+                result.files_considered,
+                result.files_extracted,
+                result.files_cached,
+                result.nodes,
+                result.edges,
+                result.communities,
+                result.output_dir.display()
+            ))
+        }
+        Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+fn saved_graph_root() -> Option<PathBuf> {
+    let path = default_graph_path().parent()?.join(".graphify_root");
+    let root = fs::read_to_string(path).ok()?;
+    let root = root.trim();
+    (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
 fn command_export(args: &[String]) -> Outcome {
@@ -764,7 +882,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  query\n  path\n  explain\n  affected\n  export"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  query\n  path\n  explain\n  affected\n  export"
         .to_owned()
 }
 

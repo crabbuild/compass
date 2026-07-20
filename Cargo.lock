@@ -1109,10 +1109,17 @@ dependencies = [
 name = "trail-core"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "trail-files",
  "trail-graph",
+ "trail-languages",
  "trail-model",
+ "trail-output",
+ "trail-resolve",
 ]
 
 [[package]]

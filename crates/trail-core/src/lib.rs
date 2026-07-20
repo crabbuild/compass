@@ -1,5 +1,9 @@
 //! Application services shared by the Trail and Graphify command frontends.
 
+mod pipeline;
+
+pub use pipeline::{BuildOptions, BuildResult, CoreError, build_local_graph};
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
