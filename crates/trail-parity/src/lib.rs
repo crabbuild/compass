@@ -430,6 +430,20 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn php_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in [
+            "sample.php",
+            "sample_php_config.php",
+            "sample_php_container.php",
+            "sample_php_listen.php",
+            "sample_php_static_prop.php",
+        ] {
+            compare_extraction(fixture, "extract_php")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);
