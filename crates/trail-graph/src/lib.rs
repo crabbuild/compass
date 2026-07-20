@@ -1,7 +1,12 @@
 //! Deterministic graph construction and graph algorithms for Trail.
 
+mod cluster;
 mod dedup;
 
+pub use cluster::{
+    ClusterOptions, cluster, cohesion_score, community_member_signatures, label_communities_by_hub,
+    remap_communities_to_previous, score_communities,
+};
 pub use dedup::{DedupError, DedupResult, DedupStats, deduplicate_entities};
 
 use std::collections::{BTreeMap, HashMap};

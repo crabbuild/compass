@@ -16,7 +16,10 @@ mod tests {
         Cache, CacheKind, DetectOptions, Manifest, ManifestKind, detect, file_hash,
         prompt_fingerprint,
     };
-    use trail_graph::{build_from_extraction, deduplicate_entities};
+    use trail_graph::{
+        ClusterOptions, build_from_extraction, cluster, community_member_signatures,
+        deduplicate_entities, label_communities_by_hub, score_communities,
+    };
     use trail_languages::Engine;
     use trail_resolve::resolve;
 
@@ -957,6 +960,81 @@ hydrate();
         );
         let python: Value = serde_json::from_slice(&output.stdout)?;
         assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn deterministic_clustering_matches_python() -> Result<(), Box<dyn Error>> {
+        let nodes = ["a", "b", "c", "d", "e", "f", "hub", "isolate"]
+            .into_iter()
+            .map(|id| json!({"id":id,"label":format!("{id}()") }))
+            .collect::<Vec<_>>();
+        let links = [
+            ("a", "b", 1.0),
+            ("a", "c", 1.0),
+            ("b", "c", 1.0),
+            ("d", "e", 1.0),
+            ("d", "f", 1.0),
+            ("e", "f", 1.0),
+            ("c", "d", 0.25),
+            ("hub", "a", 1.0),
+            ("hub", "b", 1.0),
+            ("hub", "d", 1.0),
+            ("hub", "e", 1.0),
+        ]
+        .into_iter()
+        .map(|(source, target, weight)| json!({"source":source,"target":target,"weight":weight}))
+        .collect::<Vec<_>>();
+        let fixture = json!({
+            "directed": false,
+            "multigraph": false,
+            "graph": {},
+            "nodes": nodes,
+            "links": links,
+        });
+        let graph: trail_model::GraphDocument = serde_json::from_value(fixture.clone())?;
+        for percentile in [None, Some(75.0)] {
+            let communities = cluster(
+                &graph,
+                ClusterOptions {
+                    resolution: 1.0,
+                    exclude_hubs_percentile: percentile,
+                },
+            );
+            let rust = json!({
+                "communities": communities,
+                "labels": label_communities_by_hub(&graph, &communities),
+                "signatures": community_member_signatures(&communities),
+                "cohesion": score_communities(&graph, &communities),
+            });
+            let repo = repository_root();
+            let mut child = Command::new(python_executable(&repo))
+                .args([
+                    "-c",
+                    "import json,sys,networkx as nx; from graphify.cluster import cluster,label_communities_by_hub,community_member_sigs,score_all; x=json.load(sys.stdin); p=x.pop('percentile'); G=nx.node_link_graph(x,edges='links'); c=cluster(G,exclude_hubs_percentile=p); print(json.dumps({'communities':c,'labels':label_communities_by_hub(G,c),'signatures':community_member_sigs(c),'cohesion':score_all(G,c)},sort_keys=True))",
+                ])
+                .current_dir(&repo)
+                .env("PYTHONPATH", &repo)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?;
+            let mut input = fixture.clone();
+            input["percentile"] = serde_json::to_value(percentile)?;
+            child
+                .stdin
+                .as_mut()
+                .ok_or("Python cluster oracle stdin unavailable")?
+                .write_all(&serde_json::to_vec(&input)?)?;
+            let output = child.wait_with_output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let python: Value = serde_json::from_slice(&output.stdout)?;
+            assert_eq!(rust, python, "hub percentile {percentile:?}");
+        }
         Ok(())
     }
 
