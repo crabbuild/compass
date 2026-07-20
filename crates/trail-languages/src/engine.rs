@@ -106,6 +106,9 @@ impl Engine {
         if spec.name == "pascal" {
             return Ok(crate::pascal::extract(path, &source));
         }
+        if spec.name == "apex" {
+            return Ok(crate::apex::extract(path, &source));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

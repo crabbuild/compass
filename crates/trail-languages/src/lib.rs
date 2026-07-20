@@ -1,5 +1,6 @@
 //! Statically linked deterministic language extraction for Trail.
 
+mod apex;
 mod bash;
 mod builtins;
 mod config;
