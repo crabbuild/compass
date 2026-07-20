@@ -28,6 +28,7 @@ mod rust_lang;
 mod swift;
 mod terraform;
 mod xaml;
+mod zig;
 
 pub use facts::{Extraction, RawCall};
 pub use ids::{file_stem, make_id, normalize_id};

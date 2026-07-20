@@ -94,6 +94,9 @@ impl Engine {
         if spec.name == "fortran" {
             return Ok(crate::fortran::extract(path, &source, root));
         }
+        if spec.name == "zig" {
+            return Ok(crate::zig::extract(path, &source));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 
