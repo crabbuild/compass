@@ -6,6 +6,7 @@ mod facts;
 mod go;
 mod ids;
 mod registry;
+mod rust_lang;
 
 pub use facts::{Extraction, RawCall};
 pub use ids::{file_stem, make_id, normalize_id};

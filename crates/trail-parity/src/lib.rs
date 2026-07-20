@@ -213,89 +213,38 @@ mod tests {
 
     #[test]
     fn python_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
-        let repo = repository_root();
-        let source = repo.join("tests/fixtures/sample.py");
-        let mut engine = Engine::default();
-        let rust = serde_json::to_value(engine.extract(&source)?)?;
-        let output = Command::new(python_executable(&repo))
-            .args([
-                "-c",
-                "import json,sys; from pathlib import Path; from graphify.extract import extract_python; print(json.dumps(extract_python(Path(sys.argv[1])), ensure_ascii=False))",
-            ])
-            .arg(&source)
-            .current_dir(&repo)
-            .env("PYTHONPATH", &repo)
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        assert_eq!(rust, python);
-        Ok(())
+        compare_extraction("sample.py", "extract_python")
     }
 
     #[test]
     fn typescript_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
-        let repo = repository_root();
-        let source = repo.join("tests/fixtures/sample.ts");
-        let mut engine = Engine::default();
-        let rust = serde_json::to_value(engine.extract(&source)?)?;
-        let output = Command::new(python_executable(&repo))
-            .args([
-                "-c",
-                "import json,sys; from pathlib import Path; from graphify.extract import extract_js; print(json.dumps(extract_js(Path(sys.argv[1])), ensure_ascii=False))",
-            ])
-            .arg(&source)
-            .current_dir(&repo)
-            .env("PYTHONPATH", &repo)
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        assert_eq!(rust, python);
-        Ok(())
+        compare_extraction("sample.ts", "extract_js")
     }
 
     #[test]
     fn java_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
-        let repo = repository_root();
-        let source = repo.join("tests/fixtures/sample.java");
-        let mut engine = Engine::default();
-        let rust = serde_json::to_value(engine.extract(&source)?)?;
-        let output = Command::new(python_executable(&repo))
-            .args([
-                "-c",
-                "import json,sys; from pathlib import Path; from graphify.extract import extract_java; print(json.dumps(extract_java(Path(sys.argv[1])), ensure_ascii=False))",
-            ])
-            .arg(&source)
-            .current_dir(&repo)
-            .env("PYTHONPATH", &repo)
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        assert_eq!(rust, python);
-        Ok(())
+        compare_extraction("sample.java", "extract_java")
     }
 
     #[test]
     fn go_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.go", "extract_go")
+    }
+
+    #[test]
+    fn rust_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.rs", "extract_rust")
+    }
+
+    fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
-        let source = repo.join("tests/fixtures/sample.go");
-        let mut engine = Engine::default();
-        let rust = serde_json::to_value(engine.extract(&source)?)?;
+        let source = repo.join("tests/fixtures").join(fixture);
+        let rust = serde_json::to_value(Engine::default().extract(&source)?)?;
         let output = Command::new(python_executable(&repo))
             .args([
                 "-c",
-                "import json,sys; from pathlib import Path; from graphify.extract import extract_go; print(json.dumps(extract_go(Path(sys.argv[1])), ensure_ascii=False))",
+                "import json,sys; from pathlib import Path; import graphify.extract as e; print(json.dumps(getattr(e, sys.argv[1])(Path(sys.argv[2])), ensure_ascii=False))",
+                extractor,
             ])
             .arg(&source)
             .current_dir(&repo)
@@ -307,7 +256,7 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        assert_eq!(rust, python);
+        assert_eq!(rust, python, "fixture: {fixture}");
         Ok(())
     }
 

@@ -117,6 +117,9 @@ impl Engine {
         if spec.name == "go" {
             return Ok(crate::go::extract(path, &source, root));
         }
+        if spec.name == "rust" {
+            return Ok(crate::rust_lang::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 }
