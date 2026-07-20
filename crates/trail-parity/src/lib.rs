@@ -392,6 +392,22 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn csharp_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.cs", "sample.xaml.cs"] {
+            compare_extraction(fixture, "extract_csharp")?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn xaml_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        for fixture in ["sample.xaml", "bindings.xaml"] {
+            compare_extraction(fixture, "extract_xaml")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

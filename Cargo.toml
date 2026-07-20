@@ -21,6 +21,7 @@ repository = "https://github.com/Graphify-Labs/graphify"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
+sha1 = "0.10"
 md-5 = "0.10"
 rayon = "1"
 regex = "1"

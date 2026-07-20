@@ -2,6 +2,7 @@
 
 mod bash;
 mod config;
+mod csharp;
 mod dm;
 mod dotnet_project;
 mod engine;
@@ -16,6 +17,7 @@ mod pascal_forms;
 mod registry;
 mod rust_lang;
 mod terraform;
+mod xaml;
 
 pub use facts::{Extraction, RawCall};
 pub use ids::{file_stem, make_id, normalize_id};

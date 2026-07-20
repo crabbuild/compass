@@ -87,6 +87,7 @@ impl Engine {
             ExtractorKind::DreamMaker => self.extract_dreammaker(path),
             ExtractorKind::Solution => crate::dotnet_project::extract_solution(path),
             ExtractorKind::ProjectXml => crate::dotnet_project::extract_project(path),
+            ExtractorKind::Xaml => crate::xaml::extract(self, path),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }
@@ -111,6 +112,9 @@ impl Engine {
         }
         if spec.name == "bash" {
             return Ok(crate::bash::extract(path, &source, root));
+        }
+        if spec.name == "csharp" {
+            return Ok(crate::csharp::extract(path, &source, root));
         }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
