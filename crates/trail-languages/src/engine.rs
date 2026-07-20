@@ -88,6 +88,9 @@ impl Engine {
         if spec.name == "elixir" {
             return Ok(crate::elixir::extract(path, &source, root));
         }
+        if spec.name == "julia" {
+            return Ok(crate::julia::extract(path, &source, root));
+        }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }
 

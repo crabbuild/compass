@@ -493,6 +493,11 @@ output "instance_id" { value = aws_instance.web.id }
         compare_extraction("sample.ex", "extract_elixir")
     }
 
+    #[test]
+    fn julia_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.jl", "extract_julia")
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

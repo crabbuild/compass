@@ -14,6 +14,7 @@ mod go;
 mod groovy;
 mod ids;
 mod json_config;
+mod julia;
 mod markdown;
 mod mcp;
 mod objc;
