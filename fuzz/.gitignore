@@ -1,4 +1,6 @@
 /artifacts/
 /corpus/graph_input/*
 !/corpus/graph_input/seed.json
+/corpus/semantic_fragment/*
+!/corpus/semantic_fragment/seed.json
 /target/

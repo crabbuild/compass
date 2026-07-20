@@ -1371,6 +1371,7 @@ dependencies = [
  "trail-output",
  "trail-query",
  "trail-resolve",
+ "trail-semantic",
 ]
 
 [[package]]
@@ -1390,6 +1391,16 @@ dependencies = [
  "sha1",
  "trail-languages",
  "trail-model",
+]
+
+[[package]]
+name = "trail-semantic"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

@@ -44,6 +44,9 @@ Graph edges retain their `EXTRACTED`, `INFERRED`, or `AMBIGUOUS` provenance.
 Semantic extraction for prose, PDFs, images, office files, audio, and video is a
 later compatibility phase. Until that phase lands, `trail graph update` preserves
 an existing semantic layer but never invokes a model or sends data off-machine.
+The native semantic-fragment validation and cleanup boundary is already in place
+and differential-tested, but remains internal until the complete extraction path
+meets the same compatibility standard.
 
 ## Install from source
 
@@ -77,6 +80,8 @@ cargo test --workspace --all-targets --locked
 The scheduled hardening workflow additionally enforces native line coverage,
 runs the safe graph model and traversal crates under Miri, executes the native
 workspace with AddressSanitizer, and fuzzes hostile graph JSON/query input.
+It separately fuzzes untrusted semantic fragments before they can reach graph
+construction.
 
 The compatibility tests use the Python checkout at the repository root as the
 behavioral oracle. Set `GRAPHIFY_PYTHON` when its interpreter is not located at

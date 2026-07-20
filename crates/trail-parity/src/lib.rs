@@ -31,6 +31,113 @@ mod tests {
         html_document, spring_layout, write_json,
     };
     use trail_resolve::{resolve, resolve_language_calls};
+    use trail_semantic::{
+        ValidationLimits, sanitize_semantic_fragment, validate_semantic_fragment,
+        validate_semantic_fragment_with_limits,
+    };
+
+    #[test]
+    fn semantic_fragment_boundary_matches_python() -> Result<(), Box<dyn Error>> {
+        let cases = [
+            json!({
+                "nodes":[{"id":"module_func","label":"func","file_type":"code"}],
+                "edges":[{"source":"module_func","target":"other_node"}],
+                "hyperedges":[]
+            }),
+            json!({
+                "nodes":[{"id":"../etc/passwd","label":"bad"}, "not-an-object"],
+                "edges":[{"source":"okay","target":"bad target"}],
+                "hyperedges":[{"id":"组:一","node_ids":["okay","other","other"]}]
+            }),
+            json!({"nodes":"bad", "edges":{}, "hyperedges":null}),
+        ];
+        let repo = repository_root();
+        for original in cases {
+            let directory = tempfile::tempdir()?;
+            let input = directory.path().join("fragment.json");
+            fs::write(&input, serde_json::to_vec(&original)?)?;
+            let output = Command::new(python_executable(&repo))
+                .args([
+                    "-c",
+                    "import json,sys; from pathlib import Path; from graphify.semantic_cleanup import validate_semantic_fragment; x=json.loads(Path(sys.argv[1]).read_text()); e=validate_semantic_fragment(x); print(json.dumps({'errors':e,'fragment':x}, ensure_ascii=False))",
+                ])
+                .arg(&input)
+                .current_dir(&repo)
+                .env("PYTHONPATH", &repo)
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let python: Value = serde_json::from_slice(&output.stdout)?;
+            let mut fragment = original;
+            let errors = validate_semantic_fragment(&mut fragment);
+            assert_eq!(json!({"errors": errors, "fragment": fragment}), python);
+        }
+
+        let sized = json!({"nodes": [], "edges": [], "note": "雪"});
+        let compact_size = serde_json::to_vec(&sized)?.len() as u64;
+        let directory = tempfile::tempdir()?;
+        let input = directory.path().join("sized.json");
+        fs::write(&input, serde_json::to_vec(&sized)?)?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; import graphify.semantic_cleanup as s; x=json.loads(Path(sys.argv[1]).read_text()); s.MAX_SEMANTIC_FRAGMENT_BYTES=int(sys.argv[2]); print(json.dumps(s.validate_semantic_fragment(x), ensure_ascii=False))",
+            ])
+            .arg(&input)
+            .arg(compact_size.to_string())
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(output.status.success());
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let mut rust = sized;
+        let rust = validate_semantic_fragment_with_limits(
+            &mut rust,
+            ValidationLimits {
+                max_bytes: compact_size,
+                ..ValidationLimits::default()
+            },
+        );
+        assert_eq!(json!(rust), python);
+
+        let cleanup = json!({
+            "nodes":[
+                {"id":"real","label":"Real","file_type":"code"},
+                {"id":"other","label":"Other","file_type":"code"},
+                {"id":"why","label":"Decision: tree-sitter is used because deterministic parsing is faster and safer.","file_type":"document"},
+                {"id":"garbage","label":"junk","file_type":"rationale"}
+            ],
+            "edges":[
+                {"source":"why","target":"real","relation":"rationale_for"},
+                {"source":"why","target":"other","relation":"references"}
+            ],
+            "hyperedges":[
+                {"id":"kept","members":["real","other","garbage"]},
+                {"id":"dropped","nodes":["real","garbage"]}
+            ]
+        });
+        let directory = tempfile::tempdir()?;
+        let input = directory.path().join("cleanup.json");
+        fs::write(&input, serde_json::to_vec(&cleanup)?)?;
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json,sys; from pathlib import Path; from graphify.semantic_cleanup import sanitize_semantic_fragment; x=json.loads(Path(sys.argv[1]).read_text()); print(json.dumps(sanitize_semantic_fragment(x), ensure_ascii=False))",
+            ])
+            .arg(&input)
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(output.status.success());
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let mut rust = cleanup;
+        sanitize_semantic_fragment(&mut rust);
+        assert_eq!(rust, python);
+        Ok(())
+    }
 
     #[test]
     fn read_commands_match_python_cli() -> Result<(), Box<dyn Error>> {
