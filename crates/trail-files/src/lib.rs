@@ -9,7 +9,7 @@ mod hash;
 mod manifest;
 mod slice;
 
-pub use atomic::{write_json_atomic, write_text_atomic};
+pub use atomic::{write_bytes_atomic, write_json_atomic, write_text_atomic};
 pub use build_guard::BuildGuard;
 pub use cache::{Cache, CacheKind};
 pub use detect::{DetectOptions, Detection, FileType, WatchPathFilter, classify_file, detect};

@@ -3625,6 +3625,7 @@ dependencies = [
  "trail-files",
  "trail-global",
  "trail-graph",
+ "trail-ingest",
  "trail-model",
  "trail-output",
  "trail-query",
@@ -3692,6 +3693,21 @@ dependencies = [
  "trail-model",
  "unicode-casefold",
  "unicode-normalization",
+]
+
+[[package]]
+name = "trail-ingest"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "trail-files",
+ "trail-transcribe",
+ "ureq",
+ "url",
 ]
 
 [[package]]

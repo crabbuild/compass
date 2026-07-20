@@ -5,6 +5,7 @@ members = [
     "crates/trail-files",
     "crates/trail-graph",
     "crates/trail-global",
+    "crates/trail-ingest",
     "crates/trail-languages",
     "crates/trail-media",
     "crates/trail-model",

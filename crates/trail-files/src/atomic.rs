@@ -84,6 +84,14 @@ pub fn write_text_atomic(path: impl AsRef<Path>, text: &str) -> Result<(), FileE
     })
 }
 
+pub fn write_bytes_atomic(path: impl AsRef<Path>, bytes: &[u8]) -> Result<(), FileError> {
+    atomic_replace(path.as_ref(), |writer| {
+        writer
+            .write_all(bytes)
+            .map_err(|source| io_error(path.as_ref(), source))
+    })
+}
+
 pub fn write_json_atomic<T: Serialize>(
     path: impl AsRef<Path>,
     value: &T,
