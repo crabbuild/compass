@@ -840,6 +840,36 @@ hydrate();
     }
 
     #[test]
+    fn graph_normalization_matches_python() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("normalization.json");
+        fs::write(
+            &source,
+            serde_json::to_vec(&json!({
+                "nodes": [
+                    {"id":"guide","label":"Guide","file_type":"document","source_file":"docs/guide.md"},
+                    {"id":"guide_doc","label":"Guide","file_type":"document","source_file":"docs/guide.md"},
+                    {"id":"src_mod_run","label":"run()","file_type":"code","source_file":"src/mod.py","source_location":"L2","_origin":"ast"},
+                    {"id":"mod_run","label":"run()","file_type":"code","source_file":"src/mod.py","source_location":"L2"},
+                    {"id":"pkg_util_target","label":"target()","file_type":"code","source_file":"pkg/util.py","source_location":"L3","_origin":"ast"},
+                    {"id":"python_caller","label":"caller()","file_type":"code","source_file":"src/caller.py","source_location":"L4","_origin":"ast"},
+                    {"id":"typescript_target","label":"foreign()","file_type":"code","source_file":"web/target.ts","source_location":"L5","_origin":"ast"}
+                ],
+                "edges": [
+                    {"source":"guide","target":"guide_doc","relation":"references"},
+                    {"source":"mod_run","target":"util_target","relation":"calls","confidence":"INFERRED"},
+                    {"source":"python_caller","target":"typescript_target","relation":"calls","confidence":"INFERRED"},
+                    {"source":"python_caller","target":"typescript_target","relation":"imports","confidence":"EXTRACTED"},
+                    {"source":"typescript_target","target":"python_caller","relation":"calls","confidence":"EXTRACTED"}
+                ],
+                "hyperedges": [{"id":"flow","nodes":["guide","mod_run","util_target"]}]
+            }))?,
+        )?;
+        compare_graph_build(&source)?;
+        Ok(())
+    }
+
+    #[test]
     fn shared_cross_file_call_resolution_matches_python() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         let files = [

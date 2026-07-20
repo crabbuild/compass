@@ -53,14 +53,24 @@ pub fn build_from_extraction(
     root: Option<&Path>,
 ) -> GraphDocument {
     let rekey = semantic_id_remap(&extraction.nodes, root);
+    let mut prepared_nodes = extraction
+        .nodes
+        .iter()
+        .cloned()
+        .map(|mut node| {
+            if let Some(canonical) = rekey.get(&node.id) {
+                node.id.clone_from(canonical);
+            }
+            canonicalize_node(&mut node, root);
+            node
+        })
+        .collect::<Vec<_>>();
+    let doc_remap = doc_twin_remap(&prepared_nodes);
+    prepared_nodes.retain(|node| !doc_remap.contains_key(&node.id));
+
     let mut nodes = Vec::<NodeRecord>::new();
     let mut positions = HashMap::<String, usize>::new();
-    for source in &extraction.nodes {
-        let mut node = source.clone();
-        if let Some(canonical) = rekey.get(&node.id) {
-            node.id.clone_from(canonical);
-        }
-        canonicalize_node(&mut node, root);
+    for node in prepared_nodes {
         if let Some(&position) = positions.get(&node.id) {
             nodes[position].attributes.extend(node.attributes);
         } else {
@@ -69,23 +79,42 @@ pub fn build_from_extraction(
         }
     }
 
+    let ghost_remap = ghost_duplicate_remap(&nodes);
+    if !ghost_remap.is_empty() {
+        nodes.retain(|node| !ghost_remap.contains_key(&node.id));
+        positions.clear();
+        for (index, node) in nodes.iter().enumerate() {
+            positions.insert(node.id.clone(), index);
+        }
+    }
+
+    let mut endpoint_remap = rekey.clone();
+    endpoint_remap.extend(doc_remap.clone());
+    endpoint_remap.extend(ghost_remap.clone());
+
     let mut normalized = HashMap::<String, String>::new();
     for node in &nodes {
         normalized.insert(normalize_id(&node.id), node.id.clone());
     }
-    for (legacy, canonical) in &rekey {
+    for (legacy, canonical) in &endpoint_remap {
         normalized
             .entry(normalize_id(legacy))
             .or_insert_with(|| canonical.clone());
     }
+    add_unambiguous_legacy_aliases(&nodes, &mut normalized);
 
     let mut source_edges = extraction.edges.clone();
     for edge in &mut source_edges {
-        if let Some(canonical) = rekey.get(&edge.source) {
-            edge.source.clone_from(canonical);
-        }
-        if let Some(canonical) = rekey.get(&edge.target) {
-            edge.target.clone_from(canonical);
+        let original_source = edge.source.clone();
+        let original_target = edge.target.clone();
+        edge.source = remap_endpoint(&edge.source, &endpoint_remap);
+        edge.target = remap_endpoint(&edge.target, &endpoint_remap);
+        if edge.source == edge.target
+            && (doc_remap.contains_key(&remap_endpoint(&original_source, &rekey))
+                || doc_remap.contains_key(&remap_endpoint(&original_target, &rekey)))
+        {
+            edge.attributes
+                .insert("_drop".to_owned(), Value::Bool(true));
         }
     }
     source_edges.sort_by(|left, right| {
@@ -98,6 +127,9 @@ pub fn build_from_extraction(
     let mut links = Vec::<EdgeRecord>::new();
     let mut edge_positions = HashMap::<(String, String), usize>::new();
     for mut edge in source_edges {
+        if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
+            continue;
+        }
         let Some(source) = resolve_endpoint(&edge.source, &positions, &normalized) else {
             continue;
         };
@@ -111,6 +143,9 @@ pub fn build_from_extraction(
         sanitize_numeric(&mut edge.attributes, "confidence_score");
         backfill_source_file(&mut edge, &nodes, &positions);
         normalize_attribute_path(&mut edge.attributes, "source_file", root);
+        if is_cross_language_phantom(&edge, &nodes, &positions) {
+            continue;
+        }
         edge.attributes
             .insert("_src".to_owned(), Value::String(edge.source.clone()));
         edge.attributes
@@ -135,7 +170,8 @@ pub fn build_from_extraction(
     }
 
     let mut graph = Map::new();
-    let hyperedges = canonical_hyperedges(extraction, &positions, &normalized, &rekey, root);
+    let hyperedges =
+        canonical_hyperedges(extraction, &positions, &normalized, &endpoint_remap, root);
     if !hyperedges.is_empty() {
         graph.insert("hyperedges".to_owned(), Value::Array(hyperedges));
     }
@@ -208,6 +244,156 @@ fn old_file_stems(path: &Path) -> Vec<String> {
         forms.push(bare);
     }
     forms
+}
+
+fn doc_twin_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
+    let by_id = nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<HashMap<_, _>>();
+    let mut remap = HashMap::new();
+    for node in nodes {
+        let Some(bare_id) = node.id.strip_suffix("_doc") else {
+            continue;
+        };
+        let Some(bare) = by_id.get(bare_id) else {
+            continue;
+        };
+        let source = node.string("source_file");
+        if !source.is_empty()
+            && bare.string("source_file") == source
+            && node.string("file_type") == "document"
+            && bare.string("file_type") == "document"
+        {
+            remap.insert(bare_id.to_owned(), node.id.clone());
+        }
+    }
+    remap
+}
+
+fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
+    let mut ordered = nodes.iter().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut canonical = HashMap::<(String, String), String>::new();
+    let mut collisions = std::collections::HashSet::new();
+    for node in &ordered {
+        let label = node.label().trim();
+        let source = node.string("source_file");
+        let basename = Path::new(&source)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if label.is_empty() || basename.is_empty() {
+            continue;
+        }
+        let ast = node.attributes.get("_origin").and_then(Value::as_str) == Some("ast");
+        let located = node
+            .attributes
+            .get("source_location")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty());
+        if !ast && !located {
+            continue;
+        }
+        let key = (basename.to_owned(), label.to_owned());
+        if ast {
+            if canonical.get(&key).is_some_and(|existing| {
+                nodes.iter().any(|candidate| {
+                    candidate.id == *existing
+                        && candidate.attributes.get("_origin").and_then(Value::as_str)
+                            == Some("ast")
+                })
+            }) {
+                collisions.insert(key.clone());
+            }
+            canonical.insert(key, node.id.clone());
+        } else if let Some(existing) = canonical.get(&key) {
+            let different_source = nodes.iter().any(|candidate| {
+                candidate.id == *existing
+                    && candidate.attributes.get("_origin").and_then(Value::as_str) != Some("ast")
+                    && candidate.string("source_file") != source
+            });
+            if different_source {
+                collisions.insert(key);
+            }
+        } else {
+            canonical.insert(key, node.id.clone());
+        }
+    }
+    let mut remap = HashMap::new();
+    for node in ordered {
+        if node.attributes.get("_origin").and_then(Value::as_str) == Some("ast") {
+            continue;
+        }
+        let source = node.string("source_file");
+        let basename = Path::new(&source)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        let key = (basename.to_owned(), node.label().trim().to_owned());
+        if key.0.is_empty() || key.1.is_empty() || collisions.contains(&key) {
+            continue;
+        }
+        if let Some(target) = canonical.get(&key).filter(|target| *target != &node.id) {
+            remap.insert(node.id.clone(), target.clone());
+        }
+    }
+    remap
+}
+
+fn add_unambiguous_legacy_aliases(nodes: &[NodeRecord], normalized: &mut HashMap<String, String>) {
+    let mut candidates = HashMap::<String, std::collections::HashSet<String>>::new();
+    for node in nodes {
+        let source = node.string("source_file");
+        let path = Path::new(&source);
+        if source.is_empty() || path.is_absolute() || path.file_name().is_none() {
+            continue;
+        }
+        let canonical_stem = make_id(&[&file_stem(path)]);
+        let normalized_id = normalize_id(&node.id);
+        let is_file = path.file_name().and_then(|value| value.to_str()) == Some(node.label());
+        let suffix = if is_file {
+            ""
+        } else {
+            normalized_id
+                .strip_prefix(&canonical_stem)
+                .unwrap_or_default()
+        };
+        for old_stem in old_file_stems(path) {
+            if old_stem == canonical_stem {
+                continue;
+            }
+            let alias = format!("{old_stem}{suffix}");
+            candidates
+                .entry(normalize_id(&alias))
+                .or_default()
+                .insert(node.id.clone());
+            candidates.entry(alias).or_default().insert(node.id.clone());
+        }
+    }
+    for (alias, ids) in candidates {
+        if ids.len() == 1
+            && let Some(id) = ids.into_iter().next()
+        {
+            normalized.entry(alias).or_insert(id);
+        }
+    }
+}
+
+fn remap_endpoint(value: &str, remap: &HashMap<String, String>) -> String {
+    let mut current = value;
+    let mut remaining = remap.len() + 1;
+    while remaining > 0 {
+        let Some(next) = remap.get(current) else {
+            break;
+        };
+        if next == current {
+            break;
+        }
+        current = next;
+        remaining -= 1;
+    }
+    current.to_owned()
 }
 
 fn networkx_edge_order(
@@ -398,6 +584,67 @@ fn backfill_source_file(
         .insert("source_file".to_owned(), Value::String(source.to_owned()));
 }
 
+fn is_cross_language_phantom(
+    edge: &EdgeRecord,
+    nodes: &[NodeRecord],
+    positions: &HashMap<String, usize>,
+) -> bool {
+    let relation = relation(edge);
+    if !matches!(
+        relation,
+        "calls" | "imports" | "imports_from" | "references"
+    ) {
+        return false;
+    }
+    let source_file = positions
+        .get(&edge.source)
+        .and_then(|index| nodes.get(*index))
+        .map(|node| node.string("source_file"))
+        .unwrap_or_default();
+    let target_file = positions
+        .get(&edge.target)
+        .and_then(|index| nodes.get(*index))
+        .map(|node| node.string("source_file"))
+        .unwrap_or_default();
+    let source_ext = extension(&source_file);
+    let target_ext = extension(&target_file);
+    let source_family = edge_language_family(&source_ext);
+    let target_family = edge_language_family(&target_ext);
+    if relation == "calls" {
+        return edge.attributes.get("confidence").and_then(Value::as_str) == Some("INFERRED")
+            && !source_ext.is_empty()
+            && !target_ext.is_empty()
+            && source_family != target_family;
+    }
+    source_family.is_some() && target_family.is_some() && source_family != target_family
+}
+
+fn extension(source: &str) -> String {
+    Path::new(source)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+fn edge_language_family(extension: &str) -> Option<&'static str> {
+    match extension {
+        "py" | "pyi" => Some("py"),
+        "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "mts" | "cts" => Some("js"),
+        "go" => Some("go"),
+        "rs" => Some("rs"),
+        "java" | "kt" | "scala" | "groovy" => Some("jvm"),
+        "c" | "h" | "cc" | "cpp" | "hpp" | "cxx" | "hh" | "hxx" | "cu" | "cuh" | "metal" | "m"
+        | "mm" => Some("c"),
+        "rb" | "rake" => Some("rb"),
+        "php" => Some("php"),
+        "cs" => Some("cs"),
+        "swift" => Some("swift"),
+        "lua" => Some("lua"),
+        _ => None,
+    }
+}
+
 fn edge_key(source: &str, target: &str, directed: bool) -> (String, String) {
     if directed || source <= target {
         (source.to_owned(), target.to_owned())
@@ -444,8 +691,8 @@ fn canonical_hyperedges(
                 let valid = members
                     .iter()
                     .filter_map(Value::as_str)
-                    .map(|member| rekey.get(member).map_or(member, String::as_str))
-                    .filter_map(|member| resolve_endpoint(member, positions, normalized))
+                    .map(|member| remap_endpoint(member, rekey))
+                    .filter_map(|member| resolve_endpoint(&member, positions, normalized))
                     .map(Value::String)
                     .collect::<Vec<_>>();
                 if valid.is_empty() {
