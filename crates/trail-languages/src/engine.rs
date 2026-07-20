@@ -97,12 +97,15 @@ impl Engine {
         path: &Path,
         spec: LanguageSpec,
     ) -> Result<Extraction, ExtractError> {
-        let source = fs::read(path).map_err(|source| trail_files::FileError::Io {
+        let mut source = fs::read(path).map_err(|source| trail_files::FileError::Io {
             path: path.to_path_buf(),
             source,
         })?;
         if spec.name == "groovy" {
             return Ok(crate::groovy::extract(path, &source));
+        }
+        if spec.name == "objc" {
+            crate::objc::mask_annotation_macros(&mut source);
         }
         let tree = self.parse(path, spec, &source)?;
         let config = generic_config(spec);
@@ -127,6 +130,9 @@ impl Engine {
         }
         if spec.name == "swift" {
             return Ok(crate::swift::extract(path, &source, root));
+        }
+        if spec.name == "objc" {
+            return Ok(crate::objc::extract(path, &source, root));
         }
         Ok(extract_tree(path, &source, root, &config, spec.name))
     }

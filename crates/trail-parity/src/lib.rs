@@ -465,6 +465,20 @@ output "instance_id" { value = aws_instance.web.id }
         Ok(())
     }
 
+    #[test]
+    fn objc_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.m", "extract_objc")?;
+        let repo = repository_root();
+        for fixture in [
+            "objc_mixed/Bridging-Header.h",
+            "objc_mixed/Widget.h",
+            "objc_mixed/Widget.m",
+        ] {
+            compare_extraction_path(&repo.join("tests/fixtures").join(fixture), "extract_objc")?;
+        }
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

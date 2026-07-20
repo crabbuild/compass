@@ -14,6 +14,7 @@ mod ids;
 mod json_config;
 mod markdown;
 mod mcp;
+mod objc;
 mod package_manifest;
 mod pascal_forms;
 mod php;
