@@ -12,6 +12,7 @@ mod mcp;
 mod package_manifest;
 mod registry;
 mod rust_lang;
+mod terraform;
 
 pub use facts::{Extraction, RawCall};
 pub use ids::{file_stem, make_id, normalize_id};

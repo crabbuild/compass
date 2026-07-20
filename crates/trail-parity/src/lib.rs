@@ -331,6 +331,26 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn terraform_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("main.tf");
+        fs::write(
+            &source,
+            r#"variable "region" { default = "us-west-2" }
+locals { image = data.aws_ami.base.id }
+data "aws_ami" "base" { most_recent = true }
+resource "aws_instance" "web" {
+  ami = local.image
+  depends_on = [data.aws_ami.base]
+}
+output "instance_id" { value = aws_instance.web.id }
+"#,
+        )?;
+        compare_extraction_path(&source, "extract_terraform")?;
+        Ok(())
+    }
+
     fn compare_extraction(fixture: &str, extractor: &str) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let source = repo.join("tests/fixtures").join(fixture);

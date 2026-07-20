@@ -81,6 +81,7 @@ impl Engine {
             ExtractorKind::JsonConfig => self.extract_json(path, spec),
             ExtractorKind::McpConfig => crate::mcp::extract(path),
             ExtractorKind::PackageManifest => crate::package_manifest::extract(path),
+            ExtractorKind::Terraform => self.extract_terraform(path, spec),
             _ => Err(ExtractError::Unsupported(path.to_path_buf())),
         }
     }
@@ -132,6 +133,19 @@ impl Engine {
         }
         let tree = self.parse(path, spec, &source)?;
         Ok(crate::json_config::extract(path, &source, tree.root_node()))
+    }
+
+    fn extract_terraform(
+        &mut self,
+        path: &Path,
+        spec: LanguageSpec,
+    ) -> Result<Extraction, ExtractError> {
+        let source = fs::read(path).map_err(|source| trail_files::FileError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let tree = self.parse(path, spec, &source)?;
+        Ok(crate::terraform::extract(path, &source, tree.root_node()))
     }
 
     fn parse(
