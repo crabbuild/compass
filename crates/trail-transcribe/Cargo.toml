@@ -13,8 +13,10 @@ categories.workspace = true
 
 [dependencies]
 sha1.workspace = true
+symphonia.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+rubato.workspace = true
 
 [lints]
 workspace = true

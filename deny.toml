@@ -16,6 +16,7 @@ allow = [
   "CDLA-Permissive-2.0",
   "ISC",
   "MIT",
+  "MPL-2.0",
   "NCSA",
   "Unicode-3.0",
   "Zlib",

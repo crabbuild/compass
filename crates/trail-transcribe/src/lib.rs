@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use sha1::{Digest, Sha1};
 
+pub mod audio;
+
 pub const VIDEO_EXTENSIONS: &[&str] = &[
     ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".ogg",
 ];
