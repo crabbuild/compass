@@ -26,6 +26,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 sha1 = "0.10"
 md-5 = "0.10"
+notify = "8.2.0"
+ctrlc = "3.5.2"
 strsim = "0.11"
 rayon = "1"
 regex = "1"

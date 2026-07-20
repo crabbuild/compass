@@ -4,8 +4,8 @@ use std::fs;
 
 use serde_json::json;
 use trail_files::{
-    BuildGuard, Cache, CacheKind, Manifest, ManifestKind, body_content, read_source_lossy,
-    split_file, write_text_atomic,
+    BuildGuard, Cache, CacheKind, DetectOptions, Manifest, ManifestKind, WatchPathFilter,
+    body_content, read_source_lossy, split_file, write_text_atomic,
 };
 
 #[test]
@@ -27,6 +27,23 @@ fn markdown_frontmatter_matches_legacy_bytes() {
     for (input, expected) in cases {
         assert_eq!(&body_content(input), expected);
     }
+}
+
+#[test]
+fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::write(root.join(".graphifyignore"), "ignored/\n*.generated.rs\n")?;
+    fs::create_dir(root.join("ignored"))?;
+    let filter = WatchPathFilter::new(root, &DetectOptions::default())?;
+
+    assert!(filter.allows(&root.join("src/main.rs")));
+    assert!(!filter.allows(&root.join("ignored/secret.rs")));
+    assert!(!filter.allows(&root.join("model.generated.rs")));
+    assert!(!filter.allows(&root.join(".hidden/main.rs")));
+    assert!(!filter.allows(&root.join("graphify-out/graph.json")));
+    assert!(!filter.allows(&root.join("README.unknown")));
+    Ok(())
 }
 
 #[test]

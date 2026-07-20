@@ -4,11 +4,13 @@ mod cluster_existing;
 mod diagnostics;
 mod merge;
 mod pipeline;
+mod watch;
 
 pub use cluster_existing::{ClusterExistingOptions, ClusterExistingResult, cluster_existing_graph};
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{BuildOptions, BuildResult, CoreError, build_local_graph};
+pub use watch::{WatchError, WatchOptions, WatchStatus, watch_local_graph};
 
 use std::collections::HashMap;
 use std::fs;

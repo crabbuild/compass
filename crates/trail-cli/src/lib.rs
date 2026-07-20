@@ -2,12 +2,16 @@
 
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use trail_core::{
-    BuildOptions, ClusterExistingOptions, ExportInputs, LoadedGraph, build_local_graph,
-    cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
-    format_diagnostic_report, merge_graphs,
+    BuildOptions, ClusterExistingOptions, ExportInputs, LoadedGraph, WatchOptions, WatchStatus,
+    build_local_graph, cluster_existing_graph, default_graph_path, diagnose_graph_file,
+    format_diagnostic_json, format_diagnostic_report, merge_graphs, watch_local_graph,
 };
 use trail_graph::god_nodes;
 use trail_model::GraphError;
@@ -85,6 +89,9 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
         "update" if frontend == Frontend::Trail => command_build(&args, false),
         "extract" if frontend == Frontend::Trail => command_build(&args, true),
+        "watch" if frontend == Frontend::Trail => Outcome::failure(
+            "error: watch is a streaming command and must be run from the trail binary".to_owned(),
+        ),
         "--help" | "-h" | "help" => Outcome::success(if frontend == Frontend::Trail {
             trail_help()
         } else {
@@ -93,6 +100,181 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "--version" | "-V" => Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION"))),
         _ => Outcome::failure(format!("error: unknown graph command '{command}'")),
     }
+}
+
+/// Run Trail's long-lived native watcher, streaming status as changes arrive.
+///
+/// Signal registration lives at this process boundary rather than in
+/// `trail-core`, so embedders can provide their own cancellation mechanism.
+pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
+    let args = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let options = match parse_watch_options(&args) {
+        Ok(Some(options)) => options,
+        Ok(None) => {
+            let _result = writeln!(stdout, "{}", watch_help());
+            return 0;
+        }
+        Err(error) => {
+            let _result = writeln!(stderr, "{error}");
+            return 1;
+        }
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let signal_stop = Arc::clone(&stop);
+    if let Err(error) = ctrlc::set_handler(move || signal_stop.store(true, Ordering::Release)) {
+        let _result = writeln!(stderr, "error: could not install Ctrl+C handler: {error}");
+        return 1;
+    }
+    let result = watch_local_graph(&options, &stop, |status| match status {
+        WatchStatus::Watching { root, debounce } => {
+            let _result = writeln!(
+                stdout,
+                "[trail graph watch] Watching {} - press Ctrl+C to stop",
+                root.display()
+            );
+            let _result = writeln!(
+                stdout,
+                "[trail graph watch] Deterministic changes rebuild locally; semantic media changes set needs_update."
+            );
+            let _result = writeln!(
+                stdout,
+                "[trail graph watch] Debounce: {}s",
+                debounce.as_secs_f64()
+            );
+            let _result = stdout.flush();
+        }
+        WatchStatus::Batch {
+            paths,
+            deterministic,
+            semantic,
+        } => {
+            let _result = writeln!(
+                stdout,
+                "\n[trail graph watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
+                paths.len()
+            );
+            let _result = stdout.flush();
+        }
+        WatchStatus::Rebuilt(result) => {
+            let _result = writeln!(
+                stdout,
+                "[trail graph watch] Rebuilt: {} nodes, {} edges, {} communities ({} extracted, {} cached)",
+                result.nodes,
+                result.edges,
+                result.communities,
+                result.files_extracted,
+                result.files_cached
+            );
+            let _result = writeln!(
+                stdout,
+                "[trail graph watch] graph artifacts updated in {}",
+                result.output_dir.display()
+            );
+            let _result = stdout.flush();
+        }
+        WatchStatus::SemanticUpdateRequired { flag } => {
+            let _result = writeln!(
+                stdout,
+                "[trail graph watch] Semantic media changed; update required. Flag written to {}",
+                flag.display()
+            );
+            let _result = stdout.flush();
+        }
+        WatchStatus::EventError(error) => {
+            let _result = writeln!(
+                stderr,
+                "[trail graph watch] Filesystem event error: {error}"
+            );
+            let _result = stderr.flush();
+        }
+        WatchStatus::RebuildError(error) => {
+            let _result = writeln!(stderr, "[trail graph watch] Rebuild failed: {error}");
+            let _result = stderr.flush();
+        }
+        WatchStatus::Stopped => {
+            let _result = writeln!(stdout, "\n[trail graph watch] Stopped.");
+            let _result = stdout.flush();
+        }
+    });
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            let _result = writeln!(stderr, "error: {error}");
+            1
+        }
+    }
+}
+
+fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> {
+    let mut root = None;
+    let mut output_root = None;
+    let mut debounce = Duration::from_secs(3);
+    let mut no_cluster = false;
+    let mut no_viz = false;
+    let mut gitignore = true;
+    let mut excludes = Vec::new();
+    let mut force_polling = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Ok(None),
+            "--no-cluster" => no_cluster = true,
+            "--no-viz" => no_viz = true,
+            "--no-gitignore" => gitignore = false,
+            "--poll" => force_polling = true,
+            "--debounce" if index + 1 < args.len() => {
+                debounce = parse_positive_seconds(&args[index + 1], "--debounce")?;
+                index += 1;
+            }
+            value if value.starts_with("--debounce=") => {
+                debounce = parse_positive_seconds(&value[11..], "--debounce")?;
+            }
+            "--out" if index + 1 < args.len() => {
+                output_root = Some(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            value if value.starts_with("--out=") => {
+                output_root = Some(PathBuf::from(&value[6..]));
+            }
+            "--exclude" if index + 1 < args.len() => {
+                excludes.push(args[index + 1].clone());
+                index += 1;
+            }
+            value if value.starts_with("--exclude=") => excludes.push(value[10..].to_owned()),
+            value if value.starts_with('-') => {
+                return Err(format!("error: unknown watch option: {value}"));
+            }
+            value if root.is_none() => root = Some(PathBuf::from(value)),
+            value => {
+                return Err(format!(
+                    "error: watch accepts one path, unexpected: {value}"
+                ));
+            }
+        }
+        index += 1;
+    }
+    let mut options = WatchOptions::new(root.unwrap_or_else(|| PathBuf::from(".")));
+    options.debounce = debounce;
+    options.force_polling = force_polling;
+    options.build.output_root = output_root;
+    options.build.no_cluster = no_cluster;
+    options.build.no_viz = no_viz;
+    options.build.gitignore = gitignore;
+    options.build.extra_excludes = excludes;
+    Ok(Some(options))
+}
+
+fn parse_positive_seconds(value: &str, option: &str) -> Result<Duration, String> {
+    let seconds = value
+        .parse::<f64>()
+        .map_err(|_| format!("error: {option} requires a positive number"))?;
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return Err(format!("error: {option} must be > 0"));
+    }
+    Ok(Duration::from_secs_f64(seconds))
 }
 
 fn command_diagnose(args: &[String]) -> Outcome {
@@ -1197,7 +1379,12 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs"
+        .to_owned()
+}
+
+fn watch_help() -> String {
+    "Usage: trail graph watch [PATH] [--debounce SECONDS] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
         .to_owned()
 }
 

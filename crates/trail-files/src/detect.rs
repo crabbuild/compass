@@ -174,6 +174,74 @@ struct IgnorePattern {
     component_matcher: Regex,
 }
 
+/// Immutable event filter for filesystem watchers.
+///
+/// Ignore files are intentionally loaded once at watcher startup. This keeps
+/// high-volume editor and filesystem event streams cheap while ensuring the
+/// watched corpus uses the same root ignore rules as a normal detection pass.
+#[derive(Debug)]
+pub struct WatchPathFilter {
+    root: PathBuf,
+    lexical_root: PathBuf,
+    output_name: String,
+    patterns: Vec<IgnorePattern>,
+}
+
+impl WatchPathFilter {
+    pub fn new(root: &Path, options: &DetectOptions) -> Result<Self, FileError> {
+        let lexical_root = if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|source| io_error(root, source))?
+                .join(root)
+        };
+        let root = fs::canonicalize(root).map_err(|source| io_error(root, source))?;
+        let mut patterns = initial_ignore_patterns(&root, options.gitignore);
+        patterns.extend(options.extra_excludes.iter().filter_map(|raw| {
+            parse_ignore_line(raw).and_then(|line| IgnorePattern::new(root.clone(), &line))
+        }));
+        Ok(Self {
+            root,
+            lexical_root,
+            output_name: options.output_name.clone(),
+            patterns,
+        })
+    }
+
+    #[must_use]
+    pub fn allows(&self, path: &Path) -> bool {
+        let lexical = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.lexical_root.join(path)
+        };
+        let absolute = if lexical.starts_with(&self.root) {
+            lexical
+        } else if let Ok(relative) = lexical.strip_prefix(&self.lexical_root) {
+            self.root.join(relative)
+        } else {
+            return false;
+        };
+        let Ok(relative) = absolute.strip_prefix(&self.root) else {
+            return false;
+        };
+        if relative.as_os_str().is_empty()
+            || relative.components().any(|component| {
+                let value = component.as_os_str().to_string_lossy();
+                value.starts_with('.')
+                    || value == self.output_name
+                    || Path::new(&self.output_name)
+                        .file_name()
+                        .is_some_and(|name| name == component.as_os_str())
+            })
+        {
+            return false;
+        }
+        classify_file(&absolute).is_some() && !ignored(&absolute, &self.root, &self.patterns)
+    }
+}
+
 impl IgnorePattern {
     fn new(anchor: PathBuf, line: &str) -> Option<Self> {
         let negated = line.starts_with('!');
