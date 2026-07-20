@@ -1,11 +1,39 @@
 //! Deterministic graph construction and graph algorithms for Trail.
 
+mod dedup;
+
+pub use dedup::{DedupError, DedupResult, DedupStats, deduplicate_entities};
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde_json::{Map, Value};
 use trail_languages::{Extraction, file_stem, make_id, normalize_id};
 use trail_model::{EdgeRecord, GraphDocument, NodeRecord};
+
+/// Merge resolved extraction chunks, apply native entity deduplication, and build
+/// a node-link graph. This is the deterministic counterpart of `graphify.build`.
+pub fn build(
+    extractions: &[Extraction],
+    directed: bool,
+    dedup: bool,
+    root: Option<&Path>,
+) -> Result<GraphDocument, DedupError> {
+    let mut combined = Extraction::default();
+    for extraction in extractions {
+        combined.nodes.extend(extraction.nodes.iter().cloned());
+        combined.edges.extend(extraction.edges.iter().cloned());
+        combined
+            .hyperedges
+            .extend(extraction.hyperedges.iter().cloned());
+    }
+    if dedup && !combined.nodes.is_empty() {
+        let result = deduplicate_entities(&combined.nodes, &combined.edges, &HashMap::new())?;
+        combined.nodes = result.nodes;
+        combined.edges = result.edges;
+    }
+    Ok(build_from_extraction(&combined, directed, root))
+}
 
 /// Build a NetworkX-compatible node-link document from extraction facts.
 #[must_use]

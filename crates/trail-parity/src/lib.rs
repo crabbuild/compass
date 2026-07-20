@@ -5,6 +5,7 @@ mod tests {
     use std::error::Error;
     use std::ffi::OsString;
     use std::fs;
+    use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -15,7 +16,7 @@ mod tests {
         Cache, CacheKind, DetectOptions, Manifest, ManifestKind, detect, file_hash,
         prompt_fingerprint,
     };
-    use trail_graph::build_from_extraction;
+    use trail_graph::{build_from_extraction, deduplicate_entities};
     use trail_languages::Engine;
     use trail_resolve::resolve;
 
@@ -897,6 +898,64 @@ hydrate();
             String::from_utf8_lossy(&output.stderr)
         );
         let python: Vec<Value> = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(rust, python);
+        Ok(())
+    }
+
+    #[test]
+    fn deterministic_entity_dedup_matches_python() -> Result<(), Box<dyn Error>> {
+        let fixture = json!({
+            "nodes": [
+                {"id":"u1","label":"User Service","file_type":"concept","source_file":"svc.md"},
+                {"id":"u2_c1","label":"user_service","file_type":"concept","source_file":"svc.md"},
+                {"id":"g1_long","label":"GraphExtractor","file_type":"concept","source_file":"a.md"},
+                {"id":"g2","label":"Graph Extractor","file_type":"concept","source_file":"b.md"},
+                {"id":"sku1","label":"ASR1603","file_type":"concept","source_file":"models.md"},
+                {"id":"sku2","label":"ASR1605","file_type":"concept","source_file":"models.md"},
+                {"id":"code_a","label":"render","file_type":"code","source_file":"a.rs"},
+                {"id":"code_b","label":"render","file_type":"code","source_file":"b.rs"},
+                {"id":"r1","label":"Django app config for cards. No business logic here. Domain services live in services.py.","file_type":"rationale","source_file":"cards/apps.py"},
+                {"id":"r2","label":"Django app config for cores. No business logic here. Domain services live in services.py.","file_type":"rationale","source_file":"cores/apps.py"},
+                {"id":"n1","label":"Pipeline placement 4 call sites ADR 0013 D4","file_type":"concept","source_file":"a.md"},
+                {"id":"n2","label":"Pipeline placement 4 call sites ADR 0011 D5","file_type":"concept","source_file":"b.md"},
+                {"id":"agents_make_batch_fixtures_make_batch_fixtures","label":"make-batch-fixtures","file_type":"concept","source_file":"available/diagnose-issue/SKILL.md"},
+                {"id":"agents_make_batch_fixtures_make_batch_fixtures","label":"make-batch-fixtures agent","file_type":"concept","source_file":"agents/make-batch-fixtures.md"}
+            ],
+            "edges": [
+                {"source":"u2_c1","target":"g1_long","relation":"uses"},
+                {"source":"g1_long","target":"g2","relation":"same"},
+                {"source":"code_a","target":"code_b","relation":"calls"}
+            ]
+        });
+        let nodes: Vec<trail_model::NodeRecord> = serde_json::from_value(fixture["nodes"].clone())?;
+        let edges: Vec<trail_model::EdgeRecord> = serde_json::from_value(fixture["edges"].clone())?;
+        let result = deduplicate_entities(&nodes, &edges, &std::collections::HashMap::new())?;
+        let rust = json!({"nodes": result.nodes, "edges": result.edges});
+
+        let repo = repository_root();
+        let mut child = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import contextlib,io,json,sys; from graphify.dedup import deduplicate_entities; x=json.load(sys.stdin); out=io.StringIO(); err=io.StringIO();\nwith contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): n,e=deduplicate_entities(x['nodes'],x['edges'],communities={})\nprint(json.dumps({'nodes':n,'edges':e},ensure_ascii=False))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Python dedup oracle stdin unavailable")?
+            .write_all(&serde_json::to_vec(&fixture)?)?;
+        let output = child.wait_with_output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
         assert_eq!(rust, python);
         Ok(())
     }
