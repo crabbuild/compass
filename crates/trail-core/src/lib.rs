@@ -1,0 +1,125 @@
+//! Application services shared by the Trail and Graphify command frontends.
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
+use trail_model::{Graph, GraphError};
+
+pub struct LoadedGraph {
+    pub graph: Graph,
+    pub overlay: HashMap<String, Map<String, Value>>,
+}
+
+impl LoadedGraph {
+    pub fn load(path: &Path) -> Result<Self, GraphError> {
+        let graph = Graph::load(path)?;
+        let overlay = load_learning_overlay(path);
+        Ok(Self { graph, overlay })
+    }
+
+    pub fn load_directed(path: &Path) -> Result<Self, GraphError> {
+        let graph = Graph::load_directed(path)?;
+        let overlay = load_learning_overlay(path);
+        Ok(Self { graph, overlay })
+    }
+}
+
+#[must_use]
+pub fn default_graph_path() -> PathBuf {
+    PathBuf::from(std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned()))
+        .join("graph.json")
+}
+
+fn load_learning_overlay(graph_path: &Path) -> HashMap<String, Map<String, Value>> {
+    let sidecar = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".graphify_learning.json");
+    let Ok(bytes) = fs::read(sidecar) else {
+        return HashMap::new();
+    };
+    let Ok(document) = serde_json::from_slice::<Value>(&bytes) else {
+        return HashMap::new();
+    };
+    let Some(nodes) = document.get("nodes").and_then(Value::as_object) else {
+        return HashMap::new();
+    };
+    nodes
+        .iter()
+        .filter_map(|(id, value)| {
+            let mut entry = value.as_object()?.clone();
+            entry.insert(
+                "stale".to_owned(),
+                Value::Bool(is_stale(&entry, graph_path)),
+            );
+            Some((id.clone(), entry))
+        })
+        .collect()
+}
+
+fn is_stale(entry: &Map<String, Value>, graph_path: &Path) -> bool {
+    let source = entry
+        .get("source_file")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if source.is_empty() {
+        return false;
+    }
+    let Some(path) = resolve_source_path(source, graph_path) else {
+        return true;
+    };
+    let stored = entry
+        .get("code_fingerprint")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if stored.is_empty() {
+        return true;
+    }
+    fs::read(path)
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)) != stored)
+        .unwrap_or(true)
+}
+
+fn resolve_source_path(source: &str, graph_path: &Path) -> Option<PathBuf> {
+    let source_path = Path::new(source);
+    if source_path.is_absolute() {
+        return source_path.is_file().then(|| source_path.to_path_buf());
+    }
+    let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
+    let output_name = std::env::var("GRAPHIFY_OUT")
+        .ok()
+        .and_then(|value| {
+            PathBuf::from(value)
+                .file_name()
+                .map(|name| name.to_os_string())
+        })
+        .unwrap_or_else(|| "graphify-out".into());
+    let mut roots = Vec::new();
+    if let Ok(recorded) = fs::read_to_string(output_dir.join(".graphify_root")) {
+        let recorded = recorded.trim();
+        if !recorded.is_empty() {
+            roots.push(PathBuf::from(recorded));
+        }
+    }
+    if output_dir.file_name() == Some(output_name.as_os_str()) {
+        if let Some(parent) = output_dir.parent() {
+            roots.push(parent.to_path_buf());
+        }
+        roots.push(output_dir.to_path_buf());
+    } else {
+        roots.push(output_dir.to_path_buf());
+        if let Some(parent) = output_dir.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    if let Ok(current) = std::env::current_dir() {
+        roots.push(current);
+    }
+    roots
+        .into_iter()
+        .map(|root| root.join(source_path))
+        .find(|candidate| candidate.is_file())
+}

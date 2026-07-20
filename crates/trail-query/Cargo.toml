@@ -1,0 +1,15 @@
+[package]
+name = "trail-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+trail-model = { path = "../trail-model" }
+unicode-normalization.workspace = true
+
+[lints]
+workspace = true

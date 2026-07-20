@@ -1,0 +1,26 @@
+[package]
+name = "trail-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "trail_cli"
+
+[[bin]]
+name = "trail"
+path = "src/bin/trail.rs"
+
+[[bin]]
+name = "graphify"
+path = "src/bin/graphify.rs"
+
+[dependencies]
+trail-core = { path = "../trail-core" }
+trail-model = { path = "../trail-model" }
+trail-query = { path = "../trail-query" }
+
+[lints]
+workspace = true
