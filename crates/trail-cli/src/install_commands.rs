@@ -1981,7 +1981,22 @@ mod tests {
         );
         assert!(platform("bad").is_none());
         assert_eq!(canonical_platform("skills"), "agents");
+        assert_eq!(canonical_platform("codex"), "codex");
+        for command in DIRECT_COMMANDS {
+            assert!(
+                is_direct_command(command),
+                "missing direct command {command}"
+            );
+        }
+        assert!(!is_direct_command("install"));
+        assert!(!is_direct_command("unknown"));
+        for name in PLATFORM_NAMES {
+            assert!(is_install_platform(name), "missing install platform {name}");
+        }
+        assert!(is_install_platform("gemini"));
         assert!(is_install_platform("cursor"));
+        assert!(!is_install_platform("vscode"));
+        assert!(!is_install_platform("unknown"));
     }
 
     #[test]

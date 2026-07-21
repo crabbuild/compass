@@ -91,8 +91,60 @@ fn scoring_and_find_node_cover_match_tiers_and_seed_collection() -> Result<(), B
         true,
     );
     assert!(!scores.ranked.is_empty());
+    let expected = [
+        ("foo-type", 230.503_783_409_003_52),
+        ("src/foo.py", 24.338_368_737_318_614),
+        ("caller", 1.889_245_806_401_811_8),
+        ("foo-member", 1.431_100_440_464_734_3),
+        ("isolated", 0.972_955_074_527_656_6),
+        ("other", 0.972_955_074_527_656_6),
+    ];
+    assert_eq!(scores.ranked.len(), expected.len());
+    for (actual, (id, score)) in scores.ranked.iter().zip(expected) {
+        assert_eq!(graph.node(actual.node).id, id);
+        assert!((actual.score - score).abs() < 1e-12);
+    }
     assert!(scores.best_seed_by_term.contains_key("foo"));
+    assert_eq!(
+        scores
+            .best_seed_by_term
+            .get("foo")
+            .map(|index| graph.node(*index).id.as_str()),
+        Some("foo-type")
+    );
     assert_eq!(graph.node(scores.ranked[0].node).id, "foo-type");
+    type ScoreCase<'a> = (&'a [&'a str], &'a [(&'a str, f64)]);
+    let cases: &[ScoreCase<'_>] = &[
+        (
+            &["foo"],
+            &[
+                ("foo-type", 10_916.748_877_240_092),
+                ("src/foo.py", 1_092.087_218_553_352_6),
+                ("caller", 0.916_290_731_874_155_1),
+                ("foo-member", 0.458_145_365_937_077_55),
+            ],
+        ),
+        (
+            &["fo"],
+            &[
+                ("foo-type", 1_092.087_218_553_352_6),
+                ("src/foo.py", 1_092.087_218_553_352_6),
+                ("caller", 0.916_290_731_874_155_1),
+                ("foo-member", 0.458_145_365_937_077_55),
+            ],
+        ),
+        (&["thing"], &[("other", 1.386_294_361_119_890_6)]),
+        (&["app"], &[("caller", 0.972_955_074_527_656_6)]),
+    ];
+    for (terms, expected) in cases {
+        let terms = terms.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let actual = score_nodes(&graph, &terms, true);
+        assert_eq!(actual.ranked.len(), expected.len());
+        for (actual, (id, score)) in actual.ranked.iter().zip(*expected) {
+            assert_eq!(graph.node(actual.node).id, *id);
+            assert!((actual.score - score).abs() < 1e-12);
+        }
+    }
 
     assert_eq!(
         find_node(&graph, "src/foo.py").first().copied(),

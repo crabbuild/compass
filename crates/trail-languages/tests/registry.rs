@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use trail_languages::{Registry, make_id, normalize_id};
+use trail_languages::{Registry, file_stem, make_id, normalize_id};
 
 #[test]
 fn registry_covers_every_python_dispatch_extension() -> Result<(), Box<dyn Error>> {
@@ -96,5 +96,11 @@ fn ids_match_python_unicode_casefold_contract() {
         normalize_id(normalize_id("Straße / API").as_str()),
         "strasse_api"
     );
+    assert_eq!(
+        file_stem(Path::new("src/auth/session.py")),
+        "src/auth/session"
+    );
+    assert_eq!(file_stem(Path::new("README")), "README");
+    assert_eq!(file_stem(Path::new("")), "");
     assert!(Registry::resolve(Path::new("archive.zip")).is_none());
 }
