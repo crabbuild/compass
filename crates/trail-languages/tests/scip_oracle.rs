@@ -4,6 +4,7 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 use trail_languages::ingest_scip_json;
+use trail_model::validate_extraction;
 
 #[test]
 fn simplified_scip_ingestion_matches_python_oracle() -> Result<(), Box<dyn Error>> {
@@ -44,8 +45,16 @@ fn simplified_scip_ingestion_matches_python_oracle() -> Result<(), Box<dyn Error
     let language = "typescript";
     let rust = cases
         .iter()
-        .map(|case| serde_json::to_value(ingest_scip_json(case, source_file, language)))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|case| -> Result<Value, Box<dyn Error>> {
+            let extraction = serde_json::to_value(ingest_scip_json(case, source_file, language))?;
+            let errors = validate_extraction(&extraction);
+            if errors.is_empty() {
+                Ok(extraction)
+            } else {
+                Err(format!("native SCIP output failed schema validation: {errors:?}").into())
+            }
+        })
+        .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let python = std::env::var_os("GRAPHIFY_PYTHON")
