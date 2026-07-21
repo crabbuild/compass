@@ -328,6 +328,19 @@ mod tests {
     fn bearer_scheme_is_case_insensitive_and_token_is_trimmed() {
         let value = HeaderValue::from_static("bEaReR   secret  ");
         assert_eq!(bearer_token(Some(&value)), Some(b"secret".as_slice()));
+        assert_eq!(bearer_token(None), None);
+        assert_eq!(
+            bearer_token(Some(&HeaderValue::from_static("Basic secret"))),
+            None
+        );
+        assert_eq!(
+            bearer_token(Some(&HeaderValue::from_static("Bearer"))),
+            None
+        );
+        assert_eq!(
+            bearer_token(Some(&HeaderValue::from_static("Bearer    "))),
+            None
+        );
     }
 
     #[test]
@@ -335,6 +348,77 @@ mod tests {
         let hosts = allowed_hosts("127.0.0.1", 8080);
         assert!(hosts.iter().any(|host| host == "localhost:8080"));
         assert!(hosts.iter().any(|host| host == "127.0.0.1"));
+        assert_eq!(format_authority("::1", 9000), "[::1]:9000");
+        assert_eq!(format_authority("[::1]", 9000), "[::1]:9000");
+        assert!(is_wildcard_host(""));
+        assert!(is_wildcard_host("0.0.0.0"));
+        assert!(is_wildcard_host("::"));
+        assert!(!is_wildcard_host("localhost"));
+        assert_eq!(trim_ascii(b" \t value \r\n"), b"value");
+        assert!(trim_ascii(b" \t\r\n").is_empty());
+    }
+
+    #[tokio::test]
+    async fn sse_conversion_preserves_non_sse_and_recovers_json_payloads()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let plain = Response::builder()
+            .status(StatusCode::ACCEPTED)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{\"plain\":true}"))?;
+        let plain = sse_response_to_json(plain).await;
+        assert_eq!(plain.status(), StatusCode::ACCEPTED);
+        assert_eq!(to_bytes(plain.into_body(), 1024).await?, "{\"plain\":true}");
+
+        let sse = Response::builder()
+            .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+            .header(header::CONTENT_LENGTH, "999")
+            .body(Body::from(
+                "event: message\ndata: not-json\ndata:  {\"jsonrpc\":\"2.0\",\"id\":1}  \n\n",
+            ))?;
+        let converted = sse_response_to_json(sse).await;
+        assert_eq!(
+            converted.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+        assert!(!converted.headers().contains_key(header::CONTENT_LENGTH));
+        assert_eq!(
+            to_bytes(converted.into_body(), 1024).await?,
+            "{\"jsonrpc\":\"2.0\",\"id\":1}"
+        );
+
+        let invalid = Response::builder()
+            .header(header::CONTENT_TYPE, "text/event-stream")
+            .body(Body::from("event: ping\ndata: invalid\n\n"))?;
+        let invalid = sse_response_to_json(invalid).await;
+        assert_eq!(
+            to_bytes(invalid.into_body(), 1024).await?,
+            "event: ping\ndata: invalid\n\n"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn http_configuration_rejects_bad_mounts_and_unbindable_hosts() {
+        let mut options = HttpOptions::new(PathBuf::from("missing.json"));
+        for path in ["mcp", "/mcp?query", "/mcp#fragment"] {
+            options.path = path.to_owned();
+            assert!(serve_http(options.clone()).await.is_err(), "{path}");
+        }
+        options.path = "/mcp".to_owned();
+        options.host = "not a valid host".to_owned();
+        assert!(serve_http(options).await.is_err());
+    }
+
+    #[test]
+    fn router_configuration_covers_wildcard_stateless_and_empty_credentials() {
+        let mut options = HttpOptions::new(PathBuf::from("missing.json"));
+        options.host.clear();
+        options.api_key = Some(String::new());
+        options.stateless = true;
+        options.json_response = true;
+        options.session_timeout = Some(Duration::ZERO);
+        let cancellation = CancellationToken::new();
+        let _router = build_http_router(&options, &cancellation);
     }
 
     #[tokio::test]

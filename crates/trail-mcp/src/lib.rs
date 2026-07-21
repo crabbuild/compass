@@ -1413,4 +1413,94 @@ mod tests {
         assert_eq!(status_index("unknown"), 99);
         Ok(())
     }
+
+    #[test]
+    fn empty_graph_reverse_paths_ambiguity_and_document_failures_are_total()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let empty_path = temp.path().join("empty.json");
+        fs::write(&empty_path, r#"{"directed":true,"nodes":[],"links":[]}"#)?;
+        let empty = GraphifyMcp::new(&empty_path);
+        assert_eq!(
+            empty.read("graphify://surprises")?,
+            "No surprising connections found."
+        );
+        assert_eq!(
+            empty.read("graphify://questions")?,
+            "Suggested questions:\n  - "
+        );
+        assert_eq!(
+            empty.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):"
+        );
+
+        let graph_path = temp.path().join("paths.json");
+        fs::write(
+            &graph_path,
+            r#"{"directed":true,"nodes":[{"id":"a","label":"Twin","community":1},{"id":"b","label":"Twin helper","community":1},{"id":"c","label":"Tail"}],"links":[{"source":"a","target":"b","relation":"","confidence":""},{"source":"b","target":"c","relation":"uses","confidence":"EXTRACTED"}]}"#,
+        )?;
+        let store = GraphStore::new(&graph_path);
+        let context = store.load(None)?;
+        assert!(
+            tool_get_community(
+                json!({"community_id":1})
+                    .as_object()
+                    .ok_or("community args")?,
+                &context,
+            )?
+            .starts_with("Community 1 (2 nodes)")
+        );
+        assert_eq!(
+            invoke_tool("not-real", &Map::new(), &context)?,
+            "Unknown tool: not-real"
+        );
+
+        let a = context.graph.node_index("a").ok_or("node a")?;
+        let b = context.graph.node_index("b").ok_or("node b")?;
+        let c = context.graph.node_index("c").ok_or("node c")?;
+        assert_eq!(shortest_path(&context.graph, a, a), Some(vec![a]));
+        assert_eq!(shortest_path(&context.graph, c, a), Some(vec![c, b, a]));
+        let mut warnings = Vec::new();
+        ambiguity_warning(
+            "source",
+            &[
+                trail_query::ScoredNode {
+                    score: 10.0,
+                    node: a,
+                },
+                trail_query::ScoredNode {
+                    score: 9.5,
+                    node: b,
+                },
+            ],
+            a,
+            &mut warnings,
+        );
+        assert_eq!(warnings.len(), 1);
+        ambiguity_warning(
+            "source",
+            &[trail_query::ScoredNode {
+                score: 0.0,
+                node: a,
+            }],
+            a,
+            &mut warnings,
+        );
+        assert_eq!(warnings.len(), 1);
+
+        let reverse = tool_shortest_path(
+            json!({"source":"Tail","target":"Twin"})
+                .as_object()
+                .ok_or("path args")?,
+            &context,
+        )?;
+        assert!(reverse.contains("<--uses"));
+        assert!(reverse.contains("<----"));
+        assert!(expand_home(Path::new("~/trail-cache")).ends_with("trail-cache"));
+
+        fs::write(&graph_path, "not json")?;
+        assert!(context.document().is_err());
+        assert!(tool_god_nodes(&Map::new(), &context).is_err());
+        Ok(())
+    }
 }
