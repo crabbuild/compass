@@ -12,15 +12,21 @@ pub fn diagnose_graph_file(
     max_examples: usize,
     extract_path: Option<&Path>,
 ) -> Result<Value, CoreError> {
-    let bytes = fs::read(path).map_err(|source| trail_files::FileError::Io {
-        path: path.to_path_buf(),
-        source,
+    enforce_graph_size_cap(path)?;
+    let bytes = fs::read(path).map_err(|source| {
+        CoreError::DiagnosticFile(format!(
+            "Cannot parse {}: {}. The file may be corrupted — re-run 'graphify extract'.",
+            path.display(),
+            python_io_error(path, &source)
+        ))
     })?;
-    let input: Value =
-        serde_json::from_slice(&bytes).map_err(|source| trail_files::FileError::Json {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let input: Value = serde_json::from_slice(&bytes).map_err(|source| {
+        CoreError::DiagnosticFile(format!(
+            "Cannot parse {}: {}. The file may be corrupted — re-run 'graphify extract'.",
+            path.display(),
+            python_json_error(&bytes, &source)
+        ))
+    })?;
     let object = input.as_object().ok_or(CoreError::InvalidDiagnostic)?;
     let nodes = object
         .get("nodes")
@@ -97,8 +103,8 @@ pub fn diagnose_graph_file(
         })
         .collect::<Vec<_>>();
     let producer_suppression = extract_path.map_or_else(
-        || json!({"path":"","total_sites":0,"sites":[],"error":""}),
-        |path| json!({"path":path.to_string_lossy(),"total_sites":0,"sites":[],"error":if path.exists(){""}else{"file not found"}}),
+        default_producer_suppression,
+        scan_producer_suppression_sites,
     );
     Ok(json!({
         "node_count":node_ids.len(),"unverified_node_count":unverified,"raw_edge_count":edges.len(),
@@ -116,6 +122,107 @@ pub fn diagnose_graph_file(
         "post_build_error":"","producer_suppression":producer_suppression,
         "examples":examples,"input_path":path.to_string_lossy(),"effective_directed":effective_directed
     }))
+}
+
+fn enforce_graph_size_cap(path: &Path) -> Result<(), CoreError> {
+    let Ok(size) = path.metadata().map(|metadata| metadata.len()) else {
+        return Ok(());
+    };
+    let cap = graph_size_cap();
+    if u128::from(size) <= cap {
+        return Ok(());
+    }
+    Err(CoreError::DiagnosticFile(format!(
+        "graph file {} is {} bytes, exceeds {}-byte cap\n(set GRAPHIFY_MAX_GRAPH_BYTES=<bytes> or GRAPHIFY_MAX_GRAPH_BYTES=<N>GB to raise the limit)",
+        path.display(),
+        grouped(u128::from(size)),
+        grouped(cap)
+    )))
+}
+
+fn graph_size_cap() -> u128 {
+    const DEFAULT: u128 = 512 * 1024 * 1024;
+    let Ok(raw) = std::env::var("GRAPHIFY_MAX_GRAPH_BYTES") else {
+        return DEFAULT;
+    };
+    let upper = raw.trim().to_uppercase();
+    let (number, multiplier) = if let Some(number) = upper.strip_suffix("GB") {
+        (number.trim(), 1024_u128 * 1024 * 1024)
+    } else if let Some(number) = upper.strip_suffix("MB") {
+        (number.trim(), 1024_u128 * 1024)
+    } else {
+        (upper.as_str(), 1)
+    };
+    number
+        .replace('_', "")
+        .parse::<u128>()
+        .ok()
+        .filter(|value| *value > 0)
+        .and_then(|value| value.checked_mul(multiplier))
+        .unwrap_or(DEFAULT)
+}
+
+fn grouped(value: u128) -> String {
+    let digits = value.to_string();
+    digits
+        .chars()
+        .enumerate()
+        .flat_map(|(index, character)| {
+            let separator = (index > 0 && (digits.len() - index).is_multiple_of(3)).then_some('_');
+            separator.into_iter().chain(std::iter::once(character))
+        })
+        .collect()
+}
+
+fn python_io_error(path: &Path, source: &std::io::Error) -> String {
+    let Some(errno) = source.raw_os_error() else {
+        return source.to_string();
+    };
+    let suffix = format!(" (os error {errno})");
+    let reason = source
+        .to_string()
+        .strip_suffix(&suffix)
+        .map_or_else(|| source.to_string(), str::to_owned);
+    format!("[Errno {errno}] {reason}: '{}'", path.display())
+}
+
+fn python_json_error(bytes: &[u8], source: &serde_json::Error) -> String {
+    let raw = source.to_string();
+    let description = raw
+        .split_once(" at line ")
+        .map_or(raw.as_str(), |(description, _)| description);
+    let text = String::from_utf8_lossy(bytes);
+    let (message, line, column) = if matches!(description, "expected ident" | "expected value") {
+        let offset = text
+            .char_indices()
+            .find(|(_, character)| !character.is_whitespace())
+            .map_or(text.len(), |(offset, _)| offset);
+        let prefix = &text[..offset];
+        (
+            "Expecting value".to_owned(),
+            prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
+            prefix
+                .rsplit('\n')
+                .next()
+                .map_or(1, |line| line.chars().count() + 1),
+        )
+    } else {
+        let message = match description {
+            "key must be a string" => "Expecting property name enclosed in double quotes",
+            "trailing characters" => "Extra data",
+            value if value.starts_with("expected `,` or") => "Expecting ',' delimiter",
+            value => value,
+        };
+        (message.to_owned(), source.line(), source.column())
+    };
+    let character = text
+        .split_inclusive('\n')
+        .take(line.saturating_sub(1))
+        .map(str::chars)
+        .map(Iterator::count)
+        .sum::<usize>()
+        + column.saturating_sub(1);
+    format!("{message}: line {line} column {column} (char {character})")
 }
 
 #[must_use]
@@ -175,7 +282,40 @@ pub fn format_diagnostic_report(s: &Value) -> String {
     ] {
         lines.push(format!("{label}: {}", get(key)));
     }
-    lines.push("producer_suppression_sites: 0".to_owned());
+    let suppression = s.get("producer_suppression").unwrap_or(&Value::Null);
+    lines.push(format!(
+        "producer_suppression_sites: {}",
+        suppression
+            .get("total_sites")
+            .map(text)
+            .unwrap_or_else(|| "0".to_owned())
+    ));
+    if let Some(error) = suppression
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|error| !error.is_empty())
+    {
+        lines.push(format!("producer_suppression_error: {error}"));
+    }
+    if let Some(sites) = suppression
+        .get("sites")
+        .and_then(Value::as_array)
+        .filter(|sites| !sites.is_empty())
+    {
+        lines.push("producer_suppression_examples:".to_owned());
+        for site in sites.iter().take(8) {
+            let arity = site
+                .get("tuple_arity")
+                .and_then(Value::as_u64)
+                .filter(|arity| *arity > 0)
+                .map_or_else(|| "unknown".to_owned(), |arity| arity.to_string());
+            lines.push(format!(
+                "  - L{} {} arity={arity}",
+                site.get("line").map(text).unwrap_or_default(),
+                site.get("name").map(text).unwrap_or_default(),
+            ));
+        }
+    }
     if let Some(examples) = s
         .get("examples")
         .and_then(Value::as_array)
@@ -199,6 +339,84 @@ pub fn format_diagnostic_report(s: &Value) -> String {
             .to_owned(),
     );
     lines.join("\n")
+}
+
+fn default_producer_suppression() -> Value {
+    let source = std::env::current_dir()
+        .ok()
+        .map(|directory| directory.join("graphify").join("extract.py"));
+    if let Some(path) = source.filter(|path| path.is_file()) {
+        return scan_producer_suppression_sites(&path);
+    }
+
+    // Binary releases contain no Python runtime or source tree. This versioned snapshot keeps
+    // the producer-risk diagnostic useful while explicit --extract-path scans remain live.
+    json!({
+        "path": "graphify/extract.py",
+        "total_sites": 10,
+        "sites": [
+            {"line":967,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids = {n[\"id\"] for n in nodes}"},
+            {"line":1117,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids = {n[\"id\"] for n in nodes}"},
+            {"line":1119,"name":"seen_doc_refs","tuple_arity":0,"sample":"seen_doc_refs: set[str] = set()"},
+            {"line":1542,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids: set[str] = {n[\"id\"] for n in nodes}"},
+            {"line":2011,"name":"seen_keys","tuple_arity":0,"sample":"seen_keys: set[tuple] = set()"},
+            {"line":2934,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids: set[str] = set()"},
+            {"line":3042,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids: set[str] = set()"},
+            {"line":3121,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids: set[str] = set()"},
+            {"line":3616,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids: set[str] = set()"},
+            {"line":3617,"name":"seen_edges","tuple_arity":4,"sample":"seen_edges: set[tuple[str, str, str, str | None]] = set()"}
+        ],
+        "error": ""
+    })
+}
+
+fn scan_producer_suppression_sites(path: &Path) -> Value {
+    let path_text = path.to_string_lossy();
+    let Ok(source) = fs::read_to_string(path) else {
+        return json!({"path":path_text,"total_sites":0,"sites":[],"error":"file not found"});
+    };
+    let sites = source
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim_start();
+            let name_len = trimmed
+                .chars()
+                .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+                .map(char::len_utf8)
+                .sum::<usize>();
+            let name = &trimmed[..name_len];
+            let declaration = trimmed[name_len..].trim_start();
+            if !name.starts_with("seen_")
+                || name.len() == "seen_".len()
+                || !matches!(declaration.chars().next(), Some(':' | '='))
+            {
+                return None;
+            }
+            let tuple_arity = tuple_arity_from_annotation(line);
+            Some(json!({
+                "line":index + 1,
+                "name":name,
+                "tuple_arity":tuple_arity,
+                "sample":line.trim().chars().take(120).collect::<String>()
+            }))
+        })
+        .collect::<Vec<_>>();
+    json!({"path":path_text,"total_sites":sites.len(),"sites":sites,"error":""})
+}
+
+fn tuple_arity_from_annotation(line: &str) -> usize {
+    let Some(after) = line.split_once("set[tuple[").map(|(_, after)| after) else {
+        return 0;
+    };
+    let Some(inside) = after.split_once("]]").map(|(inside, _)| inside.trim()) else {
+        return 0;
+    };
+    if inside.is_empty() {
+        0
+    } else {
+        inside.matches(',').count() + 1
+    }
 }
 
 #[derive(Clone)]

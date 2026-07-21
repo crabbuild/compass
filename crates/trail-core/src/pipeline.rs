@@ -145,6 +145,8 @@ pub enum CoreError {
     EmptyGraph,
     #[error("diagnostic input must be a JSON object")]
     InvalidDiagnostic,
+    #[error("{0}")]
+    DiagnosticFile(String),
     #[error("invalid semantic extraction fragment: {0}")]
     InvalidSemanticFragment(serde_json::Error),
     #[error("invalid supplemental extraction fragment: {0}")]

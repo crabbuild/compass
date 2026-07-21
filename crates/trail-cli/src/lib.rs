@@ -165,7 +165,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         }
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
-        "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
+        "diagnose" => command_diagnose(frontend, &args),
         "update" => command_build(frontend, &args, false),
         "extract" if frontend == Frontend::Trail => command_build(frontend, &args, true),
         "watch" if frontend == Frontend::Trail => Outcome::failure(
@@ -567,9 +567,15 @@ fn parse_positive_seconds(value: &str, option: &str) -> Result<Duration, String>
     Ok(Duration::from_secs_f64(seconds))
 }
 
-fn command_diagnose(args: &[String]) -> Outcome {
+fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
     if args.first().map(String::as_str) != Some("multigraph") {
-        return Outcome::failure("Usage: trail graph diagnose multigraph [--graph path] [--json] [--max-examples N] [--directed] [--undirected] [--extract-path path]".to_owned());
+        let prefix = match frontend {
+            Frontend::Trail => "trail graph",
+            Frontend::Graphify => "graphify",
+        };
+        return Outcome::failure(format!(
+            "Usage: {prefix} diagnose multigraph [--graph path] [--json] [--max-examples N] [--directed] [--undirected] [--extract-path path]"
+        ));
     }
     let mut graph_path = default_graph_path();
     let mut max_examples = 5_usize;
@@ -579,19 +585,30 @@ fn command_diagnose(args: &[String]) -> Outcome {
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
-            "--graph" if index + 1 < args.len() => {
-                graph_path = PathBuf::from(&args[index + 1]);
+            "--graph" => {
                 index += 1;
+                let Some(value) = args.get(index) else {
+                    return Outcome::failure("error: --graph requires a path".to_owned());
+                };
+                graph_path = PathBuf::from(value);
             }
             "--json" => json_output = true,
-            "--max-examples" if index + 1 < args.len() => {
-                let Ok(value) = args[index + 1].parse::<usize>() else {
+            "--max-examples" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
                     return Outcome::failure(
-                        "error: --max-examples requires a non-negative integer".to_owned(),
+                        "error: --max-examples requires an integer".to_owned(),
                     );
                 };
+                let Ok(value) = value.parse::<isize>() else {
+                    return Outcome::failure(
+                        "error: --max-examples requires an integer".to_owned(),
+                    );
+                };
+                let Ok(value) = usize::try_from(value) else {
+                    return Outcome::failure("error: --max-examples must be >= 0".to_owned());
+                };
                 max_examples = value;
-                index += 1;
             }
             "--directed" if directed != Some(false) => directed = Some(true),
             "--undirected" if directed != Some(true) => directed = Some(false),
@@ -600,13 +617,22 @@ fn command_diagnose(args: &[String]) -> Outcome {
                     "error: --directed and --undirected are mutually exclusive".to_owned(),
                 );
             }
-            "--extract-path" if index + 1 < args.len() => {
-                extract_path = Some(PathBuf::from(&args[index + 1]));
+            "--extract-path" => {
                 index += 1;
+                let Some(value) = args.get(index) else {
+                    return Outcome::failure("error: --extract-path requires a path".to_owned());
+                };
+                extract_path = Some(PathBuf::from(value));
             }
             value => return Outcome::failure(format!("error: unknown diagnose option {value}")),
         }
         index += 1;
+    }
+    if frontend == Frontend::Graphify && extract_path.is_none() {
+        let source_checkout = PathBuf::from("graphify/extract.py");
+        if source_checkout.is_file() {
+            extract_path = source_checkout.canonicalize().ok();
+        }
     }
     match diagnose_graph_file(&graph_path, directed, max_examples, extract_path.as_deref()) {
         Ok(summary) if json_output => {
@@ -2652,7 +2678,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
