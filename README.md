@@ -27,6 +27,8 @@ trail graph update
 trail graph extract
 trail graph watch
 trail graph serve
+trail graph install
+trail graph uninstall
 trail graph cluster-only
 trail graph query
 trail graph path
@@ -54,6 +56,12 @@ trail graph label
 trail graph prs
 trail graph hook
 ```
+
+Assistant setup is native and self-contained. The generic
+`trail graph install --platform <name>` and project-scoped `--project` forms,
+their uninstall counterparts, and every legacy direct platform command exposed
+by `graphify` are differential-tested against Python for both terminal output
+and the complete installed file tree.
 
 The deterministic language registry is checked against every extension handled
 by Python, and all Tree-sitter grammars are statically linked into the binary.
@@ -138,6 +146,9 @@ different locations.
 
 Performance methodology, the reproducible qualification harness, and the
 current local baseline are documented in [PERFORMANCE.md](PERFORMANCE.md).
+The frozen compatibility baseline and evidence map are documented in
+[COMPATIBILITY.md](COMPATIBILITY.md). Side-by-side adoption and recovery are
+documented in [MIGRATION.md](MIGRATION.md).
 
 ## Distribution
 
