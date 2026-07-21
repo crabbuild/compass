@@ -750,7 +750,9 @@ impl BoltEndpoint {
 }
 
 fn address(host: &str, port: u16) -> String {
-    if host.contains(':') {
+    if host.starts_with('[') && host.ends_with(']') {
+        format!("{host}:{port}")
+    } else if host.contains(':') {
         format!("[{host}]:{port}")
     } else {
         format!("{host}:{port}")
@@ -1087,6 +1089,191 @@ mod tests {
         assert!(self_signed.encrypted);
         assert!(self_signed.trust_any_certificate);
         assert!(BoltEndpoint::parse("https://example.test").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn packstream_marker_matrix_and_safety_limits_are_enforced() -> Result<(), GraphDbError> {
+        let values = [
+            PValue::Null,
+            PValue::Bool(false),
+            PValue::Bool(true),
+            PValue::Integer(-16),
+            PValue::Integer(127),
+            PValue::Integer(-17),
+            PValue::Integer(128),
+            PValue::Integer(i64::from(i16::MIN) - 1),
+            PValue::Integer(i64::from(i32::MIN) - 1),
+            PValue::Float(1.25),
+            PValue::String("s".repeat(16)),
+            PValue::String("s".repeat(256)),
+            PValue::String("s".repeat(65_536)),
+            PValue::List(vec![PValue::Integer(1); 16]),
+            PValue::List(vec![PValue::Integer(1); 256]),
+            PValue::Map(
+                (0..16)
+                    .map(|index| (format!("k{index}"), PValue::Integer(i64::from(index))))
+                    .collect(),
+            ),
+            PValue::Structure(0x42, vec![PValue::String("field".to_owned())]),
+        ];
+        for value in values {
+            let mut encoded = Vec::new();
+            encode_value(&value, &mut encoded)?;
+            assert_eq!(
+                decode_value(&mut Cursor::new(encoded.as_slice()), 0)?,
+                value
+            );
+        }
+
+        for encoded in [
+            vec![0xD0, 0],
+            vec![0xD1, 0, 0],
+            vec![0xD2, 0, 0, 0, 0],
+            vec![0xD4, 0],
+            vec![0xD5, 0, 0],
+            vec![0xD6, 0, 0, 0, 0],
+            vec![0xD8, 0],
+            vec![0xD9, 0, 0],
+            vec![0xDA, 0, 0, 0, 0],
+            vec![0xDC, 0, 0x42],
+            vec![0xDD, 0, 0, 0x42],
+        ] {
+            decode_value(&mut Cursor::new(encoded.as_slice()), 0)?;
+        }
+
+        for invalid in [
+            vec![],
+            vec![0xC4],
+            vec![0xC1],
+            vec![0x81, 0xFF],
+            vec![0x91],
+            vec![0xA1, 0x01, 0x01],
+            vec![0xB1],
+            vec![0xD2, 0xFF, 0xFF, 0xFF, 0xFF],
+        ] {
+            assert!(decode_value(&mut Cursor::new(invalid.as_slice()), 0).is_err());
+        }
+        assert!(decode_value(&mut Cursor::new([0xC0].as_slice()), MAX_VALUE_DEPTH + 1).is_err());
+
+        let mut output = Vec::new();
+        encode_collection_header(70_000, 0x80, 0xD0, 0xD1, 0xD2, &mut output)?;
+        assert_eq!(output[0], 0xD2);
+        if usize::BITS > 32 {
+            assert!(
+                encode_collection_header(usize::MAX, 0x80, 0xD0, 0xD1, 0xD2, &mut Vec::new())
+                    .is_err()
+            );
+        }
+        assert!(structure(0x01, &vec![PValue::Null; 16]).is_err());
+        assert!(write_message(&mut Vec::new(), &vec![0; MAX_MESSAGE_BYTES + 1]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn response_routing_and_failure_shapes_are_rejected_without_panics() -> Result<(), GraphDbError>
+    {
+        let mut framed = Vec::new();
+        let mut payload = structure(0x70, &[PValue::Map(BTreeMap::new())])?;
+        payload.push(0x00);
+        write_message(&mut framed, &payload)?;
+        let mut budget = MAX_MESSAGE_BYTES;
+        assert!(read_response(&mut Cursor::new(framed), &mut budget).is_err());
+
+        let mut oversized = Cursor::new(vec![0, 2, 0xC0, 0xC0]);
+        assert!(read_response(&mut oversized, &mut 1).is_err());
+
+        let failure_fields = [PValue::Map(BTreeMap::from([
+            ("code".to_owned(), PValue::String("X".repeat(1_300))),
+            ("message".to_owned(), PValue::String("M".repeat(1_300))),
+        ]))];
+        let error = failure("query", &failure_fields).to_string();
+        assert!(error.contains(&"X".repeat(1_200)));
+        assert!(!error.contains(&"X".repeat(1_201)));
+        assert!(failure("auth", &[]).to_string().contains("Neo4jError"));
+
+        let context = BTreeMap::from([("address".to_owned(), "localhost:7687".to_owned())]);
+        assert!(route(&mut Duplex::new(Vec::new()), BoltVersion::V42, &context).is_err());
+
+        let mut failed = Vec::new();
+        write_message(
+            &mut failed,
+            &structure(
+                0x7F,
+                &[PValue::Map(BTreeMap::from([(
+                    "message".to_owned(),
+                    PValue::String("denied".to_owned()),
+                )]))],
+            )?,
+        )?;
+        assert!(route(&mut Duplex::new(failed), BoltVersion::V43, &context).is_err());
+
+        for response in [
+            PValue::Map(BTreeMap::new()),
+            PValue::Map(BTreeMap::from([("rt".to_owned(), PValue::Null)])),
+            PValue::Map(BTreeMap::from([(
+                "rt".to_owned(),
+                PValue::Map(BTreeMap::from([(
+                    "servers".to_owned(),
+                    PValue::List(vec![]),
+                )])),
+            )])),
+        ] {
+            let mut bytes = Vec::new();
+            write_test_response(&mut bytes, response)?;
+            assert!(route(&mut Duplex::new(bytes), BoltVersion::V44, &context).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn endpoint_versions_addresses_and_json_conversion_cover_protocol_edges()
+    -> Result<(), GraphDbError> {
+        for (wire, expected) in [
+            ([0, 0, 4, 4], BoltVersion::V44),
+            ([0, 0, 3, 4], BoltVersion::V43),
+            ([0, 0, 2, 4], BoltVersion::V42),
+            ([0, 0, 1, 4], BoltVersion::V41),
+        ] {
+            assert_eq!(negotiate(&mut Duplex::new(wire.to_vec()))?, expected);
+        }
+        assert!(negotiate(&mut Duplex::new(vec![0, 0, 5, 0])).is_err());
+
+        for invalid in [
+            "bolt://",
+            "bolt://localhost/path",
+            "bolt://localhost/#fragment",
+            "unknown://localhost",
+        ] {
+            assert!(BoltEndpoint::parse(invalid).is_err(), "{invalid}");
+        }
+        let routed = BoltEndpoint::parse("neo4j://[::1]:9999?region=west")?;
+        assert_eq!(
+            routed
+                .routing_context
+                .as_ref()
+                .and_then(|map| map.get("address"))
+                .map(String::as_str),
+            Some("[::1]:9999")
+        );
+        assert!(routed.matches_address("[::1]:9999"));
+        assert!(!routed.matches_address("localhost:7687"));
+        assert!(routed.with_address("bad address !").is_err());
+
+        let converted = PValue::from_json(&serde_json::json!({
+            "null": null,
+            "bool": false,
+            "int": -2,
+            "float": 1.5,
+            "string": "x",
+            "array": [1, true]
+        }))?;
+        assert!(converted.as_map().is_some());
+        assert!(PValue::Null.as_map().is_none());
+        assert!(PValue::Null.as_str().is_none());
+        assert!(PValue::Null.as_list().is_none());
+        assert_eq!(address("localhost", 1), "localhost:1");
+        assert_eq!(address("::1", 1), "[::1]:1");
         Ok(())
     }
 }
