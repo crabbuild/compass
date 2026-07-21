@@ -26,6 +26,7 @@ trail-prs = { path = "../trail-prs", version = "0.1.0" }
 trail-query = { path = "../trail-query", version = "0.1.0" }
 
 [dev-dependencies]
+rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
 
 [lints]

@@ -220,3 +220,98 @@ fn plain_text_parameter_and_validation_paths_reject_empty_limits_and_bad_envelop
     server.join().map_err(|_| "mock server panicked")??;
     Ok(())
 }
+
+#[test]
+fn azure_request_and_bounded_claude_cli_failure_cover_builtin_dispatch_boundaries()
+-> Result<(), Box<dyn Error>> {
+    let (azure_url, azure_server) = mock_json_server(json!({
+        "choices":[{"message":{"content":"azure text"}}],
+        "usage":{"prompt_tokens":5,"completion_tokens":2}
+    }))?;
+    let azure_environment = HashMap::from([
+        ("AZURE_OPENAI_API_KEY".to_owned(), "azure-key".to_owned()),
+        ("AZURE_OPENAI_ENDPOINT".to_owned(), azure_url),
+        (
+            "AZURE_OPENAI_API_VERSION".to_owned(),
+            " 2025-01-01 ".to_owned(),
+        ),
+        ("GRAPHIFY_API_MAX_RETRIES".to_owned(), "0".to_owned()),
+    ]);
+    let azure = resolve_builtin_backend("azure", &azure_environment, Some("deployment-name"))?;
+    let response = execute_plain_text_backend(
+        &azure,
+        "azure prompt",
+        &PlainTextOptions {
+            max_tokens: 31,
+            claude_cli_model_argument: None,
+        },
+        &azure_environment,
+    )?;
+    assert_eq!(response.text, "azure text");
+    let request = azure_server.join().map_err(|_| "mock server panicked")??;
+    assert!(request.contains("/openai/deployments/deployment-name/chat/completions"));
+    assert!(request.contains("api-version=2025-01-01"));
+    assert!(request.to_ascii_lowercase().contains("api-key: azure-key"));
+
+    let cli_environment = HashMap::from([("GRAPHIFY_API_TIMEOUT".to_owned(), "0.001".to_owned())]);
+    let cli = resolve_builtin_backend("claude-cli", &cli_environment, Some("fixture-model"))?;
+    let cli_result = execute_plain_text_backend(
+        &cli,
+        "bounded prompt",
+        &PlainTextOptions {
+            max_tokens: 3,
+            claude_cli_model_argument: Some(" explicit-model ".to_owned()),
+        },
+        &cli_environment,
+    );
+    assert!(cli_result.is_err());
+    Ok(())
+}
+
+#[test]
+fn azure_plain_text_uses_deployment_route_trimmed_version_and_api_key_header()
+-> Result<(), Box<dyn Error>> {
+    let (endpoint, server) = mock_json_server(json!({
+        "choices":[{"message":{"content":"azure text"}}],
+        "usage":{"prompt_tokens":5,"completion_tokens":2}
+    }))?;
+    let environment = HashMap::from([
+        ("AZURE_OPENAI_API_KEY".to_owned(), "azure-secret".to_owned()),
+        (
+            "AZURE_OPENAI_ENDPOINT".to_owned(),
+            format!("{endpoint}/base?discard=yes"),
+        ),
+        (
+            "AZURE_OPENAI_DEPLOYMENT".to_owned(),
+            "fixture deployment".to_owned(),
+        ),
+        (
+            "AZURE_OPENAI_API_VERSION".to_owned(),
+            " 2026-01-01 ".to_owned(),
+        ),
+        ("GRAPHIFY_API_MAX_RETRIES".to_owned(), "0".to_owned()),
+    ]);
+    let backend = resolve_builtin_backend("azure", &environment, None)?;
+    let response = execute_plain_text_backend(
+        &backend,
+        "azure prompt",
+        &PlainTextOptions::default(),
+        &environment,
+    )?;
+    assert_eq!(response.text, "azure text");
+    assert_eq!((response.input_tokens, response.output_tokens), (5, 2));
+    let request = server.join().map_err(|_| "mock server panicked")??;
+    assert!(
+        request.starts_with(
+            "POST /base/openai/deployments/fixture%20deployment/chat/completions?api-version=2026-01-01"
+        ),
+        "{request}"
+    );
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("api-key: azure-secret")
+    );
+    assert!(request.contains("azure prompt"));
+    Ok(())
+}

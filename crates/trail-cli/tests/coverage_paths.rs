@@ -718,6 +718,106 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
 }
 
 #[test]
+fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("graphify-out");
+    fs::create_dir_all(&output)?;
+    let graph = output.join("graph.json");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .ok_or("repository root")?;
+    fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
+    fs::write(output.join(".graphify_labels.json"), r#"{"0":"Core"}"#)?;
+    fs::write(
+        output.join(".graphify_analysis.json"),
+        r#"{"communities":{"0":["n_transformer","n_attention"]},"cohesion":{"0":0.5}}"#,
+    )?;
+    fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
+    let graph_text = graph.to_string_lossy().into_owned();
+
+    for arguments in [
+        vec![
+            "graph".to_owned(),
+            "query".to_owned(),
+            "attention".to_owned(),
+            "--budget".to_owned(),
+            "80".to_owned(),
+            "--context".to_owned(),
+            "call".to_owned(),
+            "--graph".to_owned(),
+            graph_text.clone(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "affected".to_owned(),
+            "Transformer".to_owned(),
+            "--depth".to_owned(),
+            "3".to_owned(),
+            "--relation".to_owned(),
+            "contains".to_owned(),
+            "--graph".to_owned(),
+            graph_text.clone(),
+        ],
+    ] {
+        let result = invoke_owned(Frontend::Trail, &arguments);
+        assert_eq!(result.code, 0, "{arguments:?}: {}", result.stderr);
+    }
+
+    let html = invoke_owned(
+        Frontend::Trail,
+        &[
+            "graph".to_owned(),
+            "export".to_owned(),
+            "html".to_owned(),
+            "--graph".to_owned(),
+            graph_text.clone(),
+            "--node-limit".to_owned(),
+            "0".to_owned(),
+            "--no-viz".to_owned(),
+        ],
+    );
+    assert_eq!(html.code, 0, "{}", html.stderr);
+
+    let callflow = directory.path().join("directory-callflow.html");
+    let callflow_result = invoke_owned(
+        Frontend::Graphify,
+        &[
+            "export".to_owned(),
+            "callflow-html".to_owned(),
+            output.to_string_lossy().into_owned(),
+            "--output".to_owned(),
+            callflow.to_string_lossy().into_owned(),
+        ],
+    );
+    assert_eq!(callflow_result.code, 0, "{}", callflow_result.stderr);
+    assert!(callflow.is_file());
+
+    let clustered = invoke_owned(
+        Frontend::Graphify,
+        &[
+            "cluster-only".to_owned(),
+            directory.path().to_string_lossy().into_owned(),
+            "--graph".to_owned(),
+            graph_text,
+            "--no-label".to_owned(),
+            "--no-viz".to_owned(),
+            "--timing".to_owned(),
+            "--resolution".to_owned(),
+            "1".to_owned(),
+            "--exclude-hubs".to_owned(),
+            "100".to_owned(),
+            "--min-community-size=1".to_owned(),
+        ],
+    );
+    assert_eq!(clustered.code, 0, "{}", clustered.stderr);
+    assert!(clustered.stdout.contains("communities"));
+    assert!(clustered.stderr.contains("[graphify timing] total"));
+    Ok(())
+}
+
+#[test]
 fn install_and_extract_equals_forms_cover_namespaced_parser_boundaries()
 -> Result<(), Box<dyn Error>> {
     for (frontend, arguments) in [
@@ -790,5 +890,53 @@ fn install_and_extract_equals_forms_cover_namespaced_parser_boundaries()
         let outcome = invoke(Frontend::Trail, &["graph", "extract", "missing", option]);
         assert_ne!(outcome.code, 0, "{option}");
     }
+    Ok(())
+}
+
+#[test]
+fn semantic_provider_failures_are_formatted_for_both_frontends_after_ast_detection()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("main.rs"), "pub fn local() {}\n")?;
+    fs::write(
+        directory.path().join("guide.md"),
+        "# Guide\n\nA semantic concept connects the local service to an external system.\n",
+    )?;
+    let root = directory.path().to_string_lossy().into_owned();
+
+    let trail = invoke_owned(
+        Frontend::Trail,
+        &[
+            "graph".to_owned(),
+            "extract".to_owned(),
+            root.clone(),
+            "--backend".to_owned(),
+            "definitely-missing".to_owned(),
+            "--no-cluster".to_owned(),
+            "--no-viz".to_owned(),
+        ],
+    );
+    assert_ne!(trail.code, 0);
+    assert!(trail.stderr.contains("unknown backend"), "{}", trail.stderr);
+
+    let graphify = invoke_owned(
+        Frontend::Graphify,
+        &[
+            "extract".to_owned(),
+            root,
+            "--backend".to_owned(),
+            "definitely-missing".to_owned(),
+            "--no-cluster".to_owned(),
+            "--no-viz".to_owned(),
+            "--force".to_owned(),
+        ],
+    );
+    assert_ne!(graphify.code, 0);
+    assert!(
+        graphify.stderr.contains("unknown backend") || graphify.stdout.contains("unknown backend"),
+        "stdout={} stderr={}",
+        graphify.stdout,
+        graphify.stderr
+    );
     Ok(())
 }

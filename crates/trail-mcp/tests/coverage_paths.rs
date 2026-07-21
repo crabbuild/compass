@@ -1,9 +1,10 @@
 use std::error::Error;
 use std::fs;
 
-use rmcp::ServerHandler;
+use rmcp::model::{CallToolRequestParams, ReadResourceRequestParams};
+use rmcp::{ServerHandler, ServiceExt};
 use serde_json::{Map, Value, json};
-use trail_mcp::GraphifyMcp;
+use trail_mcp::{GraphifyMcp, HttpOptions, serve_http};
 
 fn write_fixture(root: &std::path::Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
     let graph = root.join("graph.json");
@@ -238,4 +239,104 @@ fn missing_graph_and_unknown_tool_errors_are_stable() {
             .contains("graph.json not found")
     );
     assert!(server.read("graphify://stats").is_err());
+}
+
+#[test]
+fn project_path_override_loads_an_independent_graph_and_reports_corruption()
+-> Result<(), Box<dyn Error>> {
+    let default = tempfile::tempdir()?;
+    let project = tempfile::tempdir()?;
+    let project_output = project.path().join("graphify-out");
+    fs::create_dir(&project_output)?;
+    fs::write(
+        project_output.join("graph.json"),
+        r#"{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"project","label":"Project"}],"links":[]}"#,
+    )?;
+    let server = GraphifyMcp::new(default.path().join("missing.json"));
+    let project_path = project.path().to_string_lossy().into_owned();
+    let stats = server.invoke(
+        "graph_stats",
+        args(&[("project_path", json!(project_path.clone()))]),
+    );
+    assert!(stats.contains("Nodes: 1"), "{stats}");
+
+    fs::write(project_output.join("graph.json"), "not-json-but-longer")?;
+    let corrupt = server.invoke(
+        "graph_stats",
+        args(&[("project_path", json!(project_path))]),
+    );
+    assert!(corrupt.contains("Error executing graph_stats"));
+    assert!(
+        server
+            .invoke("graph_stats", args(&[("project_path", json!(7))]))
+            .contains("graph.json not found")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
+-> Result<(), Box<dyn Error>> {
+    let temp = tempfile::tempdir()?;
+    let graph = write_fixture(temp.path())?;
+    let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
+    let server_task = tokio::spawn(async move {
+        let running = GraphifyMcp::new(graph)
+            .serve(server_transport)
+            .await
+            .map_err(|error| error.to_string())?;
+        running.waiting().await.map_err(|error| error.to_string())
+    });
+    let client = ().serve(client_transport).await?;
+
+    let tools = client.list_tools(None).await?;
+    assert_eq!(tools.tools.len(), 10);
+    let resources = client.list_resources(None).await?;
+    assert_eq!(resources.resources.len(), 6);
+
+    let call = client
+        .call_tool(CallToolRequestParams::new("graph_stats"))
+        .await?;
+    assert!(!call.content.is_empty());
+    let report = client
+        .read_resource(ReadResourceRequestParams::new("graphify://report"))
+        .await?;
+    assert_eq!(report.contents.len(), 1);
+    let stats = client
+        .read_resource(ReadResourceRequestParams::new("graphify://stats"))
+        .await?;
+    assert_eq!(stats.contents.len(), 1);
+    assert!(
+        client
+            .read_resource(ReadResourceRequestParams::new("graphify://missing"))
+            .await
+            .is_err()
+    );
+
+    client.cancel().await?;
+    server_task.await?.map_err(std::io::Error::other)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn http_transport_rejects_bad_mounts_and_unbindable_hosts_before_serving()
+-> Result<(), Box<dyn Error>> {
+    let temp = tempfile::tempdir()?;
+    let graph = write_fixture(temp.path())?;
+    for path in ["mcp", "/mcp?query", "/mcp#fragment"] {
+        let mut options = HttpOptions::new(graph.clone());
+        options.path = path.to_owned();
+        assert!(serve_http(options).await.is_err(), "{path}");
+    }
+
+    let mut options = HttpOptions::new(graph);
+    options.host = "256.256.256.256".to_owned();
+    options.port = 0;
+    options.path = "/custom".to_owned();
+    options.api_key = Some("   ".to_owned());
+    options.json_response = true;
+    options.stateless = true;
+    options.session_timeout = Some(std::time::Duration::ZERO);
+    assert!(serve_http(options).await.is_err());
+    Ok(())
 }

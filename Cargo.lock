@@ -4284,6 +4284,7 @@ dependencies = [
  "sha1",
  "sha2 0.10.9",
  "strsim",
+ "tempfile",
  "thiserror 2.0.19",
  "trail-languages",
  "trail-model",
@@ -4377,6 +4378,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
 ]
 

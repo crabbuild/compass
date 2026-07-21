@@ -164,5 +164,108 @@ fn semantic_build_normalizes_origins_paths_hyperedges_and_unicode_json()
     let encoded = fs::read_to_string(result.output_dir.join("graph.json"))?;
     assert!(encoded.contains("\\u00e9"));
     assert!(encoded.contains("\\ud83d\\ude80"));
+
+    let warm = build_graph_with_layers(&options, None, &[])?;
+    assert!(!warm.outputs_changed);
+    let preserved: serde_json::Value =
+        serde_json::from_slice(&fs::read(warm.output_dir.join("graph.json"))?)?;
+    assert!(
+        preserved["nodes"]
+            .as_array()
+            .is_some_and(|nodes| { nodes.iter().any(|node| node["id"] == "doc") })
+    );
+    assert!(
+        preserved["hyperedges"]
+            .as_array()
+            .is_some_and(|hyperedges| {
+                hyperedges.iter().any(|hyperedge| hyperedge["id"] == "h1")
+            })
+    );
+
+    fs::remove_file(directory.path().join("notes.md"))?;
+    let pruned = build_graph_with_layers(&options, None, &[])?;
+    assert!(pruned.outputs_changed);
+    let pruned_document: serde_json::Value =
+        serde_json::from_slice(&fs::read(pruned.output_dir.join("graph.json"))?)?;
+    assert!(
+        pruned_document["nodes"]
+            .as_array()
+            .is_some_and(|nodes| { nodes.iter().all(|node| node["id"] != "doc") })
+    );
+    assert!(
+        pruned_document["hyperedges"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+    Ok(())
+}
+
+#[test]
+fn incremental_update_preserves_then_replaces_owned_semantic_hyperedges()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("main.rs");
+    let notes = directory.path().join("notes.md");
+    fs::write(&source, "pub fn first() {}\n")?;
+    fs::write(&notes, "# Notes\n")?;
+    let mut options = BuildOptions::new(directory.path().to_path_buf());
+    options.no_cluster = true;
+    options.no_viz = true;
+
+    let first = SemanticLayer {
+        fragment: serde_json::json!({
+            "nodes":[
+                {"id":"concept-a","label":"A","file_type":"concept","source_file":notes},
+                {"id":"concept-b","label":"B","file_type":"concept","source_file":notes}
+            ],
+            "edges":[{"source":"concept-a","target":"concept-b","relation":"related","source_file":notes}],
+            "hyperedges":[
+                9,
+                {"id":"semantic-group","nodes":["concept-a","concept-b"],"source_file":notes}
+            ]
+        }),
+        refreshed_files: vec![notes.clone()],
+        partial_files: Vec::new(),
+        allow_partial: false,
+    };
+    build_graph_with_layers(&options, Some(&first), &[])?;
+
+    fs::write(&source, "pub fn second() {}\n")?;
+    build_graph_with_layers(&options, None, &[])?;
+    let preserved: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.path().join("graphify-out/graph.json"))?)?;
+    assert!(
+        preserved["hyperedges"]
+            .as_array()
+            .is_some_and(|hyperedges| {
+                hyperedges
+                    .iter()
+                    .any(|hyperedge| hyperedge["id"] == "semantic-group")
+            })
+    );
+
+    let replacement = SemanticLayer {
+        fragment: serde_json::json!({
+            "nodes":[
+                {"id":"concept-a","label":"A2","file_type":"concept","source_file":notes},
+                {"id":"concept-b","label":"B2","file_type":"concept","source_file":notes}
+            ],
+            "edges":[],
+            "hyperedges":[{"id":"semantic-group","members":["concept-a","concept-b"],"source_file":notes}]
+        }),
+        refreshed_files: vec![notes],
+        partial_files: Vec::new(),
+        allow_partial: false,
+    };
+    build_graph_with_layers(&options, Some(&replacement), &[])?;
+    let replaced: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.path().join("graphify-out/graph.json"))?)?;
+    let groups = replaced["hyperedges"]
+        .as_array()
+        .ok_or("missing hyperedges")?
+        .iter()
+        .filter(|hyperedge| hyperedge["id"] == "semantic-group")
+        .count();
+    assert_eq!(groups, 1);
     Ok(())
 }

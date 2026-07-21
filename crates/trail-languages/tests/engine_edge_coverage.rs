@@ -418,3 +418,149 @@ Local* free_call(Service& service) { service.helper(); return create(); }
     }
     Ok(())
 }
+
+#[test]
+fn dotnet_pascal_xaml_and_template_fixtures_cover_project_and_ui_relationships()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let fixtures = [
+        (
+            "Service.cs",
+            r#"using System;
+using System.Collections.Generic;
+namespace Trail.App;
+public interface IRunner<in T> { Result Run(T input); }
+public abstract class Base<T> where T : Contract { protected T Value { get; init; } }
+public sealed record Service<T>(Dependency Dependency) : Base<T>, IRunner<Input>
+    where T : Contract, new()
+{
+    public event EventHandler? Changed;
+    public Result Run(Input input)
+    {
+        var item = Dependency.Load(input);
+        Changed?.Invoke(this, EventArgs.Empty);
+        return Helper.Create<Result>(item);
+    }
+}
+public enum Mode { Fast, Safe }
+public delegate Output Transform(Input input);
+"#,
+        ),
+        (
+            "Trail.csproj",
+            r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Core/Core.csproj" />
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
+    <Compile Include="Generated.cs" Link="Shared/Generated.cs" />
+  </ItemGroup>
+</Project>"#,
+        ),
+        (
+            "MainWindow.xaml",
+            r#"<Window x:Class="Trail.App.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:Trail.App">
+ <Grid DataContext="{Binding Main}">
+  <local:GraphView x:Name="Graph" ItemsSource="{Binding Nodes}" />
+  <Button Click="OnRefresh" Command="{Binding RefreshCommand}" />
+ </Grid>
+</Window>"#,
+        ),
+        (
+            "units.pas",
+            r#"unit Units;
+interface
+uses SysUtils, Classes;
+type
+  IRunner = interface
+    function Run(const Input: TInput): TOutput;
+  end;
+  TService = class(TBase, IRunner)
+  private
+    FDependency: TDependency;
+    procedure Helper(Sender: TObject);
+  public
+    constructor Create(const Dependency: TDependency);
+    function Run(const Input: TInput): TOutput; override;
+    property Dependency: TDependency read FDependency write FDependency;
+  end;
+implementation
+constructor TService.Create(const Dependency: TDependency);
+begin inherited Create; FDependency := Dependency; end;
+procedure TService.Helper(Sender: TObject);
+begin FDependency.Notify(Sender); end;
+function TService.Run(const Input: TInput): TOutput;
+begin Result := FDependency.Execute(Input); Helper(Self); end;
+end."#,
+        ),
+        (
+            "MainForm.dfm",
+            r#"object MainForm: TMainForm
+  Caption = 'Trail'
+  object RefreshButton: TButton
+    OnClick = RefreshButtonClick
+  end
+  object DataSource1: TDataSource
+    DataSet = Query1
+  end
+end"#,
+        ),
+        (
+            "Component.vue",
+            r#"<script setup lang="ts">
+import { computed, ref } from 'vue'
+import GraphView from './GraphView.vue'
+const props = defineProps<{ nodes: Node[] }>()
+const emit = defineEmits<{ select: [Node] }>()
+const count = computed(() => props.nodes.length)
+function choose(node: Node) { emit('select', node) }
+</script>
+<template><GraphView v-for="node in props.nodes" :key="node.id" @click="choose(node)" /></template>"#,
+        ),
+        (
+            "Widget.svelte",
+            r#"<script lang="ts">
+ import { onMount } from 'svelte';
+ export let service: Service;
+ $: result = service.compute();
+ onMount(() => service.start());
+</script>
+{#each result as item}<button on:click={() => service.select(item)}>{item.name}</button>{/each}"#,
+        ),
+        (
+            "Card.astro",
+            r#"---
+import Layout from './Layout.astro';
+const { title, items } = Astro.props;
+const rows = items.map(formatRow);
+---
+<Layout title={title}>{rows.map(row => <span>{row}</span>)}</Layout>"#,
+        ),
+    ];
+
+    let mut engine = Engine::default();
+    for (name, source) in fixtures {
+        let path = directory.path().join(name);
+        fs::write(&path, source)?;
+        let extraction = engine.extract(&path)?;
+        assert!(!extraction.nodes.is_empty(), "{name}");
+        assert!(
+            extraction.edges.iter().any(|edge| matches!(
+                edge.string("relation").as_str(),
+                "contains"
+                    | "calls"
+                    | "references"
+                    | "imports"
+                    | "imports_from"
+                    | "inherits"
+                    | "implements"
+            )),
+            "{name}: {:?}",
+            extraction.edges
+        );
+    }
+    Ok(())
+}
