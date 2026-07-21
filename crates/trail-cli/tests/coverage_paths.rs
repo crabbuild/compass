@@ -113,6 +113,197 @@ fn graph_command_argument_failures_cover_every_local_dispatch_family() {
 }
 
 #[test]
+fn completed_command_help_routes_and_parser_boundaries_are_total() {
+    for command in [
+        "update",
+        "extract",
+        "watch",
+        "serve",
+        "cluster-only",
+        "label",
+        "prs",
+        "query",
+        "path",
+        "explain",
+        "affected",
+        "tree",
+        "export",
+        "benchmark",
+        "diagnose",
+        "merge-graphs",
+        "cache-check",
+        "merge-chunks",
+        "merge-semantic",
+        "provider",
+        "save-result",
+        "reflect",
+        "check-update",
+        "merge-driver",
+        "global",
+        "clone",
+        "add",
+        "hook",
+        "install",
+        "uninstall",
+        "not-real",
+    ] {
+        let outcome = invoke(Frontend::Trail, &["graph", command, "--help"]);
+        assert_eq!(outcome.code, 0, "{command}: {}", outcome.stderr);
+        assert!(!outcome.stdout.is_empty(), "{command}");
+    }
+
+    for arguments in [
+        vec!["cluster-only", "--resolution"],
+        vec!["cluster-only", "--exclude-hubs"],
+        vec!["cluster-only", "--backend", "fixture"],
+        vec!["cluster-only", "--model", "fixture"],
+        vec!["cluster-only", "--max-concurrency", "2"],
+        vec!["cluster-only", "--batch-size", "2"],
+        vec!["cluster-only", "--backend=fixture"],
+        vec!["cluster-only", "--model=fixture"],
+        vec!["cluster-only", "--max-concurrency=2"],
+        vec!["cluster-only", "--batch-size=2"],
+        vec!["cluster-only", "--missing-only", "--legacy-option"],
+    ] {
+        let outcome = invoke(Frontend::Graphify, &arguments);
+        assert_ne!(outcome.code, 0, "{arguments:?}");
+    }
+
+    for arguments in [
+        vec!["graph", "cluster-only", "missing", "second"],
+        vec!["graph", "cluster-only", "--exclude-hubs", "not-a-number"],
+        vec!["graph", "cluster-only", "--resolution=not-a-number"],
+        vec!["graph", "cluster-only", "--exclude-hubs=2"],
+        vec!["graph", "cluster-only", "--min-community-size=2"],
+        vec!["graph", "cluster-only", "--unsupported"],
+    ] {
+        assert_ne!(invoke(Frontend::Trail, &arguments).code, 0, "{arguments:?}");
+    }
+}
+
+#[test]
+fn read_command_missing_values_and_load_errors_are_diagnostic() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let malformed = directory.path().join("malformed.json");
+    let wrong_extension = directory.path().join("graph.txt");
+    fs::write(&malformed, "not json")?;
+    fs::write(&wrong_extension, "{}")?;
+    let malformed = malformed.to_string_lossy().into_owned();
+    let wrong_extension = wrong_extension.to_string_lossy().into_owned();
+
+    let cases = [
+        vec![
+            "graph".to_owned(),
+            "query".to_owned(),
+            "q".to_owned(),
+            "--budget".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "query".to_owned(),
+            "q".to_owned(),
+            "--context".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "query".to_owned(),
+            "q".to_owned(),
+            "--graph".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "query".to_owned(),
+            "q".to_owned(),
+            "--budget=bad".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "affected".to_owned(),
+            "q".to_owned(),
+            "--graph".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "affected".to_owned(),
+            "q".to_owned(),
+            "--depth".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "affected".to_owned(),
+            "q".to_owned(),
+            "--relation".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "affected".to_owned(),
+            "q".to_owned(),
+            "--depth=bad".to_owned(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "explain".to_owned(),
+            "q".to_owned(),
+            format!("--graph={wrong_extension}"),
+        ],
+        vec![
+            "graph".to_owned(),
+            "explain".to_owned(),
+            "q".to_owned(),
+            format!("--graph={malformed}"),
+        ],
+    ];
+    for arguments in cases {
+        let outcome = invoke_owned(Frontend::Trail, &arguments);
+        assert_ne!(outcome.code, 0, "{arguments:?}");
+        assert!(!outcome.stderr.is_empty(), "{arguments:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn export_parser_reports_all_missing_and_invalid_option_values() {
+    for option in [
+        "--graph",
+        "--labels",
+        "--report",
+        "--sections",
+        "--output",
+        "--dir",
+        "--push",
+        "--user",
+        "--password",
+        "--lang",
+        "--max-sections",
+        "--max-diagram-nodes",
+        "--max-diagram-edges",
+        "--node-limit",
+        "--diagram-scale",
+    ] {
+        let outcome = invoke(Frontend::Graphify, &["export", "callflow-html", option]);
+        assert_ne!(outcome.code, 0, "{option}");
+        assert!(!outcome.stderr.is_empty(), "{option}");
+    }
+    for (option, value) in [
+        ("--max-sections", "bad"),
+        ("--max-diagram-nodes", "bad"),
+        ("--max-diagram-edges", "bad"),
+        ("--node-limit", "bad"),
+        ("--diagram-scale", "bad"),
+    ] {
+        let outcome = invoke(
+            Frontend::Graphify,
+            &["export", "callflow-html", option, value],
+        );
+        assert_ne!(outcome.code, 0, "{option}");
+    }
+    assert_eq!(
+        invoke(Frontend::Graphify, &["export", "callflow-html", "--help"]).code,
+        0
+    );
+}
+
+#[test]
 fn graphify_legacy_parsers_tolerate_or_report_frozen_edge_cases() {
     let cases: &[&[&str]] = &[
         &["query"],
@@ -309,6 +500,10 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
         .ok_or("repository root")?;
     fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
     fs::write(output.join(".graphify_labels.json"), r#"{"0":"Core"}"#)?;
+    fs::write(
+        output.join(".graphify_analysis.json"),
+        r#"{"communities":{"0":["n_transformer","n_attention","n_layernorm","n_concept_attn"]},"cohesion":{"0":0.75}}"#,
+    )?;
     fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
     let graph = graph.to_string_lossy().into_owned();
 
@@ -403,7 +598,9 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
     assert_eq!(merge.code, 0, "{}", merge.stderr);
     assert!(merged.is_file());
 
-    for format in ["html", "svg", "graphml", "neo4j", "falkordb", "obsidian"] {
+    for format in [
+        "html", "svg", "graphml", "neo4j", "falkordb", "obsidian", "wiki",
+    ] {
         let mut arguments = vec![
             "graph".to_owned(),
             "export".to_owned(),
@@ -427,5 +624,44 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
         let result = invoke_owned(Frontend::Trail, &arguments);
         assert_eq!(result.code, 0, "{format}: {}", result.stderr);
     }
+
+    let labels = directory.path().join("labels.json");
+    let report = directory.path().join("report.md");
+    let sections = directory.path().join("sections.json");
+    let callflow = directory.path().join("callflow.html");
+    fs::write(&labels, r#"{"labels":{"0":{"name":"Runtime"}}}"#)?;
+    fs::write(&report, "# Runtime report\n")?;
+    fs::write(
+        &sections,
+        r#"{"sections":[{"id":"runtime","name":"Runtime","communities":["0"]}]}"#,
+    )?;
+    let callflow_result = invoke_owned(
+        Frontend::Graphify,
+        &[
+            "export".to_owned(),
+            "callflow-html".to_owned(),
+            graph,
+            "--labels".to_owned(),
+            labels.to_string_lossy().into_owned(),
+            "--report".to_owned(),
+            report.to_string_lossy().into_owned(),
+            "--sections".to_owned(),
+            sections.to_string_lossy().into_owned(),
+            "--output".to_owned(),
+            callflow.to_string_lossy().into_owned(),
+            "--lang".to_owned(),
+            "en".to_owned(),
+            "--max-sections".to_owned(),
+            "1".to_owned(),
+            "--max-diagram-nodes".to_owned(),
+            "2".to_owned(),
+            "--max-diagram-edges".to_owned(),
+            "2".to_owned(),
+            "--diagram-scale".to_owned(),
+            "1.25".to_owned(),
+        ],
+    );
+    assert_eq!(callflow_result.code, 0, "{}", callflow_result.stderr);
+    assert!(callflow.is_file());
     Ok(())
 }
