@@ -922,7 +922,8 @@ fn normalize_source_attribute(
     if !path.is_absolute() {
         return;
     }
-    let Ok(relative) = path.strip_prefix(root) else {
+    let canonical_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let Ok(relative) = canonical_path.strip_prefix(root) else {
         return;
     };
     attributes.insert(
@@ -1340,6 +1341,7 @@ fn write_raw_graph(
         output.insert("output_tokens".to_owned(), serde_json::Value::from(0));
         output.insert("nodes".to_owned(), nodes);
         output.insert("links".to_owned(), edges);
+        output.insert("hyperedges".to_owned(), hyperedges);
     }
     let encoded =
         serde_json::to_string_pretty(&serde_json::Value::Object(output)).map_err(|source| {
