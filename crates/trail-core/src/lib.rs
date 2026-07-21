@@ -13,8 +13,8 @@ pub use cluster_existing::{
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
-    BuildOptions, BuildPurpose, BuildResult, CoreError, SemanticLayer, build_graph_with_layers,
-    build_graph_with_semantic, build_local_graph,
+    BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError, SemanticLayer,
+    build_graph_with_layers, build_graph_with_semantic, build_local_graph,
 };
 pub use watch::{WatchError, WatchOptions, WatchStatus, watch_local_graph};
 

@@ -17,15 +17,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use trail_core::{
-    BuildOptions, BuildPurpose, BuildResult, ClusterExistingOptions, ExportInputs, LoadedGraph,
-    SemanticLayer, WatchOptions, WatchStatus, build_graph_with_layers, build_local_graph,
-    cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
-    format_diagnostic_report, merge_graphs, watch_local_graph,
+    BuildOptions, BuildPurpose, BuildResult, BuildTimings, ClusterExistingOptions, ExportInputs,
+    LoadedGraph, SemanticLayer, WatchOptions, WatchStatus, build_graph_with_layers,
+    build_local_graph, cluster_existing_graph, default_graph_path, diagnose_graph_file,
+    format_diagnostic_json, format_diagnostic_report, merge_graphs, watch_local_graph,
 };
 use trail_files::{DetectOptions, Manifest, ManifestKind};
+use trail_global::{GlobalPaths, global_add};
 use trail_graph::god_nodes;
 use trail_graphdb::{push_to_falkordb, push_to_neo4j};
 use trail_model::GraphError;
@@ -869,6 +870,7 @@ fn command_benchmark(args: &[String]) -> Outcome {
 }
 
 fn command_build(args: &[String], extract: bool) -> Outcome {
+    let started = Instant::now();
     let mut root = None;
     let mut output_root = None;
     let mut force = environment_truthy("GRAPHIFY_FORCE");
@@ -878,14 +880,18 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     let mut code_only = false;
     let mut cargo = false;
     let mut google_workspace = false;
+    let mut global_merge = false;
+    let mut global_repo_tag = None;
     let mut postgres_dsn = None;
     let mut backend = None;
     let mut model = None;
     let mut deep_mode = false;
     let mut token_budget = None;
     let mut max_concurrency = None;
+    let mut max_workers = None;
     let mut api_timeout = None;
     let mut allow_partial = false;
+    let mut timing = false;
     let mut excludes = Vec::new();
     let mut resolution = 1.0;
     let mut exclude_hubs = None;
@@ -899,6 +905,14 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             "--code-only" => code_only = true,
             "--cargo" if extract => cargo = true,
             "--google-workspace" if extract => google_workspace = true,
+            "--global" if extract => global_merge = true,
+            "--as" if extract && index + 1 < args.len() => {
+                global_repo_tag = Some(args[index + 1].clone());
+                index += 1;
+            }
+            value if extract && value.starts_with("--as=") => {
+                global_repo_tag = Some(value[5..].to_owned());
+            }
             "--postgres" if extract && index + 1 < args.len() => {
                 postgres_dsn = Some(args[index + 1].clone());
                 index += 1;
@@ -1033,25 +1047,24 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 }
                 exclude_hubs = Some(parsed);
             }
-            "--dedup-llm" | "--global" | "--timing" if extract => {
+            "--max-workers" if extract && index + 1 < args.len() => {
+                max_workers = match parse_positive_usize(&args[index + 1], "--max-workers") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--max-workers=") => {
+                max_workers = match parse_positive_usize(&value[14..], "--max-workers") {
+                    Ok(value) => Some(value),
+                    Err(error) => return Outcome::failure(error),
+                };
+            }
+            "--timing" if extract => timing = true,
+            "--dedup-llm" if extract => {
                 return Outcome::failure(format!(
                     "error: {} is not yet available in native Trail",
                     args[index]
-                ));
-            }
-            "--as" | "--max-workers" if extract => {
-                return Outcome::failure(format!(
-                    "error: {} is not yet available in native Trail",
-                    args[index]
-                ));
-            }
-            value
-                if extract
-                    && (value.starts_with("--as=") || value.starts_with("--max-workers=")) =>
-            {
-                let option = value.split('=').next().unwrap_or(value);
-                return Outcome::failure(format!(
-                    "error: {option} is not yet available in native Trail"
                 ));
             }
             "-h" | "--help" => {
@@ -1103,6 +1116,7 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     };
     options.google_workspace =
         google_workspace || trail_google_workspace::google_workspace_enabled(None);
+    options.max_workers = max_workers;
     let postgres_graph = if let Some(dsn) = postgres_dsn.as_deref() {
         match trail_postgres::introspect_postgres(Some(dsn)) {
             Ok(graph) => Some(graph),
@@ -1146,15 +1160,16 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
         )
     } else if extract && !auxiliary_fragments.is_empty() {
         build_graph_with_layers(&options, None, &auxiliary_fragments)
-            .map(|result| (result, Vec::new()))
+            .map(|result| (result, Vec::new(), Duration::ZERO))
             .map_err(|error| error.to_string())
     } else {
         build_local_graph(&options)
-            .map(|result| (result, Vec::new()))
+            .map(|result| (result, Vec::new(), Duration::ZERO))
             .map_err(|error| error.to_string())
     };
     match built {
-        Ok((result, mut notes)) => {
+        Ok((result, mut notes, semantic_elapsed)) => {
+            let mut global_warning = None;
             if let Some((nodes, edges)) = postgres_counts {
                 notes.push(format!(
                     "[trail graph extract] PostgreSQL: {nodes} nodes, {edges} edges"
@@ -1164,6 +1179,35 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 notes.push(format!(
                     "[trail graph extract] Cargo: {nodes} nodes, {edges} edges"
                 ));
+            }
+            if global_merge {
+                let tag = global_repo_tag.clone().unwrap_or_else(|| {
+                    root.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default()
+                        .to_owned()
+                });
+                match GlobalPaths::discover().and_then(|paths| {
+                    global_add(
+                        &paths,
+                        &result.output_dir.join("graph.json"),
+                        &tag,
+                        time::OffsetDateTime::now_utc(),
+                    )
+                }) {
+                    Ok(merged) if merged.skipped => notes.push(format!(
+                        "[graphify global] '{tag}' unchanged since last add - skipped."
+                    )),
+                    Ok(merged) => notes.push(format!(
+                        "[graphify global] '{tag}' merged into global graph (+{} nodes, -{} pruned).",
+                        merged.nodes_added, merged.nodes_removed
+                    )),
+                    Err(error) => {
+                        global_warning = Some(format!(
+                            "[graphify global] warning: failed to merge into global graph: {error}"
+                        ));
+                    }
+                }
             }
             let mode = if no_cluster {
                 "without clustering"
@@ -1184,10 +1228,59 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
                 output.push('\n');
                 output.push_str(&notes.join("\n"));
             }
-            Outcome::success(output)
+            let mut outcome = Outcome::success(output);
+            if let Some(warning) = global_warning {
+                outcome.stderr = warning;
+            }
+            if timing {
+                if !outcome.stderr.is_empty() {
+                    outcome.stderr.push('\n');
+                }
+                outcome.stderr.push_str(&format_extract_timings(
+                    no_cluster,
+                    started.elapsed(),
+                    semantic_elapsed,
+                    &result.timings,
+                ));
+            }
+            outcome
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+fn format_extract_timings(
+    no_cluster: bool,
+    elapsed: Duration,
+    semantic_elapsed: Duration,
+    timings: &BuildTimings,
+) -> String {
+    let mut stages = vec![
+        ("detect", timings.detect),
+        ("AST extract", timings.ast_extract),
+        ("semantic extract", semantic_elapsed),
+    ];
+    if no_cluster {
+        stages.push(("write", timings.write));
+    } else {
+        stages.extend([
+            ("build", timings.build),
+            ("cluster", timings.cluster),
+            ("analyze", timings.analyze),
+            ("export", timings.export),
+        ]);
+    }
+    let mut lines = stages
+        .into_iter()
+        .map(|(stage, duration)| {
+            format!("[graphify timing] {stage}: {:.1}s", duration.as_secs_f64())
+        })
+        .collect::<Vec<_>>();
+    lines.push(format!(
+        "[graphify timing] total: {:.1}s",
+        elapsed.as_secs_f64()
+    ));
+    lines.join("\n")
 }
 
 fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
@@ -1238,7 +1331,8 @@ fn build_semantic_graph(
     api_timeout: Option<f64>,
     allow_partial: bool,
     auxiliary_fragments: &[serde_json::Value],
-) -> Result<(BuildResult, Vec<String>), String> {
+) -> Result<(BuildResult, Vec<String>, Duration), String> {
+    let semantic_started = Instant::now();
     let root = fs::canonicalize(&options.root)
         .map_err(|error| format!("could not resolve {}: {error}", options.root.display()))?;
     let output_root = options
@@ -1459,9 +1553,10 @@ fn build_semantic_graph(
             .unwrap_or_default(),
         allow_partial,
     };
+    let semantic_elapsed = semantic_started.elapsed();
     let result = build_graph_with_layers(options, Some(&layer), auxiliary_fragments)
         .map_err(|error| error.to_string())?;
-    Ok((result, notes))
+    Ok((result, notes, semantic_elapsed))
 }
 
 fn semantic_files(files: &std::collections::BTreeMap<String, Vec<String>>) -> Vec<PathBuf> {

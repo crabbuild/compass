@@ -51,7 +51,7 @@ fn run(
         command.arg("--cargo");
     }
     Ok(command
-        .args(["--code-only", "--no-cluster", "--no-viz"])
+        .args(["--code-only", "--no-cluster", "--no-viz", "--max-workers=1"])
         .output()?)
 }
 
@@ -143,5 +143,107 @@ fn cargo_extract_graph_facts_match_python_oracle() -> Result<(), Box<dyn Error>>
         rust_directory.path().join("graphify-out/graph.json"),
     )?)?;
     assert_eq!(cargo_facts(&actual), cargo_facts(&expected));
+    Ok(())
+}
+
+#[test]
+fn native_extract_can_merge_into_the_global_graph() -> Result<(), Box<dyn Error>> {
+    let project = tempfile::tempdir()?;
+    let home = tempfile::tempdir()?;
+    seed(project.path())?;
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_trail"))
+            .args([
+                "graph",
+                "extract",
+                ".",
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+                "--max-workers=1",
+                "--global",
+                "--as",
+                "fixture",
+            ])
+            .current_dir(project.path())
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .output()
+    };
+    let first = run()?;
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&first.stdout)
+            .contains("[graphify global] 'fixture' merged into global graph")
+    );
+    assert!(home.path().join(".graphify/global-graph.json").is_file());
+
+    let second = run()?;
+    assert!(second.status.success());
+    assert!(
+        String::from_utf8_lossy(&second.stdout)
+            .contains("[graphify global] 'fixture' unchanged since last add - skipped.")
+    );
+    Ok(())
+}
+
+#[test]
+fn extract_timing_stage_order_matches_python() -> Result<(), Box<dyn Error>> {
+    let repository = repository_root();
+    let python_project = tempfile::tempdir()?;
+    let rust_project = tempfile::tempdir()?;
+    seed(python_project.path())?;
+    seed(rust_project.path())?;
+
+    let python = Command::new(repository.join(".venv/bin/python"))
+        .args(["-m", "graphify", "extract"])
+        .arg(python_project.path())
+        .args([
+            "--code-only",
+            "--no-cluster",
+            "--no-viz",
+            "--max-workers=1",
+            "--timing",
+        ])
+        .current_dir(&repository)
+        .env("PYTHONPATH", &repository)
+        .output()?;
+    let rust = Command::new(env!("CARGO_BIN_EXE_trail"))
+        .args(["graph", "extract"])
+        .arg(rust_project.path())
+        .args([
+            "--code-only",
+            "--no-cluster",
+            "--no-viz",
+            "--max-workers=1",
+            "--timing",
+        ])
+        .output()?;
+    assert!(
+        python.status.success(),
+        "{}",
+        String::from_utf8_lossy(&python.stderr)
+    );
+    assert!(
+        rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust.stderr)
+    );
+
+    let stages = |output: &Output| {
+        String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("[graphify timing] ")
+                    .and_then(|value| value.split_once(':'))
+                    .map(|(stage, _)| stage.to_owned())
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(stages(&rust), stages(&python));
     Ok(())
 }

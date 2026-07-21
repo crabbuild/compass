@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 use serde_json::json;
@@ -34,6 +35,9 @@ pub struct BuildOptions {
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub google_workspace: bool,
+    /// Maximum number of worker threads used by the deterministic AST stages.
+    /// `None` uses Rayon's process-wide default, matching the library default.
+    pub max_workers: Option<usize>,
     /// Override the commit recorded in update artifacts.
     ///
     /// This is primarily useful for reproducible builds and compatibility
@@ -64,6 +68,7 @@ impl BuildOptions {
             resolution: 1.0,
             exclude_hubs: None,
             google_workspace: false,
+            max_workers: None,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
         }
@@ -83,6 +88,18 @@ pub struct BuildResult {
     pub edges: usize,
     pub communities: usize,
     pub html_written: bool,
+    pub timings: BuildTimings,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BuildTimings {
+    pub detect: Duration,
+    pub ast_extract: Duration,
+    pub build: Duration,
+    pub cluster: Duration,
+    pub analyze: Duration,
+    pub export: Duration,
+    pub write: Duration,
 }
 
 /// Validated semantic output to merge into one atomic graph build.
@@ -131,6 +148,8 @@ pub enum CoreError {
     InvalidSemanticFragment(serde_json::Error),
     #[error("invalid supplemental extraction fragment: {0}")]
     InvalidSupplementalFragment(serde_json::Error),
+    #[error("could not create an AST worker pool: {0}")]
+    WorkerPool(String),
     #[error(
         "semantic extraction was incomplete and would shrink the graph ({new} < {existing} nodes)"
     )]
@@ -174,6 +193,24 @@ fn build_graph(
     semantic: Option<&SemanticLayer>,
     supplemental: &[Extraction],
 ) -> Result<BuildResult, CoreError> {
+    if let Some(max_workers) = options.max_workers {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(max_workers)
+            .thread_name(|index| format!("trail-ast-{index}"))
+            .build()
+            .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
+        return pool.install(|| build_graph_inner(options, semantic, supplemental));
+    }
+    build_graph_inner(options, semantic, supplemental)
+}
+
+fn build_graph_inner(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[Extraction],
+) -> Result<BuildResult, CoreError> {
+    let mut timings = BuildTimings::default();
+    let mut stage_started = Instant::now();
     if !options.root.exists() {
         return Err(CoreError::MissingRoot(options.root.clone()));
     }
@@ -234,6 +271,8 @@ fn build_graph(
         )?;
         detection.skipped_sensitive.extend(failures);
     }
+    timings.detect = stage_started.elapsed();
+    stage_started = Instant::now();
     let mut semantic_documents = if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
@@ -296,6 +335,7 @@ fn build_graph(
             edges: document.links.len(),
             communities,
             html_written: output_dir.join("graph.html").is_file(),
+            timings,
         });
     }
 
@@ -365,6 +405,8 @@ fn build_graph(
         .collect::<HashMap<_, _>>();
     let mut resolved = resolve_with_root(&ordered, &source_text, &root);
     finalize_ast_extraction(&mut resolved, &root);
+    timings.ast_extract = stage_started.elapsed();
+    stage_started = Instant::now();
     if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
@@ -429,6 +471,7 @@ fn build_graph(
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
         guard.commit()?;
+        timings.write = stage_started.elapsed();
         return Ok(BuildResult {
             root,
             output_dir,
@@ -441,9 +484,12 @@ fn build_graph(
             edges: edges.len(),
             communities: 0,
             html_written: false,
+            timings,
         });
     }
     let document = build_from_extraction(&resolved, false, Some(&root));
+    timings.build = stage_started.elapsed();
+    stage_started = Instant::now();
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
@@ -482,6 +528,7 @@ fn build_graph(
             edges: document.links.len(),
             communities,
             html_written: output_dir.join("graph.html").is_file(),
+            timings,
         });
     }
 
@@ -498,6 +545,8 @@ fn build_graph(
     } else {
         remap_communities_to_previous(&current, &previous)
     };
+    timings.cluster = stage_started.elapsed();
+    stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
     let commit = options.built_at_commit.clone().or_else(|| {
         std::env::current_dir()
@@ -552,6 +601,8 @@ fn build_graph(
                 "questions": questions,
             })
         };
+        timings.analyze = stage_started.elapsed();
+        stage_started = Instant::now();
         if options.purpose == BuildPurpose::Extract {
             write_json_atomic(output_dir.join(".graphify_analysis.json"), &analysis, true)?;
         } else {
@@ -623,6 +674,7 @@ fn build_graph(
         &root,
         semantic,
     )?;
+    timings.export = stage_started.elapsed();
     guard.commit()?;
     Ok(BuildResult {
         root,
@@ -636,6 +688,7 @@ fn build_graph(
         edges: document.links.len(),
         communities: communities.len(),
         html_written,
+        timings,
     })
 }
 
@@ -1445,10 +1498,17 @@ mod tests {
         fs::write(root.join("helper.py"), "def work():\n    return 1\n")?;
         let mut options = BuildOptions::new(root);
         options.no_viz = true;
+        options.max_workers = Some(2);
 
         let cold = build_local_graph(&options)?;
         assert_eq!(cold.files_considered, 2);
         assert_eq!(cold.files_extracted, 2);
+        assert!(cold.timings.detect > Duration::ZERO);
+        assert!(cold.timings.ast_extract > Duration::ZERO);
+        assert!(cold.timings.build > Duration::ZERO);
+        assert!(cold.timings.cluster > Duration::ZERO);
+        assert!(cold.timings.analyze > Duration::ZERO);
+        assert!(cold.timings.export > Duration::ZERO);
         assert!(cold.nodes > 0);
         assert!(cold.output_dir.join("graph.json").is_file());
         assert!(cold.output_dir.join("manifest.json").is_file());
