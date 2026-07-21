@@ -25,7 +25,7 @@ use trail_core::{
     build_local_graph, cluster_existing_graph, default_graph_path, diagnose_graph_file,
     format_diagnostic_json, format_diagnostic_report, merge_graphs, watch_local_graph,
 };
-use trail_files::{DetectOptions, Manifest, ManifestKind};
+use trail_files::{DetectOptions, Manifest, ManifestKind, write_bytes_atomic};
 use trail_global::{GlobalPaths, global_add};
 use trail_graph::god_nodes;
 use trail_graphdb::{push_to_falkordb, push_to_neo4j};
@@ -84,8 +84,12 @@ impl Outcome {
     }
 
     fn failure(stderr: String) -> Self {
+        Self::failure_with_code(stderr, 1)
+    }
+
+    fn failure_with_code(stderr: String, code: u8) -> Self {
         Self {
-            code: 1,
+            code,
             stdout: String::new(),
             stderr,
             stdout_trailing_newline: true,
@@ -162,8 +166,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
-        "update" if frontend == Frontend::Trail => command_build(&args, false),
-        "extract" if frontend == Frontend::Trail => command_build(&args, true),
+        "update" => command_build(frontend, &args, false),
+        "extract" if frontend == Frontend::Trail => command_build(frontend, &args, true),
         "watch" if frontend == Frontend::Trail => Outcome::failure(
             "error: watch is a streaming command and must be run from the trail binary".to_owned(),
         ),
@@ -869,7 +873,136 @@ fn command_benchmark(args: &[String]) -> Outcome {
     ))
 }
 
-fn command_build(args: &[String], extract: bool) -> Outcome {
+fn validate_graphify_update_args(args: &[String]) -> Option<Outcome> {
+    let mut path = None;
+    for argument in args {
+        if matches!(argument.as_str(), "--force" | "--no-cluster") {
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Some(Outcome::failure_with_code(
+                format!("error: unknown update option: {argument}"),
+                2,
+            ));
+        }
+        if path.is_some() {
+            return Some(Outcome::failure_with_code(
+                "error: update accepts at most one path argument".to_owned(),
+                2,
+            ));
+        }
+        path = Some(argument);
+    }
+    if let Some(path) = path
+        && !Path::new(path).exists()
+    {
+        return Some(Outcome::failure(format!("error: path not found: {path}")));
+    }
+    None
+}
+
+fn format_graphify_update(result: &BuildResult, watch_path: &Path, no_cluster: bool) -> Outcome {
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_dir = if watch_path == Path::new(".") {
+        PathBuf::from(&output_name)
+    } else {
+        watch_path.join(&output_name)
+    };
+    let mut lines = vec![format!(
+        "Re-extracting code files in {} (no LLM needed)...",
+        watch_path.display()
+    )];
+    if !result.empty_files.is_empty() {
+        let examples = result
+            .empty_files
+            .iter()
+            .take(5)
+            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+            .collect::<Vec<_>>();
+        let remaining = result.empty_files.len().saturating_sub(examples.len());
+        let suffix = if remaining == 0 {
+            String::new()
+        } else {
+            format!(" (+{remaining} more)")
+        };
+        lines.push(format!(
+            "  warning: {} source file(s) produced zero nodes and are absent from the graph: {}{suffix}. A re-run will retry them (empties are no longer cached); if it persists, please report the file(s) (#1666).",
+            result.empty_files.len(),
+            examples.join(", ")
+        ));
+    }
+    if result.outputs_changed {
+        if no_cluster {
+            lines.push(format!(
+                "[graphify watch] Rebuilt (no clustering): {} nodes, {} edges",
+                result.nodes, result.edges
+            ));
+            lines.push(format!(
+                "[graphify watch] graph.json updated in {}",
+                output_dir.display()
+            ));
+        } else {
+            let viz_limit = std::env::var("GRAPHIFY_VIZ_NODE_LIMIT")
+                .ok()
+                .and_then(|value| value.parse::<isize>().ok())
+                .unwrap_or(5_000);
+            if !result.html_written
+                && isize::try_from(result.nodes).map_or(true, |nodes| nodes > viz_limit)
+            {
+                lines.push(format!(
+                    "[graphify watch] Skipped graph.html: Graph has {} nodes - too large for HTML viz (limit: {viz_limit}). Use --no-viz, raise GRAPHIFY_VIZ_NODE_LIMIT, or reduce input size.",
+                    result.nodes,
+                ));
+            }
+            lines.push(format!(
+                "[graphify watch] Rebuilt: {} nodes, {} edges, {} communities",
+                result.nodes, result.edges, result.communities
+            ));
+            let artifacts = if result.html_written {
+                "graph.json, graph.html and GRAPH_REPORT.md"
+            } else {
+                "graph.json and GRAPH_REPORT.md"
+            };
+            lines.push(format!(
+                "[graphify watch] {artifacts} updated in {}",
+                output_dir.display()
+            ));
+        }
+    } else {
+        lines.push(
+            "[graphify watch] No code-graph topology changes detected; outputs left untouched."
+                .to_owned(),
+        );
+    }
+    lines.push(
+        "Code graph updated. For doc/paper/image changes run /graphify --update in your AI assistant."
+            .to_owned(),
+    );
+    if ![
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "MOONSHOT_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "GRAPHIFY_NO_TIPS",
+    ]
+    .into_iter()
+    .any(|key| std::env::var_os(key).is_some())
+    {
+        lines.push(
+            "Tip: set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini for semantic extraction."
+                .to_owned(),
+        );
+    }
+    Outcome::success(lines.join("\n"))
+}
+
+fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
+    if frontend == Frontend::Graphify
+        && !extract
+        && let Some(error) = validate_graphify_update_args(args)
+    {
+        return error;
+    }
     let started = Instant::now();
     let mut root = None;
     let mut output_root = None;
@@ -1099,6 +1232,9 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
         root.or_else(saved_graph_root)
             .unwrap_or_else(|| PathBuf::from("."))
     };
+    if frontend == Frontend::Graphify && !root.exists() {
+        return Outcome::failure(format!("error: path not found: {}", root.display()));
+    }
     let mut options = BuildOptions::new(&root);
     options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
@@ -1117,6 +1253,14 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     options.google_workspace =
         google_workspace || trail_google_workspace::google_workspace_enabled(None);
     options.max_workers = max_workers;
+    let compatibility_manifest = (frontend == Frontend::Graphify && !extract).then(|| {
+        let output_name =
+            std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+        let output_root = options.output_root.as_ref().unwrap_or(&root);
+        let path = output_root.join(output_name).join("manifest.json");
+        let existing = fs::read(&path).ok();
+        (path, existing)
+    });
     let postgres_graph = if let Some(dsn) = postgres_dsn.as_deref() {
         match trail_postgres::introspect_postgres(Some(dsn)) {
             Ok(graph) => Some(graph),
@@ -1169,6 +1313,23 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
     };
     match built {
         Ok((result, mut notes, semantic_elapsed)) => {
+            if let Some((path, existing)) = compatibility_manifest {
+                let restored = match existing {
+                    Some(bytes) => {
+                        write_bytes_atomic(&path, &bytes).map_err(|error| error.to_string())
+                    }
+                    None if path.exists() => {
+                        fs::remove_file(&path).map_err(|error| error.to_string())
+                    }
+                    None => Ok(()),
+                };
+                if let Err(error) = restored {
+                    return Outcome::failure(format!(
+                        "error: could not restore legacy manifest state at {}: {error}",
+                        path.display()
+                    ));
+                }
+            }
             let mut global_warning = None;
             if let Some((nodes, edges)) = postgres_counts {
                 notes.push(format!(
@@ -1214,6 +1375,9 @@ fn command_build(args: &[String], extract: bool) -> Outcome {
             } else {
                 "with clustering"
             };
+            if frontend == Frontend::Graphify && !extract {
+                return format_graphify_update(&result, &root, no_cluster);
+            }
             let mut output = format!(
                 "Trail indexed {} files ({} extracted, {} cached): {} nodes, {} edges, {} communities {mode}.\nWritten to: {}",
                 result.files_considered,
@@ -1304,7 +1468,7 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
             ]
         },
     );
-    let result = command_build(&build_args, false);
+    let result = command_build(frontend, &build_args, false);
     if result.code != 0 {
         return result;
     }
@@ -2488,7 +2652,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 

@@ -17,8 +17,8 @@ use trail_graph::{
 use trail_languages::{Engine, Extraction, Registry, file_stem, make_id};
 use trail_model::{EdgeRecord, GraphDocument, NodeRecord};
 use trail_output::{
-    DetectionSummary, HtmlOptions, JsonExportOptions, ReportOptions, TokenCost, generate_report,
-    write_html, write_json,
+    DetectionSummary, HtmlOptions, JsonExportOptions, OutputError, ReportOptions, TokenCost,
+    generate_report, write_html, write_json,
 };
 use trail_resolve::resolve_with_root;
 
@@ -88,6 +88,7 @@ pub struct BuildResult {
     pub edges: usize,
     pub communities: usize,
     pub html_written: bool,
+    pub outputs_changed: bool,
     pub timings: BuildTimings,
 }
 
@@ -335,6 +336,7 @@ fn build_graph_inner(
             edges: document.links.len(),
             communities,
             html_written: output_dir.join("graph.html").is_file(),
+            outputs_changed: false,
             timings,
         });
     }
@@ -484,6 +486,7 @@ fn build_graph_inner(
             edges: edges.len(),
             communities: 0,
             html_written: false,
+            outputs_changed: true,
             timings,
         });
     }
@@ -528,6 +531,7 @@ fn build_graph_inner(
             edges: document.links.len(),
             communities,
             html_written: output_dir.join("graph.html").is_file(),
+            outputs_changed: false,
             timings,
         });
     }
@@ -646,16 +650,20 @@ fn build_graph_inner(
             if options.no_viz {
                 remove_if_exists(&html_path)?;
             } else {
-                let rendered = write_html(
+                let rendered = match write_html(
                     &document,
                     &communities,
                     &html_path,
                     &HtmlOptions {
                         community_labels: (!labels.is_empty()).then_some(&labels),
-                        node_limit: Some(5_000),
+                        node_limit: None,
                         ..HtmlOptions::default()
                     },
-                )?;
+                ) {
+                    Ok(rendered) => rendered,
+                    Err(OutputError::HtmlTooLarge { .. }) => None,
+                    Err(error) => return Err(CoreError::Output(error)),
+                };
                 html_written = rendered.is_some();
                 if !html_written {
                     remove_if_exists(&html_path)?;
@@ -688,6 +696,7 @@ fn build_graph_inner(
         edges: document.links.len(),
         communities: communities.len(),
         html_written,
+        outputs_changed: true,
         timings,
     })
 }
@@ -1234,7 +1243,6 @@ fn write_raw_graph(
             serde_json::Value::from(tokens.1),
         );
     } else {
-        output.insert("hyperedges".to_owned(), hyperedges);
         output.insert("input_tokens".to_owned(), serde_json::Value::from(0));
         output.insert("output_tokens".to_owned(), serde_json::Value::from(0));
         output.insert("nodes".to_owned(), nodes);
