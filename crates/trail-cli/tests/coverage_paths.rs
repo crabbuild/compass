@@ -665,3 +665,79 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
     assert!(callflow.is_file());
     Ok(())
 }
+
+#[test]
+fn install_and_extract_equals_forms_cover_namespaced_parser_boundaries()
+-> Result<(), Box<dyn Error>> {
+    for (frontend, arguments) in [
+        (Frontend::Trail, vec!["graph", "install", "--platform"]),
+        (
+            Frontend::Trail,
+            vec!["graph", "install", "--platform=unknown"],
+        ),
+        (Frontend::Trail, vec!["graph", "install", "--unknown"]),
+        (
+            Frontend::Trail,
+            vec!["graph", "install", "cursor", "claude"],
+        ),
+        (Frontend::Trail, vec!["graph", "uninstall", "--platform"]),
+        (Frontend::Trail, vec!["graph", "uninstall", "--unknown"]),
+        (Frontend::Graphify, vec!["install", "--platform"]),
+        (Frontend::Graphify, vec!["uninstall", "--platform"]),
+    ] {
+        let outcome = invoke(frontend, &arguments);
+        assert_ne!(outcome.code, 0, "{arguments:?}");
+        assert!(!outcome.stderr.is_empty(), "{arguments:?}");
+    }
+
+    let directory = tempfile::tempdir()?;
+    let missing = directory.path().join("missing-root");
+    let output = directory.path().join("out");
+    let arguments = vec![
+        "graph".to_owned(),
+        "extract".to_owned(),
+        missing.to_string_lossy().into_owned(),
+        "--as=fixture".to_owned(),
+        "--backend=fixture".to_owned(),
+        "--model=fixture-model".to_owned(),
+        "--mode=deep".to_owned(),
+        "--token-budget=1".to_owned(),
+        "--max-concurrency=1".to_owned(),
+        "--api-timeout=0.01".to_owned(),
+        format!("--out={}", output.display()),
+        "--exclude=vendor/**".to_owned(),
+        "--resolution=1".to_owned(),
+        "--exclude-hubs=2".to_owned(),
+        "--max-workers=1".to_owned(),
+        "--allow-partial".to_owned(),
+        "--timing".to_owned(),
+    ];
+    let outcome = invoke_owned(Frontend::Trail, &arguments);
+    assert_ne!(outcome.code, 0);
+    assert!(
+        outcome.stderr.contains("missing-root"),
+        "{}",
+        outcome.stderr
+    );
+
+    let postgres = invoke(
+        Frontend::Trail,
+        &["graph", "extract", "missing", "--postgres=not-a-dsn"],
+    );
+    assert_ne!(postgres.code, 0);
+    assert!(!postgres.stderr.is_empty());
+
+    for option in [
+        "--mode=shallow",
+        "--token-budget=0",
+        "--max-concurrency=0",
+        "--api-timeout=inf",
+        "--resolution=0",
+        "--exclude-hubs=NaN",
+        "--max-workers=0",
+    ] {
+        let outcome = invoke(Frontend::Trail, &["graph", "extract", "missing", option]);
+        assert_ne!(outcome.code, 0, "{option}");
+    }
+    Ok(())
+}

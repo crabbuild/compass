@@ -9,8 +9,9 @@ use trail_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, SemanticCacheSaveOptions,
     SemanticError, SemanticUnit, check_semantic_cache, effective_semantic_concurrency,
     estimate_semantic_unit_tokens, expand_oversized_semantic_files, extract_corpus_cached_with,
-    extract_corpus_parallel_with_progress, extract_with_adaptive_retry, merge_semantic_results,
-    pack_semantic_chunks, reconcile_semantic_scope, save_semantic_cache,
+    extract_corpus_parallel_with, extract_corpus_parallel_with_progress,
+    extract_with_adaptive_retry, merge_semantic_results, pack_semantic_chunks,
+    reconcile_semantic_scope, save_semantic_cache,
 };
 
 fn node_for(unit: &SemanticUnit, id: String) -> Value {
@@ -298,5 +299,130 @@ fn cached_corpus_pipeline_checkpoints_replays_and_filters_out_of_scope_entries()
     let checked = check_semantic_cache(&mut cache, &[first, outside], false, "coverage prompt")?;
     assert_eq!(checked.nodes.len(), 1);
     assert_eq!(checked.uncached.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn slice_retry_cache_disabled_and_deep_partial_merges_cover_public_orchestration_edges()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let document = root.join("long.md");
+    let outside = root.join("outside.md");
+    fs::write(
+        &document,
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa",
+    )?;
+    fs::write(&outside, "outside")?;
+
+    let slices = trail_files::split_file(&document, 32)?;
+    let first = slices.first().cloned().ok_or("missing semantic slice")?;
+    let split = extract_with_adaptive_retry(
+        &[SemanticUnit::Slice(first)],
+        Some("fixture"),
+        4,
+        &|units| {
+            let SemanticUnit::Slice(slice) = &units[0] else {
+                return Err(SemanticError::Transport("expected slice".to_owned()));
+            };
+            if slice.end.saturating_sub(slice.start) > 12 {
+                return Err(SemanticError::Transport(
+                    "maximum context length exceeded".to_owned(),
+                ));
+            }
+            Ok(json!({
+                "nodes": [], "edges": [], "hyperedges": [],
+                "input_tokens": 1, "output_tokens": 1,
+                "finish_reason": "stop"
+            }))
+        },
+    )?;
+    assert!(split["input_tokens"].as_u64().unwrap_or_default() >= 2);
+
+    let options = CorpusExtractionOptions {
+        backend_name: "fixture".to_owned(),
+        model: Some("fixture".to_owned()),
+        chunk_size: 1,
+        token_budget: None,
+        max_concurrency: 1,
+        max_retry_depth: 0,
+    };
+    let parallel = extract_corpus_parallel_with(
+        std::slice::from_ref(&document),
+        root,
+        &options,
+        &HashMap::new(),
+        &|units| {
+            Ok(json!({
+                "nodes": [node_for(&units[0], "parallel".to_owned())],
+                "edges": [], "hyperedges": []
+            }))
+        },
+    )?;
+    assert!(parallel.failures.is_empty());
+
+    let cached_options = CachedCorpusExtractionOptions {
+        extraction: options,
+        deep_mode: true,
+        force: false,
+        cache_enabled: false,
+        prune_live_files: None,
+    };
+    let mut callbacks = 0;
+    let disabled = extract_corpus_cached_with(
+        std::slice::from_ref(&document),
+        root,
+        None,
+        &cached_options,
+        &HashMap::new(),
+        &|units| {
+            Ok(json!({
+                "nodes": [node_for(&units[0], "uncached".to_owned())],
+                "edges": [], "hyperedges": []
+            }))
+        },
+        &mut |_, _, _, _| callbacks += 1,
+    )?;
+    assert_eq!(
+        (disabled.cache_hits, disabled.cache_misses, callbacks),
+        (0, 1, 1)
+    );
+
+    let mut malformed = json!({
+        "nodes": [{"id":"outside","source_file":outside.to_string_lossy()}],
+        "edges": [],
+        "hyperedges": "invalid"
+    });
+    assert!(
+        reconcile_semantic_scope(&mut malformed, std::slice::from_ref(&document), root).is_err()
+    );
+
+    let mut cache = Cache::new(root, None)?;
+    let mut save_options = SemanticCacheSaveOptions::for_extraction(true);
+    save_options.merge_existing = true;
+    save_options.partial_source_files = vec![document.clone()];
+    let first_fragment = json!({
+        "nodes": [{"id":"first","source_file":document.to_string_lossy(),"_partial":true}],
+        "edges": [], "hyperedges": []
+    });
+    assert_eq!(
+        save_semantic_cache(&mut cache, root, &first_fragment, &save_options)?.saved,
+        1
+    );
+    let second_fragment = json!({
+        "nodes": [{"id":"second","source_file":document.to_string_lossy()}],
+        "edges": [], "hyperedges": []
+    });
+    assert_eq!(
+        save_semantic_cache(&mut cache, root, &second_fragment, &save_options)?.saved,
+        1
+    );
+    let checked = check_semantic_cache(
+        &mut cache,
+        std::slice::from_ref(&document),
+        true,
+        &save_options.prompt,
+    )?;
+    assert_eq!(checked.uncached, vec![document]);
     Ok(())
 }
