@@ -80,7 +80,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 GRAPHIFY_PYTHON=../.venv/bin/python cargo test --workspace --all-targets --locked
 cargo package --workspace --locked --no-verify
-cargo deny check --all-features
+cargo deny --all-features --locked check all
 ```
 
 Performance qualification is described in `PERFORMANCE.md` and release
