@@ -14,7 +14,8 @@ pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagno
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
     BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError, SemanticLayer,
-    build_graph_with_layers, build_graph_with_semantic, build_local_graph,
+    build_graph_with_layers, build_graph_with_layers_and_tiebreaker, build_graph_with_semantic,
+    build_local_graph,
 };
 pub use watch::{WatchError, WatchOptions, WatchStatus, watch_local_graph};
 

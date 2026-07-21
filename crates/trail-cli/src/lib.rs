@@ -1,5 +1,6 @@
 //! Command compatibility layer for Trail's graph namespace.
 
+mod dedup_commands;
 mod hook_commands;
 mod ingest_commands;
 mod install_commands;
@@ -22,8 +23,9 @@ use std::time::{Duration, Instant};
 use trail_core::{
     BuildOptions, BuildPurpose, BuildResult, BuildTimings, ClusterExistingOptions, ExportInputs,
     LoadedGraph, SemanticLayer, WatchOptions, WatchStatus, build_graph_with_layers,
-    build_local_graph, cluster_existing_graph, default_graph_path, diagnose_graph_file,
-    format_diagnostic_json, format_diagnostic_report, merge_graphs, watch_local_graph,
+    build_graph_with_layers_and_tiebreaker, cluster_existing_graph, default_graph_path,
+    diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
+    watch_local_graph,
 };
 use trail_files::{DetectOptions, Manifest, ManifestKind, write_bytes_atomic};
 use trail_global::{GlobalPaths, global_add};
@@ -1343,6 +1345,7 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
     let mut api_timeout = None;
     let mut allow_partial = false;
     let mut timing = false;
+    let mut dedup_llm = false;
     let mut excludes = Vec::new();
     let mut resolution = 1.0;
     let mut exclude_hubs = None;
@@ -1512,12 +1515,7 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
                 };
             }
             "--timing" if extract => timing = true,
-            "--dedup-llm" if extract => {
-                return Outcome::failure(format!(
-                    "error: {} is not yet available in native Trail",
-                    args[index]
-                ));
-            }
+            "--dedup-llm" if extract => dedup_llm = true,
             "-h" | "--help" => {
                 return Outcome::success(if extract {
                     extract_help()
@@ -1571,6 +1569,40 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
     options.google_workspace =
         google_workspace || trail_google_workspace::google_workspace_enabled(None);
     options.max_workers = max_workers;
+    let mut dedup_environment = std::env::vars().collect::<HashMap<_, _>>();
+    if let Some(timeout) = api_timeout {
+        dedup_environment.insert("GRAPHIFY_API_TIMEOUT".to_owned(), timeout.to_string());
+    }
+    let mut dedup_tiebreaker = if dedup_llm {
+        let global_providers = home_directory()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".graphify")
+            .join("providers.json");
+        let local_providers = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(".graphify")
+            .join("providers.json");
+        match dedup_commands::DedupLlmTiebreaker::prepare(
+            backend.as_deref(),
+            model.as_deref(),
+            dedup_environment,
+            &global_providers,
+            &local_providers,
+            environment_truthy("GRAPHIFY_ALLOW_LOCAL_PROVIDERS"),
+            executable_on_path("claude"),
+        ) {
+            Ok(tiebreaker) => Some(tiebreaker),
+            Err(error) if error == "no LLM backend selected" => {
+                return Outcome::failure(
+                    "error: no LLM API key found (--dedup-llm was passed). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key."
+                        .to_owned(),
+                );
+            }
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        }
+    } else {
+        None
+    };
     let compatibility_manifest = (frontend == Frontend::Graphify && !extract).then(|| {
         let output_name =
             std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
@@ -1619,18 +1651,38 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             api_timeout,
             allow_partial,
             &auxiliary_fragments,
+            dedup_tiebreaker
+                .as_mut()
+                .map(|tiebreaker| tiebreaker as &mut dyn trail_graph::EntityTiebreaker),
         )
     } else if extract && !auxiliary_fragments.is_empty() {
-        build_graph_with_layers(&options, None, &auxiliary_fragments)
-            .map(|result| (result, Vec::new(), Duration::ZERO))
-            .map_err(|error| error.to_string())
+        build_graph_with_optional_tiebreaker(
+            &options,
+            None,
+            &auxiliary_fragments,
+            dedup_tiebreaker
+                .as_mut()
+                .map(|tiebreaker| tiebreaker as &mut dyn trail_graph::EntityTiebreaker),
+        )
+        .map(|result| (result, Vec::new(), Duration::ZERO))
+        .map_err(|error| error.to_string())
     } else {
-        build_local_graph(&options)
-            .map(|result| (result, Vec::new(), Duration::ZERO))
-            .map_err(|error| error.to_string())
+        build_graph_with_optional_tiebreaker(
+            &options,
+            None,
+            &[],
+            dedup_tiebreaker
+                .as_mut()
+                .map(|tiebreaker| tiebreaker as &mut dyn trail_graph::EntityTiebreaker),
+        )
+        .map(|result| (result, Vec::new(), Duration::ZERO))
+        .map_err(|error| error.to_string())
     };
     match built {
         Ok((result, mut notes, semantic_elapsed)) => {
+            if let Some(tiebreaker) = dedup_tiebreaker.as_mut() {
+                notes.extend(tiebreaker.take_warnings());
+            }
             if let Some((path, existing)) = compatibility_manifest {
                 let restored = match existing {
                     Some(bytes) => {
@@ -1813,6 +1865,7 @@ fn build_semantic_graph(
     api_timeout: Option<f64>,
     allow_partial: bool,
     auxiliary_fragments: &[serde_json::Value],
+    tiebreaker: Option<&mut dyn trail_graph::EntityTiebreaker>,
 ) -> Result<(BuildResult, Vec<String>, Duration), String> {
     let semantic_started = Instant::now();
     let root = fs::canonicalize(&options.root)
@@ -2036,9 +2089,28 @@ fn build_semantic_graph(
         allow_partial,
     };
     let semantic_elapsed = semantic_started.elapsed();
-    let result = build_graph_with_layers(options, Some(&layer), auxiliary_fragments)
-        .map_err(|error| error.to_string())?;
+    let result = build_graph_with_optional_tiebreaker(
+        options,
+        Some(&layer),
+        auxiliary_fragments,
+        tiebreaker,
+    )
+    .map_err(|error| error.to_string())?;
     Ok((result, notes, semantic_elapsed))
+}
+
+fn build_graph_with_optional_tiebreaker(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[serde_json::Value],
+    tiebreaker: Option<&mut dyn trail_graph::EntityTiebreaker>,
+) -> Result<BuildResult, trail_core::CoreError> {
+    match tiebreaker {
+        Some(tiebreaker) => {
+            build_graph_with_layers_and_tiebreaker(options, semantic, supplemental, tiebreaker)
+        }
+        None => build_graph_with_layers(options, semantic, supplemental),
+    }
 }
 
 fn semantic_files(files: &std::collections::BTreeMap<String, Vec<String>>) -> Vec<PathBuf> {
@@ -2122,7 +2194,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: trail graph extract [PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--api-timeout SECONDS] [--allow-partial] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: trail graph extract [PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {

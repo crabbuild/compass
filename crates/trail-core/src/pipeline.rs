@@ -10,9 +10,9 @@ use trail_files::{
     write_json_atomic, write_text_atomic,
 };
 use trail_graph::{
-    ClusterOptions, build as build_document, cluster, dedupe_edges, dedupe_nodes, god_nodes,
-    label_communities_by_hub, remap_communities_to_previous, score_communities, suggest_questions,
-    surprising_connections,
+    ClusterOptions, EntityTiebreaker, build_with_tiebreaker as build_document, cluster,
+    dedupe_edges, dedupe_nodes, god_nodes, label_communities_by_hub, remap_communities_to_previous,
+    score_communities, suggest_questions, surprising_connections,
 };
 use trail_languages::{Engine, Extraction, Registry, file_stem, make_id};
 use trail_model::{EdgeRecord, GraphDocument, NodeRecord};
@@ -166,7 +166,7 @@ pub enum CoreError {
 /// Run the complete deterministic local graph pipeline without invoking Python,
 /// an LLM, a network service, or a dynamically installed grammar.
 pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreError> {
-    build_graph(options, None, &[])
+    build_graph(options, None, &[], None)
 }
 
 /// Merge a completed semantic provider result into the native graph pipeline.
@@ -174,7 +174,7 @@ pub fn build_graph_with_semantic(
     options: &BuildOptions,
     semantic: &SemanticLayer,
 ) -> Result<BuildResult, CoreError> {
-    build_graph(options, Some(semantic), &[])
+    build_graph(options, Some(semantic), &[], None)
 }
 
 /// Merge deterministic supplemental facts, such as Cargo or database schema
@@ -190,13 +190,29 @@ pub fn build_graph_with_layers(
         .map(serde_json::from_value)
         .collect::<Result<Vec<Extraction>, _>>()
         .map_err(CoreError::InvalidSupplementalFragment)?;
-    build_graph(options, semantic, &supplemental)
+    build_graph(options, semantic, &supplemental, None)
+}
+
+pub fn build_graph_with_layers_and_tiebreaker(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[serde_json::Value],
+    tiebreaker: &mut dyn EntityTiebreaker,
+) -> Result<BuildResult, CoreError> {
+    let supplemental = supplemental
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<Extraction>, _>>()
+        .map_err(CoreError::InvalidSupplementalFragment)?;
+    build_graph(options, semantic, &supplemental, Some(tiebreaker))
 }
 
 fn build_graph(
     options: &BuildOptions,
     semantic: Option<&SemanticLayer>,
     supplemental: &[Extraction],
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
 ) -> Result<BuildResult, CoreError> {
     if let Some(max_workers) = options.max_workers {
         let pool = rayon::ThreadPoolBuilder::new()
@@ -204,15 +220,16 @@ fn build_graph(
             .thread_name(|index| format!("trail-ast-{index}"))
             .build()
             .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
-        return pool.install(|| build_graph_inner(options, semantic, supplemental));
+        return pool.install(|| build_graph_inner(options, semantic, supplemental, tiebreaker));
     }
-    build_graph_inner(options, semantic, supplemental)
+    build_graph_inner(options, semantic, supplemental, tiebreaker)
 }
 
 fn build_graph_inner(
     options: &BuildOptions,
     semantic: Option<&SemanticLayer>,
     supplemental: &[Extraction],
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
 ) -> Result<BuildResult, CoreError> {
     let mut timings = BuildTimings::default();
     let mut stage_started = Instant::now();
@@ -494,7 +511,13 @@ fn build_graph_inner(
             timings,
         });
     }
-    let document = build_document(std::slice::from_ref(&resolved), false, true, Some(&root))?;
+    let document = build_document(
+        std::slice::from_ref(&resolved),
+        false,
+        true,
+        Some(&root),
+        tiebreaker,
+    )?;
     timings.build = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {

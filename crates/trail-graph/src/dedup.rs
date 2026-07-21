@@ -37,6 +37,18 @@ pub struct DedupResult {
     pub diagnostics: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AmbiguousPair {
+    pub left: NodeRecord,
+    pub right: NodeRecord,
+    pub score: f64,
+}
+
+pub trait EntityTiebreaker: Send {
+    /// Return one merge decision per pair. Missing decisions are treated as `false`.
+    fn decide(&mut self, pairs: &[AmbiguousPair]) -> Vec<bool>;
+}
+
 /// Deduplicate semantic entities using Graphify's deterministic compatibility rules.
 ///
 /// Code symbols remain ID-addressed and are never label-merged. LLM tie-breaking is
@@ -45,6 +57,15 @@ pub fn deduplicate_entities(
     nodes: &[NodeRecord],
     edges: &[EdgeRecord],
     communities: &HashMap<String, i64>,
+) -> Result<DedupResult, DedupError> {
+    deduplicate_entities_with_tiebreaker(nodes, edges, communities, None)
+}
+
+pub fn deduplicate_entities_with_tiebreaker(
+    nodes: &[NodeRecord],
+    edges: &[EdgeRecord],
+    communities: &HashMap<String, i64>,
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
 ) -> Result<DedupResult, DedupError> {
     validate_repository_scope(nodes)?;
     if nodes.len() <= 1 {
@@ -107,6 +128,15 @@ pub fn deduplicate_entities(
         }
     }
     let fuzzy_merges = fuzzy_merge(&candidates, communities, &mut union_find);
+    if let Some(tiebreaker) = tiebreaker {
+        let pairs = ambiguous_pairs(&candidates, communities, &mut union_find);
+        let decisions = tiebreaker.decide(&pairs);
+        for (pair, _merge) in pairs.iter().zip(decisions).filter(|(_, merge)| *merge) {
+            let winner = pick_winner(&[&pair.left, &pair.right]);
+            union_find.union(&winner.id, &pair.left.id);
+            union_find.union(&winner.id, &pair.right.id);
+        }
+    }
 
     let mut remap = HashMap::<String, String>::new();
     for members in union_find.components().values() {
@@ -150,6 +180,52 @@ pub fn deduplicate_entities(
         },
         diagnostics,
     })
+}
+
+fn ambiguous_pairs(
+    candidates: &[&NodeRecord],
+    communities: &HashMap<String, i64>,
+    union_find: &mut UnionFind,
+) -> Vec<AmbiguousPair> {
+    let mut output = Vec::new();
+    for (index, node) in candidates.iter().enumerate() {
+        let norm_left = normalize_label(node.label());
+        for neighbor in &candidates[index + 1..] {
+            if union_find.find(&node.id) == union_find.find(&neighbor.id) {
+                continue;
+            }
+            let norm_right = normalize_label(neighbor.label());
+            let cross_file = source_file(node) != source_file(neighbor);
+            let max_length = norm_left.chars().count().max(norm_right.chars().count());
+            let mut score = if cross_file && max_length >= 12 {
+                strsim::jaro(&norm_left, &norm_right) * 100.0
+            } else {
+                strsim::jaro_winkler(&norm_left, &norm_right) * 100.0
+            };
+            if is_variant_pair(&norm_left, &norm_right)
+                || short_label_blocked(&norm_left, &norm_right, score)
+                || strict_prefix_pair(&norm_left, &norm_right)
+                || numeric_tokens_differ(&norm_left, &norm_right)
+                || crossfile_fileanchored_blocked(node, neighbor)
+            {
+                continue;
+            }
+            if communities.get(&node.id) == communities.get(&neighbor.id)
+                && communities.contains_key(&node.id)
+                && norm_left.chars().count().min(norm_right.chars().count()) >= 12
+            {
+                score += COMMUNITY_BOOST;
+            }
+            if (75.0..MERGE_THRESHOLD).contains(&score) {
+                output.push(AmbiguousPair {
+                    left: (*node).clone(),
+                    right: (*neighbor).clone(),
+                    score,
+                });
+            }
+        }
+    }
+    output
 }
 
 fn validate_repository_scope(nodes: &[NodeRecord]) -> Result<(), DedupError> {
@@ -717,6 +793,41 @@ mod tests {
         ];
         let result = deduplicate_entities(&nodes, &[], &HashMap::new())?;
         assert_eq!(result.nodes.len(), 4);
+        Ok(())
+    }
+
+    struct MergeAll {
+        pairs_seen: usize,
+    }
+
+    impl EntityTiebreaker for MergeAll {
+        fn decide(&mut self, pairs: &[AmbiguousPair]) -> Vec<bool> {
+            self.pairs_seen = pairs.len();
+            vec![true; pairs.len()]
+        }
+    }
+
+    #[test]
+    fn optional_tiebreaker_merges_only_ambiguous_pairs() -> Result<(), DedupError> {
+        let nodes = vec![
+            node("account", "Customer Account Management", "accounts.md"),
+            node("identity", "Customer Identity Management", "identity.md"),
+        ];
+        let edges = vec![EdgeRecord {
+            source: "identity".to_owned(),
+            target: "account".to_owned(),
+            attributes: Map::new(),
+        }];
+        let mut tiebreaker = MergeAll { pairs_seen: 0 };
+        let result = deduplicate_entities_with_tiebreaker(
+            &nodes,
+            &edges,
+            &HashMap::new(),
+            Some(&mut tiebreaker),
+        )?;
+        assert_eq!(tiebreaker.pairs_seen, 1);
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.edges.is_empty());
         Ok(())
     }
 }

@@ -12,7 +12,10 @@ pub use cluster::{
     ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
     label_communities_by_hub, remap_communities_to_previous, score_communities,
 };
-pub use dedup::{DedupError, DedupResult, DedupStats, deduplicate_entities};
+pub use dedup::{
+    AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
+    deduplicate_entities_with_tiebreaker,
+};
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -29,6 +32,16 @@ pub fn build(
     dedup: bool,
     root: Option<&Path>,
 ) -> Result<GraphDocument, DedupError> {
+    build_with_tiebreaker(extractions, directed, dedup, root, None)
+}
+
+pub fn build_with_tiebreaker(
+    extractions: &[Extraction],
+    directed: bool,
+    dedup: bool,
+    root: Option<&Path>,
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
+) -> Result<GraphDocument, DedupError> {
     let mut combined = Extraction::default();
     for extraction in extractions {
         combined.nodes.extend(extraction.nodes.iter().cloned());
@@ -38,7 +51,12 @@ pub fn build(
             .extend(extraction.hyperedges.iter().cloned());
     }
     if dedup && !combined.nodes.is_empty() {
-        let result = deduplicate_entities(&combined.nodes, &combined.edges, &HashMap::new())?;
+        let result = deduplicate_entities_with_tiebreaker(
+            &combined.nodes,
+            &combined.edges,
+            &HashMap::new(),
+            tiebreaker,
+        )?;
         combined.nodes = result.nodes;
         combined.edges = result.edges;
     }
