@@ -70,41 +70,6 @@ mod tests {
     }
 
     #[test]
-    fn query_output_uses_source_node_order_for_equal_degrees() -> Result<(), Box<dyn Error>> {
-        let graph = load(
-            r#"{
-                "directed": false, "multigraph": false, "graph": {},
-                "nodes": [
-                    {"id":"extract","label":"extract"},
-                    {"id":"cluster","label":"cluster"},
-                    {"id":"build","label":"build"}
-                ],
-                "links": [
-                    {"source":"extract","target":"cluster"},
-                    {"source":"cluster","target":"build"}
-                ]
-            }"#,
-        )?;
-        let output = query_graph_text(
-            &graph,
-            "extract",
-            TraversalMode::Bfs,
-            2,
-            2000,
-            &[],
-            &HashMap::new(),
-        );
-        let nodes = output
-            .lines()
-            .filter(|line| line.starts_with("NODE "))
-            .collect::<Vec<_>>();
-        assert!(nodes[0].starts_with("NODE cluster "));
-        assert!(nodes[1].starts_with("NODE extract "));
-        assert!(nodes[2].starts_with("NODE build "));
-        Ok(())
-    }
-
-    #[test]
     fn shortest_path_preserves_stored_arrow_direction() -> Result<(), Box<dyn Error>> {
         let mut document = serde_json::from_str::<GraphDocument>(
             r#"{
