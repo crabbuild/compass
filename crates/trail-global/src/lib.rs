@@ -210,16 +210,32 @@ fn prefix_graph(mut graph: GraphDocument, repo_tag: &str) -> GraphDocument {
 }
 
 fn prune_repo(graph: &mut GraphDocument, repo_tag: &str) -> usize {
-    let removed = graph
+    let mut removed = graph
         .nodes
         .iter()
-        .filter(|node| node.string("repo") == repo_tag)
+        .filter(|node| node.string("repo") == repo_tag && !node.string("source_file").is_empty())
         .map(|node| node.id.clone())
         .collect::<HashSet<_>>();
     graph.nodes.retain(|node| !removed.contains(&node.id));
     graph
         .links
         .retain(|edge| !removed.contains(&edge.source) && !removed.contains(&edge.target));
+
+    let referenced = graph
+        .links
+        .iter()
+        .flat_map(|edge| [&edge.source, &edge.target])
+        .collect::<HashSet<_>>();
+    let orphaned_external = graph
+        .nodes
+        .iter()
+        .filter(|node| node.string("source_file").is_empty() && !referenced.contains(&node.id))
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
+    graph
+        .nodes
+        .retain(|node| !orphaned_external.contains(&node.id));
+    removed.extend(orphaned_external);
     removed.len()
 }
 
