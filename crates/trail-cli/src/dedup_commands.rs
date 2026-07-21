@@ -51,7 +51,11 @@ impl DedupLlmTiebreaker {
                         .to_owned(),
                 );
             }
-            let allows_keyless = selected == "ollama"
+            let allows_keyless = (selected == "ollama"
+                && resolved
+                    .base_url
+                    .as_deref()
+                    .is_some_and(super::provider_url_is_loopback))
                 || (selected == "bedrock"
                     && [
                         "AWS_PROFILE",

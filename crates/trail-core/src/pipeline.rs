@@ -263,6 +263,7 @@ fn build_graph_inner(
         gitignore: options.gitignore,
         extra_excludes: options.extra_excludes.clone(),
         output_name: output_name.clone(),
+        cache_root: Some(output_root.clone()),
         ..DetectOptions::default()
     };
     let mut detection = detect(&root, &detect_options)?;
@@ -466,6 +467,51 @@ fn build_graph_inner(
             .hyperedges
             .extend(extracted.hyperedges.iter().cloned());
     }
+    let live_sources = detection
+        .files
+        .values()
+        .flatten()
+        .map(|path| canonical_identity(Path::new(path)))
+        .collect::<HashSet<_>>();
+    let source_removed = prior_manifest
+        .entries()
+        .keys()
+        .map(|path| canonical_identity(Path::new(path)))
+        .any(|path| !live_sources.contains(&path));
+    if options.no_cluster
+        && options.purpose == BuildPurpose::Extract
+        && !options.force
+        && missing.is_empty()
+        && !source_removed
+        && supplemental.is_empty()
+        && semantic.is_some_and(semantic_layer_is_empty)
+        && let Ok(document) = GraphDocument::load(&output_dir.join("graph.json"))
+    {
+        let mut manifest = prior_manifest;
+        save_build_manifest(
+            &mut manifest,
+            &detection.files,
+            &manifest_path,
+            &root,
+            semantic,
+        )?;
+        guard.commit()?;
+        return Ok(BuildResult {
+            root,
+            output_dir,
+            detection,
+            files_considered: sources.len(),
+            files_extracted: 0,
+            files_cached: sources.len(),
+            empty_files,
+            nodes: document.nodes.len(),
+            edges: document.links.len(),
+            communities: 0,
+            html_written: false,
+            outputs_changed: false,
+            timings,
+        });
+    }
     if options.no_cluster {
         let (nodes, edges) = (dedupe_nodes(&resolved.nodes), dedupe_edges(&resolved.edges));
         enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
@@ -524,10 +570,20 @@ fn build_graph_inner(
         return Err(CoreError::EmptyGraph);
     }
 
-    if semantic.is_none()
+    let unchanged_artifacts_complete = match options.purpose {
+        BuildPurpose::Update => update_artifacts_complete(&output_dir),
+        BuildPurpose::Extract => {
+            output_dir.join("graph.json").is_file()
+                && output_dir.join(".graphify_analysis.json").is_file()
+        }
+    };
+    let unchanged_layers = semantic.is_none()
+        || (options.purpose == BuildPurpose::Extract
+            && semantic.is_some_and(semantic_layer_is_empty));
+    if unchanged_layers
         && supplemental.is_empty()
-        && options.purpose == BuildPurpose::Update
-        && update_artifacts_complete(&output_dir)
+        && !options.force
+        && unchanged_artifacts_complete
         && GraphDocument::load(&output_dir.join("graph.json"))
             .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
     {
@@ -594,9 +650,7 @@ fn build_graph_inner(
             force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
                 !incomplete_semantic || layer.allow_partial
             }),
-            built_at_commit: (options.purpose == BuildPurpose::Update)
-                .then_some(commit.as_deref())
-                .flatten(),
+            built_at_commit: commit.as_deref(),
             community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
                 .then_some(&labels),
         },
@@ -726,6 +780,18 @@ fn build_graph_inner(
         outputs_changed: true,
         timings,
     })
+}
+
+fn semantic_layer_is_empty(layer: &SemanticLayer) -> bool {
+    layer.refreshed_files.is_empty()
+        && layer.partial_files.is_empty()
+        && ["nodes", "edges", "hyperedges"].into_iter().all(|key| {
+            layer
+                .fragment
+                .get(key)
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(Vec::is_empty)
+        })
 }
 
 fn write_semantic_marker(

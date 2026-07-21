@@ -27,7 +27,7 @@ use trail_core::{
     diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
     watch_local_graph,
 };
-use trail_files::{DetectOptions, Manifest, ManifestKind, write_bytes_atomic};
+use trail_files::{DetectOptions, Manifest, ManifestKind, detect, write_bytes_atomic};
 use trail_global::{GlobalPaths, global_add};
 use trail_graph::god_nodes;
 use trail_graphdb::{push_to_falkordb, push_to_neo4j};
@@ -169,7 +169,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "cluster-only" => command_cluster_only(frontend, &args),
         "diagnose" => command_diagnose(frontend, &args),
         "update" => command_build(frontend, &args, false),
-        "extract" if frontend == Frontend::Trail => command_build(frontend, &args, true),
+        "extract" => command_build(frontend, &args, true),
         "watch" if frontend == Frontend::Trail => Outcome::failure(
             "error: watch is a streaming command and must be run from the trail binary".to_owned(),
         ),
@@ -1317,7 +1317,23 @@ fn format_graphify_update(result: &BuildResult, watch_path: &Path, no_cluster: b
 }
 
 fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
-    if frontend == Frontend::Graphify
+    if frontend == Frontend::Graphify && extract && args.is_empty() {
+        return Outcome::failure(
+            "Usage: graphify extract <path> [--backend gemini|kimi|claude|openai|deepseek|ollama] [--model M] [--mode deep] [--out DIR] [--google-workspace] [--no-cluster] [--no-gitignore] [--max-workers N] [--token-budget N] [--max-concurrency N] [--api-timeout S] [--postgres DSN] [--cargo] [--allow-partial] [--timing]"
+                .to_owned(),
+        );
+    }
+    command_build_with_validation(frontend, args, extract, true)
+}
+
+fn command_build_with_validation(
+    frontend: Frontend,
+    args: &[String],
+    extract: bool,
+    validate_external_args: bool,
+) -> Outcome {
+    if validate_external_args
+        && frontend == Frontend::Graphify
         && !extract
         && let Some(error) = validate_graphify_update_args(args)
     {
@@ -1391,61 +1407,64 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             }
             "--mode" if extract && index + 1 < args.len() => {
                 if args[index + 1] != "deep" {
-                    return Outcome::failure(format!(
-                        "error: unknown --mode '{}'. Available: deep",
-                        args[index + 1]
-                    ));
+                    return extract_parse_failure(
+                        frontend,
+                        format!(
+                            "error: unknown --mode '{}'. Available: deep",
+                            args[index + 1]
+                        ),
+                    );
                 }
                 deep_mode = true;
                 index += 1;
             }
             value if extract && value.starts_with("--mode=") => {
                 if &value[7..] != "deep" {
-                    return Outcome::failure(format!(
-                        "error: unknown --mode '{}'. Available: deep",
-                        &value[7..]
-                    ));
+                    return extract_parse_failure(
+                        frontend,
+                        format!("error: unknown --mode '{}'. Available: deep", &value[7..]),
+                    );
                 }
                 deep_mode = true;
             }
             "--token-budget" if extract && index + 1 < args.len() => {
                 token_budget = match parse_positive_usize(&args[index + 1], "--token-budget") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
                 index += 1;
             }
             value if extract && value.starts_with("--token-budget=") => {
                 token_budget = match parse_positive_usize(&value[15..], "--token-budget") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
             "--max-concurrency" if extract && index + 1 < args.len() => {
                 max_concurrency = match parse_positive_usize(&args[index + 1], "--max-concurrency")
                 {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
                 index += 1;
             }
             value if extract && value.starts_with("--max-concurrency=") => {
                 max_concurrency = match parse_positive_usize(&value[18..], "--max-concurrency") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
             "--api-timeout" if extract && index + 1 < args.len() => {
                 api_timeout = match parse_positive_f64(&args[index + 1], "--api-timeout") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
                 index += 1;
             }
             value if extract && value.starts_with("--api-timeout=") => {
                 api_timeout = match parse_positive_f64(&value[14..], "--api-timeout") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
             "--out" if index + 1 < args.len() => {
@@ -1461,27 +1480,17 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             }
             value if value.starts_with("--exclude=") => excludes.push(value[10..].to_owned()),
             "--resolution" if index + 1 < args.len() => {
-                let Ok(value) = args[index + 1].parse::<f64>() else {
-                    return Outcome::failure(
-                        "error: --resolution must be a positive number".to_owned(),
-                    );
+                resolution = match parse_positive_f64(&args[index + 1], "--resolution") {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
-                if value <= 0.0 {
-                    return Outcome::failure("error: --resolution must be > 0".to_owned());
-                }
-                resolution = value;
                 index += 1;
             }
             value if value.starts_with("--resolution=") => {
-                let Ok(parsed) = value[13..].parse::<f64>() else {
-                    return Outcome::failure(
-                        "error: --resolution must be a positive number".to_owned(),
-                    );
+                resolution = match parse_positive_f64(&value[13..], "--resolution") {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
-                if !parsed.is_finite() || parsed <= 0.0 {
-                    return Outcome::failure("error: --resolution must be > 0".to_owned());
-                }
-                resolution = parsed;
             }
             "--exclude-hubs" if index + 1 < args.len() => {
                 let Ok(value) = args[index + 1].parse::<f64>() else {
@@ -1504,19 +1513,19 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             "--max-workers" if extract && index + 1 < args.len() => {
                 max_workers = match parse_positive_usize(&args[index + 1], "--max-workers") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
                 index += 1;
             }
             value if extract && value.starts_with("--max-workers=") => {
                 max_workers = match parse_positive_usize(&value[14..], "--max-workers") {
                     Ok(value) => Some(value),
-                    Err(error) => return Outcome::failure(error),
+                    Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
             "--timing" if extract => timing = true,
             "--dedup-llm" if extract => dedup_llm = true,
-            "-h" | "--help" => {
+            "-h" | "--help" if !(frontend == Frontend::Graphify && extract) => {
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
@@ -1524,10 +1533,16 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
                         .to_owned()
                 });
             }
+            value if frontend == Frontend::Graphify && extract && value.starts_with('-') => {}
             value if value.starts_with('-') => {
                 return Outcome::failure(format!("error: unknown graph build option: {value}"));
             }
-            value if root.is_none() => root = Some(PathBuf::from(value)),
+            value
+                if root.is_none() && !(frontend == Frontend::Graphify && extract && index != 0) =>
+            {
+                root = Some(PathBuf::from(value));
+            }
+            _value if frontend == Frontend::Graphify && extract => {}
             value => {
                 return Outcome::failure(format!(
                     "error: graph build accepts one path, unexpected: {value}"
@@ -1542,12 +1557,15 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             "error: must specify a path to scan or a --postgres DSN".to_owned(),
         );
     }
-    let root = if extract && !has_explicit_root {
+    let mut root = if extract && !has_explicit_root {
         PathBuf::from(".")
     } else {
         root.or_else(saved_graph_root)
             .unwrap_or_else(|| PathBuf::from("."))
     };
+    if frontend == Frontend::Graphify && extract {
+        root = resolve_cli_path(&root);
+    }
     if frontend == Frontend::Graphify && !root.exists() {
         return Outcome::failure(format!("error: path not found: {}", root.display()));
     }
@@ -1569,6 +1587,17 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
     options.google_workspace =
         google_workspace || trail_google_workspace::google_workspace_enabled(None);
     options.max_workers = max_workers;
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let extract_incremental = extract
+        && !force
+        && options
+            .output_root
+            .as_deref()
+            .map(absolute_cli_path)
+            .unwrap_or_else(|| root.clone())
+            .join(output_name)
+            .join("graph.json")
+            .is_file();
     let mut dedup_environment = std::env::vars().collect::<HashMap<_, _>>();
     if let Some(timeout) = api_timeout {
         dedup_environment.insert("GRAPHIFY_API_TIMEOUT".to_owned(), timeout.to_string());
@@ -1592,13 +1621,41 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             executable_on_path("claude"),
         ) {
             Ok(tiebreaker) => Some(tiebreaker),
-            Err(error) if error == "no LLM backend selected" => {
-                return Outcome::failure(
-                    "error: no LLM API key found (--dedup-llm was passed). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key."
-                        .to_owned(),
-                );
+            Err(error) if error.starts_with("no LLM API key found") => {
+                let semantic_count = if code_only {
+                    0
+                } else {
+                    pending_semantic_count(&options, extract_incremental)
+                };
+                let message = format!("error: {}", no_llm_api_key_message(semantic_count, true));
+                return if frontend == Frontend::Graphify {
+                    graphify_extract_provider_failure(
+                        &options,
+                        code_only,
+                        force,
+                        extract_incremental,
+                        message,
+                        1,
+                    )
+                } else {
+                    Outcome::failure(message)
+                };
             }
-            Err(error) => return Outcome::failure(format!("error: {error}")),
+            Err(error) => {
+                let message = format!("error: {error}");
+                return if frontend == Frontend::Graphify {
+                    graphify_extract_provider_failure(
+                        &options,
+                        code_only,
+                        force,
+                        extract_incremental,
+                        message,
+                        1,
+                    )
+                } else {
+                    Outcome::failure(message)
+                };
+            }
         }
     } else {
         None
@@ -1640,6 +1697,19 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
     if let Some(graph) = cargo_graph {
         auxiliary_fragments.push(graph.into_fragment());
     }
+    let empty_extract_layer = SemanticLayer {
+        fragment: serde_json::json!({
+            "nodes": [],
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "failed_chunks": 0,
+        }),
+        refreshed_files: Vec::new(),
+        partial_files: Vec::new(),
+        allow_partial,
+    };
     let built = if extract && !code_only {
         build_semantic_graph(
             &options,
@@ -1658,7 +1728,7 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
     } else if extract && !auxiliary_fragments.is_empty() {
         build_graph_with_optional_tiebreaker(
             &options,
-            None,
+            Some(&empty_extract_layer),
             &auxiliary_fragments,
             dedup_tiebreaker
                 .as_mut()
@@ -1669,7 +1739,7 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
     } else {
         build_graph_with_optional_tiebreaker(
             &options,
-            None,
+            extract.then_some(&empty_extract_layer),
             &[],
             dedup_tiebreaker
                 .as_mut()
@@ -1748,6 +1818,19 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
             if frontend == Frontend::Graphify && !extract {
                 return format_graphify_update(&result, &root, no_cluster);
             }
+            if frontend == Frontend::Graphify && extract {
+                return format_graphify_extract(
+                    &result,
+                    code_only,
+                    no_cluster,
+                    force,
+                    extract_incremental,
+                    backend.as_deref(),
+                    &notes,
+                    timing.then_some((started.elapsed(), semantic_elapsed)),
+                    global_warning,
+                );
+            }
             let mut output = format!(
                 "Trail indexed {} files ({} extracted, {} cached): {} nodes, {} edges, {} communities {mode}.\nWritten to: {}",
                 result.files_considered,
@@ -1778,6 +1861,16 @@ fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome 
                 ));
             }
             outcome
+        }
+        Err(error) if frontend == Frontend::Graphify && extract => {
+            graphify_extract_provider_failure(
+                &options,
+                code_only,
+                force,
+                extract_incremental,
+                format!("error: {error}"),
+                1,
+            )
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
@@ -1817,6 +1910,344 @@ fn format_extract_timings(
     lines.join("\n")
 }
 
+fn pending_semantic_count(options: &BuildOptions, incremental: bool) -> usize {
+    let root = fs::canonicalize(&options.root).unwrap_or_else(|_| options.root.clone());
+    let output_root = options
+        .output_root
+        .as_deref()
+        .map(resolve_cli_path)
+        .unwrap_or_else(|| root.clone());
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let detect_options = DetectOptions {
+        scan_filesystem: options.scan_filesystem,
+        gitignore: options.gitignore,
+        extra_excludes: options.extra_excludes.clone(),
+        output_name: output_name.clone(),
+        cache_root: Some(output_root.clone()),
+        google_workspace: options.google_workspace,
+        ..DetectOptions::default()
+    };
+    let files = if incremental {
+        Manifest::incremental(
+            &root,
+            &output_root.join(output_name).join("manifest.json"),
+            &detect_options,
+            ManifestKind::Semantic,
+        )
+        .ok()
+        .map(|result| result.new_files)
+    } else {
+        detect(&root, &detect_options)
+            .ok()
+            .map(|result| result.files)
+    };
+    files.map_or(0, |files| {
+        ["document", "paper", "image"]
+            .into_iter()
+            .filter_map(|kind| files.get(kind))
+            .map(Vec::len)
+            .sum()
+    })
+}
+
+fn no_llm_api_key_message(semantic_count: usize, dedup_llm: bool) -> String {
+    let mut reasons = Vec::new();
+    if semantic_count > 0 {
+        reasons.push(format!(
+            "{semantic_count} doc/paper/image file(s) need semantic extraction"
+        ));
+    }
+    if dedup_llm {
+        reasons.push("--dedup-llm was passed".to_owned());
+    }
+    let hint = if semantic_count > 0 {
+        " Or pass --code-only to index just the code (local AST, no key) and skip the non-code files."
+    } else {
+        ""
+    };
+    format!(
+        "no LLM API key found ({}). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key.{hint}",
+        reasons.join("; ")
+    )
+}
+
+fn graphify_extract_provider_failure(
+    options: &BuildOptions,
+    code_only: bool,
+    force: bool,
+    incremental: bool,
+    stderr: String,
+    code: u8,
+) -> Outcome {
+    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_root = options
+        .output_root
+        .as_deref()
+        .map(absolute_cli_path)
+        .unwrap_or_else(|| options.root.clone());
+    let output_dir = output_root.join(&output_name);
+    let _result = fs::create_dir_all(&output_dir);
+    let detect_options = DetectOptions {
+        scan_filesystem: options.scan_filesystem,
+        gitignore: options.gitignore,
+        extra_excludes: options.extra_excludes.clone(),
+        output_name,
+        ..DetectOptions::default()
+    };
+    let detection = detect(&options.root, &detect_options).ok();
+    let mut lines = Vec::new();
+    if force {
+        lines.push(
+            "[graphify extract] --force: full re-scan, semantic cache reads skipped".to_owned(),
+        );
+    }
+    lines.push(format!(
+        "[graphify extract] {} {}",
+        if incremental {
+            "incremental scan of"
+        } else {
+            "scanning"
+        },
+        options.root.display()
+    ));
+    if let Some(detection) = detection {
+        let count = |kind: &str| detection.files.get(kind).map_or(0, std::vec::Vec::len);
+        let code_files = count("code");
+        let docs = count("document");
+        let papers = count("paper");
+        let images = count("image");
+        let semantic = docs + papers + images;
+        if code_only && semantic > 0 {
+            lines.push(format!(
+                "[graphify extract] --code-only: skipping {semantic} non-code file(s) ({docs} docs, {papers} papers, {images} images) — no LLM extraction"
+            ));
+        }
+        if incremental {
+            lines.push(format!(
+                "[graphify extract] {code_files} code, {} docs, {} papers, {} images changed; 0 unchanged; 0 deleted",
+                if code_only { 0 } else { docs },
+                if code_only { 0 } else { papers },
+                if code_only { 0 } else { images }
+            ));
+        } else {
+            lines.push(format!(
+                "[graphify extract] found {code_files} code, {} docs, {} papers, {} images",
+                if code_only { 0 } else { docs },
+                if code_only { 0 } else { papers },
+                if code_only { 0 } else { images }
+            ));
+        }
+        if !detection.unclassified.is_empty() {
+            let mut names = detection
+                .unclassified
+                .iter()
+                .filter_map(|path| Path::new(path).file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let more = names.len().saturating_sub(6);
+            names.truncate(6);
+            lines.push(format!(
+                "[graphify extract] {} file(s) not classified (no supported extension or shebang), skipped: {}{}",
+                detection.unclassified.len(),
+                names.join(", "),
+                if more > 0 {
+                    format!(" (+{more} more)")
+                } else {
+                    String::new()
+                }
+            ));
+        }
+    }
+    Outcome {
+        code,
+        stdout: lines.join("\n"),
+        stderr,
+        stdout_trailing_newline: true,
+        stderr_trailing_newline: true,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn format_graphify_extract(
+    result: &BuildResult,
+    code_only: bool,
+    no_cluster: bool,
+    force: bool,
+    incremental: bool,
+    backend: Option<&str>,
+    notes: &[String],
+    timing: Option<(Duration, Duration)>,
+    global_warning: Option<String>,
+) -> Outcome {
+    let count = |kind: &str| {
+        result
+            .detection
+            .files
+            .get(kind)
+            .map_or(0, std::vec::Vec::len)
+    };
+    let live_code = count("code");
+    let live_docs = count("document");
+    let live_papers = count("paper");
+    let live_images = count("image");
+    let live_semantic = live_docs + live_papers + live_images;
+    let changed_code = if incremental {
+        result.files_extracted
+    } else {
+        live_code
+    };
+    let mut lines = Vec::new();
+    if force {
+        lines.push(
+            "[graphify extract] --force: full re-scan, semantic cache reads skipped".to_owned(),
+        );
+    }
+    lines.push(format!(
+        "[graphify extract] {} {}",
+        if incremental {
+            "incremental scan of"
+        } else {
+            "scanning"
+        },
+        result.root.display()
+    ));
+    if code_only && live_semantic > 0 {
+        lines.push(format!(
+            "[graphify extract] --code-only: skipping {live_semantic} non-code file(s) ({live_docs} docs, {live_papers} papers, {live_images} images) — no LLM extraction"
+        ));
+    }
+    if incremental {
+        let unchanged = result
+            .detection
+            .total_files
+            .saturating_sub(result.files_extracted);
+        lines.push(format!(
+            "[graphify extract] {changed_code} code, {} docs, {} papers, {} images changed; {unchanged} unchanged; 0 deleted",
+            if code_only { 0 } else { live_docs.saturating_sub(unchanged) },
+            if code_only { 0 } else { live_papers.saturating_sub(unchanged) },
+            if code_only { 0 } else { live_images.saturating_sub(unchanged) },
+        ));
+    } else {
+        lines.push(format!(
+            "[graphify extract] found {live_code} code, {} docs, {} papers, {} images",
+            if code_only { 0 } else { live_docs },
+            if code_only { 0 } else { live_papers },
+            if code_only { 0 } else { live_images },
+        ));
+    }
+    if !result.detection.unclassified.is_empty() {
+        let mut names = result
+            .detection
+            .unclassified
+            .iter()
+            .filter_map(|path| Path::new(path).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let more = names.len().saturating_sub(6);
+        names.truncate(6);
+        lines.push(format!(
+            "[graphify extract] {} file(s) not classified (no supported extension or shebang), skipped: {}{}",
+            result.detection.unclassified.len(),
+            names.join(", "),
+            if more > 0 {
+                format!(" (+{more} more)")
+            } else {
+                String::new()
+            }
+        ));
+    }
+    if changed_code > 0 {
+        lines.push(format!(
+            "[graphify extract] AST extraction on {changed_code} code files..."
+        ));
+    }
+
+    let mut chunk_notes = Vec::new();
+    for note in notes {
+        if let Some(cache) = note.strip_prefix("[trail graph extract] semantic cache: ") {
+            lines.push(format!("[graphify extract] semantic cache: {cache}"));
+        } else if let Some(chunk) = note.strip_prefix("[trail graph extract] chunk ") {
+            chunk_notes.push(format!("[graphify extract] chunk {chunk}"));
+        } else if let Some(cargo) = note.strip_prefix("[trail graph extract] Cargo: ") {
+            lines.push("[graphify extract] introspecting Cargo workspace...".to_owned());
+            lines.push(format!("[graphify extract] Cargo: {cargo}"));
+        } else if let Some(postgres) = note.strip_prefix("[trail graph extract] PostgreSQL: ") {
+            lines.push("[graphify extract] introspecting PostgreSQL schema...".to_owned());
+            lines.push(format!("[graphify extract] PostgreSQL: {postgres}"));
+        } else if note.starts_with("[graphify]") || note.starts_with("[graphify global]") {
+            lines.push(note.clone());
+        }
+    }
+    if !chunk_notes.is_empty() {
+        lines.push(format!(
+            "[graphify extract] semantic extraction on {} files via {}...",
+            chunk_notes.len(),
+            backend.unwrap_or("configured backend")
+        ));
+        lines.extend(chunk_notes);
+    }
+
+    let graph_path = result.output_dir.join("graph.json");
+    if no_cluster {
+        if incremental && !result.outputs_changed {
+            lines.push(
+                "[graphify extract] no incremental changes detected (--no-cluster); outputs left untouched."
+                    .to_owned(),
+            );
+        } else {
+            lines.push(format!(
+                "[graphify extract] wrote {} — {} nodes, {} edges (no clustering)",
+                graph_path.display(),
+                result.nodes,
+                result.edges
+            ));
+        }
+    } else {
+        lines.push(format!(
+            "[graphify extract] wrote {}: {} nodes, {} edges, {} communities",
+            graph_path.display(),
+            result.nodes,
+            result.edges,
+            result.communities
+        ));
+        lines.push(format!(
+            "[graphify extract] wrote {}",
+            result.output_dir.join(".graphify_analysis.json").display()
+        ));
+        if incremental {
+            lines.push(format!(
+                "[graphify extract] incremental summary: {} files cached/unchanged, {} re-extracted, 0 deleted",
+                result.files_cached,
+                result.files_extracted
+            ));
+        }
+        lines.push(format!(
+            "[graphify extract] next: run `graphify cluster-only {}` to generate GRAPH_REPORT.md and name communities",
+            result.output_dir.parent().unwrap_or(&result.root).display()
+        ));
+    }
+    let mut outcome = Outcome::success(lines.join("\n"));
+    if let Some(warning) = global_warning {
+        outcome.stderr = warning;
+    }
+    if let Some((elapsed, semantic_elapsed)) = timing {
+        if !outcome.stderr.is_empty() {
+            outcome.stderr.push('\n');
+        }
+        outcome.stderr.push_str(&format_extract_timings(
+            no_cluster,
+            elapsed,
+            semantic_elapsed,
+            &result.timings,
+        ));
+    }
+    outcome
+}
+
 fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
     let launch_root = args
         .iter()
@@ -1838,7 +2269,7 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
             ]
         },
     );
-    let result = command_build(frontend, &build_args, false);
+    let result = command_build_with_validation(frontend, &build_args, false, false);
     if result.code != 0 {
         return result;
     }
@@ -1952,12 +2383,7 @@ fn build_semantic_graph(
             .or_else(|| {
                 detect_backend_with_custom(&custom.providers, &environment).map(str::to_owned)
             })
-            .ok_or_else(|| {
-                format!(
-                    "no LLM API key found ({} doc/paper/image file(s) need semantic extraction). Set GEMINI_API_KEY or GOOGLE_API_KEY, MOONSHOT_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY; pass --backend; or use --code-only",
-                    semantic_files.len()
-                )
-            })?;
+            .ok_or_else(|| no_llm_api_key_message(semantic_files.len(), false))?;
         let mut completed_chunks = 0_usize;
         let mut progress = |index: usize,
                             total: usize,
@@ -1973,7 +2399,15 @@ fn build_semantic_graph(
         let result = if let Some(backend) = trail_semantic::builtin_backend(&selected) {
             let resolved = resolve_builtin_backend(&selected, &environment, requested_model)
                 .map_err(|error| error.to_string())?;
-            if !backend.api_key_variables.is_empty() && resolved.api_key().is_none() {
+            let keyless_local_ollama = selected == "ollama"
+                && resolved
+                    .base_url
+                    .as_deref()
+                    .is_some_and(provider_url_is_loopback);
+            if !backend.api_key_variables.is_empty()
+                && resolved.api_key().is_none()
+                && !keyless_local_ollama
+            {
                 return Err(format!(
                     "backend '{selected}' requires {} to be set",
                     backend.api_key_variables.join(" or ")
@@ -2123,19 +2557,70 @@ fn semantic_files(files: &std::collections::BTreeMap<String, Vec<String>>) -> Ve
 }
 
 fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
-    value
-        .parse::<usize>()
+    let parsed = value.parse::<isize>().map_err(|_| {
+        format!(
+            "error: {option} must be a positive integer (got {})",
+            python_string_repr(value)
+        )
+    })?;
+    usize::try_from(parsed)
         .ok()
-        .filter(|value| *value > 0)
-        .ok_or_else(|| format!("error: {option} must be a positive integer (got {value:?})"))
+        .filter(|parsed| *parsed > 0)
+        .ok_or_else(|| format!("error: {option} must be > 0 (got {parsed})"))
 }
 
 fn parse_positive_f64(value: &str, option: &str) -> Result<f64, String> {
-    value
-        .parse::<f64>()
-        .ok()
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .ok_or_else(|| format!("error: {option} must be a positive number (got {value:?})"))
+    let parsed = value.parse::<f64>().map_err(|_| {
+        format!(
+            "error: {option} must be a positive number (got {})",
+            python_string_repr(value)
+        )
+    })?;
+    if parsed <= 0.0 {
+        return Err(format!(
+            "error: {option} must be > 0 (got {})",
+            python_float_repr(parsed)
+        ));
+    }
+    Ok(parsed)
+}
+
+fn python_float_repr(value: f64) -> String {
+    if value.is_nan() {
+        "nan".to_owned()
+    } else if value == f64::INFINITY {
+        "inf".to_owned()
+    } else if value == f64::NEG_INFINITY {
+        "-inf".to_owned()
+    } else if value.fract() == 0.0 {
+        format!("{value:.1}")
+    } else {
+        value.to_string()
+    }
+}
+
+fn provider_url_is_loopback(value: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(value) else {
+        return false;
+    };
+    parsed.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
+}
+
+fn python_string_repr(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn extract_parse_failure(frontend: Frontend, error: String) -> Outcome {
+    if frontend == Frontend::Graphify {
+        Outcome::failure_with_code(error, 2)
+    } else {
+        Outcome::failure(error)
+    }
 }
 
 fn environment_truthy(key: &str) -> bool {
@@ -2162,6 +2647,21 @@ fn absolute_cli_path(path: &Path) -> PathBuf {
     } else {
         std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
     }
+}
+
+fn resolve_cli_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = fs::canonicalize(path) {
+        return canonical;
+    }
+    let absolute = absolute_cli_path(path);
+    let Some(parent) = absolute.parent() else {
+        return absolute;
+    };
+    fs::canonicalize(parent).map_or(absolute.clone(), |resolved| {
+        absolute
+            .file_name()
+            .map_or(resolved.clone(), |name| resolved.join(name))
+    })
 }
 
 fn home_directory() -> Option<PathBuf> {

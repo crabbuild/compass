@@ -8,6 +8,50 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
 
+const BACKEND_ENVIRONMENT: &[&str] = &[
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "MOONSHOT_API_KEY",
+    "AWS_PROFILE",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_ACCESS_KEY_ID",
+    "OLLAMA_BASE_URL",
+];
+
+#[test]
+fn dedup_llm_without_backend_matches_python_diagnostic() -> Result<(), Box<dyn Error>> {
+    let corpus = tempfile::tempdir()?;
+    fs::write(corpus.path().join("main.py"), "def main():\n    return 1\n")?;
+    let mut command = Command::new(env!("CARGO_BIN_EXE_trail"));
+    command
+        .args([
+            "graph",
+            "extract",
+            corpus.path().to_str().ok_or("non-UTF-8 corpus path")?,
+            "--code-only",
+            "--dedup-llm",
+            "--no-viz",
+        ])
+        .current_dir(corpus.path())
+        .env("HOME", corpus.path())
+        .env("USERPROFILE", corpus.path());
+    for key in BACKEND_ENVIRONMENT {
+        command.env_remove(key);
+    }
+    let output = command.output()?;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr)?,
+        "error: no LLM API key found (--dedup-llm was passed). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key.\n"
+    );
+    Ok(())
+}
+
 #[test]
 fn dedup_llm_resolves_ambiguous_semantic_entities() -> Result<(), Box<dyn Error>> {
     let corpus = tempfile::tempdir()?;
