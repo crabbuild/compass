@@ -11,9 +11,9 @@ use trail_semantic::{
     openai_plain_call_parameters, resolve_builtin_backend, resolve_custom_backend,
 };
 
-fn mock_json_server(
-    body: Value,
-) -> Result<(String, thread::JoinHandle<Result<String, std::io::Error>>), Box<dyn Error>> {
+type ServerHandle = thread::JoinHandle<Result<String, std::io::Error>>;
+
+fn mock_json_server(body: Value) -> Result<(String, ServerHandle), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let address = listener.local_addr()?;
     let handle = thread::spawn(move || {

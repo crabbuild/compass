@@ -400,4 +400,110 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn bedrock_rejects_invalid_inference_settings_and_normalizes_edge_responses()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let environment = HashMap::from([("AWS_REGION".to_owned(), "us-west-2".to_owned())]);
+        let mut backend = resolve_builtin_backend("bedrock", &environment, Some("bedrock-model"))?;
+
+        let jpeg = ImageRef {
+            path: PathBuf::from("/corpus/photo.jpeg"),
+            relative_path: "photo.jpeg".to_owned(),
+            media_type: "jpeg".to_owned(),
+            raw: Some(vec![3, 4, 5]),
+        };
+        let content = bedrock_content("inspect", &[jpeg])?;
+        assert_eq!(
+            content[0]
+                .as_image()
+                .map_err(|_| "expected image block")?
+                .format(),
+            &ImageFormat::Jpeg
+        );
+        assert_eq!(bedrock_content("plain", &[])?.len(), 1);
+
+        assert!(bedrock_inference_config_with_max(&backend, usize::MAX).is_err());
+        backend.temperature = Some(f64::NAN);
+        assert!(bedrock_inference_config(&backend).is_err());
+
+        let usage = TokenUsage::builder()
+            .input_tokens(-11)
+            .output_tokens(-7)
+            .total_tokens(-18)
+            .build()?;
+        let hollow_message = Message::builder()
+            .role(ConversationRole::Assistant)
+            .content(ContentBlock::Text("{}".to_owned()))
+            .build()?;
+        let hollow = ConverseOutput::builder()
+            .output(BedrockOutput::Message(hollow_message))
+            .stop_reason(StopReason::EndTurn)
+            .usage(usage.clone())
+            .build()?;
+        let normalized = normalize_bedrock_response(&hollow, "edge-model")?;
+        assert_eq!(normalized["input_tokens"], 0);
+        assert_eq!(normalized["output_tokens"], 0);
+        assert_eq!(normalized["finish_reason"], "length");
+
+        let array_message = Message::builder()
+            .role(ConversationRole::Assistant)
+            .content(ContentBlock::Text("[]".to_owned()))
+            .build()?;
+        let array = ConverseOutput::builder()
+            .output(BedrockOutput::Message(array_message))
+            .stop_reason(StopReason::EndTurn)
+            .usage(usage.clone())
+            .build()?;
+        let array_normalized = normalize_bedrock_response(&array, "edge-model")?;
+        assert_eq!(array_normalized["nodes"], serde_json::json!([]));
+        assert_eq!(array_normalized["finish_reason"], "length");
+
+        let image_message = Message::builder()
+            .role(ConversationRole::Assistant)
+            .content(ContentBlock::Image(
+                ImageBlock::builder()
+                    .format(ImageFormat::Png)
+                    .source(ImageSource::Bytes(Blob::new(vec![9])))
+                    .build()?,
+            ))
+            .build()?;
+        let image_only = ConverseOutput::builder()
+            .output(BedrockOutput::Message(image_message))
+            .stop_reason(StopReason::EndTurn)
+            .usage(usage)
+            .build()?;
+        let plain = normalize_bedrock_plain_response(&image_only, "edge-model");
+        assert!(plain.text.is_empty());
+        assert_eq!(plain.input_tokens, 0);
+        assert_eq!(plain.output_tokens, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn bedrock_sync_wrappers_reject_other_backends_inside_and_outside_runtime()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let environment = HashMap::from([("OPENAI_API_KEY".to_owned(), "test-key".to_owned())]);
+        let backend = resolve_builtin_backend("openai", &environment, Some("test-model"))?;
+
+        let assert_rejected = || {
+            let extraction = execute_bedrock_backend(&backend, "extract", &[], false, &environment);
+            assert!(matches!(
+                extraction,
+                Err(SemanticError::InvalidProviderConfiguration(_))
+            ));
+            let plain = execute_bedrock_plain_text(&backend, "plain", 32, &environment);
+            assert!(matches!(
+                plain,
+                Err(SemanticError::InvalidProviderConfiguration(_))
+            ));
+        };
+
+        assert_rejected();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async { assert_rejected() });
+        Ok(())
+    }
 }
