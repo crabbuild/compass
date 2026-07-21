@@ -676,3 +676,147 @@ fn extension(source: &str) -> String {
         .unwrap_or_default()
         .to_ascii_lowercase()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(value: Value) -> NodeRecord {
+        serde_json::from_value(value).unwrap_or_else(|_| NodeRecord {
+            id: String::new(),
+            attributes: Map::new(),
+        })
+    }
+
+    fn call(receiver_value: Option<Option<&str>>) -> RawCall {
+        RawCall {
+            caller_nid: "caller".to_owned(),
+            callee: "run".to_owned(),
+            is_member_call: Some(true),
+            source_file: "source.ts".to_owned(),
+            source_location: "L2".to_owned(),
+            receiver: receiver_value.map(|value| value.map(str::to_owned)),
+            receiver_type: None,
+            lang: Some("typescript".to_owned()),
+            extensions: Map::new(),
+        }
+    }
+
+    #[test]
+    fn member_classification_and_collection_helpers_cover_boundary_shapes() {
+        assert!(is_type_like(&node(serde_json::json!({
+            "id":"type","label":"Service","file_type":"code"
+        }))));
+        for value in [
+            serde_json::json!({"id":"n","label":"Space","type":"namespace","file_type":"code"}),
+            serde_json::json!({"id":"n","label":"run()","file_type":"code"}),
+            serde_json::json!({"id":"n","label":".hidden","file_type":"code"}),
+            serde_json::json!({"id":"n","label":"A.B","file_type":"code"}),
+            serde_json::json!({"id":"n","label":"","file_type":"code"}),
+            serde_json::json!({"id":"n","label":"External","file_type":"document"}),
+        ] {
+            assert!(!is_type_like(&node(value)));
+        }
+        assert!(is_builtin("Promise"));
+        assert!(!is_builtin("Custom"));
+        assert_eq!(key("HTTP_Client.run()"), "httpclientrun");
+        assert_eq!(receiver(&call(Some(Some("service")))), Some("service"));
+        assert_eq!(receiver(&call(Some(None))), None);
+        assert_eq!(receiver(&call(None)), None);
+        assert!(starts_upper("Service"));
+        assert!(!starts_upper("service"));
+        assert_eq!(unique(Some(&vec!["one".to_owned()])), Some("one"));
+        assert_eq!(
+            unique(Some(&vec!["one".to_owned(), "two".to_owned()])),
+            None
+        );
+        assert_eq!(unique(None), None);
+
+        let mut values = HashMap::new();
+        push_unique(&mut values, "key".to_owned(), "value");
+        push_unique(&mut values, "key".to_owned(), "value");
+        assert_eq!(values["key"], ["value"]);
+        let mut pairs = HashMap::new();
+        push_unique_pair(&mut pairs, ("owner", "member".to_owned()), "target");
+        push_unique_pair(&mut pairs, ("owner", "member".to_owned()), "target");
+        assert_eq!(pairs.len(), 1);
+    }
+
+    #[test]
+    fn module_family_and_table_helpers_preserve_language_specific_contracts() {
+        assert_eq!(module_stem(None), "");
+        assert_eq!(
+            module_stem(Some(&node(serde_json::json!({
+                "id":"m","label":"Fallback","source_file":"src/MyModule.ts"
+            })))),
+            "mymodule"
+        );
+        assert_eq!(
+            module_stem(Some(&node(serde_json::json!({
+                "id":"m","label":"Fallback","source_file":""
+            })))),
+            "fallback"
+        );
+        assert!(is_bare_constant("HTTP_2"));
+        assert!(!is_bare_constant("notConstant"));
+        assert_eq!(member_family("x.any", Some("cpp")), MemberFamily::Cpp);
+        assert_eq!(member_family("x.any", Some("csharp")), MemberFamily::Csharp);
+        assert_eq!(member_family("x.any", Some("java")), MemberFamily::Java);
+        assert_eq!(member_family("x.any", Some("objc")), MemberFamily::Objc);
+        assert_eq!(member_family("x.swift", None), MemberFamily::Swift);
+        assert_eq!(member_family("x.TSX", None), MemberFamily::Typescript);
+        assert_eq!(member_family("x.unknown", None), MemberFamily::Other);
+
+        let mut extraction = Extraction::default();
+        extraction.extensions.insert(
+            "types".to_owned(),
+            serde_json::json!({"path":"source.ts","table":{"value":"Service","bad":7}}),
+        );
+        let mut tables = HashMap::new();
+        collect_table(&extraction, "missing", &mut tables);
+        collect_table(&extraction, "types", &mut tables);
+        assert_eq!(
+            tables["source.ts"].get("value").map(String::as_str),
+            Some("Service")
+        );
+        assert!(!tables["source.ts"].contains_key("bad"));
+    }
+
+    #[test]
+    fn edge_emission_rejects_self_and_duplicates_and_stamps_metadata() {
+        let call = call(Some(Some("service")));
+        let mut existing = HashSet::new();
+        let mut edges = Vec::new();
+        emit(
+            &call,
+            "caller",
+            "calls",
+            "call",
+            ("INFERRED", 0.8),
+            &mut existing,
+            &mut edges,
+        );
+        emit(
+            &call,
+            "target",
+            "calls",
+            "call",
+            ("INFERRED", 0.8),
+            &mut existing,
+            &mut edges,
+        );
+        emit(
+            &call,
+            "target",
+            "calls",
+            "call",
+            ("INFERRED", 0.8),
+            &mut existing,
+            &mut edges,
+        );
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].string("relation"), "calls");
+        assert_eq!(edges[0].attributes["confidence_score"], 0.8);
+        assert_eq!(edges[0].attributes["source_location"], "L2");
+    }
+}

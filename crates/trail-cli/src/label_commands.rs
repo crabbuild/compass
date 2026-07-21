@@ -519,3 +519,139 @@ pub(super) fn label_help(frontend: Frontend) -> String {
     }
     .to_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use trail_model::GraphDocument;
+
+    use super::*;
+
+    #[test]
+    fn label_argument_parser_covers_split_equals_flags_and_validation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = parse_arguments(&[
+            "project".to_owned(),
+            "ignored".to_owned(),
+            "--graph".to_owned(),
+            "custom.json".to_owned(),
+            "--backend".to_owned(),
+            "openai".to_owned(),
+            "--model".to_owned(),
+            "model".to_owned(),
+            "--resolution".to_owned(),
+            "1.5".to_owned(),
+            "--exclude-hubs".to_owned(),
+            "95".to_owned(),
+            "--max-concurrency".to_owned(),
+            "2".to_owned(),
+            "--batch-size".to_owned(),
+            "8".to_owned(),
+            "--min-community-size=4".to_owned(),
+            "--no-viz".to_owned(),
+            "--missing-only".to_owned(),
+            "--timing".to_owned(),
+            "--unknown".to_owned(),
+        ])?;
+        assert_eq!(parsed.root, PathBuf::from("project"));
+        assert_eq!(parsed.graph_override, Some(PathBuf::from("custom.json")));
+        assert_eq!(parsed.backend.as_deref(), Some("openai"));
+        assert_eq!(parsed.model.as_deref(), Some("model"));
+        assert_eq!(parsed.resolution, 1.5);
+        assert_eq!(parsed.exclude_hubs, Some(95.0));
+        assert_eq!(parsed.max_concurrency, 2);
+        assert_eq!(parsed.batch_size, 8);
+        assert_eq!(parsed.min_community_size, 4);
+        assert!(parsed.no_viz && parsed.missing_only && parsed.timing);
+
+        let equals = parse_arguments(&[
+            "--backend=gemini".to_owned(),
+            "--model=flash".to_owned(),
+            "--resolution=2".to_owned(),
+            "--exclude-hubs=90".to_owned(),
+            "--max-concurrency=3".to_owned(),
+            "--batch-size=9".to_owned(),
+        ])?;
+        assert_eq!(equals.backend.as_deref(), Some("gemini"));
+        assert_eq!(equals.max_concurrency, 3);
+        for args in [
+            vec!["--backend".to_owned()],
+            vec!["--resolution=nan".to_owned()],
+            vec!["--max-concurrency=0".to_owned()],
+            vec!["--batch-size=bad".to_owned()],
+        ] {
+            assert!(parse_arguments(&args).is_err());
+        }
+        assert!(parse_number("inf", "--value").is_err());
+        assert!(parse_positive("0", "--value").is_err());
+        assert_eq!(python_repr("a'b\\c"), "'a\\'b\\\\c'");
+        assert!(label_help(Frontend::Graphify).starts_with("Usage: graphify"));
+        Ok(())
+    }
+
+    #[test]
+    fn label_selection_reuses_curated_labels_and_fails_providers_closed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document = serde_json::from_value::<GraphDocument>(serde_json::json!({
+            "directed":true,"multigraph":false,"graph":{},
+            "nodes":[{"id":"a","label":"A"},{"id":"b","label":"B"}],"links":[]
+        }))?;
+        let communities = BTreeMap::from([(0, vec!["a".to_owned()]), (1, vec!["b".to_owned()])]);
+        let hubs = BTreeMap::from([(0, "A".to_owned()), (1, "B".to_owned())]);
+        let saved = BTreeMap::from([(0, "Curated".to_owned()), (1, "Community 1".to_owned())]);
+        let empty = BTreeMap::new();
+        let context = ClusterLabelContext {
+            document: &document,
+            communities: &communities,
+            hub_labels: &hubs,
+            saved_labels: &saved,
+            saved_signatures: &empty,
+            signatures: &empty,
+            gods: &[],
+        };
+        let mut arguments = parse_arguments(&[])?;
+        arguments.missing_only = true;
+        let mut warnings = Vec::new();
+        let selection = select_labels(
+            &context,
+            &arguments,
+            None,
+            &serde_json::Map::new(),
+            &HashMap::new(),
+            &mut warnings,
+        );
+        assert_eq!(
+            selection.labels.get(&0).map(String::as_str),
+            Some("Curated")
+        );
+        assert_eq!(selection.labels_reused, 2);
+        assert!(!warnings.is_empty());
+
+        for selected in ["openai", "unknown"] {
+            let generated = generate_labels(
+                &context,
+                &communities,
+                &arguments,
+                Some(selected),
+                &serde_json::Map::new(),
+                &HashMap::new(),
+            );
+            assert_eq!(generated.labels.len(), 2);
+            assert!(!generated.warnings.is_empty());
+        }
+        let providers = serde_json::Map::from_iter([(
+            "custom".to_owned(),
+            serde_json::json!({"base_url":"not a URL","model":"m","api_key":"key"}),
+        )]);
+        let generated = generate_labels(
+            &context,
+            &communities,
+            &arguments,
+            Some("custom"),
+            &providers,
+            &HashMap::new(),
+        );
+        assert_eq!(generated.labels.len(), 2);
+        assert!(!generated.warnings.is_empty());
+        Ok(())
+    }
+}

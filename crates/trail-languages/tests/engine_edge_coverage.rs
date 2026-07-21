@@ -203,3 +203,119 @@ export function run() { target(); View(); return item; }
     );
     Ok(())
 }
+
+#[test]
+fn objective_c_go_and_swift_fixtures_cover_type_members_calls_and_imports()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(
+        directory.path().join("Local.h"),
+        "@interface Local : NSObject\n@end\n",
+    )?;
+    let fixtures = [
+        (
+            "Service.m",
+            r#"NS_ASSUME_NONNULL_BEGIN
+#import <Foundation/Foundation.h>
+#import "Local.h"
+@import UIKit;
+
+@protocol Child <NSObject>
+- (void)required;
+@end
+
+@interface Service : NSObject <Child>
+@property(nonatomic, strong) ExternalType *field;
+- (void)helper;
+- (Result *)run:(Input *)input;
+@end
+
+@implementation Service
+- (void)helper {}
+- (Result *)run:(Input *)input {
+    ExternalType *local = [[ExternalType alloc] init];
+    [self helper];
+    [ExternalType alloc];
+    self.helper;
+    @selector(helper);
+    return [local execute:input];
+}
+@end
+NS_ASSUME_NONNULL_END
+"#,
+        ),
+        (
+            "service.go",
+            r#"package service
+
+import (
+    "context"
+    alias "example.com/project/dependency"
+)
+
+type Embedded interface { Base; Run(context.Context) error }
+type Box[T any] struct { Value T; Client *alias.Client }
+
+func NewBox[T any](value T) *Box[T] { return &Box[T]{Value: value} }
+func (b *Box[T]) Run(ctx context.Context) error {
+    defer cleanup()
+    go notify(b.Value)
+    alias.Handle(ctx)
+    return b.Client.Execute(ctx)
+}
+"#,
+        ),
+        (
+            "Service.swift",
+            r#"import Foundation
+
+protocol Runnable: AnyObject { func run(_ input: Input) async throws -> Output }
+class Base {}
+final class Service<T: Contract>: Base, Runnable {
+    let dependency: Dependency
+    init(dependency: Dependency) { self.dependency = dependency }
+    func run(_ input: Input) async throws -> Output {
+        let value: Intermediate = try await dependency.load(input)
+        return helper(value)
+    }
+}
+extension Service { func helper(_ value: Intermediate) -> Output { Output(value) } }
+enum Mode { case fast; case safe }
+struct Wrapper { var service: Service<Concrete> }
+"#,
+        ),
+    ];
+
+    let mut engine = Engine::default();
+    for (name, text) in fixtures {
+        let path = directory.path().join(name);
+        fs::write(&path, text)?;
+        let extraction = engine.extract(&path)?;
+        assert!(
+            extraction.nodes.len() >= 3,
+            "{name}: {:?}",
+            extraction.nodes
+        );
+        assert!(
+            extraction.edges.iter().any(|edge| {
+                matches!(edge.string("relation").as_str(), "imports" | "imports_from")
+            }),
+            "{name}: {:?}",
+            extraction.edges
+        );
+        assert!(
+            extraction.edges.iter().any(|edge| {
+                matches!(
+                    edge.string("relation").as_str(),
+                    "calls" | "references" | "inherits" | "implements"
+                )
+            }),
+            "{name}: {:?}",
+            extraction.edges
+        );
+    }
+    let objc = engine.extract(&directory.path().join("Service.m"))?;
+    assert!(objc.extensions.contains_key("objc_type_table"));
+    assert!(!objc.raw_calls.as_deref().unwrap_or_default().is_empty());
+    Ok(())
+}

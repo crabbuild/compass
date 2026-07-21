@@ -2614,11 +2614,10 @@ fn provider_url_is_loopback(value: &str) -> bool {
     let Ok(parsed) = url::Url::parse(value) else {
         return false;
     };
-    parsed.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
+    parsed.host().is_some_and(|host| match host {
+        url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(address) => address.is_loopback(),
+        url::Host::Ipv6(address) => address.is_loopback(),
     })
 }
 
@@ -3811,6 +3810,223 @@ mod mcp_option_tests {
         assert!(stdout.contains("Rebuild failed: build failed"));
         assert!(stdout.contains("[graphify watch] Stopped."));
         assert!(stderr.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn graphify_update_and_extract_formatters_cover_warnings_notes_and_timing() {
+        let mut result = sample_build_result(true, false);
+        result.nodes = 6_000;
+        result.empty_files = (0..7)
+            .map(|index| PathBuf::from(format!("empty-{index}.rs")))
+            .collect();
+        let updated = format_graphify_update(&result, Path::new("project"), false);
+        assert!(updated.stdout.contains("7 source file(s)"));
+        assert!(updated.stdout.contains("(+2 more)"));
+        assert!(updated.stdout.contains("too large for HTML viz"));
+        assert!(updated.stdout.contains("graph.json and GRAPH_REPORT.md"));
+        assert!(
+            format_graphify_update(&result, Path::new("."), true)
+                .stdout
+                .contains("no clustering")
+        );
+        result.outputs_changed = false;
+        assert!(
+            format_graphify_update(&result, Path::new("project"), false)
+                .stdout
+                .contains("outputs left untouched")
+        );
+
+        result.outputs_changed = true;
+        result.files_extracted = 2;
+        result.files_cached = 3;
+        result.detection.total_files = 8;
+        result.detection.files = std::collections::BTreeMap::from([
+            (
+                "code".to_owned(),
+                vec!["a.rs".to_owned(), "b.rs".to_owned()],
+            ),
+            ("document".to_owned(), vec!["a.md".to_owned()]),
+            ("paper".to_owned(), vec!["a.pdf".to_owned()]),
+            ("image".to_owned(), vec!["a.png".to_owned()]),
+        ]);
+        result.detection.unclassified = (0..8).map(|index| format!("raw-{index}.bin")).collect();
+        result.timings = BuildTimings {
+            detect: Duration::from_millis(100),
+            ast_extract: Duration::from_millis(200),
+            build: Duration::from_millis(300),
+            cluster: Duration::from_millis(400),
+            analyze: Duration::from_millis(500),
+            export: Duration::from_millis(600),
+            write: Duration::from_millis(700),
+        };
+        let notes = [
+            "[trail graph extract] semantic cache: 1 hit".to_owned(),
+            "[trail graph extract] chunk 1/1".to_owned(),
+            "[trail graph extract] Cargo: 2 nodes".to_owned(),
+            "[trail graph extract] PostgreSQL: 3 nodes".to_owned(),
+            "[graphify global] retained".to_owned(),
+            "ignored".to_owned(),
+        ];
+        let extracted = format_graphify_extract(
+            &result,
+            true,
+            false,
+            true,
+            true,
+            None,
+            &notes,
+            Some((Duration::from_secs(3), Duration::from_secs(1))),
+            Some("global warning".to_owned()),
+        );
+        for expected in [
+            "--force",
+            "--code-only",
+            "(+2 more)",
+            "semantic cache",
+            "configured backend",
+            "introspecting Cargo",
+            "introspecting PostgreSQL",
+            "incremental summary",
+        ] {
+            assert!(extracted.stdout.contains(expected), "missing {expected}");
+        }
+        assert!(
+            extracted
+                .stderr
+                .contains("global warning\n[graphify timing] detect")
+        );
+        result.outputs_changed = false;
+        let no_cluster = format_graphify_extract(
+            &result,
+            false,
+            true,
+            false,
+            true,
+            Some("gemini"),
+            &[],
+            Some((Duration::from_secs(1), Duration::ZERO)),
+            None,
+        );
+        assert!(no_cluster.stdout.contains("outputs left untouched"));
+        assert!(no_cluster.stderr.contains("[graphify timing] write"));
+    }
+
+    #[test]
+    fn parser_numeric_url_path_and_export_helpers_cover_boundary_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(grouped_decimal(1_234_567), "1_234_567");
+        assert_eq!(python_float_repr(f64::NAN), "nan");
+        assert_eq!(python_float_repr(f64::INFINITY), "inf");
+        assert_eq!(python_float_repr(f64::NEG_INFINITY), "-inf");
+        assert_eq!(python_float_repr(2.0), "2.0");
+        assert_eq!(python_float_repr(2.5), "2.5");
+        assert!(provider_url_is_loopback("http://localhost:11434"));
+        assert!(provider_url_is_loopback("http://[::1]:11434"));
+        assert!(!provider_url_is_loopback("not a url"));
+        assert!(!provider_url_is_loopback("https://example.com"));
+        assert_eq!(python_string_repr("a'b\\c"), "'a\\'b\\\\c'");
+        assert_eq!(parse_positive_usize("2", "--count")?, 2);
+        assert!(parse_positive_usize("0", "--count").is_err());
+        assert!(parse_positive_usize("bad", "--count").is_err());
+        assert_eq!(parse_positive_f64("0.5", "--rate")?, 0.5);
+        assert!(parse_positive_f64("0", "--rate").is_err());
+        assert_eq!(safe_output_name(" /Project: One/ "), "Project--One");
+        assert_eq!(safe_output_name("///"), "project");
+        assert_eq!(parse_usize(Some("7".to_owned()), "value"), Some(7));
+        assert_eq!(parse_usize(Some("bad".to_owned()), "value"), None);
+        assert_eq!(parse_usize(None, "value"), None);
+
+        let directory = tempfile::tempdir()?;
+        let map_path = directory.path().join("map.json");
+        fs::write(
+            &map_path,
+            r#"{"labels":{"0":"Zero","1":{"name":"One"},"2":{"title":"Two"},"bad":"skip","3":7}}"#,
+        )?;
+        let labels = load_usize_string_map(&map_path)?;
+        assert_eq!(labels.len(), 3);
+        assert_eq!(labels.get(&1).map(String::as_str), Some("One"));
+        fs::write(&map_path, "[]")?;
+        assert!(load_usize_string_map(&map_path)?.is_empty());
+        fs::write(&map_path, "not json")?;
+        assert!(load_usize_string_map(&map_path).is_err());
+        assert!(load_usize_string_map(&directory.path().join("missing")).is_err());
+
+        let sections = directory.path().join("sections.json");
+        fs::write(&sections, r#"{"sections":[]}"#)?;
+        assert!(load_sections(&sections)?.is_empty());
+        fs::write(&sections, "{}")?;
+        assert!(load_sections(&sections).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn watch_tree_cluster_and_provider_failure_parsers_cover_value_forms()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().to_string_lossy().into_owned();
+        let args = vec![
+            root.clone(),
+            "--debounce".to_owned(),
+            "0.25".to_owned(),
+            "--out".to_owned(),
+            "artifacts".to_owned(),
+            "--exclude".to_owned(),
+            "target".to_owned(),
+            "--poll".to_owned(),
+        ];
+        let watch = parse_watch_options(Frontend::Trail, &args)?.ok_or("unexpected help")?;
+        assert_eq!(watch.debounce, Duration::from_millis(250));
+        assert_eq!(watch.build.output_root, Some(PathBuf::from("artifacts")));
+        assert_eq!(watch.build.extra_excludes, ["target"]);
+        assert!(watch.force_polling);
+
+        assert_eq!(
+            command_cluster_only(Frontend::Trail, &["--help".to_owned()]).code,
+            0
+        );
+        for args in [
+            vec!["--resolution".to_owned()],
+            vec!["--exclude-hubs".to_owned()],
+            vec!["--resolution".to_owned(), "bad".to_owned()],
+            vec!["--exclude-hubs".to_owned(), "bad".to_owned()],
+        ] {
+            assert_eq!(command_cluster_only(Frontend::Trail, &args).code, 1);
+        }
+        assert_eq!(
+            command_tree(
+                Frontend::Trail,
+                &["--max-children".to_owned(), "bad".to_owned()]
+            )
+            .code,
+            1
+        );
+        assert_eq!(
+            command_tree(
+                Frontend::Trail,
+                &["--top-k-edges".to_owned(), "bad".to_owned()]
+            )
+            .code,
+            1
+        );
+
+        fs::write(directory.path().join("main.rs"), "fn main() {}")?;
+        fs::write(directory.path().join("notes.md"), "# Notes")?;
+        fs::write(directory.path().join("unknown.blob"), "raw")?;
+        let mut options = BuildOptions::new(directory.path().to_path_buf());
+        options.output_root = Some(directory.path().to_path_buf());
+        let failed = graphify_extract_provider_failure(
+            &options,
+            true,
+            true,
+            true,
+            "provider unavailable".to_owned(),
+            2,
+        );
+        assert_eq!(failed.code, 2);
+        assert!(failed.stdout.contains("--force"));
+        assert!(failed.stdout.contains("--code-only"));
+        assert!(failed.stderr.contains("provider unavailable"));
         Ok(())
     }
 }

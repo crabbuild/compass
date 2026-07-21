@@ -741,4 +741,65 @@ mod tests {
         assert!(rendered.html.contains("\"learning_stale\": false"));
         Ok(())
     }
+
+    #[test]
+    fn scalar_labels_hyperedges_and_learning_staleness_cover_boundary_shapes()
+    -> Result<(), Box<dyn Error>> {
+        let node: NodeRecord = serde_json::from_value(json!({"id":"fallback"}))?;
+        assert_eq!(node_label(&node), "fallback");
+        let null_label: NodeRecord = serde_json::from_value(json!({"id":"id","label":null}))?;
+        assert_eq!(node_label(&null_label), "");
+        assert_eq!(python_string(None), "0");
+        assert_eq!(python_string(Some(&Value::Null)), "None");
+        assert_eq!(python_value_string(&Value::Null), "None");
+        assert_eq!(python_value_string(&Value::Bool(true)), "True");
+        assert_eq!(python_value_string(&Value::Bool(false)), "False");
+        assert_eq!(python_value_string(&json!(7)), "7");
+        assert_eq!(python_value_string(&json!([1])), "[1]");
+        assert_eq!(sanitize_label("<tag>\nline"), "<tag>line");
+        assert_eq!(html_escape("&\"'"), "&amp;&quot;&#x27;");
+        assert_eq!(js_safe("</script>"), "<\\/script>");
+
+        let edge: EdgeRecord = serde_json::from_value(json!({
+            "source":"a","target":"b","relation":null,"weight":false
+        }))?;
+        assert_eq!(defaulted(&edge, "missing", "fallback"), "fallback");
+        assert_eq!(defaulted(&edge, "relation", "fallback"), "fallback");
+        assert_eq!(defaulted(&edge, "weight", "fallback"), "False");
+
+        let document: GraphDocument = serde_json::from_value(json!({
+            "graph":{"hyperedges":[
+                7,
+                {"id":"single","nodes":["a"]},
+                {"id":"cross","relation":"works_with","nodes":["a","b","c","b"]}
+            ]},
+            "nodes":[],"links":[]
+        }))?;
+        let communities = HashMap::from([("a", 0_usize), ("b", 1_usize), ("c", 1_usize)]);
+        let remapped = remap_hyperedges(&document, &communities);
+        assert_eq!(remapped["hyperedges"].as_array().map(Vec::len), Some(1));
+        assert_eq!(remapped["hyperedges"][0]["label"], "works with");
+        assert_eq!(remapped["hyperedges"][0]["nodes"], json!(["0", "1"]));
+
+        let directory = tempdir()?;
+        let output = directory.path().join("custom/graph.html");
+        fs::create_dir_all(output.parent().ok_or("missing parent")?)?;
+        let mut entry = Map::new();
+        assert!(!learning_entry_is_stale(&entry, &output));
+        entry.insert(
+            "source_file".to_owned(),
+            Value::String("missing.rs".to_owned()),
+        );
+        assert!(learning_entry_is_stale(&entry, &output));
+        let source = directory.path().join("source.rs");
+        fs::write(&source, "fn source() {}")?;
+        entry.insert(
+            "source_file".to_owned(),
+            Value::String(source.to_string_lossy().into_owned()),
+        );
+        entry.insert("code_fingerprint".to_owned(), Value::String(String::new()));
+        assert!(learning_entry_is_stale(&entry, &output));
+        assert_eq!(resolve_learning_source("", &output), None);
+        Ok(())
+    }
 }
