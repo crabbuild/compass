@@ -438,7 +438,25 @@ fn run_watch_with_frontend(
         let _result = writeln!(stderr, "error: could not install Ctrl+C handler: {error}");
         return 1;
     }
-    let result = watch_local_graph(&options, &stop, |status| match status {
+    let result = watch_local_graph(&options, &stop, |status| {
+        write_watch_status(frontend, status, stdout, stderr);
+    });
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            let _result = writeln!(stderr, "error: {error}");
+            1
+        }
+    }
+}
+
+fn write_watch_status(
+    frontend: Frontend,
+    status: WatchStatus,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) {
+    match status {
         WatchStatus::Watching { root, debounce } => {
             if frontend == Frontend::Graphify {
                 let _result = writeln!(
@@ -598,13 +616,6 @@ fn run_watch_with_frontend(
             };
             let _result = writeln!(stdout, "\n[{label}] Stopped.");
             let _result = stdout.flush();
-        }
-    });
-    match result {
-        Ok(()) => 0,
-        Err(error) => {
-            let _result = writeln!(stderr, "error: {error}");
-            1
         }
     }
 }
@@ -3552,6 +3563,37 @@ fn graphify_help() -> String {
 mod mcp_option_tests {
     use super::*;
 
+    fn sample_build_result(outputs_changed: bool, html_written: bool) -> BuildResult {
+        BuildResult {
+            root: PathBuf::from("project"),
+            output_dir: PathBuf::from("project/graphify-out"),
+            detection: trail_files::Detection {
+                files: std::collections::BTreeMap::new(),
+                total_files: 2,
+                total_words: 0,
+                needs_graph: true,
+                warning: None,
+                skipped_sensitive: Vec::new(),
+                unclassified: Vec::new(),
+                walk_errors: Vec::new(),
+                ignored: Vec::new(),
+                graphifyignore_patterns: 0,
+                scan_root: "project".to_owned(),
+                google_workspace_shortcuts: Vec::new(),
+            },
+            files_considered: 2,
+            files_extracted: 1,
+            files_cached: 1,
+            empty_files: Vec::new(),
+            nodes: 3,
+            edges: 2,
+            communities: 1,
+            html_written,
+            outputs_changed,
+            timings: BuildTimings::default(),
+        }
+    }
+
     #[test]
     fn argparse_style_equals_options_are_supported() -> Result<(), String> {
         let args = [
@@ -3617,5 +3659,158 @@ mod mcp_option_tests {
             outcome.stderr,
             "error: unknown command 'not-a-command'\nRun 'graphify --help' for usage."
         );
+    }
+
+    #[test]
+    fn watch_statuses_preserve_native_output_contract() -> Result<(), Box<dyn std::error::Error>> {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::Watching {
+                root: PathBuf::from("project"),
+                debounce: Duration::from_millis(1500),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::Batch {
+                paths: vec![PathBuf::from("src/lib.rs"), PathBuf::from("notes.md")],
+                deterministic: 1,
+                semantic: 1,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::Rebuilt(Box::new(sample_build_result(true, true))),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::SemanticUpdateRequired {
+                flag: PathBuf::from("project/graphify-out/needs_update"),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::EventError("event failed".to_owned()),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::RebuildError("build failed".to_owned()),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Trail,
+            WatchStatus::Stopped,
+            &mut stdout,
+            &mut stderr,
+        );
+
+        let stdout = String::from_utf8(stdout)?;
+        let stderr = String::from_utf8(stderr)?;
+        assert!(stdout.contains("[trail graph watch] Watching project"));
+        assert!(stdout.contains("2 file(s) changed (1 deterministic, 1 semantic)"));
+        assert!(stdout.contains("3 nodes, 2 edges, 1 communities (1 extracted, 1 cached)"));
+        assert!(stdout.contains("Flag written to project/graphify-out/needs_update"));
+        assert!(stdout.contains("[trail graph watch] Stopped."));
+        assert!(stderr.contains("Filesystem event error: event failed"));
+        assert!(stderr.contains("Rebuild failed: build failed"));
+        Ok(())
+    }
+
+    #[test]
+    fn watch_statuses_preserve_graphify_output_contract() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::Watching {
+                root: PathBuf::from("project"),
+                debounce: Duration::from_millis(1500),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::Batch {
+                paths: vec![PathBuf::from("src/lib.rs")],
+                deterministic: 1,
+                semantic: 0,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::Rebuilt(Box::new(sample_build_result(true, true))),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::Rebuilt(Box::new(sample_build_result(true, false))),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::Rebuilt(Box::new(sample_build_result(false, false))),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::SemanticUpdateRequired {
+                flag: PathBuf::from("project/graphify-out/needs_update"),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::EventError("event failed".to_owned()),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::RebuildError("build failed".to_owned()),
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Graphify,
+            WatchStatus::Stopped,
+            &mut stdout,
+            &mut stderr,
+        );
+
+        let stdout = String::from_utf8(stdout)?;
+        let stderr = String::from_utf8(stderr)?;
+        assert!(stdout.contains("[graphify watch] Watching project"));
+        assert!(stdout.contains("Debounce: 1.5s"));
+        assert!(stdout.contains("1 file(s) changed"));
+        assert!(stdout.contains("graph.json, graph.html and GRAPH_REPORT.md updated"));
+        assert!(stdout.contains("graph.json and GRAPH_REPORT.md updated"));
+        assert!(stdout.contains("No code-graph topology changes detected"));
+        assert!(stdout.contains("New or changed files detected in project"));
+        assert!(stdout.contains("Filesystem event error: event failed"));
+        assert!(stdout.contains("Rebuild failed: build failed"));
+        assert!(stdout.contains("[graphify watch] Stopped."));
+        assert!(stderr.is_empty());
+        Ok(())
     }
 }

@@ -1052,4 +1052,146 @@ mod tests {
         assert_eq!(merged["links"][0]["relation"], "new");
         assert_eq!(merged["graph"], serde_json::json!({"a":1,"b":2}));
     }
+
+    fn object(value: Value) -> Map<String, Value> {
+        value.as_object().cloned().unwrap_or_default()
+    }
+
+    fn error<T>(result: Result<T, String>) -> String {
+        result.err().unwrap_or_default()
+    }
+
+    #[test]
+    fn compose_rejects_incompatible_and_malformed_networkx_documents() {
+        let base = || {
+            object(serde_json::json!({
+                "directed":true,"multigraph":false,"graph":{},"nodes":[],"links":[]
+            }))
+        };
+        let mut other = base();
+        other.insert("directed".to_owned(), Value::Bool(false));
+        assert_eq!(
+            error(compose_graphs(base(), other)),
+            "All graphs must be directed or undirected."
+        );
+        let mut other = base();
+        other.insert("multigraph".to_owned(), Value::Bool(true));
+        assert_eq!(
+            error(compose_graphs(base(), other)),
+            "All graphs must be graphs or multigraphs."
+        );
+        for (field, invalid, expected) in [
+            (
+                "nodes",
+                serde_json::json!([1]),
+                "node entry must be an object",
+            ),
+            ("nodes", serde_json::json!([{}]), "node entry is missing id"),
+            (
+                "links",
+                serde_json::json!([1]),
+                "edge entry must be an object",
+            ),
+            (
+                "links",
+                serde_json::json!([{"target":"b"}]),
+                "edge entry is missing source",
+            ),
+            (
+                "links",
+                serde_json::json!([{"source":"a"}]),
+                "edge entry is missing target",
+            ),
+        ] {
+            let mut current = base();
+            current.insert(field.to_owned(), invalid);
+            assert_eq!(error(compose_graphs(current, base())), expected);
+        }
+        let mut missing_nodes = base();
+        missing_nodes.remove("nodes");
+        assert!(error(compose_graphs(missing_nodes, base())).contains("nodes array"));
+    }
+
+    #[test]
+    fn compose_multigraph_keys_implicit_nodes_edges_aliases_and_unicode_are_deterministic()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let current = object(serde_json::json!({
+            "directed":false,"multigraph":true,"graph":{},"nodes":[],
+            "edges":[
+                {"source":"z","target":"a","key":0,"label":"first"},
+                {"source":"z","target":"a","label":"second"},
+                {"source":"z","target":"a","label":"third"}
+            ]
+        }));
+        let other = object(serde_json::json!({
+            "directed":false,"multigraph":true,"graph":{},"nodes":[{"id":"a","name":"A"}],
+            "links":[{"source":"a","target":"z","key":1,"other":true}]
+        }));
+        let merged = compose_graphs(current, other)?;
+        assert_eq!(merged["nodes"].as_array().map(Vec::len), Some(2));
+        assert_eq!(merged["links"].as_array().map(Vec::len), Some(3));
+        assert_eq!(merged["links"][1]["key"], 1);
+        assert_eq!(merged["links"][1]["other"], true);
+        assert_eq!(merged["links"][2]["key"], 2);
+
+        let encoded = python_pretty_json(&serde_json::json!({"bmp":"é","astral":"🚀"}))?;
+        assert!(encoded.contains("\\u00e9"));
+        assert!(encoded.contains("\\ud83d\\ude80"));
+        assert!(!encoded.contains('🚀'));
+
+        assert_eq!(
+            normalize_path(PathBuf::from("one/./two/../three")),
+            PathBuf::from("one/three")
+        );
+        assert_eq!(
+            edge_pair(&Value::from("z"), &Value::from("a"), false),
+            "\"a\":\"z\""
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_merge_loading_scalar_rendering_and_help_variants_are_total()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(python_string_value(&Value::Null), "None");
+        assert_eq!(python_string_value(&Value::Bool(true)), "True");
+        assert_eq!(
+            python_string_value(&Value::String("text".to_owned())),
+            "text"
+        );
+        assert_eq!(python_string_value(&Value::from(7)), "7");
+        assert_eq!(python_string(None), "");
+        assert_eq!(python_string(Some(&Value::Null)), "");
+        assert_eq!(python_string(Some(&Value::Bool(false))), "False");
+        assert_eq!(python_string(Some(&Value::from(3))), "3");
+        assert_eq!(python_string(Some(&serde_json::json!([1]))), "[1]");
+        assert_eq!(python_repr("a'b\\c"), "'a\\'b\\\\c'");
+        for frontend in [Frontend::Trail, Frontend::Graphify] {
+            assert!(check_update_help(frontend).contains("check-update"));
+            assert!(merge_driver_help(frontend).contains("merge-driver"));
+            assert!(global_add_help(frontend).contains("global add"));
+            assert!(global_remove_help(frontend).contains("global remove"));
+        }
+
+        let directory = tempfile::tempdir()?;
+        let missing = directory.path().join("missing.json");
+        assert!(error(load_merge_graph(&missing)).contains("cannot stat"));
+        let scalar = directory.path().join("scalar.json");
+        fs::write(&scalar, "[]")?;
+        assert_eq!(
+            error(load_merge_graph(&scalar)),
+            "graph document must be a JSON object"
+        );
+        let invalid = directory.path().join("invalid.json");
+        fs::write(&invalid, "not json")?;
+        assert!(!error(load_merge_graph(&invalid)).is_empty());
+        let valid = directory.path().join("valid.json");
+        fs::write(&valid, "{}")?;
+        assert!(load_merge_graph(&valid)?.is_empty());
+        let oversized = directory.path().join("oversized.json");
+        let file = fs::File::create(&oversized)?;
+        file.set_len(MERGE_MAX_BYTES + 1)?;
+        assert!(error(load_merge_graph(&oversized)).contains("exceeds"));
+        Ok(())
+    }
 }
