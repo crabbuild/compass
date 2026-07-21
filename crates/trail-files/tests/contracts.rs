@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
-use std::fs;
+use std::fs::{self, FileTimes};
+use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::json;
 use trail_files::FileType;
@@ -272,6 +273,35 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
 }
 
 #[test]
+fn malformed_and_non_object_cache_entries_fail_closed() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("main.py");
+    fs::write(&source, "def main(): pass\n")?;
+    let mut cache = Cache::new(directory.path(), None)?;
+
+    cache.save(&source, &json!("scalar"), &CacheKind::Semantic, None)?;
+    assert_eq!(
+        cache.load(&source, &CacheKind::Semantic, None, false, false)?,
+        Some(json!("scalar"))
+    );
+
+    let entry = fs::read_dir(cache.directory(&CacheKind::Semantic, None))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .ok_or("missing semantic cache entry")?;
+    fs::write(entry, b"not-json")?;
+    assert_eq!(
+        cache.load(&source, &CacheKind::Semantic, None, false, false)?,
+        None
+    );
+    Ok(())
+}
+
+#[test]
 fn manifest_round_trip_preserves_independent_stamps() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("main.rs");
@@ -326,6 +356,15 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(BuildGuard::ensure_complete(directory.path()).is_err());
     guard.commit()?;
     BuildGuard::ensure_complete(directory.path())?;
+    let not_a_directory = directory.path().join("not-a-directory");
+    fs::write(&not_a_directory, "file")?;
+    assert!(BuildGuard::begin(&not_a_directory.join("output")).is_err());
+
+    let broken_guard = BuildGuard::begin(directory.path())?;
+    let marker = directory.path().join(".trail-build-incomplete");
+    fs::remove_file(&marker)?;
+    fs::create_dir(&marker)?;
+    assert!(broken_guard.commit().is_err());
     Ok(())
 }
 
@@ -358,6 +397,15 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
         "{}",
     )?;
     fs::write(cache_root.join("graphify-out/cache/ast/legacy.json"), "{}")?;
+    fs::create_dir_all(cache_root.join("graphify-out/cache/ast/keep"))?;
+    fs::write(
+        cache_root.join("graphify-out/cache/ast/keep/marker"),
+        "preserved",
+    )?;
+    fs::write(
+        cache_root.join("graphify-out/cache/ast/preserved.txt"),
+        "preserved",
+    )?;
     let source = root.join("main.md");
     fs::write(&source, "---\ntitle: ignored\n---\nbody\n")?;
 
@@ -413,10 +461,66 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     cache.clear();
     assert!(cache.cached_files().len() <= 1);
     assert!(!cache_root.join("graphify-out/cache/ast/vold").exists());
+    assert!(
+        cache_root
+            .join("graphify-out/cache/ast/keep/marker")
+            .exists()
+    );
+    assert!(
+        cache_root
+            .join("graphify-out/cache/ast/preserved.txt")
+            .exists()
+    );
 
     let missing = root.join("missing.md");
     cache.save(&missing, &json!({}), &CacheKind::Ast, None)?;
     assert!(Cache::new(root.join("missing-root"), None).is_err());
+    Ok(())
+}
+
+#[test]
+fn manifest_change_detection_distinguishes_corpus_hash_kind_and_legacy_time()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("main.rs");
+    fs::write(&source, "fn main() {}\n")?;
+    let source = fs::canonicalize(source)?;
+    let source_key = source.to_string_lossy().into_owned();
+    let mut files = BTreeMap::from([("code".to_owned(), vec![source_key.clone()])]);
+
+    assert!(!Manifest::default().is_unchanged(&files, ManifestKind::Ast));
+
+    let manifest_path = directory.path().join("manifest.json");
+    let current_hash = md5_file(&source)?;
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&json!({
+            (source_key.clone()): {
+                "mtime": 0.0,
+                "ast_hash": current_hash,
+                "semantic_hash": "different"
+            }
+        }))?,
+    )?;
+    let current = Manifest::load(&manifest_path, None);
+    assert!(current.is_unchanged(&files, ManifestKind::Ast));
+    assert!(!current.is_unchanged(&files, ManifestKind::Semantic));
+
+    files.insert("code".to_owned(), Vec::new());
+    assert!(!current.is_unchanged(&files, ManifestKind::Ast));
+
+    let legacy_time = UNIX_EPOCH + Duration::from_secs(1);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&source)?
+        .set_times(FileTimes::new().set_modified(legacy_time))?;
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&json!({(source_key.clone()): 1.0}))?,
+    )?;
+    let legacy = Manifest::load(&manifest_path, None);
+    let legacy_files = BTreeMap::from([("code".to_owned(), vec![source_key])]);
+    assert!(legacy.is_unchanged(&legacy_files, ManifestKind::Ast));
     Ok(())
 }
 

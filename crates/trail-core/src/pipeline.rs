@@ -22,6 +22,8 @@ use trail_output::{
 };
 use trail_resolve::resolve_with_root;
 
+use crate::raw_guard::enforce_incomplete_raw_guard;
+
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
     pub root: PathBuf,
@@ -1153,7 +1155,7 @@ fn semantic_tokens(semantic: Option<&SemanticLayer>) -> (u64, u64) {
     (numeric("input_tokens"), numeric("output_tokens"))
 }
 
-fn semantic_is_incomplete(layer: &SemanticLayer, root: &Path) -> bool {
+pub(super) fn semantic_is_incomplete(layer: &SemanticLayer, root: &Path) -> bool {
     if !layer.partial_files.is_empty()
         || layer
             .fragment
@@ -1229,31 +1231,6 @@ fn save_build_manifest(
         Some(&scan_corpus),
         Some(&clear_semantic),
     )?;
-    Ok(())
-}
-
-fn enforce_incomplete_raw_guard(
-    semantic: Option<&SemanticLayer>,
-    graph_path: &Path,
-    root: &Path,
-    new_count: usize,
-) -> Result<(), CoreError> {
-    let Some(layer) = semantic else {
-        return Ok(());
-    };
-    if layer.allow_partial || !semantic_is_incomplete(layer, root) || !graph_path.exists() {
-        return Ok(());
-    }
-    let existing = GraphDocument::load(graph_path)
-        .map_err(|_| CoreError::IncompleteSemanticExisting(graph_path.to_path_buf()))?
-        .nodes
-        .len();
-    if new_count < existing {
-        return Err(CoreError::IncompleteSemanticShrink {
-            existing,
-            new: new_count,
-        });
-    }
     Ok(())
 }
 

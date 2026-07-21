@@ -4,6 +4,7 @@ mod cluster_existing;
 mod diagnostics;
 mod merge;
 mod pipeline;
+mod raw_guard;
 mod watch;
 
 pub use cluster_existing::{
