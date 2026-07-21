@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use trail_core::{
     ClusterExistingOptions, ClusterLabelContext, ClusterLabelSelection,
@@ -109,7 +108,6 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
                 }
             }),
     );
-    let started = Instant::now();
     let options = ClusterExistingOptions {
         graph_path,
         output_dir: output_dir.clone(),
@@ -137,20 +135,35 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
     if parsed.timing {
         let mut ordered = result.load_warning.clone().into_iter().collect::<Vec<_>>();
         ordered.extend(
-            ["load", "cluster", "analyze"]
-                .into_iter()
-                .map(|stage| format!("[graphify timing] {stage}: 0.0s")),
+            [
+                ("load", result.timings.load),
+                ("cluster", result.timings.cluster),
+                ("analyze", result.timings.analyze),
+            ]
+            .into_iter()
+            .map(|(stage, duration)| {
+                format!("[graphify timing] {stage}: {:.1}s", duration.as_secs_f64())
+            }),
         );
         ordered.append(&mut warnings);
-        ordered.push("[graphify timing] label: 0.0s".to_owned());
-        ordered.push("[graphify timing] report: 0.0s".to_owned());
+        ordered.push(format!(
+            "[graphify timing] label: {:.1}s",
+            result.timings.label.as_secs_f64()
+        ));
+        ordered.push(format!(
+            "[graphify timing] report: {:.1}s",
+            result.timings.report.as_secs_f64()
+        ));
         if let Some(warning) = result.backup_warning.clone() {
             ordered.push(warning);
         }
-        ordered.push("[graphify timing] export: 0.0s".to_owned());
+        ordered.push(format!(
+            "[graphify timing] export: {:.1}s",
+            result.timings.export.as_secs_f64()
+        ));
         ordered.push(format!(
             "[graphify timing] total: {:.1}s",
-            started.elapsed().as_secs_f64()
+            result.timings.total.as_secs_f64()
         ));
         warnings = ordered;
     } else {

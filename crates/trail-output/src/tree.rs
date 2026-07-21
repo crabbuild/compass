@@ -8,7 +8,7 @@ use trail_model::GraphDocument;
 use crate::OutputError;
 use crate::json::escape_non_ascii;
 
-pub const DEFAULT_MAX_CHILDREN: usize = 200;
+pub const DEFAULT_MAX_CHILDREN: isize = 200;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeNode {
@@ -20,7 +20,7 @@ pub struct TreeNode {
 #[derive(Clone, Debug)]
 pub struct TreeOptions<'a> {
     pub root: Option<&'a Path>,
-    pub max_children: usize,
+    pub max_children: isize,
     pub project_label: Option<&'a str>,
     pub svg_width: usize,
     pub svg_height: usize,
@@ -133,9 +133,21 @@ pub fn build_tree(document: &GraphDocument, options: &TreeOptions<'_>) -> TreeNo
             (left.name.starts_with('_'), left.name.to_lowercase())
                 .cmp(&(right.name.starts_with('_'), right.name.to_lowercase()))
         });
-        if children.len() > options.max_children {
-            let extra = children.len() - options.max_children;
-            children.truncate(options.max_children);
+        let child_count = children.len();
+        if i128::try_from(child_count).unwrap_or(i128::MAX) > options.max_children as i128 {
+            let keep = if options.max_children >= 0 {
+                usize::try_from(options.max_children)
+                    .unwrap_or(usize::MAX)
+                    .min(child_count)
+            } else {
+                child_count.saturating_sub(options.max_children.unsigned_abs())
+            };
+            let extra = if options.max_children >= 0 {
+                child_count.saturating_sub(keep)
+            } else {
+                child_count.saturating_add(options.max_children.unsigned_abs())
+            };
+            children.truncate(keep);
             children.push(TreeNode {
                 name: format!("(+{extra} more)"),
                 total_count: extra,
@@ -251,22 +263,42 @@ fn emit_html(
     let data = serde_json::to_string(tree)
         .map(|json| escape_non_ascii(&json).replace("</", "<\\/"))
         .unwrap_or_else(|_| "{}".into());
-    format!(
-        r##"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>{}</title>
-<style>body{{font-family:'Segoe UI',sans-serif;margin:0;background:#f9f9f9;color:#333}}h1{{margin:20px 0 0 24px;color:#1e3a56}}.controls{{margin:20px 0 15px 24px}}button{{margin-right:10px;padding:8px 18px;background:#007bff;color:#fff;border:0;border-radius:5px;cursor:pointer}}#tree-container{{width:calc(100vw - 48px);height:85vh;overflow:auto;background:#fff;margin:0 24px;border:1px solid #ddd;border-radius:8px}}.node text{{font:13px 'Segoe UI',sans-serif;paint-order:stroke fill;stroke:#fff;stroke-width:3px}}.link{{fill:none;stroke:#95A5A6;stroke-width:2px}}</style></head><body>
-<h1>{}</h1><div class="controls"><button onclick="expandAll()">Expand All</button><button onclick="collapseAll()">Collapse All</button><button onclick="resetView()">Reset View</button></div><div id="tree-container"><svg id="tree-svg" width="{}" height="{}"></svg></div>
-<script src="https://d3js.org/d3.v7.min.js"></script><script>const initialJsonData={};
-const palette=['#3498DB','#2ECC71','#E74C3C','#9B59B6','#F39C12','#1ABC9C','#34495E','#E67E22'];
-function convert(n,phase='Root'){{return{{name:`${{n.name}} (Total Count: ${{n.total_count}})`,phase,children:(n.children||[]).map(c=>convert(c,phase==='Root'?c.name:phase))}}}}const data=convert(initialJsonData),svg=d3.select('#tree-svg'),g=svg.append('g').attr('transform','translate(450,40)'),layout=d3.tree().nodeSize([40,400]);let root=d3.hierarchy(data),counter=0;
-function collapse(d){{if(d.children){{d._children=d.children;d._children.forEach(collapse);d.children=null}}}}function expand(d){{if(d._children){{d.children=d._children;d._children=null}}if(d.children)d.children.forEach(expand)}}if(root.children)root.children.forEach(collapse);
-function update(source){{const view=layout(root),nodes=view.descendants(),links=nodes.slice(1);const node=g.selectAll('g.node').data(nodes,d=>d.id||(d.id=++counter));const enter=node.enter().append('g').attr('class','node').on('click',(e,d)=>{{if(d.children){{d._children=d.children;d.children=null}}else if(d._children){{d.children=d._children;d._children=null}}update(d)}});enter.append('circle').attr('r',8.5);enter.append('text').attr('x',d=>d.children||d._children?-14:14).attr('text-anchor',d=>d.children||d._children?'end':'start').text(d=>d.data.name);enter.merge(node).transition().attr('transform',d=>`translate(${{d.y}},${{d.x}})`).select('circle').style('fill',d=>d._children?'#AED6F1':d.children?(palette[(d.depth-1+palette.length)%palette.length]||'#4A4A4A'):'#fff').style('stroke','#333');node.exit().remove();const link=g.selectAll('path.link').data(links,d=>d.id);link.enter().insert('path','g').attr('class','link').merge(link).attr('d',d=>`M${{d.y}},${{d.x}}C${{(d.y+d.parent.y)/2}},${{d.x}} ${{(d.y+d.parent.y)/2}},${{d.parent.x}} ${{d.parent.y}},${{d.parent.x}}`);link.exit().remove()}}
-window.expandAll=()=>{{expand(root);update(root)}};window.collapseAll=()=>{{if(root.children)root.children.forEach(collapse);update(root)}};window.resetView=window.collapseAll;update(root);</script></body></html>"##,
-        html_escape(title),
-        html_escape(header),
-        svg_width,
-        svg_height,
-        data
+    let title = html_escape(title);
+    let header = html_escape(header);
+    let width = svg_width.to_string();
+    let height = svg_height.to_string();
+    render_template(
+        include_str!("../assets/tree-template.html"),
+        &[
+            ("@@TRAIL_TREE_TITLE@@", title.as_str()),
+            ("@@TRAIL_TREE_HEADER@@", header.as_str()),
+            ("@@TRAIL_TREE_WIDTH@@", width.as_str()),
+            ("@@TRAIL_TREE_HEIGHT@@", height.as_str()),
+            ("@@TRAIL_TREE_DATA@@", data.as_str()),
+        ],
     )
+}
+
+fn render_template(template: &str, replacements: &[(&str, &str)]) -> String {
+    let mut output = String::with_capacity(template.len());
+    let mut remaining = template;
+    loop {
+        let next = replacements
+            .iter()
+            .filter_map(|(marker, replacement)| {
+                remaining
+                    .find(marker)
+                    .map(|position| (position, *marker, *replacement))
+            })
+            .min_by_key(|(position, _, _)| *position);
+        let Some((position, marker, replacement)) = next else {
+            output.push_str(remaining);
+            return output;
+        };
+        output.push_str(&remaining[..position]);
+        output.push_str(replacement);
+        remaining = &remaining[position + marker.len()..];
+    }
 }
 
 fn html_escape(value: &str) -> String {

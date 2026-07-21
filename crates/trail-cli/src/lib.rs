@@ -163,8 +163,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         platform if install_commands::is_direct_command(platform) => {
             install_commands::command_platform(frontend, platform, &args)
         }
-        "tree" if frontend == Frontend::Trail => command_tree(&args),
-        "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
+        "tree" => command_tree(frontend, &args),
+        "cluster-only" => command_cluster_only(frontend, &args),
         "diagnose" => command_diagnose(frontend, &args),
         "update" => command_build(frontend, &args, false),
         "extract" if frontend == Frontend::Trail => command_build(frontend, &args, true),
@@ -646,38 +646,84 @@ fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
     }
 }
 
-fn command_cluster_only(args: &[String]) -> Outcome {
+fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
     let mut root = PathBuf::from(".");
     let mut root_set = false;
     let mut graph_override = None;
     let mut no_viz = false;
     let mut no_label = false;
+    let mut timing = false;
     let mut resolution = 1.0;
     let mut exclude_hubs = None;
     let mut min_community_size = 3_usize;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--graph" if index + 1 < args.len() => {
-                graph_override = Some(PathBuf::from(&args[index + 1]));
+            "--graph" => {
+                let Some(value) = args.get(index + 1) else {
+                    if frontend == Frontend::Graphify {
+                        index += 1;
+                        continue;
+                    }
+                    return Outcome::failure("error: --graph requires a value".to_owned());
+                };
+                graph_override = Some(PathBuf::from(value));
                 index += 1;
             }
             "--no-viz" => no_viz = true,
             "--no-label" => no_label = true,
-            "--resolution" if index + 1 < args.len() => {
-                let Ok(value) = args[index + 1].parse::<f64>() else {
+            "--missing-only" => {}
+            "--timing" => timing = true,
+            "--resolution" => {
+                let Some(argument) = args.get(index + 1) else {
+                    if frontend == Frontend::Graphify {
+                        index += 1;
+                        continue;
+                    }
+                    return Outcome::failure("error: --resolution requires a value".to_owned());
+                };
+                let Ok(value) = argument.parse::<f64>() else {
                     return Outcome::failure("error: --resolution requires a number".to_owned());
                 };
                 resolution = value;
                 index += 1;
             }
-            "--exclude-hubs" if index + 1 < args.len() => {
-                let Ok(value) = args[index + 1].parse::<f64>() else {
+            value if value.starts_with("--resolution=") => {
+                let Ok(parsed) = value[13..].parse::<f64>() else {
+                    return Outcome::failure("error: --resolution requires a number".to_owned());
+                };
+                resolution = parsed;
+            }
+            "--exclude-hubs" => {
+                let Some(argument) = args.get(index + 1) else {
+                    if frontend == Frontend::Graphify {
+                        index += 1;
+                        continue;
+                    }
+                    return Outcome::failure("error: --exclude-hubs requires a value".to_owned());
+                };
+                let Ok(value) = argument.parse::<f64>() else {
                     return Outcome::failure("error: --exclude-hubs requires a number".to_owned());
                 };
                 exclude_hubs = Some(value);
                 index += 1;
             }
+            value if value.starts_with("--exclude-hubs=") => {
+                let Ok(parsed) = value[15..].parse::<f64>() else {
+                    return Outcome::failure("error: --exclude-hubs requires a number".to_owned());
+                };
+                exclude_hubs = Some(parsed);
+            }
+            "--backend" | "--model" | "--max-concurrency" | "--batch-size"
+                if index + 1 < args.len() =>
+            {
+                index += 1;
+            }
+            value
+                if value.starts_with("--backend=")
+                    || value.starts_with("--model=")
+                    || value.starts_with("--max-concurrency=")
+                    || value.starts_with("--batch-size=") => {}
             value if value.starts_with("--min-community-size=") => {
                 let Ok(parsed) = value[21..].parse::<usize>() else {
                     return Outcome::failure(
@@ -686,19 +732,23 @@ fn command_cluster_only(args: &[String]) -> Outcome {
                 };
                 min_community_size = parsed;
             }
-            "-h" | "--help" => {
+            "-h" | "--help" if frontend == Frontend::Trail => {
                 return Outcome::success("Usage: trail graph cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned());
             }
-            value if value.starts_with('-') => {
+            value if value.starts_with('-') && frontend == Frontend::Trail => {
                 return Outcome::failure(format!(
                     "error: unsupported native cluster-only option: {value}"
                 ));
             }
+            value if value.starts_with('-') => {}
             value if !root_set => {
                 root = PathBuf::from(value);
                 root_set = true;
             }
-            value => return Outcome::failure(format!("error: unexpected path: {value}")),
+            value if frontend == Frontend::Trail => {
+                return Outcome::failure(format!("error: unexpected path: {value}"));
+            }
+            _ => {}
         }
         index += 1;
     }
@@ -707,11 +757,17 @@ fn command_cluster_only(args: &[String]) -> Outcome {
         .clone()
         .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
     if !graph_path.exists() {
-        return Outcome::failure(format!(
-            "error: no graph found at {} — run `trail graph extract {}` first",
-            graph_path.display(),
-            root.display()
-        ));
+        return Outcome::failure(match frontend {
+            Frontend::Graphify => format!(
+                "error: no graph found at {} — run /graphify first",
+                graph_path.display()
+            ),
+            Frontend::Trail => format!(
+                "error: no graph found at {} — run `trail graph extract {}` first",
+                graph_path.display(),
+                root.display()
+            ),
+        });
     }
     let output_dir = if graph_override.is_some()
         && graph_path.parent().and_then(Path::file_name) == Path::new(&output_name).file_name()
@@ -723,6 +779,12 @@ fn command_cluster_only(args: &[String]) -> Outcome {
     } else {
         root.join(&output_name)
     };
+    if frontend == Frontend::Graphify
+        && !no_label
+        && !output_dir.join(".graphify_labels.json").is_file()
+    {
+        return label_commands::command_label(frontend, args);
+    }
     match cluster_existing_graph(&ClusterExistingOptions {
         graph_path,
         output_dir: output_dir.clone(),
@@ -733,6 +795,79 @@ fn command_cluster_only(args: &[String]) -> Outcome {
         exclude_hubs,
         min_community_size,
     }) {
+        Ok(result) if frontend == Frontend::Graphify => {
+            let mut warnings = result.load_warning.clone().into_iter().collect::<Vec<_>>();
+            if timing {
+                warnings.extend([
+                    format!(
+                        "[graphify timing] load: {:.1}s",
+                        result.timings.load.as_secs_f64()
+                    ),
+                    format!(
+                        "[graphify timing] cluster: {:.1}s",
+                        result.timings.cluster.as_secs_f64()
+                    ),
+                    format!(
+                        "[graphify timing] analyze: {:.1}s",
+                        result.timings.analyze.as_secs_f64()
+                    ),
+                    format!(
+                        "[graphify timing] label: {:.1}s",
+                        result.timings.label.as_secs_f64()
+                    ),
+                    format!(
+                        "[graphify timing] report: {:.1}s",
+                        result.timings.report.as_secs_f64()
+                    ),
+                ]);
+            }
+            if let Some(warning) = result.backup_warning.clone() {
+                warnings.push(warning);
+            }
+            if timing {
+                warnings.extend([
+                    format!(
+                        "[graphify timing] export: {:.1}s",
+                        result.timings.export.as_secs_f64()
+                    ),
+                    format!(
+                        "[graphify timing] total: {:.1}s",
+                        result.timings.total.as_secs_f64()
+                    ),
+                ]);
+            }
+            let done = if no_viz {
+                format!(
+                    "Done - {} communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).",
+                    result.communities
+                )
+            } else if result.html_written {
+                format!(
+                    "Done - {} communities. GRAPH_REPORT.md, graph.json and graph.html updated.",
+                    result.communities
+                )
+            } else {
+                format!(
+                    "Done - {} communities. GRAPH_REPORT.md and graph.json updated.",
+                    result.communities
+                )
+            };
+            let backup = result
+                .backup_message
+                .as_deref()
+                .map(|message| format!("{message}\n"))
+                .unwrap_or_default();
+            Outcome {
+                code: 0,
+                stdout: format!(
+                    "Loading existing graph...\nGraph: {} nodes, {} edges\nRe-clustering...\n{backup}{done}",
+                    result.nodes, result.edges
+                ),
+                stderr: warnings.join("\n"),
+                stdout_trailing_newline: true,
+                stderr_trailing_newline: true,
+            }
+        }
         Ok(result) => Outcome::success(format!(
             "Trail clustered {} nodes and {} edges into {} communities ({} labels reused).\nWritten to: {}",
             result.nodes,
@@ -745,11 +880,18 @@ fn command_cluster_only(args: &[String]) -> Outcome {
     }
 }
 
-fn command_tree(args: &[String]) -> Outcome {
+fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
+    if frontend == Frontend::Graphify
+        && args
+            .iter()
+            .any(|argument| matches!(argument.as_str(), "-h" | "--help" | "-?"))
+    {
+        return Outcome::success("Run 'graphify --help' for full usage.".to_owned());
+    }
     let mut graph_path = default_graph_path();
     let mut output_path = None;
     let mut root = None;
-    let mut max_children = 200_usize;
+    let mut max_children = 200_isize;
     let mut label = None;
     let mut index = 0;
     while index < args.len() {
@@ -767,7 +909,7 @@ fn command_tree(args: &[String]) -> Outcome {
                 index += 1;
             }
             "--max-children" if index + 1 < args.len() => {
-                let Ok(value) = args[index + 1].parse::<usize>() else {
+                let Ok(value) = args[index + 1].parse::<isize>() else {
                     return Outcome::failure(
                         "error: --max-children requires an integer".to_owned(),
                     );
@@ -776,7 +918,7 @@ fn command_tree(args: &[String]) -> Outcome {
                 index += 1;
             }
             "--top-k-edges" if index + 1 < args.len() => {
-                if args[index + 1].parse::<usize>().is_err() {
+                if args[index + 1].parse::<isize>().is_err() {
                     return Outcome::failure("error: --top-k-edges requires an integer".to_owned());
                 }
                 index += 1;
@@ -785,8 +927,8 @@ fn command_tree(args: &[String]) -> Outcome {
                 label = Some(args[index + 1].clone());
                 index += 1;
             }
-            "-h" | "--help" => return Outcome::success(tree_help()),
-            value => return Outcome::failure(format!("error: unknown tree option {value}")),
+            "-h" | "--help" => return Outcome::success(tree_help(frontend)),
+            _ => {}
         }
         index += 1;
     }
@@ -796,7 +938,15 @@ fn command_tree(args: &[String]) -> Outcome {
             graph_path.display()
         ));
     }
-    let document = match trail_model::GraphDocument::load(&graph_path) {
+    if let Some((size, cap)) = trail_model::GraphDocument::size_cap_exceeded(&graph_path) {
+        return Outcome::failure(format!(
+            "error: graph file {} is {} bytes, exceeds {}-byte cap\n(set GRAPHIFY_MAX_GRAPH_BYTES=<bytes> or GRAPHIFY_MAX_GRAPH_BYTES=<N>GB to raise the limit)",
+            graph_path.display(),
+            grouped_decimal(size),
+            grouped_decimal(cap)
+        ));
+    }
+    let document = match trail_model::GraphDocument::load_for_recluster_compatibility(&graph_path) {
         Ok(document) => document,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
@@ -831,8 +981,26 @@ fn command_tree(args: &[String]) -> Outcome {
     ))
 }
 
-fn tree_help() -> String {
-    "Usage: trail graph tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default graphify-out/graph.json)\n  --output HTML        output path (default graphify-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      accepted for Graphify compatibility (currently ignored there too)\n  --label NAME         project label shown in the page header".to_owned()
+fn grouped_decimal(value: u64) -> String {
+    let digits = value.to_string();
+    let mut output = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            output.push('_');
+        }
+        output.push(character);
+    }
+    output
+}
+
+fn tree_help(frontend: Frontend) -> String {
+    let prefix = match frontend {
+        Frontend::Trail => "trail graph",
+        Frontend::Graphify => "graphify",
+    };
+    format!(
+        "Usage: {prefix} tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default graphify-out/graph.json)\n  --output HTML        output path (default graphify-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header"
+    )
 }
 
 fn command_merge_graphs(args: &[String]) -> Outcome {
@@ -2649,7 +2817,7 @@ fn trail_command_help(command: &str) -> String {
         "path" => "Usage: trail graph path \"<source>\" \"<target>\" [--graph PATH]".to_owned(),
         "explain" => "Usage: trail graph explain \"<node>\" [--graph PATH]".to_owned(),
         "affected" => "Usage: trail graph affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),
-        "tree" => tree_help(),
+        "tree" => tree_help(Frontend::Trail),
         "export" => export_help().replacen("graphify export", "trail graph export", 1),
         "benchmark" => "Usage: trail graph benchmark [GRAPH_JSON]".to_owned(),
         "diagnose" => "Usage: trail graph diagnose multigraph [--graph PATH] [--json] [--max-examples N] [--directed|--undirected] [--extract-path PATH]".to_owned(),
@@ -2678,7 +2846,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 

@@ -7,8 +7,8 @@ mod pipeline;
 mod watch;
 
 pub use cluster_existing::{
-    ClusterExistingOptions, ClusterExistingResult, ClusterLabelContext, ClusterLabelSelection,
-    cluster_existing_graph, cluster_existing_graph_with_labeler,
+    ClusterExistingOptions, ClusterExistingResult, ClusterExistingTimings, ClusterLabelContext,
+    ClusterLabelSelection, cluster_existing_graph, cluster_existing_graph_with_labeler,
 };
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use merge::{MergeResult, merge_graphs};

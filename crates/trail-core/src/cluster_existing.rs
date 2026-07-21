@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use trail_files::{write_json_atomic, write_text_atomic};
@@ -40,6 +41,18 @@ pub struct ClusterExistingResult {
     pub load_warning: Option<String>,
     pub backup_message: Option<String>,
     pub backup_warning: Option<String>,
+    pub timings: ClusterExistingTimings,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClusterExistingTimings {
+    pub load: Duration,
+    pub cluster: Duration,
+    pub analyze: Duration,
+    pub label: Duration,
+    pub report: Duration,
+    pub export: Duration,
+    pub total: Duration,
 }
 
 pub struct ClusterLabelContext<'a> {
@@ -99,6 +112,8 @@ pub fn cluster_existing_graph_with_labeler<F>(
 where
     F: FnOnce(&ClusterLabelContext<'_>) -> ClusterLabelSelection,
 {
+    let total_started = Instant::now();
+    let load_started = Instant::now();
     let load_warning = GraphDocument::size_cap_exceeded(&options.graph_path).map(|(size, _)| {
         format!(
             "warning: graph.json exceeds cap ({size} bytes); falling back to community-aggregation view (node_limit=5000)"
@@ -108,6 +123,7 @@ where
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
+    let load_elapsed = load_started.elapsed();
     fs::create_dir_all(&options.output_dir).map_err(|source| trail_files::FileError::Io {
         path: options.output_dir.clone(),
         source,
@@ -124,6 +140,7 @@ where
             Some((node.id.clone(), community))
         })
         .collect::<HashMap<_, _>>();
+    let cluster_started = Instant::now();
     let fresh = cluster(
         &document,
         ClusterOptions {
@@ -136,6 +153,8 @@ where
     } else {
         remap_communities_to_previous(&fresh, &previous)
     };
+    let cluster_elapsed = cluster_started.elapsed();
+    let analyze_started = Instant::now();
     let hub_labels = label_communities_by_hub(&document, &communities);
     let signatures = community_member_signatures(&communities);
     let saved_labels = load_usize_string_map(&options.output_dir.join(".graphify_labels.json"));
@@ -144,6 +163,8 @@ where
     let cohesion = score_communities(&document, &communities);
     let gods = god_nodes(&document, 10);
     let surprises = surprising_connections(&document, &communities, 5);
+    let analyze_elapsed = analyze_started.elapsed();
+    let label_started = Instant::now();
     let selection = labeler(&ClusterLabelContext {
         document: &document,
         communities: &communities,
@@ -153,7 +174,9 @@ where
         signatures: &signatures,
         gods: &gods,
     });
+    let label_elapsed = label_started.elapsed();
     let labels = selection.labels;
+    let report_started = Instant::now();
     let questions = suggest_questions(&document, &communities, &labels, 10);
     let commit_root = std::env::current_dir().unwrap_or_else(|_| options.root.clone());
     let commit = git_commit(&commit_root);
@@ -179,6 +202,8 @@ where
         &report_options,
     );
     write_text_atomic(options.output_dir.join("GRAPH_REPORT.md"), &report)?;
+    let report_elapsed = report_started.elapsed();
+    let export_started = Instant::now();
     let backup = backup_if_protected(&options.output_dir);
     write_json_atomic(
         options.output_dir.join(".graphify_analysis.json"),
@@ -226,6 +251,7 @@ where
         }
         rendered.is_some()
     };
+    let export_elapsed = export_started.elapsed();
     Ok(ClusterExistingResult {
         nodes: document.nodes.len(),
         edges: document.links.len(),
@@ -235,6 +261,15 @@ where
         load_warning,
         backup_message: backup.message,
         backup_warning: backup.warning,
+        timings: ClusterExistingTimings {
+            load: load_elapsed,
+            cluster: cluster_elapsed,
+            analyze: analyze_elapsed,
+            label: label_elapsed,
+            report: report_elapsed,
+            export: export_elapsed,
+            total: total_started.elapsed(),
+        },
     })
 }
 
