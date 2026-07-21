@@ -1,4 +1,7 @@
+use std::error::Error;
 use std::ffi::OsString;
+use std::fs;
+use std::path::Path;
 
 use trail_cli::{Frontend, McpFrontend, run, run_graphify_watch, run_mcp, run_watch};
 
@@ -7,6 +10,10 @@ fn invoke(frontend: Frontend, arguments: &[&str]) -> trail_cli::Outcome {
         frontend,
         arguments.iter().map(|argument| OsString::from(*argument)),
     )
+}
+
+fn invoke_owned(frontend: Frontend, arguments: &[String]) -> trail_cli::Outcome {
+    run(frontend, arguments.iter().map(OsString::from))
 }
 
 #[test]
@@ -287,4 +294,138 @@ fn valid_watch_options_reach_missing_root_failure_after_full_parse() {
     let mut stderr = Vec::new();
     assert_eq!(run_watch(&args, &mut stdout, &mut stderr), 1);
     assert!(!stderr.is_empty());
+}
+
+#[test]
+fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("graphify-out");
+    fs::create_dir_all(&output)?;
+    let graph = output.join("graph.json");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .ok_or("repository root")?;
+    fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
+    fs::write(output.join(".graphify_labels.json"), r#"{"0":"Core"}"#)?;
+    fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
+    let graph = graph.to_string_lossy().into_owned();
+
+    let cases = [
+        vec![
+            "graph".to_owned(),
+            "query".to_owned(),
+            "attention".to_owned(),
+            "--dfs".to_owned(),
+            "--budget=100".to_owned(),
+            "--context=model.py".to_owned(),
+            format!("--graph={graph}"),
+        ],
+        vec![
+            "graph".to_owned(),
+            "path".to_owned(),
+            "Transformer".to_owned(),
+            "attention mechanism".to_owned(),
+            "--graph".to_owned(),
+            graph.clone(),
+        ],
+        vec![
+            "graph".to_owned(),
+            "explain".to_owned(),
+            "MultiHeadAttention".to_owned(),
+            format!("--graph={graph}"),
+        ],
+        vec![
+            "graph".to_owned(),
+            "affected".to_owned(),
+            "Transformer".to_owned(),
+            "--depth=3".to_owned(),
+            "--relation=contains".to_owned(),
+            format!("--graph={graph}"),
+        ],
+        vec!["graph".to_owned(), "benchmark".to_owned(), graph.clone()],
+        vec![
+            "graph".to_owned(),
+            "diagnose".to_owned(),
+            "multigraph".to_owned(),
+            "--graph".to_owned(),
+            graph.clone(),
+            "--json".to_owned(),
+            "--max-examples".to_owned(),
+            "0".to_owned(),
+            "--directed".to_owned(),
+        ],
+    ];
+    for arguments in cases {
+        let result = invoke_owned(Frontend::Trail, &arguments);
+        assert_eq!(result.code, 0, "{arguments:?}: {}", result.stderr);
+        assert!(!result.stdout.is_empty());
+    }
+
+    let tree = directory.path().join("tree.html");
+    let result = invoke_owned(
+        Frontend::Trail,
+        &[
+            "graph".to_owned(),
+            "tree".to_owned(),
+            "--graph".to_owned(),
+            graph.clone(),
+            "--output".to_owned(),
+            tree.to_string_lossy().into_owned(),
+            "--root".to_owned(),
+            "src".to_owned(),
+            "--max-children".to_owned(),
+            "2".to_owned(),
+            "--top-k-edges".to_owned(),
+            "4".to_owned(),
+            "--label".to_owned(),
+            "Fixture".to_owned(),
+        ],
+    );
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    assert!(tree.is_file());
+
+    let second = directory.path().join("second.json");
+    fs::copy(&graph, &second)?;
+    let merged = directory.path().join("merged.json");
+    let merge = invoke_owned(
+        Frontend::Trail,
+        &[
+            "graph".to_owned(),
+            "merge-graphs".to_owned(),
+            graph.clone(),
+            second.to_string_lossy().into_owned(),
+            "--out".to_owned(),
+            merged.to_string_lossy().into_owned(),
+        ],
+    );
+    assert_eq!(merge.code, 0, "{}", merge.stderr);
+    assert!(merged.is_file());
+
+    for format in ["html", "svg", "graphml", "neo4j", "falkordb", "obsidian"] {
+        let mut arguments = vec![
+            "graph".to_owned(),
+            "export".to_owned(),
+            format.to_owned(),
+            "--graph".to_owned(),
+            graph.clone(),
+        ];
+        if format == "html" {
+            arguments.push("--no-viz".to_owned());
+        }
+        if format == "obsidian" {
+            arguments.extend([
+                "--dir".to_owned(),
+                directory
+                    .path()
+                    .join("vault")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]);
+        }
+        let result = invoke_owned(Frontend::Trail, &arguments);
+        assert_eq!(result.code, 0, "{format}: {}", result.stderr);
+    }
+    Ok(())
 }
