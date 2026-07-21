@@ -3,3 +3,8 @@
 # libraries are disabled in Cargo.toml, preserving the local-only code path.
 TSLP_LANGUAGES = "apex,astro,bash,blade,c,cpp,csharp,dart,elixir,fortran,go,groovy,hcl,java,javascript,json,julia,kotlin,lua,objc,pascal,php,powershell,python,razor,ruby,rust,scala,sql,svelte,swift,tsx,typescript,verilog,vue,zig"
 TSLP_LINK_MODE = "static"
+# These language-pack switches are debug escape hatches that can silently
+# produce a binary with advertised-but-missing grammars. Force production
+# semantics even when a caller's shell happens to export them.
+TSLP_OFFLINE = { value = "0", force = true }
+TSLP_ALLOW_FAILED_GRAMMARS = { value = "0", force = true }
