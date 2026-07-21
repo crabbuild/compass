@@ -28,6 +28,7 @@ mod php;
 mod powershell;
 mod registry;
 mod rust_lang;
+mod scip;
 mod sql;
 mod swift;
 mod templates;
@@ -39,6 +40,7 @@ mod zig;
 pub use facts::{Extraction, RawCall};
 pub use ids::{file_stem, make_id, normalize_id};
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
+pub use scip::{ScipExtraction, ingest_scip_json};
 
 use std::path::PathBuf;
 
