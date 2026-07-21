@@ -10,7 +10,7 @@ use trail_files::{
     write_json_atomic, write_text_atomic,
 };
 use trail_graph::{
-    ClusterOptions, build_from_extraction, cluster, dedupe_edges, dedupe_nodes, god_nodes,
+    ClusterOptions, build as build_document, cluster, dedupe_edges, dedupe_nodes, god_nodes,
     label_communities_by_hub, remap_communities_to_previous, score_communities, suggest_questions,
     surprising_connections,
 };
@@ -125,6 +125,8 @@ pub enum CoreError {
     Extract(#[from] trail_languages::ExtractError),
     #[error(transparent)]
     Graph(#[from] trail_model::GraphError),
+    #[error(transparent)]
+    Dedup(#[from] trail_graph::DedupError),
     #[error(transparent)]
     Output(#[from] trail_output::OutputError),
     #[error("invalid cached AST extraction for {path}: {source}")]
@@ -492,7 +494,7 @@ fn build_graph_inner(
             timings,
         });
     }
-    let document = build_from_extraction(&resolved, false, Some(&root));
+    let document = build_document(std::slice::from_ref(&resolved), false, true, Some(&root))?;
     timings.build = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {
