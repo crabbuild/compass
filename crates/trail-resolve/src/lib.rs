@@ -1156,3 +1156,337 @@ fn extension(source: &str) -> String {
         .unwrap_or_default()
         .to_ascii_lowercase()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn node(id: &str, label: &str, source_file: &str, kind: &str) -> NodeRecord {
+        let mut attributes = Map::new();
+        attributes.insert("label".to_owned(), Value::String(label.to_owned()));
+        attributes.insert(
+            "source_file".to_owned(),
+            Value::String(source_file.to_owned()),
+        );
+        attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+        attributes.insert("type".to_owned(), Value::String(kind.to_owned()));
+        NodeRecord {
+            id: id.to_owned(),
+            attributes,
+        }
+    }
+
+    fn edge(source: &str, target: &str, relation: &str, source_file: &str) -> EdgeRecord {
+        let mut attributes = Map::new();
+        attributes.insert("relation".to_owned(), Value::String(relation.to_owned()));
+        attributes.insert(
+            "source_file".to_owned(),
+            Value::String(source_file.to_owned()),
+        );
+        EdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes,
+        }
+    }
+
+    fn raw(caller: &str, callee: &str, source_file: &str) -> RawCall {
+        RawCall {
+            caller_nid: caller.to_owned(),
+            callee: callee.to_owned(),
+            is_member_call: Some(false),
+            source_file: source_file.to_owned(),
+            source_location: "L7".to_owned(),
+            receiver: None,
+            receiver_type: None,
+            lang: None,
+            extensions: Map::new(),
+        }
+    }
+
+    #[test]
+    fn python_import_parser_handles_aliases_multiline_comments_and_wildcards() {
+        let imports = python_symbol_imports(
+            "from pkg.api import (\n  Widget as LocalWidget,\n  helper, # kept\n  *,\n)\nfrom invalid\nimport os\n",
+        );
+        assert_eq!(imports.len(), 2);
+        assert_eq!(imports[0].module, "pkg.api");
+        assert_eq!(imports[0].imported, "Widget");
+        assert_eq!(imports[0].local, "LocalWidget");
+        assert_eq!(imports[0].line, 1);
+        assert_eq!(imports[1].imported, "helper");
+        let aliases = python_import_aliases("from lib import run as execute");
+        assert_eq!(
+            aliases.get("execute"),
+            Some(&("lib".to_owned(), "run".to_owned()))
+        );
+    }
+
+    #[test]
+    fn python_definition_matching_respects_relative_and_module_tail_rules() {
+        let definitions = HashMap::from([(
+            "Widget".to_owned(),
+            vec![
+                ("app/models.py".to_owned(), "models-widget".to_owned()),
+                ("other/models.py".to_owned(), "other-widget".to_owned()),
+            ],
+        )]);
+        assert_eq!(
+            python_definition_candidates(
+                Path::new("app/use.py"),
+                ".models",
+                "Widget",
+                &definitions,
+                false,
+            ),
+            vec!["models-widget"]
+        );
+        assert_eq!(
+            python_definition_candidates(
+                Path::new("app/use.py"),
+                "pkg.models",
+                "Widget",
+                &definitions,
+                false,
+            ),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            python_definition_candidates(
+                Path::new("app/use.py"),
+                "pkg.models",
+                "Widget",
+                &definitions,
+                true,
+            )
+            .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn candidate_disambiguation_prefers_imports_tests_and_nearby_paths() {
+        let candidates = vec!["prod".to_owned(), "test".to_owned()];
+        let sources = HashMap::from([
+            ("prod".to_owned(), "src/service.py".to_owned()),
+            ("test".to_owned(), "tests/test_service.py".to_owned()),
+        ]);
+        assert_eq!(
+            disambiguate_candidates(&candidates, &sources, "tests/test_service.py"),
+            Some("test".to_owned())
+        );
+        assert_eq!(
+            disambiguate_candidates(&candidates, &sources, "src/caller.py"),
+            Some("prod".to_owned())
+        );
+
+        let nearby = vec!["same-dir".to_owned(), "far".to_owned()];
+        let nearby_sources = HashMap::from([
+            ("same-dir".to_owned(), "src/api/helper.py".to_owned()),
+            ("far".to_owned(), "vendor/helper.py".to_owned()),
+        ]);
+        assert_eq!(
+            path_proximity(&nearby, &nearby_sources, "src/api/caller.py"),
+            Some("same-dir".to_owned())
+        );
+        assert_eq!(path_proximity(&nearby, &nearby_sources, ""), None);
+
+        let symbols = HashSet::from(["far".to_owned()]);
+        assert_eq!(
+            select_candidate(
+                &nearby,
+                Some(&symbols),
+                None,
+                &HashMap::new(),
+                &nearby_sources,
+                "src/api/caller.py",
+            ),
+            Some(("far".to_owned(), true))
+        );
+    }
+
+    #[test]
+    fn path_and_language_classifiers_cover_supported_families() {
+        for path in [
+            "tests/a.py",
+            "src/test_a.py",
+            "src/a_test.go",
+            "src/a.spec.ts",
+            "src/WidgetTests.cs",
+            "spec/unit.rb",
+        ] {
+            assert!(is_test_path(path), "{path}");
+        }
+        assert!(!is_test_path("src/widget.rs"));
+        assert_eq!(normalize_path(r"src\api\x.py"), "src/api/x.py");
+        assert_eq!(parent_segments("src/api/x.py"), vec!["src", "api"]);
+        assert_eq!(language_family("x.tsx"), Some("js"));
+        assert_eq!(language_family("x.hpp"), Some("native"));
+        assert_eq!(language_family("x.psm1"), Some("powershell"));
+        assert_eq!(language_family("README"), None);
+        assert!(case_insensitive("query.SQL"));
+        assert!(is_javascript("view.mjs"));
+        assert!(is_builtin("Promise"));
+        assert!(!is_builtin("project_function"));
+    }
+
+    #[test]
+    fn resolve_adds_import_guided_calls_and_class_uses() {
+        let file_a = make_id(&["app/a.py"]);
+        let file_b = make_id(&["app/b.py"]);
+        let extraction = Extraction {
+            nodes: vec![
+                node(&file_a, "a.py", "app/a.py", "file"),
+                node(&file_b, "b.py", "app/b.py", "file"),
+                node("caller", "caller()", "app/a.py", "function"),
+                node("local-class", "Local", "app/a.py", "class"),
+                node("helper", "helper()", "app/b.py", "function"),
+                node("widget", "Widget", "app/b.py", "class"),
+            ],
+            raw_calls: Some(vec![raw("caller", "run", "app/a.py")]),
+            ..Extraction::default()
+        };
+        let sources = HashMap::from([(
+            "app/a.py".to_owned(),
+            "from .b import helper as run\nfrom .b import Widget\nrun()\n".to_owned(),
+        )]);
+        let resolved = resolve(&[extraction], &sources);
+        assert!(resolved.edges.iter().any(|candidate| {
+            candidate.source == "caller"
+                && candidate.target == "helper"
+                && relation(candidate) == "calls"
+                && candidate.string("confidence") == "EXTRACTED"
+        }));
+        assert!(resolved.edges.iter().any(|candidate| {
+            candidate.source == "local-class"
+                && candidate.target == "widget"
+                && relation(candidate) == "uses"
+        }));
+        assert!(resolved.edges.iter().any(|candidate| {
+            candidate.source == file_a
+                && candidate.target == "helper"
+                && relation(candidate) == "imports"
+        }));
+    }
+
+    #[test]
+    fn cross_file_resolution_filters_builtins_members_mixins_and_javascript_guesses() {
+        let mut callable = node("target", "work()", "src/b.py", "function");
+        callable
+            .attributes
+            .insert("_callable".to_owned(), Value::Bool(true));
+        let mut indirect = raw("caller", "work", "src/a.py");
+        indirect
+            .extensions
+            .insert("indirect".to_owned(), Value::Bool(true));
+        indirect
+            .extensions
+            .insert("context".to_owned(), Value::String("callback".to_owned()));
+        let mut mixin = raw("caller", "work", "src/a.py");
+        mixin
+            .extensions
+            .insert("is_mixin".to_owned(), Value::Bool(true));
+        let mut extraction = Extraction {
+            nodes: vec![
+                node("caller", "caller()", "src/a.py", "function"),
+                callable,
+                node("js-caller", "caller()", "web/a.ts", "function"),
+                node("js-target", "work()", "web/b.ts", "function"),
+            ],
+            raw_calls: Some(vec![
+                indirect,
+                mixin,
+                raw("caller", "len", "src/a.py"),
+                RawCall {
+                    is_member_call: Some(true),
+                    ..raw("caller", "work", "src/a.py")
+                },
+                raw("js-caller", "work", "web/a.ts"),
+            ]),
+            ..Extraction::default()
+        };
+        resolve_cross_file_calls(&mut extraction, &HashMap::new());
+        assert!(extraction.edges.iter().any(|candidate| {
+            candidate.source == "caller"
+                && candidate.target == "target"
+                && relation(candidate) == "indirect_call"
+                && candidate.string("context") == "callback"
+        }));
+        assert!(!extraction.edges.iter().any(|candidate| {
+            candidate.source == "js-caller"
+                && candidate.target == "js-target"
+                && relation(candidate) == "calls"
+        }));
+    }
+
+    #[test]
+    fn collision_disambiguation_rewrites_nodes_edges_and_raw_callers() {
+        let mut first = node("duplicate", "Thing", "include/thing.h", "class");
+        first.attributes.insert(
+            "origin_file".to_owned(),
+            Value::String("include/thing.h".to_owned()),
+        );
+        let second = node("duplicate", "Thing", "src/thing.cpp", "class");
+        let mut import = edge("source", "duplicate", "imports", "src/use.cpp");
+        import.attributes.insert(
+            "target_file".to_owned(),
+            Value::String("include/thing.h".to_owned()),
+        );
+        let mut extraction = Extraction {
+            nodes: vec![first, second],
+            edges: vec![import],
+            raw_calls: Some(vec![raw("duplicate", "work", "src/thing.cpp")]),
+            extensions: Map::from_iter([("fixture".to_owned(), json!(true))]),
+            ..Extraction::default()
+        };
+        disambiguate_colliding_node_ids(&mut extraction, Path::new("."));
+        assert_ne!(extraction.nodes[0].id, extraction.nodes[1].id);
+        assert_eq!(extraction.edges[0].target, extraction.nodes[0].id);
+        assert_eq!(
+            extraction
+                .raw_calls
+                .as_ref()
+                .and_then(|calls| calls.first())
+                .map(|call| &call.caller_nid),
+            Some(&extraction.nodes[1].id)
+        );
+        assert!(!extraction.edges[0].attributes.contains_key("target_file"));
+    }
+
+    #[test]
+    fn unique_stub_rewiring_retargets_edges_and_removes_unreferenced_stubs() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node("type", "Widget", "src/widget.py", "class"),
+                node("stub", "Widget", "", "stub"),
+                node("func", "run()", "src/run.py", "function"),
+                node("func-stub", "run()", "", "stub"),
+            ],
+            edges: vec![
+                edge("stub", "func-stub", "uses", "src/use.py"),
+                edge("type", "stub", "inherits", "src/widget.py"),
+            ],
+            ..Extraction::default()
+        };
+        rewire_unique_stub_nodes(&mut extraction);
+        assert!(
+            extraction
+                .edges
+                .iter()
+                .any(|candidate| { candidate.source == "type" && candidate.target == "func" })
+        );
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|candidate| candidate.id != "stub")
+        );
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|candidate| candidate.id != "func-stub")
+        );
+    }
+}
