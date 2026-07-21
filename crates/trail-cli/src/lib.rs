@@ -176,12 +176,12 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "serve" if frontend == Frontend::Trail => Outcome::failure(
             "error: serve is a long-lived command and must be run from the trail binary".to_owned(),
         ),
-        "--help" | "-h" | "help" => Outcome::success(if frontend == Frontend::Trail {
+        "--help" | "-h" | "-?" | "help" => Outcome::success(if frontend == Frontend::Trail {
             trail_help()
         } else {
             graphify_help()
         }),
-        "--version" | "-V" => Outcome::success(match frontend {
+        "--version" | "-V" | "-v" | "version" => Outcome::success(match frontend {
             Frontend::Trail => format!("trail {}", env!("CARGO_PKG_VERSION")),
             Frontend::Graphify => format!("graphify {GRAPHIFY_COMPAT_VERSION}"),
         }),
@@ -3542,7 +3542,9 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  extract\n  update\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    include_str!("../assets/graphify-help.txt")
+        .strip_suffix('\n')
+        .unwrap_or(include_str!("../assets/graphify-help.txt"))
         .to_owned()
 }
 

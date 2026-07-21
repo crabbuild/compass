@@ -88,6 +88,37 @@ fn fixture(root: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn graphify_help_matches_python() -> Result<(), Box<dyn Error>> {
+    let repository = repository_root();
+    let home = tempfile::tempdir()?;
+    let mut python = Command::new(repository.join(".venv/bin/python"));
+    python
+        .args(["-m", "graphify", "--help"])
+        .current_dir(&repository)
+        .env("PYTHONPATH", &repository);
+    command_environment(&mut python, home.path());
+    let expected = python.output()?;
+
+    let mut rust = Command::new(env!("CARGO_BIN_EXE_graphify"));
+    rust.arg("--help").current_dir(&repository);
+    command_environment(&mut rust, home.path());
+    assert_same_output(&expected, &rust.output()?);
+    for argument in ["-?", "-v", "version"] {
+        let mut python = Command::new(repository.join(".venv/bin/python"));
+        python
+            .args(["-m", "graphify", argument])
+            .current_dir(&repository)
+            .env("PYTHONPATH", &repository);
+        command_environment(&mut python, home.path());
+        let mut rust = Command::new(env!("CARGO_BIN_EXE_graphify"));
+        rust.arg(argument).current_dir(&repository);
+        command_environment(&mut rust, home.path());
+        assert_same_output(&python.output()?, &rust.output()?);
+    }
+    Ok(())
+}
+
+#[test]
 fn cold_force_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
     for extra in [Vec::<&str>::new(), vec!["--force"], vec!["--no-cluster"]] {
         let directory = tempfile::tempdir()?;

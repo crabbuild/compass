@@ -1409,7 +1409,12 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             Frontend::Graphify,
             ["update", &root].into_iter().map(OsString::from),
         );
-        assert_ne!(legacy.code, 0, "uncertified legacy command was exposed");
+        assert_eq!(legacy.code, 0, "{}", legacy.stderr);
+        assert!(
+            legacy
+                .stdout
+                .contains("[graphify watch] No code-graph topology changes detected;")
+        );
         Ok(())
     }
 
