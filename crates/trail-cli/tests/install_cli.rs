@@ -150,7 +150,15 @@ impl InstallFixture {
     fn python(&self, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
         let python = std::env::var_os("GRAPHIFY_PYTHON")
             .map(PathBuf::from)
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.repo.join("rust").join(path)
+                }
+            })
             .unwrap_or_else(|| self.repo.join(".venv/bin/python"));
+        let display = python.display().to_string();
         Ok(Command::new(python)
             .args(["-m", "graphify"])
             .args(arguments)
@@ -158,7 +166,8 @@ impl InstallFixture {
             .env("PYTHONPATH", &self.repo)
             .env("HOME", &self.python_home)
             .env("USERPROFILE", &self.python_home)
-            .output()?)
+            .output()
+            .map_err(|error| format!("could not run Python oracle {display}: {error}"))?)
     }
 
     fn rust(&self, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {

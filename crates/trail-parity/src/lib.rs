@@ -4044,7 +4044,12 @@ hydrate();
 
     fn python_executable(repo: &Path) -> PathBuf {
         if let Ok(value) = std::env::var("GRAPHIFY_PYTHON") {
-            return PathBuf::from(value);
+            let path = PathBuf::from(value);
+            return if path.is_absolute() {
+                path
+            } else {
+                repo.join("rust").join(path)
+            };
         }
         if cfg!(windows) {
             repo.join(".venv/Scripts/python.exe")
@@ -4055,7 +4060,12 @@ hydrate();
 
     fn media_python_executable(repo: &Path) -> PathBuf {
         if let Ok(value) = std::env::var("GRAPHIFY_MEDIA_PYTHON") {
-            return PathBuf::from(value);
+            let path = PathBuf::from(value);
+            return if path.is_absolute() {
+                path
+            } else {
+                repo.join("rust").join(path)
+            };
         }
         if cfg!(windows) {
             repo.join(".venv-media/Scripts/python.exe")

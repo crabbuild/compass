@@ -40,6 +40,13 @@ fn extraction_validation_matches_python_oracle() -> Result<(), Box<dyn Error>> {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let python = std::env::var_os("GRAPHIFY_PYTHON")
         .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                repo.join("rust").join(path)
+            }
+        })
         .unwrap_or_else(|| repo.join(".venv/bin/python"));
     let mut child = Command::new(python)
         .args([
