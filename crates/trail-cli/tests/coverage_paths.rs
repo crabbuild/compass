@@ -344,6 +344,57 @@ fn graphify_legacy_parsers_tolerate_or_report_frozen_edge_cases() {
 }
 
 #[test]
+fn dense_extract_value_forms_and_graphify_formatting_run_end_to_end() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("src"))?;
+    fs::write(directory.path().join("src/lib.rs"), "pub fn run() {}\n")?;
+    fs::write(directory.path().join("notes.md"), "# Notes\n")?;
+    fs::write(directory.path().join("paper.pdf"), b"%PDF-1.4\n")?;
+    fs::write(directory.path().join("image.png"), b"not an image")?;
+    for index in 0..8 {
+        fs::write(directory.path().join(format!("raw-{index}.blob")), b"raw")?;
+    }
+    let root = directory.path().to_string_lossy().into_owned();
+    let output = directory.path().join("artifacts");
+    let output = output.to_string_lossy().into_owned();
+    let arguments = vec![
+        "extract".to_owned(),
+        root,
+        "--code-only".to_owned(),
+        "--no-cluster".to_owned(),
+        "--force".to_owned(),
+        "--timing".to_owned(),
+        "--mode".to_owned(),
+        "deep".to_owned(),
+        "--token-budget".to_owned(),
+        "100".to_owned(),
+        "--max-concurrency".to_owned(),
+        "2".to_owned(),
+        "--max-workers".to_owned(),
+        "2".to_owned(),
+        "--api-timeout".to_owned(),
+        "0.25".to_owned(),
+        "--exclude".to_owned(),
+        "ignored".to_owned(),
+        "--resolution".to_owned(),
+        "1.0".to_owned(),
+        "--exclude-hubs".to_owned(),
+        "99".to_owned(),
+        "--out".to_owned(),
+        output,
+    ];
+    let outcome = invoke_owned(Frontend::Graphify, &arguments);
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(outcome.stdout.contains("--force"));
+    assert!(outcome.stdout.contains("--code-only"));
+    assert!(outcome.stdout.contains("(+2 more)"));
+    assert!(outcome.stdout.contains("no clustering"));
+    assert!(outcome.stderr.contains("[graphify timing] write"));
+    Ok(())
+}
+
+#[test]
 fn mcp_option_parser_covers_help_equals_missing_and_invalid_values() {
     for frontend in [McpFrontend::Trail, McpFrontend::Graphify] {
         let mut stdout = Vec::new();

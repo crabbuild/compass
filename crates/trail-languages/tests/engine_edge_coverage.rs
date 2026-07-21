@@ -319,3 +319,102 @@ struct Wrapper { var service: Service<Concrete> }
     assert!(!objc.raw_calls.as_deref().unwrap_or_default().is_empty());
     Ok(())
 }
+
+#[test]
+fn cpp_and_dream_maker_fixtures_cover_qualified_generics_overrides_and_receivers()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("local.hpp"), "struct Local {};\n")?;
+    fs::write(
+        directory.path().join("helpers.dm"),
+        "/proc/helper()\n\treturn 1\n",
+    )?;
+    let fixtures = [
+        (
+            "advanced.cpp",
+            r#"#include "local.hpp"
+#include <vector>
+namespace api { class Base {}; void global_call(); }
+template <typename T> class GenericBase {};
+class Service : public api::Base, public GenericBase<Local> {
+public:
+    Local value;
+    std::vector<Local*> items;
+    Local *pointer, &reference;
+    Local* run(const Local& input) {
+        this->helper();
+        api::global_call();
+        pointer->execute();
+        return factory(input);
+    }
+    void helper() {}
+};
+Local* free_call(Service& service) { service.helper(); return create(); }
+"#,
+        ),
+        (
+            "advanced.dm",
+            r#"#include "helpers.dm"
+/proc/log_event(message)
+	world.log << message
+
+/datum/base
+	proc/run()
+		return helper()
+
+/datum/service
+	parent_type = /datum/base
+	var/datum/base/dependency
+	proc/helper()
+		return 1
+	proc/run()
+		var/datum/service/local = new /datum/service()
+		local.helper()
+		src.helper()
+		return ..()
+
+/datum/service/proc/external()
+	log_event("external")
+	return new /datum/base()
+"#,
+        ),
+    ];
+    let mut engine = Engine::default();
+    for (name, source) in fixtures {
+        let path = directory.path().join(name);
+        fs::write(&path, source)?;
+        let extraction = engine.extract(&path)?;
+        assert!(
+            extraction.nodes.len() >= 4,
+            "{name}: {:?}",
+            extraction.nodes
+        );
+        assert!(
+            extraction
+                .edges
+                .iter()
+                .any(|edge| edge.string("relation") == "imports"
+                    || edge.string("relation") == "imports_from")
+        );
+        assert!(
+            extraction.edges.iter().any(|edge| {
+                matches!(
+                    edge.string("relation").as_str(),
+                    "calls" | "references" | "inherits"
+                )
+            }),
+            "{name}: {:?}",
+            extraction.edges
+        );
+        if name == "advanced.cpp" {
+            assert!(
+                !extraction
+                    .raw_calls
+                    .as_deref()
+                    .unwrap_or_default()
+                    .is_empty()
+            );
+        }
+    }
+    Ok(())
+}
