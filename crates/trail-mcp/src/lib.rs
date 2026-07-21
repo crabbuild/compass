@@ -1253,4 +1253,164 @@ mod tests {
         assert!(output.contains("[calls] [EXTRACTED]"));
         Ok(())
     }
+
+    #[test]
+    fn every_local_tool_and_resource_handles_success_missing_and_filter_shapes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            r#"{"directed":true,"multigraph":false,"graph":{},"nodes":[
+{"id":"a","label":"Alpha","community":0,"community_name":"Core","file_type":"code","source_file":"a.rs","source_location":"L1"},
+{"id":"b","label":"Beta","community":"0","community_name":"Core","file_type":"code","source_file":"b.rs"},
+{"id":"c","label":"Gamma","community":1,"file_type":"document","source_file":"c.md"},
+{"id":"d","label":"Delta","file_type":"code","source_file":"d.rs"}],
+"links":[
+{"source":"a","target":"b","relation":"calls","confidence":"EXTRACTED"},
+{"source":"c","target":"b","relation":"documents","confidence":"INFERRED"},
+{"source":"b","target":"d","relation":"uses","confidence":"AMBIGUOUS"}]}
+"#,
+        )?;
+        fs::write(temp.path().join("GRAPH_REPORT.md"), "# Report\nBody\n")?;
+        fs::write(
+            temp.path().join(".graphify_labels.json"),
+            r#"{"0":"Core","1":"Docs"}"#,
+        )?;
+        let server = GraphifyMcp::new(&graph);
+
+        let invoke = |name: &str, value: Value| {
+            server.invoke(name, value.as_object().cloned().unwrap_or_default())
+        };
+        assert!(invoke("get_node", json!({"label":"alpha"})).contains("Node: Alpha"));
+        assert!(invoke("get_node", json!({"label":"absent"})).contains("No node"));
+        assert!(invoke("get_node", json!({})).contains("'label'"));
+        let neighbors = invoke("get_neighbors", json!({"label":"Beta"}));
+        assert!(neighbors.contains("--> Delta"));
+        assert!(neighbors.contains("<-- Alpha"));
+        assert!(
+            invoke(
+                "get_neighbors",
+                json!({"label":"Beta","relation_filter":"doc"})
+            )
+            .contains("Gamma")
+        );
+        assert!(invoke("get_neighbors", json!({"label":"none"})).contains("No node"));
+        assert!(invoke("get_community", json!({"community_id":"0"})).contains("Core"));
+        assert!(invoke("get_community", json!({"community_id":-1})).contains("not found"));
+        assert!(invoke("get_community", json!({"community_id":99})).contains("not found"));
+        assert!(invoke("god_nodes", json!({"top_n":"2"})).contains("God nodes"));
+        assert!(invoke("graph_stats", json!({})).contains("INFERRED: 33%"));
+
+        assert!(
+            invoke("shortest_path", json!({"source":"none","target":"Beta"}))
+                .contains("No node matching source")
+        );
+        assert!(
+            invoke("shortest_path", json!({"source":"Alpha","target":"none"}))
+                .contains("No node matching target")
+        );
+        assert!(
+            invoke("shortest_path", json!({"source":"Alpha","target":"Alpha"}))
+                .contains("same node")
+        );
+        assert!(
+            invoke(
+                "shortest_path",
+                json!({"source":"Alpha","target":"Gamma","max_hops":0})
+            )
+            .contains("exceeds max_hops")
+        );
+        assert!(
+            invoke("shortest_path", json!({"source":"Delta","target":"Alpha"}))
+                .contains("Shortest path")
+        );
+        assert!(!invoke("query_graph", json!({"question":"Alpha","mode":"dfs","depth":99,"token_budget":-1,"context_filter":["calls",7]})).is_empty());
+        assert!(invoke("query_graph", json!({})).contains("'question'"));
+        assert!(invoke("get_pr_impact", json!({"pr_number":-1})).contains("'pr_number'"));
+
+        for uri in [
+            "graphify://report",
+            "graphify://stats",
+            "graphify://god-nodes",
+            "graphify://surprises",
+            "graphify://audit",
+            "graphify://questions",
+        ] {
+            assert!(!server.read(uri)?.is_empty(), "{uri}");
+        }
+        assert!(server.read("graphify://unknown").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn graph_store_cache_reload_missing_graph_and_pure_helpers_are_total()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        sample(&graph)?;
+        let store = GraphStore::new(&graph);
+        let first = store.load(None)?;
+        let warm = store.load(None)?;
+        assert!(Arc::ptr_eq(&first, &warm));
+        fs::write(
+            &graph,
+            r#"{"directed":true,"nodes":[{"id":"only","label":"Only"}],"links":[],"padding":"changed-size"}"#,
+        )?;
+        let changed = store.load(None)?;
+        assert!(!Arc::ptr_eq(&first, &changed));
+        assert_eq!(changed.graph.node_count(), 1);
+
+        let missing = GraphifyMcp::new(temp.path().join("missing.json"));
+        assert!(
+            missing
+                .invoke("graph_stats", Map::new())
+                .contains("not found")
+        );
+        assert!(missing.read("graphify://stats").is_err());
+
+        assert_eq!(integer_argument(&Map::new(), "x", 7), 7);
+        assert_eq!(
+            integer_argument(
+                &json!({"x":"8"}).as_object().cloned().unwrap_or_default(),
+                "x",
+                7
+            ),
+            8
+        );
+        assert_eq!(
+            optional_string(
+                &json!({"x":""}).as_object().cloned().unwrap_or_default(),
+                "x"
+            ),
+            None
+        );
+        assert!(truthy("YES"));
+        assert!(!truthy("off"));
+        assert_eq!(
+            expand_home(Path::new("plain/path")),
+            PathBuf::from("plain/path")
+        );
+        assert_eq!(format_score(2.0), "2");
+        assert_eq!(format_score(1.234_567_89), "1.234568");
+        assert_eq!(python_percent(1, 3), 33);
+        assert_eq!(python_percent(2, 3), 67);
+        for (index, status) in [
+            "WRONG-BASE",
+            "CI-FAIL",
+            "CHANGES-REQ",
+            "DRAFT",
+            "STALE",
+            "PENDING",
+            "APPROVED",
+            "READY",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(status_index(status), index);
+        }
+        assert_eq!(status_index("unknown"), 99);
+        Ok(())
+    }
 }
