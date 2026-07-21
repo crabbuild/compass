@@ -11,14 +11,25 @@ Run the qualification harness from any directory:
 rust/scripts/qualify_phase1.sh
 ```
 
+The release-grade corpus matrix is equally explicit:
+
+```bash
+rust/scripts/qualify_phase1_matrix.sh
+```
+
+It prepares reproducible small (`tests/fixtures`), medium (`graphify` plus the
+multilingual fixtures), and large (`graphify`, tests, native crates, and docs)
+corpora, runs every gate for at least five iterations, and retains one CSV per
+tier. Weekly hardening CI runs this matrix and uploads the raw evidence.
+
 Configuration is explicit through `TRAIL_BENCH_CORPUS`,
 `TRAIL_BENCH_REPEATS`, `TRAIL_BENCH_QUERY`, `TRAIL_BENCH_OUTPUT`, and
 `GRAPHIFY_PYTHON`. Raw per-run data is written to
 `rust/target/phase1-qualification.csv` by default.
 Each row records latency, peak RSS, indexed-file throughput, node and edge
 counts, the canonical graph SHA-256, and whether the Python/Trail topology pair
-matched. Cold, unchanged-warm, one-file change, rename, delete, and query cases
-are measured independently on fresh corpus copies.
+matched. Cold, unchanged-warm, one-file change, rename, delete, query, path,
+explain, and affected cases are measured independently on fresh corpus copies.
 
 ## Qualified local baseline
 
@@ -43,8 +54,7 @@ every warm/incremental/query median exceeds 5×, every graph pair matches the
 oracle, and Trail peak RSS is no worse than Python for every case.
 
 This baseline is local qualification evidence, not a substitute for release CI.
-Before a Phase 1 release, the harness must also be run for at least five
-iterations on approved small, medium, and large multilingual corpora, with
-median and p95 results retained as release artifacts. The local baseline above
-qualifies the complete Graphify Python package, including real incremental
-change, rename, and delete operations.
+The hardening workflow runs the approved small, medium, and large multilingual
+matrix for at least five iterations and retains median/p95 source data as build
+artifacts. The local baseline above qualifies the complete Graphify Python
+package, including real incremental change, rename, and delete operations.

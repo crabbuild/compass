@@ -88,6 +88,25 @@ run_pair() {
     "$python_corpus/graphify-out/graph.json" "$trail_corpus/graphify-out/graph.json"
 }
 
+run_read_pair() {
+  local case_name="$1"
+  local iteration="$2"
+  shift 2
+  local python_stats="$work_root/time-python-${case_name}-${iteration}.txt"
+  local trail_stats="$work_root/time-trail-${case_name}-${iteration}.txt"
+  measure "$python_stats" \
+    "$python_bin" -m graphify "$@" \
+    --graph "$python_corpus/graphify-out/graph.json"
+  local python_seconds="$measured_seconds"
+  local python_rss="$measured_rss"
+  measure "$trail_stats" \
+    "$trail_bin" graph "$@" \
+    --graph "$trail_corpus/graphify-out/graph.json"
+  record_pair "$case_name" "$iteration" "$python_seconds" "$python_rss" \
+    "$measured_seconds" "$measured_rss" \
+    "$python_corpus/graphify-out/graph.json" "$trail_corpus/graphify-out/graph.json"
+}
+
 for ((iteration = 1; iteration <= repeats; iteration++)); do
   python_corpus="$work_root/python-$iteration"
   trail_corpus="$work_root/trail-$iteration"
@@ -113,17 +132,26 @@ for ((iteration = 1; iteration <= repeats; iteration++)); do
   rm "$trail_corpus/trail_phase1_renamed_fixture.py"
   run_pair incremental_delete "$iteration"
 
-  measure "$work_root/time-python-query-${iteration}.txt" \
-    "$python_bin" -m graphify query "$query" \
-    --graph "$python_corpus/graphify-out/graph.json"
-  python_seconds="$measured_seconds"
-  python_rss="$measured_rss"
-  measure "$work_root/time-trail-query-${iteration}.txt" \
-    "$trail_bin" graph query "$query" \
-    --graph "$trail_corpus/graphify-out/graph.json"
-  record_pair query "$iteration" "$python_seconds" "$python_rss" \
-    "$measured_seconds" "$measured_rss" \
-    "$python_corpus/graphify-out/graph.json" "$trail_corpus/graphify-out/graph.json"
+  run_read_pair query "$iteration" query "$query"
+  IFS=$'\t' read -r benchmark_source benchmark_target < <(
+    "$python_bin" - "$python_corpus/graphify-out/graph.json" <<'PY'
+import json
+import sys
+
+graph = json.load(open(sys.argv[1], encoding="utf-8"))
+links = graph.get("links", graph.get("edges", []))
+if links:
+    print(f"{links[0]['source']}\t{links[0]['target']}")
+else:
+    nodes = [node["id"] for node in graph.get("nodes", [])]
+    if not nodes:
+        raise SystemExit("benchmark graph has no nodes")
+    print(f"{nodes[0]}\t{nodes[min(1, len(nodes) - 1)]}")
+PY
+  )
+  run_read_pair path "$iteration" path "$benchmark_source" "$benchmark_target"
+  run_read_pair explain "$iteration" explain "$benchmark_source"
+  run_read_pair affected "$iteration" affected "$benchmark_source"
 done
 
 "$python_bin" - "$output" <<'PY'
@@ -152,6 +180,9 @@ minimum_speedups = {
     "incremental_rename": 5.0,
     "incremental_delete": 5.0,
     "query": 5.0,
+    "path": 5.0,
+    "explain": 5.0,
+    "affected": 5.0,
 }
 failures = []
 for case, minimum in minimum_speedups.items():
