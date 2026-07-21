@@ -3,9 +3,12 @@ use std::error::Error;
 use std::fs;
 
 use serde_json::json;
+use trail_files::FileType;
 use trail_files::{
-    BuildGuard, Cache, CacheKind, DetectOptions, FileType, Manifest, ManifestKind, WatchPathFilter,
-    body_content, classify_file, read_source_lossy, split_file, write_text_atomic,
+    BuildGuard, Cache, CacheKind, DetectOptions, FileSlice, Manifest, ManifestKind, StatHashIndex,
+    WatchPathFilter, bisect_slice, body_content, classify_file, file_hash, md5_file,
+    prompt_fingerprint, read_slice_text, read_source_lossy, slice_boundaries, split_file,
+    write_bytes_atomic, write_json_atomic, write_text_atomic,
 };
 
 #[test]
@@ -339,5 +342,264 @@ fn atomic_write_preserves_destination_symlink() -> Result<(), Box<dyn Error>> {
     write_text_atomic(&link, "new")?;
     assert!(link.is_symlink());
     assert_eq!(fs::read_to_string(target)?, "new");
+    Ok(())
+}
+
+#[test]
+fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("root");
+    let cache_root = directory.path().join("cache-root");
+    fs::create_dir_all(&root)?;
+    fs::create_dir_all(cache_root.join("graphify-out/cache/ast/vold"))?;
+    fs::write(
+        cache_root.join("graphify-out/cache/ast/vold/stale.json"),
+        "{}",
+    )?;
+    fs::write(cache_root.join("graphify-out/cache/ast/legacy.json"), "{}")?;
+    let source = root.join("main.md");
+    fs::write(&source, "---\ntitle: ignored\n---\nbody\n")?;
+
+    let mut cache = Cache::new(&root, Some(&cache_root))?.with_extractor_version("current");
+    assert!(
+        cache
+            .directory(&CacheKind::Ast, None)
+            .ends_with("ast/vcurrent")
+    );
+    assert!(
+        cache
+            .directory(&CacheKind::SemanticMode("deep".to_owned()), Some("abc"))
+            .ends_with("semantic-deep/pabc")
+    );
+    cache.save(
+        &source,
+        &json!({
+            "nodes":[{"source_file":source},{"source_file":"relative.md"},"bad"],
+            "edges":[{"source_file":""}],
+            "hyperedges":[{"source_file":"outside.md"}],
+            "raw_calls":[{"source_file":"relative.md"}]
+        }),
+        &CacheKind::Semantic,
+        None,
+    )?;
+    assert_eq!(
+        cache.load(&source, &CacheKind::Semantic, Some("new"), false, true)?,
+        None
+    );
+    let legacy = cache
+        .load(&source, &CacheKind::Semantic, Some("new"), true, true)?
+        .ok_or("legacy cache entry")?;
+    assert!(
+        legacy["nodes"][0]["source_file"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("main.md"))
+    );
+    assert!(
+        legacy["nodes"][1]["source_file"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("relative.md"))
+    );
+
+    cache.save(
+        &source,
+        &json!({"nodes":[],"edges":[]}),
+        &CacheKind::SemanticMode("deep".to_owned()),
+        Some("old"),
+    )?;
+    let before = cache.cached_files();
+    assert_eq!(before.len(), 1, "identical hashes deduplicate across modes");
+    assert!(cache.prune_semantic(&BTreeSet::new()) >= 2);
+    cache.clear();
+    assert!(cache.cached_files().len() <= 1);
+    assert!(!cache_root.join("graphify-out/cache/ast/vold").exists());
+
+    let missing = root.join("missing.md");
+    cache.save(&missing, &json!({}), &CacheKind::Ast, None)?;
+    assert!(Cache::new(root.join("missing-root"), None).is_err());
+    Ok(())
+}
+
+#[test]
+fn manifest_incremental_tracks_changes_deletions_exclusions_and_legacy_entries()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let first = root.join("first.rs");
+    let second = root.join("second.rs");
+    fs::write(&first, "fn first() {}\n")?;
+    fs::write(&second, "fn second() {}\n")?;
+    let first = fs::canonicalize(first)?;
+    let second = fs::canonicalize(second)?;
+    let manifest_path = root.join("graphify-out/manifest.json");
+
+    let fresh = Manifest::incremental(
+        root,
+        &manifest_path,
+        &DetectOptions::default(),
+        ManifestKind::Both,
+    )?;
+    assert_eq!(fresh.new_total, 2);
+    let mut manifest = Manifest::default();
+    manifest.save(
+        &fresh.detection.files,
+        &manifest_path,
+        ManifestKind::Both,
+        Some(root),
+        None,
+        None,
+    )?;
+    assert!(manifest.is_unchanged(&fresh.detection.files, ManifestKind::Ast));
+    assert!(manifest.is_unchanged(&fresh.detection.files, ManifestKind::Semantic));
+
+    let warm = Manifest::incremental(
+        root,
+        &manifest_path,
+        &DetectOptions::default(),
+        ManifestKind::Both,
+    )?;
+    assert_eq!(warm.new_total, 0);
+    let excluded = root.join("excluded.rs");
+    fs::write(&excluded, "fn excluded() {}\n")?;
+    let mut with_excluded = warm.detection.files.clone();
+    with_excluded
+        .entry("code".to_owned())
+        .or_default()
+        .push(fs::canonicalize(&excluded)?.to_string_lossy().into_owned());
+    manifest.save(
+        &with_excluded,
+        &manifest_path,
+        ManifestKind::Both,
+        Some(root),
+        None,
+        None,
+    )?;
+    fs::write(&first, "fn first_changed() {}\n")?;
+    fs::remove_file(&second)?;
+    fs::write(root.join(".graphifyignore"), "excluded.rs\n")?;
+    let delta = Manifest::incremental(
+        root,
+        &manifest_path,
+        &DetectOptions::default(),
+        ManifestKind::Both,
+    )?;
+    assert!(
+        delta.new_files["code"]
+            .iter()
+            .any(|path| path == first.to_string_lossy().as_ref())
+    );
+    assert!(
+        delta
+            .deleted_files
+            .iter()
+            .any(|path| path == second.to_string_lossy().as_ref())
+    );
+    assert!(
+        delta
+            .excluded_files
+            .iter()
+            .any(|path| path.ends_with("excluded.rs"))
+    );
+
+    let clear = BTreeSet::from([first.to_string_lossy().into_owned()]);
+    manifest.save(
+        &delta.detection.files,
+        &manifest_path,
+        ManifestKind::Ast,
+        Some(root),
+        None,
+        Some(&clear),
+    )?;
+    let loaded = Manifest::load(&manifest_path, Some(root));
+    assert!(
+        loaded.entries()[first.to_string_lossy().as_ref()]
+            .semantic_hash
+            .is_empty()
+    );
+
+    fs::write(
+        &manifest_path,
+        format!(
+            "{{\"{}\":1.0,\"object.rs\":{{\"mtime\":2.0,\"hash\":\"legacy\"}},\"bad\":null}}",
+            first.to_string_lossy().replace('\\', "\\\\")
+        ),
+    )?;
+    assert_eq!(Manifest::load(&manifest_path, None).entries().len(), 2);
+    fs::write(&manifest_path, "[]")?;
+    assert!(Manifest::load(&manifest_path, None).entries().is_empty());
+    fs::write(&manifest_path, "not json")?;
+    assert!(Manifest::load(&manifest_path, None).entries().is_empty());
+    Ok(())
+}
+
+#[test]
+fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("unicode.md");
+    fs::write(&source, "αβ\n# Heading\n\nbody\n")?;
+    assert_eq!(slice_boundaries("", 0), vec![(0, 0)]);
+    let zero_limit = slice_boundaries("abc", 0);
+    assert_eq!(zero_limit, vec![(0, 1), (1, 2), (2, 3)]);
+    let ranges = slice_boundaries("one\n\n# two\nthree", 9);
+    assert_eq!(ranges.first().map(|range| range.0), Some(0));
+    assert_eq!(ranges.last().map(|range| range.1), Some(16));
+
+    let slices = split_file(&source, 8)?;
+    assert!(slices.len() > 1);
+    assert!(!read_slice_text(&slices[0])?.is_empty());
+    let whole = FileSlice {
+        path: source.clone(),
+        start: 0,
+        end: usize::MAX,
+        index: 0,
+        total: 1,
+    };
+    let (left, right) = bisect_slice(&whole)?.ok_or("bisected slice")?;
+    assert_eq!(left.end, right.start);
+    assert!(right.end < usize::MAX);
+    let tiny = FileSlice {
+        end: 1,
+        ..whole.clone()
+    };
+    assert!(bisect_slice(&tiny)?.is_none());
+    let missing = FileSlice {
+        path: directory.path().join("missing.md"),
+        ..tiny
+    };
+    assert!(read_slice_text(&missing).is_err());
+    assert!(bisect_slice(&missing).is_err());
+    let binary = directory.path().join("data.bin");
+    fs::write(&binary, "long binary payload")?;
+    assert_eq!(split_file(&binary, 1)?.len(), 1);
+
+    assert_eq!(
+        prompt_fingerprint(" prompt  \r\n"),
+        prompt_fingerprint("prompt\n")
+    );
+    assert_eq!(md5_file(&source)?.len(), 32);
+    assert_eq!(file_hash(&source, directory.path())?.len(), 64);
+    assert!(file_hash(directory.path(), directory.path()).is_err());
+    let mut index = StatHashIndex::load(directory.path(), "graphify-out");
+    let first_hash = index.hash(&source, directory.path())?;
+    assert_eq!(index.hash(&source, directory.path())?, first_hash);
+    assert_eq!(index.word_count(&source, |_| 4), 4);
+    assert_eq!(index.word_count(&source, |_| 99), 4);
+    assert_eq!(index.word_count(&missing.path, |_| 7), 7);
+    index.flush()?;
+    index.flush()?;
+
+    let nested = directory.path().join("nested/out.bin");
+    write_bytes_atomic(&nested, b"bytes")?;
+    assert_eq!(fs::read(&nested)?, b"bytes");
+    let json_path = directory.path().join("nested/value.json");
+    write_json_atomic(&json_path, &json!({"x":1}), true)?;
+    assert!(fs::read_to_string(json_path)?.contains("\n"));
+    fs::write(directory.path().join("not-a-directory"), "file")?;
+    assert!(write_text_atomic(directory.path().join("not-a-directory/child"), "x").is_err());
+
+    let guard = BuildGuard::begin(directory.path())?;
+    fs::remove_file(directory.path().join(".trail-build-incomplete"))?;
+    guard.commit()?;
     Ok(())
 }

@@ -43,6 +43,7 @@ fn best_cut(text: &str, start: usize, end: usize) -> usize {
 /// Gap-free Python-compatible character ranges covering all input.
 pub fn slice_boundaries(text: &str, max_chars: usize) -> Vec<(usize, usize)> {
     let length = text.chars().count();
+    let max_chars = max_chars.max(1);
     if length <= max_chars {
         return vec![(0, length)];
     }
@@ -105,26 +106,30 @@ pub fn read_slice_text(slice: &FileSlice) -> Result<String, FileError> {
 }
 
 pub fn bisect_slice(slice: &FileSlice) -> Result<Option<(FileSlice, FileSlice)>, FileError> {
-    if slice.end.saturating_sub(slice.start) <= 1 {
-        return Ok(None);
-    }
     let bytes = fs::read(&slice.path).map_err(|source| io_error(&slice.path, source))?;
     let text = String::from_utf8_lossy(&bytes).chars().collect::<Vec<_>>();
-    let midpoint = (slice.start + slice.end) / 2;
-    let cut = text[midpoint..slice.end]
+    let start = slice.start.min(text.len());
+    let end = slice.end.min(text.len());
+    if end.saturating_sub(start) <= 1 {
+        return Ok(None);
+    }
+    let midpoint = start + (end - start) / 2;
+    let cut = text[midpoint..end]
         .iter()
         .position(|character| *character == '\n')
         .map_or(midpoint, |offset| midpoint + offset + 1);
-    if cut <= slice.start || cut >= slice.end {
+    if cut <= start || cut >= end {
         return Ok(None);
     }
     Ok(Some((
         FileSlice {
+            start,
             end: cut,
             ..slice.clone()
         },
         FileSlice {
             start: cut,
+            end,
             ..slice.clone()
         },
     )))
