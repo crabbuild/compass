@@ -197,10 +197,14 @@ fn extract_errors_unknown_flags_and_dedup_key_gate_match_python() -> Result<(), 
     let semantic = tempfile::tempdir()?;
     fs::write(semantic.path().join("guide.md"), "# Guide\n")?;
     let semantic_root = semantic.path().to_string_lossy();
-    let arguments = [semantic_root.as_ref(), "--dedup-llm"];
-    assert_same_output(
-        &run_python(&arguments, home.path())?,
-        &run_rust(&arguments, home.path())?,
-    );
+    for suffix in [Vec::<&str>::new(), vec!["--dedup-llm"]] {
+        let mut arguments = vec![semantic_root.as_ref()];
+        arguments.extend(suffix);
+        remove_output(semantic.path())?;
+        let expected = run_python(&arguments, home.path())?;
+        remove_output(semantic.path())?;
+        let actual = run_rust(&arguments, home.path())?;
+        assert_same_output(&expected, &actual);
+    }
     Ok(())
 }
