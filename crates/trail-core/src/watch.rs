@@ -18,6 +18,7 @@ pub struct WatchOptions {
     pub debounce: Duration,
     pub poll_interval: Duration,
     pub force_polling: bool,
+    pub graphify_compatibility: bool,
 }
 
 impl WatchOptions {
@@ -28,6 +29,7 @@ impl WatchOptions {
             debounce: Duration::from_secs(3),
             poll_interval: Duration::from_millis(500),
             force_polling: false,
+            graphify_compatibility: false,
         }
     }
 }
@@ -189,7 +191,10 @@ fn process_batch(
     paths: Vec<PathBuf>,
     emit: &mut impl FnMut(WatchStatus),
 ) -> Result<(), WatchError> {
-    let deterministic = paths.iter().filter(|path| is_deterministic(path)).count();
+    let deterministic = paths
+        .iter()
+        .filter(|path| is_deterministic(path, options.graphify_compatibility))
+        .count();
     let semantic = paths.len().saturating_sub(deterministic);
     emit(WatchStatus::Batch {
         paths,
@@ -213,9 +218,12 @@ fn process_batch(
     Ok(())
 }
 
-fn is_deterministic(path: &Path) -> bool {
+fn is_deterministic(path: &Path, graphify_compatibility: bool) -> bool {
     classify_file(path).is_some_and(|kind| {
-        kind == FileType::Code || (kind == FileType::Document && Registry::resolve(path).is_some())
+        kind == FileType::Code
+            || (!graphify_compatibility
+                && kind == FileType::Document
+                && Registry::resolve(path).is_some())
     })
 }
 

@@ -397,11 +397,29 @@ fn mcp_help(frontend: McpFrontend) -> String {
 /// Signal registration lives at this process boundary rather than in
 /// `trail-core`, so embedders can provide their own cancellation mechanism.
 pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
+    run_watch_with_frontend(Frontend::Trail, arguments, stdout, stderr)
+}
+
+/// Run the frozen Graphify watch frontend without requiring Python or watchdog.
+pub fn run_graphify_watch(
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> u8 {
+    run_watch_with_frontend(Frontend::Graphify, arguments, stdout, stderr)
+}
+
+fn run_watch_with_frontend(
+    frontend: Frontend,
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> u8 {
     let args = arguments
         .iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let options = match parse_watch_options(&args) {
+    let options = match parse_watch_options(frontend, &args) {
         Ok(Some(options)) => options,
         Ok(None) => {
             let _result = writeln!(stdout, "{}", watch_help());
@@ -420,6 +438,24 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
     }
     let result = watch_local_graph(&options, &stop, |status| match status {
         WatchStatus::Watching { root, debounce } => {
+            if frontend == Frontend::Graphify {
+                let _result = writeln!(
+                    stdout,
+                    "[graphify watch] Watching {} - press Ctrl+C to stop",
+                    root.display()
+                );
+                let _result = writeln!(
+                    stdout,
+                    "[graphify watch] Code changes rebuild graph automatically. Doc/image changes require /graphify --update."
+                );
+                let _result = writeln!(
+                    stdout,
+                    "[graphify watch] Debounce: {:.1}s",
+                    debounce.as_secs_f64()
+                );
+                let _result = stdout.flush();
+                return;
+            }
             let _result = writeln!(
                 stdout,
                 "[trail graph watch] Watching {} - press Ctrl+C to stop",
@@ -441,6 +477,12 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
             deterministic,
             semantic,
         } => {
+            if frontend == Frontend::Graphify {
+                let _result =
+                    writeln!(stdout, "\n[graphify watch] {} file(s) changed", paths.len());
+                let _result = stdout.flush();
+                return;
+            }
             let _result = writeln!(
                 stdout,
                 "\n[trail graph watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
@@ -449,6 +491,32 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
             let _result = stdout.flush();
         }
         WatchStatus::Rebuilt(result) => {
+            if frontend == Frontend::Graphify {
+                if result.outputs_changed {
+                    let _result = writeln!(
+                        stdout,
+                        "[graphify watch] Rebuilt: {} nodes, {} edges, {} communities",
+                        result.nodes, result.edges, result.communities
+                    );
+                    let html = if result.html_written {
+                        ", graph.html"
+                    } else {
+                        ""
+                    };
+                    let _result = writeln!(
+                        stdout,
+                        "[graphify watch] graph.json{html} and GRAPH_REPORT.md updated in {}",
+                        result.output_dir.display()
+                    );
+                } else {
+                    let _result = writeln!(
+                        stdout,
+                        "[graphify watch] No code-graph topology changes detected; outputs left untouched."
+                    );
+                }
+                let _result = stdout.flush();
+                return;
+            }
             let _result = writeln!(
                 stdout,
                 "[trail graph watch] Rebuilt: {} nodes, {} edges, {} communities ({} extracted, {} cached)",
@@ -466,6 +534,32 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
             let _result = stdout.flush();
         }
         WatchStatus::SemanticUpdateRequired { flag } => {
+            if frontend == Frontend::Graphify {
+                let watch_root = flag
+                    .parent()
+                    .and_then(Path::parent)
+                    .unwrap_or_else(|| Path::new("."));
+                let _result = writeln!(
+                    stdout,
+                    "\n[graphify watch] New or changed files detected in {}",
+                    watch_root.display()
+                );
+                let _result = writeln!(
+                    stdout,
+                    "[graphify watch] Non-code files changed - semantic re-extraction requires LLM."
+                );
+                let _result = writeln!(
+                    stdout,
+                    "[graphify watch] Run `/graphify --update` in Claude Code to update the graph."
+                );
+                let _result = writeln!(
+                    stdout,
+                    "[graphify watch] Flag written to {}",
+                    flag.display()
+                );
+                let _result = stdout.flush();
+                return;
+            }
             let _result = writeln!(
                 stdout,
                 "[trail graph watch] Semantic media changed; update required. Flag written to {}",
@@ -474,6 +568,11 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
             let _result = stdout.flush();
         }
         WatchStatus::EventError(error) => {
+            if frontend == Frontend::Graphify {
+                let _result = writeln!(stdout, "[graphify watch] Filesystem event error: {error}");
+                let _result = stdout.flush();
+                return;
+            }
             let _result = writeln!(
                 stderr,
                 "[trail graph watch] Filesystem event error: {error}"
@@ -481,11 +580,21 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
             let _result = stderr.flush();
         }
         WatchStatus::RebuildError(error) => {
-            let _result = writeln!(stderr, "[trail graph watch] Rebuild failed: {error}");
-            let _result = stderr.flush();
+            if frontend == Frontend::Graphify {
+                let _result = writeln!(stdout, "[graphify watch] Rebuild failed: {error}");
+                let _result = stdout.flush();
+            } else {
+                let _result = writeln!(stderr, "[trail graph watch] Rebuild failed: {error}");
+                let _result = stderr.flush();
+            }
         }
         WatchStatus::Stopped => {
-            let _result = writeln!(stdout, "\n[trail graph watch] Stopped.");
+            let label = if frontend == Frontend::Graphify {
+                "graphify watch"
+            } else {
+                "trail graph watch"
+            };
+            let _result = writeln!(stdout, "\n[{label}] Stopped.");
             let _result = stdout.flush();
         }
     });
@@ -498,7 +607,22 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
     }
 }
 
-fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> {
+fn parse_watch_options(
+    frontend: Frontend,
+    args: &[String],
+) -> Result<Option<WatchOptions>, String> {
+    if frontend == Frontend::Graphify {
+        let root = args
+            .first()
+            .map_or_else(|| PathBuf::from("."), PathBuf::from);
+        if !root.exists() {
+            return Err(format!("error: path not found: {}", root.display()));
+        }
+        let mut options = WatchOptions::new(root);
+        options.graphify_compatibility = true;
+        options.force_polling = cfg!(target_os = "macos");
+        return Ok(Some(options));
+    }
     let mut root = None;
     let mut output_root = None;
     let mut debounce = Duration::from_secs(3);
@@ -2846,7 +2970,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  update\n  watch\n  cluster-only\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 

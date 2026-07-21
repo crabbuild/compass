@@ -3,6 +3,13 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if arguments.first().and_then(|value| value.to_str()) == Some("watch") {
+        return ExitCode::from(trail_cli::run_graphify_watch(
+            &arguments[1..],
+            &mut io::stdout(),
+            &mut io::stderr(),
+        ));
+    }
     let outcome = trail_cli::run(trail_cli::Frontend::Graphify, arguments);
     emit(
         &outcome.stdout,
