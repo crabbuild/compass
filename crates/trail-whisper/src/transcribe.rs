@@ -564,3 +564,148 @@ pub fn validate_language_for_model(model: &WhisperModel, language: Option<&str>)
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_transformers::models::whisper::Config;
+
+    fn transcription_config(multilingual: bool) -> Config {
+        Config {
+            num_mel_bins: 80,
+            max_source_positions: N_FRAMES / 2,
+            d_model: 4,
+            encoder_attention_heads: 2,
+            encoder_layers: 0,
+            vocab_size: if multilingual { 51_865 } else { 51_864 },
+            max_target_positions: 32,
+            decoder_attention_heads: 2,
+            decoder_layers: 1,
+            suppress_tokens: Vec::new(),
+        }
+    }
+
+    fn fast_options() -> TranscribeOptions {
+        TranscribeOptions {
+            temperatures: vec![0.0],
+            compression_ratio_threshold: None,
+            logprob_threshold: None,
+            no_speech_threshold: None,
+            condition_on_previous_text: false,
+            initial_prompt: Some("Trail graph".to_owned()),
+            clip_timestamps: vec![0.0, 0.05],
+            decode_options: DecodingOptions {
+                language: Some("en".to_owned()),
+                sample_len: Some(1),
+                suppress_blank: false,
+                default_suppress: false,
+                without_timestamps: true,
+                ..DecodingOptions::default()
+            },
+            ..TranscribeOptions::default()
+        }
+    }
+
+    fn segment_with_words(words: Option<Vec<Word>>) -> Segment {
+        Segment {
+            id: 0,
+            seek: 0,
+            start: 0.0,
+            end: 3.0,
+            text: "fixture".to_owned(),
+            tokens: vec![1],
+            temperature: 0.0,
+            avg_logprob: -0.5,
+            compression_ratio: 1.0,
+            no_speech_prob: 0.0,
+            words,
+        }
+    }
+
+    #[test]
+    fn short_audio_runs_the_complete_window_pipeline() -> Result<()> {
+        let mut model = WhisperModel::for_test_random(transcription_config(false))?;
+        let options = fast_options();
+        let audio = vec![0.0; 1_600];
+        let result = transcribe(&mut model, &audio, &options)?;
+        assert_eq!(result.language, "en");
+        assert!(result.segments.len() <= 1);
+        Ok(())
+    }
+
+    #[test]
+    fn fallback_ladder_and_word_timestamps_run_on_a_bounded_clip() -> Result<()> {
+        let mut model = WhisperModel::for_test_random(transcription_config(false))?;
+        let mut options = fast_options();
+        options.temperatures = vec![0.0, 0.5];
+        options.compression_ratio_threshold = Some(-1.0);
+        options.word_timestamps = true;
+        options.carry_initial_prompt = true;
+        options.hallucination_silence_threshold = Some(0.01);
+        let result = transcribe(&mut model, &[0.0; 800], &options)?;
+        assert_eq!(result.language, "en");
+        assert!(
+            result
+                .segments
+                .iter()
+                .all(|segment| segment.words.is_some())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_empty_temperature_ladder_is_reported() -> Result<()> {
+        let mut model = WhisperModel::for_test(transcription_config(false))?;
+        let mut options = fast_options();
+        options.temperatures.clear();
+        let error = transcribe(&mut model, &[0.0; 160], &options);
+        assert!(error.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn language_and_hallucination_guards_cover_edge_cases() -> Result<()> {
+        let english = WhisperModel::for_test(transcription_config(false))?;
+        assert!(validate_language_for_model(&english, None).is_ok());
+        assert!(validate_language_for_model(&english, Some("english")).is_ok());
+        assert!(validate_language_for_model(&english, Some("fr")).is_err());
+        let multilingual = WhisperModel::for_test(transcription_config(true))?;
+        assert!(validate_language_for_model(&multilingual, Some("fr")).is_ok());
+
+        let improbable = Word {
+            word: "unlikely".to_owned(),
+            start: 0.0,
+            end: 3.5,
+            probability: 0.1,
+        };
+        assert!(word_anomaly_score(&improbable) > 2.0);
+        let too_short = Word {
+            word: "brief".to_owned(),
+            start: 1.0,
+            end: 1.01,
+            probability: 1.0,
+        };
+        assert!(word_anomaly_score(&too_short) > 1.0);
+
+        let anomalous = segment_with_words(Some(vec![improbable]));
+        let ordinary = segment_with_words(Some(vec![Word {
+            word: "normal".to_owned(),
+            start: 1.0,
+            end: 1.5,
+            probability: 0.9,
+        }]));
+        let empty = segment_with_words(Some(Vec::new()));
+        assert!(is_segment_anomaly(Some(&anomalous)));
+        assert!(!is_segment_anomaly(Some(&ordinary)));
+        assert!(!is_segment_anomaly(Some(&empty)));
+        assert!(!is_segment_anomaly(None));
+        assert!(has_words(&ordinary));
+        assert!(!has_words(&empty));
+        assert_eq!(
+            next_words_segment(&[empty, ordinary]).map(|s| s.text.as_str()),
+            Some("fixture")
+        );
+        assert_eq!(get_end(&[anomalous]), Some(3.5));
+        Ok(())
+    }
+}

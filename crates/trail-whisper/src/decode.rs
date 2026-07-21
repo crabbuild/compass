@@ -719,3 +719,180 @@ pub fn decode(
 ) -> Result<DecodingResult> {
     DecodingTask::new(model, tokenizer, options)?.run(mel)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::{DType, Device};
+    use candle_transformers::models::whisper::Config;
+
+    fn tiny_config(multilingual: bool) -> Config {
+        Config {
+            num_mel_bins: 2,
+            max_source_positions: 4,
+            d_model: 4,
+            encoder_attention_heads: 2,
+            encoder_layers: 1,
+            vocab_size: if multilingual { 51_865 } else { 51_864 },
+            max_target_positions: 16,
+            decoder_attention_heads: 2,
+            decoder_layers: 1,
+            suppress_tokens: Vec::new(),
+        }
+    }
+
+    fn english_tokenizer() -> Result<Tokenizer> {
+        crate::tokenizer::get_tokenizer(false, 99, Some("en"), Some(Task::Transcribe))
+    }
+
+    #[test]
+    fn decoding_option_validation_rejects_incompatible_search_modes() -> Result<()> {
+        let tokenizer = english_tokenizer()?;
+        let mut model = WhisperModel::for_test(tiny_config(false))?;
+
+        let both = DecodingOptions {
+            beam_size: Some(2),
+            best_of: Some(2),
+            ..DecodingOptions::default()
+        };
+        assert!(DecodingTask::new(&mut model, &tokenizer, both).is_err());
+
+        let greedy_best_of = DecodingOptions {
+            best_of: Some(2),
+            ..DecodingOptions::default()
+        };
+        assert!(DecodingTask::new(&mut model, &tokenizer, greedy_best_of).is_err());
+
+        let patience_without_beam = DecodingOptions {
+            patience: Some(1.5),
+            ..DecodingOptions::default()
+        };
+        assert!(DecodingTask::new(&mut model, &tokenizer, patience_without_beam).is_err());
+
+        let bad_length_penalty = DecodingOptions {
+            length_penalty: Some(1.1),
+            ..DecodingOptions::default()
+        };
+        assert!(DecodingTask::new(&mut model, &tokenizer, bad_length_penalty).is_err());
+
+        let zero_candidates = DecodingOptions {
+            beam_size: Some(2),
+            patience: Some(0.0),
+            ..DecodingOptions::default()
+        };
+        assert!(DecodingTask::new(&mut model, &tokenizer, zero_candidates).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn tiny_model_runs_greedy_sampling_and_beam_decoders() -> Result<()> {
+        let device = Device::Cpu;
+        let tokenizer = english_tokenizer()?;
+        let mel = Tensor::zeros((1, 2, 8), DType::F32, &device)?;
+
+        let mut greedy_model = WhisperModel::for_test(tiny_config(false))?;
+        let greedy = decode(
+            &mut greedy_model,
+            &tokenizer,
+            &mel,
+            DecodingOptions {
+                language: Some("en".to_owned()),
+                sample_len: Some(2),
+                without_timestamps: true,
+                suppress_blank: false,
+                default_suppress: false,
+                ..DecodingOptions::default()
+            },
+        )?;
+        assert_eq!(greedy.language, "en");
+        assert_eq!(greedy.temperature, 0.0);
+
+        let mut sampling_model = WhisperModel::for_test(tiny_config(false))?;
+        let sampled = decode(
+            &mut sampling_model,
+            &tokenizer,
+            &mel,
+            DecodingOptions {
+                language: Some("en".to_owned()),
+                temperature: 0.5,
+                best_of: Some(2),
+                sample_len: Some(1),
+                without_timestamps: true,
+                suppress_blank: false,
+                default_suppress: false,
+                ..DecodingOptions::default()
+            },
+        )?;
+        assert_eq!(sampled.language, "en");
+        assert_eq!(sampled.temperature, 0.5);
+
+        let mut beam_model = WhisperModel::for_test(tiny_config(false))?;
+        let beam = decode(
+            &mut beam_model,
+            &tokenizer,
+            &mel,
+            DecodingOptions {
+                language: Some("en".to_owned()),
+                beam_size: Some(2),
+                sample_len: Some(2),
+                without_timestamps: true,
+                suppress_blank: false,
+                default_suppress: false,
+                ..DecodingOptions::default()
+            },
+        )?;
+        assert_eq!(beam.language, "en");
+        Ok(())
+    }
+
+    #[test]
+    fn language_detection_scores_every_supported_language() -> Result<()> {
+        let device = Device::Cpu;
+        let mut model = WhisperModel::for_test(tiny_config(true))?;
+        let tokenizer = crate::tokenizer::get_tokenizer(
+            true,
+            model.num_languages(),
+            Some("en"),
+            Some(Task::Transcribe),
+        )?;
+        let mel = Tensor::zeros((1, 2, 8), DType::F32, &device)?;
+        let features = model.encoder_forward(&mel, true)?;
+        let (language, probabilities) = detect_language(&mut model, &tokenizer, &features)?;
+        assert_eq!(probabilities.len(), model.num_languages());
+        assert!(probabilities.contains_key(&language));
+        Ok(())
+    }
+
+    #[test]
+    fn timestamp_filters_and_numeric_helpers_cover_boundary_rules() {
+        let rules = TimestampRules {
+            no_timestamps: 2,
+            timestamp_begin: 6,
+            eot: 1,
+            sample_begin: 2,
+            max_initial_timestamp_index: Some(1),
+        };
+
+        let mut initial = vec![0.0; 10];
+        apply_timestamp_rules(&mut initial, &[3, 4], &rules);
+        assert!(initial[..6].iter().all(|value| value.is_infinite()));
+        assert!(initial[8..].iter().all(|value| value.is_infinite()));
+
+        let mut after_pair = vec![0.0; 10];
+        apply_timestamp_rules(&mut after_pair, &[3, 4, 6, 7], &rules);
+        assert!(after_pair[6..].iter().all(|value| value.is_infinite()));
+
+        let mut after_text = vec![0.0; 10];
+        apply_timestamp_rules(&mut after_text, &[3, 4, 5, 7], &rules);
+        assert!(after_text[..1].iter().all(|value| value.is_infinite()));
+
+        let normalized = log_softmax(&[0.0, 0.0]);
+        assert!((normalized[0].exp() - 0.5).abs() < 1e-6);
+        assert_eq!(topk(&[1.0, 3.0, 2.0], 2), vec![(1, 3.0), (2, 2.0)]);
+        assert_eq!(argmax(&[1.0, 4.0, 2.0]), 1);
+        assert_eq!(argmax(&[]), 0);
+
+        let mut rng = rand::thread_rng();
+        assert_eq!(sample_gumbel(&[f32::NEG_INFINITY, 0.0], 0.5, &mut rng), 1);
+    }
+}

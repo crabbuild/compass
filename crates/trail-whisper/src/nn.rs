@@ -753,3 +753,85 @@ impl<E: Module, D: Module> Whisper<E, D> {
         self.decoder.reset_kv_cache();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::DType;
+
+    fn tiny_config() -> Config {
+        Config {
+            num_mel_bins: 2,
+            max_source_positions: 4,
+            d_model: 4,
+            encoder_attention_heads: 2,
+            encoder_layers: 1,
+            vocab_size: 16,
+            max_target_positions: 8,
+            decoder_attention_heads: 2,
+            decoder_layers: 1,
+            suppress_tokens: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn tiny_model_exercises_prefill_incremental_and_alignment_paths() -> Result<()> {
+        let device = Device::Cpu;
+        let config = tiny_config();
+        let builder = VarBuilder::zeros(DType::F32, &device);
+        let mut model = Whisper::load(&builder, config.clone())?;
+
+        let mel = Tensor::zeros((1, config.num_mel_bins, 8), DType::F32, &device)?;
+        let audio = model.encoder_forward(&mel, true)?;
+        assert_eq!(
+            audio.dims(),
+            &[1, config.max_source_positions, config.d_model]
+        );
+
+        let prompt = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &device)?;
+        let hidden = model.decoder_forward(&prompt, &audio, true)?;
+        assert_eq!(hidden.dims(), &[1, 3, config.d_model]);
+
+        let next = Tensor::from_vec(vec![4u32], (1, 1), &device)?;
+        let incremental = model.decoder_forward(&next, &audio, false)?;
+        assert_eq!(incremental.dims(), &[1, 1, config.d_model]);
+        assert_eq!(model.decoder.cache_len(), 4);
+
+        let logits = model.decoder.final_linear(&incremental)?;
+        assert_eq!(logits.dims(), &[1, 1, config.vocab_size]);
+
+        let (aligned, cross_qk) = model.decoder_forward_with_cross_qk(&prompt, &audio)?;
+        assert_eq!(aligned.dims(), &[1, 3, config.d_model]);
+        assert_eq!(cross_qk.len(), config.decoder_layers);
+        assert_eq!(
+            cross_qk[0].dims(),
+            &[
+                1,
+                config.decoder_attention_heads,
+                3,
+                config.max_source_positions,
+            ]
+        );
+
+        model.rearrange_kv_cache(&[0])?;
+        model.reset_kv_cache();
+        assert_eq!(model.decoder.cache_len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn cache_reordering_tracks_beam_sources() -> Result<()> {
+        let device = Device::Cpu;
+        let config = tiny_config();
+        let builder = VarBuilder::zeros(DType::F32, &device);
+        let mut model = Whisper::load(&builder, config.clone())?;
+
+        let mel = Tensor::zeros((2, config.num_mel_bins, 8), DType::F32, &device)?;
+        let audio = model.encoder_forward(&mel, true)?;
+        let prompt = Tensor::from_vec(vec![1u32, 2, 3, 4], (2, 2), &device)?;
+        model.decoder_forward(&prompt, &audio, true)?;
+        model.rearrange_kv_cache(&[1, 0])?;
+        assert_eq!(model.decoder.cache_len(), 2);
+        Ok(())
+    }
+}

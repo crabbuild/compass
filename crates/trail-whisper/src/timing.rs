@@ -420,3 +420,116 @@ pub fn add_word_timestamps(
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::WhisperModel;
+    use crate::tokenizer::{Task, get_tokenizer};
+    use candle_core::{DType, Device};
+    use candle_transformers::models::whisper::Config;
+
+    fn tiny_config() -> Config {
+        Config {
+            num_mel_bins: 2,
+            max_source_positions: 4,
+            d_model: 4,
+            encoder_attention_heads: 2,
+            encoder_layers: 1,
+            vocab_size: 51_864,
+            max_target_positions: 32,
+            decoder_attention_heads: 2,
+            decoder_layers: 1,
+            suppress_tokens: Vec::new(),
+        }
+    }
+
+    fn word(word: &str, token: u32) -> WordTiming {
+        WordTiming {
+            word: word.to_owned(),
+            tokens: vec![token],
+            start: token as f64,
+            end: token as f64 + 0.5,
+            probability: 0.75,
+        }
+    }
+
+    #[test]
+    fn median_filter_dtw_and_punctuation_rules_match_reference_shapes() {
+        let mut samples = vec![1.0, 100.0, 2.0, 3.0, 4.0, 9.0];
+        median_filter_rows(&mut samples, 3, 3);
+        assert_eq!(samples[1], 2.0);
+
+        let mut too_short = vec![2.0, 1.0];
+        median_filter_rows(&mut too_short, 2, 5);
+        assert_eq!(too_short, vec![2.0, 1.0]);
+
+        let (text, time) = dtw(&[1.0, 2.0, 9.0, 9.0, 2.0, 1.0], 2, 3);
+        assert_eq!(text.first(), Some(&0));
+        assert_eq!(time.first(), Some(&0));
+        assert_eq!(text.last(), Some(&1));
+        assert_eq!(time.last(), Some(&2));
+
+        let mut alignment = vec![word(" (", 1), word("hello", 2), word("!", 3)];
+        merge_punctuations(&mut alignment, "(", "!");
+        assert!(alignment[0].word.is_empty());
+        assert_eq!(alignment[1].word, " (hello!");
+        assert_eq!(alignment[1].tokens, vec![1, 2, 3]);
+        assert!(alignment[2].word.is_empty());
+    }
+
+    #[test]
+    fn empty_alignment_and_segment_sets_are_noops() -> Result<()> {
+        let device = Device::Cpu;
+        let mut model = WhisperModel::for_test(tiny_config())?;
+        let tokenizer = get_tokenizer(false, 99, Some("en"), Some(Task::Transcribe))?;
+        let mel = Tensor::zeros((1, 2, 8), DType::F32, &device)?;
+        assert!(find_alignment(&mut model, &tokenizer, &[], &mel, 8, 3, 1.0)?.is_empty());
+        add_word_timestamps(&mut [], &mut model, &tokenizer, &mel, 8, "(", "!", 0.0)?;
+        Ok(())
+    }
+
+    #[test]
+    fn tiny_random_model_exercises_alignment_and_segment_attachment() -> Result<()> {
+        let device = Device::Cpu;
+        let mut model = WhisperModel::for_test_random(tiny_config())?;
+        let tokenizer = get_tokenizer(false, 99, Some("en"), Some(Task::Transcribe))?;
+        let text_tokens = tokenizer.encode(" hello world");
+        let mel = Tensor::zeros((1, 2, 8), DType::F32, &device)?;
+
+        let alignment = find_alignment(&mut model, &tokenizer, &text_tokens, &mel, 8, 3, 1.0)?;
+        assert!(!alignment.is_empty());
+        assert!(alignment.iter().all(|item| item.start <= item.end));
+
+        let mut segments = vec![Segment {
+            id: 0,
+            seek: 0,
+            start: 0.0,
+            end: 1.0,
+            text: " hello world".to_owned(),
+            tokens: text_tokens,
+            temperature: 0.0,
+            avg_logprob: -0.5,
+            compression_ratio: 1.0,
+            no_speech_prob: 0.0,
+            words: None,
+        }];
+        add_word_timestamps(
+            &mut segments,
+            &mut model,
+            &tokenizer,
+            &mel,
+            8,
+            "(",
+            "!",
+            0.0,
+        )?;
+        assert!(
+            segments[0]
+                .words
+                .as_ref()
+                .is_some_and(|words| !words.is_empty())
+        );
+        Ok(())
+    }
+}
