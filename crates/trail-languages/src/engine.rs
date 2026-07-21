@@ -2116,10 +2116,11 @@ fn clean_name(value: String) -> String {
 
 fn quoted_value(value: &str) -> Option<String> {
     for quote in ['\'', '"'] {
-        let start = value.find(quote)?;
-        let rest = &value[start + quote.len_utf8()..];
-        if let Some(end) = rest.find(quote) {
-            return Some(rest[..end].to_owned());
+        if let Some(start) = value.find(quote) {
+            let rest = &value[start + quote.len_utf8()..];
+            if let Some(end) = rest.find(quote) {
+                return Some(rest[..end].to_owned());
+            }
         }
     }
     None
