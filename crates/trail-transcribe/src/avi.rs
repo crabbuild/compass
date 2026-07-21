@@ -833,6 +833,143 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn wave_formats_samples_and_chunk_ids_cover_supported_matrix()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (tag, bits, bytes, expected) in [
+            (WAVE_FORMAT_PCM, 8, vec![255], 127.0 / 128.0),
+            (
+                WAVE_FORMAT_PCM,
+                16,
+                i16::MAX.to_le_bytes().to_vec(),
+                i16::MAX as f32 / 32_768.0,
+            ),
+            (
+                WAVE_FORMAT_PCM,
+                24,
+                vec![0xff, 0xff, 0x7f],
+                8_388_607.0 / 8_388_608.0,
+            ),
+            (WAVE_FORMAT_PCM, 32, i32::MIN.to_le_bytes().to_vec(), -1.0),
+            (
+                WAVE_FORMAT_IEEE_FLOAT,
+                32,
+                0.25_f32.to_le_bytes().to_vec(),
+                0.25,
+            ),
+            (
+                WAVE_FORMAT_IEEE_FLOAT,
+                64,
+                0.5_f64.to_le_bytes().to_vec(),
+                0.5,
+            ),
+        ] {
+            assert!((decode_sample(&bytes, tag, bits)? - expected).abs() < 0.000_01);
+        }
+        assert!(decode_sample(&[0; 2], 99, 16).is_err());
+        assert_eq!(audio_chunk_stream(*b"00wb"), Some(0));
+        assert_eq!(audio_chunk_stream(*b"Afwb"), Some(175));
+        assert_eq!(audio_chunk_stream(*b"ggwb"), None);
+        assert_eq!(audio_chunk_stream(*b"00dc"), None);
+        assert_eq!(align_even(3)?, 4);
+        assert_eq!(align_even(4)?, 4);
+        assert!(align_even(u64::MAX).is_err());
+        assert!(le_u16(&[], 0).is_err());
+        assert!(le_u32(&[0; 3], 0).is_err());
+
+        let limits = AudioLimits::default();
+        for (channels, rate, alignment, tag, bits) in [
+            (0, 16_000, 2, WAVE_FORMAT_PCM, 16),
+            (65, 16_000, 130, WAVE_FORMAT_PCM, 16),
+            (1, 0, 2, WAVE_FORMAT_PCM, 16),
+            (1, 768_001, 2, WAVE_FORMAT_PCM, 16),
+            (1, 16_000, 0, WAVE_FORMAT_PCM, 16),
+            (1, 16_000, 2, WAVE_FORMAT_PCM, 12),
+            (1, 16_000, 4, WAVE_FORMAT_IEEE_FLOAT, 16),
+            (2, 16_000, 2, WAVE_FORMAT_PCM, 16),
+        ] {
+            assert!(
+                validate_format(
+                    WaveFormat {
+                        tag,
+                        channels,
+                        sample_rate: rate,
+                        block_align: alignment,
+                        bits_per_sample: bits,
+                        aac_config: None,
+                    },
+                    limits
+                )
+                .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_wave_and_aac_metadata_are_bounded() -> Result<(), Box<dyn std::error::Error>> {
+        assert!(parse_wave_format(&[0; 15]).is_err());
+        let mut extensible = pcm_format(16_000, 1);
+        extensible[..2].copy_from_slice(&WAVE_FORMAT_EXTENSIBLE.to_le_bytes());
+        assert!(parse_wave_format(&extensible).is_err());
+        extensible.resize(40, 0);
+        extensible[16..18].copy_from_slice(&22_u16.to_le_bytes());
+        assert!(parse_wave_format(&extensible).is_err());
+
+        let mut aac = pcm_format(48_000, 1);
+        aac[..2].copy_from_slice(&WAVE_FORMAT_RAW_AAC.to_le_bytes());
+        assert!(parse_wave_format(&aac).is_err());
+        aac.extend_from_slice(&1_u16.to_le_bytes());
+        aac.push(0);
+        assert!(parse_wave_format(&aac).is_err());
+
+        let config = AacConfig {
+            object_type: 2,
+            frequency_index: 3,
+            channel_config: 1,
+        };
+        assert!(adts_header(8_185, config).is_err());
+        for (object_type, frequency_index, channel_config) in
+            [(0_u8, 3_u8, 1_u8), (5, 3, 1), (2, 15, 1), (2, 3, 8)]
+        {
+            let mut format = pcm_format(48_000, 1);
+            format[..2].copy_from_slice(&WAVE_FORMAT_RAW_AAC.to_le_bytes());
+            format.extend_from_slice(&2_u16.to_le_bytes());
+            format.push((object_type << 3) | (frequency_index >> 1));
+            format.push(((frequency_index & 1) << 7) | (channel_config << 3));
+            assert!(parse_wave_format(&format).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn detection_and_container_failures_are_structured() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("fixture.bin");
+        fs::write(&path, b"short")?;
+        assert!(!is_avi(&path)?);
+        fs::write(&path, b"RIFF\0\0\0\0WAVE")?;
+        assert!(!is_avi(&path)?);
+        assert!(is_avi(&directory.path().join("missing")).is_err());
+
+        for bytes in [
+            Vec::new(),
+            b"not a riff!!".to_vec(),
+            b"RIFF\x03\0\0\0AVI ".to_vec(),
+            b"RIFF\x20\0\0\0AVI ".to_vec(),
+        ] {
+            fs::write(&path, bytes)?;
+            assert!(decode_avi_audio(&path, AudioLimits::default()).is_err());
+        }
+
+        fs::write(&path, riff(*b"AVI ", &[]))?;
+        assert!(
+            decode_avi_audio(&path, AudioLimits::default())
+                .is_err_and(|error| error.to_string().contains("no audio stream"))
+        );
+        Ok(())
+    }
+
     fn pcm_avi<const CHANNELS: usize>(
         sample_rate: u32,
         channels: u16,

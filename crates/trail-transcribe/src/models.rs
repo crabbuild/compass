@@ -218,7 +218,7 @@ fn ensure_artifact(
         })?;
     let mut hasher = ArtifactHasher::new(artifact);
     let mut total = 0_u64;
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let read = reader.read(&mut buffer).map_err(|source| ModelError::Io {
             action: "download model artifact",
@@ -345,7 +345,7 @@ fn verify_file(path: &Path, artifact: &ArtifactSpec) -> Result<bool, ModelError>
         source,
     })?;
     let mut hasher = ArtifactHasher::new(artifact);
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let read = file.read(&mut buffer).map_err(|source| ModelError::Io {
             action: "verify model artifact",
@@ -728,5 +728,136 @@ mod tests {
         let mut hasher = ArtifactHasher::new(&artifact);
         hasher.update(b"abc");
         assert_eq!(hasher.finish(), artifact.digest);
+    }
+
+    struct ErrorFetcher;
+
+    impl ArtifactFetcher for ErrorFetcher {
+        fn fetch(&self, _url: &str, _max_bytes: u64) -> Result<Box<dyn Read>, String> {
+            Err("offline".to_owned())
+        }
+    }
+
+    struct ReadError;
+
+    impl Read for ReadError {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("broken stream"))
+        }
+    }
+
+    struct ReadErrorFetcher;
+
+    impl ArtifactFetcher for ReadErrorFetcher {
+        fn fetch(&self, _url: &str, _max_bytes: u64) -> Result<Box<dyn Read>, String> {
+            Ok(Box::new(ReadError))
+        }
+    }
+
+    #[test]
+    fn download_failures_short_reads_and_invalid_existing_files_are_explicit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        assert!(matches!(
+            ensure_artifact(directory.path(), &TEST_MODEL, &TEST_ARTIFACT, &ErrorFetcher),
+            Err(ModelError::Download { .. })
+        ));
+        assert!(matches!(
+            ensure_artifact(
+                directory.path(),
+                &TEST_MODEL,
+                &TEST_ARTIFACT,
+                &ReadErrorFetcher
+            ),
+            Err(ModelError::Io {
+                action: "download model artifact",
+                ..
+            })
+        ));
+
+        let short = StaticFetcher {
+            body: b"ab".to_vec(),
+            calls: Cell::new(0),
+        };
+        assert!(matches!(
+            ensure_artifact(directory.path(), &TEST_MODEL, &TEST_ARTIFACT, &short),
+            Err(ModelError::Size {
+                actual: 2,
+                expected: 3,
+                ..
+            })
+        ));
+
+        fs::write(directory.path().join("config.json"), b"bad")?;
+        let good = StaticFetcher {
+            body: b"abc".to_vec(),
+            calls: Cell::new(0),
+        };
+        ensure_artifact(directory.path(), &TEST_MODEL, &TEST_ARTIFACT, &good)?;
+        assert_eq!(good.calls.get(), 1);
+        assert_eq!(fs::read(directory.path().join("config.json"))?, b"abc");
+        Ok(())
+    }
+
+    #[test]
+    fn verification_markers_must_match_size_digest_and_modification_time()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("config.json");
+        fs::write(&path, b"abc")?;
+        assert!(!verified_marker_matches(&path, &TEST_ARTIFACT)?);
+        fs::write(marker_path(&path), b"not json")?;
+        assert!(matches!(
+            verified_marker_matches(&path, &TEST_ARTIFACT),
+            Err(ModelError::Marker { .. })
+        ));
+        fs::write(
+            marker_path(&path),
+            serde_json::to_vec(&VerifiedMarker {
+                size: 3,
+                modified_nanos: 0,
+                digest: "wrong".to_owned(),
+            })?,
+        )?;
+        assert!(!verified_marker_matches(&path, &TEST_ARTIFACT)?);
+        write_verified_marker(&path, &TEST_ARTIFACT)?;
+        assert!(verified_marker_matches(&path, &TEST_ARTIFACT)?);
+
+        let wrong_size = ArtifactSpec {
+            size: 4,
+            ..TEST_ARTIFACT
+        };
+        assert!(!verified_marker_matches(&path, &wrong_size)?);
+        assert!(!verify_file(&path, &wrong_size)?);
+        Ok(())
+    }
+
+    #[test]
+    fn model_cache_builds_expected_layout_and_rejects_unknown_names()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let cache = ModelCache::new(directory.path().to_path_buf());
+        assert!(matches!(
+            cache.ensure_model("unknown", &ErrorFetcher),
+            Err(ModelError::UnsupportedModel(_))
+        ));
+        let fetcher = StaticFetcher {
+            body: b"abc".to_vec(),
+            calls: Cell::new(0),
+        };
+        let files = cache.ensure_spec(&TEST_MODEL, &fetcher)?;
+        assert!(
+            files
+                .config
+                .ends_with("test/0123456789abcdef0123456789abcdef01234567/config.json")
+        );
+        assert!(files.weights.ends_with("model.safetensors"));
+        assert!(files.generation_config.ends_with("generation_config.json"));
+        assert!(model_spec("missing").is_none());
+        assert!(
+            artifact_url(&TEST_MODEL, &TEST_ARTIFACT)
+                .starts_with("https://huggingface.co/openai/test/resolve/")
+        );
+        Ok(())
     }
 }
