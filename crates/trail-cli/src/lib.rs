@@ -2,6 +2,7 @@
 
 mod hook_commands;
 mod ingest_commands;
+mod install_commands;
 mod integration_commands;
 mod label_commands;
 mod provider_commands;
@@ -42,6 +43,8 @@ use trail_semantic::{
     extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
     resolve_builtin_backend, resolve_custom_backend,
 };
+
+const GRAPHIFY_COMPAT_VERSION: &str = "0.9.20";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frontend {
@@ -150,6 +153,11 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "hook" => hook_commands::command_hook(frontend, &args),
         "hook-spawn" => hook_commands::command_hook_spawn(frontend, &args),
         "hook-refresh" => command_hook_refresh(frontend, &args),
+        "install" => install_commands::command_install(frontend, &args),
+        "uninstall" => install_commands::command_uninstall(frontend, &args),
+        platform if install_commands::is_direct_command(platform) => {
+            install_commands::command_platform(frontend, platform, &args)
+        }
         "tree" if frontend == Frontend::Trail => command_tree(&args),
         "cluster-only" if frontend == Frontend::Trail => command_cluster_only(&args),
         "diagnose" if frontend == Frontend::Trail => command_diagnose(&args),
@@ -166,7 +174,13 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         } else {
             graphify_help()
         }),
-        "--version" | "-V" => Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION"))),
+        "--version" | "-V" => Outcome::success(match frontend {
+            Frontend::Trail => format!("trail {}", env!("CARGO_PKG_VERSION")),
+            Frontend::Graphify => format!("graphify {GRAPHIFY_COMPAT_VERSION}"),
+        }),
+        _ if frontend == Frontend::Graphify => Outcome::failure(format!(
+            "error: unknown command '{command}'\nRun 'graphify --help' for usage."
+        )),
         _ => Outcome::failure(format!("error: unknown graph command '{command}'")),
     }
 }
@@ -2333,7 +2347,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  install\n  uninstall\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -2367,6 +2381,8 @@ fn trail_command_help(command: &str) -> String {
         "clone" => integration_commands::clone_help(Frontend::Trail),
         "add" => ingest_commands::add_help(Frontend::Trail),
         "hook" => hook_commands::hook_help(Frontend::Trail),
+        "install" => install_commands::command_install(Frontend::Trail, &["--help".to_owned()]).stdout,
+        "uninstall" => "Usage: trail graph uninstall [--project] [--purge] [--platform P|P]".to_owned(),
         _ => trail_help(),
     }
 }
@@ -2377,7 +2393,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: graphify <command>\n\nPorted commands:\n  install\n  uninstall\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -2432,6 +2448,23 @@ mod mcp_option_tests {
         assert_eq!(
             parse_session_timeout("1e300"),
             Err("error: --session-timeout is out of range".to_owned())
+        );
+    }
+
+    #[test]
+    fn graphify_version_reports_the_compatibility_baseline() {
+        let outcome = run(Frontend::Graphify, [OsString::from("--version")]);
+        assert_eq!(outcome.code, 0);
+        assert_eq!(outcome.stdout, "graphify 0.9.20");
+    }
+
+    #[test]
+    fn graphify_unknown_command_matches_the_legacy_diagnostic() {
+        let outcome = run(Frontend::Graphify, [OsString::from("not-a-command")]);
+        assert_eq!(outcome.code, 1);
+        assert_eq!(
+            outcome.stderr,
+            "error: unknown command 'not-a-command'\nRun 'graphify --help' for usage."
         );
     }
 }
