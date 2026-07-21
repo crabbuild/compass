@@ -4,8 +4,8 @@ use std::fs;
 
 use serde_json::json;
 use trail_files::{
-    BuildGuard, Cache, CacheKind, DetectOptions, Manifest, ManifestKind, WatchPathFilter,
-    body_content, read_source_lossy, split_file, write_text_atomic,
+    BuildGuard, Cache, CacheKind, DetectOptions, FileType, Manifest, ManifestKind, WatchPathFilter,
+    body_content, classify_file, read_source_lossy, split_file, write_text_atomic,
 };
 
 #[test]
@@ -105,6 +105,122 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
     assert!(!filter.allows(&root.join(".hidden/main.rs")));
     assert!(!filter.allows(&root.join("graphify-out/graph.json")));
     assert!(!filter.allows(&root.join("README.unknown")));
+    Ok(())
+}
+
+#[test]
+fn classification_exercises_manifests_shebangs_media_papers_and_asset_exclusions()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let cases = [
+        ("pyproject.toml", "[project]\n", Some(FileType::Code)),
+        ("view.blade.php", "<div />\n", Some(FileType::Code)),
+        ("main.rs", "fn main() {}\n", Some(FileType::Code)),
+        ("photo.PNG", "image", Some(FileType::Image)),
+        ("clip.MP4", "video", Some(FileType::Video)),
+        ("notes.md", "ordinary notes", Some(FileType::Document)),
+        (
+            "paper.md",
+            "Abstract\nWe propose a method. arXiv 1706.03762\n",
+            Some(FileType::Paper),
+        ),
+        ("unknown.bin", "opaque", None),
+        (
+            "script",
+            "#!/usr/bin/env -S python3 -u\nprint(1)\n",
+            Some(FileType::Code),
+        ),
+        ("plain", "not executable source", None),
+    ];
+    for (name, contents, expected) in cases {
+        let path = directory.path().join(name);
+        fs::write(&path, contents)?;
+        assert_eq!(classify_file(&path), expected, "{name}");
+    }
+
+    let excluded = directory.path().join("Icons.xcassets/App.imageset");
+    fs::create_dir_all(&excluded)?;
+    let pdf = excluded.join("vector.pdf");
+    fs::write(&pdf, b"%PDF")?;
+    assert_eq!(classify_file(&pdf), None);
+
+    let ordinary_pdf = directory.path().join("paper.pdf");
+    fs::write(&ordinary_pdf, b"%PDF")?;
+    assert_eq!(classify_file(&ordinary_pdf), Some(FileType::Paper));
+    Ok(())
+}
+
+#[test]
+fn detector_covers_nested_ignores_memory_sensitive_files_and_large_corpus_warning()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join(".git/info"))?;
+    fs::write(root.join(".git/info/exclude"), "excluded-by-git.rs\n")?;
+    fs::write(
+        root.join(".graphifyignore"),
+        "ignored/**\n!ignored/keep.rs\n*.generated.rs\n",
+    )?;
+    fs::create_dir_all(root.join("ignored"))?;
+    fs::write(root.join("ignored/drop.rs"), "fn drop_me() {}\n")?;
+    fs::write(root.join("ignored/keep.rs"), "fn keep_me() {}\n")?;
+    fs::write(root.join("excluded-by-git.rs"), "fn excluded() {}\n")?;
+    fs::write(root.join("model.generated.rs"), "fn generated() {}\n")?;
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    fs::write(root.join("README.odd"), "unclassified\n")?;
+    fs::write(root.join("credentials.txt"), "secret\n")?;
+    fs::write(root.join(".env.local"), "TOKEN=nope\n")?;
+    fs::write(root.join("song.mp3"), b"audio")?;
+
+    let memory = root.join("graphify-out/memory/nested");
+    fs::create_dir_all(&memory)?;
+    fs::write(memory.join("remember.md"), "# Durable memory\n")?;
+
+    let large = root.join("large.md");
+    fs::write(&large, "word ".repeat(500_001))?;
+
+    let detection = trail_files::detect(root, &DetectOptions::default())?;
+    assert!(detection.needs_graph);
+    assert!(
+        detection
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("Large corpus"))
+    );
+    assert!(
+        detection.files["code"]
+            .iter()
+            .any(|path| path.ends_with("main.rs"))
+    );
+    assert!(
+        detection.files["document"]
+            .iter()
+            .any(|path| path.ends_with("remember.md"))
+    );
+    assert!(
+        detection.files["video"]
+            .iter()
+            .any(|path| path.ends_with("song.mp3"))
+    );
+    assert!(
+        detection
+            .unclassified
+            .iter()
+            .any(|path| path.ends_with("README.odd"))
+    );
+    assert!(
+        detection
+            .skipped_sensitive
+            .iter()
+            .any(|path| path.ends_with("credentials.txt"))
+    );
+    assert!(
+        detection
+            .ignored
+            .iter()
+            .any(|path| path.contains("ignored"))
+    );
+    assert!(detection.graphifyignore_patterns >= 4);
     Ok(())
 }
 

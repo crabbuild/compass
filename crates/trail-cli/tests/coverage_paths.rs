@@ -171,6 +171,7 @@ fn mcp_option_parser_covers_help_equals_missing_and_invalid_values() {
         &["--session-timeout", "bad"],
         &["--session-timeout=NaN"],
         &["--session-timeout=inf"],
+        &["--session-timeout=1e999"],
         &["--wat"],
         &["one.json", "two.json"],
     ];
@@ -181,6 +182,50 @@ fn mcp_option_parser_covers_help_equals_missing_and_invalid_values() {
         assert_eq!(
             run_mcp(McpFrontend::Trail, &args, &mut stdout, &mut stderr),
             2,
+            "{arguments:?}"
+        );
+        assert!(!stderr.is_empty());
+    }
+}
+
+#[test]
+fn mcp_valid_option_forms_reach_native_load_failures_without_starting_a_server() {
+    let missing = "definitely-missing-coverage-graph.json";
+    for arguments in [
+        vec![
+            "--graph",
+            missing,
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--api-key",
+            "fixture-key",
+            "--path",
+            "fixture?invalid",
+            "--json-response",
+            "--stateless",
+            "--session-timeout",
+            "0",
+        ],
+        vec![
+            "--graph=definitely-missing-coverage-graph.json",
+            "--transport=http",
+            "--host=127.0.0.1",
+            "--port=0",
+            "--api-key=fixture-key",
+            "--path=fixture#invalid",
+            "--session-timeout=-1",
+        ],
+    ] {
+        let args = arguments.iter().map(OsString::from).collect::<Vec<_>>();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        assert_eq!(
+            run_mcp(McpFrontend::Trail, &args, &mut stdout, &mut stderr),
+            1,
             "{arguments:?}"
         );
         assert!(!stderr.is_empty());
@@ -221,4 +266,25 @@ fn watch_option_parser_covers_help_validation_and_legacy_missing_path() {
         1
     );
     assert!(String::from_utf8_lossy(&stderr).contains("path not found"));
+}
+
+#[test]
+fn valid_watch_options_reach_missing_root_failure_after_full_parse() {
+    let args = [
+        "definitely-missing-watch-coverage-root",
+        "--no-cluster",
+        "--no-viz",
+        "--no-gitignore",
+        "--poll",
+        "--debounce=0.01",
+        "--out=coverage-out",
+        "--exclude=vendor/**",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect::<Vec<_>>();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    assert_eq!(run_watch(&args, &mut stdout, &mut stderr), 1);
+    assert!(!stderr.is_empty());
 }
