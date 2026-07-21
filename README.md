@@ -129,12 +129,14 @@ cd rust
 cargo build --release --locked --bins
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-targets --locked
+cargo test --workspace --all-targets --all-features --locked
 ```
 
 The scheduled hardening workflow additionally enforces native line coverage,
-runs the safe graph model and traversal crates under Miri, executes the native
-workspace with AddressSanitizer, and fuzzes hostile graph JSON/query input.
+runs focused mutation suites for stable IDs, invalidation, query scoring, graph
+guards, and compatibility mappings, runs the safe graph model and traversal
+crates under Miri, executes the native workspace with AddressSanitizer, and
+fuzzes hostile graph JSON/query input.
 It separately fuzzes untrusted semantic fragments and AVI/audio containers
 before they can reach graph construction or transcription.
 

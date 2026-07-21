@@ -78,14 +78,19 @@ From `rust/`:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-GRAPHIFY_PYTHON=../.venv/bin/python cargo test --workspace --all-targets --locked
+GRAPHIFY_PYTHON=../.venv/bin/python cargo test --workspace --all-targets --all-features --locked
+GRAPHIFY_PYTHON=../.venv/bin/python cargo nextest run --workspace --all-features --locked
+cargo llvm-cov --workspace --all-features --all-targets --locked --lcov --output-path target/trail.lcov
+cargo llvm-cov report --summary-only --fail-under-lines 90 --fail-under-regions 85
+scripts/check_critical_coverage.sh target/trail.lcov 95
 cargo package --workspace --locked --no-verify
 cargo deny check
 ```
 
 Performance qualification is described in `PERFORMANCE.md` and release
 automation is in `.github/workflows/rust-ci.yml`, `rust-hardening.yml`,
-`rust-release.yml`, and `rust-publish.yml`.
+`rust-release.yml`, and `rust-publish.yml`. The hardening workflow also runs
+the pinned mutation matrix and retains each result as release evidence.
 
 ## Post-baseline changes
 
