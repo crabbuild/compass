@@ -256,7 +256,7 @@ mod tests {
     use std::error::Error;
 
     use super::*;
-    use crate::{Counts, SourceScore};
+    use crate::{ContestedSource, Counts, SourceScore};
 
     #[test]
     fn overlay_resolves_unique_labels_and_hashes_source() -> Result<(), Box<dyn Error>> {
@@ -286,6 +286,77 @@ mod tests {
         let overlay = build_learning_overlay(&aggregate, &graph, OffsetDateTime::UNIX_EPOCH);
         assert_eq!(overlay["nodes"]["source_main"]["status"], "preferred");
         assert_ne!(overlay["nodes"]["source_main"]["code_fingerprint"], "");
+        Ok(())
+    }
+
+    #[test]
+    fn contested_overlay_skips_unknown_and_ambiguous_labels() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let graph = directory.path().join("graph.json");
+        fs::write(
+            &graph,
+            r#"{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"a","label":"duplicate"},{"id":"b","label":"duplicate"},{"id":"c","label":"contested"}],"links":[]}"#,
+        )?;
+        let aggregate = Aggregate {
+            contested: vec![
+                ContestedSource {
+                    node: "contested".to_owned(),
+                    pos: 2,
+                    neg: 1,
+                    score: 0.5,
+                    verdict: "mixed".to_owned(),
+                    last: "2026-01-01".to_owned(),
+                },
+                ContestedSource {
+                    node: "duplicate".to_owned(),
+                    pos: 1,
+                    neg: 1,
+                    score: 0.0,
+                    verdict: "mixed".to_owned(),
+                    last: String::new(),
+                },
+                ContestedSource {
+                    node: "missing".to_owned(),
+                    pos: 1,
+                    neg: 1,
+                    score: 0.0,
+                    verdict: "mixed".to_owned(),
+                    last: String::new(),
+                },
+            ],
+            ..Aggregate::default()
+        };
+        let overlay = build_learning_overlay(&aggregate, &graph, OffsetDateTime::UNIX_EPOCH);
+        assert_eq!(overlay["nodes"]["c"]["status"], "contested");
+        assert_eq!(overlay["nodes"]["c"]["uses"], 2);
+        assert_eq!(overlay["nodes"]["c"]["neg"], 1);
+        assert_eq!(overlay["nodes"].as_object().map(Map::len), Some(1));
+        Ok(())
+    }
+
+    #[test]
+    fn source_resolution_covers_absolute_output_and_parent_candidates() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("source.rs");
+        fs::write(&source, "fn source() {}")?;
+        let output = directory.path().join("custom-output");
+        fs::create_dir_all(&output)?;
+        let graph = output.join("graph.json");
+
+        assert_eq!(resolve_source_path("", &graph), None);
+        assert_eq!(
+            resolve_source_path(&source.to_string_lossy(), &graph),
+            Some(source.clone())
+        );
+        assert_eq!(resolve_source_path("missing.rs", &graph), None);
+        assert_eq!(resolve_source_path("source.rs", &graph), Some(source));
+        assert_eq!(code_fingerprint(None, &graph), "");
+        let sorted = recursively_sorted(json!({"z":{"b":1,"a":2},"a":[{"d":1,"c":2}]}));
+        assert_eq!(
+            serde_json::to_string(&sorted)?,
+            r#"{"a":[{"c":2,"d":1}],"z":{"a":2,"b":1}}"#
+        );
         Ok(())
     }
 }

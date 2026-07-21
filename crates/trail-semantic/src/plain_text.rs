@@ -300,3 +300,123 @@ pub fn execute_plain_text_custom_backend(
     let response = execute_json_request(&request, backend.timeout, backend.max_retries)?;
     normalize_openai_plain(&response, &backend.model)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    fn backend(name: &str, base_url: Option<&str>, api_key: Option<&str>) -> ResolvedBackend {
+        let spec = BUILTIN_BACKENDS
+            .iter()
+            .find(|candidate| candidate.name == name)
+            .unwrap_or(&BUILTIN_BACKENDS[0]);
+        ResolvedBackend {
+            backend: spec,
+            base_url: base_url.map(str::to_owned),
+            model: "fixture-model".to_owned(),
+            api_key: api_key.map(str::to_owned),
+            temperature: None,
+            max_output_tokens: 200,
+            timeout: Duration::from_millis(10),
+            max_retries: 0,
+        }
+    }
+
+    #[test]
+    fn response_normalizers_reject_shapes_and_default_optional_fields() {
+        assert!(normalize_openai_plain(&serde_json::json!({}), "model").is_err());
+        assert!(normalize_openai_plain(&serde_json::json!({"choices":[7]}), "model").is_err());
+        let openai = normalize_openai_plain(
+            &serde_json::json!({
+                "choices":[{"message":{"content":7}}],
+                "usage":{"prompt_tokens":3,"completion_tokens":"bad"}
+            }),
+            "model",
+        )
+        .unwrap_or_default();
+        assert_eq!(openai.text, "");
+        assert_eq!(openai.input_tokens, 3);
+        assert_eq!(openai.output_tokens, 0);
+
+        assert!(normalize_anthropic_plain(&serde_json::json!({}), "model").is_err());
+        let anthropic = normalize_anthropic_plain(
+            &serde_json::json!({"content":[],"usage":{"input_tokens":2,"output_tokens":1}}),
+            "model",
+        )
+        .unwrap_or_default();
+        assert_eq!(anthropic.text, "");
+        assert_eq!((anthropic.input_tokens, anthropic.output_tokens), (2, 1));
+    }
+
+    #[test]
+    fn request_and_execution_validation_fail_before_transport()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert!(anthropic_plain_request(&backend("claude", None, Some("key")), "p", 1).is_err());
+        assert!(
+            anthropic_plain_request(
+                &backend("claude", Some("https://api.example.test"), None),
+                "p",
+                1
+            )
+            .is_err()
+        );
+        let request = anthropic_plain_request(
+            &backend("claude", Some("https://api.example.test/"), Some("key")),
+            "prompt",
+            9,
+        )?;
+        assert_eq!(request.url, "https://api.example.test/v1/messages");
+        assert_eq!(request.body["max_tokens"], 9);
+
+        let options = PlainTextOptions {
+            max_tokens: 0,
+            claude_cli_model_argument: None,
+        };
+        assert!(
+            execute_plain_text_backend(
+                &backend("claude", None, None),
+                "prompt",
+                &options,
+                &HashMap::new()
+            )
+            .is_err()
+        );
+        assert!(
+            execute_plain_text_backend(
+                &backend("openai", None, Some("key")),
+                "prompt",
+                &PlainTextOptions::default(),
+                &HashMap::new()
+            )
+            .is_err()
+        );
+        assert!(
+            execute_plain_text_backend(
+                &backend("openai", Some("https://api.example.test"), None),
+                "prompt",
+                &PlainTextOptions::default(),
+                &HashMap::new()
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn openai_parameters_ignore_non_finite_temperature_and_prefer_explicit_body() {
+        let parameters = openai_plain_call_parameters(
+            "https://moonshot.example",
+            "model",
+            "prompt",
+            4,
+            Some(f64::NAN),
+            None,
+            Some(&serde_json::json!({"custom":true})),
+            true,
+        );
+        assert!(parameters.get("temperature").is_none());
+        assert_eq!(parameters["extra_body"]["custom"], true);
+    }
+}

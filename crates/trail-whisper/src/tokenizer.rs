@@ -139,7 +139,7 @@ pub fn normalize_language(language: &str) -> Result<String> {
     if LANGUAGES.iter().any(|(code, _)| *code == lower) {
         return Ok(lower);
     }
-    if let Some((_, code)) = LANGUAGES.iter().find(|(_, name)| *name == lower) {
+    if let Some((code, _)) = LANGUAGES.iter().find(|(_, name)| *name == lower) {
         return Ok(code.to_string());
     }
     if let Some((_, code)) = LANGUAGE_ALIASES.iter().find(|(alias, _)| *alias == lower) {
@@ -482,4 +482,69 @@ pub fn get_tokenizer(
     task: Option<Task>,
 ) -> Result<Tokenizer> {
     Tokenizer::new(multilingual, num_languages, language, task)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_normalization_accepts_codes_names_aliases_and_rejects_unknowns() -> Result<()> {
+        assert_eq!(normalize_language("EN")?, "en");
+        assert_eq!(normalize_language("English")?, "en");
+        assert_eq!(normalize_language("Mandarin")?, "zh");
+        assert!(normalize_language("not-a-language").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn multilingual_tokenizer_exposes_language_task_and_non_speech_contracts() -> Result<()> {
+        let tokenizer = Tokenizer::new(true, LANGUAGES.len(), Some("zh"), Some(Task::Translate))?;
+        assert_eq!(
+            tokenizer.language_token()?,
+            tokenizer.to_language_token("zh")?
+        );
+        assert_eq!(
+            tokenizer.sot_sequence.last().copied(),
+            Some(tokenizer.translate)
+        );
+        assert_eq!(tokenizer.all_language_tokens().len(), LANGUAGES.len());
+        assert_eq!(tokenizer.all_language_codes().first().copied(), Some("en"));
+        assert!(tokenizer.special_token("<|endoftext|>").is_some());
+        assert!(tokenizer.special_token("missing").is_none());
+        assert!(tokenizer.to_language_token("missing").is_err());
+        assert!(tokenizer.n_vocab() > tokenizer.timestamp_begin);
+
+        let suppressed = tokenizer.non_speech_tokens();
+        assert!(!suppressed.is_empty());
+        assert!(suppressed.windows(2).all(|pair| pair[0] < pair[1]));
+
+        let tokens = tokenizer.encode("你好世界");
+        let (words, word_tokens) = tokenizer.split_to_word_tokens(&tokens);
+        assert_eq!(words.len(), word_tokens.len());
+        assert_eq!(words.concat(), "你好世界");
+        Ok(())
+    }
+
+    #[test]
+    fn english_tokenizer_reports_no_language_and_groups_subword_tokens() -> Result<()> {
+        let tokenizer = get_tokenizer(false, 0, None, Some(Task::Translate))?;
+        assert!(tokenizer.language_token().is_err());
+        assert!(tokenizer.all_language_tokens().is_empty());
+        assert!(tokenizer.all_language_codes().is_empty());
+
+        let text = " extraordinarily compact";
+        let tokens = tokenizer.encode(text);
+        let (words, word_tokens) = tokenizer.split_to_word_tokens(&tokens);
+        assert_eq!(words.concat(), text);
+        assert_eq!(word_tokens.concat(), tokens);
+        assert_eq!(tokenizer.decode(&[tokenizer.timestamp_begin]), "");
+        assert!(
+            tokenizer
+                .decode_with_timestamps(&[tokenizer.timestamp_begin])
+                .contains("<|0.00|>")
+        );
+        assert!(base64_decode("!").is_err());
+        Ok(())
+    }
 }

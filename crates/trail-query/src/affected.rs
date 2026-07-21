@@ -195,3 +195,66 @@ fn bare_name(label: &str) -> String {
         .unwrap_or(&normalized)
         .to_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use trail_model::GraphDocument;
+
+    use super::*;
+
+    fn graph(value: serde_json::Value) -> Result<Graph, Box<dyn std::error::Error>> {
+        let document = serde_json::from_value::<GraphDocument>(value)?;
+        Ok(Graph::from_document(document)?)
+    }
+
+    #[test]
+    fn seed_resolution_prefers_file_nodes_for_shared_source_paths()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let graph = graph(serde_json::json!({
+            "directed":true,"multigraph":false,"graph":{},
+            "nodes":[
+                {"id":"file","label":"lib.rs","source_file":"src/lib.rs","source_location":"L1"},
+                {"id":"function","label":"run()","source_file":"src/lib.rs","source_location":"L2"},
+                {"id":"accent","label":"CAFÉ"}
+            ],
+            "links":[]
+        }))?;
+        assert_eq!(resolve_seed(&graph, "file/"), graph.node_index("file"));
+        assert_eq!(resolve_seed(&graph, "src/lib.rs"), graph.node_index("file"));
+        assert_eq!(resolve_seed(&graph, "run"), graph.node_index("function"));
+        assert_eq!(
+            resolve_seed(&graph, "cafe\u{301}"),
+            graph.node_index("accent")
+        );
+        assert_eq!(prefer_file_node(&graph, &[], "src/lib.rs"), None);
+        Ok(())
+    }
+
+    #[test]
+    fn affected_traversal_includes_file_members_and_formats_missing_locations()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let graph = graph(serde_json::json!({
+            "directed":true,"multigraph":true,"graph":{},
+            "nodes":[
+                {"id":"file","label":"lib.rs"},
+                {"id":"member","label":"run()","source_file":"src/lib.rs","source_location":"L2"},
+                {"id":"caller","label":"caller()"},
+                {"id":"ignored","label":"ignored()"}
+            ],
+            "links":[
+                {"source":"file","target":"member","relation":"contains"},
+                {"source":"caller","target":"member","relation":"calls"},
+                {"source":"ignored","target":"member","relation":"documents"}
+            ]
+        }))?;
+        let relations = vec!["calls".to_owned()];
+        let seed = graph.node_index("file").ok_or("missing seed")?;
+        let hits = affected_nodes(&graph, seed, &relations, 2);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(graph.node(hits[0].node).label(), "caller()");
+        assert!(format_affected(&graph, "file", &relations, 2).contains("caller() [calls] -"));
+        assert!(format_affected(&graph, "missing", &relations, 2).contains("No unique"));
+        assert!(format_affected(&graph, "file", &relations, 0).contains("No affected"));
+        Ok(())
+    }
+}

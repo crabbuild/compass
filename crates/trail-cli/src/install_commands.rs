@@ -1924,6 +1924,14 @@ const KILO_PLUGIN: &str = "// graphify Kilo plugin\n// Injects a knowledge graph
 mod tests {
     use super::*;
 
+    fn write(path: &Path, content: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, content)?;
+        Ok(())
+    }
+
     #[test]
     fn section_replacement_preserves_surrounding_user_content() {
         let input = "# User\n\n## graphify\nold\n\n## Keep\nvalue\n";
@@ -1945,5 +1953,231 @@ mod tests {
                     .starts_with(&format!("skills/{bundle}/references/"))
             }));
         }
+    }
+
+    #[test]
+    fn parser_and_platform_boundaries_fail_without_mutation() {
+        let conflicting =
+            command_install(Frontend::Trail, &["claude".to_owned(), "codex".to_owned()]);
+        assert_eq!(conflicting.code, 1);
+        assert!(conflicting.stderr.contains("only once"));
+        let conflicting_equals = command_install(
+            Frontend::Trail,
+            &["--platform=claude".to_owned(), "codex".to_owned()],
+        );
+        assert_eq!(conflicting_equals.code, 1);
+        assert_eq!(command_platform(Frontend::Trail, "codex", &[]).code, 1);
+        assert_eq!(
+            command_platform(Frontend::Trail, "codex", &["bad".to_owned()]).code,
+            1
+        );
+        assert_eq!(
+            install_platform("bad", true, Path::new("."), false, "trail graph").code,
+            1
+        );
+        assert_eq!(
+            uninstall_platform("bad", true, Path::new("."), "trail graph").code,
+            1
+        );
+        assert!(platform("bad").is_none());
+        assert_eq!(canonical_platform("skills"), "agents");
+        assert!(is_install_platform("cursor"));
+    }
+
+    #[test]
+    fn project_uninstall_all_purges_only_the_scoped_output()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let output = directory.path().join("graphify-out");
+        fs::create_dir_all(&output)?;
+        fs::write(output.join("graph.json"), "{}")?;
+        let outcome = uninstall_all(true, true, directory.path(), "trail graph");
+        assert_eq!(outcome.code, 0);
+        assert!(outcome.stdout.contains("project-scoped"));
+        assert!(outcome.stdout.contains("removed"));
+        assert!(outcome.stdout.ends_with("Done."));
+        assert!(!output.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn hook_installers_replace_invalid_shapes_and_preserve_unowned_entries()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        write(
+            &root.join(".claude/settings.json"),
+            r#"{"hooks":{"PreToolUse":[{"command":"keep"},{"command":"graphify old"}]}}"#,
+        )?;
+        install_claude_hook(root, true)?;
+        let claude = load_json_object(&root.join(".claude/settings.json"));
+        let hooks = claude["hooks"]["PreToolUse"]
+            .as_array()
+            .ok_or("missing Claude hooks")?;
+        assert_eq!(hooks.len(), 3);
+        assert!(
+            hooks
+                .iter()
+                .any(|hook| hook.to_string().contains("--strict"))
+        );
+
+        write(&root.join(".codebuddy/settings.json"), r#"{"hooks":7}"#)?;
+        install_codebuddy_hook(root)?;
+        assert_eq!(
+            load_json_object(&root.join(".codebuddy/settings.json"))["hooks"]["PreToolUse"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+        write(&root.join(".gemini/settings.json"), r#"{"hooks":null}"#)?;
+        install_gemini_hook(root)?;
+        assert_eq!(
+            load_json_object(&root.join(".gemini/settings.json"))["hooks"]["BeforeTool"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn plugin_install_and_cleanup_round_trip_handles_scalar_configs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        write(&root.join(".opencode/opencode.json"), r#"{"plugin":7}"#)?;
+        write(&root.join(".kilo/kilo.json"), r#"{"plugin":false}"#)?;
+        let mut lines = Vec::new();
+        install_opencode(root, &mut lines)?;
+        install_kilo_plugin(root, &mut lines)?;
+        assert!(root.join(".opencode/plugins/graphify.js").is_file());
+        assert!(root.join(".kilo/plugins/graphify.js").is_file());
+        remove_opencode(root, &mut lines);
+        remove_kilo(root, &mut lines);
+        assert!(!root.join(".opencode/plugins/graphify.js").exists());
+        assert!(!root.join(".kilo/plugins/graphify.js").exists());
+        assert!(lines.iter().any(|line| line.contains("deregistered")));
+        Ok(())
+    }
+
+    #[test]
+    fn owned_markdown_cleanup_covers_empty_preserved_and_unmarked_files()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let mut lines = Vec::new();
+
+        let registration = root.join("CLAUDE.md");
+        append_registration(&registration, "# graphify\nowned\n")?;
+        append_registration(&registration, "# graphify\nduplicate\n")?;
+        remove_registration(&registration, &mut lines);
+        assert!(!registration.exists());
+
+        let agents = root.join("AGENTS.md");
+        write(&agents, "# User\n\n## graphify\nowned\n\n## Keep\nvalue\n")?;
+        strip_section_file(&agents, "## graphify", &mut lines);
+        assert_eq!(fs::read_to_string(&agents)?, "# User\n\n## Keep\nvalue\n\n");
+        let untouched = root.join("untouched.md");
+        write(&untouched, "# User\n")?;
+        strip_section_file(&untouched, "## graphify", &mut lines);
+        assert_eq!(fs::read_to_string(&untouched)?, "# User\n");
+
+        let labeled = root.join("owned.md");
+        write(&labeled, "owned")?;
+        remove_labeled_file(&labeled, "removed label", &mut lines);
+        let plain = root.join("plain.md");
+        write(&plain, "owned")?;
+        remove_file(&plain, &mut lines);
+        assert!(lines.iter().any(|line| line == "removed label"));
+        Ok(())
+    }
+
+    #[test]
+    fn json_hook_cleanup_and_owned_file_results_are_explicit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let hooks = root.join("hooks.json");
+        write(
+            &hooks,
+            r#"{"hooks":{"PreToolUse":[{"command":"keep"},{"command":"graphify hook"}]}}"#,
+        )?;
+        let mut lines = Vec::new();
+        remove_json_hooks(&hooks, "PreToolUse", &mut lines);
+        let document = load_json_object(&hooks);
+        assert_eq!(
+            document["hooks"]["PreToolUse"].as_array().map(Vec::len),
+            Some(1)
+        );
+        remove_json_hooks(&hooks, "Missing", &mut lines);
+        remove_json_hooks(&root.join("missing.json"), "PreToolUse", &mut lines);
+
+        let owned = root.join("owned.txt");
+        write(&owned, "owned")?;
+        assert_eq!(
+            remove_owned_file(owned.clone(), "missing", "removed").code,
+            0
+        );
+        assert_eq!(
+            remove_owned_file(owned, "missing", "removed").stdout,
+            "missing"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn asset_tree_json_and_path_helpers_cover_boundary_shapes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let destination = directory.path().join("references");
+        assert!(install_asset_tree("skills/codex/references/", &destination).is_ok());
+        assert!(destination.is_dir());
+        assert!(install_asset_tree("missing-prefix/", &destination).is_err());
+
+        let mut object = Map::new();
+        object.insert("hooks".to_owned(), Value::Bool(false));
+        object_child(&mut object, "hooks")?.insert("ready".to_owned(), Value::Bool(true));
+        assert_eq!(object["hooks"]["ready"], true);
+
+        let nested = directory.path().join("one/two/three");
+        fs::create_dir_all(&nested)?;
+        remove_empty_ancestors(&nested, directory.path());
+        assert!(!nested.exists());
+        assert_eq!(
+            project_scope_root(&directory.path().join("one/two"), directory.path()),
+            directory.path().join("one")
+        );
+        assert_eq!(
+            project_scope_root(Path::new("elsewhere"), directory.path()),
+            PathBuf::from("elsewhere")
+        );
+        assert_eq!(
+            display_path(&directory.path().join("x"), true, directory.path()),
+            "x"
+        );
+        assert_eq!(capitalize("graphify"), "Graphify");
+        assert_eq!(capitalize(""), "");
+        Ok(())
+    }
+
+    #[test]
+    fn antigravity_finalization_adds_frontmatter_and_owned_files()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let skill = directory.path().join("skill.md");
+        write(&skill, "# Body\n")?;
+        let mut lines = Vec::new();
+        finalize_antigravity(directory.path(), &skill, &mut lines)?;
+        assert!(fs::read_to_string(&skill)?.starts_with("---\nname: graphify-manager"));
+        assert!(directory.path().join(".agents/rules/graphify.md").is_file());
+        assert!(
+            directory
+                .path()
+                .join(".agents/workflows/graphify.md")
+                .is_file()
+        );
+        finalize_antigravity(directory.path(), &skill, &mut lines)?;
+        assert_eq!(lines.len(), 4);
+        Ok(())
     }
 }

@@ -918,4 +918,100 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn empty_edgeless_and_split_graphs_have_total_deterministic_results() {
+        assert!(cluster(&graph(&[], &[]), ClusterOptions::default()).is_empty());
+        assert_eq!(
+            cluster(&graph(&["b", "a"], &[]), ClusterOptions::default()),
+            BTreeMap::from([(0, vec!["a".to_owned()]), (1, vec!["b".to_owned()])])
+        );
+
+        let weighted = WeightedGraph::from_document(&graph(&["b", "a"], &[]));
+        assert!(excluded_hubs(&weighted, None).is_empty());
+        assert!(excluded_hubs(&WeightedGraph::new(Vec::new(), Vec::new()), Some(50.0)).is_empty());
+        assert_eq!(weighted.position_map().get(&&weighted.ids[0]), Some(&0));
+        assert_eq!(
+            split_community(&weighted, &["b".to_owned(), "a".to_owned()]),
+            vec![vec!["a".to_owned()], vec!["b".to_owned()]]
+        );
+        assert_eq!(
+            louvain(&weighted, 1.0),
+            vec![vec!["a".to_owned()], vec!["b".to_owned()]]
+        );
+    }
+
+    #[test]
+    fn hub_reattachment_covers_connected_and_isolated_hubs() {
+        let weighted =
+            WeightedGraph::from_document(&graph(&["a", "hub", "isolated"], &[("hub", "a")]));
+        let hub = weighted.ids.iter().position(|id| id == "hub").unwrap_or(0);
+        let isolated = weighted
+            .ids
+            .iter()
+            .position(|id| id == "isolated")
+            .unwrap_or(0);
+        let mut raw = vec![vec!["a".to_owned()]];
+        reattach_hubs(&weighted, &HashSet::from([hub, isolated]), &mut raw);
+        assert!(
+            raw.iter()
+                .any(|members| members.contains(&"hub".to_owned()))
+        );
+        assert!(
+            raw.iter()
+                .any(|members| members == &vec!["isolated".to_owned()])
+        );
+    }
+
+    #[test]
+    fn remapping_and_canonical_attributes_cover_unmatched_ties_and_nested_values() {
+        assert!(remap_communities_to_previous(&Communities::new(), &HashMap::new()).is_empty());
+        let communities = BTreeMap::from([
+            (7, vec!["b".to_owned(), "a".to_owned()]),
+            (4, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+        let remapped = remap_communities_to_previous(&communities, &HashMap::new());
+        assert_eq!(
+            remapped.get(&0),
+            Some(&vec!["a".to_owned(), "b".to_owned()])
+        );
+        assert_eq!(
+            remapped.get(&1),
+            Some(&vec!["c".to_owned(), "d".to_owned()])
+        );
+
+        let left = Map::from_iter([
+            ("z".to_owned(), json!([{"b":2,"a":1}])),
+            ("a".to_owned(), json!(true)),
+        ]);
+        let right = Map::from_iter([
+            ("a".to_owned(), json!(true)),
+            ("z".to_owned(), json!([{"a":1,"b":2}])),
+        ]);
+        assert_eq!(canonical_attributes(&left), canonical_attributes(&right));
+    }
+
+    #[test]
+    fn python_random_sampling_covers_pool_and_rejection_algorithms() {
+        let small = PythonRandom::seeded(7).sample_indices(10, 4);
+        assert_eq!(small.len(), 4);
+        assert_eq!(small.iter().copied().collect::<HashSet<_>>().len(), 4);
+        let large = PythonRandom::seeded(7).sample_indices(1_000, 8);
+        assert_eq!(large.len(), 8);
+        assert_eq!(large.iter().copied().collect::<HashSet<_>>().len(), 8);
+        assert!(large.iter().all(|index| *index < 1_000));
+    }
+
+    #[test]
+    fn dangling_edges_are_ignored_when_building_weighted_graphs() {
+        let mut document = graph(&["a"], &[]);
+        document.links.push(EdgeRecord {
+            source: "a".to_owned(),
+            target: "missing".to_owned(),
+            attributes: Map::from_iter([("weight".to_owned(), json!(3.0))]),
+        });
+        let weighted = WeightedGraph::from_document(&document);
+        assert_eq!(weighted.len(), 1);
+        assert_eq!(weighted.edge_count(), 0);
+    }
 }

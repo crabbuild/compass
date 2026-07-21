@@ -909,4 +909,80 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn ipv6_url_policy_rejects_embedded_private_and_reserved_networks() {
+        let cases = [
+            "::",
+            "::1",
+            "::ffff:127.0.0.1",
+            "64:ff9b::a9fe:a9fe",
+            "ff02::1",
+            "fc00::1",
+            "fe80::1",
+            "2001:db8::1",
+        ];
+        for address in cases {
+            let parsed = address
+                .parse::<IpAddr>()
+                .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+            assert!(ip_is_blocked(parsed), "{address} should be blocked");
+        }
+        let public = "2606:4700:4700::1111"
+            .parse::<IpAddr>()
+            .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        assert!(!ip_is_blocked(public));
+        assert_eq!(
+            nat64_embedded_ipv4(
+                "64:ff9b::c000:201"
+                    .parse::<Ipv6Addr>()
+                    .unwrap_or(Ipv6Addr::UNSPECIFIED)
+            ),
+            Some(Ipv4Addr::new(192, 0, 2, 1))
+        );
+        assert!(
+            validate_public_url_with("https://example.com", &StaticResolver(Vec::new())).is_err()
+        );
+    }
+
+    #[test]
+    fn downloaded_audio_resolution_accepts_safe_stdout_then_sorted_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let key = "abc";
+        let first = directory.path().join("yt_abc.wav");
+        let second = directory.path().join("yt_abc.m4a");
+        fs::write(&first, b"wav")?;
+        fs::write(&second, b"m4a")?;
+
+        assert_eq!(
+            resolve_downloaded_audio("unsafe.txt\nyt_abc.wav\n", directory.path(), key, 10)?,
+            first
+        );
+        assert_eq!(
+            resolve_downloaded_audio("", directory.path(), key, 10)?,
+            second
+        );
+        assert!(resolve_downloaded_audio("", directory.path(), "missing", 10).is_err());
+        assert!(resolve_downloaded_audio("", &directory.path().join("absent"), key, 10).is_err());
+        assert!(!safe_named_output(
+            &directory.path().join("other.wav"),
+            directory.path(),
+            key,
+            10
+        ));
+        assert!(!safe_named_output(&first, directory.path(), key, 2));
+        Ok(())
+    }
+
+    #[test]
+    fn environment_factories_and_https_overflow_guard_are_total() {
+        assert!(ToolCache::from_environment().is_ok());
+        assert!(ManagedYtDlp::from_environment().is_ok());
+        let fetcher = HttpsToolFetcher::default();
+        assert_eq!(
+            fetcher.fetch("https://example.com", u64::MAX).err(),
+            Some("tool size limit overflowed".to_owned())
+        );
+    }
 }

@@ -191,4 +191,43 @@ mod tests {
         assert_eq!(parsed.question, "a \"quote\"");
         assert_eq!(parsed.source_nodes, ["A", "Node\\Path"]);
     }
+
+    #[test]
+    fn yaml_subset_decodes_simple_hex_unicode_and_unknown_escapes() {
+        assert_eq!(
+            yaml_unescape(r#"\n\r\t\0\"\\\L\P\x41\u263a\q\xzz"#),
+            "\n\r\t\0\"\\\u{2028}\u{2029}A☺\\q\\xzz"
+        );
+        assert!(parse_memory_doc("plain text").is_none());
+        assert!(parse_memory_doc("--- not a delimiter").is_none());
+        let parsed =
+            parse_memory_doc("---\nunknown: \"ignored\"\ninvalid line\n---\n").unwrap_or_default();
+        assert_eq!(parsed, MemoryDoc::default());
+    }
+
+    #[test]
+    fn memory_directory_loading_sorts_valid_markdown_and_skips_other_shapes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        fs::write(
+            directory.path().join("b.md"),
+            "---\ndate: \"2026-02-01\"\nquestion: \"B\"\n---\n",
+        )?;
+        fs::write(
+            directory.path().join("a.md"),
+            "---\ndate: \"2026-01-01\"\nquestion: \"A\"\n---\n",
+        )?;
+        fs::write(directory.path().join("invalid.md"), "invalid")?;
+        fs::write(directory.path().join("ignored.txt"), "---\n---\n")?;
+        fs::create_dir(directory.path().join("directory.md"))?;
+        let oversized = fs::File::create(directory.path().join("oversized.md"))?;
+        oversized.set_len(MAX_MEMORY_DOC_BYTES + 1)?;
+
+        let docs = load_memory_docs(directory.path());
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].path, "a.md");
+        assert_eq!(docs[1].path, "b.md");
+        assert!(load_memory_docs(&directory.path().join("missing")).is_empty());
+        Ok(())
+    }
 }
