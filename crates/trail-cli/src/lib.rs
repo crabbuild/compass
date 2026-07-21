@@ -158,6 +158,9 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "watch" if frontend == Frontend::Trail => Outcome::failure(
             "error: watch is a streaming command and must be run from the trail binary".to_owned(),
         ),
+        "serve" if frontend == Frontend::Trail => Outcome::failure(
+            "error: serve is a long-lived command and must be run from the trail binary".to_owned(),
+        ),
         "--help" | "-h" | "help" => Outcome::success(if frontend == Frontend::Trail {
             trail_help()
         } else {
@@ -166,6 +169,208 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "--version" | "-V" => Outcome::success(format!("trail {}", env!("CARGO_PKG_VERSION"))),
         _ => Outcome::failure(format!("error: unknown graph command '{command}'")),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum McpFrontend {
+    Trail,
+    Graphify,
+}
+
+/// Parse and run the long-lived native MCP server.
+pub fn run_mcp(
+    frontend: McpFrontend,
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> u8 {
+    let args = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let options = match parse_mcp_options(frontend, &args) {
+        Ok(Some(options)) => options,
+        Ok(None) => {
+            let _result = writeln!(stdout, "{}", mcp_help(frontend));
+            return 0;
+        }
+        Err(error) => {
+            let _result = writeln!(stderr, "{error}");
+            return 2;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _result = writeln!(stderr, "error: could not start async runtime: {error}");
+            return 1;
+        }
+    };
+    let result = if options.transport == "http" {
+        runtime.block_on(trail_mcp::serve_http(trail_mcp::HttpOptions {
+            graph_path: options.graph_path,
+            host: options.host,
+            port: options.port,
+            api_key: options.api_key,
+            path: options.path,
+            json_response: options.json_response,
+            stateless: options.stateless,
+            session_timeout: options.session_timeout,
+        }))
+    } else {
+        runtime.block_on(trail_mcp::serve_stdio(options.graph_path))
+    };
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            let _result = writeln!(stderr, "error: {error}");
+            1
+        }
+    }
+}
+
+#[derive(Debug)]
+struct McpOptions {
+    graph_path: PathBuf,
+    transport: String,
+    host: String,
+    port: u16,
+    api_key: Option<String>,
+    path: String,
+    json_response: bool,
+    stateless: bool,
+    session_timeout: Option<Duration>,
+}
+
+fn parse_mcp_options(frontend: McpFrontend, args: &[String]) -> Result<Option<McpOptions>, String> {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Ok(None);
+    }
+    let mut positional = None;
+    let mut graph_flag = None;
+    let mut transport = "stdio".to_owned();
+    let mut host = "127.0.0.1".to_owned();
+    let mut port = 8080_u16;
+    let mut api_key = std::env::var("GRAPHIFY_API_KEY").ok();
+    let mut path = "/mcp".to_owned();
+    let mut json_response = false;
+    let mut stateless = false;
+    let mut session_timeout = Some(Duration::from_secs(3600));
+    let mut index = 0_usize;
+    while index < args.len() {
+        let value = &args[index];
+        match value.as_str() {
+            "--graph" => graph_flag = Some(mcp_value(args, &mut index, "--graph")?.into()),
+            "--transport" => {
+                transport = mcp_value(args, &mut index, "--transport")?.to_owned();
+                if !matches!(transport.as_str(), "stdio" | "http") {
+                    return Err(format!(
+                        "error: argument --transport: invalid choice: '{transport}' (choose from 'stdio', 'http')"
+                    ));
+                }
+            }
+            "--host" => host = mcp_value(args, &mut index, "--host")?.to_owned(),
+            "--port" => {
+                let raw = mcp_value(args, &mut index, "--port")?;
+                port = raw
+                    .parse::<u16>()
+                    .map_err(|_| format!("error: argument --port: invalid int value: '{raw}'"))?;
+            }
+            "--api-key" => api_key = Some(mcp_value(args, &mut index, "--api-key")?.to_owned()),
+            "--path" => path = mcp_value(args, &mut index, "--path")?.to_owned(),
+            "--json-response" => json_response = true,
+            "--stateless" => stateless = true,
+            "--session-timeout" => {
+                let raw = mcp_value(args, &mut index, "--session-timeout")?;
+                session_timeout = parse_session_timeout(raw)?;
+            }
+            _ if value.starts_with("--graph=") => {
+                graph_flag = Some(PathBuf::from(&value[8..]));
+            }
+            _ if value.starts_with("--transport=") => {
+                transport = value[12..].to_owned();
+                if !matches!(transport.as_str(), "stdio" | "http") {
+                    return Err(format!(
+                        "error: argument --transport: invalid choice: '{transport}' (choose from 'stdio', 'http')"
+                    ));
+                }
+            }
+            _ if value.starts_with("--host=") => host = value[7..].to_owned(),
+            _ if value.starts_with("--port=") => {
+                let raw = &value[7..];
+                port = raw
+                    .parse::<u16>()
+                    .map_err(|_| format!("error: argument --port: invalid int value: '{raw}'"))?;
+            }
+            _ if value.starts_with("--api-key=") => api_key = Some(value[10..].to_owned()),
+            _ if value.starts_with("--path=") => path = value[7..].to_owned(),
+            _ if value.starts_with("--session-timeout=") => {
+                let raw = &value[18..];
+                session_timeout = parse_session_timeout(raw)?;
+            }
+            _ if value.starts_with('-') => {
+                return Err(format!("error: unrecognized arguments: {value}"));
+            }
+            _ if positional.is_none() => positional = Some(PathBuf::from(value)),
+            _ => return Err(format!("error: unrecognized arguments: {value}")),
+        }
+        index += 1;
+    }
+    let graph_path = graph_flag
+        .filter(|path| !path.as_os_str().is_empty())
+        .or_else(|| positional.filter(|path| !path.as_os_str().is_empty()))
+        .unwrap_or_else(default_graph_path);
+    let _ = frontend;
+    Ok(Some(McpOptions {
+        graph_path,
+        transport,
+        host,
+        port,
+        api_key,
+        path,
+        json_response,
+        stateless,
+        session_timeout,
+    }))
+}
+
+fn mcp_value<'a>(args: &'a [String], index: &mut usize, option: &str) -> Result<&'a str, String> {
+    *index += 1;
+    args.get(*index)
+        .map(String::as_str)
+        .ok_or_else(|| format!("error: argument {option}: expected one argument"))
+}
+
+fn parse_session_timeout(raw: &str) -> Result<Option<Duration>, String> {
+    let seconds = raw
+        .parse::<f64>()
+        .map_err(|_| format!("error: argument --session-timeout: invalid float value: '{raw}'"))?;
+    if !seconds.is_finite() {
+        return Err("error: --session-timeout must be finite".to_owned());
+    }
+    if seconds <= 0.0 {
+        return Ok(None);
+    }
+    Duration::try_from_secs_f64(seconds)
+        .map(Some)
+        .map_err(|_| "error: --session-timeout is out of range".to_owned())
+}
+
+fn mcp_help(frontend: McpFrontend) -> String {
+    let command = if frontend == McpFrontend::Trail {
+        "trail graph serve"
+    } else {
+        "graphify-mcp"
+    };
+    format!(
+        "Usage: {command} [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]"
+    )
 }
 
 /// Run Trail's long-lived native watcher, streaming status as changes arrive.
@@ -2128,7 +2333,7 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
 }
 
 fn trail_help() -> String {
-    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
+    "Usage: trail graph <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
 }
 
@@ -2137,6 +2342,7 @@ fn trail_command_help(command: &str) -> String {
         "update" => "Usage: trail graph update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
         "extract" => extract_help(),
         "watch" => watch_help(),
+        "serve" => mcp_help(McpFrontend::Trail),
         "cluster-only" => "Usage: trail graph cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
         "label" => label_commands::label_help(Frontend::Trail),
         "prs" => prs_commands::prs_help(Frontend::Trail),
@@ -2173,4 +2379,59 @@ fn watch_help() -> String {
 fn graphify_help() -> String {
     "Usage: graphify <command>\n\nPorted commands:\n  query\n  path\n  explain\n  affected\n  export\n  benchmark\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  label\n  prs\n  hook\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
         .to_owned()
+}
+
+#[cfg(test)]
+mod mcp_option_tests {
+    use super::*;
+
+    #[test]
+    fn argparse_style_equals_options_are_supported() -> Result<(), String> {
+        let args = [
+            "--graph=custom.json",
+            "--transport=http",
+            "--host=0.0.0.0",
+            "--port=9000",
+            "--api-key=secret",
+            "--path=/graph",
+            "--session-timeout=12.5",
+            "--json-response",
+            "--stateless",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        let options = parse_mcp_options(McpFrontend::Graphify, &args)?
+            .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
+        assert_eq!(options.graph_path, PathBuf::from("custom.json"));
+        assert_eq!(options.transport, "http");
+        assert_eq!(options.host, "0.0.0.0");
+        assert_eq!(options.port, 9000);
+        assert_eq!(options.api_key.as_deref(), Some("secret"));
+        assert_eq!(options.path, "/graph");
+        assert_eq!(options.session_timeout, Some(Duration::from_secs_f64(12.5)));
+        assert!(options.json_response);
+        assert!(options.stateless);
+        Ok(())
+    }
+
+    #[test]
+    fn graph_flag_overrides_positional_like_python_argparse() -> Result<(), String> {
+        let args = ["positional.json", "--graph=flag.json"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let options = parse_mcp_options(McpFrontend::Graphify, &args)?
+            .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
+        assert_eq!(options.graph_path, PathBuf::from("flag.json"));
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_session_timeout_is_an_error_not_a_panic() {
+        assert_eq!(
+            parse_session_timeout("1e300"),
+            Err("error: --session-timeout is out of range".to_owned())
+        );
+    }
 }

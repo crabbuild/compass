@@ -12,6 +12,16 @@ fn main() -> ExitCode {
             &mut io::stderr(),
         ));
     }
+    if arguments.first().and_then(|value| value.to_str()) == Some("graph")
+        && arguments.get(1).and_then(|value| value.to_str()) == Some("serve")
+    {
+        return ExitCode::from(trail_cli::run_mcp(
+            trail_cli::McpFrontend::Trail,
+            &arguments[2..],
+            &mut io::stdout(),
+            &mut io::stderr(),
+        ));
+    }
     let outcome = trail_cli::run(trail_cli::Frontend::Trail, arguments);
     emit(
         &outcome.stdout,

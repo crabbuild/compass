@@ -26,6 +26,7 @@ tests against the Python implementation.
 trail graph update
 trail graph extract
 trail graph watch
+trail graph serve
 trail graph cluster-only
 trail graph query
 trail graph path
@@ -75,6 +76,19 @@ Neo4j uses Bolt (including verified TLS and explicit self-signed modes), while
 FalkorDB uses RESP directly. Passwords can come from `NEO4J_PASSWORD` or
 `FALKORDB_PASSWORD` and are redacted from failures; neither path needs Python,
 a database SDK, or a native client library.
+
+`trail graph serve` exposes the completed query, graph-inspection, resource,
+and PR-impact surface over MCP. Stdio is the default for editor integrations;
+`--transport http` enables Streamable HTTP with stateful or stateless
+operation, bounded request bodies, DNS-rebinding checks, optional API-key
+authentication, session expiry, and graceful shutdown. The same package
+installs `graphify-mcp` as a drop-in compatibility entry point:
+
+```bash
+trail graph serve graphify-out/graph.json
+trail graph serve --transport http --api-key "$GRAPHIFY_API_KEY"
+graphify-mcp --graph graphify-out/graph.json
+```
 
 Native Whisper inference, verified model and URL artifact acquisition, and
 bounded audio/video decoding—including AVI—are implemented internally; their
@@ -128,8 +142,8 @@ current local baseline are documented in [PERFORMANCE.md](PERFORMANCE.md).
 ## Distribution
 
 `rust-release.yml` builds native archives for Linux, macOS, and Windows on both
-x86-64 and ARM64. Every archive contains standalone `trail` and compatibility
-`graphify` executables, a SHA-256 checksum, and GitHub build-provenance
+x86-64 and ARM64. Every archive contains standalone `trail`, compatibility
+`graphify`, and `graphify-mcp` executables, a SHA-256 checksum, and GitHub build-provenance
 attestation. The crate manifests are package-ready for an ordered crates.io
 publish. `rust-publish.yml` is a separately approved environment-protected
 workflow that validates an exact release tag and confirmation string, then

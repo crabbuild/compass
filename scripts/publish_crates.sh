@@ -46,6 +46,7 @@ crates=(
   trail-resolve
   trail-output
   trail-core
+  trail-mcp
   trail-cli
 )
 for crate in "${crates[@]}"; do

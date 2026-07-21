@@ -6,6 +6,7 @@ _trail() {
     'update:incrementally update a local graph'
     'extract:extract deterministic code facts'
     'watch:watch and incrementally rebuild'
+    'serve:serve graph tools and resources over MCP'
     'cluster-only:cluster an existing graph'
     'query:query graph context'
     'path:find a shortest graph path'

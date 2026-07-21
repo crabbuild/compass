@@ -345,7 +345,9 @@ fn render_subgraph(
         graph
             .degree(*right)
             .cmp(&graph.degree(*left))
-            .then_with(|| graph.node(*left).id.cmp(&graph.node(*right).id))
+            // Python's stable degree sort retains source-document order for
+            // ties. NodeIndex is that insertion order in the native graph.
+            .then_with(|| left.cmp(right))
     });
     ordered.extend(remainder);
     let mut lines = Vec::new();

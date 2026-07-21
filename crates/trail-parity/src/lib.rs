@@ -23,6 +23,7 @@ mod tests {
         score_communities, suggest_questions, surprising_connections,
     };
     use trail_languages::Engine;
+    use trail_mcp::GraphifyMcp;
     use trail_media::{docx_to_markdown, extract_pdf_text, xlsx_to_markdown};
     use trail_output::{
         CallflowOptions, CanvasOptions, DetectionSummary, HtmlOptions, JsonExportOptions,
@@ -53,6 +54,104 @@ mod tests {
     use trail_transcribe::{
         VIDEO_EXTENSIONS, audio_cache_key, build_whisper_prompt_with_override, is_url,
     };
+
+    #[test]
+    fn mcp_tools_and_resources_match_python_oracle() -> Result<(), Box<dyn Error>> {
+        let fixture = Fixture::new()?;
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                r#"import asyncio,json,sys
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+async def main():
+    graph = sys.argv[1]
+    server = StdioServerParameters(command=sys.executable, args=['-m', 'graphify.serve', graph])
+    cases = [
+        ('query_graph', {'question':'extract', 'depth':1}),
+        ('get_node', {'label':'cluster'}),
+        ('get_neighbors', {'label':'cluster'}),
+        ('get_community', {'community_id':0}),
+        ('god_nodes', {'top_n':3}),
+        ('graph_stats', {}),
+        ('shortest_path', {'source':'extract', 'target':'build', 'max_hops':8}),
+    ]
+    uris = ['graphify://report','graphify://stats','graphify://god-nodes','graphify://surprises','graphify://audit','graphify://questions']
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            info = await session.initialize()
+            tools = await session.list_tools()
+            resources = await session.list_resources()
+            calls = []
+            for name, arguments in cases:
+                result = await session.call_tool(name, arguments)
+                calls.append(result.content[0].text)
+            reads = []
+            for uri in uris:
+                result = await session.read_resource(uri)
+                reads.append(result.contents[0].text)
+            print(json.dumps({
+                'server': info.serverInfo.name,
+                'tools': [item.model_dump(mode='json', exclude_none=True) for item in tools.tools],
+                'resources': [item.model_dump(mode='json', exclude_none=True) for item in resources.resources],
+                'calls': calls,
+                'reads': reads,
+            }, ensure_ascii=False))
+
+asyncio.run(main())"#,
+            ])
+            .arg(fixture.graph_string())
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "Python MCP oracle failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python: Value = serde_json::from_slice(&output.stdout)?;
+        let server = GraphifyMcp::new(&fixture.graph);
+        let calls = [
+            ("query_graph", json!({"question":"extract", "depth":1})),
+            ("get_node", json!({"label":"cluster"})),
+            ("get_neighbors", json!({"label":"cluster"})),
+            ("get_community", json!({"community_id":0})),
+            ("god_nodes", json!({"top_n":3})),
+            ("graph_stats", json!({})),
+            (
+                "shortest_path",
+                json!({"source":"extract", "target":"build", "max_hops":8}),
+            ),
+        ]
+        .into_iter()
+        .map(|(name, arguments)| {
+            server.invoke(name, arguments.as_object().cloned().unwrap_or_default())
+        })
+        .collect::<Vec<_>>();
+        let uris = [
+            "graphify://report",
+            "graphify://stats",
+            "graphify://god-nodes",
+            "graphify://surprises",
+            "graphify://audit",
+            "graphify://questions",
+        ];
+        let reads = uris
+            .iter()
+            .map(|uri| server.read(uri))
+            .collect::<Result<Vec<_>, _>>()?;
+        let rust = json!({
+            "server": "graphify",
+            "tools": GraphifyMcp::tools(),
+            "resources": GraphifyMcp::resources(),
+            "calls": calls,
+            "reads": reads,
+        });
+        assert_eq!(rust, python);
+        Ok(())
+    }
 
     #[test]
     fn transcription_contracts_match_python_oracle() -> Result<(), Box<dyn Error>> {

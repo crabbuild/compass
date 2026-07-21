@@ -4,11 +4,13 @@ Register-ArgumentCompleter -Native -CommandName trail -ScriptBlock {
     $values = if ($tokens.Count -le 1) {
         @('graph', '--help', '--version')
     } elseif ($tokens.Count -le 2) {
-        @('update', 'extract', 'watch', 'cluster-only', 'query', 'path', 'explain', 'affected', 'tree', 'export', 'benchmark', 'diagnose', 'merge-graphs')
+        @('update', 'extract', 'watch', 'serve', 'cluster-only', 'query', 'path', 'explain', 'affected', 'tree', 'export', 'benchmark', 'diagnose', 'merge-graphs')
     } elseif ($tokens -contains 'export') {
         @('html', 'callflow-html', 'obsidian', 'wiki', 'svg', 'graphml')
     } elseif ($tokens -contains 'diagnose') {
         @('multigraph')
+    } elseif ($tokens -contains 'serve') {
+        @('--help', '--graph', '--transport', '--host', '--port', '--api-key', '--path', '--json-response', '--stateless', '--session-timeout')
     } else {
         @('--help', '--graph', '--out', '--output', '--force', '--no-cluster', '--no-viz', '--exclude', '--resolution', '--exclude-hubs')
     }
