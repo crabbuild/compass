@@ -1,28 +1,17 @@
-# Compass
+# Compass: local knowledge graphs for your codebase
 
-Compass is the native Rust implementation of Graphify. It maps source code and
-structured project files into a traversable knowledge graph without embeddings,
-a vector database, Python, runtime grammar downloads, or separately installed
-native libraries. Code remains fully local and deterministic; semantic formats
-use the selected model provider.
+Compass turns source code and project artifacts into a searchable knowledge graph. Use it to find implementation paths, understand dependencies, estimate change impact, give coding assistants focused context, or export the graph to other tools.
 
-The public command surface is exposed directly under `compass`:
+Compass is the native Rust implementation of [Graphify](https://github.com/Graphify-Labs/graphify). Structural extraction and graph queries run locally without Python, embeddings, a vector database, runtime grammar downloads, or separately installed native libraries. Semantic extraction is optional and uses the model provider you configure.
 
-```bash
-compass update .
-compass query "where is authentication enforced?"
-compass query --cql 'MATCH (f:Function)-[:CALLS]->(a) RETURN f.id, a.id'
-compass path LoginHandler SessionValidator
-compass explain SessionValidator
-compass affected SessionValidator
-```
+## Command surface and graph history
 
 Only completed commands are exposed. `compass` is the authoritative CLI and
 may evolve independently of the Python `graphify` command. The workspace also
 builds a legacy `graphify` executable for the older command surface where
 compatibility remains useful; it does not constrain Compass commands or help.
 
-## Current native command surface
+### Current native command surface
 
 ```text
 compass update
@@ -62,7 +51,7 @@ compass prs
 compass hook
 ```
 
-## Versioned graph history
+### Versioned graph history
 
 Compass can materialize a complete immutable graph for an exact Git commit and
 keep it in a SQLite-backed Prolly store outside Git history. A realization
@@ -115,7 +104,7 @@ All linked worktrees share
 `$(git rev-parse --git-common-dir)/compass/history.sqlite`. The pinned
 `prolly-store-sqlite` adapter runs SQLite in WAL mode with full synchronous
 durability and a busy timeout. The database, WAL, and operational files are
-live resources—do not copy only `history.sqlite` while Compass is running.
+live resources. Don't copy only `history.sqlite` while Compass is running.
 Compass creates the resource directory and operational records with owner-only
 permissions. Jobs, leases, locks, and protected temporary worktrees are files
 beside the database rather than Prolly values.
@@ -153,68 +142,334 @@ Assistant setup is native and self-contained. The generic
 their uninstall counterparts, and every legacy direct platform command exposed
 by `graphify` are differential-tested against Python for both terminal output
 and the complete installed file tree.
+## How Compass works
 
-The deterministic language registry is checked against every extension handled
-by Python, and all Tree-sitter grammars are statically linked into the binary.
-Graph edges retain their `EXTRACTED`, `INFERRED`, or `AMBIGUOUS` provenance.
+Compass parses a project into nodes and directed relationships. It then groups related nodes into communities and writes the results to `graphify-out/`.
 
-`compass extract` now combines local AST facts with native semantic
-extraction for documents, papers, PDFs, office files, and images. It supports
-built-in and trusted custom providers, standard/deep cache namespaces, adaptive
-chunk recovery, root-confined image loading, bounded pure-Rust PDF/DOCX/XLSX
-ingestion, and guarded incremental replacement. Use `--code-only` to guarantee
-that no model is invoked; add `--cargo` to include workspace-internal crate
-dependency edges from local Cargo manifests, `--postgres DSN` for read-only
-schema introspection, or `--google-workspace` to export Drive shortcuts through
-the configured `gws` CLI. Integrations that have not reached compatibility are
-rejected explicitly instead of being accepted silently.
-
-`compass export neo4j` and `compass export falkordb` emit compatible
-OpenCypher locally. Adding `--push URI` performs native, bounded live upserts:
-Neo4j uses Bolt (including verified TLS and explicit self-signed modes), while
-FalkorDB uses RESP directly. Passwords can come from `NEO4J_PASSWORD` or
-`FALKORDB_PASSWORD` and are redacted from failures; neither path needs Python,
-a database SDK, or a native client library.
-
-`compass serve` exposes the completed query, graph-inspection, resource,
-and PR-impact surface over MCP. Stdio is the default for editor integrations;
-`--transport http` enables Streamable HTTP with stateful or stateless
-operation, bounded request bodies, DNS-rebinding checks, optional API-key
-authentication, session expiry, and graceful shutdown. The same package
-installs `graphify-mcp` as a drop-in compatibility entry point:
-
-```bash
-compass serve graphify-out/graph.json
-compass serve --transport http --api-key "$GRAPHIFY_API_KEY"
-graphify-mcp --graph graphify-out/graph.json
+```text
+ Source code        Project files       Optional semantic sources
+ .rs .py .ts ...    Cargo, MCP, etc.    docs, PDFs, Office, images
+      \                  |                         /
+       +-----------------+------------------------+
+                         |
+                         v
+               Parse and resolve locally
+                         |
+                         v
+              +------------------------+
+              |   Compass graph        |
+              |                        |
+              |  nodes --relations-->  |
+              |     \__ communities    |
+              +------------------------+
+                         |
+          +--------------+---------------+
+          |              |               |
+          v              v               v
+       CLI queries   graph.html     assistants / MCP
 ```
 
-Native Whisper inference, verified model and URL artifact acquisition, and
-bounded audio/video decoding—including AVI—are implemented internally; their
-public commands remain hidden until the corresponding Python command workflows
-pass strict compatibility tests.
+Consider a checkout flow. Compass may represent it like this:
 
-## Install from source
+```text
+ CheckoutHandler
+      |
+      +--CALLS [EXTRACTED]--> authorizePayment()
+      |                              |
+      |                              +--USES--> PaymentGateway
+      |
+      +--CALLS [INFERRED]----> reserveInventory()
+```
 
-Rust 1.97.1 or newer is required to compile Compass:
+The graph uses these concepts:
+
+- **Node**: a file, function, class, document section, database object, or another project entity
+- **Relationship**: a directed connection such as `CALLS`, `IMPORTS_FROM`, `USES`, or `CONTAINS`
+- **Community**: a densely connected group that usually corresponds to a subsystem or feature
+- **God node**: a highly connected node that may be important, generic, or too broad to help navigation
+- **Provenance**: how Compass determined a relationship: `EXTRACTED` from direct evidence, `INFERRED` from resolution, or `AMBIGUOUS` when more than one interpretation remains
+
+Compass preserves relationship direction, source locations, and provenance in the graph. You can inspect uncertain relationships instead of treating every connection as equally reliable.
+
+## Install Compass from source
+
+Building Compass requires Rust 1.97.1 or newer. The repository pins that toolchain in `rust-toolchain.toml`.
 
 ```bash
 git clone https://github.com/crabbuild/compass.git
 cd compass
 cargo install --locked --path crates/compass-cli
-compass --help
+compass --version
 ```
 
-No Python environment is needed by the installed binaries. Python is used only
-by the development parity suite.
+The installation adds three standalone binaries:
 
-After a release is published to crates.io, the registry install is:
+- `compass`: the primary command-line interface
+- `graphify`: a compatibility interface for tested Graphify workflows
+- `graphify-mcp`: a compatibility entry point for existing Model Context Protocol configurations
+
+The installed binaries don't require Python. The development parity suite uses Python only to compare Compass with Graphify.
+
+After the crate is published to crates.io, install it with:
 
 ```bash
 cargo install --locked compass-cli
 ```
 
-## Build and verify
+The release workflow publishes prebuilt archives on the [Compass releases page](https://github.com/crabbuild/compass/releases) for Linux, macOS, and Windows on x86-64 and ARM64.
+
+## Build your first graph
+
+Run `update` from a project directory. This command performs deterministic structural extraction and doesn't call a model.
+
+```bash
+cd your_project_directory
+compass update .
+```
+
+Compass writes the graph and its supporting artifacts to `graphify-out/`:
+
+| Artifact | Use it for |
+| --- | --- |
+| `graph.json` | Machine-readable nodes, relationships, attributes, and provenance |
+| `GRAPH_REPORT.md` | Architecture summary, communities, god nodes, and graph diagnostics |
+| `graph.html` | Interactive browser exploration when the graph is within the visualization limit |
+| `manifest.json` | Incremental build state |
+
+Open `graphify-out/graph.html` in a browser for a visual tour. Start with `GRAPH_REPORT.md` when you need a repository-wide architecture view.
+
+Ask a focused question when you need a smaller working set:
+
+```bash
+compass query "where is authentication enforced?"
+```
+
+This query searches and traverses the saved graph. It returns relevant nodes and relationships, not a model-generated narrative, and it doesn't access the network.
+
+## Explore the graph with concrete questions
+
+Compass includes focused commands for common code-reading tasks. Each command reads `graphify-out/graph.json` by default.
+
+Find the neighborhood related to a concept:
+
+```bash
+compass query "payment retry logic"
+```
+
+Inspect one symbol and its incoming and outgoing relationships:
+
+```bash
+compass explain PaymentGateway
+```
+
+Find the shortest known route between two symbols:
+
+```bash
+compass path CheckoutHandler PaymentGateway
+```
+
+Estimate what may depend on a changed symbol:
+
+```bash
+compass affected authorizePayment --depth 3
+```
+
+`affected` follows impact-related relationships such as calls, imports, and uses. Treat the result as a review scope, not proof that every returned file must change.
+
+### Run exact structural queries with CompassQL
+
+[CompassQL](docs/COMPASSQL.md) is Compass's deterministic, read-only subset of openCypher. Use it when you need an exact graph pattern, stable automation, parameters, or JSON output.
+
+This query finds callers of `authorizePayment()`:
+
+```bash
+compass query --cql \
+  "MATCH (caller)-[:CALLS]->(target) \
+   WHERE target.label = 'authorizePayment()' \
+   RETURN caller.id, target.id \
+   LIMIT 20"
+```
+
+Use parameters when values come from a script:
+
+```bash
+compass query --cql \
+  'MATCH (caller)-[:CALLS]->(target) \
+   WHERE target.label = $target \
+   RETURN caller.id' \
+  --param target='authorizePayment()' \
+  --format json
+```
+
+CompassQL never mutates the graph. See the [CompassQL support matrix](docs/COMPASSQL_SUPPORT.md) for accepted syntax, limits, diagnostics, and unsupported openCypher features.
+
+## Choose structural or semantic extraction
+
+Use `update` for source code and deterministic project structure. Use `extract` when you also need documents, papers, Portable Document Format (PDF) files, Office files, images, or external schemas in the graph.
+
+```text
+compass update .
+    local structural graph
+    no model call
+
+compass extract . --code-only --cargo
+    explicit no-model mode
+    includes Cargo workspace dependency edges
+
+compass extract docs --backend openai --model your_model_name
+    adds semantic facts from supported documents
+    sends selected content to the configured provider
+```
+
+`--code-only` guarantees that Compass won't invoke a model. Without that flag, semantic extraction uses the selected built-in or trusted custom provider. Configure provider credentials through the provider's environment variables, then run `compass extract --help` for controls such as token budget, concurrency, timeouts, and partial results.
+
+Native integrations can add other graph layers:
+
+```bash
+# Add workspace-internal Cargo dependencies.
+compass extract . --code-only --cargo
+
+# Read a PostgreSQL schema through a read-only connection.
+compass extract . --code-only --postgres 'postgresql://localhost/app_database'
+
+# Export Google Drive shortcuts through the configured gws CLI.
+compass extract . --code-only --google-workspace
+```
+
+Compass confines image loading to the selected root. PDF, DOCX, and XLSX ingestion also uses bounded native readers.
+
+## Keep the graph current
+
+Compass records file state in `manifest.json`, so later updates can reuse unchanged extraction results.
+
+Run an update after a batch of changes:
+
+```bash
+compass update .
+```
+
+Use the watcher during active development:
+
+```bash
+compass watch .
+```
+
+The watcher rebuilds deterministic changes after its debounce interval. When semantic media changes, it writes `graphify-out/needs_update` instead of calling a model in the background. Run `compass extract` again when you're ready to refresh that content.
+
+## Connect a coding assistant
+
+Compass can install project-scoped instructions, skills, and hooks for supported coding assistants. For example, install the Codex integration from the project root:
+
+```bash
+compass install --platform codex --project
+```
+
+The integration tells the assistant when to read the architecture report and when to run a focused graph query. It doesn't upload the graph.
+
+List every supported platform and installation option:
+
+```bash
+compass install --help
+```
+
+Remove one project integration without deleting the graph:
+
+```bash
+compass uninstall --platform codex --project
+```
+
+## Serve the graph over MCP
+
+Compass includes a Model Context Protocol (MCP) server for editors and agents. Standard input and output is the default transport:
+
+```bash
+compass serve graphify-out/graph.json
+```
+
+For a network client, start Streamable HTTP and require an API key:
+
+```bash
+export GRAPHIFY_API_KEY='your_access_token_here'
+compass serve --transport http --api-key "$GRAPHIFY_API_KEY"
+```
+
+HTTP mode supports stateful or stateless sessions, bounded request bodies, Domain Name System (DNS) rebinding checks, session expiry, and graceful shutdown. Run `compass serve --help` to configure the host, port, path, and session behavior.
+
+## Export or share the graph
+
+Exports transform the existing graph without rebuilding the project:
+
+```bash
+compass export wiki
+compass export obsidian
+compass export svg
+compass export graphml
+compass export neo4j
+```
+
+Neo4j and FalkorDB exports produce local openCypher by default. Add `--push URI` for bounded live upserts. Compass connects to Neo4j with Bolt and to FalkorDB with Redis Serialization Protocol (RESP), so neither path needs a database software development kit.
+
+Store database passwords in `NEO4J_PASSWORD` or `FALKORDB_PASSWORD`. Compass redacts those values from failures.
+
+## Know when Compass can access the network
+
+The default build and query workflow stays local. Network access occurs only when you select a network-backed feature:
+
+- `compass update`, local queries, CompassQL, traversal, reports, and local exports don't access the network
+- `compass extract --code-only` explicitly disables model calls
+- Semantic extraction may send selected content to your configured model provider
+- `compass export neo4j --push` and `compass export falkordb --push` connect to the target database
+- `compass serve --transport http` listens on the host and port you configure
+- Google Workspace extraction uses your configured `gws` command
+
+All Tree-sitter grammars are linked into the binary. Compass doesn't download parsers while scanning a repository.
+
+## Find the command you need
+
+Compass exposes completed native commands under one interface:
+
+| Task | Commands |
+| --- | --- |
+| Build and enrich | `update`, `extract`, `watch`, `cluster-only`, `label` |
+| Explore and assess impact | `query`, `path`, `explain`, `affected`, `tree`, `benchmark` |
+| Inspect versioned graphs | `history`, `diff`, and query commands with `--at` |
+| Export and serve | `export`, `serve` |
+| Manage graph data | `diagnose multigraph`, `merge-graphs`, `merge-chunks`, `merge-semantic`, `cache-check` |
+| Work across projects | `global`, `clone`, `add`, `prs`, `hook`, `merge-driver` |
+| Configure integrations | `install`, `uninstall`, `provider`, `check-update`, `hook-check`, `hook-guard` |
+| Save project knowledge | `save-result`, `reflect` |
+
+Run `compass --help` for the current surface or `compass <command> --help` for command syntax.
+
+## Migrate from Graphify
+
+Compass reads and writes the existing `graphify-out/` layout, including graphs, caches, manifests, labels, analysis, memory, and sidecars. You don't need to convert your project data.
+
+Use `compass` for new workflows. Use the bundled `graphify` executable when an existing script depends on Graphify's tested arguments, output, or exit behavior.
+
+```text
+graphify <command>       -> compass <command>
+python -m graphify ...  -> compass ...
+```
+
+See [MIGRATION.md](MIGRATION.md) for side-by-side qualification, cutover, and rollback. See [COMPATIBILITY.md](COMPATIBILITY.md) for the frozen Python baseline and differential evidence.
+
+## Join the Compass community
+
+Use Compass's public community channels to ask questions, report problems, propose improvements, and contribute changes.
+
+| Need | Destination |
+| --- | --- |
+| Usage question or open-ended idea | [GitHub Discussions](https://github.com/crabbuild/compass/discussions) |
+| Reproducible bug or actionable feature request | [GitHub Issue chooser](https://github.com/crabbuild/compass/issues/new/choose) |
+| Security vulnerability | [GitHub private vulnerability reporting](https://github.com/crabbuild/compass/security/advisories/new) |
+| Code or documentation contribution | [GitHub pull requests](https://github.com/crabbuild/compass/pulls) |
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. All project interactions follow the [Compass code of conduct](CODE_OF_CONDUCT.md). [SUPPORT.md](SUPPORT.md) explains support boundaries, and [SECURITY.md](SECURITY.md) explains private vulnerability reporting.
+
+## Build and verify the workspace
+
+These commands run the checks used for local development:
 
 ```bash
 cargo build --release --locked --bins
@@ -223,37 +478,20 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
 ```
 
-The scheduled hardening workflow additionally enforces native line coverage,
-runs focused mutation suites for stable IDs, invalidation, query scoring, graph
-guards, and compatibility mappings, runs the safe graph model and traversal
-crates under Miri, executes the native workspace with AddressSanitizer, and
-fuzzes hostile graph JSON, source code, ignore files, manifests, CLI arguments,
-renderers, semantic fragments, and AVI/audio containers before they can reach
-graph construction or transcription.
+The compatibility suite uses a sibling Graphify checkout as its behavioral oracle. Set `GRAPHIFY_REPO_ROOT` when that checkout lives elsewhere. Set `GRAPHIFY_PYTHON` and `GRAPHIFY_MEDIA_PYTHON` when the test interpreters use non-default paths.
 
-The compatibility tests use a sibling Graphify checkout as the behavioral
-oracle. Set `GRAPHIFY_REPO_ROOT` when it is elsewhere. Office/PDF dependencies
-live in a separate `.venv-media`
-environment so installing `lxml` cannot alter unrelated GraphML oracle output.
-Set `GRAPHIFY_PYTHON` and `GRAPHIFY_MEDIA_PYTHON` when those interpreters are in
-different locations.
+Release qualification also covers native line and region coverage, focused mutation suites, Miri, AddressSanitizer, and fuzz targets for untrusted inputs. Read [PERFORMANCE.md](PERFORMANCE.md) for benchmark methodology and the current baseline.
 
-Performance methodology, the reproducible qualification harness, and the
-current local baseline are documented in [PERFORMANCE.md](PERFORMANCE.md).
-The frozen compatibility baseline and evidence map are documented in
-[COMPATIBILITY.md](COMPATIBILITY.md). Side-by-side adoption and recovery are
-documented in [MIGRATION.md](MIGRATION.md).
+## Distribution guarantees
 
-The deterministic structural-query language is documented in
-[docs/COMPASSQL.md](docs/COMPASSQL.md), with its exact accepted/rejected surface
-in [docs/COMPASSQL_SUPPORT.md](docs/COMPASSQL_SUPPORT.md).
+Release archives contain `compass`, `graphify`, and `graphify-mcp`, plus shell completions, license notices, a Software Package Data Exchange (SPDX) software bill of materials, a SHA-256 checksum, and build-provenance attestation.
 
-## Distribution
+The release workflow builds Linux, macOS, and Windows archives for x86-64 and ARM64. Publishing to crates.io uses a separate environment-protected workflow that validates the release tag before publishing workspace crates in dependency order.
 
-`compass-release.yml` builds native archives for Linux, macOS, and Windows on both
-x86-64 and ARM64. Every archive contains standalone `compass`, compatibility
-`graphify`, and `graphify-mcp` executables, a SHA-256 checksum, and GitHub build-provenance
-attestation. The crate manifests are package-ready for an ordered crates.io
-publish. `compass-publish.yml` is a separately approved environment-protected
-workflow that validates an exact release tag and confirmation string, then
-publishes the crates in dependency order.
+## License
+
+Compass's original work is available under your choice of the [MIT License](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE). The workspace uses the SPDX expression `MIT OR Apache-2.0`.
+
+Third-party components retain their original licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the license files stored with vendored components.
+
+Unless you explicitly state otherwise, contributions submitted for inclusion in Compass use the same dual license without additional terms or conditions.

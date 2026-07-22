@@ -136,6 +136,9 @@ jobs:
           cp "target/${{ matrix.target }}/release/graphify-mcp" "dist/$name/"
           cp README.md "dist/$name/"
           cp LICENSE "dist/$name/"
+          cp LICENSE-MIT "dist/$name/"
+          cp LICENSE-APACHE "dist/$name/"
+          cp THIRD_PARTY_NOTICES.md "dist/$name/"
           cp -R completions "dist/$name/"
 
       - name: Prepare Windows distribution
@@ -149,6 +152,9 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/graphify-mcp.exe" "dist/$name/"
           Copy-Item README.md "dist/$name/"
           Copy-Item LICENSE "dist/$name/"
+          Copy-Item LICENSE-MIT "dist/$name/"
+          Copy-Item LICENSE-APACHE "dist/$name/"
+          Copy-Item THIRD_PARTY_NOTICES.md "dist/$name/"
           Copy-Item completions "dist/$name/" -Recurse
 
       - name: Generate SPDX SBOM
@@ -190,6 +196,9 @@ jobs:
           "dist/verify/$name/graphify" --help
           "dist/verify/$name/graphify-mcp" --help
           test -f "dist/verify/$name/SBOM.spdx.json"
+          test -f "dist/verify/$name/LICENSE-MIT"
+          test -f "dist/verify/$name/LICENSE-APACHE"
+          test -f "dist/verify/$name/THIRD_PARTY_NOTICES.md"
 
       - name: Verify packaged Windows binaries
         if: matrix.archive == 'zip'
@@ -202,6 +211,9 @@ jobs:
           & "dist/verify/$name/graphify.exe" --help
           & "dist/verify/$name/graphify-mcp.exe" --help
           if (-not (Test-Path "dist/verify/$name/SBOM.spdx.json")) { throw "SBOM missing" }
+          if (-not (Test-Path "dist/verify/$name/LICENSE-MIT")) { throw "MIT license missing" }
+          if (-not (Test-Path "dist/verify/$name/LICENSE-APACHE")) { throw "Apache license missing" }
+          if (-not (Test-Path "dist/verify/$name/THIRD_PARTY_NOTICES.md")) { throw "third-party notices missing" }
 
       - name: Attest release archives
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
