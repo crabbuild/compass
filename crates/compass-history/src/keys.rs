@@ -1,9 +1,9 @@
 use prolly::KeyBuilder;
 
-const KEY_SCHEMA_V1: &[u8] = &[1];
-const NODE_KIND: &[u8] = &[1];
-const EDGE_KIND: &[u8] = &[2];
-const HYPEREDGE_KIND: &[u8] = &[3];
+pub(crate) const KEY_SCHEMA_V1: &[u8] = &[1];
+pub(crate) const NODE_KIND: &[u8] = &[1];
+pub(crate) const EDGE_KIND: &[u8] = &[2];
+pub(crate) const HYPEREDGE_KIND: &[u8] = &[3];
 
 /// Construct a segment-safe node key.
 #[must_use]
