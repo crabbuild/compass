@@ -40,6 +40,18 @@ pub enum HistoryError {
     /// The history database has no supported store-format marker.
     #[error("history store format is missing or incompatible")]
     IncompatibleStoreFormat,
+    /// A value could not be represented by the canonical encoding.
+    #[error("canonical encoding failed: {0}")]
+    Canonical(String),
+    /// A typed key was malformed.
+    #[error("invalid typed key: {0}")]
+    InvalidKey(String),
+    /// A fingerprint field name appears to contain secret material.
+    #[error("secret-bearing field cannot enter extraction identity: {0}")]
+    FingerprintSecretKey(String),
+    /// A fingerprint digest was not strict lowercase SHA-256 text.
+    #[error("invalid extraction fingerprint: {0}")]
+    InvalidFingerprint(String),
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> HistoryError {
