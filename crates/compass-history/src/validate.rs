@@ -19,6 +19,10 @@ pub const MAX_JSON_DEPTH: usize = 128;
 pub const MAX_JOB_BYTES: usize = 1024 * 1024;
 pub const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 
+pub(crate) const fn exceeds_limit(actual: u64, limit: u64) -> bool {
+    actual > limit
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ValidationReport {
     pub nodes: u64,
@@ -174,14 +178,14 @@ fn scan_tree(
     let mut entries = Vec::new();
     for entry in manager.range(tree, &[], None)? {
         let (key, value) = entry?;
-        if key.len() > MAX_KEY_BYTES {
+        if exceeds_limit(key.len() as u64, MAX_KEY_BYTES as u64) {
             problems.push(ValidationProblem::ResourceLimit {
                 kind: "key bytes",
                 limit: MAX_KEY_BYTES as u64,
                 actual: key.len() as u64,
             });
         }
-        if value.len() > MAX_RECORD_VALUE_BYTES {
+        if exceeds_limit(value.len() as u64, MAX_RECORD_VALUE_BYTES as u64) {
             problems.push(ValidationProblem::ResourceLimit {
                 kind: "record value bytes",
                 limit: MAX_RECORD_VALUE_BYTES as u64,
@@ -191,7 +195,7 @@ fn scan_tree(
         *total_bytes = total_bytes
             .saturating_add(key.len() as u64)
             .saturating_add(value.len() as u64);
-        if *total_bytes > MAX_AUTHORITATIVE_BYTES {
+        if exceeds_limit(*total_bytes, MAX_AUTHORITATIVE_BYTES) {
             problems.push(ValidationProblem::ResourceLimit {
                 kind: "authoritative bytes",
                 limit: MAX_AUTHORITATIVE_BYTES,
@@ -202,7 +206,7 @@ fn scan_tree(
             && let Ok(json) = serde_json::from_slice::<Value>(&envelope.payload)
         {
             let depth = json_depth(&json);
-            if depth > MAX_JSON_DEPTH {
+            if exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64) {
                 problems.push(ValidationProblem::ResourceLimit {
                     kind: "JSON depth",
                     limit: MAX_JSON_DEPTH as u64,
@@ -217,7 +221,7 @@ fn scan_tree(
             }
         }
         entries.push((key, value));
-        if entries.len() as u64 > MAX_RECORDS_PER_TREE {
+        if exceeds_limit(entries.len() as u64, MAX_RECORDS_PER_TREE) {
             problems.push(ValidationProblem::ResourceLimit {
                 kind: "records per tree",
                 limit: MAX_RECORDS_PER_TREE,
@@ -282,5 +286,29 @@ fn json_depth(value: &Value) -> usize {
         Value::Array(values) => 1 + values.iter().map(json_depth).max().unwrap_or(0),
         Value::Object(values) => 1 + values.values().map(json_depth).max().unwrap_or(0),
         _ => 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH,
+        MAX_KEY_BYTES, MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, exceeds_limit,
+    };
+
+    #[test]
+    fn every_v1_resource_limit_accepts_the_boundary_and_rejects_the_next_unit() {
+        for limit in [
+            MAX_AUTHORITATIVE_BYTES,
+            MAX_KEY_BYTES as u64,
+            MAX_RECORD_VALUE_BYTES as u64,
+            MAX_RECORDS_PER_TREE,
+            MAX_JSON_DEPTH as u64,
+            MAX_JOB_BYTES as u64,
+            MAX_DIAGNOSTIC_BYTES as u64,
+        ] {
+            assert!(!exceeds_limit(limit, limit));
+            assert!(exceeds_limit(limit + 1, limit));
+        }
     }
 }

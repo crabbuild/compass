@@ -6,10 +6,8 @@ Commands:
     --purge                 also delete graphify-out/ directory
   path "A" "B"            shortest path between two nodes in graph.json
     --graph <path>          path to graph.json (default graphify-out/graph.json)
-    --at <rev>              use a materialized Git commit (exclusive with --graph)
   explain "X"             plain-language explanation of a node and its neighbors
     --graph <path>          path to graph.json (default graphify-out/graph.json)
-    --at <rev>              use a materialized Git commit (exclusive with --graph)
   diagnose multigraph    report same-endpoint edge collapse risk in graph.json
     --graph <path>          path to graph/extraction JSON
                             (default graphify-out/graph.json)
@@ -54,7 +52,6 @@ Commands:
     --context C             explicit edge-context filter (repeatable)
     --budget N              cap output at N tokens (default 2000)
     --graph <path>          path to graph.json (default graphify-out/graph.json)
-    --at <rev>              use a materialized Git commit (exclusive with --graph)
   affected "X"             reverse traversal to find nodes impacted by X
     --relation R            edge relation to traverse in reverse (repeatable)
     --depth N               reverse traversal depth (default 2)

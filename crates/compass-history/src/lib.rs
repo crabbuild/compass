@@ -32,7 +32,7 @@ pub use lock::{ActivityGuard, MaintenanceGuard};
 pub use model::{
     ArtifactClass, ArtifactContent, ArtifactRegistryEntry, CommitId, CompletionEvidence,
     GraphVersion, HISTORY_SCHEMA_VERSION, PublishRequest, PublishedVersion, RealizationId,
-    StoredTree,
+    StoredTree, StructuralSharing,
 };
 pub use store::{CorruptPreferredToken, HistoryStore, PreparedPublication};
 pub use validate::{

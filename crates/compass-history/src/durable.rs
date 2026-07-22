@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use crate::store::{create_owner_dir, reject_symlink, set_owner_file};
+use crate::validate::exceeds_limit;
 use crate::{HistoryError, MAX_JOB_BYTES};
 
 /// Atomically persist owner-only operational state in one directory.
@@ -11,7 +12,7 @@ pub(crate) fn write_json_atomic<T: serde::Serialize>(
     value: &T,
 ) -> Result<(), HistoryError> {
     let bytes = serde_json::to_vec(value)?;
-    if bytes.len() > MAX_JOB_BYTES {
+    if exceeds_limit(bytes.len() as u64, MAX_JOB_BYTES as u64) {
         return Err(HistoryError::OperationalState(format!(
             "{} exceeds the {}-byte durable-state limit",
             path.display(),
@@ -105,7 +106,7 @@ pub(crate) fn read_json_bounded<T: serde::de::DeserializeOwned>(
     let metadata = file
         .metadata()
         .map_err(|source| crate::error::io_error(path, source))?;
-    if !metadata.is_file() || metadata.len() > MAX_JOB_BYTES as u64 {
+    if !metadata.is_file() || exceeds_limit(metadata.len(), MAX_JOB_BYTES as u64) {
         return Err(HistoryError::OperationalState(format!(
             "{} is not a bounded regular durable-state file",
             path.display()
@@ -115,7 +116,7 @@ pub(crate) fn read_json_bounded<T: serde::de::DeserializeOwned>(
     file.take((MAX_JOB_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|source| crate::error::io_error(path, source))?;
-    if bytes.len() > MAX_JOB_BYTES {
+    if exceeds_limit(bytes.len() as u64, MAX_JOB_BYTES as u64) {
         return Err(HistoryError::OperationalState(format!(
             "{} exceeds the {}-byte durable-state limit",
             path.display(),

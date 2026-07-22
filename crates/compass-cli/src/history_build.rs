@@ -972,4 +972,91 @@ mod tests {
         assert!(output.ends_with("...[truncated]"));
         Ok(())
     }
+
+    #[test]
+    fn build_parser_covers_complete_profile_and_every_argument_boundary()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = parse_build_command(
+            "rebuild",
+            &[
+                "HEAD".to_owned(),
+                "--cargo".to_owned(),
+                "--dedup-llm".to_owned(),
+                "--no-gitignore".to_owned(),
+                "--mode".to_owned(),
+                "deep".to_owned(),
+                "--token-budget=1".to_owned(),
+                "--resolution".to_owned(),
+                "0.5".to_owned(),
+                "--exclude-hubs=-0.0".to_owned(),
+                "--exclude".to_owned(),
+                "target".to_owned(),
+                "--replace-corrupt".to_owned(),
+                "--format".to_owned(),
+                "text".to_owned(),
+            ],
+        )?;
+        assert!(parsed.replace_corrupt);
+        assert_eq!(parsed.revision, "HEAD");
+        assert_eq!(parsed.options.profile().value("cargo"), Some("true"));
+        assert_eq!(parsed.options.profile().value("gitignore"), Some("false"));
+        assert_eq!(parsed.options.profile().value("exclude_hubs"), Some("0"));
+
+        let end_marker = parse_build_command("build", &["--".to_owned(), "-revision".to_owned()])?;
+        assert_eq!(end_marker.revision, "-revision");
+
+        for arguments in [
+            vec![],
+            vec!["one", "two"],
+            vec!["HEAD", "--cargo=true"],
+            vec!["HEAD", "--cargo", "--cargo"],
+            vec!["HEAD", "--mode", "shallow"],
+            vec!["HEAD", "--mode"],
+            vec!["HEAD", "--token-budget", "0"],
+            vec!["HEAD", "--token-budget", "word"],
+            vec!["HEAD", "--resolution", "0"],
+            vec!["HEAD", "--resolution", "NaN"],
+            vec!["HEAD", "--exclude-hubs", "NaN"],
+            vec!["HEAD", "--exclude", ""],
+            vec!["HEAD", "--format", "yaml"],
+            vec!["HEAD", "--unknown"],
+            vec!["HEAD", "--allow-partial"],
+            vec!["HEAD", "--code-only"],
+            vec!["HEAD", "--no-cluster"],
+            vec!["HEAD", "--google-workspace"],
+            vec!["HEAD", "--postgres"],
+            vec!["HEAD", "--global"],
+            vec!["HEAD", "--as"],
+        ] {
+            let arguments = arguments.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            assert!(
+                parse_build_command("build", &arguments).is_err(),
+                "unexpectedly accepted {arguments:?}"
+            );
+        }
+        assert!(
+            parse_build_command(
+                "build",
+                &["HEAD".to_owned(), "--replace-corrupt".to_owned()]
+            )
+            .is_err()
+        );
+        assert!(parse_enable_options(&["--format=json".to_owned()]).is_err());
+        assert!(parse_enable_options(&["--replace-corrupt".to_owned()]).is_err());
+        assert!(parse_enable_options(&["--cargo".to_owned()]).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_profile_helpers_reject_non_finite_and_non_positive_values() {
+        assert_eq!(nonempty("--x", " value "), Ok(" value "));
+        assert!(nonempty("--x", " \t").is_err());
+        assert_eq!(positive_usize("--x", "2"), Ok(2));
+        assert!(positive_usize("--x", "0").is_err());
+        assert_eq!(positive_float("--x", "0.25"), Ok(0.25));
+        assert!(positive_float("--x", "-1").is_err());
+        assert!(finite_float("--x", "inf").is_err());
+        assert_eq!(normalized_float(-0.0), "0");
+        assert_eq!(normalized_float(1.25), "1.25");
+    }
 }

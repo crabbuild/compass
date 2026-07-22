@@ -16,9 +16,10 @@ compass explain SessionValidator
 compass affected SessionValidator
 ```
 
-Only completed commands are exposed. The workspace also builds a `graphify`
-compatibility executable, but it exposes only commands that pass differential
-tests against the Python implementation.
+Only completed commands are exposed. `compass` is the authoritative CLI and
+may evolve independently of the Python `graphify` command. The workspace also
+builds a legacy `graphify` executable for the older command surface where
+compatibility remains useful; it does not constrain Compass commands or help.
 
 ## Current native command surface
 
@@ -33,6 +34,8 @@ compass cluster-only
 compass query
 compass path
 compass explain
+compass diff
+compass history
 compass affected
 compass tree
 compass export
@@ -56,6 +59,92 @@ compass label
 compass prs
 compass hook
 ```
+
+## Versioned graph history
+
+Compass can materialize a complete immutable graph for an exact Git commit and
+keep it in a SQLite-backed Prolly store outside Git history. A realization
+contains the AST graph, semantic and inferred edges, hyperedges, community and
+analysis data, reconstruction metadata, and authoritative sidecars. History is
+opt-in for eager generation; explicit builds and lazy historical queries remain
+available while eager generation is disabled.
+
+```bash
+compass history enable
+compass history build HEAD
+compass query "authentication flow" --at HEAD~20
+compass diff v1.2.0 HEAD --detailed
+compass history export HEAD --format graphify-out --output historical-output
+compass history list HEAD --format json
+compass history gc
+compass history disable
+```
+
+`compass history enable` records a repository-wide build profile and installs
+managed `post-commit` and `post-merge` hooks. The hooks capture the resulting
+commit SHA and durably enqueue work, then return without waiting for extraction.
+The worker uses leases and a FIFO queue; a failed job does not prevent later
+jobs from running. `disable` is idempotent: it stops eager enqueueing but keeps
+the database, jobs, and existing realizations. It does not disable explicit
+`build`/`rebuild`, `--at`, or `diff`.
+
+`query`, `path`, and `explain` accept either `--graph PATH` or `--at REV`.
+`--at` resolves the revision to an exact commit. If its preferred realization
+is missing, Compass synchronously builds it in a detached, offline worktree;
+uncommitted files and caller-local `.git/info/exclude` or global-ignore rules do
+not enter the build. The committed `.gitignore` still applies. Gitlinks and LFS
+pointers are reported as limitations, and checkout filters that could execute
+external code are rejected. Historical materialization does not run hooks,
+smudge LFS objects, prompt for credentials, fetch from the network, or recurse
+into submodules.
+
+Every meaning-affecting input is captured in an extraction fingerprint,
+including the build profile, graph and canonical-encoding versions, parser and
+analyzer versions, and provider/model configuration. Credentials, machine-local
+paths, timings, token counts, and other operational data are excluded. The same
+commit may therefore have multiple immutable realizations; one validated,
+complete realization is the preferred default. Use `history list`, `show`, and
+`prefer` to inspect or select them. An unreadable preferred pointer is never
+silently overwritten: recover it only with an explicit
+`compass history rebuild REV --replace-corrupt`, which uses an exact
+compare-and-swap observation.
+
+All linked worktrees share
+`$(git rev-parse --git-common-dir)/compass/history.sqlite`. The pinned
+`prolly-store-sqlite` adapter runs SQLite in WAL mode with full synchronous
+durability and a busy timeout. The database, WAL, and operational files are
+live resources—do not copy only `history.sqlite` while Compass is running.
+Compass creates the resource directory and operational records with owner-only
+permissions. Jobs, leases, locks, and protected temporary worktrees are files
+beside the database rather than Prolly values.
+
+`history export --format graph-json` reconstructs the canonical graph JSON.
+`--format graphify-out` also restores authoritative, non-derivable sidecars
+verbatim and regenerates reports and HTML only with the renderer versions
+recorded in the artifact registry. Export equivalence is semantic and
+canonical: insignificant JSON member or record ordering is not part of the
+contract, while graph structure, attributes, duplicate id-less hyperedges, and
+authoritative bytes are.
+
+Normal `history gc` retains every published realization and removes only
+unreachable Prolly nodes plus expired operational records. Pruning alternate
+realizations requires `--prune-non-preferred`; it is a dry run until repeated
+with `--yes`. Reported bytes and node rows are logical reclamation. The command
+does not promise that the SQLite file shrinks or run `VACUUM`.
+
+Text output is intended for people; `--format json` emits stable JSON for the
+history commands that support it. Successful queries and no-store read-only
+status/list operations exit `0` and do not create `.git/compass`. CLI usage
+errors exit `2`; Git, provider, validation, corruption, and storage failures
+exit `1`, with diagnostics on stderr. Complete semantic builds require the
+selected provider's credentials when a committed input needs model extraction;
+a provider failure cannot publish or become preferred.
+
+Scripts and new documentation should use `compass`. The separately installed
+`graphify` binary is a best-effort legacy entry point for its existing tested
+surface, not an alias contract for new Compass features. In particular,
+versioned history is specified, documented, and qualified through `compass`;
+its commands and help do not need a matching Python Graphify surface.
 
 Assistant setup is native and self-contained. The generic
 `compass install --platform <name>` and project-scoped `--project` forms,

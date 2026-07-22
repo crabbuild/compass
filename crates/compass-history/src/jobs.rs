@@ -12,6 +12,7 @@ use crate::config::{now_millis, operational_root};
 use crate::durable::{read_json_bounded, write_json_atomic};
 use crate::leases;
 use crate::store::{create_owner_dir, reject_directory, reject_symlink};
+use crate::validate::exceeds_limit;
 use crate::{
     BuildProfile, CommitId, HistoryError, LeaseGuard, MAX_DIAGNOSTIC_BYTES, RealizationId,
     Repository,
@@ -407,7 +408,7 @@ impl HistoryQueue {
             || job
                 .diagnostic
                 .as_ref()
-                .is_some_and(|value| value.len() > MAX_DIAGNOSTIC_BYTES)
+                .is_some_and(|value| exceeds_limit(value.len() as u64, MAX_DIAGNOSTIC_BYTES as u64))
             || (job.state == JobState::Queued && job.lease_generation != 0)
             || (job.state != JobState::Queued && job.lease_generation == 0)
         {
@@ -459,7 +460,7 @@ fn redact_diagnostic(value: &str) -> String {
         let _ = name;
         redacted = redacted.replace(&secret, "[REDACTED]");
     }
-    if redacted.len() > MAX_DIAGNOSTIC_BYTES {
+    if exceeds_limit(redacted.len() as u64, MAX_DIAGNOSTIC_BYTES as u64) {
         let mut end = MAX_DIAGNOSTIC_BYTES;
         while !redacted.is_char_boundary(end) {
             end -= 1;

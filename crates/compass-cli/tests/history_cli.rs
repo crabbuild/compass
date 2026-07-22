@@ -55,6 +55,16 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     let status = run(compass, directory.path(), &["history", "status", "HEAD"])?;
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("no store"));
+    let status_json = run(
+        compass,
+        directory.path(),
+        &["history", "status", "HEAD", "--format=json"],
+    )?;
+    assert!(status_json.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&status_json.stdout)?["store"],
+        false
+    );
     assert!(!directory.path().join(".git/compass").exists());
     let alias = run(graphify, directory.path(), &["history", "status", "HEAD"])?;
     assert_eq!(status.status.code(), alias.status.code());
@@ -70,6 +80,15 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     assert_eq!(incompatible.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&incompatible.stdout).contains("store: incompatible"));
     assert!(String::from_utf8_lossy(&incompatible.stderr).contains("error:"));
+    let incompatible_json = run(
+        compass,
+        directory.path(),
+        &["history", "status", "HEAD", "--format=json"],
+    )?;
+    assert_eq!(incompatible_json.status.code(), Some(1));
+    let incompatible_json: serde_json::Value = serde_json::from_slice(&incompatible_json.stdout)?;
+    assert_eq!(incompatible_json["compatible"], false);
+    assert_eq!(incompatible_json["validation"]["valid"], false);
     Ok(())
 }
 
@@ -143,6 +162,40 @@ fn worker_drains_fifo_after_an_earlier_job_fails() -> Result<(), Box<dyn std::er
         .profile
         .ok_or("enabled profile")?;
     let queue = HistoryQueue::for_repository(&repository)?;
+    let mut invalid_profile_jobs = Vec::new();
+    for (key, value) in [
+        ("unsupported", "field"),
+        ("compass_version", "incompatible"),
+        ("gitignore", "maybe"),
+        ("resolution", "NaN"),
+        ("exclude_hubs", "NaN"),
+        ("token_budget", "0"),
+        ("semantic_mode", "invalid"),
+        ("semantic_prompt_sha256", "invalid"),
+        ("provider", "unsupported"),
+        ("model", "model-without-provider"),
+        ("provider_endpoint", "https://example.invalid"),
+    ] {
+        let mut invalid = profile.clone();
+        invalid.insert(key, value)?;
+        invalid_profile_jobs.push(queue.enqueue(JobRequest {
+            commit: repository.resolve("HEAD")?,
+            profile: invalid,
+        })?);
+    }
+    for (key, value) in [
+        ("provider_temperature", "NaN"),
+        ("provider_max_output_tokens", "0"),
+    ] {
+        let mut invalid = profile.clone();
+        invalid.insert("provider", "openai")?;
+        invalid.insert("model", "fixture-model")?;
+        invalid.insert(key, value)?;
+        invalid_profile_jobs.push(queue.enqueue(JobRequest {
+            commit: repository.resolve("HEAD")?,
+            profile: invalid,
+        })?);
+    }
     let failed_id = queue.enqueue(JobRequest {
         commit: "ffffffffffffffffffffffffffffffffffffffff".parse()?,
         profile: profile.clone(),
@@ -162,6 +215,12 @@ fn worker_drains_fifo_after_an_earlier_job_fails() -> Result<(), Box<dyn std::er
         queue.get(&failed_id)?.ok_or("failed job")?.state,
         JobState::Failed
     );
+    for job_id in invalid_profile_jobs {
+        assert_eq!(
+            queue.get(&job_id)?.ok_or("invalid profile job")?.state,
+            JobState::Failed
+        );
+    }
     assert_eq!(
         queue.get(&published_id)?.ok_or("published job")?.state,
         JobState::Published
@@ -346,6 +405,9 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     assert!(list.status.success());
     let listed: serde_json::Value = serde_json::from_slice(&list.stdout)?;
     assert_eq!(listed.as_array().map(Vec::len), Some(2));
+    let list_text = run(compass, directory.path(), &["history", "list", "HEAD"])?;
+    assert!(list_text.status.success());
+    assert!(String::from_utf8_lossy(&list_text.stdout).contains("alternate"));
     let alias = run(
         graphify,
         directory.path(),
@@ -363,12 +425,34 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
         serde_json::from_slice::<serde_json::Value>(&show.stdout)?["git_commit"],
         commit.as_str()
     );
+    let show_text = run(
+        compass,
+        directory.path(),
+        &["history", "show", &first.id.as_hex()],
+    )?;
+    assert!(String::from_utf8_lossy(&show_text.stdout).contains("realization:"));
     let preferred = run(
         compass,
         directory.path(),
         &["history", "prefer", "HEAD", &second.id.as_hex()],
     )?;
     assert!(preferred.status.success());
+    let preferred_json = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "prefer",
+            "HEAD",
+            &first.id.as_hex(),
+            "--format=json",
+        ],
+    )?;
+    assert!(preferred_json.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&preferred_json.stdout)?["preferred"],
+        first.id.as_hex()
+    );
 
     let graph_json = directory.path().join("historical.json");
     let export = run(
@@ -390,7 +474,23 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
         String::from_utf8_lossy(&export.stderr)
     );
     let exported = GraphDocument::load_for_recluster_compatibility(&graph_json)?;
-    assert_eq!(exported.nodes[0].label(), "Second");
+    assert_eq!(exported.nodes[0].label(), "First");
+
+    let graph_directory = directory.path().join("not-a-graph-file");
+    std::fs::create_dir(&graph_directory)?;
+    let rejected = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format=graph-json",
+            "--output",
+            graph_directory.to_str().ok_or("path")?,
+        ],
+    )?;
+    assert_eq!(rejected.status.code(), Some(1));
 
     let bundle = directory.path().join("historical-out");
     let export = run(
@@ -417,6 +517,41 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     assert_eq!(
         std::fs::read(bundle.join("semantic/facts.bin"))?,
         vec![0, 1, 255]
+    );
+    let existing_bundle = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format=graphify-out",
+            "--output",
+            bundle.to_str().ok_or("path")?,
+        ],
+    )?;
+    assert_eq!(existing_bundle.status.code(), Some(1));
+    let invalid_format = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format=yaml",
+            "--output=unused",
+        ],
+    )?;
+    assert_eq!(invalid_format.status.code(), Some(2));
+    let status = run(
+        compass,
+        directory.path(),
+        &["history", "status", "HEAD", "--format=json"],
+    )?;
+    assert!(status.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&status.stdout)?["validation"]["valid"],
+        true
     );
     assert_ne!(first.id, second.id);
     Ok(())
@@ -489,6 +624,13 @@ fn gc_requires_explicit_confirmation_for_non_preferred_realizations()
         2
     );
 
+    let dry_text = run(
+        compass,
+        directory.path(),
+        &["history", "gc", "--prune-non-preferred"],
+    )?;
+    assert!(String::from_utf8_lossy(&dry_text.stdout).contains("GC plan (not applied)"));
+
     let applied = run(
         compass,
         directory.path(),
@@ -508,9 +650,23 @@ fn gc_requires_explicit_confirmation_for_non_preferred_realizations()
         1
     );
 
+    let json_sweep = run(
+        compass,
+        directory.path(),
+        &["history", "gc", "--format=json"],
+    )?;
+    assert!(json_sweep.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&json_sweep.stdout)?["applied"],
+        true
+    );
+
     for arguments in [
         vec!["history", "gc", directory.path().to_str().ok_or("path")?],
         vec!["history", "gc", "--yes"],
+        vec!["history", "gc", "--format"],
+        vec!["history", "gc", "--format=yaml"],
+        vec!["history", "gc", "--format=json", "--format", "text"],
     ] {
         assert_eq!(
             run(compass, directory.path(), &arguments)?.status.code(),
@@ -1152,4 +1308,110 @@ fn merge_commit_materialization_reads_the_exact_merge_tree()
         assert!(String::from_utf8_lossy(&query.stdout).contains(symbol));
     }
     Ok(())
+}
+
+#[test]
+fn normal_graph_export_and_historical_queries_are_semantically_identical()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("auth.rs"),
+        "pub fn authenticate() { validate_session(); }\npub fn validate_session() {}\n",
+    )?;
+    git(directory.path(), &["add", "auth.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "auth graph"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let extracted = run(compass, directory.path(), &["extract", ".", "--no-viz"])?;
+    assert!(
+        extracted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&extracted.stderr)
+    );
+    let graph_path = directory.path().join("graphify-out/graph.json");
+    let original: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
+
+    let built = run(compass, directory.path(), &["history", "build", "HEAD"])?;
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let exported_path = directory.path().join("historical-graph.json");
+    let exported = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "graph-json",
+            "--output",
+            exported_path.to_str().ok_or("export path")?,
+        ],
+    )?;
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let reconstructed: serde_json::Value = serde_json::from_slice(&std::fs::read(&exported_path)?)?;
+    assert_eq!(
+        normalize_graph(original.clone()),
+        normalize_graph(reconstructed)
+    );
+
+    let first_link = original
+        .get("links")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|links| links.first())
+        .ok_or("normal Rust graph has no edge")?;
+    let source = first_link["source"].as_str().ok_or("edge source")?;
+    let target = first_link["target"].as_str().ok_or("edge target")?;
+    let graph = graph_path.to_str().ok_or("graph path")?;
+    for (file_args, history_args) in [
+        (
+            vec!["query", source, "--graph", graph],
+            vec!["query", source, "--at", "HEAD"],
+        ),
+        (
+            vec!["path", source, target, "--graph", graph],
+            vec!["path", source, target, "--at", "HEAD"],
+        ),
+        (
+            vec!["explain", source, "--graph", graph],
+            vec!["explain", source, "--at", "HEAD"],
+        ),
+    ] {
+        let from_file = run(compass, directory.path(), &file_args)?;
+        let from_history = run(compass, directory.path(), &history_args)?;
+        assert!(
+            from_file.status.success(),
+            "{}",
+            String::from_utf8_lossy(&from_file.stderr)
+        );
+        assert_eq!(from_file.status.code(), from_history.status.code());
+        assert_eq!(from_file.stdout, from_history.stdout, "{file_args:?}");
+        assert_eq!(from_file.stderr, from_history.stderr, "{file_args:?}");
+    }
+    Ok(())
+}
+
+fn normalize_graph(mut graph: serde_json::Value) -> serde_json::Value {
+    for field in ["nodes", "links", "edges"] {
+        if let Some(records) = graph
+            .get_mut(field)
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            records.sort_by_key(serde_json::Value::to_string);
+        }
+    }
+    graph
 }

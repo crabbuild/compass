@@ -1020,6 +1020,11 @@ fn validate_sidecar_paths(
 fn validate_relative_path(path: &str) -> Result<(), HistoryError> {
     let candidate = Path::new(path);
     if path.is_empty()
+        || path.contains('\\')
+        || path
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes()[0].is_ascii_alphabetic())
         || candidate.is_absolute()
         || candidate.components().any(|component| {
             matches!(
@@ -1044,5 +1049,214 @@ fn read_optional_json(path: &Path) -> Result<Option<Value>, HistoryError> {
         Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(crate::error::io_error(path, source)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn registry_entry(class: ArtifactClass, path: &str) -> ArtifactRegistryEntry {
+        ArtifactRegistryEntry {
+            registry_version: 1,
+            relative_path: path.to_owned(),
+            class,
+            media_type: "application/json".to_owned(),
+            schema_version: Some(1),
+            content_digest: None,
+            storage: None,
+            regeneration_version: None,
+        }
+    }
+
+    #[test]
+    fn registry_declarations_reject_every_invalid_storage_combination() {
+        let bytes = br#"{"ok":true}"#.to_vec();
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        let mut authoritative = registry_entry(ArtifactClass::Authoritative, "facts.json");
+        authoritative.content_digest = Some(digest);
+        authoritative.storage = Some(bytes.clone());
+        assert!(validate_registry_declarations(&[authoritative.clone()]).is_ok());
+        assert!(verify_registry_content(&authoritative, &bytes).is_ok());
+        assert!(verify_registry_content(&authoritative, b"different").is_err());
+
+        let mut invalid = authoritative.clone();
+        invalid.registry_version = 2;
+        assert!(validate_registry_declarations(&[invalid]).is_err());
+        let mut invalid = authoritative.clone();
+        invalid.content_digest = None;
+        assert!(validate_registry_declarations(&[invalid]).is_err());
+        let mut invalid = authoritative.clone();
+        invalid.regeneration_version = Some("renderer-v1".to_owned());
+        assert!(validate_registry_declarations(&[invalid]).is_err());
+        let mut invalid = authoritative.clone();
+        invalid.storage = Some(b"different".to_vec());
+        assert!(validate_registry_declarations(&[invalid]).is_err());
+        let duplicate = authoritative.clone();
+        assert!(validate_registry_declarations(&[authoritative, duplicate]).is_err());
+
+        let mut derived = registry_entry(ArtifactClass::Derived, "report.html");
+        assert!(validate_registry_declarations(&[derived.clone()]).is_err());
+        derived.regeneration_version = Some("html-v1".to_owned());
+        assert!(validate_registry_declarations(&[derived.clone()]).is_ok());
+        derived.content_digest = Some(digest);
+        assert!(validate_registry_declarations(&[derived]).is_err());
+
+        let operational = registry_entry(ArtifactClass::Operational, "attempt.log");
+        assert!(validate_registry_declarations(std::slice::from_ref(&operational)).is_ok());
+        let mut invalid = operational;
+        invalid.storage = Some(bytes);
+        assert!(validate_registry_declarations(&[invalid]).is_err());
+    }
+
+    #[test]
+    fn artifact_paths_arrays_and_ordering_fail_closed() -> Result<(), Box<dyn std::error::Error>> {
+        for path in [
+            "",
+            "/absolute",
+            "../escape",
+            "a/./b",
+            "a//b",
+            "a\\b",
+            "C:/escape",
+            "C:escape",
+        ] {
+            assert!(validate_relative_path(path).is_err(), "accepted {path:?}");
+        }
+        assert!(validate_relative_path("nested/facts.json").is_ok());
+        assert!(is_builtin_artifact("graph.json"));
+        assert!(is_builtin_artifact(".graphify_analysis.json"));
+        assert!(is_builtin_artifact(".graphify_labels.json"));
+        assert!(is_builtin_artifact("manifest.json"));
+        assert!(!is_builtin_artifact("custom.json"));
+
+        assert!(hyperedge_array(None)?.is_empty());
+        assert_eq!(hyperedge_array(Some(&json!([{"id":"h"}])))?.len(), 1);
+        assert!(hyperedge_array(Some(&json!({"id":"h"}))).is_err());
+
+        let mut unique = vec![(b"b".to_vec(), vec![]), (b"a".to_vec(), vec![])];
+        sort_unique(&mut unique, "node")?;
+        assert_eq!(unique[0].0, b"a");
+        let mut duplicate = vec![(b"a".to_vec(), vec![]), (b"a".to_vec(), vec![])];
+        assert!(sort_unique(&mut duplicate, "node").is_err());
+        assert_eq!(rank_bytes(&7_u64.to_be_bytes())?, 7);
+        assert!(rank_bytes(&[0; 7]).is_err());
+        assert_eq!(decode_segments(&metadata_rank_key("node", 2)?)?.len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn ordered_record_reconstruction_rejects_gaps_missing_records_and_leftovers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let key_a = b"a".to_vec();
+        let key_b = b"b".to_vec();
+        let ordered = |key: Vec<u8>| OrderedRecord {
+            key,
+            location: None,
+        };
+        let mut values = BTreeMap::from([(key_a.clone(), 1), (key_b.clone(), 2)]);
+        let order = BTreeMap::from([(0, ordered(key_a.clone())), (1, ordered(key_b.clone()))]);
+        assert_eq!(restore_order(&mut values, order, "node")?, [1, 2]);
+
+        let mut values = BTreeMap::from([(key_a.clone(), 1)]);
+        assert!(
+            restore_order(
+                &mut values,
+                BTreeMap::from([(1, ordered(key_a.clone()))]),
+                "node"
+            )
+            .is_err()
+        );
+        let mut values = BTreeMap::from([(key_a.clone(), 1)]);
+        assert!(
+            restore_order(
+                &mut values,
+                BTreeMap::from([(0, ordered(key_b.clone()))]),
+                "node"
+            )
+            .is_err()
+        );
+        let mut values = BTreeMap::from([(key_a.clone(), 1), (key_b.clone(), 2)]);
+        assert!(
+            restore_order(
+                &mut values,
+                BTreeMap::from([(0, ordered(key_a.clone()))]),
+                "node"
+            )
+            .is_err()
+        );
+
+        let placed = |key: Vec<u8>, location| OrderedRecord { key, location };
+        let mut values = BTreeMap::from([(key_a.clone(), json!({"id":"h"}))]);
+        let restored = restore_hyperedge_order(
+            &mut values,
+            BTreeMap::from([(0, placed(key_a.clone(), Some(HyperedgeLocation::Graph)))]),
+        )?;
+        assert_eq!(restored.len(), 1);
+
+        let mut values = BTreeMap::from([(key_a.clone(), json!(1))]);
+        assert!(
+            restore_hyperedge_order(
+                &mut values,
+                BTreeMap::from([(0, placed(key_a.clone(), None))])
+            )
+            .is_err()
+        );
+        let mut values = BTreeMap::from([(key_a.clone(), json!(1))]);
+        assert!(
+            restore_hyperedge_order(
+                &mut values,
+                BTreeMap::from([(0, placed(key_b.clone(), Some(HyperedgeLocation::TopLevel)))])
+            )
+            .is_err()
+        );
+        let mut values = BTreeMap::from([(key_a.clone(), json!(1))]);
+        assert!(restore_hyperedge_order(&mut values, BTreeMap::new()).is_err());
+        let mut values = BTreeMap::from([(key_a.clone(), json!(1))]);
+        assert!(
+            restore_hyperedge_order(
+                &mut values,
+                BTreeMap::from([(1, placed(key_a, Some(HyperedgeLocation::TopLevel)))])
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn completion_and_optional_json_boundaries_are_explicit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let completion = CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        };
+        let encoded = encode_record(
+            "compass.metadata.completion",
+            &serde_json::to_value(&completion)?,
+        )?;
+        let key = metadata_key(&[b"completion"]);
+        let missing = PartitionedGraph::default();
+        assert!(completion_from_partition(&missing).is_err());
+        let duplicate = PartitionedGraph {
+            metadata: vec![(key.clone(), encoded.clone()), (key, encoded)],
+            ..PartitionedGraph::default()
+        };
+        assert!(completion_from_partition(&duplicate).is_err());
+
+        let directory = tempfile::tempdir()?;
+        let missing = directory.path().join("missing.json");
+        assert_eq!(read_optional_json(&missing)?, None);
+        let valid = directory.path().join("valid.json");
+        fs::write(&valid, b"{\"ok\":true}")?;
+        assert_eq!(read_optional_json(&valid)?, Some(json!({"ok": true})));
+        let invalid = directory.path().join("invalid.json");
+        fs::write(&invalid, b"{")?;
+        assert!(read_optional_json(&invalid).is_err());
+        assert!(read_optional_json(directory.path()).is_err());
+        Ok(())
     }
 }

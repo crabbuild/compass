@@ -1334,6 +1334,21 @@ mod tests {
 
     use super::*;
 
+    fn change(
+        record: RecordKind,
+        kind: ChangeKind,
+        old: Option<serde_json::Value>,
+        new: Option<serde_json::Value>,
+    ) -> GraphChange {
+        GraphChange {
+            record,
+            change: kind,
+            key: vec![format!("{record:?}"), format!("{kind:?}")],
+            old,
+            new,
+        }
+    }
+
     #[test]
     fn common_options_support_equals_end_marker_and_reject_duplicates() {
         let result = parse(&[
@@ -1393,6 +1408,176 @@ mod tests {
             ])
             .is_err()
         );
+        for arguments in [
+            vec!["old", "new", "--detailed", "--detailed"],
+            vec!["old", "new", "--topology-only", "--topology-only"],
+            vec!["old", "new", "--format"],
+            vec!["old", "new", "--format="],
+            vec!["old", "new", "--format=text", "--format", "json"],
+            vec!["old", "new", "--unknown"],
+        ] {
+            assert!(
+                parse_diff(&arguments.into_iter().map(str::to_owned).collect::<Vec<_>>()).is_err()
+            );
+        }
+        let parsed = parse_diff(&["--".to_owned(), "-old".to_owned(), "-new".to_owned()]);
+        assert_eq!(
+            parsed.map(|value| value.0),
+            Ok(vec!["-old".to_owned(), "-new".to_owned()])
+        );
+    }
+
+    #[test]
+    fn help_failures_and_common_argument_boundaries_are_total() {
+        assert!(help(Frontend::Compass).starts_with("Usage: compass history"));
+        assert!(diff_help(Frontend::Compass).starts_with("Usage: compass diff"));
+        assert_eq!(command(Frontend::Compass, &[]).code, 0);
+        assert_eq!(
+            command_worker(Frontend::Compass, &["extra".to_owned()]).code,
+            2
+        );
+
+        let reported = outcome(Err(report_failure("partial".to_owned(), "failed")));
+        assert_eq!(reported.code, 1);
+        assert_eq!(reported.stdout, "partial");
+        assert_eq!(reported.stderr, "error: failed");
+        assert_eq!(outcome(Err(usage("bad"))).code, 2);
+        assert_eq!(outcome(Err(runtime("bad"))).code, 1);
+        assert_eq!(outcome(Ok("ok".to_owned())).stdout, "ok");
+
+        assert!(exact(&["one".to_owned()], 1, "bad").is_ok());
+        assert!(exact(&[], 1, "bad").is_err());
+        assert!(one_or_zero(&[], "status").is_ok());
+        assert!(one_or_zero(&["one".to_owned()], "status").is_ok());
+        assert!(one_or_zero(&["one".to_owned(), "two".to_owned()], "status").is_err());
+
+        for arguments in [
+            vec!["--format"],
+            vec!["--output"],
+            vec!["--format="],
+            vec!["--output="],
+            vec!["--output=a", "--output", "b"],
+        ] {
+            assert!(parse(&arguments.into_iter().map(str::to_owned).collect::<Vec<_>>()).is_err());
+        }
+    }
+
+    #[test]
+    fn diff_renderers_cover_every_record_change_and_topology_filter()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let records = [
+            RecordKind::Node,
+            RecordKind::Edge,
+            RecordKind::Hyperedge,
+            RecordKind::Analysis,
+            RecordKind::Metadata,
+        ];
+        let changes = [ChangeKind::Added, ChangeKind::Removed, ChangeKind::Changed];
+        let mut summary = SummarySink::new(false);
+        for record in records {
+            for kind in changes {
+                summary.change(change(record, kind, None, None))?;
+            }
+        }
+        for index in 0..25 {
+            summary.change(GraphChange {
+                record: RecordKind::Node,
+                change: ChangeKind::Added,
+                key: vec![format!("node-{index}")],
+                old: None,
+                new: None,
+            })?;
+        }
+        let mut rendered = Vec::new();
+        summary.render(&mut rendered)?;
+        let rendered = String::from_utf8(rendered)?;
+        assert!(rendered.contains("26 nodes added"));
+        assert!(rendered.contains("analysis record"));
+        assert!(rendered.contains("metadata record"));
+
+        for record in records {
+            assert!(!record_name(record, 1).is_empty());
+            assert!(!record_name(record, 2).is_empty());
+        }
+        for kind in changes {
+            assert!(!change_name(kind).is_empty());
+        }
+
+        let mut empty = Vec::new();
+        SummarySink::new(true).render(&mut empty)?;
+        assert_eq!(empty, b"no graph changes\n");
+        let mut topology = SummarySink::new(true);
+        topology.change(change(
+            RecordKind::Analysis,
+            ChangeKind::Changed,
+            None,
+            None,
+        ))?;
+        let mut filtered = Vec::new();
+        topology.render(&mut filtered)?;
+        assert_eq!(filtered, b"no graph changes\n");
+
+        let mut detailed_bytes = Vec::new();
+        let mut detailed = DetailedSink::new(&mut detailed_bytes, false);
+        detailed.change(change(
+            RecordKind::Edge,
+            ChangeKind::Changed,
+            Some(json!({"confidence": 0.5})),
+            Some(json!({"confidence": 0.9})),
+        ))?;
+        detailed.change(change(RecordKind::Node, ChangeKind::Added, None, None))?;
+        detailed.finish()?;
+        assert!(String::from_utf8(detailed_bytes)?.contains("old="));
+
+        let mut no_details = Vec::new();
+        DetailedSink::new(&mut no_details, true).finish()?;
+        assert_eq!(no_details, b"no graph changes\n");
+
+        let mut json_bytes = b"[".to_vec();
+        let mut json_sink = JsonSink::new(&mut json_bytes, true);
+        json_sink.change(change(
+            RecordKind::Metadata,
+            ChangeKind::Changed,
+            None,
+            None,
+        ))?;
+        json_sink.change(change(RecordKind::Node, ChangeKind::Added, None, None))?;
+        json_sink.change(change(RecordKind::Edge, ChangeKind::Removed, None, None))?;
+        json_sink.finish()?;
+        let decoded: serde_json::Value = serde_json::from_slice(&json_bytes)?;
+        assert_eq!(decoded.as_array().map(Vec::len), Some(2));
+        Ok(())
+    }
+
+    #[test]
+    fn history_labels_and_non_io_json_errors_are_stable() {
+        assert_eq!(
+            render_limitation(GitTargetLimitation::LfsPointer("a".to_owned())),
+            "lfs-pointer:a"
+        );
+        assert_eq!(
+            render_limitation(GitTargetLimitation::Gitlink("b".to_owned())),
+            "gitlink:b"
+        );
+        assert_eq!(
+            render_limitation(GitTargetLimitation::UnsupportedFilter("crypt".to_owned())),
+            "unsupported-filter:crypt"
+        );
+        for (state, name) in [
+            (JobState::Queued, "queued"),
+            (JobState::Building, "building"),
+            (JobState::Validating, "validating"),
+            (JobState::Published, "published"),
+            (JobState::Failed, "failed"),
+            (JobState::Incomplete, "incomplete"),
+        ] {
+            assert_eq!(job_state_name(state), name);
+        }
+        let parsed = serde_json::from_str::<serde_json::Value>("{");
+        assert!(parsed.is_err());
+        if let Err(syntax) = parsed {
+            assert!(matches!(json_output_error(syntax), HistoryError::Json(_)));
+        }
     }
 
     #[test]

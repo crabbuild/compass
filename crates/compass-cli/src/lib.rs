@@ -3733,11 +3733,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    include_str!("../assets/graphify-help.txt")
-        .strip_suffix('\n')
-        .unwrap_or(include_str!("../assets/graphify-help.txt"))
-        .to_owned()
-        + "\n  graphify history --help\n  graphify diff OLD NEW"
+    include_str!("../assets/graphify-help.txt").to_owned()
 }
 
 #[cfg(test)]

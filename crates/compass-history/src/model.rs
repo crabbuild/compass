@@ -55,6 +55,21 @@ pub struct StoredTree {
     pub format: TreeFormat,
 }
 
+/// Logical content-addressed storage shared by two complete realizations.
+///
+/// Counts come from Prolly reachability, not SQLite's private schema or file size.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StructuralSharing {
+    pub first_total_nodes: usize,
+    pub second_total_nodes: usize,
+    pub union_nodes: usize,
+    pub shared_nodes: usize,
+    pub first_total_bytes: usize,
+    pub second_total_bytes: usize,
+    pub union_bytes: usize,
+    pub shared_bytes: usize,
+}
+
 impl StoredTree {
     /// Capture only the persisted portion of a Prolly tree handle.
     #[must_use]

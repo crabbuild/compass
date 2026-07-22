@@ -278,3 +278,177 @@ fn semantic_manifest_must_cover_each_exact_commit_source() -> Result<(), Box<dyn
     assert!(store.list(Some(&commit))?.is_empty());
     Ok(())
 }
+
+#[test]
+fn observers_can_abort_every_materialization_boundary_without_publication()
+-> Result<(), Box<dyn std::error::Error>> {
+    #[derive(Clone, Copy)]
+    enum FailurePoint {
+        Resolved,
+        Building,
+        Validating,
+        Publishing,
+        Candidate,
+    }
+    struct FailingObserver(FailurePoint);
+    impl MaterializeObserver for FailingObserver {
+        fn entered(&mut self, stage: MaterializeStage) -> Result<(), MaterializeError> {
+            let matches = matches!(
+                (self.0, stage),
+                (FailurePoint::Building, MaterializeStage::Building)
+                    | (FailurePoint::Validating, MaterializeStage::Validating)
+                    | (FailurePoint::Publishing, MaterializeStage::Publishing)
+            );
+            if matches {
+                Err(MaterializeError::Observer("fixture stage".to_owned()))
+            } else {
+                Ok(())
+            }
+        }
+        fn resolved(
+            &mut self,
+            _fingerprint: &compass_history::ExtractionFingerprint,
+        ) -> Result<(), MaterializeError> {
+            if matches!(self.0, FailurePoint::Resolved) {
+                Err(MaterializeError::Observer("fixture resolution".to_owned()))
+            } else {
+                Ok(())
+            }
+        }
+        fn candidate(
+            &mut self,
+            _candidate: &compass_history::RealizationId,
+            _observed_preferred: Option<&compass_history::RealizationId>,
+        ) -> Result<(), MaterializeError> {
+            if matches!(self.0, FailurePoint::Candidate) {
+                Err(MaterializeError::Observer("fixture candidate".to_owned()))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
+    std::fs::write(directory.path().join("graphify.toml"), "mode = \"deep\"\n")?;
+    std::fs::create_dir(directory.path().join("config"))?;
+    std::fs::write(
+        directory.path().join("config/tsconfig.json"),
+        "{\"compilerOptions\":{}}\n",
+    )?;
+    git(directory.path(), &["add", "."])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let store = HistoryStore::create(&repository)?;
+    let builder = RecordingBuilder::default();
+    for point in [
+        FailurePoint::Resolved,
+        FailurePoint::Building,
+        FailurePoint::Validating,
+        FailurePoint::Publishing,
+        FailurePoint::Candidate,
+    ] {
+        let result = materialize_history_with_observer(
+            &store,
+            &builder,
+            request(&repository, commit.clone(), false),
+            &mut FailingObserver(point),
+        );
+        assert!(matches!(result, Err(MaterializeError::Observer(_))));
+        assert!(store.preferred(&commit)?.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn exact_tree_validation_rejects_commit_inventory_and_manifest_mismatches()
+-> Result<(), Box<dyn std::error::Error>> {
+    #[derive(Clone, Copy)]
+    enum InvalidOutput {
+        Commit,
+        Inventory,
+        ManifestShape,
+    }
+    struct InvalidBuilder(InvalidOutput);
+    impl CompleteGraphBuilder for InvalidBuilder {
+        fn build(
+            &self,
+            checkout: &Path,
+            _output_root: &Path,
+            _seed: Option<&GraphArtifacts>,
+        ) -> Result<CompletedGraphArtifacts, MaterializeError> {
+            let commit = git(checkout, &["rev-parse", "HEAD"])
+                .map_err(|error| MaterializeError::Builder(error.to_string()))?;
+            let built_at = if matches!(self.0, InvalidOutput::Commit) {
+                "0000000000000000000000000000000000000000".to_owned()
+            } else {
+                commit
+            };
+            let document = serde_json::from_value(json!({
+                "nodes": [], "links": [], "built_at_commit": built_at
+            }))
+            .map_err(|error| MaterializeError::Builder(error.to_string()))?;
+            let expected = if matches!(self.0, InvalidOutput::Inventory) {
+                0
+            } else {
+                1
+            };
+            let manifest = if matches!(self.0, InvalidOutput::ManifestShape) {
+                json!([])
+            } else {
+                json!({"design.md":{"semantic_hash":"complete"}})
+            };
+            Ok(CompletedGraphArtifacts {
+                artifacts: GraphArtifacts {
+                    document,
+                    analysis: None,
+                    labels: None,
+                    manifest: Some(manifest),
+                    authoritative_sidecars: Default::default(),
+                },
+                completion: CompletionEvidence {
+                    extraction_succeeded: true,
+                    allow_partial: false,
+                    semantic_files_expected: expected,
+                    semantic_files_completed: expected,
+                    failed_chunks: 0,
+                },
+            })
+        }
+    }
+
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("design.md"), "# Design\n")?;
+    git(directory.path(), &["add", "design.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "design"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let store = HistoryStore::create(&repository)?;
+    for variant in [
+        InvalidOutput::Commit,
+        InvalidOutput::Inventory,
+        InvalidOutput::ManifestShape,
+    ] {
+        let result = materialize_history(
+            &store,
+            &InvalidBuilder(variant),
+            request(&repository, commit.clone(), false),
+        );
+        assert!(matches!(result, Err(MaterializeError::Incomplete(_))));
+        assert!(store.preferred(&commit)?.is_none());
+    }
+    Ok(())
+}

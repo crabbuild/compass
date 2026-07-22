@@ -12,7 +12,8 @@ use crate::keys::root_name;
 use crate::validate::{RealizationTrees, validate_trees};
 use crate::{
     ActivityGuard, CommitId, GraphVersion, HistoryError, MaintenanceGuard, PublishRequest,
-    PublishedVersion, RealizationId, Repository, StoredTree, canonical_json_bytes,
+    PublishedVersion, RealizationId, Repository, StoredTree, StructuralSharing,
+    canonical_json_bytes,
 };
 
 pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
@@ -577,6 +578,59 @@ impl HistoryStore {
             metadata: self.read_tree(&self.load_realization_root(id, b"metadata")?)?,
         };
         crate::CompletedGraphArtifacts::reconstruct(&partitioned)
+    }
+
+    /// Measure logical Prolly-node reuse between two complete realizations.
+    ///
+    /// This deliberately uses content reachability rather than adapter-private
+    /// SQLite tables or the physical database file size.
+    pub fn structural_sharing(
+        &self,
+        first: &RealizationId,
+        second: &RealizationId,
+    ) -> Result<StructuralSharing, HistoryError> {
+        let _guard = self.activity()?;
+        self.get_without_activity(first)?;
+        self.get_without_activity(second)?;
+        let roots = |id: &RealizationId| -> Result<Vec<Tree>, HistoryError> {
+            [
+                b"nodes".as_slice(),
+                b"edges".as_slice(),
+                b"hyperedges".as_slice(),
+                b"analysis".as_slice(),
+                b"metadata".as_slice(),
+                b"manifest".as_slice(),
+            ]
+            .into_iter()
+            .map(|kind| self.load_realization_root(id, kind))
+            .collect()
+        };
+        let first_roots = roots(first)?;
+        let second_roots = roots(second)?;
+        let first = self.prolly.mark_reachable(&first_roots)?;
+        let second = self.prolly.mark_reachable(&second_roots)?;
+        let union = self.prolly.mark_reachable(
+            &first_roots
+                .into_iter()
+                .chain(second_roots)
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(StructuralSharing {
+            first_total_nodes: first.live_nodes,
+            second_total_nodes: second.live_nodes,
+            union_nodes: union.live_nodes,
+            shared_nodes: first
+                .live_nodes
+                .saturating_add(second.live_nodes)
+                .saturating_sub(union.live_nodes),
+            first_total_bytes: first.live_bytes,
+            second_total_bytes: second.live_bytes,
+            union_bytes: union.live_bytes,
+            shared_bytes: first
+                .live_bytes
+                .saturating_add(second.live_bytes)
+                .saturating_sub(union.live_bytes),
+        })
     }
 
     fn build_tree(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Tree, HistoryError> {
