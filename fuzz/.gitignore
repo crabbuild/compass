@@ -4,4 +4,14 @@
 /corpus/semantic_fragment/*
 !/corpus/semantic_fragment/seed.json
 /corpus/avi_audio/*
+/corpus/source_input/*
+!/corpus/source_input/seed.txt
+/corpus/ignore_input/*
+!/corpus/ignore_input/seed.txt
+/corpus/manifest_input/*
+!/corpus/manifest_input/seed.json
+/corpus/cli_args/*
+!/corpus/cli_args/seed.txt
+/corpus/renderer_input/*
+!/corpus/renderer_input/seed.json
 /target/

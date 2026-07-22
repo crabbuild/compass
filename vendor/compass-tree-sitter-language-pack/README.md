@@ -1,0 +1,172 @@
+# Compass tree-sitter language pack
+
+This package is Compass's pinned static adapter derived from
+`tree-sitter-language-pack` 1.13.1. It fixes the supported grammar set at build
+time, forces static linkage, and fails the build if any advertised grammar is
+missing. This is what makes both prebuilt Compass releases and
+`cargo install compass-cli` independent of Python, runtime grammar downloads, and
+native library installation.
+
+The upstream implementation and its parser-source manifest remain MIT licensed.
+Compass-specific changes are isolated to `Cargo.toml` and `build.rs`; the Rust
+library implementation is otherwise preserved from the pinned upstream release.
+Runtime grammar download, dynamic loading, and upstream configuration features
+are deliberately not exposed by this adapter.
+
+## Upstream documentation
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://cdn.jsdelivr.net/gh/xberg-io/assets@v1/banner/readme-banner-dark.svg">
+    <img alt="Xberg" width="420" src="https://cdn.jsdelivr.net/gh/xberg-io/assets@v1/banner/readme-banner-light.svg">
+  </picture>
+</p>
+
+# Rust
+
+<div align="center" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 20px 0">
+	<a href="https://github.com/xberg-io/alef">
+		<img src="https://img.shields.io/badge/built%20with-alef%20%D7%90-007ec6" alt="Built with alef" />
+	</a>
+	<!-- Language Bindings -->
+	<a href="https://crates.io/crates/tree-sitter-language-pack">
+		<img src="https://img.shields.io/crates/v/tree-sitter-language-pack?label=Rust&color=007ec6" alt="Rust" />
+	</a>
+	<a href="https://pypi.org/project/tree-sitter-language-pack/">
+		<img src="https://img.shields.io/pypi/v/tree-sitter-language-pack?label=Python&color=007ec6" alt="Python" />
+	</a>
+	<a href="https://www.npmjs.com/package/@xberg-io/tree-sitter-language-pack">
+		<img
+			src="https://img.shields.io/npm/v/@xberg-io/tree-sitter-language-pack?label=Node.js&color=007ec6"
+			alt="Node.js"
+		/>
+	</a>
+	<a href="https://www.npmjs.com/package/@xberg-io/tree-sitter-language-pack-wasm">
+		<img
+			src="https://img.shields.io/npm/v/@xberg-io/tree-sitter-language-pack-wasm?label=WASM&color=007ec6"
+			alt="WASM"
+		/>
+	</a>
+	<a href="https://central.sonatype.com/artifact/io.xberg.treesitterlanguagepack/tree-sitter-language-pack">
+		<img
+			src="https://img.shields.io/maven-central/v/io.xberg.treesitterlanguagepack/tree-sitter-language-pack?label=Java&color=007ec6"
+			alt="Java"
+		/>
+	</a>
+	<a href="https://pkg.go.dev/github.com/xberg-io/tree-sitter-language-pack/packages/go">
+		<img
+			src="https://img.shields.io/github/v/tag/xberg-io/tree-sitter-language-pack?label=Go&color=007ec6"
+			alt="Go"
+		/>
+	</a>
+	<a href="https://www.nuget.org/packages/XbergIo.TreeSitterLanguagePack/">
+		<img src="https://img.shields.io/nuget/v/XbergIo.TreeSitterLanguagePack?label=C%23&color=007ec6" alt="C#" />
+	</a>
+	<a href="https://packagist.org/packages/xberg-io/tree-sitter-language-pack">
+		<img
+			src="https://img.shields.io/packagist/v/xberg-io/tree-sitter-language-pack?label=PHP&color=007ec6"
+			alt="PHP"
+		/>
+	</a>
+	<a href="https://rubygems.org/gems/tree_sitter_language_pack">
+		<img src="https://img.shields.io/gem/v/tree_sitter_language_pack?label=Ruby&color=007ec6" alt="Ruby" />
+	</a>
+	<a href="https://hex.pm/packages/tree_sitter_language_pack">
+		<img src="https://img.shields.io/hexpm/v/tree_sitter_language_pack?label=Elixir&color=007ec6" alt="Elixir" />
+	</a>
+	<a href="https://pub.dev/packages/tree_sitter_language_pack">
+		<img src="https://img.shields.io/pub/v/tree_sitter_language_pack?label=Dart&color=007ec6" alt="Dart" />
+	</a>
+	<a href="https://central.sonatype.com/artifact/io.xberg.tslp.android/tree-sitter-language-pack-android">
+		<img
+			src="https://img.shields.io/maven-central/v/io.xberg.tslp.android/tree-sitter-language-pack-android?label=Kotlin&color=007ec6"
+			alt="Kotlin"
+		/>
+	</a>
+	<a href="https://github.com/xberg-io/tree-sitter-language-pack/tree/main/packages/swift">
+		<img src="https://img.shields.io/badge/Swift-SPM-007ec6" alt="Swift" />
+	</a>
+	<a href="https://github.com/xberg-io/tree-sitter-language-pack/tree/main/packages/zig">
+		<img src="https://img.shields.io/badge/Zig-package-007ec6" alt="Zig" />
+	</a>
+	<a href="https://github.com/xberg-io/tree-sitter-language-pack/releases">
+		<img src="https://img.shields.io/badge/C-FFI-007ec6" alt="C FFI" />
+	</a>
+
+	<!-- Project Info -->
+	<a href="https://github.com/xberg-io/tree-sitter-language-pack/blob/main/LICENSE">
+		<img src="https://img.shields.io/badge/License-MIT-007ec6" alt="License" />
+	</a>
+	<a href="https://docs.tree-sitter-language-pack.xberg.io">
+		<img src="https://img.shields.io/badge/Docs-tree--sitter--language--pack-007ec6" alt="Documentation" />
+	</a>
+</div>
+
+<div align="center" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 28px 0 24px">
+	<a href="https://discord.gg/xt9WY3GnKR">
+		<img
+			height="22"
+			src="https://img.shields.io/badge/Discord-Chat-007ec6?logo=discord&logoColor=white"
+			alt="Join Discord"
+		/>
+	</a>
+</div>
+
+Pre-compiled tree-sitter grammars for 306 programming languages, with on-demand download and caching. Polyglot core that powers every binding in the xberg.io ecosystem.
+
+## What This Package Provides
+
+- **Parser access** — load a tree-sitter language parser by name without wiring individual grammar crates or packages.
+- **Code intelligence primitives** — parse trees, functions, classes, imports, exports, symbols, docstrings, diagnostics, and syntax-aware chunks.
+- **Shared cache model** — parsers are fetched and cached once, then reused by every call in the process.
+- **Same catalog as every binding** — Rust, Python, Node.js, Go, Java, PHP, Ruby, .NET, Elixir, WASM, Dart, Kotlin Android, Swift, Zig, and C FFI use the same grammar set.
+- **Rust crate** — canonical API used by the other bindings and by Xberg code intelligence.
+
+## Installation
+
+```bash
+cargo add tree-sitter-language-pack
+```
+
+## Quick Start
+
+```rust
+use tree_sitter_language_pack::{get_language, get_parser};
+
+let mut parser = get_parser("python").expect("language available");
+let tree = parser.parse("def hello(): pass", None).unwrap();
+println!("{}", tree.root_node().to_sexp());
+```
+
+## Features
+
+- **306 languages** — pre-compiled tree-sitter grammars covering every major programming language and many minor ones.
+- **On-demand download + cache** — parsers fetched at first use; subsequent runs hit the local cache.
+- **Code intelligence** — extract functions, classes, imports, exports, symbols, docstrings, and diagnostics with one API.
+- **Syntax-aware chunking** — semantic chunks for RAG/LLM pipelines.
+- **Polyglot bindings** — native APIs across 15 languages: Rust, Python, TypeScript/Node.js, Go, Java, C#, Ruby, PHP, Elixir, WebAssembly, Dart, Kotlin, Swift, Zig, and C/C++ via [alef](https://github.com/xberg-io/alef).
+
+## Documentation
+
+- **[Documentation](https://docs.tree-sitter-language-pack.xberg.io)** -- Full docs and API reference
+- **[GitHub Repository](https://github.com/xberg-io/tree-sitter-language-pack)** -- Source, issues, and discussions
+
+## Part of Xberg
+
+- [Xberg](https://github.com/xberg-io/xberg) — document intelligence: text, tables, metadata from 91+ formats with optional OCR.
+- [Xberg Enterprise](https://github.com/xberg-io/xberg-enterprise) — managed extraction API with SDKs, dashboards, and observability.
+- [crawlberg](https://github.com/xberg-io/crawlberg) — web crawling and scraping with HTML→Markdown and headless-Chrome fallback.
+- [html-to-markdown](https://github.com/xberg-io/html-to-markdown) — fast, lossless HTML→Markdown engine.
+- [liter-llm](https://github.com/xberg-io/liter-llm) — universal LLM API client with native bindings for 14 languages and 143 providers.
+- [alef](https://github.com/xberg-io/alef) — the polyglot binding generator that produces this README and all per-language bindings.
+- [Discord](https://discord.gg/xt9WY3GnKR) — community, roadmap, announcements.
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](https://github.com/xberg-io/tree-sitter-language-pack/blob/main/CONTRIBUTING.md) for guidelines.
+
+Join our [Discord community](https://discord.gg/xt9WY3GnKR) for questions and discussion.
+
+## License
+
+MIT -- see [LICENSE](https://github.com/xberg-io/tree-sitter-language-pack/blob/main/LICENSE) for details.

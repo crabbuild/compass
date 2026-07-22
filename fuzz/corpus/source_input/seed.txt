@@ -1,0 +1,2 @@
+\0def compass_seed():
+    return 1

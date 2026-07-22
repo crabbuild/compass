@@ -57,37 +57,37 @@ def main() -> int:
     args = sys.argv[2:] if csv_output else sys.argv[1:]
     if len(args) != 2:
         print(
-            "usage: compare_phase1_graphs.py [--csv] PYTHON_GRAPH TRAIL_GRAPH",
+            "usage: compare_phase1_graphs.py [--csv] PYTHON_GRAPH COMPASS_GRAPH",
             file=sys.stderr,
         )
         return 2
     python_graph = canonical(Path(args[0]))
-    trail_graph = canonical(Path(args[1]))
-    if python_graph[:2] == trail_graph[:2]:
-        digest = canonical_hash(trail_graph[0], trail_graph[1])
+    compass_graph = canonical(Path(args[1]))
+    if python_graph[:2] == compass_graph[:2]:
+        digest = canonical_hash(compass_graph[0], compass_graph[1])
         if csv_output:
             print(
-                f"true,{len(trail_graph[0])},{len(trail_graph[1])},"
-                f"{len(trail_graph[2])},{digest}"
+                f"true,{len(compass_graph[0])},{len(compass_graph[1])},"
+                f"{len(compass_graph[2])},{digest}"
             )
         else:
             print(
-                f"correct: {len(trail_graph[0])} nodes, "
-                f"{len(trail_graph[1])} edges, sha256={digest}"
+                f"correct: {len(compass_graph[0])} nodes, "
+                f"{len(compass_graph[1])} edges, sha256={digest}"
             )
         return 0
     python_nodes, python_edges, _ = python_graph
-    trail_nodes, trail_edges, _ = trail_graph
+    compass_nodes, compass_edges, _ = compass_graph
     print(
         "mismatch: "
-        f"nodes python={len(python_nodes)} trail={len(trail_nodes)}, "
-        f"edges python={len(python_edges)} trail={len(trail_edges)}",
+        f"nodes python={len(python_nodes)} compass={len(compass_nodes)}, "
+        f"edges python={len(python_edges)} compass={len(compass_edges)}",
         file=sys.stderr,
     )
-    print(f"python-only nodes: {sorted(python_nodes - trail_nodes)[:20]}", file=sys.stderr)
-    print(f"trail-only nodes: {sorted(trail_nodes - python_nodes)[:20]}", file=sys.stderr)
-    print(f"python-only edges: {sorted(set(python_edges) - set(trail_edges))[:20]}", file=sys.stderr)
-    print(f"trail-only edges: {sorted(set(trail_edges) - set(python_edges))[:20]}", file=sys.stderr)
+    print(f"python-only nodes: {sorted(python_nodes - compass_nodes)[:20]}", file=sys.stderr)
+    print(f"compass-only nodes: {sorted(compass_nodes - python_nodes)[:20]}", file=sys.stderr)
+    print(f"python-only edges: {sorted(set(python_edges) - set(compass_edges))[:20]}", file=sys.stderr)
+    print(f"compass-only edges: {sorted(set(compass_edges) - set(python_edges))[:20]}", file=sys.stderr)
     return 1
 
 

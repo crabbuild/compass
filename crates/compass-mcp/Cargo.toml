@@ -1,0 +1,33 @@
+[package]
+name = "compass-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+axum.workspace = true
+rmcp.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower-http.workspace = true
+compass-core = { path = "../compass-core", version = "0.1.0" }
+compass-graph = { path = "../compass-graph", version = "0.1.0" }
+compass-model = { path = "../compass-model", version = "0.1.0" }
+compass-prs = { path = "../compass-prs", version = "0.1.0" }
+compass-query = { path = "../compass-query", version = "0.1.0" }
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

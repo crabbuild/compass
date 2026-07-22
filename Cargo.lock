@@ -28,7 +28,6 @@ dependencies = [
  "cfg-if",
  "const-random",
  "once_cell",
- "serde",
  "version_check",
  "zerocopy",
 ]
@@ -918,6 +917,397 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-cargo"
+version = "0.1.0"
+dependencies = [
+ "compass-model",
+ "glob",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml 1.1.3+spec-1.1.0",
+]
+
+[[package]]
+name = "compass-cli"
+version = "0.1.0"
+dependencies = [
+ "compass-cargo",
+ "compass-core",
+ "compass-files",
+ "compass-global",
+ "compass-google-workspace",
+ "compass-graph",
+ "compass-graphdb",
+ "compass-ingest",
+ "compass-mcp",
+ "compass-model",
+ "compass-output",
+ "compass-postgres",
+ "compass-prs",
+ "compass-query",
+ "compass-reflect",
+ "compass-semantic",
+ "ctrlc",
+ "glob",
+ "mimalloc",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "compass-core"
+version = "0.1.0"
+dependencies = [
+ "compass-files",
+ "compass-google-workspace",
+ "compass-graph",
+ "compass-languages",
+ "compass-model",
+ "compass-output",
+ "compass-reflect",
+ "compass-resolve",
+ "notify",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+]
+
+[[package]]
+name = "compass-files"
+version = "0.1.0"
+dependencies = [
+ "md-5 0.10.6",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-global"
+version = "0.1.0"
+dependencies = [
+ "compass-files",
+ "compass-model",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+]
+
+[[package]]
+name = "compass-google-workspace"
+version = "0.1.0"
+dependencies = [
+ "compass-media",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-graph"
+version = "0.1.0"
+dependencies = [
+ "compass-languages",
+ "compass-model",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "strsim",
+ "tempfile",
+ "thiserror 2.0.19",
+ "unicode-casefold",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "compass-graphdb"
+version = "0.1.0"
+dependencies = [
+ "compass-model",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde_json",
+ "thiserror 2.0.19",
+ "url",
+]
+
+[[package]]
+name = "compass-ingest"
+version = "0.1.0"
+dependencies = [
+ "compass-files",
+ "compass-transcribe",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "ureq",
+ "url",
+]
+
+[[package]]
+name = "compass-languages"
+version = "0.1.0"
+dependencies = [
+ "compass-files",
+ "compass-model",
+ "compass-tree-sitter-language-pack",
+ "flate2",
+ "regex",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha1",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml 1.1.3+spec-1.1.0",
+ "tree-sitter",
+ "tree-sitter-dm",
+ "unicode-casefold",
+ "unicode-normalization",
+ "unicode-properties",
+]
+
+[[package]]
+name = "compass-mcp"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "compass-core",
+ "compass-graph",
+ "compass-model",
+ "compass-prs",
+ "compass-query",
+ "rmcp",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tower-http",
+]
+
+[[package]]
+name = "compass-media"
+version = "0.1.0"
+dependencies = [
+ "oxidize-pdf",
+ "roxmltree",
+ "tempfile",
+ "thiserror 2.0.19",
+ "zip 6.0.0",
+]
+
+[[package]]
+name = "compass-model"
+version = "0.1.0"
+dependencies = [
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compass-output"
+version = "0.1.0"
+dependencies = [
+ "compass-files",
+ "compass-graph",
+ "compass-model",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "compass-parity"
+version = "0.1.0"
+dependencies = [
+ "compass-cli",
+ "compass-core",
+ "compass-files",
+ "compass-graph",
+ "compass-languages",
+ "compass-mcp",
+ "compass-media",
+ "compass-model",
+ "compass-output",
+ "compass-query",
+ "compass-reflect",
+ "compass-resolve",
+ "compass-semantic",
+ "compass-transcribe",
+ "serde_json",
+ "tempfile",
+ "time",
+]
+
+[[package]]
+name = "compass-postgres"
+version = "0.1.0"
+dependencies = [
+ "compass-languages",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+]
+
+[[package]]
+name = "compass-prs"
+version = "0.1.0"
+dependencies = [
+ "compass-model",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-query"
+version = "0.1.0"
+dependencies = [
+ "compass-model",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "compass-reflect"
+version = "0.1.0"
+dependencies = [
+ "compass-files",
+ "compass-model",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+]
+
+[[package]]
+name = "compass-resolve"
+version = "0.1.0"
+dependencies = [
+ "compass-languages",
+ "compass-model",
+ "regex",
+ "serde_json",
+ "sha1",
+]
+
+[[package]]
+name = "compass-semantic"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-bedrockruntime",
+ "aws-smithy-http-client",
+ "base64",
+ "compass-files",
+ "compass-media",
+ "regex",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "tokio",
+ "ureq",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-transcribe"
+version = "0.1.0"
+dependencies = [
+ "compass-whisper",
+ "rubato",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "symphonia",
+ "tempfile",
+ "thiserror 2.0.19",
+ "ureq",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
+name = "compass-tree-sitter-language-pack"
+version = "1.13.1"
+dependencies = [
+ "ahash",
+ "cc",
+ "memchr",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "thiserror 2.0.19",
+ "tree-sitter",
+ "ureq",
+ "zstd",
+]
+
+[[package]]
+name = "compass-whisper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "flate2",
+ "rand 0.8.7",
+ "realfft",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tiktoken-rs",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1663,11 +2053,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -2196,6 +2584,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "libmimalloc-sys"
+version = "0.1.49"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a45a52f43e1c16f667ccfe4dd8c85b7f7c204fd5e3bf46c5b0db9a5c3c0b8e9"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2283,6 +2680,15 @@ checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
 dependencies = [
  "libc",
  "stable_deref_trait",
+]
+
+[[package]]
+name = "mimalloc"
+version = "0.1.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
+dependencies = [
+ "libmimalloc-sys",
 ]
 
 [[package]]
@@ -2976,6 +3382,25 @@ dependencies = [
  "tower-service",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
 ]
 
 [[package]]
@@ -4173,375 +4598,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trail-cargo"
-version = "0.1.0"
-dependencies = [
- "glob",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "toml 1.1.3+spec-1.1.0",
- "trail-model",
-]
-
-[[package]]
-name = "trail-cli"
-version = "0.1.0"
-dependencies = [
- "ctrlc",
- "glob",
- "regex",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "trail-cargo",
- "trail-core",
- "trail-files",
- "trail-global",
- "trail-google-workspace",
- "trail-graph",
- "trail-graphdb",
- "trail-ingest",
- "trail-mcp",
- "trail-model",
- "trail-output",
- "trail-postgres",
- "trail-prs",
- "trail-query",
- "trail-reflect",
- "trail-semantic",
- "url",
-]
-
-[[package]]
-name = "trail-core"
-version = "0.1.0"
-dependencies = [
- "notify",
- "rayon",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "trail-files",
- "trail-google-workspace",
- "trail-graph",
- "trail-languages",
- "trail-model",
- "trail-output",
- "trail-reflect",
- "trail-resolve",
-]
-
-[[package]]
-name = "trail-files"
-version = "0.1.0"
-dependencies = [
- "md-5 0.10.6",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "trail-global"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "trail-files",
- "trail-model",
-]
-
-[[package]]
-name = "trail-google-workspace"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "trail-media",
- "url",
- "wait-timeout",
-]
-
-[[package]]
-name = "trail-graph"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "strsim",
- "tempfile",
- "thiserror 2.0.19",
- "trail-languages",
- "trail-model",
- "unicode-casefold",
- "unicode-normalization",
-]
-
-[[package]]
-name = "trail-graphdb"
-version = "0.1.0"
-dependencies = [
- "rustls",
- "rustls-platform-verifier",
- "serde_json",
- "thiserror 2.0.19",
- "trail-model",
- "url",
-]
-
-[[package]]
-name = "trail-ingest"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "trail-files",
- "trail-transcribe",
- "ureq",
- "url",
-]
-
-[[package]]
-name = "trail-languages"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "regex",
- "roxmltree",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha1",
- "tempfile",
- "thiserror 2.0.19",
- "toml 1.1.3+spec-1.1.0",
- "trail-files",
- "trail-model",
- "tree-sitter",
- "tree-sitter-dm",
- "tree-sitter-language-pack",
- "unicode-casefold",
- "unicode-normalization",
-]
-
-[[package]]
-name = "trail-mcp"
-version = "0.1.0"
-dependencies = [
- "axum",
- "rmcp",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "tokio-util",
- "tower-http",
- "trail-core",
- "trail-graph",
- "trail-model",
- "trail-prs",
- "trail-query",
-]
-
-[[package]]
-name = "trail-media"
-version = "0.1.0"
-dependencies = [
- "oxidize-pdf",
- "roxmltree",
- "tempfile",
- "thiserror 2.0.19",
- "zip 6.0.0",
-]
-
-[[package]]
-name = "trail-model"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "trail-output"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "trail-files",
- "trail-graph",
- "trail-model",
- "unicode-normalization",
-]
-
-[[package]]
-name = "trail-parity"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "tempfile",
- "time",
- "trail-cli",
- "trail-core",
- "trail-files",
- "trail-graph",
- "trail-languages",
- "trail-mcp",
- "trail-media",
- "trail-model",
- "trail-output",
- "trail-query",
- "trail-reflect",
- "trail-resolve",
- "trail-semantic",
- "trail-transcribe",
-]
-
-[[package]]
-name = "trail-postgres"
-version = "0.1.0"
-dependencies = [
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tokio-postgres",
- "tokio-postgres-rustls",
- "trail-languages",
-]
-
-[[package]]
-name = "trail-prs"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "trail-model",
- "wait-timeout",
-]
-
-[[package]]
-name = "trail-query"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "trail-model",
- "unicode-normalization",
-]
-
-[[package]]
-name = "trail-reflect"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "trail-files",
- "trail-model",
-]
-
-[[package]]
-name = "trail-resolve"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha1",
- "trail-languages",
- "trail-model",
-]
-
-[[package]]
-name = "trail-semantic"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-sdk-bedrockruntime",
- "aws-smithy-http-client",
- "base64",
- "regex",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "tokio",
- "trail-files",
- "trail-media",
- "ureq",
- "url",
- "wait-timeout",
-]
-
-[[package]]
-name = "trail-transcribe"
-version = "0.1.0"
-dependencies = [
- "rubato",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "symphonia",
- "tempfile",
- "thiserror 2.0.19",
- "trail-whisper",
- "ureq",
- "url",
- "wait-timeout",
-]
-
-[[package]]
-name = "trail-whisper"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "flate2",
- "rand 0.8.7",
- "realfft",
- "rustc-hash",
- "serde",
- "serde_json",
- "tiktoken-rs",
-]
-
-[[package]]
 name = "transpose"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4580,26 +4636,6 @@ name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
-
-[[package]]
-name = "tree-sitter-language-pack"
-version = "1.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c0ee835c2c523874c241b8d524825f934d08b1517abd611e901fca30d4a42d3"
-dependencies = [
- "ahash",
- "cc",
- "getrandom 0.4.3",
- "memchr",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tar",
- "thiserror 2.0.19",
- "tree-sitter",
- "ureq",
- "zstd",
-]
 
 [[package]]
 name = "try-lock"

@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use trail_semantic::{
+use compass_semantic::{
     neutralize_injection_sentinels, parse_llm_json, sanitize_semantic_fragment,
     validate_semantic_fragment,
 };

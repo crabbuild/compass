@@ -1,0 +1,59 @@
+[package]
+name = "compass-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "compass_cli"
+
+[[bin]]
+name = "compass"
+path = "src/bin/compass.rs"
+
+[[bin]]
+name = "graphify"
+path = "src/bin/graphify.rs"
+
+[[bin]]
+name = "graphify-mcp"
+path = "src/bin/graphify-mcp.rs"
+
+[dependencies]
+ctrlc.workspace = true
+glob.workspace = true
+mimalloc.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+compass-core = { path = "../compass-core", version = "0.1.0" }
+compass-cargo = { path = "../compass-cargo", version = "0.1.0" }
+compass-files = { path = "../compass-files", version = "0.1.0" }
+compass-graph = { path = "../compass-graph", version = "0.1.0" }
+compass-graphdb = { path = "../compass-graphdb", version = "0.1.0" }
+compass-global = { path = "../compass-global", version = "0.1.0" }
+compass-google-workspace = { path = "../compass-google-workspace", version = "0.1.0" }
+compass-ingest = { path = "../compass-ingest", version = "0.1.0" }
+compass-model = { path = "../compass-model", version = "0.1.0" }
+compass-mcp = { path = "../compass-mcp", version = "0.1.0" }
+compass-output = { path = "../compass-output", version = "0.1.0" }
+compass-postgres = { path = "../compass-postgres", version = "0.1.0" }
+compass-prs = { path = "../compass-prs", version = "0.1.0" }
+compass-query = { path = "../compass-query", version = "0.1.0" }
+compass-reflect = { path = "../compass-reflect", version = "0.1.0" }
+compass-semantic = { path = "../compass-semantic", version = "0.1.0" }
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

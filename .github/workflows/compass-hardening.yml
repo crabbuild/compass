@@ -1,0 +1,276 @@
+name: Compass Rust hardening
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Check out the Graphify compatibility oracle
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Graphify-Labs/graphify
+          ref: v8
+          path: python-oracle
+      - name: Install Python oracle
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Sync pinned Python environment
+        working-directory: python-oracle
+        run: uv sync --frozen --extra mcp
+      - name: Sync isolated media oracle
+        working-directory: python-oracle
+        shell: bash
+        run: |
+          uv venv .venv-media --python 3.12
+          VIRTUAL_ENV="$GITHUB_WORKSPACE/python-oracle/.venv-media" uv sync --frozen --extra office --extra pdf --active
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+          components: llvm-tools-preview
+      - name: Install pinned coverage runner
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: cargo-llvm-cov@0.8.7
+      - name: Generate native coverage evidence
+        env:
+          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
+          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
+          GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
+        run: >-
+          cargo llvm-cov --workspace --all-features --all-targets --locked
+          --exclude compass-tree-sitter-language-pack
+          --lcov --output-path target/compass.lcov
+      - name: Enforce native line and region coverage
+        run: >-
+          cargo llvm-cov report --summary-only
+          --ignore-filename-regex='(^|/)vendor/'
+          --fail-under-lines 90 --fail-under-regions 85
+      - name: Enforce critical-module line coverage
+        run: scripts/check_critical_coverage.sh target/compass.lcov 95
+      - name: Retain coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compass-rust-coverage
+          path: target/compass.lcov
+          if-no-files-found: error
+
+  miri:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install nightly Miri
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-06-19
+          components: miri
+      - name: Check graph model and traversal under Miri
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+        run: cargo miri test -p compass-model -p compass-query
+
+  address-sanitizer:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install nightly with Rust sources
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-06-19
+          components: rust-src
+      - name: Run native crates with AddressSanitizer
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          CFLAGS: -fsanitize=address -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+        run: cargo test -Zbuild-std --workspace --exclude compass-parity --target x86_64-unknown-linux-gnu
+
+  fuzz:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - graph_input
+          - source_input
+          - ignore_input
+          - manifest_input
+          - cli_args
+          - renderer_input
+          - semantic_fragment
+          - avi_audio
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-06-19
+      - name: Install pinned cargo-fuzz
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: cargo-fuzz@0.13.2
+      - name: Fuzz hostile input
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=300 -max_len=1048576 -rss_limit_mb=2048
+      - name: Retain evolved fuzz corpus and failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compass-rust-fuzz-${{ matrix.target }}
+          path: |
+            fuzz/corpus/${{ matrix.target }}
+            fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: warn
+
+  mutation:
+    name: mutation (${{ matrix.area }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - area: stable-ids
+            files: -f crates/compass-languages/src/ids.rs
+            filter: normalize_id|make_id|file_stem
+          - area: invalidation
+            files: -f crates/compass-files/src/cache.rs -f crates/compass-files/src/manifest.rs
+            filter: Cache::load|Cache::cleanup_stale_ast|Cache::prune_semantic|Manifest::is_unchanged|Manifest::incremental|changed
+          - area: query-scoring
+            files: -f crates/compass-query/src/score.rs
+            filter: score_nodes|query_match_tier|singleton_score|pick_scored_endpoint|pick_seeds|compute_idf|BestSeed::better_than
+          - area: graph-atomic-guard
+            files: -f crates/compass-files/src/build_guard.rs
+            filter: .*
+          - area: graph-shrink-guard
+            files: -f crates/compass-core/src/raw_guard.rs
+            filter: .*
+          - area: compatibility-mappings
+            files: -f crates/compass-cli/src/install_commands.rs
+            filter: is_direct_command|canonical_platform|is_install_platform
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Check out the Graphify compatibility oracle
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Graphify-Labs/graphify
+          ref: v8
+          path: python-oracle
+      - name: Install Python oracle
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Sync pinned Python environment
+        working-directory: python-oracle
+        run: uv sync --frozen --extra mcp
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+          key: mutation-${{ matrix.area }}
+      - name: Install pinned mutation runner
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: cargo-mutants@27.0.0
+      - name: Exercise ${{ matrix.area }} mutations
+        env:
+          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
+          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
+        run: >-
+          cargo mutants ${{ matrix.files }} -F '${{ matrix.filter }}'
+          --all-features --cargo-arg=--locked
+      - name: Retain mutation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compass-rust-mutants-${{ matrix.area }}
+          path: mutants.out
+          if-no-files-found: error
+
+  performance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Check out the Graphify compatibility oracle
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Graphify-Labs/graphify
+          ref: v8
+          path: python-oracle
+      - name: Install Python oracle
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Sync pinned Python environment
+        working-directory: python-oracle
+        run: uv sync --frozen
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+          key: performance
+      - name: Restore frozen performance baseline
+        id: performance-baseline
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: target/phase1-qualified-baseline
+          key: compass-performance-baseline-v1-${{ runner.os }}-${{ runner.arch }}
+      - name: Qualify small, medium, and large multilingual corpora
+        env:
+          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
+          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
+          COMPASS_BENCH_REPEATS: "5"
+          COMPASS_BENCH_BASELINE_DIR: ${{ github.workspace }}/target/phase1-qualified-baseline
+        run: scripts/qualify_phase1_matrix.sh
+      - name: Establish the first approved runner baseline
+        if: steps.performance-baseline.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p target/phase1-qualified-baseline
+          cp target/phase1-qualification-matrix/*.csv target/phase1-qualified-baseline/
+      - name: Freeze the approved runner baseline
+        if: steps.performance-baseline.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: target/phase1-qualified-baseline
+          key: compass-performance-baseline-v1-${{ runner.os }}-${{ runner.arch }}
+      - name: Retain performance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compass-rust-performance
+          path: target/phase1-qualification-matrix/*.csv
+          if-no-files-found: error

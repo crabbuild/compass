@@ -1,0 +1,86 @@
+[package]
+edition = "2024"
+name = "compass-tree-sitter-language-pack"
+version = "1.13.1"
+rust-version = "1.97"
+build = "build.rs"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Compass's pinned, statically linked tree-sitter grammar adapter"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/crabbuild/compass"
+
+[features]
+default = []
+
+[lib]
+name = "tree_sitter_language_pack"
+path = "src/lib.rs"
+
+[dependencies.ahash]
+version = "0.8"
+features = [
+    "std",
+    "compile-time-rng",
+]
+default-features = false
+
+[dependencies.memchr]
+version = "2"
+
+[dependencies.thiserror]
+version = "2"
+
+[dependencies.tree-sitter]
+version = "0.26"
+
+[dev-dependencies.serde_json]
+version = "1"
+
+[build-dependencies.cc]
+version = "1"
+
+[build-dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[build-dependencies.serde_json]
+version = "1"
+
+[build-dependencies.sha2]
+version = "0.11"
+
+[build-dependencies.tar]
+version = "0.4"
+
+[build-dependencies.ureq]
+version = "3"
+features = [
+    "platform-verifier",
+    "socks-proxy",
+]
+
+[build-dependencies.zstd]
+version = "0.13"
+
+[lints.clippy]
+duplicated_attributes = "allow"
+
+[lints.clippy.all]
+level = "deny"
+priority = -1
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+priority = 0
+check-cfg = [
+    "cfg(alef)",
+    'cfg(feature, values("config", "download", "dynamic-loading", "serde", "test-internals"))',
+]

@@ -1,15 +1,15 @@
-# Trail compatibility ledger
+# Compass compatibility ledger
 
-Trail is a native Rust implementation of Graphify with a strict compatibility
+Compass is a native Rust implementation of Graphify with a strict compatibility
 adapter. The compatibility executable is `graphify`; the primary product
-interface is `trail graph`.
+interface is `compass`.
 
 ## Frozen oracle
 
 - Python baseline: Graphify `v0.9.20`
 - Baseline commit: `edec9eabeceeae6aa2375eddb3835efa1a32c0a3`
 - Oracle runtime: the repository's pinned Python environment
-- Native implementation root: `rust/`
+- Native implementation root: the Compass repository root
 
 There are no committed changes to `graphify/` between the frozen baseline and
 the current implementation checkpoint. A future Python behavior change must be
@@ -22,6 +22,18 @@ forms, exit status, stdout and stderr, graph and sidecar schemas, cache and
 manifest behavior, deterministic ordering, installed files, and mutation of
 existing `graphify-out/` directories. Tests normalize only declared sources of
 variability such as temporary roots, elapsed time, and frozen clock values.
+
+The frozen Python query renderer has one inherently unstable behavior: nodes
+with equal degree are emitted from `set` iteration, so their relative order
+changes with Python's hash seed and runtime. Compass does not reproduce that
+runtime accident. It orders those ties by stable node ID. Differential query
+qualification therefore requires an exact header and exact complete line
+multiset; every non-query read command remains byte-compared. Graph artifacts
+are likewise compared as ordered-independent node/edge records because the
+Python file walk order is platform-dependent, while Compass persists a stable
+order. This is the sole approved ordering normalization; node/edge attributes,
+multiplicity, ranking, traversal membership, and duplicate output lines must
+still match exactly.
 
 The released binaries do not start Python and do not load tree-sitter grammars
 at runtime. Python is a development and CI oracle only.
@@ -67,36 +79,36 @@ CI tests and release packaging cover:
 - `x86_64-pc-windows-msvc`
 - `aarch64-pc-windows-msvc`
 
-Each release archive contains `trail`, `graphify`, and `graphify-mcp`, license
+Each release archive contains `compass`, `graphify`, and `graphify-mcp`, license
 notices, completions, an SPDX SBOM, a SHA-256 checksum, and build-provenance
 attestation. Cargo packages are verified independently from workspace builds.
 
 ## Evidence commands
 
-From `rust/`:
+From the Compass repository root, with Graphify checked out as a sibling:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-GRAPHIFY_PYTHON=../.venv/bin/python cargo test --workspace --all-targets --all-features --locked
-GRAPHIFY_PYTHON=../.venv/bin/python cargo nextest run --workspace --all-features --locked
-cargo llvm-cov --workspace --all-features --all-targets --locked --lcov --output-path target/trail.lcov
-cargo llvm-cov report --summary-only --fail-under-lines 90 --fail-under-regions 85
-scripts/check_critical_coverage.sh target/trail.lcov 95
+GRAPHIFY_PYTHON=../.venv/bin/python GRAPHIFY_MEDIA_PYTHON=../.venv-media/bin/python cargo test --workspace --all-targets --all-features --locked
+GRAPHIFY_PYTHON=../.venv/bin/python GRAPHIFY_MEDIA_PYTHON=../.venv-media/bin/python cargo nextest run --workspace --all-features --locked
+GRAPHIFY_PYTHON=../.venv/bin/python GRAPHIFY_MEDIA_PYTHON=../.venv-media/bin/python cargo llvm-cov --workspace --all-features --all-targets --locked --exclude compass-tree-sitter-language-pack --lcov --output-path target/compass.lcov
+cargo llvm-cov report --summary-only --ignore-filename-regex='(^|/)vendor/' --fail-under-lines 90 --fail-under-regions 85
+scripts/check_critical_coverage.sh target/compass.lcov 95
 cargo package --workspace --locked --no-verify
 cargo deny check
 ```
 
 Performance qualification is described in `PERFORMANCE.md` and release
-automation is in `.github/workflows/rust-ci.yml`, `rust-hardening.yml`,
-`rust-release.yml`, and `rust-publish.yml`. The hardening workflow also runs
+automation is in `.github/workflows/compass-ci.yml`, `compass-hardening.yml`,
+`compass-release.yml`, and `compass-publish.yml`. The hardening workflow also runs
 the pinned mutation matrix and retains each result as release evidence.
 
 ## Post-baseline changes
 
 No Python implementation deltas are pending. Add one row per future delta:
 
-| Python commit | Affected contract | Fixture/evidence | Trail status |
+| Python commit | Affected contract | Fixture/evidence | Compass status |
 | --- | --- | --- | --- |
 | _none_ | — | — | — |
 

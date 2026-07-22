@@ -6,11 +6,11 @@ minimum=${2:-95}
 
 awk -v minimum="$minimum" '
 BEGIN {
-    targets["crates/trail-parity/src/lib.rs"] = "compatibility"
-    targets["crates/trail-model/src/graph.rs"] = "serialization"
-    targets["crates/trail-files/src/cache.rs"] = "cache"
-    targets["crates/trail-files/src/build_guard.rs"] = "security-atomic"
-    targets["crates/trail-core/src/raw_guard.rs"] = "security-shrink"
+    targets["crates/compass-parity/src/lib.rs"] = "compatibility"
+    targets["crates/compass-model/src/graph.rs"] = "serialization"
+    targets["crates/compass-files/src/cache.rs"] = "cache"
+    targets["crates/compass-files/src/build_guard.rs"] = "security-atomic"
+    targets["crates/compass-core/src/raw_guard.rs"] = "security-shrink"
 }
 /^SF:/ {
     current = substr($0, 4)

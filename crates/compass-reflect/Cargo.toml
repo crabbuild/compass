@@ -1,0 +1,28 @@
+[package]
+name = "compass-reflect"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time.workspace = true
+thiserror.workspace = true
+compass-files = { path = "../compass-files", version = "0.1.0" }
+compass-model = { path = "../compass-model", version = "0.1.0" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

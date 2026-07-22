@@ -1,0 +1,1 @@
+{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"a","label":"Alpha","source_file":"src/a.py"},{"id":"b","label":"Beta","source_file":"src/b.py"}],"links":[{"source":"a","target":"b","relation":"calls","confidence":"EXTRACTED"}]}

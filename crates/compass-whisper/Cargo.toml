@@ -1,0 +1,33 @@
+[package]
+name = "compass-whisper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+description = "Compass-owned bounded native Whisper inference core"
+keywords = ["whisper", "speech-to-text", "transcription"]
+categories = ["multimedia::audio", "science"]
+
+[dependencies]
+anyhow.workspace = true
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+flate2.workspace = true
+rand.workspace = true
+realfft.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tiktoken-rs.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

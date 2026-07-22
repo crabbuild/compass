@@ -2,10 +2,11 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-rust_root="$(cd "$script_dir/.." && pwd)"
-repo_root="$(cd "$rust_root/.." && pwd)"
-output_dir="${TRAIL_BENCH_MATRIX_OUTPUT:-$rust_root/target/phase1-qualification-matrix}"
-work_root="$(mktemp -d "${TMPDIR:-/tmp}/trail-matrix.XXXXXX")"
+compass_root="$(cd "$script_dir/.." && pwd)"
+graphify_root="${GRAPHIFY_REPO_ROOT:-$(cd "$compass_root/.." && pwd)}"
+output_dir="${COMPASS_BENCH_MATRIX_OUTPUT:-$compass_root/target/phase1-qualification-matrix}"
+baseline_dir="${COMPASS_BENCH_BASELINE_DIR:-}"
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/compass-matrix.XXXXXX")"
 trap 'rm -rf "$work_root"' EXIT
 
 mkdir -p "$output_dir"
@@ -24,17 +25,17 @@ prepare_corpus() {
   mkdir -p "$corpus"
   case "$tier" in
     small)
-      copy_tree "$repo_root/tests/fixtures" "$corpus/fixtures"
+      copy_tree "$graphify_root/tests/fixtures" "$corpus/fixtures"
       ;;
     medium)
-      copy_tree "$repo_root/graphify" "$corpus/graphify"
-      copy_tree "$repo_root/tests/fixtures" "$corpus/fixtures"
+      copy_tree "$graphify_root/graphify" "$corpus/graphify"
+      copy_tree "$graphify_root/tests/fixtures" "$corpus/fixtures"
       ;;
     large)
-      copy_tree "$repo_root/graphify" "$corpus/graphify"
-      copy_tree "$repo_root/tests" "$corpus/tests"
-      copy_tree "$rust_root/crates" "$corpus/rust-crates"
-      copy_tree "$repo_root/docs" "$corpus/docs"
+      copy_tree "$graphify_root/graphify" "$corpus/graphify"
+      copy_tree "$graphify_root/tests" "$corpus/tests"
+      copy_tree "$compass_root/crates" "$corpus/compass-crates"
+      copy_tree "$graphify_root/docs" "$corpus/docs"
       ;;
     *)
       echo "error: unsupported benchmark tier: $tier" >&2
@@ -47,8 +48,13 @@ prepare_corpus() {
 for tier in small medium large; do
   corpus="$(prepare_corpus "$tier")"
   echo "qualifying $tier multilingual corpus"
-  TRAIL_BENCH_CORPUS="$corpus" \
-    TRAIL_BENCH_OUTPUT="$output_dir/$tier.csv" \
+  baseline=""
+  if [[ -n "$baseline_dir" && -f "$baseline_dir/$tier.csv" ]]; then
+    baseline="$baseline_dir/$tier.csv"
+  fi
+  COMPASS_BENCH_CORPUS="$corpus" \
+    COMPASS_BENCH_OUTPUT="$output_dir/$tier.csv" \
+    COMPASS_BENCH_BASELINE="$baseline" \
     "$script_dir/qualify_phase1.sh"
 done
 

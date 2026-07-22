@@ -1,6 +1,6 @@
-# Migrating from Graphify to Trail
+# Migrating from Graphify to Compass
 
-Trail can be adopted side by side. It reads and writes the existing
+Compass can be adopted side by side. It reads and writes the existing
 `graphify-out/` graph, cache, manifest, labels, analysis, memory, and sidecar
 formats, so no data migration is required.
 
@@ -9,13 +9,14 @@ formats, so no data migration is required.
 Use a release archive for a prebuilt binary, or install from the workspace:
 
 ```bash
-cd rust
-cargo install --locked --path crates/trail-cli
+git clone https://github.com/crabbuild/compass.git
+cd compass
+cargo install --locked --path crates/compass-cli
 ```
 
 The installation provides:
 
-- `trail` for the primary `trail graph <command>` interface;
+- `compass` for the primary `compass <command>` interface;
 - `graphify` for strict legacy CLI compatibility;
 - `graphify-mcp` for existing MCP configurations.
 
@@ -29,20 +30,19 @@ read-only commands through both interfaces:
 
 ```bash
 python -m graphify query "authentication flow"
-trail graph query "authentication flow"
+compass query "authentication flow"
 
 python -m graphify path Router Database
-trail graph path Router Database
+compass path Router Database
 ```
 
-Next, run Trail against a disposable working-tree copy and compare the full
+Next, run Compass against a disposable working-tree copy and compare the full
 `graphify-out/` tree after a cold build, unchanged warm build, and one-file
 incremental update. The repository qualification script automates the Phase 1
 graph and performance comparison:
 
 ```bash
-cd rust
-scripts/qualify_phase1.sh /path/to/corpus
+COMPASS_BENCH_CORPUS=/path/to/corpus scripts/qualify_phase1.sh
 ```
 
 Do not run two writers against the same output directory concurrently. Query
@@ -54,8 +54,8 @@ update is in progress.
 Replace legacy invocations mechanically:
 
 ```text
-graphify <command>       -> trail graph <command>
-python -m graphify ...  -> trail graph ...
+graphify <command>       -> compass <command>
+python -m graphify ...  -> compass ...
 ```
 
 If exact legacy messages or scripts are important, use the native `graphify`
@@ -65,7 +65,7 @@ Reinstall assistant integration from the native binary after cutover so hooks
 and skill assets point at the intended command:
 
 ```bash
-trail graph install --platform codex --project
+compass install --platform codex --project
 ```
 
 Semantic and network-backed operations remain opt-in. Review provider keys,
@@ -76,14 +76,14 @@ environment. `extract --code-only` is the explicit local-only mode.
 
 Rollback does not require converting graph data:
 
-1. Stop Trail watchers and MCP servers.
+1. Stop Compass watchers and MCP servers.
 2. Restore the preserved `graphify-out/` directory only if an interrupted or
-   unwanted write occurred; completed Trail output is Python-compatible.
+   unwanted write occurred; completed Compass output is Python-compatible.
 3. Resume the pinned Python `graphify` command.
 4. Reinstall the desired Python-era assistant integration if its command path
    differs from the native installation.
 
-Do not delete caches merely to roll back. Python and Trail share their baseline
+Do not delete caches merely to roll back. Python and Compass share their baseline
 layout, and retaining them makes rollback faster. If a future ledger entry adds
 optional forward-compatible metadata, older Python ignores it; a future
 breaking migration is prohibited without an explicit versioned converter and
@@ -91,9 +91,9 @@ separate rollback procedure.
 
 ## Troubleshooting
 
-- Use `trail graph --help` to see only completed native commands.
+- Use `compass --help` to see only completed native commands.
 - Use `graphify --help` when validating a legacy script's exact surface.
-- Run `trail graph cache-check` before discarding a cache.
-- Run `trail graph diagnose multigraph` before converting a suspect graph.
+- Run `compass cache-check` before discarding a cache.
+- Run `compass diagnose multigraph` before converting a suspect graph.
 - Keep API keys out of command output and bug reports; native diagnostics
   redact configured secrets.

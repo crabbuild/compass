@@ -1,5 +1,5 @@
 [package]
-name = "trail-fuzz"
+name = "compass-fuzz"
 version = "0.0.0"
 edition = "2024"
 license = "Apache-2.0"
@@ -12,10 +12,15 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 serde_json = "1"
 tempfile = "3"
-trail-model = { version = "0.1.0", path = "../crates/trail-model" }
-trail-query = { version = "0.1.0", path = "../crates/trail-query" }
-trail-semantic = { version = "0.1.0", path = "../crates/trail-semantic" }
-trail-transcribe = { version = "0.1.0", path = "../crates/trail-transcribe", default-features = false }
+compass-model = { version = "0.1.0", path = "../crates/compass-model" }
+compass-cli = { version = "0.1.0", path = "../crates/compass-cli" }
+compass-files = { version = "0.1.0", path = "../crates/compass-files" }
+compass-graph = { version = "0.1.0", path = "../crates/compass-graph" }
+compass-languages = { version = "0.1.0", path = "../crates/compass-languages" }
+compass-output = { version = "0.1.0", path = "../crates/compass-output" }
+compass-query = { version = "0.1.0", path = "../crates/compass-query" }
+compass-semantic = { version = "0.1.0", path = "../crates/compass-semantic" }
+compass-transcribe = { version = "0.1.0", path = "../crates/compass-transcribe", default-features = false }
 
 [[bin]]
 name = "graph_input"
@@ -34,6 +39,41 @@ bench = false
 [[bin]]
 name = "avi_audio"
 path = "fuzz_targets/avi_audio.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "source_input"
+path = "fuzz_targets/source_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ignore_input"
+path = "fuzz_targets/ignore_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "manifest_input"
+path = "fuzz_targets/manifest_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cli_args"
+path = "fuzz_targets/cli_args.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "renderer_input"
+path = "fuzz_targets/renderer_input.rs"
 test = false
 doc = false
 bench = false

@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use libfuzzer_sys::fuzz_target;
-use trail_transcribe::audio::{AudioLimits, decode_audio};
+use compass_transcribe::audio::{AudioLimits, decode_audio};
 
 fuzz_target!(|data: &[u8]| {
     if data.len() > 1_000_000 {

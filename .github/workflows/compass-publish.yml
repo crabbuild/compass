@@ -1,0 +1,72 @@
+name: Publish Compass crates
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version already tagged as compass-v<version>
+        required: true
+        type: string
+      confirmation:
+        description: Type publish-<version> to authorize crates.io publication
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    steps:
+      - name: Validate explicit confirmation
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: test "$CONFIRMATION" = "publish-$VERSION"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: compass-v${{ inputs.version }}
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+          key: crates-io-publish
+
+      - name: Publish in dependency order
+        working-directory: .
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          COMPASS_PUBLISH_CONFIRM: ${{ inputs.confirmation }}
+        run: scripts/publish_crates.sh
+
+      - name: Verify registry cargo install is self-contained
+        working-directory: .
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          install_root="$(mktemp -d)"
+          trap 'rm -rf "$install_root"' EXIT
+          installed=0
+          for attempt in $(seq 1 12); do
+            if cargo install compass-cli --version "=$VERSION" --locked --root "$install_root"; then
+              installed=1
+              break
+            fi
+            echo "registry propagation pending (attempt $attempt/12)" >&2
+            sleep 10
+          done
+          test "$installed" = 1
+          "$install_root/bin/compass" --version
+          "$install_root/bin/compass" query --help
+          "$install_root/bin/graphify" --help
+          "$install_root/bin/graphify-mcp" --help

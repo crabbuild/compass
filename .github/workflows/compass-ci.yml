@@ -1,0 +1,167 @@
+name: Compass Rust CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: compass-rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: .
+
+jobs:
+  quality-and-parity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Check out the Graphify compatibility oracle
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Graphify-Labs/graphify
+          ref: v8
+          path: python-oracle
+
+      - name: Install Python oracle
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Sync pinned Python environment
+        working-directory: python-oracle
+        run: uv sync --frozen --extra mcp
+
+      - name: Sync isolated media oracle
+        working-directory: python-oracle
+        shell: bash
+        run: |
+          uv venv .venv-media --python 3.12
+          VIRTUAL_ENV="$GITHUB_WORKSPACE/python-oracle/.venv-media" uv sync --frozen --extra office --extra pdf --active
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+
+      - name: Install pinned nextest runner
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: nextest@0.9.124
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lints
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Native and Python-oracle tests
+        env:
+          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
+          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
+          GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
+        run: cargo test --workspace --all-targets --all-features --locked
+
+      - name: Isolated native and Python-oracle tests
+        env:
+          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
+          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
+          GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
+        run: cargo nextest run --workspace --all-features --locked
+
+      - name: Verify publishable crate archives
+        run: cargo package --workspace --locked --no-verify
+
+      - name: Verify cargo install and standalone launch
+        shell: bash
+        run: |
+          install_root="$(mktemp -d)"
+          cargo install --path crates/compass-cli --locked --root "$install_root"
+          "$install_root/bin/compass" --help
+          "$install_root/bin/graphify" --help
+          "$install_root/bin/graphify-mcp" --help
+
+      - name: Validate qualification and completion scripts
+        shell: bash
+        run: |
+          bash -n scripts/qualify_phase1.sh
+          bash -n scripts/qualify_phase1_matrix.sh
+          sh -n scripts/check_critical_coverage.sh
+          bash -n scripts/publish_crates.sh
+          bash -n completions/compass.bash
+          python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_graphs.py').read_text())"
+          python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_read_outputs.py').read_text())"
+          python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/measure_process.py').read_text())"
+
+  native-platforms:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+          target: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+          key: ${{ matrix.target }}
+
+      - name: Native tests
+        run: cargo test --workspace --exclude compass-parity --all-targets --locked --target ${{ matrix.target }}
+
+  dependency-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          working-directory: .
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Check licenses, bans, advisories, and sources
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: Cargo.toml
+          arguments: --all-features
+      - name: Check fuzz-harness dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: fuzz/Cargo.toml
