@@ -103,5 +103,9 @@ fn fingerprints_are_order_independent_secret_free_and_strict()
     assert!(profile.insert("apikey", "secret").is_err());
     assert!(profile.insert("token", "secret").is_err());
     profile.insert("token_budget", "8192")?;
+    assert!(
+        serde_json::from_str::<BuildProfile>(r#"{"values":{"api_key":"must-not-deserialize"}}"#)
+            .is_err()
+    );
     Ok(())
 }

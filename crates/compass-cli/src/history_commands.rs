@@ -6,11 +6,12 @@ use compass_core::{
     materialize_history_with_observer,
 };
 use compass_history::{
-    ArtifactClass, ChangeKind, ChangeSink, CommitId, GraphChange, HistoryError, HistoryStore,
-    PublishedVersion, RealizationId, RecordKind, Repository,
+    ArtifactClass, ChangeKind, ChangeSink, ClaimedJob, CommitId, ExtractionFingerprint,
+    GitTargetLimitation, GraphChange, HistoryConfig, HistoryError, HistoryQueue, HistoryStore,
+    JobRequest, JobState, PublishedVersion, RealizationId, RecordKind, Repository,
 };
 
-use crate::history_build::{HistoryBuildOptions, parse_build_command};
+use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
 use crate::{Frontend, Outcome};
 
 pub(crate) fn help(frontend: Frontend) -> String {
@@ -33,6 +34,16 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
         return Outcome::success(help(frontend));
     }
     outcome(execute(frontend, args))
+}
+
+pub(crate) fn command_worker(_frontend: Frontend, args: &[String]) -> Outcome {
+    if !args.is_empty() {
+        return Outcome::failure_with_code(
+            "error: history-worker accepts no arguments".to_owned(),
+            2,
+        );
+    }
+    outcome(run_worker().map(|()| String::new()))
 }
 
 pub(crate) fn diff_help(frontend: Frontend) -> String {
@@ -77,37 +88,64 @@ fn resolve_or_materialize(
             Some(history) => history,
             None => HistoryStore::create(repository).map_err(|error| error.to_string())?,
         };
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("could not resolve current Compass executable: {error}"))?;
-    let builder = options.builder(executable);
-    let mut observer = StderrProgress;
-    let published = materialize_history_with_observer(
-        &history,
-        &builder,
-        MaterializeRequest {
-            repository: repository.clone(),
-            commit,
-            profile: options.profile(),
-            rebuild,
-            replace_corrupt,
-        },
-        &mut observer,
-    )
+    let queue = HistoryQueue::for_repository(repository).map_err(|error| error.to_string())?;
+    let request = JobRequest {
+        commit: commit.clone(),
+        profile: options.profile(),
+    };
+    let job_id = if rebuild {
+        queue.enqueue_rebuild(request, replace_corrupt)
+    } else {
+        queue.enqueue(request)
+    }
     .map_err(|error| error.to_string())?;
-    Ok((history, published))
-}
-
-struct StderrProgress;
-
-impl MaterializeObserver for StderrProgress {
-    fn entered(&mut self, stage: MaterializeStage) -> Result<(), MaterializeError> {
-        let message = match stage {
-            MaterializeStage::Building => "building complete graph",
-            MaterializeStage::Validating => "validating complete graph",
-            MaterializeStage::Publishing => "publishing immutable realization",
-        };
-        eprintln!("[graph history] {message}");
-        Ok(())
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(150);
+    loop {
+        if !rebuild {
+            match history.preferred(&commit) {
+                Ok(Some(preferred)) if history.validate(&preferred.id).is_ok() => {
+                    return Ok((history, preferred));
+                }
+                Ok(_) => {}
+                Err(error) if error.is_catalog_corruption() => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        let job = queue
+            .get(&job_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "joined history job disappeared".to_owned())?;
+        if job.state.terminal() {
+            if job.state == JobState::Published {
+                if let Some(candidate) = &job.candidate_realization {
+                    let mut published =
+                        history.get(candidate).map_err(|error| error.to_string())?;
+                    published.preferred = job.preferred.unwrap_or(false);
+                    return Ok((history, published));
+                }
+                if let Some(preferred) = history
+                    .preferred(&commit)
+                    .map_err(|error| error.to_string())?
+                {
+                    return Ok((history, preferred));
+                }
+            }
+            return Err(job
+                .diagnostic
+                .unwrap_or_else(|| format!("history materialization ended in {:?}", job.state)));
+        }
+        if let Some(claimed) = queue
+            .claim_or_join(&job_id)
+            .map_err(|error| error.to_string())?
+        {
+            run_claimed_job(repository, &history, &queue, &claimed, true)
+                .map_err(|error| error.message)?;
+            continue;
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("timed out joining the live history materialization lease".to_owned());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
@@ -517,6 +555,23 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
     if matches!(args[0].as_str(), "build" | "rebuild") {
         return execute_build(&repository, &args[0], &args[1..]);
     }
+    if args[0] == "enable" {
+        let options = parse_enable_options(&args[1..]).map_err(usage)?;
+        HistoryStore::create(&repository).map_err(runtime)?;
+        crate::hook_commands::install_managed(frontend).map_err(runtime)?;
+        let config = HistoryConfig::enable(&repository, options.profile()).map_err(runtime)?;
+        return Ok(format!(
+            "history: enabled\nprofile: {}",
+            config.profile_digest.as_deref().unwrap_or("none")
+        ));
+    }
+    if args[0] == "disable" {
+        if args.len() != 1 {
+            return Err(usage("history disable accepts no arguments"));
+        }
+        HistoryConfig::disable(&repository).map_err(runtime)?;
+        return Ok("history: disabled".to_owned());
+    }
     let (positionals, format, output) = parse(&args[1..]).map_err(usage)?;
     if args[0] != "export" && output.is_some() {
         return Err(usage("--output is only valid for history export"));
@@ -530,29 +585,58 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             let commit = repository
                 .resolve(positionals.first().map(String::as_str).unwrap_or("HEAD"))
                 .map_err(runtime)?;
+            let config = HistoryConfig::load(&repository).map_err(runtime)?;
+            let history_state = if config.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            let limitations = repository
+                .target_limitations(&commit)
+                .map_err(runtime)?
+                .into_iter()
+                .map(render_limitation)
+                .collect::<Vec<_>>();
+            let limitation_text = if limitations.is_empty() {
+                "none".to_owned()
+            } else {
+                limitations.join(", ")
+            };
             let history = match HistoryStore::open_existing(&repository) {
                 Ok(Some(history)) => history,
                 Ok(None) => {
                     return Ok(if format == "json" {
-                        serde_json::json!({"enabled":false,"store":false,"commit":commit})
-                            .to_string()
+                        serde_json::json!({
+                            "enabled":config.enabled,
+                            "profile_digest":config.profile_digest,
+                            "store":false,
+                            "commit":commit,
+                            "limitations":limitations
+                        })
+                        .to_string()
                     } else {
-                        format!("history: disabled\nstore: no store\ncommit: {commit}")
+                        format!(
+                            "history: {history_state}\nprofile: {}\nstore: no store\ncommit: {commit}\nlimitations: {limitation_text}",
+                            config.profile_digest.as_deref().unwrap_or("none")
+                        )
                     });
                 }
                 Err(error) => {
                     let report = if format == "json" {
                         serde_json::json!({
-                            "enabled":false,
+                            "enabled":config.enabled,
+                            "profile_digest":config.profile_digest,
                             "store":true,
                             "compatible":false,
                             "commit":commit,
+                            "limitations":limitations,
                             "validation":{"valid":false,"error":error.to_string()}
                         })
                         .to_string()
                     } else {
                         format!(
-                            "history: disabled\nstore: incompatible\ncommit: {commit}\nvalidation: invalid"
+                            "history: {history_state}\nprofile: {}\nstore: incompatible\ncommit: {commit}\nlimitations: {limitation_text}\nvalidation: invalid",
+                            config.profile_digest.as_deref().unwrap_or("none")
                         )
                     };
                     return Err(report_failure(report, error));
@@ -563,32 +647,39 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 Err(error) => {
                     let report = if format == "json" {
                         serde_json::json!({
-                            "enabled":false,
+                            "enabled":config.enabled,
+                            "profile_digest":config.profile_digest,
                             "store":true,
                             "commit":commit,
+                            "limitations":limitations,
                             "preferred":serde_json::Value::Null,
                             "validation":{"valid":false,"error":error.to_string()}
                         })
                         .to_string()
                     } else {
                         format!(
-                            "history: disabled\nstore: present\ncommit: {commit}\npreferred: unreadable\nvalidation: invalid"
+                            "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: unreadable\nvalidation: invalid",
+                            config.profile_digest.as_deref().unwrap_or("none")
                         )
                     };
                     return Err(report_failure(report, error));
                 }
             };
             if format == "json" {
+                let job = newest_job(&repository, &commit).map_err(runtime)?;
                 let validation = preferred
                     .as_ref()
                     .map(|value| history.validate(&value.id))
                     .transpose();
                 let report = serde_json::json!({
-                    "enabled":false,
+                    "enabled":config.enabled,
+                    "profile_digest":config.profile_digest,
                     "store":true,
                     "commit":commit,
+                    "limitations":limitations,
                     "preferred":preferred.as_ref().map(|v|v.id.as_hex()),
                     "version":preferred.as_ref().map(|v|&v.version),
+                    "job":job,
                     "validation": match &validation {
                         Ok(Some(_)) => serde_json::json!({"valid":true}),
                         Ok(None) => serde_json::Value::Null,
@@ -601,13 +692,26 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                     Err(error) => Err(report_failure(report, error)),
                 }
             } else if let Some(value) = preferred {
-                let prefix = format!(
-                    "history: disabled\nstore: present\ncommit: {commit}\npreferred: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nvalidation: valid",
+                let mut prefix = format!(
+                    "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nvalidation: valid",
+                    config.profile_digest.as_deref().unwrap_or("none"),
                     value.id,
                     value.version.extraction_fingerprint,
                     value.version.node_count,
                     value.version.edge_count
                 );
+                if let Some(job) = newest_job(&repository, &commit).map_err(runtime)?
+                    && matches!(job.state, JobState::Failed | JobState::Incomplete)
+                {
+                    prefix.push_str(&format!(
+                        "\nnewer attempt: {}\nattempts: {}",
+                        job_state_name(job.state),
+                        job.attempts
+                    ));
+                    if let Some(diagnostic) = job.diagnostic {
+                        prefix.push_str(&format!("\ndiagnostic: {diagnostic}"));
+                    }
+                }
                 match history.validate(&value.id) {
                     Ok(_) => Ok(prefix),
                     Err(error) => Err(report_failure(
@@ -616,9 +720,21 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                     )),
                 }
             } else {
-                Ok(format!(
-                    "history: disabled\nstore: present\ncommit: {commit}\npreferred: none"
-                ))
+                let mut report = format!(
+                    "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: none",
+                    config.profile_digest.as_deref().unwrap_or("none")
+                );
+                if let Some(job) = newest_job(&repository, &commit).map_err(runtime)? {
+                    report.push_str(&format!(
+                        "\njob: {}\nattempts: {}",
+                        job_state_name(job.state),
+                        job.attempts
+                    ));
+                    if let Some(diagnostic) = job.diagnostic {
+                        report.push_str(&format!("\ndiagnostic: {diagnostic}"));
+                    }
+                }
+                Ok(report)
             }
         }
         "list" => {
@@ -769,10 +885,235 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             }
             Ok(format!("exported {} to {}", preferred.id, output.display()))
         }
-        "enable" | "disable" | "gc" => {
-            Err(runtime(format!("history {} is not available yet", args[0])))
-        }
+        "gc" => Err(runtime("history gc is not available yet")),
         other => Err(usage(format!("unknown history command {other}"))),
+    }
+}
+
+fn newest_job(
+    repository: &Repository,
+    commit: &CommitId,
+) -> Result<Option<compass_history::JobRecord>, HistoryError> {
+    let Some(queue) = HistoryQueue::open_existing(repository)? else {
+        return Ok(None);
+    };
+    Ok(queue
+        .list()?
+        .into_iter()
+        .filter(|job| &job.commit == commit)
+        .max_by_key(|job| (job.updated_at_millis, job.id.clone())))
+}
+
+fn render_limitation(limitation: GitTargetLimitation) -> String {
+    match limitation {
+        GitTargetLimitation::LfsPointer(path) => format!("lfs-pointer:{path}"),
+        GitTargetLimitation::Gitlink(path) => format!("gitlink:{path}"),
+        GitTargetLimitation::UnsupportedFilter(filter) => {
+            format!("unsupported-filter:{filter}")
+        }
+    }
+}
+
+fn job_state_name(state: JobState) -> &'static str {
+    match state {
+        JobState::Queued => "queued",
+        JobState::Building => "building",
+        JobState::Validating => "validating",
+        JobState::Published => "published",
+        JobState::Failed => "failed",
+        JobState::Incomplete => "incomplete",
+    }
+}
+
+fn run_worker() -> Result<(), CommandFailure> {
+    let repository =
+        Repository::discover(&std::env::current_dir().map_err(runtime)?).map_err(runtime)?;
+    let queue = HistoryQueue::for_repository(&repository).map_err(runtime)?;
+    let history = HistoryStore::create(&repository).map_err(runtime)?;
+    while let Some(claimed) = queue.claim_next().map_err(runtime)? {
+        run_claimed_job(&repository, &history, &queue, &claimed, false)?;
+    }
+    Ok(())
+}
+
+fn run_claimed_job(
+    repository: &Repository,
+    history: &HistoryStore,
+    queue: &HistoryQueue,
+    claimed: &ClaimedJob,
+    progress: bool,
+) -> Result<(), CommandFailure> {
+    if let Some(candidate) = &claimed.candidate_realization
+        && history.get(candidate).is_ok()
+    {
+        let became_preferred = match history.preferred(&claimed.commit) {
+            Ok(preferred) if preferred.as_ref().map(|value| &value.id) == Some(candidate) => true,
+            Ok(preferred)
+                if preferred.as_ref().map(|value| &value.id)
+                    == claimed.observed_preferred.as_ref() =>
+            {
+                history
+                    .compare_and_set_preferred(
+                        &claimed.commit,
+                        claimed.observed_preferred.as_ref(),
+                        candidate,
+                    )
+                    .map_err(runtime)?
+            }
+            Ok(_) => false,
+            Err(error) if error.is_catalog_corruption() && claimed.replace_corrupt => {
+                let token = history
+                    .corrupt_preferred_token(&claimed.commit)
+                    .map_err(runtime)?;
+                let activity = history.activity().map_err(runtime)?;
+                history
+                    .recover_corrupt_preferred_with_activity(
+                        &claimed.commit,
+                        &token,
+                        candidate,
+                        &activity,
+                    )
+                    .map_err(runtime)?
+            }
+            Err(error) if error.is_catalog_corruption() => false,
+            Err(error) => return Err(runtime(error)),
+        };
+        queue
+            .transition(claimed, JobState::Validating, None)
+            .map_err(runtime)?;
+        queue
+            .finish(claimed, JobState::Published, Some(became_preferred), None)
+            .map_err(runtime)?;
+        return Ok(());
+    }
+    let options = match HistoryBuildOptions::from_profile(claimed.profile.clone()) {
+        Ok(options) => options,
+        Err(error) => {
+            queue
+                .finish(claimed, JobState::Failed, None, Some(&error.to_string()))
+                .map_err(runtime)?;
+            return Ok(());
+        }
+    };
+    let executable = std::env::current_exe().map_err(runtime)?;
+    let builder = options.builder(executable);
+    let heartbeat_job = claimed.clone();
+    let heartbeat_root = queue.root().to_path_buf();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+    let heartbeat = std::thread::spawn(move || {
+        let Ok(queue) = HistoryQueue::open(&heartbeat_root) else {
+            return;
+        };
+        loop {
+            match stop_rx.recv_timeout(std::time::Duration::from_millis(
+                compass_history::LEASE_HEARTBEAT_MILLIS,
+            )) {
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if queue.heartbeat(&heartbeat_job).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let mut observer = DurableJobObserver {
+        queue,
+        claimed,
+        validating: false,
+        progress,
+    };
+    let result = materialize_history_with_observer(
+        history,
+        &builder,
+        MaterializeRequest {
+            repository: repository.clone(),
+            commit: claimed.commit.clone(),
+            profile: claimed.profile.clone(),
+            rebuild: claimed.rebuild,
+            replace_corrupt: claimed.replace_corrupt,
+        },
+        &mut observer,
+    );
+    let _stopped = stop_tx.send(());
+    let _joined = heartbeat.join();
+    match result {
+        Ok(published) => {
+            if !observer.validating {
+                queue
+                    .transition(claimed, JobState::Validating, None)
+                    .map_err(runtime)?;
+            }
+            queue
+                .finish(
+                    claimed,
+                    JobState::Published,
+                    Some(published.preferred),
+                    None,
+                )
+                .map_err(runtime)?;
+        }
+        Err(error) => {
+            let state = if matches!(error, MaterializeError::Incomplete(_)) {
+                JobState::Incomplete
+            } else {
+                JobState::Failed
+            };
+            queue
+                .finish(claimed, state, None, Some(&error.to_string()))
+                .map_err(runtime)?;
+        }
+    }
+    Ok(())
+}
+
+struct DurableJobObserver<'a> {
+    queue: &'a HistoryQueue,
+    claimed: &'a ClaimedJob,
+    validating: bool,
+    progress: bool,
+}
+
+impl MaterializeObserver for DurableJobObserver<'_> {
+    fn entered(&mut self, stage: MaterializeStage) -> Result<(), MaterializeError> {
+        if self.progress {
+            let message = match stage {
+                MaterializeStage::Building => "building complete graph",
+                MaterializeStage::Validating => "validating complete graph",
+                MaterializeStage::Publishing => "publishing immutable realization",
+            };
+            eprintln!("[graph history] {message}");
+        }
+        if stage == MaterializeStage::Validating {
+            self.queue
+                .transition(self.claimed, JobState::Validating, None)
+                .map_err(|error| MaterializeError::Observer(error.to_string()))?;
+            self.validating = true;
+        }
+        Ok(())
+    }
+
+    fn resolved(&mut self, fingerprint: &ExtractionFingerprint) -> Result<(), MaterializeError> {
+        self.queue
+            .annotate(self.claimed, Some(fingerprint.as_hex()), None, None)
+            .map(|_| ())
+            .map_err(|error| MaterializeError::Observer(error.to_string()))
+    }
+
+    fn candidate(
+        &mut self,
+        candidate: &RealizationId,
+        observed_preferred: Option<&RealizationId>,
+    ) -> Result<(), MaterializeError> {
+        self.queue
+            .annotate(
+                self.claimed,
+                None,
+                Some(candidate.clone()),
+                observed_preferred.cloned(),
+            )
+            .map(|_| ())
+            .map_err(|error| MaterializeError::Observer(error.to_string()))
     }
 }
 

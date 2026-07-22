@@ -164,6 +164,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     }
     match command.as_str() {
         "history" => history_commands::command(frontend, &args),
+        "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => history_commands::command_diff(frontend, &args),
         "query" => command_query(frontend, &args),
         "path" => command_path(frontend, &args),

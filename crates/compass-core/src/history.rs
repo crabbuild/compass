@@ -5,7 +5,7 @@ use compass_files::{DetectOptions, IgnorePolicy, detect};
 use compass_history::{
     BuildProfile, CommitId, CompletedGraphArtifacts, CorruptPreferredToken, ExtractionFingerprint,
     ExtractionFingerprintInput, GraphArtifacts, HistoryError, HistoryStore, PublishRequest,
-    PublishedVersion, Repository, WorktreeGuard,
+    PublishedVersion, RealizationId, Repository, WorktreeGuard,
 };
 use sha2::{Digest, Sha256};
 
@@ -38,6 +38,18 @@ pub enum MaterializeStage {
 /// Optional phase observer used by durable workers.
 pub trait MaterializeObserver {
     fn entered(&mut self, stage: MaterializeStage) -> Result<(), MaterializeError>;
+
+    fn resolved(&mut self, _fingerprint: &ExtractionFingerprint) -> Result<(), MaterializeError> {
+        Ok(())
+    }
+
+    fn candidate(
+        &mut self,
+        _candidate: &RealizationId,
+        _observed_preferred: Option<&RealizationId>,
+    ) -> Result<(), MaterializeError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -135,6 +147,7 @@ fn run_materialization(
     corrupt: Option<CorruptPreferredToken>,
 ) -> Result<PublishedVersion, MaterializeError> {
     let fingerprint = resolve_fingerprint(&request.profile, worktree.path())?;
+    observer.resolved(&fingerprint)?;
     let seed = compatible_seed(store, &request.repository, &request.commit, &fingerprint)?;
     observer.entered(MaterializeStage::Building)?;
     let completed = builder.build(
@@ -145,7 +158,7 @@ fn run_materialization(
     observer.entered(MaterializeStage::Validating)?;
     validate_completed(&completed, &request.commit, &request.profile, worktree)?;
     observer.entered(MaterializeStage::Publishing)?;
-    let mut published = store.publish_with_activity(
+    let prepared = store.prepare_publish_with_activity(
         PublishRequest {
             commit: request.commit.clone(),
             parents: request.repository.parents(&request.commit)?,
@@ -156,6 +169,8 @@ fn run_materialization(
         },
         activity,
     )?;
+    observer.candidate(prepared.id(), prepared.observed_preferred())?;
+    let mut published = store.commit_prepared_with_activity(prepared, activity)?;
     if let Some(observed) = corrupt {
         if request.replace_corrupt {
             if !store.recover_corrupt_preferred_with_activity(

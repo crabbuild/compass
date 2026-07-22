@@ -19,6 +19,8 @@ pub enum GitTargetLimitation {
     LfsPointer(String),
     /// A tree entry is a gitlink/submodule commit rather than ordinary file content.
     Gitlink(String),
+    /// A configured checkout filter could execute arbitrary external code and is rejected.
+    UnsupportedFilter(String),
 }
 
 /// An exact detached checkout below the repository's protected Compass temporary directory.
@@ -126,6 +128,58 @@ impl Repository {
                 })
             })
             .collect()
+    }
+
+    /// Inspect committed-tree and repository filter limitations without creating a worktree.
+    pub fn target_limitations(
+        &self,
+        commit: &CommitId,
+    ) -> Result<Vec<GitTargetLimitation>, HistoryError> {
+        let mut limitations = Vec::new();
+        match reject_unsupported_filters(&self.root) {
+            Ok(()) => {}
+            Err(HistoryError::UnsupportedGitFilter(filter)) => {
+                limitations.push(GitTargetLimitation::UnsupportedFilter(filter));
+            }
+            Err(error) => return Err(error),
+        }
+        let listing = git_output(
+            &self.root,
+            &["ls-tree", "-r", "-z", "-l", "--full-tree", commit.as_str()],
+        )?;
+        for entry in listing
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+        {
+            let Some(tab) = entry.iter().position(|byte| *byte == b'\t') else {
+                continue;
+            };
+            let metadata = String::from_utf8_lossy(&entry[..tab]);
+            let fields = metadata.split_ascii_whitespace().collect::<Vec<_>>();
+            let path = String::from_utf8_lossy(&entry[tab + 1..]).into_owned();
+            if fields.first() == Some(&"160000") {
+                limitations.push(GitTargetLimitation::Gitlink(path));
+                continue;
+            }
+            if fields.get(1) != Some(&"blob")
+                || fields
+                    .get(3)
+                    .and_then(|size| size.parse::<u64>().ok())
+                    .is_none_or(|size| size > 512)
+            {
+                continue;
+            }
+            let Some(object) = fields.get(2) else {
+                continue;
+            };
+            let bytes = git_output(&self.root, &["cat-file", "blob", object])?;
+            if bytes.starts_with(b"version https://git-lfs.github.com/spec/v1\n") {
+                limitations.push(GitTargetLimitation::LfsPointer(path));
+            }
+        }
+        limitations.sort();
+        limitations.dedup();
+        Ok(limitations)
     }
 
     /// Create an exact detached worktree without running hooks, prompting, fetching, or smudging

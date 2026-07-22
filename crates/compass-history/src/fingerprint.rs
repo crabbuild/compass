@@ -53,9 +53,34 @@ impl<'de> Deserialize<'de> for ExtractionFingerprint {
 }
 
 /// Normalized, non-secret options available before an exact checkout exists.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct BuildProfile {
     values: BTreeMap<String, String>,
+}
+
+impl<'de> Deserialize<'de> for BuildProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ProfileWire {
+            values: BTreeMap<String, String>,
+        }
+
+        let values = ProfileWire::deserialize(deserializer)?.values;
+        let mut profile = Self::default();
+        for (key, value) in values {
+            let normalized = checked_key(&key).map_err(serde::de::Error::custom)?;
+            if profile.values.contains_key(&normalized) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate normalized build-profile key {key:?}"
+                )));
+            }
+            profile.values.insert(normalized, value);
+        }
+        Ok(profile)
+    }
 }
 
 impl BuildProfile {

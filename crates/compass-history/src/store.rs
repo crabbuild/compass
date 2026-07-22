@@ -35,6 +35,34 @@ pub struct CorruptPreferredToken {
     manifest: Tree,
 }
 
+/// Fully validated publication staged before any catalog named root becomes visible.
+pub struct PreparedPublication {
+    id: RealizationId,
+    version: GraphVersion,
+    nodes: Tree,
+    edges: Tree,
+    hyperedges: Tree,
+    analysis: Tree,
+    metadata: Tree,
+    manifest: Tree,
+    preferred_name: Vec<u8>,
+    observed_preferred: Option<Tree>,
+    observed_preferred_id: Option<RealizationId>,
+    make_preferred: bool,
+}
+
+impl PreparedPublication {
+    #[must_use]
+    pub fn id(&self) -> &RealizationId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn observed_preferred(&self) -> Option<&RealizationId> {
+        self.observed_preferred_id.as_ref()
+    }
+}
+
 impl HistoryStore {
     /// Create or open the repository's shared history store.
     pub fn create(repository: &Repository) -> Result<Self, HistoryError> {
@@ -104,16 +132,33 @@ impl HistoryStore {
     pub fn publish_with_activity(
         &self,
         request: PublishRequest,
-        _guard: &ActivityGuard,
+        guard: &ActivityGuard,
     ) -> Result<PublishedVersion, HistoryError> {
+        let prepared = self.prepare_publish_with_activity(request, guard)?;
+        self.commit_prepared_with_activity(prepared, guard)
+    }
+
+    /// Stage and validate all immutable trees without publishing catalog roots.
+    pub fn prepare_publish_with_activity(
+        &self,
+        request: PublishRequest,
+        _guard: &ActivityGuard,
+    ) -> Result<PreparedPublication, HistoryError> {
         request.completion.validate()?;
         let preferred_name = preferred_root_name(&request.commit);
         let observed_preferred = self.prolly.load_named_root(&preferred_name)?;
-        if request.make_preferred
-            && let Some(tree) = &observed_preferred
-        {
-            self.validated_manifest_pointer(tree)?;
-        }
+        let observed_preferred_id = if request.make_preferred {
+            observed_preferred
+                .as_ref()
+                .map(|tree| self.validated_manifest_pointer(tree).map(|value| value.id))
+                .transpose()?
+        } else {
+            observed_preferred.as_ref().and_then(|tree| {
+                self.validated_manifest_pointer(tree)
+                    .ok()
+                    .map(|value| value.id)
+            })
+        };
 
         let partitioned = request.artifacts.partition(&request.completion)?;
         let node_count = count(partitioned.nodes.len())?;
@@ -161,6 +206,43 @@ impl HistoryStore {
             },
         )?;
 
+        Ok(PreparedPublication {
+            id,
+            version,
+            nodes,
+            edges,
+            hyperedges,
+            analysis,
+            metadata,
+            manifest,
+            preferred_name,
+            observed_preferred,
+            observed_preferred_id,
+            make_preferred: request.make_preferred,
+        })
+    }
+
+    /// Atomically publish a previously staged immutable realization.
+    pub fn commit_prepared_with_activity(
+        &self,
+        prepared: PreparedPublication,
+        _guard: &ActivityGuard,
+    ) -> Result<PublishedVersion, HistoryError> {
+        let PreparedPublication {
+            id,
+            version,
+            nodes,
+            edges,
+            hyperedges,
+            analysis,
+            metadata,
+            manifest,
+            preferred_name,
+            observed_preferred,
+            observed_preferred_id: _,
+            make_preferred,
+        } = prepared;
+
         self.publish_catalog_roots(
             &id,
             [
@@ -179,7 +261,7 @@ impl HistoryStore {
             )));
         }
 
-        let preferred = if request.make_preferred {
+        let preferred = if make_preferred {
             matches!(
                 self.prolly.compare_and_swap_named_root(
                     &preferred_name,
@@ -768,14 +850,14 @@ fn set_owner_dir(_path: &Path) -> Result<(), HistoryError> {
 }
 
 #[cfg(unix)]
-fn set_owner_file(path: &Path) -> Result<(), HistoryError> {
+pub(crate) fn set_owner_file(path: &Path) -> Result<(), HistoryError> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
         .map_err(|source| crate::error::io_error(path, source))
 }
 
 #[cfg(not(unix))]
-fn set_owner_file(_path: &Path) -> Result<(), HistoryError> {
+pub(crate) fn set_owner_file(_path: &Path) -> Result<(), HistoryError> {
     Ok(())
 }
 

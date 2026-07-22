@@ -17,6 +17,8 @@ pub(crate) struct HistoryBuildOptions {
     forwarded: Vec<String>,
     gitignore: bool,
     excludes: Vec<String>,
+    semantic_environment: Vec<(String, String)>,
+    semantic_environment_remove: Vec<String>,
 }
 
 pub(crate) struct ParsedBuildCommand {
@@ -35,12 +37,72 @@ impl HistoryBuildOptions {
         self.profile.clone()
     }
 
+    pub(crate) fn from_profile(profile: BuildProfile) -> Result<Self, HistoryError> {
+        validate_persisted_profile(&profile)?;
+        let gitignore = profile.value("gitignore") != Some("false");
+        let excludes = profile
+            .entries()
+            .filter(|(key, _)| key.starts_with("exclude."))
+            .map(|(_, value)| value.to_owned())
+            .collect::<Vec<_>>();
+        let mut forwarded = Vec::new();
+        push_profile_option(&profile, &mut forwarded, "provider", "--backend", "none");
+        push_profile_option(&profile, &mut forwarded, "model", "--model", "none");
+        if profile.value("semantic_mode") == Some("deep") {
+            forwarded.extend(["--mode".to_owned(), "deep".to_owned()]);
+        }
+        for (key, flag) in [("cargo", "--cargo"), ("dedup_llm", "--dedup-llm")] {
+            if profile.value(key) == Some("true") {
+                forwarded.push(flag.to_owned());
+            }
+        }
+        push_profile_option(
+            &profile,
+            &mut forwarded,
+            "token_budget",
+            "--token-budget",
+            "default",
+        );
+        push_profile_option(
+            &profile,
+            &mut forwarded,
+            "resolution",
+            "--resolution",
+            "none",
+        );
+        push_profile_option(
+            &profile,
+            &mut forwarded,
+            "exclude_hubs",
+            "--exclude-hubs",
+            "none",
+        );
+        if !gitignore {
+            forwarded.push("--no-gitignore".to_owned());
+        }
+        for exclude in &excludes {
+            forwarded.extend(["--exclude".to_owned(), exclude.clone()]);
+        }
+        let (semantic_environment, semantic_environment_remove) =
+            pinned_provider_environment(&profile);
+        Ok(Self {
+            semantic_environment,
+            semantic_environment_remove,
+            profile,
+            forwarded,
+            gitignore,
+            excludes,
+        })
+    }
+
     pub(crate) fn builder(&self, executable: PathBuf) -> NativeCompleteGraphBuilder {
         NativeCompleteGraphBuilder {
             executable,
             forwarded: self.forwarded.clone(),
             gitignore: self.gitignore,
             excludes: self.excludes.clone(),
+            semantic_environment: self.semantic_environment.clone(),
+            semantic_environment_remove: self.semantic_environment_remove.clone(),
         }
     }
 
@@ -89,6 +151,32 @@ impl HistoryBuildOptions {
                     .token_budget
                     .map_or_else(|| "default".to_owned(), |value| value.to_string()),
             ),
+            (
+                "provider_endpoint",
+                values
+                    .provider_endpoint
+                    .clone()
+                    .unwrap_or_else(|| "none".to_owned()),
+            ),
+            (
+                "provider_temperature",
+                values
+                    .provider_temperature
+                    .map_or_else(|| "none".to_owned(), normalized_float),
+            ),
+            (
+                "provider_max_output_tokens",
+                values
+                    .provider_max_output_tokens
+                    .map_or_else(|| "none".to_owned(), |value| value.to_string()),
+            ),
+            (
+                "provider_region",
+                values
+                    .provider_region
+                    .clone()
+                    .unwrap_or_else(|| "none".to_owned()),
+            ),
         ] {
             profile.insert(key, &value)?;
         }
@@ -129,13 +217,253 @@ impl HistoryBuildOptions {
             forwarded.extend(["--exclude-hubs".to_owned(), normalized_float(exclude_hubs)]);
         }
 
+        let (semantic_environment, semantic_environment_remove) =
+            pinned_provider_environment(&profile);
         Ok(Self {
+            semantic_environment,
+            semantic_environment_remove,
             profile,
             forwarded,
             gitignore: values.gitignore,
             excludes: values.excludes,
         })
     }
+}
+
+fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError> {
+    for (key, _) in profile.entries() {
+        if !matches!(
+            key,
+            "compass_version"
+                | "graph_schema"
+                | "extractor_version"
+                | "resolver_version"
+                | "pipeline_version"
+                | "enabled_features"
+                | "direction"
+                | "cluster_algorithm"
+                | "cluster_seed"
+                | "gitignore"
+                | "cargo"
+                | "dedup_llm"
+                | "semantic_mode"
+                | "semantic_prompt_sha256"
+                | "provider"
+                | "model"
+                | "resolution"
+                | "exclude_hubs"
+                | "token_budget"
+                | "provider_endpoint"
+                | "provider_temperature"
+                | "provider_max_output_tokens"
+                | "provider_region"
+        ) && !key.starts_with("exclude.")
+        {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "unsupported persisted build-profile field {key:?}"
+            )));
+        }
+    }
+    for (key, expected) in [
+        ("compass_version", env!("CARGO_PKG_VERSION")),
+        ("graph_schema", "networkx-node-link/v1"),
+        ("extractor_version", "compass-languages/v1"),
+        ("resolver_version", "compass-resolve/v1"),
+        ("pipeline_version", "compass-core/v1"),
+        ("enabled_features", "workspace-default"),
+        ("direction", "native-source-semantics"),
+        ("cluster_algorithm", "seeded-louvain/v1"),
+        ("cluster_seed", "42"),
+    ] {
+        if profile.value(key) != Some(expected) {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "persisted {key} is incompatible with {expected}"
+            )));
+        }
+    }
+    for key in ["gitignore", "cargo", "dedup_llm"] {
+        if !matches!(profile.value(key), Some("true" | "false")) {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "persisted {key} is not boolean"
+            )));
+        }
+    }
+    let resolution = profile
+        .value("resolution")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0);
+    if resolution.is_none() {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted resolution is invalid".to_owned(),
+        ));
+    }
+    if profile.value("exclude_hubs") != Some("none")
+        && profile
+            .value("exclude_hubs")
+            .and_then(|value| value.parse::<f64>().ok())
+            .is_none_or(|value| !value.is_finite())
+    {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted hub exclusion is invalid".to_owned(),
+        ));
+    }
+    if profile.value("token_budget") != Some("default")
+        && profile
+            .value("token_budget")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_none_or(|value| value == 0)
+    {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted token budget is invalid".to_owned(),
+        ));
+    }
+    let deep = match profile.value("semantic_mode") {
+        Some("standard") => false,
+        Some("deep") => true,
+        _ => {
+            return Err(HistoryError::InvalidFingerprint(
+                "persisted semantic mode is invalid".to_owned(),
+            ));
+        }
+    };
+    let prompt_digest = compass_semantic::extraction_prompt_sha256(deep);
+    if profile.value("semantic_prompt_sha256") != Some(prompt_digest.as_str()) {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted semantic prompt does not match this binary".to_owned(),
+        ));
+    }
+    if let Some(provider) = profile.value("provider").filter(|value| *value != "none")
+        && compass_semantic::builtin_backend(provider).is_none()
+    {
+        return Err(HistoryError::InvalidFingerprint(format!(
+            "unsupported persisted backend {provider:?}"
+        )));
+    }
+    match (profile.value("provider"), profile.value("model")) {
+        (Some("none"), Some("none")) => {}
+        (Some(provider), Some(model))
+            if compass_semantic::builtin_backend(provider).is_some() && model != "none" => {}
+        _ => {
+            return Err(HistoryError::InvalidFingerprint(
+                "persisted provider and model are inconsistent".to_owned(),
+            ));
+        }
+    }
+    let provider_config = [
+        "provider_endpoint",
+        "provider_temperature",
+        "provider_max_output_tokens",
+        "provider_region",
+    ];
+    if profile.value("provider") == Some("none")
+        && provider_config
+            .iter()
+            .any(|key| profile.value(key) != Some("none"))
+    {
+        return Err(HistoryError::InvalidFingerprint(
+            "provider-free profile contains provider configuration".to_owned(),
+        ));
+    }
+    if profile.value("provider_temperature") != Some("none")
+        && profile
+            .value("provider_temperature")
+            .and_then(|value| value.parse::<f64>().ok())
+            .is_none_or(|value| !value.is_finite())
+    {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted provider temperature is invalid".to_owned(),
+        ));
+    }
+    if profile.value("provider_max_output_tokens") != Some("none")
+        && profile
+            .value("provider_max_output_tokens")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_none_or(|value| value == 0)
+    {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted provider output limit is invalid".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn push_profile_option(
+    profile: &BuildProfile,
+    forwarded: &mut Vec<String>,
+    key: &str,
+    flag: &str,
+    absent: &str,
+) {
+    if let Some(value) = profile.value(key).filter(|value| *value != absent) {
+        forwarded.extend([flag.to_owned(), value.to_owned()]);
+    }
+}
+
+fn pinned_provider_environment(profile: &BuildProfile) -> (Vec<(String, String)>, Vec<String>) {
+    let mut set = Vec::new();
+    let mut remove = vec![
+        "GRAPHIFY_LLM_TEMPERATURE".to_owned(),
+        "GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(),
+    ];
+    if let Some(value) = profile
+        .value("provider_temperature")
+        .filter(|value| *value != "none")
+    {
+        set.push(("GRAPHIFY_LLM_TEMPERATURE".to_owned(), value.to_owned()));
+    }
+    if let Some(value) = profile
+        .value("provider_max_output_tokens")
+        .filter(|value| *value != "none")
+    {
+        set.push(("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), value.to_owned()));
+    }
+    let provider = profile.value("provider").unwrap_or("none");
+    if let Some(variable) = match provider {
+        "claude" => Some("ANTHROPIC_BASE_URL"),
+        "kimi" => Some("KIMI_BASE_URL"),
+        "gemini" => Some("GEMINI_BASE_URL"),
+        "openai" => Some("OPENAI_BASE_URL"),
+        "deepseek" => Some("DEEPSEEK_BASE_URL"),
+        "ollama" => Some("OLLAMA_BASE_URL"),
+        "azure" => Some("AZURE_OPENAI_ENDPOINT"),
+        _ => None,
+    } {
+        remove.push(variable.to_owned());
+        if let Some(endpoint) = profile
+            .value("provider_endpoint")
+            .filter(|value| *value != "none")
+        {
+            set.push((variable.to_owned(), endpoint.to_owned()));
+        }
+    }
+    if provider == "bedrock" {
+        remove.extend(["AWS_REGION".to_owned(), "AWS_DEFAULT_REGION".to_owned()]);
+        if let Some(region) = profile
+            .value("provider_region")
+            .filter(|value| *value != "none")
+        {
+            set.push(("AWS_REGION".to_owned(), region.to_owned()));
+        }
+    }
+    if provider == "none" {
+        for backend in compass_semantic::BUILTIN_BACKENDS {
+            remove.extend(
+                backend
+                    .api_key_variables
+                    .iter()
+                    .map(|variable| (*variable).to_owned()),
+            );
+        }
+        remove.extend([
+            "AWS_PROFILE".to_owned(),
+            "AWS_REGION".to_owned(),
+            "AWS_DEFAULT_REGION".to_owned(),
+            "OLLAMA_BASE_URL".to_owned(),
+        ]);
+    }
+    remove.sort();
+    remove.dedup();
+    (set, remove)
 }
 
 #[derive(Debug)]
@@ -150,6 +478,10 @@ struct HistoryBuildValues {
     exclude_hubs: Option<f64>,
     gitignore: bool,
     excludes: Vec<String>,
+    provider_endpoint: Option<String>,
+    provider_temperature: Option<f64>,
+    provider_max_output_tokens: Option<usize>,
+    provider_region: Option<String>,
 }
 
 impl Default for HistoryBuildValues {
@@ -165,6 +497,10 @@ impl Default for HistoryBuildValues {
             exclude_hubs: None,
             gitignore: true,
             excludes: Vec::new(),
+            provider_endpoint: None,
+            provider_temperature: None,
+            provider_max_output_tokens: None,
+            provider_region: None,
         }
     }
 }
@@ -266,6 +602,19 @@ pub(crate) fn parse_build_command(
     })
 }
 
+pub(crate) fn parse_enable_options(args: &[String]) -> Result<HistoryBuildOptions, String> {
+    if args.iter().any(|argument| {
+        argument == "--format"
+            || argument.starts_with("--format=")
+            || argument == "--replace-corrupt"
+    }) {
+        return Err("history enable accepts build-profile options only".to_owned());
+    }
+    let mut build = vec!["__enable_profile__".to_owned()];
+    build.extend_from_slice(args);
+    parse_build_command("enable", &build).map(|parsed| parsed.options)
+}
+
 fn option_value<'a>(
     args: &'a [String],
     index: &mut usize,
@@ -341,11 +690,41 @@ fn resolve_provider(values: &mut HistoryBuildValues) -> Result<(), HistoryError>
             "custom backend {name:?} is not supported for immutable graph history"
         )));
     }
+    if name == "claude-cli" {
+        return Err(HistoryError::InvalidFingerprint(
+            "claude-cli is not supported for immutable graph history".to_owned(),
+        ));
+    }
     let resolved =
         compass_semantic::resolve_builtin_backend(&name, &environment, values.model.as_deref())
             .map_err(|error| HistoryError::InvalidFingerprint(error.to_string()))?;
+    if let Some(endpoint) = resolved.base_url.as_deref() {
+        let parsed = url::Url::parse(endpoint)
+            .map_err(|error| HistoryError::InvalidFingerprint(error.to_string()))?;
+        if !parsed.username().is_empty() || parsed.password().is_some() || parsed.query().is_some()
+        {
+            return Err(HistoryError::InvalidFingerprint(
+                "provider endpoint credentials or query parameters cannot enter graph history"
+                    .to_owned(),
+            ));
+        }
+    }
     values.backend = Some(name);
     values.model = Some(resolved.model);
+    values.provider_endpoint = resolved.base_url;
+    values.provider_temperature = resolved.temperature;
+    values.provider_max_output_tokens = Some(resolved.max_output_tokens);
+    values.provider_region = environment
+        .get("AWS_REGION")
+        .or_else(|| environment.get("AWS_DEFAULT_REGION"))
+        .filter(|value| !value.is_empty())
+        .cloned();
+    if values.backend.as_deref() == Some("bedrock") && values.provider_region.is_none() {
+        return Err(HistoryError::InvalidFingerprint(
+            "Bedrock graph history requires an explicit AWS_REGION or AWS_DEFAULT_REGION"
+                .to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -354,6 +733,8 @@ pub(crate) struct NativeCompleteGraphBuilder {
     forwarded: Vec<String>,
     gitignore: bool,
     excludes: Vec<String>,
+    semantic_environment: Vec<(String, String)>,
+    semantic_environment_remove: Vec<String>,
 }
 
 impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
@@ -378,8 +759,21 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             .env("GRAPHIFY_SKIP_HOOK", "1")
             .env("COMPASS_HISTORY_BUILD", "1")
             .env("GRAPHIFY_OUT", "graphify-out")
+            .envs(self.semantic_environment.iter().cloned())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        for variable in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_PREFIX",
+        ] {
+            command.env_remove(variable);
+        }
+        for variable in &self.semantic_environment_remove {
+            command.env_remove(variable);
+        }
         let output = bounded_output(command)?;
         if !output.status.success() {
             return Err(MaterializeError::BuilderProcess {

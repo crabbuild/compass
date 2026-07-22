@@ -83,6 +83,7 @@ unicode-normalization = "0.1"
 unicode-casefold = "0.2"
 unicode-properties = { version = "0.1.4", features = ["general-category"] }
 tempfile = "3"
+atomicwrites = "=0.4.4"
 tiktoken-rs = "0.7.0"
 symphonia = { version = "0.6.0", default-features = false, features = ["all"] }
 time = { version = "=0.3.53", features = ["formatting", "local-offset", "parsing"] }

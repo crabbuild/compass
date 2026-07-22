@@ -81,6 +81,9 @@ pub enum HistoryError {
     /// A realization failed one or more content-integrity checks.
     #[error("invalid graph realization: {0:?}")]
     InvalidRealization(Vec<ValidationProblem>),
+    /// Durable operational configuration, job, or lease state was invalid.
+    #[error("invalid history operational state: {0}")]
+    OperationalState(String),
 }
 
 impl HistoryError {
@@ -121,6 +124,7 @@ impl HistoryError {
             | Self::LockTimeout { .. }
             | Self::IncompatibleStoreFormat
             | Self::FingerprintSecretKey(_) => false,
+            Self::OperationalState(_) => false,
         }
     }
 }

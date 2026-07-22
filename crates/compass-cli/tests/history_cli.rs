@@ -2,8 +2,8 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use compass_history::{
-    CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryStore, PublishRequest,
-    Repository,
+    CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryConfig, HistoryQueue,
+    HistoryStore, JobRequest, JobState, PublishRequest, Repository,
 };
 use compass_model::GraphDocument;
 use serde_json::json;
@@ -70,6 +70,211 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     assert_eq!(incompatible.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&incompatible.stdout).contains("store: incompatible"));
     assert!(String::from_utf8_lossy(&incompatible.stderr).contains("error:"));
+    Ok(())
+}
+
+#[test]
+fn enable_disable_are_explicit_idempotent_and_invalid_profiles_roll_back()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("fixture.rs"), "pub struct Fixture;\n")?;
+    git(directory.path(), &["add", "fixture.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let enabled = run(compass, directory.path(), &["history", "enable"])?;
+    assert!(enabled.status.success());
+    let config = directory.path().join(".git/compass/config.json");
+    let before = std::fs::read(&config)?;
+    let invalid = run(
+        compass,
+        directory.path(),
+        &["history", "enable", "--code-only"],
+    )?;
+    assert_eq!(invalid.status.code(), Some(2));
+    assert_eq!(std::fs::read(&config)?, before);
+    let status = run(
+        compass,
+        directory.path(),
+        &["history", "status", "HEAD", "--format=json"],
+    )?;
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["enabled"], true);
+    assert!(status["profile_digest"].as_str().is_some());
+    for _ in 0..2 {
+        let disabled = run(compass, directory.path(), &["history", "disable"])?;
+        assert!(disabled.status.success());
+    }
+    assert!(
+        directory
+            .path()
+            .join(".git/compass/history.sqlite")
+            .is_file()
+    );
+    Ok(())
+}
+
+#[test]
+fn worker_drains_fifo_after_an_earlier_job_fails() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct DrainService;\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let enabled = run(compass, directory.path(), &["history", "enable"])?;
+    assert!(enabled.status.success());
+    let repository = Repository::discover(directory.path())?;
+    let profile = HistoryConfig::load(&repository)?
+        .profile
+        .ok_or("enabled profile")?;
+    let queue = HistoryQueue::for_repository(&repository)?;
+    let failed_id = queue.enqueue(JobRequest {
+        commit: "ffffffffffffffffffffffffffffffffffffffff".parse()?,
+        profile: profile.clone(),
+    })?;
+    let published_id = queue.enqueue(JobRequest {
+        commit: repository.resolve("HEAD")?,
+        profile,
+    })?;
+
+    let worker = run(compass, directory.path(), &["history-worker"])?;
+    assert!(
+        worker.status.success(),
+        "{}",
+        String::from_utf8_lossy(&worker.stderr)
+    );
+    assert_eq!(
+        queue.get(&failed_id)?.ok_or("failed job")?.state,
+        JobState::Failed
+    );
+    assert_eq!(
+        queue.get(&published_id)?.ok_or("published job")?.state,
+        JobState::Published
+    );
+    Ok(())
+}
+
+#[test]
+fn worker_reconciles_catalog_and_preferred_crash_windows() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("fixture.rs"), "pub struct Fixture;\n")?;
+    git(directory.path(), &["add", "fixture.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": true,
+        "multigraph": false,
+        "graph": {"name": "reconcile"},
+        "nodes": [{"id": "fixture", "label": "Fixture", "community": 0}],
+        "links": [],
+        "built_at_commit": commit
+    }))?;
+    let candidate = history.publish(PublishRequest {
+        commit: commit.clone(),
+        parents: repository.parents(&commit)?,
+        fingerprint: std::iter::repeat_n('d', 64)
+            .collect::<String>()
+            .parse::<ExtractionFingerprint>()?,
+        artifacts: GraphArtifacts {
+            document,
+            analysis: None,
+            labels: None,
+            manifest: None,
+            authoritative_sidecars: BTreeMap::new(),
+        },
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        },
+        make_preferred: false,
+    })?;
+    let profile = compass_history::BuildProfile::default();
+    let queue = HistoryQueue::for_repository(&repository)?;
+    let first_id = queue.enqueue_rebuild(
+        JobRequest {
+            commit: commit.clone(),
+            profile: profile.clone(),
+        },
+        false,
+    )?;
+    let first = queue.claim_or_join(&first_id)?.ok_or("first claim")?;
+    queue.annotate(&first, None, Some(candidate.id.clone()), None)?;
+    queue.transition(&first, JobState::Validating, None)?;
+    expire_job_lease(&queue, &first)?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let worker = run(compass, directory.path(), &["history-worker"])?;
+    assert!(worker.status.success());
+    let first = queue.get(&first_id)?.ok_or("first job")?;
+    assert_eq!(first.state, JobState::Published);
+    assert_eq!(first.preferred, Some(true));
+    assert_eq!(
+        history.preferred(&commit)?.ok_or("preferred")?.id,
+        candidate.id
+    );
+
+    let second_id = queue.enqueue_rebuild(
+        JobRequest {
+            commit: commit.clone(),
+            profile,
+        },
+        false,
+    )?;
+    let second = queue.claim_or_join(&second_id)?.ok_or("second claim")?;
+    queue.annotate(
+        &second,
+        None,
+        Some(candidate.id.clone()),
+        Some(candidate.id.clone()),
+    )?;
+    queue.transition(&second, JobState::Validating, None)?;
+    expire_job_lease(&queue, &second)?;
+    let worker = run(compass, directory.path(), &["history-worker"])?;
+    assert!(worker.status.success());
+    let second = queue.get(&second_id)?.ok_or("second job")?;
+    assert_eq!(second.state, JobState::Published);
+    assert_eq!(second.preferred, Some(true));
+    Ok(())
+}
+
+fn expire_job_lease(
+    queue: &HistoryQueue,
+    job: &compass_history::ClaimedJob,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = queue
+        .root()
+        .join("leases")
+        .join(format!("{}-{}.lease", job.commit, job.profile_digest));
+    let mut lease: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    lease["expires_at_millis"] = 0_u64.into();
+    std::fs::write(path, serde_json::to_vec(&lease)?)?;
     Ok(())
 }
 

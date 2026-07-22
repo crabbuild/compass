@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use compass_files::write_text_atomic;
+use compass_history::{CommitId, HistoryConfig, HistoryQueue, JobRequest, Repository};
 
 use crate::{Frontend, Outcome};
 
 const COMMIT_START: &str = "# graphify-hook-start";
 const COMMIT_END: &str = "# graphify-hook-end";
+const MERGE_START: &str = "# graphify-merge-hook-start";
+const MERGE_END: &str = "# graphify-merge-hook-end";
 const CHECKOUT_START: &str = "# graphify-checkout-hook-start";
 const CHECKOUT_END: &str = "# graphify-checkout-hook-end";
 const MAX_HOOK_BYTES: u64 = 4 * 1024 * 1024;
@@ -27,6 +30,10 @@ pub(super) fn command_hook_spawn(_frontend: Frontend, args: &[String]) -> Outcom
     let root = args
         .first()
         .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let history_commit = match parse_history_commit(&args[1..]) {
+        Ok(commit) => commit,
+        Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 2),
+    };
     let executable = match std::env::current_exe() {
         Ok(executable) => executable,
         Err(error) => {
@@ -35,16 +42,79 @@ pub(super) fn command_hook_spawn(_frontend: Frontend, args: &[String]) -> Outcom
             ));
         }
     };
+    if let Some(commit) = history_commit {
+        let repository = match Repository::discover(&root) {
+            Ok(repository) => repository,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        let supplied = match commit.parse::<CommitId>() {
+            Ok(commit) => commit,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        let commit = match repository.resolve(supplied.as_str()) {
+            Ok(commit) => commit,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        if commit != supplied {
+            return Outcome::failure(
+                "error: history hook commit did not resolve to the supplied full SHA".to_owned(),
+            );
+        }
+        let config = match HistoryConfig::load(&repository) {
+            Ok(config) => config,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        if !config.enabled {
+            return Outcome::success(String::new());
+        }
+        let Some(profile) = config.profile else {
+            return Outcome::failure("error: enabled history has no build profile".to_owned());
+        };
+        let queue = match HistoryQueue::for_repository(&repository) {
+            Ok(queue) => queue,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        if let Err(error) = queue.enqueue(JobRequest { commit, profile }) {
+            return Outcome::failure(format!("error: {error}"));
+        }
+        return spawn_background(executable, &root, &["history-worker"], background_log());
+    }
+    spawn_background(
+        executable,
+        &root,
+        &["hook-refresh", root.to_string_lossy().as_ref()],
+        background_log(),
+    )
+}
+
+fn background_log() -> Option<fs::File> {
     let log = std::env::var_os("GRAPHIFY_REBUILD_LOG")
         .map(PathBuf::from)
         .unwrap_or_else(|| cache_home().join("graphify-rebuild.log"));
     if let Some(parent) = log.parent() {
-        let _ = fs::create_dir_all(parent);
+        let _created = fs::create_dir_all(parent);
     }
-    let output = OpenOptions::new().create(true).append(true).open(log).ok();
+    OpenOptions::new().create(true).append(true).open(log).ok()
+}
+
+fn spawn_background(
+    executable: PathBuf,
+    root: &Path,
+    arguments: &[&str],
+    output: Option<fs::File>,
+) -> Outcome {
     let mut command = Command::new(executable);
-    command.args(["hook-refresh", root.to_string_lossy().as_ref()]);
-    command.current_dir(&root).stdin(Stdio::null());
+    command.args(arguments);
+    for variable in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_PREFIX",
+    ] {
+        command.env_remove(variable);
+    }
+    command.current_dir(root).stdin(Stdio::null());
     if let Some(stdout) = output {
         let stderr = stdout.try_clone().ok();
         command.stdout(Stdio::from(stdout));
@@ -59,6 +129,16 @@ pub(super) fn command_hook_spawn(_frontend: Frontend, args: &[String]) -> Outcom
         Err(error) => Outcome::failure(format!(
             "error: graph hook could not launch the background refresh: {error}"
         )),
+    }
+}
+
+fn parse_history_commit(args: &[String]) -> Result<Option<String>, String> {
+    match args {
+        [] => Ok(None),
+        [flag, commit] if flag == "--history-commit" && !commit.is_empty() => {
+            Ok(Some(commit.clone()))
+        }
+        _ => Err("hook-spawn accepts ROOT [--history-commit FULL_SHA]".to_owned()),
     }
 }
 
@@ -121,15 +201,34 @@ fn install(frontend: Frontend, root: &Path, hooks: &Path) -> Result<String, Stri
         &checkout_script(&invocation),
         CHECKOUT_START,
     )?;
+    let _merge_commit = install_hook(
+        hooks,
+        "post-merge",
+        &merge_commit_script(&invocation),
+        MERGE_START,
+    )?;
     let merge = register_merge_driver(frontend, root)?;
     Ok(format!(
         "post-commit: {commit}\npost-checkout: {checkout}\nmerge driver: {merge}"
     ))
 }
 
+pub(crate) fn install_managed(frontend: Frontend) -> Result<String, String> {
+    let current = std::env::current_dir().map_err(|error| error.to_string())?;
+    let root = git_root(&current).ok_or_else(|| "not in a Git repository".to_owned())?;
+    let (hooks, _) = hooks_directory(&root)?;
+    let hooks = if hooks.file_name().and_then(|name| name.to_str()) == Some("_") {
+        hooks.parent().unwrap_or(&hooks).to_path_buf()
+    } else {
+        hooks
+    };
+    install(frontend, &root, &hooks)
+}
+
 fn uninstall(root: &Path, hooks: &Path) -> Result<String, String> {
     let commit = uninstall_hook(hooks, "post-commit", COMMIT_START, COMMIT_END)?;
     let checkout = uninstall_hook(hooks, "post-checkout", CHECKOUT_START, CHECKOUT_END)?;
+    let _merge_commit = uninstall_hook(hooks, "post-merge", MERGE_START, MERGE_END)?;
     let merge = unregister_merge_driver(root)?;
     Ok(format!(
         "post-commit: {commit}\npost-checkout: {checkout}\nmerge driver: {merge}"
@@ -139,6 +238,7 @@ fn uninstall(root: &Path, hooks: &Path) -> Result<String, String> {
 fn status(root: &Path, hooks: &Path) -> Result<String, String> {
     let commit = hook_status(&hooks.join("post-commit"), COMMIT_START)?;
     let checkout = hook_status(&hooks.join("post-checkout"), CHECKOUT_START)?;
+    let _merge_commit = hook_status(&hooks.join("post-merge"), MERGE_START)?;
     let merge = merge_driver_status(root);
     Ok(format!(
         "post-commit: {commit}\npost-checkout: {checkout}\nmerge driver: {merge}"
@@ -217,8 +317,22 @@ fn install_hook(hooks: &Path, name: &str, script: &str, marker: &str) -> Result<
     let path = hooks.join(name);
     if path.exists() {
         let content = read_text_bounded(&path, MAX_HOOK_BYTES)?;
-        if content.contains(marker) {
-            return Ok(format!("already installed at {}", path.display()));
+        if let Some(start) = content.find(marker) {
+            let marker_end = match marker {
+                COMMIT_START => COMMIT_END,
+                MERGE_START => MERGE_END,
+                _ => CHECKOUT_END,
+            };
+            let relative_end = content[start..]
+                .find(marker_end)
+                .ok_or_else(|| format!("managed {name} hook block has no end marker"))?;
+            let end = start + relative_end + marker_end.len();
+            if content[start..end].trim_end() == script.trim_end() {
+                return Ok(format!("already installed at {}", path.display()));
+            }
+            let updated = format!("{}{}{}", &content[..start], script, &content[end..]);
+            write_text_atomic(&path, &updated).map_err(|error| error.to_string())?;
+            return Ok(format!("updated managed {name} hook at {}", path.display()));
         }
         let merged = format!("{}\n\n{script}", content.trim_end());
         write_text_atomic(&path, &merged).map_err(|error| error.to_string())?;
@@ -403,11 +517,8 @@ fn merge_attribute_line() -> String {
 fn pinned_invocation(frontend: Frontend) -> Result<String, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let quoted = shell_quote(&executable.to_string_lossy());
-    Ok(if frontend == Frontend::Compass {
-        format!("{quoted} graph")
-    } else {
-        quoted
-    })
+    let _ = frontend;
+    Ok(quoted)
 }
 
 fn shell_quote(value: &str) -> String {
@@ -416,13 +527,19 @@ fn shell_quote(value: &str) -> String {
 
 fn commit_script(invocation: &str) -> String {
     format!(
-        "{COMMIT_START}\n# Native Compass graph refresh installed by: graphify hook install\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)\n[ -z \"$_CHANGED\" ] && exit 0\n_NON_GRAPH=$(printf '%s\\n' \"$_CHANGED\" | grep -v '^graphify-out/' || true)\n[ -z \"$_NON_GRAPH\" ] && exit 0\nexport GRAPHIFY_CHANGED=\"$_CHANGED\"\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[graphify hook] launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{COMMIT_END}\n"
+        "{COMMIT_START}\n# Native Compass graph refresh installed by: compass hook install\n_COMPASS_HISTORY_COMMIT=$(git rev-parse --verify 'HEAD^{{commit}}' 2>/dev/null || true)\n[ -n \"$_COMPASS_HISTORY_COMMIT\" ] && {invocation} hook-spawn . --history-commit \"$_COMPASS_HISTORY_COMMIT\"\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)\n[ -z \"$_CHANGED\" ] && exit 0\n_NON_GRAPH=$(printf '%s\\n' \"$_CHANGED\" | grep -v '^graphify-out/' || true)\n[ -z \"$_NON_GRAPH\" ] && exit 0\nexport GRAPHIFY_CHANGED=\"$_CHANGED\"\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[compass hook] launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{COMMIT_END}\n"
     )
 }
 
 fn checkout_script(invocation: &str) -> String {
     format!(
         "{CHECKOUT_START}\n# Native Compass graph refresh installed by: graphify hook install\n[ \"$3\" != \"1\" ] && exit 0\n[ ! -d \"${{GRAPHIFY_OUT:-graphify-out}}\" ] && exit 0\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[graphify] Branch switched - launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{CHECKOUT_END}\n"
+    )
+}
+
+fn merge_commit_script(invocation: &str) -> String {
+    format!(
+        "{MERGE_START}\n# Exact-SHA history enqueue for commits created by git merge\n_COMPASS_HISTORY_COMMIT=$(git rev-parse --verify 'HEAD^{{commit}}' 2>/dev/null || true)\n[ -n \"$_COMPASS_HISTORY_COMMIT\" ] && {invocation} hook-spawn . --history-commit \"$_COMPASS_HISTORY_COMMIT\"\n{MERGE_END}\n"
     )
 }
 
@@ -510,4 +627,23 @@ pub(super) fn hook_help(frontend: Frontend) -> String {
         Frontend::Graphify => "Usage: graphify hook [install|uninstall|status]",
     }
     .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_launch_failure_is_reported() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let outcome = spawn_background(
+            directory.path().join("missing-compass"),
+            directory.path(),
+            &["history-worker"],
+            None,
+        );
+        assert_ne!(outcome.code, 0);
+        assert!(outcome.stderr.contains("could not launch"));
+        Ok(())
+    }
 }
