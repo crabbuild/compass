@@ -6,7 +6,7 @@
 
 **Product:** Compass
 
-**Primary commands:** `compass cql`, `compass check`
+**Primary commands:** `compass query --cql`, `compass check`
 
 ## Summary
 
@@ -47,12 +47,13 @@ Compass keeps heuristic discovery and deterministic queries visibly separate:
 # Natural-language discovery
 compass query "where is authentication enforced?"
 
-# Deterministic CompassQL
-compass cql 'MATCH (f:Function)-[:CALLS]->(a) RETURN f, a'
-compass cql --file queries/auth-callers.cypher
-compass cql --file queries/auth-callers.cypher --param target=authorize
-compass cql --file query.cypher --params-file params.json
-compass cql repl
+# Deterministic CompassQL mode
+compass query --cql 'MATCH (f:Function)-[:CALLS]->(a) RETURN f, a'
+compass query --cql --file queries/auth-callers.cypher
+compass query --cql --file queries/auth-callers.cypher --param target=authorize
+compass query --cql --file query.cypher --params-file params.json
+compass query --cql --stdin
+compass query --cql --repl
 
 # Architecture enforcement
 compass check
@@ -61,9 +62,13 @@ compass check --format sarif --output compass.sarif
 compass check --fail-on warning
 ```
 
-The public language name is **CompassQL**. The command is **`compass cql`**. Documentation describes the language as a "documented, read-only openCypher subset" and never claims complete openCypher compatibility.
+The public language name is **CompassQL**. The interface is the **`--cql` mode of `compass query`**. Documentation describes the language as a "documented, read-only openCypher subset" and never claims complete openCypher compatibility.
 
-`compass cql` and `compass check` remain hidden until their respective compatibility, safety, and performance gates pass, following Compass's completed-command policy.
+`compass query --cql` and `compass check` remain hidden until their respective compatibility, safety, and performance gates pass, following Compass's completed-command policy.
+
+`compass query` never infers the query mode from source text. Without `--cql`, every positional query remains a natural-language query, including text beginning with `MATCH`. In CompassQL mode, exactly one source must be selected: one positional query, `--file PATH`, `--stdin`, or `--repl`. Conflicting sources are errors.
+
+Existing natural-language options retain their current behavior. CompassQL-only options are rejected unless `--cql` is present. Common graph-selection and output options are parsed once and shared by both modes. The `graphify` compatibility executable does not expose `--cql` unless the Python compatibility oracle gains the same flag; its legacy `graphify query` contract remains unchanged.
 
 ## Compatibility and versioning
 
@@ -328,7 +333,7 @@ CompassQL introduces focused crates and extends existing ones:
 - `compass-policy`: policy discovery, metadata, validation, exemptions, baselines, evaluation, and policy result types.
 - `compass-model`: immutable query indexes and snapshot schema fingerprints.
 - `compass-output`: table, JSON, JSONL, SARIF, and policy witness rendering.
-- `compass-cli`: `compass cql` and `compass check` argument parsing and dispatch.
+- `compass-cli`: the `compass query --cql` mode, shared query-source selection, and `compass check` argument parsing and dispatch.
 - `compass-mcp`: structured `query_cql` and `check_architecture` tools.
 
 No query crate depends on CLI or output presentation. `compass-policy` consumes the CompassQL execution interface and returns structured results without rendering them.
@@ -480,7 +485,7 @@ CompassQL 1 aborts on memory exhaustion rather than spilling sensitive graph dat
 
 Default limits are:
 
-| Resource | Interactive `compass cql` | One policy query |
+| Resource | Interactive `compass query --cql` | One policy query |
 |---|---:|---:|
 | Execution time | 5 seconds | 2 seconds |
 | Returned rows | 10,000 | 1,000 violations |
@@ -620,7 +625,7 @@ expires = "2026-10-01"
 
 ## Outputs
 
-`compass cql` supports `table`, `json`, and `jsonl`. The TTY default is `table`; redirected output retains the explicitly selected format rather than guessing a schema.
+`compass query --cql` supports `table`, `json`, and `jsonl`. The TTY default is `table`; redirected output retains the explicitly selected format rather than guessing a schema.
 
 `compass check` supports human-readable terminal output, canonical JSON, JSONL violations, and SARIF. Every output includes the policy ID, severity, message, owners, policy location, fingerprint, exemption state, and structured evidence.
 
@@ -652,7 +657,7 @@ Policy: .compass/policies/domain-isolation/policy.toml
 4  resource limit, cancellation, timeout, or internal execution failure
 ```
 
-`compass cql` uses `0` for successful execution and the same `2`, `3`, and `4` categories for failures. An empty successful result is exit `0`.
+`compass query --cql` uses `0` for successful execution and the same `2`, `3`, and `4` categories for failures. An empty successful result is exit `0`.
 
 ## Diagnostics
 
@@ -690,7 +695,7 @@ MCP calls use stricter server-configured budgets when those are lower than query
 CompassQL consumes a graph-selection interface rather than opening files directly. The initial selector is the current graph or explicit `--graph PATH`. When versioned graph history lands, the same interface adds `--at REV` without changing query semantics.
 
 ```bash
-compass cql --file query.cypher --at HEAD~20
+compass query --cql --file query.cypher --at HEAD~20
 compass check --at main
 ```
 
@@ -821,7 +826,7 @@ Adding policy keywords would make query files non-portable and fork Cypher seman
 
 CompassQL Core is complete when:
 
-- `compass cql` exposes every CompassQL 1 feature listed in this document and rejects every listed unsupported feature explicitly.
+- `compass query --cql` exposes every CompassQL 1 feature listed in this document and rejects every listed unsupported feature explicitly.
 - `compass check` discovers schema-1 policies, evaluates zero-row pass semantics, renders witnesses, applies accountable exemptions and baselines, and emits stable exit statuses.
 - All selected openCypher TCK scenarios pass and the support matrix contains no undocumented accepted syntax.
 - Neo4j differential fixtures match after documented normalization.
