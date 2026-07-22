@@ -18,6 +18,21 @@ fn valid_fragment() -> Value {
     })
 }
 
+#[test]
+fn extraction_prompt_fingerprints_are_strict_and_mode_specific() {
+    let shallow = extraction_prompt_sha256(false);
+    let deep = extraction_prompt_sha256(true);
+    assert_ne!(shallow, deep);
+    assert_eq!(shallow.len(), 64);
+    assert_eq!(deep.len(), 64);
+    assert!(
+        shallow
+            .bytes()
+            .chain(deep.bytes())
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+}
+
 fn read_http_request(socket: &mut TcpStream) -> Result<String, std::io::Error> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4096];

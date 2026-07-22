@@ -3,13 +3,13 @@ use std::error::Error;
 use std::fs::{self, FileTimes};
 use std::time::{Duration, UNIX_EPOCH};
 
-use compass_files::FileType;
 use compass_files::{
     BuildGuard, Cache, CacheKind, DetectOptions, FileSlice, Manifest, ManifestKind, StatHashIndex,
     WatchPathFilter, bisect_slice, body_content, classify_file, file_hash, md5_file,
     prompt_fingerprint, read_slice_text, read_source_lossy, slice_boundaries, split_file,
     write_bytes_atomic, write_json_atomic, write_text_atomic,
 };
+use compass_files::{FileType, IgnorePolicy};
 use serde_json::json;
 
 #[test]
@@ -109,6 +109,34 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
     assert!(!filter.allows(&root.join(".hidden/main.rs")));
     assert!(!filter.allows(&root.join("graphify-out/graph.json")));
     assert!(!filter.allows(&root.join("README.unknown")));
+    Ok(())
+}
+
+#[test]
+fn historical_detection_ignores_caller_local_excludes_but_keeps_committed_rules()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join(".git/info"))?;
+    fs::write(root.join(".git/info/exclude"), "local.rs\n")?;
+    fs::write(root.join(".gitignore"), "committed.rs\n")?;
+    fs::write(root.join("local.rs"), "fn local() {}\n")?;
+    fs::write(root.join("committed.rs"), "fn committed() {}\n")?;
+    fs::write(root.join("explicit.rs"), "fn explicit() {}\n")?;
+
+    let current = compass_files::detect(root, &DetectOptions::default())?;
+    assert_eq!(current.files["code"].len(), 1);
+    assert!(current.files["code"][0].ends_with("explicit.rs"));
+    let historical = compass_files::detect(
+        root,
+        &DetectOptions {
+            ignore_policy: IgnorePolicy::HistoricalCommit,
+            extra_excludes: vec!["explicit.rs".to_owned()],
+            ..DetectOptions::default()
+        },
+    )?;
+    assert_eq!(historical.files["code"].len(), 1);
+    assert!(historical.files["code"][0].ends_with("local.rs"));
     Ok(())
 }
 

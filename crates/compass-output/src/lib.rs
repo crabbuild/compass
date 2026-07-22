@@ -6,6 +6,7 @@ mod canvas;
 mod cql;
 mod cypher;
 mod graphml;
+mod history_bundle;
 mod html;
 mod json;
 mod obsidian;
@@ -23,6 +24,9 @@ pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
 pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
+pub use history_bundle::{
+    DerivedArtifactRequest, HistoryBundleInput, SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
+};
 pub use html::{HtmlOptions, HtmlRender, html_document, write_html};
 pub use json::{JsonExportOptions, export_json_value, write_json};
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
@@ -59,6 +63,20 @@ pub enum OutputError {
         "all community node IDs are stale — none exist in the graph. Re-run `graphify extract .` to regenerate .graphify_analysis.json."
     )]
     StaleWikiCommunities,
+    #[error("unsupported history renderer {version} for {path}")]
+    UnsupportedHistoryRenderer { path: String, version: String },
+    #[error("history bundle destination already exists: {0}")]
+    HistoryBundleExists(std::path::PathBuf),
+    #[error("history bundle contains an unsafe path: {0}")]
+    UnsafeHistoryPath(String),
+    #[error("history bundle I/O failed at {path}: {source}")]
+    HistoryBundleIo {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("history bundle validation failed: {0}")]
+    InvalidHistoryBundle(String),
     #[error("wiki filesystem error at {path}: {source}")]
     WikiIo {
         path: std::path::PathBuf,

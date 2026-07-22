@@ -47,6 +47,17 @@ fn frontend_roots_versions_help_and_unknown_commands_are_total() {
 fn graph_command_argument_failures_cover_every_local_dispatch_family() {
     let compass_cases: &[&[&str]] = &[
         &["query"],
+        &["history", "unknown"],
+        &["history", "status", "one", "two"],
+        &["history", "status", "--unknown"],
+        &["history", "list", "--format", "yaml"],
+        &["history", "show"],
+        &["history", "export", "HEAD"],
+        &["diff"],
+        &["diff", "one", "two", "three"],
+        &["diff", "one", "two", "--unknown"],
+        &["diff", "one", "two", "--format", "yaml"],
+        &["diff", "one", "two", "--detailed", "--format", "json"],
         &["query", "x", "--depth", "bad"],
         &["query", "x", "--unknown"],
         &["path"],
@@ -109,6 +120,7 @@ fn graph_command_argument_failures_cover_every_local_dispatch_family() {
 #[test]
 fn completed_command_help_routes_and_parser_boundaries_are_total() {
     for command in [
+        "history",
         "update",
         "extract",
         "watch",
@@ -225,6 +237,20 @@ fn read_command_missing_values_and_load_errors_are_diagnostic() -> Result<(), Bo
         let outcome = invoke_owned(Frontend::Compass, &arguments);
         assert_ne!(outcome.code, 0, "{arguments:?}");
         assert!(!outcome.stderr.is_empty(), "{arguments:?}");
+    }
+    for frontend in [Frontend::Compass, Frontend::Graphify] {
+        for arguments in [
+            &["query", "q", "--at"][..],
+            &["path", "a", "b", "--at"][..],
+            &["explain", "a", "--at="][..],
+            &["query", "q", "--graph", "graph.json", "--at", "HEAD"][..],
+            &["path", "a", "b", "--at", "HEAD", "--at", "HEAD~1"][..],
+            &["explain", "a", "extra"][..],
+        ] {
+            let outcome = invoke(frontend, arguments);
+            assert_ne!(outcome.code, 0, "{frontend:?} {arguments:?}");
+            assert!(!outcome.stderr.is_empty(), "{frontend:?} {arguments:?}");
+        }
     }
     Ok(())
 }

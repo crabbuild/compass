@@ -1,6 +1,8 @@
 //! Command compatibility layer for Compass and the Graphify compatibility binary.
 
 mod dedup_commands;
+mod history_build;
+mod history_commands;
 mod hook_commands;
 mod ingest_commands;
 mod install_commands;
@@ -114,6 +116,36 @@ impl Outcome {
     }
 }
 
+/// Write a completed command outcome without losing short writes or output failures.
+///
+/// Returns the command's exit code when both streams are written successfully, or `1` when
+/// either stream fails. A stdout failure is reported to stderr when that stream remains usable.
+pub fn write_outcome(outcome: &Outcome, stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
+    if let Err(error) = write_output(stdout, &outcome.stdout, outcome.stdout_trailing_newline) {
+        let _diagnostic = writeln!(stderr, "error: failed to write stdout: {error}");
+        return 1;
+    }
+    if write_output(stderr, &outcome.stderr, outcome.stderr_trailing_newline).is_err() {
+        return 1;
+    }
+    outcome.code
+}
+
+fn write_output<W: Write + ?Sized>(
+    stream: &mut W,
+    output: &str,
+    trailing_newline: bool,
+) -> std::io::Result<()> {
+    if output.is_empty() {
+        return Ok(());
+    }
+    stream.write_all(output.as_bytes())?;
+    if trailing_newline {
+        stream.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
 #[must_use]
 pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) -> Outcome {
     let mut args = arguments
@@ -145,9 +177,12 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         return Outcome::success(compass_command_help(&command));
     }
     match command.as_str() {
+        "history" => history_commands::command(frontend, &args),
+        "history-worker" => history_commands::command_worker(frontend, &args),
+        "diff" => history_commands::command_diff(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
-        "path" => command_path(&args),
-        "explain" => command_explain(&args),
+        "path" => command_path(frontend, &args),
+        "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
         "export" => command_export(&args),
         "benchmark" => command_benchmark(&args),
@@ -203,6 +238,25 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         _ => Outcome::failure(format!(
             "error: unknown command '{command}'\nRun 'compass --help' for usage."
         )),
+    }
+}
+
+/// Run the graph-history diff command with direct streaming output.
+pub fn run_diff(
+    frontend: Frontend,
+    arguments: &[OsString],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8 {
+    let arguments = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let outcome = history_commands::command_diff_to_writer(frontend, &arguments, stdout);
+    if write_output(stderr, &outcome.stderr, outcome.stderr_trailing_newline).is_err() {
+        1
+    } else {
+        outcome.code
     }
 }
 
@@ -1599,6 +1653,9 @@ fn command_build_with_validation(
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
     options.gitignore = gitignore;
+    if environment_truthy("COMPASS_HISTORY_BUILD") {
+        options.ignore_policy = compass_files::IgnorePolicy::HistoricalCommit;
+    }
     options.extra_excludes = excludes;
     options.resolution = resolution;
     options.exclude_hubs = exclude_hubs;
@@ -1950,6 +2007,7 @@ fn pending_semantic_count(options: &BuildOptions, incremental: bool) -> usize {
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
+        ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
         output_name: output_name.clone(),
         cache_root: Some(output_root.clone()),
@@ -2019,6 +2077,7 @@ fn graphify_extract_provider_failure(
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
+        ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
         output_name,
         ..DetectOptions::default()
@@ -2340,6 +2399,7 @@ fn build_semantic_graph(
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
+        ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
         output_name,
         ..DetectOptions::default()
@@ -3308,14 +3368,26 @@ fn callflow_help() -> String {
     "Usage: graphify export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default graphify-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
 }
 
-fn command_natural_query(args: &[String]) -> Outcome {
-    let Some(question) = args.first() else {
-        return Outcome::failure(
-            "Usage: graphify query \"<question>\" [--dfs] [--context C] [--budget N] [--graph path]"
-                .to_owned(),
-        );
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum GraphSelection {
+    File(PathBuf),
+    Commit(String),
+}
+
+pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(query_help(frontend));
+    }
+    let (selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    let mut graph_path = default_graph_path();
+    let Some(question) = args.first() else {
+        return Outcome::failure(query_help(frontend));
+    };
     let mut contexts = Vec::new();
     let mut budget = 2000_usize;
     let mut mode = TraversalMode::Bfs;
@@ -3343,13 +3415,6 @@ fn command_natural_query(args: &[String]) -> Outcome {
                 contexts.push(value.clone());
                 index += 2;
             }
-            "--graph" => {
-                let Some(value) = args.get(index + 1) else {
-                    return Outcome::failure("error: --graph requires a path".to_owned());
-                };
-                graph_path = PathBuf::from(value);
-                index += 2;
-            }
             value if value.starts_with("--budget=") => {
                 let Ok(value) = value[9..].parse::<usize>() else {
                     return Outcome::failure("error: --budget must be an integer".to_owned());
@@ -3361,14 +3426,12 @@ fn command_natural_query(args: &[String]) -> Outcome {
                 contexts.push(value[10..].to_owned());
                 index += 1;
             }
-            value if value.starts_with("--graph=") => {
-                graph_path = PathBuf::from(&value[8..]);
-                index += 1;
+            value => {
+                return Outcome::failure(format!("error: unexpected query argument {value}"));
             }
-            _ => index += 1,
         }
     }
-    let loaded = match load(&graph_path, false) {
+    let loaded = match load_selection(frontend, &selection, false) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
@@ -3381,41 +3444,57 @@ fn command_natural_query(args: &[String]) -> Outcome {
         &contexts,
         &loaded.overlay,
     );
-    integration_commands::touch_query_stamp(&graph_path);
+    touch_selected_query_stamp(&selection);
     Outcome::success(output)
 }
 
-fn command_path(args: &[String]) -> Outcome {
-    if args.len() < 2 {
-        return Outcome::failure(
-            "Usage: graphify path \"<source>\" \"<target>\" [--graph path]".to_owned(),
-        );
+fn command_path(frontend: Frontend, args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(path_help(frontend));
     }
-    let graph_path = parse_graph_path(&args[2..]);
-    let loaded = match load(&graph_path, true) {
+    let (selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    if args.len() != 2 {
+        return Outcome::failure(path_help(frontend));
+    }
+    let loaded = match load_selection(frontend, &selection, true) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
     match render_shortest_path(&loaded.graph, &args[0], &args[1]) {
         Ok(output) => {
-            integration_commands::touch_query_stamp(&graph_path);
+            touch_selected_query_stamp(&selection);
             Outcome::success(output)
         }
         Err(error) => Outcome::failure(error),
     }
 }
 
-fn command_explain(args: &[String]) -> Outcome {
-    let Some(label) = args.first() else {
-        return Outcome::failure("Usage: graphify explain \"<node>\" [--graph path]".to_owned());
+fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(explain_help(frontend));
+    }
+    let (selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    let graph_path = parse_graph_path(&args[1..]);
-    let loaded = match load(&graph_path, true) {
+    if args.len() != 1 {
+        return Outcome::failure(explain_help(frontend));
+    }
+    let loaded = match load_selection(frontend, &selection, true) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    let output = render_explanation(&loaded.graph, label, &loaded.overlay);
-    integration_commands::touch_query_stamp(&graph_path);
+    let output = render_explanation(&loaded.graph, &args[0], &loaded.overlay);
+    touch_selected_query_stamp(&selection);
     Outcome::success(output)
 }
 
@@ -3487,23 +3566,114 @@ fn command_affected(args: &[String]) -> Outcome {
     Outcome::success(format_affected(&loaded.graph, query, &relations, depth))
 }
 
-fn parse_graph_path(args: &[String]) -> PathBuf {
-    let mut path = default_graph_path();
+pub(crate) fn parse_graph_selection(
+    args: &[String],
+) -> Result<(GraphSelection, Vec<String>), String> {
+    let mut selection = None;
+    let mut remaining = Vec::new();
+    let mut options = true;
     let mut index = 0;
     while index < args.len() {
-        if args[index] == "--graph" {
-            if let Some(value) = args.get(index + 1) {
-                path = PathBuf::from(value);
+        match args[index].as_str() {
+            "--" if options => options = false,
+            "--graph" if options => {
+                index += 1;
+                let value = args.get(index).ok_or("--graph requires a path")?;
+                if value.is_empty() || value.starts_with('-') {
+                    return Err("--graph requires a path".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::File(value.into()))?;
             }
-            index += 2;
-        } else if let Some(value) = args[index].strip_prefix("--graph=") {
-            path = PathBuf::from(value);
-            index += 1;
-        } else {
-            index += 1;
+            "--at" if options => {
+                index += 1;
+                let value = args.get(index).ok_or("--at requires a revision")?;
+                if value.is_empty() || value.starts_with('-') {
+                    return Err("--at requires a revision".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::Commit(value.clone()))?;
+            }
+            value if options && value.starts_with("--graph=") => {
+                let value = &value[8..];
+                if value.is_empty() {
+                    return Err("--graph requires a path".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::File(value.into()))?;
+            }
+            value if options && value.starts_with("--at=") => {
+                let value = &value[5..];
+                if value.is_empty() {
+                    return Err("--at requires a revision".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::Commit(value.to_owned()))?;
+            }
+            value => remaining.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    Ok((
+        selection.unwrap_or_else(|| GraphSelection::File(default_graph_path())),
+        remaining,
+    ))
+}
+
+fn set_graph_selection(
+    selected: &mut Option<GraphSelection>,
+    value: GraphSelection,
+) -> Result<(), String> {
+    let Some(existing) = selected else {
+        *selected = Some(value);
+        return Ok(());
+    };
+    let message = if std::mem::discriminant(existing) == std::mem::discriminant(&value) {
+        "graph source selector may only be specified once"
+    } else {
+        "--graph and --at are mutually exclusive"
+    };
+    Err(message.to_owned())
+}
+
+pub(crate) fn load_selection(
+    frontend: Frontend,
+    selection: &GraphSelection,
+    force_directed: bool,
+) -> Result<LoadedGraph, Outcome> {
+    match selection {
+        GraphSelection::File(path) => load(path, force_directed),
+        GraphSelection::Commit(revision) => {
+            history_commands::load_graph_at(frontend, revision, force_directed)
+                .map_err(|error| Outcome::failure(format!("error: {error}")))
         }
     }
-    path
+}
+
+fn touch_selected_query_stamp(selection: &GraphSelection) {
+    if let GraphSelection::File(path) = selection {
+        integration_commands::touch_query_stamp(path);
+    }
+}
+
+fn query_help(frontend: Frontend) -> String {
+    let prefix = frontend_name(frontend);
+    format!(
+        "Usage: {prefix} query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH|--at REV]"
+    )
+}
+
+fn path_help(frontend: Frontend) -> String {
+    let prefix = frontend_name(frontend);
+    format!("Usage: {prefix} path \"<source>\" \"<target>\" [--graph PATH|--at REV]")
+}
+
+fn explain_help(frontend: Frontend) -> String {
+    let prefix = frontend_name(frontend);
+    format!("Usage: {prefix} explain \"<node>\" [--graph PATH|--at REV]")
+}
+
+fn frontend_name(frontend: Frontend) -> &'static str {
+    match frontend {
+        Frontend::Compass => "compass",
+        Frontend::Graphify => "graphify",
+    }
 }
 
 fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
@@ -3533,11 +3703,13 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 
 fn compass_help() -> String {
     "Usage: compass <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  install\n  uninstall\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
-        .to_owned()
+        .replacen("Commands:\n", "Commands:\n  history\n  diff\n", 1)
 }
 
 fn compass_command_help(command: &str) -> String {
     match command {
+        "history" => history_commands::help(Frontend::Compass),
+        "diff" => history_commands::diff_help(Frontend::Compass),
         "update" => "Usage: compass update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
         "extract" => extract_help(),
         "watch" => watch_help(),
@@ -3546,8 +3718,8 @@ fn compass_command_help(command: &str) -> String {
         "label" => label_commands::label_help(Frontend::Compass),
         "prs" => prs_commands::prs_help(Frontend::Compass),
         "query" => query_commands::query_help(),
-        "path" => "Usage: compass path \"<source>\" \"<target>\" [--graph PATH]".to_owned(),
-        "explain" => "Usage: compass explain \"<node>\" [--graph PATH]".to_owned(),
+        "path" => path_help(Frontend::Compass),
+        "explain" => explain_help(Frontend::Compass),
         "affected" => "Usage: compass affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),
         "tree" => tree_help(Frontend::Compass),
         "export" => export_help().replacen("graphify export", "compass export", 1),
@@ -3578,10 +3750,7 @@ fn watch_help() -> String {
 }
 
 fn graphify_help() -> String {
-    include_str!("../assets/graphify-help.txt")
-        .strip_suffix('\n')
-        .unwrap_or(include_str!("../assets/graphify-help.txt"))
-        .to_owned()
+    include_str!("../assets/graphify-help.txt").to_owned()
 }
 
 #[cfg(test)]

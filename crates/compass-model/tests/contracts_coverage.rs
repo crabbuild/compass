@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use compass_model::{EdgeRecord, Graph, GraphDocument, NodeRecord};
 use serde_json::{Value, json};
@@ -116,5 +117,40 @@ fn directed_and_multigraph_loading_preserve_parallel_edges_and_direction()
     };
     assert_eq!(edge.string("value"), "False");
     assert_eq!(edge.string("missing"), "");
+    Ok(())
+}
+
+#[test]
+fn graph_size_cap_units_and_fallbacks_are_accepted_without_global_side_effects()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    fs::write(
+        &path,
+        br#"{"directed":true,"multigraph":false,"nodes":[],"links":[]}"#,
+    )?;
+    for cap in [
+        "1GB",
+        "2MB",
+        "1_000_000",
+        "invalid",
+        "18446744073709551615GB",
+    ] {
+        let status = std::process::Command::new(std::env::current_exe()?)
+            .args(["--exact", "graph_size_cap_child", "--nocapture"])
+            .env("GRAPHIFY_MAX_GRAPH_BYTES", cap)
+            .env("COMPASS_GRAPH_CAP_FIXTURE", &path)
+            .status()?;
+        assert!(status.success(), "cap child failed for {cap}");
+    }
+    Ok(())
+}
+
+#[test]
+fn graph_size_cap_child() -> Result<(), Box<dyn Error>> {
+    let Some(path) = std::env::var_os("COMPASS_GRAPH_CAP_FIXTURE") else {
+        return Ok(());
+    };
+    GraphDocument::load(Path::new(&path))?;
     Ok(())
 }

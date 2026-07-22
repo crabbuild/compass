@@ -14,7 +14,7 @@ use compass_output::{render_cql_json, render_cql_jsonl, render_cql_table};
 use compass_query::{PlanCache, QueryLimits, QueryRequest, execute};
 use serde_json::Value;
 
-use super::{Frontend, Outcome, default_graph_path, load};
+use super::{Frontend, GraphSelection, Outcome, load_selection, parse_graph_selection};
 
 static CQL_PLAN_CACHE: OnceLock<PlanCache> = OnceLock::new();
 
@@ -23,7 +23,7 @@ const MAX_PARAMETER_BYTES: u64 = 16 * 1024 * 1024;
 
 pub(super) fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
     if !args.iter().any(|argument| argument == "--cql") {
-        return super::command_natural_query(args);
+        return super::command_natural_query(frontend, args);
     }
     if frontend == Frontend::Graphify {
         return Outcome::failure(
@@ -31,7 +31,11 @@ pub(super) fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
                 .to_owned(),
         );
     }
-    match parse_request(args).and_then(run_request) {
+    let (graph_selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 2),
+    };
+    match parse_request(&args, graph_selection).and_then(run_request) {
         Ok(output) => Outcome::success(output),
         Err(error) => Outcome::failure_with_code(error.message, error.code),
     }
@@ -39,7 +43,7 @@ pub(super) fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
 
 #[must_use]
 pub(super) fn query_help() -> String {
-    "Usage:\n  compass query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH]\n  compass query --cql <QUERY> [--param NAME=VALUE] [--format table|json|jsonl] [--graph PATH]\n  compass query --cql --file PATH [--params-file PATH] [--output PATH]\n  compass query --cql --stdin\n  compass query --cql --repl\n\nCompassQL limits:\n  --timeout-ms N\n  --max-rows N\n  --max-path-depth N\n  --max-expanded-relationships N\n  --max-memory-bytes N"
+    "Usage: compass query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH|--at REV]\n       compass query --cql <QUERY> [--param NAME=VALUE] [--format table|json|jsonl] [--graph PATH|--at REV]\n       compass query --cql --file PATH [--params-file PATH] [--output PATH]\n       compass query --cql --stdin\n       compass query --cql --repl\n\nCompassQL limits:\n  --timeout-ms N\n  --max-rows N\n  --max-path-depth N\n  --max-expanded-relationships N\n  --max-memory-bytes N"
         .to_owned()
 }
 
@@ -59,7 +63,7 @@ enum SourceSelection {
 
 struct CqlCliRequest {
     source: SourceSelection,
-    graph_path: PathBuf,
+    graph_selection: GraphSelection,
     parameters: Parameters,
     format: OutputFormat,
     output: Option<PathBuf>,
@@ -98,12 +102,14 @@ impl CliError {
     }
 }
 
-fn parse_request(args: &[String]) -> Result<CqlCliRequest, CliError> {
+fn parse_request(
+    args: &[String],
+    graph_selection: GraphSelection,
+) -> Result<CqlCliRequest, CliError> {
     let mut inline = Vec::new();
     let mut file = None;
     let mut stdin = false;
     let mut repl = false;
-    let mut graph_path = default_graph_path();
     let mut parameters = Parameters::new();
     let mut params_file = None;
     let mut format = OutputFormat::Table;
@@ -129,10 +135,6 @@ fn parse_request(args: &[String]) -> Result<CqlCliRequest, CliError> {
             "--repl" => {
                 repl = true;
                 index += 1;
-            }
-            "--graph" => {
-                graph_path = PathBuf::from(required_value(args, index, "--graph")?);
-                index += 2;
             }
             "--param" => {
                 parse_parameter(required_value(args, index, "--param")?, &mut parameters)?;
@@ -184,10 +186,6 @@ fn parse_request(args: &[String]) -> Result<CqlCliRequest, CliError> {
             }
             value if value.starts_with("--file=") => {
                 file = Some(PathBuf::from(&value[7..]));
-                index += 1;
-            }
-            value if value.starts_with("--graph=") => {
-                graph_path = PathBuf::from(&value[8..]);
                 index += 1;
             }
             value if value.starts_with("--param=") => {
@@ -280,7 +278,7 @@ fn parse_request(args: &[String]) -> Result<CqlCliRequest, CliError> {
     };
     Ok(CqlCliRequest {
         source,
-        graph_path,
+        graph_selection,
         parameters,
         format,
         output,
@@ -305,8 +303,8 @@ fn run_source(
     source_name: &str,
     source: &str,
 ) -> Result<String, CliError> {
-    let loaded =
-        load(&request.graph_path, true).map_err(|outcome| CliError::graph(outcome.stderr))?;
+    let loaded = load_selection(Frontend::Compass, &request.graph_selection, true)
+        .map_err(|outcome| CliError::graph(outcome.stderr))?;
     run_source_with_graph(request, source_name, source, &loaded.graph)
 }
 
@@ -387,8 +385,8 @@ fn run_repl(request: CqlCliRequest) -> Result<String, CliError> {
     if !std::io::stdin().is_terminal() {
         return Err(CliError::usage("--repl requires an interactive terminal"));
     }
-    let loaded =
-        load(&request.graph_path, true).map_err(|outcome| CliError::graph(outcome.stderr))?;
+    let loaded = load_selection(Frontend::Compass, &request.graph_selection, true)
+        .map_err(|outcome| CliError::graph(outcome.stderr))?;
     let mut transcript = Vec::new();
     let mut buffer = String::new();
     loop {

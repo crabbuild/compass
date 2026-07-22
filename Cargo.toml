@@ -22,6 +22,7 @@ members = [
     "crates/compass-reflect",
     "crates/compass-resolve",
     "crates/compass-semantic",
+    "crates/compass-history",
     "crates/compass-transcribe",
     "crates/compass-whisper",
     "vendor/compass-tree-sitter-language-pack",
@@ -58,6 +59,8 @@ sha1 = "0.10"
 md-5 = "0.10"
 mimalloc = { version = "0.1.52", default-features = false }
 notify = "8.2.0"
+prolly-map = "=0.5.0"
+prolly-store-sqlite = "=0.3.0"
 oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compression"] }
 ctrlc = "3.5.2"
 strsim = "0.11"
@@ -81,6 +84,7 @@ unicode-normalization = "0.1"
 unicode-casefold = "0.2"
 unicode-properties = { version = "0.1.4", features = ["general-category"] }
 tempfile = "3"
+atomicwrites = "=0.4.4"
 tiktoken-rs = "0.7.0"
 symphonia = { version = "0.6.0", default-features = false, features = ["all"] }
 time = { version = "=0.3.53", features = ["formatting", "local-offset", "parsing"] }

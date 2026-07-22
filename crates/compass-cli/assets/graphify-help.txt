@@ -154,4 +154,3 @@ Commands:
   pi uninstall            remove skill from ~/.pi/agent/skills/graphify/
   devin install           write skill to ~/.config/devin/skills/graphify/ (Devin CLI)
   devin uninstall         remove skill from ~/.config/devin/skills/graphify/
-

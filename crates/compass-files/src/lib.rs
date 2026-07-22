@@ -14,7 +14,9 @@ pub use atomic::{
 };
 pub use build_guard::BuildGuard;
 pub use cache::{Cache, CacheKind};
-pub use detect::{DetectOptions, Detection, FileType, WatchPathFilter, classify_file, detect};
+pub use detect::{
+    DetectOptions, Detection, FileType, IgnorePolicy, WatchPathFilter, classify_file, detect,
+};
 pub use encoding::read_source_lossy;
 pub use hash::{StatHashIndex, body_content, file_hash, md5_file, prompt_fingerprint};
 pub use manifest::{IncrementalDetection, Manifest, ManifestEntry, ManifestKind};

@@ -1874,6 +1874,18 @@ pub fn extraction_prompt(deep: bool) -> String {
     }
 }
 
+/// Return the lowercase SHA-256 fingerprint of the exact semantic extraction prompt.
+#[must_use]
+pub fn extraction_prompt_sha256(deep: bool) -> String {
+    let digest = Sha256::digest(extraction_prompt(deep).as_bytes());
+    let mut output = String::with_capacity(64);
+    use std::fmt::Write as _;
+    for byte in digest {
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
 /// Build the OpenAI SDK-compatible call parameters used by Gemini, Kimi,
 /// Ollama, OpenAI, DeepSeek, Azure, and custom compatible providers.
 #[must_use]
