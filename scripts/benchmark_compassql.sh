@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-graph=${1:-graphify-out/graph.json}
+graph=${1:-compass-out/graph.json}
 binary=${COMPASS_BIN:-target/release/compass}
 output=${COMPASSQL_BENCH_OUTPUT:-target/compassql-benchmark.csv}
 repeats=${COMPASSQL_BENCH_REPEATS:-5}

@@ -6,10 +6,8 @@ Compass is the native Rust implementation of [Graphify](https://github.com/Graph
 
 ## Command surface and graph history
 
-Only completed commands are exposed. `compass` is the authoritative CLI and
-may evolve independently of the Python `graphify` command. The workspace also
-builds a legacy `graphify` executable for the older command surface where
-compatibility remains useful; it does not constrain Compass commands or help.
+Only completed commands are exposed. `compass` is the authoritative and only
+shipped CLI. It may evolve independently of the Python `graphify` command.
 
 ### Current native command surface
 
@@ -65,7 +63,7 @@ compass history enable
 compass history build HEAD
 compass query "authentication flow" --at HEAD~20
 compass diff v1.2.0 HEAD --detailed
-compass history export HEAD --format graphify-out --output historical-output
+compass history export HEAD --format compass-out --output historical-output
 compass history list HEAD --format json
 compass history gc
 compass history disable
@@ -110,7 +108,7 @@ permissions. Jobs, leases, locks, and protected temporary worktrees are files
 beside the database rather than Prolly values.
 
 `history export --format graph-json` reconstructs the canonical graph JSON.
-`--format graphify-out` also restores authoritative, non-derivable sidecars
+`--format compass-out` also restores authoritative, non-derivable sidecars
 verbatim and regenerates reports and HTML only with the renderer versions
 recorded in the artifact registry. Export equivalence is semantic and
 canonical: insignificant JSON member or record ordering is not part of the
@@ -131,20 +129,17 @@ exit `1`, with diagnostics on stderr. Complete semantic builds require the
 selected provider's credentials when a committed input needs model extraction;
 a provider failure cannot publish or become preferred.
 
-Scripts and new documentation should use `compass`. The separately installed
-`graphify` binary is a best-effort legacy entry point for its existing tested
-surface, not an alias contract for new Compass features. In particular,
-versioned history is specified, documented, and qualified through `compass`;
-its commands and help do not need a matching Python Graphify surface.
+Scripts and new documentation should use `compass`. Versioned history is
+specified, documented, and qualified through `compass`; its commands and help
+do not need a matching Python Graphify surface.
 
 Assistant setup is native and self-contained. The generic
 `compass install --platform <name>` and project-scoped `--project` forms,
-their uninstall counterparts, and every legacy direct platform command exposed
-by `graphify` are differential-tested against Python for both terminal output
-and the complete installed file tree.
+their uninstall counterparts, and their generated file trees are tested in the
+Rust workspace.
 ## How Compass works
 
-Compass parses a project into nodes and directed relationships. It then groups related nodes into communities and writes the results to `graphify-out/`.
+Compass parses a project into nodes and directed relationships. It then groups related nodes into communities and writes the results to `compass-out/`.
 
 ```text
  Source code        Project files       Optional semantic sources
@@ -191,6 +186,18 @@ The graph uses these concepts:
 
 Compass preserves relationship direction, source locations, and provenance in the graph. You can inspect uncertain relationships instead of treating every connection as equally reliable.
 
+## Install Compass on macOS
+
+Install the latest release on Apple Silicon or Intel with one command:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/crabbuild/compass/releases/latest/download/install.sh | sh
+```
+
+The installer verifies the release archive's SHA-256 checksum and installs
+`compass` to `~/.local/bin`. Set `COMPASS_INSTALL_DIR` to choose another
+directory. This first macOS release is unsigned and isn't notarized by Apple.
+
 ## Install Compass from source
 
 Building Compass requires Rust 1.97.1 or newer. The repository pins that toolchain in `rust-toolchain.toml`.
@@ -198,25 +205,21 @@ Building Compass requires Rust 1.97.1 or newer. The repository pins that toolcha
 ```bash
 git clone https://github.com/crabbuild/compass.git
 cd compass
-cargo install --locked --path crates/compass-cli
+cargo install --locked --path crates/compass-cli --bin compass
 compass --version
 ```
 
-The installation adds three standalone binaries:
-
-- `compass`: the primary command-line interface
-- `graphify`: a compatibility interface for tested Graphify workflows
-- `graphify-mcp`: a compatibility entry point for existing Model Context Protocol configurations
-
-The installed binaries don't require Python. The development parity suite uses Python only to compare Compass with Graphify.
+The installed `compass` binary doesn't require Python. The development parity
+suite uses Python only to compare selected behavior with Graphify.
 
 After the crate is published to crates.io, install it with:
 
 ```bash
-cargo install --locked compass-cli
+cargo install --locked compass-cli --bin compass
 ```
 
-The release workflow publishes prebuilt archives on the [Compass releases page](https://github.com/crabbuild/compass/releases) for Linux, macOS, and Windows on x86-64 and ARM64.
+The release workflow publishes prebuilt Intel and Apple Silicon archives on the
+[Compass releases page](https://github.com/crabbuild/compass/releases).
 
 ## Build your first graph
 
@@ -227,7 +230,7 @@ cd your_project_directory
 compass update .
 ```
 
-Compass writes the graph and its supporting artifacts to `graphify-out/`:
+Compass writes the graph and its supporting artifacts to `compass-out/`:
 
 | Artifact | Use it for |
 | --- | --- |
@@ -236,7 +239,7 @@ Compass writes the graph and its supporting artifacts to `graphify-out/`:
 | `graph.html` | Interactive browser exploration when the graph is within the visualization limit |
 | `manifest.json` | Incremental build state |
 
-Open `graphify-out/graph.html` in a browser for a visual tour. Start with `GRAPH_REPORT.md` when you need a repository-wide architecture view.
+Open `compass-out/graph.html` in a browser for a visual tour. Start with `GRAPH_REPORT.md` when you need a repository-wide architecture view.
 
 Ask a focused question when you need a smaller working set:
 
@@ -248,7 +251,7 @@ This query searches and traverses the saved graph. It returns relevant nodes and
 
 ## Explore the graph with concrete questions
 
-Compass includes focused commands for common code-reading tasks. Each command reads `graphify-out/graph.json` by default.
+Compass includes focused commands for common code-reading tasks. Each command reads `compass-out/graph.json` by default.
 
 Find the neighborhood related to a concept:
 
@@ -354,7 +357,7 @@ Use the watcher during active development:
 compass watch .
 ```
 
-The watcher rebuilds deterministic changes after its debounce interval. When semantic media changes, it writes `graphify-out/needs_update` instead of calling a model in the background. Run `compass extract` again when you're ready to refresh that content.
+The watcher rebuilds deterministic changes after its debounce interval. When semantic media changes, it writes `compass-out/needs_update` instead of calling a model in the background. Run `compass extract` again when you're ready to refresh that content.
 
 ## Connect a coding assistant
 
@@ -383,7 +386,7 @@ compass uninstall --platform codex --project
 Compass includes a Model Context Protocol (MCP) server for editors and agents. Standard input and output is the default transport:
 
 ```bash
-compass serve graphify-out/graph.json
+compass serve compass-out/graph.json
 ```
 
 For a network client, start Streamable HTTP and require an API key:
@@ -443,9 +446,12 @@ Run `compass --help` for the current surface or `compass <command> --help` for c
 
 ## Migrate from Graphify
 
-Compass reads and writes the existing `graphify-out/` layout, including graphs, caches, manifests, labels, analysis, memory, and sidecars. You don't need to convert your project data.
+Compass uses `compass-out/` and doesn't read `graphify-out/` or `GRAPHIFY_OUT`.
+Rebuild a project with `compass update .` after switching from Graphify. Set
+`COMPASS_OUT` when you need a custom output directory.
 
-Use `compass` for new workflows. Use the bundled `graphify` executable when an existing script depends on Graphify's tested arguments, output, or exit behavior.
+Use `compass` for new workflows. The release doesn't include compatibility
+executables for the Python Graphify command or its MCP entry point.
 
 ```text
 graphify <command>       -> compass <command>
@@ -472,10 +478,12 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. All proje
 These commands run the checks used for local development:
 
 ```bash
-cargo build --release --locked --bins
+cargo build --release --locked -p compass-cli --bin compass
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-targets --all-features --locked
+cargo clippy --workspace --lib --bins --locked -- -D warnings
+cargo test --workspace --lib --bins --locked
+cargo test -p compass-cli --test compass_product --locked
+sh scripts/test_release_scripts.sh
 ```
 
 The compatibility suite uses a sibling Graphify checkout as its behavioral oracle. Set `GRAPHIFY_REPO_ROOT` when that checkout lives elsewhere. Set `GRAPHIFY_PYTHON` and `GRAPHIFY_MEDIA_PYTHON` when the test interpreters use non-default paths.
@@ -484,9 +492,14 @@ Release qualification also covers native line and region coverage, focused mutat
 
 ## Distribution guarantees
 
-Release archives contain `compass`, `graphify`, and `graphify-mcp`, plus shell completions, license notices, a Software Package Data Exchange (SPDX) software bill of materials, a SHA-256 checksum, and build-provenance attestation.
+Release archives contain `compass`, shell completions, license notices, and a
+SHA-256 checksum. The automated workflow also records build-provenance
+attestations for each archive.
 
-The release workflow builds Linux, macOS, and Windows archives for x86-64 and ARM64. Publishing to crates.io uses a separate environment-protected workflow that validates the release tag before publishing workspace crates in dependency order.
+The release workflow currently builds macOS archives for Intel and Apple
+Silicon. Publishing to crates.io uses a separate environment-protected workflow
+that validates the release tag before publishing workspace crates in dependency
+order.
 
 ## License
 

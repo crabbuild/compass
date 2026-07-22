@@ -75,7 +75,7 @@ const SKIP_DIRS: &[&str] = &[
     ".tox",
     ".nox",
     ".eggs",
-    "graphify-out",
+    "compass-out",
     "coverage",
     "lcov-report",
     "visual-tests",
@@ -158,8 +158,7 @@ impl Default for DetectOptions {
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
-            output_name: std::env::var("GRAPHIFY_OUT")
-                .unwrap_or_else(|_| "graphify-out".to_owned()),
+            output_name: std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()),
             cache_root: None,
             google_workspace: false,
             additional_files: Vec::new(),

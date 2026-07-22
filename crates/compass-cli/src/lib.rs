@@ -955,7 +955,7 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
         }
         index += 1;
     }
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let graph_path = graph_override
         .clone()
         .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
@@ -984,7 +984,7 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
     };
     if frontend == Frontend::Graphify
         && !no_label
-        && !output_dir.join(".graphify_labels.json").is_file()
+        && !output_dir.join(".compass_labels.json").is_file()
     {
         return label_commands::command_label(frontend, args);
     }
@@ -1203,7 +1203,7 @@ fn tree_help(frontend: Frontend) -> String {
         Frontend::Graphify => "graphify",
     };
     format!(
-        "Usage: {prefix} tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default graphify-out/graph.json)\n  --output HTML        output path (default graphify-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header"
+        "Usage: {prefix} tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default compass-out/graph.json)\n  --output HTML        output path (default compass-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header"
     )
 }
 
@@ -1260,7 +1260,7 @@ fn command_benchmark(args: &[String]) -> Outcome {
         Ok(document) => document,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    let corpus_words = fs::read(".graphify_detect.json")
+    let corpus_words = fs::read(".compass_detect.json")
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .and_then(|value| value.get("total_words").and_then(serde_json::Value::as_u64))
@@ -1300,7 +1300,7 @@ fn validate_graphify_update_args(args: &[String]) -> Option<Outcome> {
 }
 
 fn format_graphify_update(result: &BuildResult, watch_path: &Path, no_cluster: bool) -> Outcome {
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let output_dir = if watch_path == Path::new(".") {
         PathBuf::from(&output_name)
     } else {
@@ -1667,7 +1667,7 @@ fn command_build_with_validation(
     options.google_workspace =
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
     apply_max_workers_override(&mut options, max_workers);
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let extract_incremental = extract
         && !force
         && options
@@ -1741,8 +1741,7 @@ fn command_build_with_validation(
         None
     };
     let compatibility_manifest = (frontend == Frontend::Graphify && !extract).then(|| {
-        let output_name =
-            std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+        let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
         let output_root = options.output_root.as_ref().unwrap_or(&root);
         let path = output_root.join(output_name).join("manifest.json");
         let existing = fs::read(&path).ok();
@@ -2003,7 +2002,7 @@ fn pending_semantic_count(options: &BuildOptions, incremental: bool) -> usize {
         .as_deref()
         .map(resolve_cli_path)
         .unwrap_or_else(|| root.clone());
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
@@ -2066,7 +2065,7 @@ fn graphify_extract_provider_failure(
     stderr: String,
     code: u8,
 ) -> Outcome {
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let output_root = options
         .output_root
         .as_deref()
@@ -2304,7 +2303,7 @@ fn format_graphify_extract(
         ));
         lines.push(format!(
             "[graphify extract] wrote {}",
-            result.output_dir.join(".graphify_analysis.json").display()
+            result.output_dir.join(".compass_analysis.json").display()
         ));
         if incremental {
             lines.push(format!(
@@ -2341,8 +2340,8 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
         .iter()
         .find(|argument| !argument.starts_with('-'))
         .map_or_else(|| PathBuf::from("."), PathBuf::from);
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
-    let marker = launch_root.join(&output_name).join(".graphify_root");
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
+    let marker = launch_root.join(&output_name).join(".compass_root");
     let recorded_root = hook_commands::read_text_bounded(&marker, 16 * 1024)
         .ok()
         .map(|value| value.trim().to_owned())
@@ -2394,7 +2393,7 @@ fn build_semantic_graph(
         .as_deref()
         .map(absolute_cli_path)
         .unwrap_or_else(|| root.clone());
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let manifest_path = output_root.join(&output_name).join("manifest.json");
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
@@ -2786,7 +2785,7 @@ fn extract_help() -> String {
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
-    let path = default_graph_path().parent()?.join(".graphify_root");
+    let path = default_graph_path().parent()?.join(".compass_root");
     let root = fs::read_to_string(path).ok()?;
     let root = root.trim();
     (!root.is_empty()).then(|| PathBuf::from(root))
@@ -2807,7 +2806,7 @@ fn command_export(args: &[String]) -> Outcome {
     let mut labels_path = default_graph_path()
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".graphify_labels.json");
+        .join(".compass_labels.json");
     let mut labels_explicit = false;
     let mut report_path = default_graph_path()
         .parent()
@@ -2969,7 +2968,7 @@ fn command_export(args: &[String]) -> Outcome {
                 } else if candidate.join("graph.json").exists() {
                     candidate.join("graph.json")
                 } else {
-                    candidate.join("graphify-out/graph.json")
+                    candidate.join("compass-out/graph.json")
                 };
                 graph_explicit = true;
                 index += 1;
@@ -2980,7 +2979,7 @@ fn command_export(args: &[String]) -> Outcome {
     if graph_explicit {
         let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
         if !labels_explicit {
-            labels_path = output_dir.join(".graphify_labels.json");
+            labels_path = output_dir.join(".compass_labels.json");
         }
         if !report_explicit {
             report_path = output_dir.join("GRAPH_REPORT.md");
@@ -3253,7 +3252,7 @@ fn export_obsidian_cli(inputs: &ExportInputs, output_dir: &Path) -> Result<Strin
 fn export_wiki_cli(inputs: &ExportInputs, output_dir: &Path) -> Result<String, String> {
     if inputs.communities.is_empty() {
         return Err(
-            ".graphify_analysis.json is missing or empty — refusing to export wiki to prevent data loss.\nRun `graphify extract .` (or `graphify cluster-only .`) to regenerate community data first."
+            ".compass_analysis.json is missing or empty — refusing to export wiki to prevent data loss.\nRun `graphify extract .` (or `graphify cluster-only .`) to regenerate community data first."
                 .to_owned(),
         );
     }
@@ -3365,7 +3364,7 @@ fn export_help() -> String {
 }
 
 fn callflow_help() -> String {
-    "Usage: graphify export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default graphify-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
+    "Usage: graphify export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default compass-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3760,7 +3759,7 @@ mod mcp_option_tests {
     fn sample_build_result(outputs_changed: bool, html_written: bool) -> BuildResult {
         BuildResult {
             root: PathBuf::from("project"),
-            output_dir: PathBuf::from("project/graphify-out"),
+            output_dir: PathBuf::from("project/compass-out"),
             detection: compass_files::Detection {
                 files: std::collections::BTreeMap::new(),
                 total_files: 2,
@@ -3887,7 +3886,7 @@ mod mcp_option_tests {
         write_watch_status(
             Frontend::Compass,
             WatchStatus::SemanticUpdateRequired {
-                flag: PathBuf::from("project/graphify-out/needs_update"),
+                flag: PathBuf::from("project/compass-out/needs_update"),
             },
             &mut stdout,
             &mut stderr,
@@ -3916,7 +3915,7 @@ mod mcp_option_tests {
         assert!(stdout.contains("[compass watch] Watching project"));
         assert!(stdout.contains("2 file(s) changed (1 deterministic, 1 semantic)"));
         assert!(stdout.contains("3 nodes, 2 edges, 1 communities (1 extracted, 1 cached)"));
-        assert!(stdout.contains("Flag written to project/graphify-out/needs_update"));
+        assert!(stdout.contains("Flag written to project/compass-out/needs_update"));
         assert!(stdout.contains("[compass watch] Stopped."));
         assert!(stderr.contains("Filesystem event error: event failed"));
         assert!(stderr.contains("Rebuild failed: build failed"));
@@ -3968,7 +3967,7 @@ mod mcp_option_tests {
         write_watch_status(
             Frontend::Graphify,
             WatchStatus::SemanticUpdateRequired {
-                flag: PathBuf::from("project/graphify-out/needs_update"),
+                flag: PathBuf::from("project/compass-out/needs_update"),
             },
             &mut stdout,
             &mut stderr,

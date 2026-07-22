@@ -3,14 +3,14 @@ Usage: graphify <command>
 Commands:
   install [--platform P]  copy skill to platform config dir (claude|windows|codebuddy|codex|opencode|aider|amp|agents|claw|droid|trae|trae-cn|gemini|cursor|antigravity|hermes|kiro|pi|devin)
   uninstall               remove graphify from all detected platforms in one shot
-    --purge                 also delete graphify-out/ directory
+    --purge                 also delete compass-out/ directory
   path "A" "B"            shortest path between two nodes in graph.json
-    --graph <path>          path to graph.json (default graphify-out/graph.json)
+    --graph <path>          path to graph.json (default compass-out/graph.json)
   explain "X"             plain-language explanation of a node and its neighbors
-    --graph <path>          path to graph.json (default graphify-out/graph.json)
+    --graph <path>          path to graph.json (default compass-out/graph.json)
   diagnose multigraph    report same-endpoint edge collapse risk in graph.json
     --graph <path>          path to graph/extraction JSON
-                            (default graphify-out/graph.json)
+                            (default compass-out/graph.json)
     --json                  emit machine-readable JSON
     --max-examples N        max same-endpoint examples to print (default 5)
     --directed              force directed post-build simulation
@@ -18,10 +18,10 @@ Commands:
                             (default follows JSON directed flag;
                              raw extraction with no flag defaults directed)
     --extract-path PATH     extractor source for suppression scan
-  clone <github-url>      clone a GitHub repo locally and print its path for /graphify
+  clone <github-url>      clone a GitHub repo locally and print its path for /compass
   merge-driver <base> <current> <other>  git merge driver: union-merge two graph.json files (set up via hook install)
   merge-graphs <g1> <g2>  merge two or more graph.json files into one cross-repo graph
-    --out <path>            output path (default: graphify-out/merged-graph.json)
+    --out <path>            output path (default: compass-out/merged-graph.json)
     --branch <branch>       checkout a specific branch (default: repo default)
     --out <dir>             clone to a custom directory (default: ~/.graphify/repos/<owner>/<repo>)
   add <url>               fetch a URL and save it to ./raw, then update the graph
@@ -35,7 +35,7 @@ Commands:
     --no-cluster            skip clustering, write raw extraction only
   cluster-only <path>     rerun clustering on an existing graph.json and regenerate report
     --no-viz                skip graph.html generation (useful for >5000 node graphs / CI)
-    --graph <path>          path to graph.json (default <path>/graphify-out/graph.json)
+    --graph <path>          path to graph.json (default <path>/compass-out/graph.json)
     --no-label              keep 'Community N' placeholders (skip LLM community naming)
     --backend=<name>        backend to use for community naming (default: auto-detect)
     --model=<name>          model to use for community naming
@@ -51,31 +51,31 @@ Commands:
     --dfs                   use depth-first instead of breadth-first
     --context C             explicit edge-context filter (repeatable)
     --budget N              cap output at N tokens (default 2000)
-    --graph <path>          path to graph.json (default graphify-out/graph.json)
+    --graph <path>          path to graph.json (default compass-out/graph.json)
   affected "X"             reverse traversal to find nodes impacted by X
     --relation R            edge relation to traverse in reverse (repeatable)
     --depth N               reverse traversal depth (default 2)
-    --graph <path>          path to graph.json (default graphify-out/graph.json)
-  save-result             save a Q&A result to graphify-out/memory/ for graph feedback loop
+    --graph <path>          path to graph.json (default compass-out/graph.json)
+  save-result             save a Q&A result to compass-out/memory/ for graph feedback loop
     --question Q            the question asked
     --answer A              the answer to save
     --type T                query type: query|path_query|explain (default: query)
     --nodes N1 N2 ...       source node labels cited in the answer
     --outcome O             work-memory signal: useful|dead_end|corrected
     --correction TEXT       what the right answer was (pairs with --outcome corrected)
-    --memory-dir DIR        memory directory (default: graphify-out/memory)
-  reflect                 aggregate graphify-out/memory/ outcomes into a deterministic lessons doc
-    --memory-dir DIR        memory directory (default: graphify-out/memory)
-    --out FILE              output path (default: graphify-out/reflections/LESSONS.md)
+    --memory-dir DIR        memory directory (default: compass-out/memory)
+  reflect                 aggregate compass-out/memory/ outcomes into a deterministic lessons doc
+    --memory-dir DIR        memory directory (default: compass-out/memory)
+    --out FILE              output path (default: compass-out/reflections/LESSONS.md)
     --graph PATH            graph.json, for community grouping + dropping stale nodes (optional)
-    --analysis PATH         .graphify_analysis.json (optional, auto-detected next to --graph)
-    --labels PATH           .graphify_labels.json (optional, auto-detected next to --graph)
+    --analysis PATH         .compass_analysis.json (optional, auto-detected next to --graph)
+    --labels PATH           .compass_labels.json (optional, auto-detected next to --graph)
     --half-life-days N      signal weight halves every N days (default 30)
     --min-corroboration N   distinct useful results to prefer a node (default 2)
   check-update <path>     check needs_update flag and notify if semantic re-extraction is pending (cron-safe)
   tree                    emit a D3 v7 collapsible-tree HTML for graph.json
-    --graph PATH            path to graph.json (default graphify-out/graph.json)
-    --output HTML           output path (default graphify-out/GRAPH_TREE.html)
+    --graph PATH            path to graph.json (default compass-out/graph.json)
+    --output HTML           output path (default compass-out/GRAPH_TREE.html)
     --root PATH             filesystem root for the hierarchy
     --max-children N        cap children per node (default 200)
     --top-k-edges N         per-symbol outbound edges in inspector (default 12)
@@ -95,7 +95,7 @@ Commands:
     --token-budget N        per-chunk token cap for semantic extraction (default: 60000)
     --max-concurrency N     parallel semantic chunks in flight (default: 4; set 1 for local LLMs)
     --api-timeout S         per-request timeout in seconds for the LLM client (default: 600)
-    --out DIR               output dir (default: <path>); writes <DIR>/graphify-out/
+    --out DIR               output dir (default: <path>); writes <DIR>/compass-out/
     --google-workspace      export .gdoc/.gsheet/.gslides shortcuts via gws before extraction
     --no-gitignore         ignore .gitignore and .git/info/exclude (prioritizes .graphifyignore)
     --no-cluster            skip clustering, write raw extraction only
@@ -118,8 +118,8 @@ Commands:
   hook status             check if git hooks are installed
   gemini install          write GEMINI.md section + BeforeTool hook (Gemini CLI)
   gemini uninstall        remove GEMINI.md section + BeforeTool hook
-  cursor install          write .cursor/rules/graphify.mdc (Cursor)
-  cursor uninstall        remove .cursor/rules/graphify.mdc
+  cursor install          write .cursor/rules/compass.mdc (Cursor)
+  cursor uninstall        remove .cursor/rules/compass.mdc
   claude install          write graphify section to CLAUDE.md + PreToolUse hook (Claude Code)
   claude uninstall        remove graphify section from CLAUDE.md + PreToolUse hook
   codebuddy install       write graphify section to CODEBUDDY.md + PreToolUse hook (CodeBuddy)
@@ -146,11 +146,11 @@ Commands:
   trae-cn uninstall      remove graphify section from AGENTS.md
   antigravity install     write .agents/rules + .agents/workflows + skill (Google Antigravity)
   antigravity uninstall   remove .agents/rules, .agents/workflows, and skill
-  hermes install          write skill to ~/.hermes/skills/graphify/ (Hermes)
-  hermes uninstall        remove skill from ~/.hermes/skills/graphify/
-  kiro install            write skill to .kiro/skills/graphify/ + steering file (Kiro IDE/CLI)
+  hermes install          write skill to ~/.hermes/skills/compass/ (Hermes)
+  hermes uninstall        remove skill from ~/.hermes/skills/compass/
+  kiro install            write skill to .kiro/skills/compass/ + steering file (Kiro IDE/CLI)
   kiro uninstall          remove skill + steering file
-  pi install              write skill to ~/.pi/agent/skills/graphify/ (Pi coding agent)
-  pi uninstall            remove skill from ~/.pi/agent/skills/graphify/
-  devin install           write skill to ~/.config/devin/skills/graphify/ (Devin CLI)
-  devin uninstall         remove skill from ~/.config/devin/skills/graphify/
+  pi install              write skill to ~/.pi/agent/skills/compass/ (Pi coding agent)
+  pi uninstall            remove skill from ~/.pi/agent/skills/compass/
+  devin install           write skill to ~/.config/devin/skills/compass/ (Devin CLI)
+  devin uninstall         remove skill from ~/.config/devin/skills/compass/

@@ -23,7 +23,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|graphify-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]"
     )
 }
 
@@ -1293,7 +1293,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 let value = serde_json::to_value(&artifacts.artifacts.document).map_err(runtime)?;
                 let bytes = compass_history::canonical_json_bytes(&value).map_err(runtime)?;
                 compass_files::write_bytes_atomic(&output, &bytes).map_err(runtime)?;
-            } else if format == "graphify-out" {
+            } else if format == "compass-out" {
                 if output.exists() {
                     return Err(runtime("bundle output already exists"));
                 }
@@ -1335,7 +1335,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 )
                 .map_err(runtime)?;
             } else {
-                return Err(usage("export --format must be graph-json or graphify-out"));
+                return Err(usage("export --format must be graph-json or compass-out"));
             }
             Ok(format!("exported {} to {}", preferred.id, output.display()))
         }

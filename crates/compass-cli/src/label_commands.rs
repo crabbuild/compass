@@ -43,7 +43,7 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
         Ok(parsed) => parsed,
         Err(error) => return Outcome::failure(error),
     };
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let graph_path = parsed
         .graph_override
         .clone()

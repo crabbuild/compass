@@ -15,32 +15,32 @@ LOCAL_PATH=$(graphify clone <github-url> [--branch <branch>])
 # Clone each repo, run the full pipeline on each, then merge
 graphify clone <url1>   # → ~/.graphify/repos/<owner1>/<repo1>
 graphify clone <url2>   # → ~/.graphify/repos/<owner2>/<repo2>
-# Run /graphify on each local path to produce their graph.json files
+# Run /compass on each local path to produce their graph.json files
 # Then merge:
 graphify merge-graphs \
-  ~/.graphify/repos/<owner1>/<repo1>/graphify-out/graph.json \
-  ~/.graphify/repos/<owner2>/<repo2>/graphify-out/graph.json \
-  --out graphify-out/cross-repo-graph.json
+  ~/.graphify/repos/<owner1>/<repo1>/compass-out/graph.json \
+  ~/.graphify/repos/<owner2>/<repo2>/compass-out/graph.json \
+  --out compass-out/cross-repo-graph.json
 ```
 
 Graphify clones into `~/.graphify/repos/<owner>/<repo>` and reuses existing clones on repeat runs. Each node in the merged graph carries a `repo` attribute so you can filter by origin.
 
 **Multiple local subfolders (monorepo or multi-service layout):**
 
-The skill pipeline writes all intermediate and final outputs to `graphify-out/` in the current working directory. Running the skill on each subfolder separately will clobber the same output dir. Instead, use the CLI directly for each subfolder — it places `graphify-out/` *inside* the scanned path:
+The skill pipeline writes all intermediate and final outputs to `compass-out/` in the current working directory. Running the skill on each subfolder separately will clobber the same output dir. Instead, use the CLI directly for each subfolder — it places `compass-out/` *inside* the scanned path:
 
 ```bash
-graphify extract ./core/     # → ./core/graphify-out/graph.json
-graphify extract ./service/  # → ./service/graphify-out/graph.json
-graphify extract ./platform/ # → ./platform/graphify-out/graph.json
+compass extract ./core/     # → ./core/compass-out/graph.json
+compass extract ./service/  # → ./service/compass-out/graph.json
+compass extract ./platform/ # → ./platform/compass-out/graph.json
 # Add --backend gemini|kimi|openai|deepseek|claude-cli depending on which API key you have set
 
 # Then merge at the project root:
 graphify merge-graphs \
-  ./core/graphify-out/graph.json \
-  ./service/graphify-out/graph.json \
-  ./platform/graphify-out/graph.json \
-  --out graphify-out/graph.json
+  ./core/compass-out/graph.json \
+  ./service/compass-out/graph.json \
+  ./platform/compass-out/graph.json \
+  --out compass-out/graph.json
 ```
 
-Once `graphify-out/graph.json` exists, the fast path above takes over: any codebase question runs `graphify query` directly on the merged graph — no re-extraction, no size gate.
+Once `compass-out/graph.json` exists, the fast path above takes over: any codebase question runs `compass query` directly on the merged graph — no re-extraction, no size gate.

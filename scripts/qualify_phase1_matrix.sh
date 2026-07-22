@@ -15,7 +15,7 @@ copy_tree() {
   local source="$1"
   local destination="$2"
   mkdir -p "$destination"
-  tar -C "$source" --exclude='graphify-out' --exclude='*/__pycache__' -cf - . \
+  tar -C "$source" --exclude='compass-out' --exclude='*/__pycache__' -cf - . \
     | tar -C "$destination" -xf -
 }
 

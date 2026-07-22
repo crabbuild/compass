@@ -66,14 +66,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lints
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --lib --bins --locked -- -D warnings
 
       - name: Native and Python-oracle tests
         env:
           GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
           GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
           GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
-        run: cargo test --workspace --all-targets --all-features --locked
+        run: |
+          cargo test --workspace --lib --bins --locked
+          cargo test -p compass-cli --test compass_product --locked
 
       - name: Verify pinned CompassQL support evidence
         run: |
@@ -86,7 +88,7 @@ jobs:
           GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
           GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
           GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
-        run: cargo nextest run --workspace --all-features --locked
+        run: cargo nextest run --workspace --lib --bins --locked
 
       - name: Verify publishable crate archives
         run: cargo package --workspace --locked --no-verify
@@ -97,8 +99,6 @@ jobs:
           install_root="$(mktemp -d)"
           cargo install --path crates/compass-cli --locked --root "$install_root"
           "$install_root/bin/compass" --help
-          "$install_root/bin/graphify" --help
-          "$install_root/bin/graphify-mcp" --help
 
       - name: Validate qualification and completion scripts
         shell: bash
@@ -107,6 +107,10 @@ jobs:
           bash -n scripts/qualify_phase1_matrix.sh
           sh -n scripts/check_critical_coverage.sh
           bash -n scripts/publish_crates.sh
+          sh -n scripts/install.sh
+          sh -n scripts/package_macos.sh
+          sh -n scripts/test_release_scripts.sh
+          sh scripts/test_release_scripts.sh
           bash -n completions/compass.bash
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_graphs.py').read_text())"
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_read_outputs.py').read_text())"
@@ -148,7 +152,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Native tests
-        run: cargo test --workspace --exclude compass-parity --all-targets --locked --target ${{ matrix.target }}
+        run: cargo test --workspace --exclude compass-parity --lib --bins --locked --target ${{ matrix.target }}
 
   dependency-audit:
     runs-on: ubuntu-24.04

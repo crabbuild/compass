@@ -125,9 +125,9 @@ impl GraphStore {
         project_path.map_or_else(
             || self.inner.default_graph.clone(),
             |project| {
-                let output = std::env::var_os("GRAPHIFY_OUT")
+                let output = std::env::var_os("COMPASS_OUT")
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("graphify-out"));
+                    .unwrap_or_else(|| PathBuf::from("compass-out"));
                 Path::new(project).join(output).join("graph.json")
             },
         )
@@ -283,7 +283,7 @@ impl ServerHandler for GraphifyMcp {
 fn tool_specs() -> Vec<Tool> {
     let project = json!({
         "type": "string",
-        "description": "Absolute path to a project directory containing graphify-out/graph.json. Optional — defaults to the graph this server was started with."
+        "description": "Absolute path to a project directory containing compass-out/graph.json. Optional — defaults to the graph this server was started with."
     });
     let mut specs = vec![
         tool(
@@ -1139,7 +1139,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
                 .path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
-                .join(".graphify_labels.json");
+                .join(".compass_labels.json");
             let labels = fs::read(&labels_path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<BTreeMap<usize, String>>(&bytes).ok())
@@ -1200,9 +1200,9 @@ mod tests {
         let default = temp.path().join("default.json");
         sample(&default)?;
         let project = temp.path().join("project");
-        fs::create_dir_all(project.join("graphify-out"))?;
+        fs::create_dir_all(project.join("compass-out"))?;
         fs::write(
-            project.join("graphify-out/graph.json"),
+            project.join("compass-out/graph.json"),
             r#"{"directed":true,"nodes":[{"id":"a"},{"id":"b"},{"id":"c"}],"links":[]}"#,
         )?;
         let server = GraphifyMcp::new(default);
@@ -1274,7 +1274,7 @@ mod tests {
         )?;
         fs::write(temp.path().join("GRAPH_REPORT.md"), "# Report\nBody\n")?;
         fs::write(
-            temp.path().join(".graphify_labels.json"),
+            temp.path().join(".compass_labels.json"),
             r#"{"0":"Core","1":"Docs"}"#,
         )?;
         let server = GraphifyMcp::new(&graph);

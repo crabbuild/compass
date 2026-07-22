@@ -35,7 +35,7 @@ printf 'implementation,case,iteration,seconds,peak_rss_kib,indexed_files,nodes,e
 copy_corpus() {
   local destination="$1"
   mkdir -p "$destination"
-  tar -C "$corpus" --exclude='./graphify-out' --exclude='*/__pycache__' -cf - . \
+  tar -C "$corpus" --exclude='./compass-out' --exclude='*/__pycache__' -cf - . \
     | tar -C "$destination" -xf -
 }
 
@@ -79,7 +79,7 @@ run_pair() {
     "$python_bin" -m graphify update "$source_corpus" --no-cluster
   local python_seconds="$measured_seconds"
   local python_rss="$measured_rss"
-  measure "$compass_stats" /dev/null env GRAPHIFY_OUT="$compass_graph_dir" \
+  measure "$compass_stats" /dev/null env COMPASS_OUT="$compass_graph_dir" \
     "$compass_bin" update "$source_corpus" --no-cluster
   record_pair "$case_name" "$iteration" "$python_seconds" "$python_rss" \
     "$measured_seconds" "$measured_rss" \

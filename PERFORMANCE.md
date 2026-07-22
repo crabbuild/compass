@@ -84,7 +84,7 @@ CompassQL measures compile/plan latency, indexed fixed matches, one-hop and
 bounded-path expansion, aggregation, optional matching, cached-plan lookup,
 cancellation latency, expanded relationships, returned rows, and peak RSS.
 Run `scripts/benchmark_compassql.sh [GRAPH_JSON]`; the default graph is
-`graphify-out/graph.json`.
+`compass-out/graph.json`.
 
 The release gate rejects a cached-plan or query median regression above 10%, a
 working-memory budget violation, any partial result after cancellation/limit,

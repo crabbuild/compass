@@ -761,7 +761,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         seed: Option<&GraphArtifacts>,
     ) -> Result<CompletedGraphArtifacts, MaterializeError> {
         if let Some(seed) = seed {
-            seed.write_seed(&output_root.join("graphify-out"), &seed_completion(seed))?;
+            seed.write_seed(&output_root.join("compass-out"), &seed_completion(seed))?;
         }
         let mut command = Command::new(&self.executable);
         command
@@ -774,7 +774,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             .current_dir(checkout)
             .env("GRAPHIFY_SKIP_HOOK", "1")
             .env("COMPASS_HISTORY_BUILD", "1")
-            .env("GRAPHIFY_OUT", "graphify-out")
+            .env("COMPASS_OUT", "compass-out")
             .envs(self.semantic_environment.iter().cloned())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -799,7 +799,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             });
         }
 
-        let output_dir = output_root.join("graphify-out");
+        let output_dir = output_root.join("compass-out");
         let detection = detect(
             checkout,
             &DetectOptions {
@@ -807,7 +807,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
                 ignore_policy: IgnorePolicy::HistoricalCommit,
                 extra_excludes: self.excludes.clone(),
                 cache_root: Some(output_root.to_path_buf()),
-                output_name: "graphify-out".to_owned(),
+                output_name: "compass-out".to_owned(),
                 ..DetectOptions::default()
             },
         )?;

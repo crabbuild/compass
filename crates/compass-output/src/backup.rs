@@ -7,10 +7,10 @@ use sha2::{Digest, Sha256};
 const BACKUP_ARTIFACTS: &[&str] = &[
     "graph.json",
     "GRAPH_REPORT.md",
-    ".graphify_labels.json",
-    ".graphify_analysis.json",
+    ".compass_labels.json",
+    ".compass_analysis.json",
     "manifest.json",
-    ".graphify_semantic_marker",
+    ".compass_semantic_marker",
     "cost.json",
 ];
 
@@ -34,8 +34,8 @@ pub fn backup_if_protected(output_dir: &Path) -> BackupResult {
     if !graph_path.is_file() {
         return BackupResult::default();
     }
-    let semantic = output_dir.join(".graphify_semantic_marker").exists();
-    let curated = labels_are_curated(&output_dir.join(".graphify_labels.json"));
+    let semantic = output_dir.join(".compass_semantic_marker").exists();
+    let curated = labels_are_curated(&output_dir.join(".compass_labels.json"));
     if !semantic && !curated {
         return BackupResult::default();
     }
@@ -112,7 +112,7 @@ mod tests {
         fs::write(directory.path().join("graph.json"), "graph")?;
         fs::write(directory.path().join("GRAPH_REPORT.md"), "report")?;
         fs::write(
-            directory.path().join(".graphify_labels.json"),
+            directory.path().join(".compass_labels.json"),
             r#"{"0":"Orders"}"#,
         )?;
         let first = backup_if_protected(directory.path());

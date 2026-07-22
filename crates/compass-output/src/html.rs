@@ -535,7 +535,7 @@ fn load_learning_overlay(output_path: &Path) -> BTreeMap<String, Value> {
     let path = output_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".graphify_learning.json");
+        .join(".compass_learning.json");
     let raw = fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
@@ -590,13 +590,13 @@ fn resolve_learning_source(source: &str, output_path: &Path) -> Option<std::path
     }
     let out = output_path.parent().unwrap_or_else(|| Path::new("."));
     let mut roots = Vec::new();
-    if let Ok(recorded) = fs::read_to_string(out.join(".graphify_root")) {
+    if let Ok(recorded) = fs::read_to_string(out.join(".compass_root")) {
         let recorded = recorded.trim();
         if !recorded.is_empty() {
             roots.push(std::path::PathBuf::from(recorded));
         }
     }
-    if out.file_name().and_then(|name| name.to_str()) == Some("graphify-out") {
+    if out.file_name().and_then(|name| name.to_str()) == Some("compass-out") {
         if let Some(parent) = out.parent() {
             roots.push(parent.to_path_buf());
         }
@@ -713,7 +713,7 @@ mod tests {
     #[test]
     fn sidecar_overlay_is_loaded_and_staleness_recomputed() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
-        let out = directory.path().join("graphify-out");
+        let out = directory.path().join("compass-out");
         fs::create_dir(&out)?;
         fs::write(directory.path().join("source.rs"), "fn main() {}")?;
         let digest = format!(
@@ -721,7 +721,7 @@ mod tests {
             Sha256::digest(fs::read(directory.path().join("source.rs"))?)
         );
         fs::write(
-            out.join(".graphify_learning.json"),
+            out.join(".compass_learning.json"),
             serde_json::to_vec(&json!({"nodes":{"a":{
                 "status":"preferred","uses":2,"score":1.5,
                 "source_file":"source.rs","code_fingerprint":digest

@@ -18,14 +18,6 @@ name = "compass_cli"
 name = "compass"
 path = "src/bin/compass.rs"
 
-[[bin]]
-name = "graphify"
-path = "src/bin/graphify.rs"
-
-[[bin]]
-name = "graphify-mcp"
-path = "src/bin/graphify-mcp.rs"
-
 [dependencies]
 ctrlc.workspace = true
 glob.workspace = true

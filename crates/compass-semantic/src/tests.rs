@@ -1004,7 +1004,7 @@ fn cached_corpus_orchestration_checkpoints_replays_and_prunes() -> Result<(), Bo
     assert_eq!(replayed.cache_misses, 0);
     assert_eq!(replayed.fragment["nodes"].as_array().map(Vec::len), Some(2));
     assert_eq!(replayed.fragment["input_tokens"], 0);
-    assert!(!corpus.path().join("graphify-out").exists());
+    assert!(!corpus.path().join("compass-out").exists());
     Ok(())
 }
 
