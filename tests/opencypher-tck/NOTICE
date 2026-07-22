@@ -1,0 +1,12 @@
+Selected openCypher Technology Compatibility Kit feature files
+
+Copyright (c) Neo4j Sweden AB and the openCypher contributors.
+This work was created by the collective efforts of the openCypher community.
+
+The copied feature files are unmodified excerpts from openCypher 2024.3,
+commit 677cbafabb8c3c5eed458fd3b1ec0daec8d67d23, and retain their original
+attribution notices. They are licensed under Apache License 2.0.
+
+Cypher is a registered trademark of Neo4j, Inc. CompassQL is an independent
+implementation and is not approved by or affiliated with Neo4j or the
+openCypher Implementers Group.

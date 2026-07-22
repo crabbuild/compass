@@ -75,6 +75,12 @@ jobs:
           GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
         run: cargo test --workspace --all-targets --all-features --locked
 
+      - name: Verify pinned CompassQL support evidence
+        run: |
+          cargo test -p compass-cypher --test tck --locked
+          cargo test -p compass-query --test opencypher_tck --locked
+          python3 scripts/check_compassql_support.py
+
       - name: Isolated native and Python-oracle tests
         env:
           GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
@@ -105,6 +111,8 @@ jobs:
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_graphs.py').read_text())"
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_read_outputs.py').read_text())"
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/measure_process.py').read_text())"
+          python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/check_compassql_support.py').read_text())"
+          sh -n scripts/benchmark_compassql.sh
 
   native-platforms:
     name: ${{ matrix.target }}

@@ -3,6 +3,7 @@
 mod backup;
 mod callflow;
 mod canvas;
+mod cql;
 mod cypher;
 mod graphml;
 mod html;
@@ -19,6 +20,7 @@ pub use callflow::{
     derive_callflow_sections, write_callflow_html,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
+pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
 pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
 pub use html::{HtmlOptions, HtmlRender, html_document, write_html};
@@ -31,6 +33,8 @@ pub use wiki::{WikiExport, WikiOptions, export_wiki};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {
+    #[error("could not serialize output: {0}")]
+    Serialization(#[from] serde_json::Error),
     #[error(transparent)]
     File(#[from] compass_files::FileError),
     #[error("existing graph is non-empty but malformed: {0}")]

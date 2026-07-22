@@ -3714,6 +3714,7 @@ dependencies = [
  "tokio",
  "compass-cargo",
  "compass-core",
+ "compass-cypher",
  "compass-files",
  "compass-global",
  "compass-google-workspace",
@@ -3753,6 +3754,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-cypher"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "compass-model",
+]
+
+[[package]]
 name = "compass-files"
 version = "0.1.0"
 dependencies = [
@@ -3773,6 +3786,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "compass-cli",
+ "compass-cypher",
  "compass-files",
  "compass-graph",
  "compass-languages",
@@ -3908,6 +3922,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.19",
 ]
 
@@ -3921,9 +3936,11 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.19",
  "time",
+ "compass-cypher",
  "compass-files",
  "compass-graph",
  "compass-model",
+ "compass-query",
  "unicode-normalization",
 ]
 
@@ -3957,7 +3974,11 @@ dependencies = [
 name = "compass-query"
 version = "0.1.0"
 dependencies = [
+ "regex",
+ "serde",
  "serde_json",
+ "thiserror 2.0.19",
+ "compass-cypher",
  "compass-model",
  "unicode-normalization",
 ]

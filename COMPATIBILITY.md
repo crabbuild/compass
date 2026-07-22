@@ -38,6 +38,11 @@ still match exactly.
 The released binaries do not start Python and do not load tree-sitter grammars
 at runtime. Python is a development and CI oracle only.
 
+`compass query --cql` is a Compass-native product surface and is deliberately
+absent from the `graphify` compatibility executable because the frozen Python
+oracle has no equivalent flag. Natural-language `graphify query` parsing and
+output remain governed by the compatibility contract above.
+
 ## Certified command families
 
 | Family | Native entry points | Differential evidence |
