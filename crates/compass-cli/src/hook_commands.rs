@@ -505,9 +505,9 @@ fn has_merge_attribute(content: &str) -> bool {
 }
 
 fn merge_attribute_line() -> String {
-    let output = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let output = if output.is_empty() || Path::new(&output).is_absolute() || output.contains('\\') {
-        "graphify-out"
+        "compass-out"
     } else {
         output.trim_end_matches('/')
     };
@@ -527,13 +527,13 @@ fn shell_quote(value: &str) -> String {
 
 fn commit_script(invocation: &str) -> String {
     format!(
-        "{COMMIT_START}\n# Native Compass graph refresh installed by: compass hook install\n_COMPASS_HISTORY_COMMIT=$(git rev-parse --verify 'HEAD^{{commit}}' 2>/dev/null || true)\n[ -n \"$_COMPASS_HISTORY_COMMIT\" ] && {invocation} hook-spawn . --history-commit \"$_COMPASS_HISTORY_COMMIT\"\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)\n[ -z \"$_CHANGED\" ] && exit 0\n_NON_GRAPH=$(printf '%s\\n' \"$_CHANGED\" | grep -v '^graphify-out/' || true)\n[ -z \"$_NON_GRAPH\" ] && exit 0\nexport GRAPHIFY_CHANGED=\"$_CHANGED\"\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[compass hook] launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{COMMIT_END}\n"
+        "{COMMIT_START}\n# Native Compass graph refresh installed by: compass hook install\n_COMPASS_HISTORY_COMMIT=$(git rev-parse --verify 'HEAD^{{commit}}' 2>/dev/null || true)\n[ -n \"$_COMPASS_HISTORY_COMMIT\" ] && {invocation} hook-spawn . --history-commit \"$_COMPASS_HISTORY_COMMIT\"\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)\n[ -z \"$_CHANGED\" ] && exit 0\n_NON_GRAPH=$(printf '%s\\n' \"$_CHANGED\" | grep -v '^compass-out/' || true)\n[ -z \"$_NON_GRAPH\" ] && exit 0\nexport GRAPHIFY_CHANGED=\"$_CHANGED\"\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[compass hook] launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{COMMIT_END}\n"
     )
 }
 
 fn checkout_script(invocation: &str) -> String {
     format!(
-        "{CHECKOUT_START}\n# Native Compass graph refresh installed by: graphify hook install\n[ \"$3\" != \"1\" ] && exit 0\n[ ! -d \"${{GRAPHIFY_OUT:-graphify-out}}\" ] && exit 0\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[graphify] Branch switched - launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{CHECKOUT_END}\n"
+        "{CHECKOUT_START}\n# Native Compass graph refresh installed by: graphify hook install\n[ \"$3\" != \"1\" ] && exit 0\n[ ! -d \"${{COMPASS_OUT:-compass-out}}\" ] && exit 0\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[graphify] Branch switched - launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{CHECKOUT_END}\n"
     )
 }
 

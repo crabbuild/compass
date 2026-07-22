@@ -1,4 +1,4 @@
-name: Release Compass binaries
+name: Release Compass for macOS
 
 on:
   push:
@@ -11,9 +11,6 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: .
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Install pinned Rust toolchain
@@ -28,205 +25,68 @@ jobs:
           test "$(printf '%s\n' "$versions" | wc -l | tr -d ' ')" = "1"
           test "$GITHUB_REF_NAME" = "compass-v$versions"
 
-  qualification:
-    needs: metadata
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: .
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Check out the Graphify compatibility oracle
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          repository: Graphify-Labs/graphify
-          ref: v8
-          path: python-oracle
-      - name: Install Python oracle
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          python-version: "3.12"
-      - name: Sync pinned Python environment
-        working-directory: python-oracle
-        run: uv sync --frozen
-      - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: .
-          key: release-qualification
-      - name: Restore frozen performance baseline
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: target/phase1-qualified-baseline
-          key: compass-performance-baseline-v1-${{ runner.os }}-${{ runner.arch }}
-      - name: Require an approved performance baseline
-        run: |
-          test -f target/phase1-qualified-baseline/small.csv
-          test -f target/phase1-qualified-baseline/medium.csv
-          test -f target/phase1-qualified-baseline/large.csv
-      - name: Enforce parity, memory, latency, and regression gates
-        env:
-          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
-          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
-          COMPASS_BENCH_REPEATS: "5"
-          COMPASS_BENCH_BASELINE_DIR: ${{ github.workspace }}/target/phase1-qualified-baseline
-        run: scripts/qualify_phase1_matrix.sh
-
   build:
     name: Build ${{ matrix.target }}
-    needs: [metadata, qualification]
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            archive: tar.gz
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            archive: tar.gz
           - runner: macos-15-intel
             target: x86_64-apple-darwin
-            archive: tar.gz
           - runner: macos-15
             target: aarch64-apple-darwin
-            archive: tar.gz
-          - runner: windows-2025
-            target: x86_64-pc-windows-msvc
-            archive: zip
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            archive: zip
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       id-token: write
       attestations: write
-    defaults:
-      run:
-        working-directory: .
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: 1.97.1
           target: ${{ matrix.target }}
-
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: .
           key: release-${{ matrix.target }}
-
-      - name: Build locked release binaries
-        run: cargo build --release --locked --bins --target ${{ matrix.target }}
-
-      - name: Prepare Unix distribution
-        if: matrix.archive == 'tar.gz'
+      - name: Test Compass product contract
+        run: cargo test -p compass-cli --test compass_product --locked
+      - name: Test release scripts
+        run: sh scripts/test_release_scripts.sh
+      - name: Build locked Compass binary
+        run: cargo build --release --locked -p compass-cli --bin compass --target ${{ matrix.target }}
+      - name: Package macOS distribution
+        run: >-
+          scripts/package_macos.sh
+          ${{ matrix.target }}
+          target/${{ matrix.target }}/release/compass
+          dist
+      - name: Verify packaged Compass binary
         shell: bash
         run: |
-          name="compass-${GITHUB_REF_NAME:-dev}-${{ matrix.target }}"
-          mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/compass" "dist/$name/"
-          cp "target/${{ matrix.target }}/release/graphify" "dist/$name/"
-          cp "target/${{ matrix.target }}/release/graphify-mcp" "dist/$name/"
-          cp README.md "dist/$name/"
-          cp LICENSE "dist/$name/"
-          cp LICENSE-MIT "dist/$name/"
-          cp LICENSE-APACHE "dist/$name/"
-          cp THIRD_PARTY_NOTICES.md "dist/$name/"
-          cp -R completions "dist/$name/"
-
-      - name: Prepare Windows distribution
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $name = "compass-$env:GITHUB_REF_NAME-${{ matrix.target }}"
-          New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/compass.exe" "dist/$name/"
-          Copy-Item "target/${{ matrix.target }}/release/graphify.exe" "dist/$name/"
-          Copy-Item "target/${{ matrix.target }}/release/graphify-mcp.exe" "dist/$name/"
-          Copy-Item README.md "dist/$name/"
-          Copy-Item LICENSE "dist/$name/"
-          Copy-Item LICENSE-MIT "dist/$name/"
-          Copy-Item LICENSE-APACHE "dist/$name/"
-          Copy-Item THIRD_PARTY_NOTICES.md "dist/$name/"
-          Copy-Item completions "dist/$name/" -Recurse
-
-      - name: Generate SPDX SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        with:
-          path: dist/compass-${{ github.ref_name }}-${{ matrix.target }}
-          format: spdx-json
-          output-file: dist/compass-${{ github.ref_name }}-${{ matrix.target }}/SBOM.spdx.json
-          artifact-name: compass-${{ matrix.target }}-sbom.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-
-      - name: Package Unix distribution
-        if: matrix.archive == 'tar.gz'
-        shell: bash
-        run: |
-          name="compass-${GITHUB_REF_NAME:-dev}-${{ matrix.target }}"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"
-
-      - name: Package Windows distribution
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $name = "compass-$env:GITHUB_REF_NAME-${{ matrix.target }}"
-          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
-          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Set-Content -NoNewline "dist/$name.zip.sha256"
-
-      - name: Verify packaged Unix binaries
-        if: matrix.archive == 'tar.gz'
-        shell: bash
-        run: |
-          name="compass-${GITHUB_REF_NAME:-dev}-${{ matrix.target }}"
+          name="compass-${{ matrix.target }}"
           mkdir -p dist/verify
           tar -C dist/verify -xzf "dist/$name.tar.gz"
           "dist/verify/$name/compass" --version
           "dist/verify/$name/compass" query --help
-          "dist/verify/$name/graphify" --help
-          "dist/verify/$name/graphify-mcp" --help
-          test -f "dist/verify/$name/SBOM.spdx.json"
           test -f "dist/verify/$name/LICENSE-MIT"
           test -f "dist/verify/$name/LICENSE-APACHE"
           test -f "dist/verify/$name/THIRD_PARTY_NOTICES.md"
-
-      - name: Verify packaged Windows binaries
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $name = "compass-$env:GITHUB_REF_NAME-${{ matrix.target }}"
-          Expand-Archive "dist/$name.zip" "dist/verify"
-          & "dist/verify/$name/compass.exe" --version
-          & "dist/verify/$name/compass.exe" query --help
-          & "dist/verify/$name/graphify.exe" --help
-          & "dist/verify/$name/graphify-mcp.exe" --help
-          if (-not (Test-Path "dist/verify/$name/SBOM.spdx.json")) { throw "SBOM missing" }
-          if (-not (Test-Path "dist/verify/$name/LICENSE-MIT")) { throw "MIT license missing" }
-          if (-not (Test-Path "dist/verify/$name/LICENSE-APACHE")) { throw "Apache license missing" }
-          if (-not (Test-Path "dist/verify/$name/THIRD_PARTY_NOTICES.md")) { throw "third-party notices missing" }
-
-      - name: Attest release archives
+          (cd dist && shasum -a 256 -c "$name.tar.gz.sha256")
+      - name: Attest release archive
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
-          subject-path: dist/*.${{ matrix.archive }}
-
+          subject-path: dist/compass-${{ matrix.target }}.tar.gz
       - name: Upload release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: compass-${{ matrix.target }}
           path: |
-            dist/*.${{ matrix.archive }}
-            dist/*.sha256
+            dist/compass-${{ matrix.target }}.tar.gz
+            dist/compass-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
 
   release:
@@ -236,14 +96,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: compass-*
           path: dist
           merge-multiple: true
-
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
-          files: dist/*
+          files: |
+            dist/*
+            scripts/install.sh

@@ -139,8 +139,8 @@ impl GraphArtifacts {
             document: GraphDocument::load_for_recluster_compatibility(
                 &output_dir.join("graph.json"),
             )?,
-            analysis: read_optional_json(&output_dir.join(".graphify_analysis.json"))?,
-            labels: read_optional_json(&output_dir.join(".graphify_labels.json"))?,
+            analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
+            labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
             manifest: read_optional_json(&output_dir.join("manifest.json"))?,
             authoritative_sidecars,
         };
@@ -313,12 +313,12 @@ impl GraphArtifacts {
 
         add_optional_analysis(
             &mut partitioned,
-            ".graphify_analysis.json",
+            ".compass_analysis.json",
             self.analysis.as_ref(),
         )?;
         add_optional_analysis(
             &mut partitioned,
-            ".graphify_labels.json",
+            ".compass_labels.json",
             self.labels.as_ref(),
         )?;
         if let Some(manifest) = &self.manifest {
@@ -377,8 +377,8 @@ impl GraphArtifacts {
                 [_, _, kind, path] if kind == b"sidecar" => {
                     let value = decode_record(bytes, "compass.analysis.sidecar")?;
                     match path.as_slice() {
-                        b".graphify_analysis.json" => analysis = Some(value),
-                        b".graphify_labels.json" => labels = Some(value),
+                        b".compass_analysis.json" => analysis = Some(value),
+                        b".compass_labels.json" => labels = Some(value),
                         _ => {
                             return Err(HistoryError::InvalidArtifacts(
                                 "unknown analysis sidecar".to_owned(),
@@ -537,10 +537,10 @@ impl GraphArtifacts {
         validate_sidecar_paths(&self.authoritative_sidecars)?;
         write_json_atomic(output_dir.join("graph.json"), &self.document, false)?;
         if let Some(value) = &self.analysis {
-            write_json_atomic(output_dir.join(".graphify_analysis.json"), value, false)?;
+            write_json_atomic(output_dir.join(".compass_analysis.json"), value, false)?;
         }
         if let Some(value) = &self.labels {
-            write_json_atomic(output_dir.join(".graphify_labels.json"), value, false)?;
+            write_json_atomic(output_dir.join(".compass_labels.json"), value, false)?;
         }
         if let Some(value) = &self.manifest {
             write_json_atomic(output_dir.join("manifest.json"), value, false)?;
@@ -554,7 +554,7 @@ impl GraphArtifacts {
             write_bytes_atomic(destination, bytes)?;
         }
         write_json_atomic(
-            output_dir.join(".graphify_semantic_marker"),
+            output_dir.join(".compass_semantic_marker"),
             &SemanticCompletionMarker::from(completion),
             false,
         )?;
@@ -634,8 +634,8 @@ fn artifact_registry(
         &graph_bytes,
     )];
     for (path, value) in [
-        (".graphify_analysis.json", artifacts.analysis.as_ref()),
-        (".graphify_labels.json", artifacts.labels.as_ref()),
+        (".compass_analysis.json", artifacts.analysis.as_ref()),
+        (".compass_labels.json", artifacts.labels.as_ref()),
         ("manifest.json", artifacts.manifest.as_ref()),
     ] {
         if let Some(value) = value {
@@ -655,7 +655,7 @@ fn artifact_registry(
         "GRAPH_REPORT.md",
         "graph.html",
         "GRAPH_TREE.html",
-        ".graphify_labels.json.sig",
+        ".compass_labels.json.sig",
     ] {
         registry.push(ArtifactRegistryEntry {
             registry_version: 1,
@@ -677,7 +677,7 @@ fn artifact_registry(
     }
     registry.push(ArtifactRegistryEntry {
         registry_version: 1,
-        relative_path: ".graphify_semantic_marker".to_owned(),
+        relative_path: ".compass_semantic_marker".to_owned(),
         class: ArtifactClass::Operational,
         media_type: "application/json".to_owned(),
         schema_version: None,
@@ -726,7 +726,7 @@ fn completion_from_partition(
 fn is_builtin_artifact(path: &str) -> bool {
     matches!(
         path,
-        "graph.json" | ".graphify_analysis.json" | ".graphify_labels.json" | "manifest.json"
+        "graph.json" | ".compass_analysis.json" | ".compass_labels.json" | "manifest.json"
     )
 }
 
@@ -827,12 +827,12 @@ fn verify_builtin_registry_content(
             "graph.json" => Some(canonical_json_bytes(&serde_json::to_value(
                 &artifacts.document,
             )?)?),
-            ".graphify_analysis.json" => artifacts
+            ".compass_analysis.json" => artifacts
                 .analysis
                 .as_ref()
                 .map(canonical_json_bytes)
                 .transpose()?,
-            ".graphify_labels.json" => artifacts
+            ".compass_labels.json" => artifacts
                 .labels
                 .as_ref()
                 .map(canonical_json_bytes)
@@ -1126,8 +1126,8 @@ mod tests {
         }
         assert!(validate_relative_path("nested/facts.json").is_ok());
         assert!(is_builtin_artifact("graph.json"));
-        assert!(is_builtin_artifact(".graphify_analysis.json"));
-        assert!(is_builtin_artifact(".graphify_labels.json"));
+        assert!(is_builtin_artifact(".compass_analysis.json"));
+        assert!(is_builtin_artifact(".compass_labels.json"));
         assert!(is_builtin_artifact("manifest.json"));
         assert!(!is_builtin_artifact("custom.json"));
 

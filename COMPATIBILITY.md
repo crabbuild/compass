@@ -1,8 +1,8 @@
 # Compass compatibility ledger
 
-Compass is a native Rust implementation of Graphify with a strict compatibility
-adapter. The compatibility executable is `graphify`; the primary product
-interface is `compass`.
+Compass is a native Rust implementation of Graphify. The Rust workspace uses a
+frozen Python Graphify checkout as a development oracle, but releases ship only
+the `compass` executable.
 
 ## Frozen oracle
 
@@ -17,11 +17,10 @@ added below before it can be called compatible.
 
 ## Compatibility contract
 
-For every command exposed by the `graphify` binary, parity includes argument
-forms, exit status, stdout and stderr, graph and sidecar schemas, cache and
-manifest behavior, deterministic ordering, installed files, and mutation of
-existing `graphify-out/` directories. Tests normalize only declared sources of
-variability such as temporary roots, elapsed time, and frozen clock values.
+Selected Compass commands retain differential fixtures for argument forms, exit
+status, graph schemas, deterministic ordering, and native extraction behavior.
+The Python oracle writes `graphify-out/`; Compass writes `compass-out/`. Runtime
+paths and sidecar names are not a compatibility contract.
 
 The frozen Python query renderer has one inherently unstable behavior: nodes
 with equal degree are emitted from `set` iteration, so their relative order
@@ -38,10 +37,8 @@ still match exactly.
 The released binaries do not start Python and do not load tree-sitter grammars
 at runtime. Python is a development and CI oracle only.
 
-`compass query --cql` is a Compass-native product surface and is deliberately
-absent from the `graphify` compatibility executable because the frozen Python
-oracle has no equivalent flag. Natural-language `graphify query` parsing and
-output remain governed by the compatibility contract above.
+`compass query --cql` is a Compass-native product surface. The frozen Python
+oracle has no equivalent flag.
 
 ## Certified command families
 
@@ -50,7 +47,7 @@ output remain governed by the compatibility contract above.
 | Build | `update`, `extract`, `watch`, `cluster-only`, `label` | cold, warm, changed, rename/delete, graph, cache, manifest, report, and CLI parity fixtures |
 | Query | `query`, `path`, `explain`, `affected`, `tree`, `benchmark` | Python-generated and native graphs, legacy `edges`, stable ranking, traversal, budgets, and output snapshots |
 | Graph operations | `export`, `diagnose multigraph`, `merge-graphs`, `merge-driver`, `merge-chunks`, `merge-semantic`, `cache-check` | structure, attributes, ordering, conflict, malformed-input, and round-trip fixtures |
-| Service | `serve` and `graphify-mcp` | official MCP client oracle, all tools/resources, stdio and HTTP transport, authentication and limits |
+| Service | `serve` | official MCP client oracle, all tools/resources, stdio and HTTP transport, authentication and limits |
 | Project workflows | `global`, `clone`, `add`, `prs`, `hook`, `provider`, `save-result`, `reflect`, `check-update`, `hook-check`, `hook-guard` | command-specific Python oracles and native integration tests |
 | Assistant setup | `install`, `uninstall`, and direct platform commands | stdout/stderr plus complete global/project filesystem-tree comparison for every supported platform |
 
@@ -75,7 +72,7 @@ not depend on a source checkout, Python package, or network access.
 
 ## Platform and distribution matrix
 
-CI tests and release packaging cover:
+CI tests cover:
 
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
@@ -84,9 +81,11 @@ CI tests and release packaging cover:
 - `x86_64-pc-windows-msvc`
 - `aarch64-pc-windows-msvc`
 
-Each release archive contains `compass`, `graphify`, and `graphify-mcp`, license
-notices, completions, an SPDX SBOM, a SHA-256 checksum, and build-provenance
-attestation. Cargo packages are verified independently from workspace builds.
+Release packaging currently covers `x86_64-apple-darwin` and
+`aarch64-apple-darwin`. Each archive contains `compass`, license notices, and
+completions. A separate file records the SHA-256 checksum, and the automated
+workflow records build provenance. Cargo packages are verified independently
+from workspace builds.
 
 ## Evidence commands
 
@@ -94,12 +93,10 @@ From the Compass repository root, with Graphify checked out as a sibling:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-GRAPHIFY_PYTHON=../.venv/bin/python GRAPHIFY_MEDIA_PYTHON=../.venv-media/bin/python cargo test --workspace --all-targets --all-features --locked
-GRAPHIFY_PYTHON=../.venv/bin/python GRAPHIFY_MEDIA_PYTHON=../.venv-media/bin/python cargo nextest run --workspace --all-features --locked
-GRAPHIFY_PYTHON=../.venv/bin/python GRAPHIFY_MEDIA_PYTHON=../.venv-media/bin/python cargo llvm-cov --workspace --all-features --all-targets --locked --exclude compass-tree-sitter-language-pack --lcov --output-path target/compass.lcov
-cargo llvm-cov report --summary-only --ignore-filename-regex='(^|/)vendor/' --fail-under-lines 90 --fail-under-regions 85
-scripts/check_critical_coverage.sh target/compass.lcov 95
+cargo clippy --workspace --lib --bins --locked -- -D warnings
+cargo test --workspace --lib --bins --locked
+cargo test -p compass-cli --test compass_product --locked
+sh scripts/test_release_scripts.sh
 cargo package --workspace --locked --no-verify
 cargo deny check
 ```

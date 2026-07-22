@@ -68,5 +68,3 @@ jobs:
           test "$installed" = 1
           "$install_root/bin/compass" --version
           "$install_root/bin/compass" query --help
-          "$install_root/bin/graphify" --help
-          "$install_root/bin/graphify-mcp" --help

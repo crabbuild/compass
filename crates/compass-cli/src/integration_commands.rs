@@ -17,11 +17,11 @@ const MERGE_MAX_NODES: usize = 100_000;
 const MANIFEST_MAX_BYTES: u64 = 2_000_000;
 const SESSION_ID_MAX_CHARS: usize = 64;
 
-const SEARCH_NUDGE_TEXT: &str = "MANDATORY: graphify-out/graph.json exists. You MUST run `graphify query \"<question>\"` before grepping raw files. Only grep after graphify has oriented you, or to modify/debug specific lines.";
-const READ_NUDGE_TEXT: &str = "MANDATORY: graphify-out/graph.json exists. You MUST run graphify before reading source files. Use: `graphify query \"<question>\"` (scoped subgraph), `graphify explain \"<concept>\"`, or `graphify path \"<A>\" \"<B>\"`. Only read raw files after graphify has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration.";
-const READ_STALE_TEXT: &str = "graphify-out/graph.json exists but may be STALE for this file (the file changed after the last build). Prefer `graphify query \"<question>\"` for orientation, and run `graphify update` to refresh the graph. Reading the file directly is fine.";
+const SEARCH_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run `graphify query \"<question>\"` before grepping raw files. Only grep after graphify has oriented you, or to modify/debug specific lines.";
+const READ_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run graphify before reading source files. Use: `graphify query \"<question>\"` (scoped subgraph), `graphify explain \"<concept>\"`, or `graphify path \"<A>\" \"<B>\"`. Only read raw files after graphify has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration.";
+const READ_STALE_TEXT: &str = "compass-out/graph.json exists but may be STALE for this file (the file changed after the last build). Prefer `graphify query \"<question>\"` for orientation, and run `graphify update` to refresh the graph. Reading the file directly is fine.";
 const READ_DENY_TEXT: &str = "graphify strict mode: this project has a fresh knowledge graph that covers this file. Run `graphify query \"<your question>\"` (or `graphify explain` / `graphify path`) FIRST to orient yourself, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query. Apply the same rule in any subagent prompt that explores code.";
-const GEMINI_NUDGE_TEXT: &str = "graphify: knowledge graph at graphify-out/. For focused questions, run `graphify query \"<question>\"` (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.";
+const GEMINI_NUDGE_TEXT: &str = "graphify: knowledge graph at compass-out/. For focused questions, run `graphify query \"<question>\"` (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.";
 const SOURCE_EXTENSIONS: &[&str] = &[
     "py", "js", "cjs", "ts", "tsx", "jsx", "astro", "vue", "svelte", "go", "rs", "java", "rb", "c",
     "h", "cpp", "hpp", "cc", "cs", "kt", "swift", "php", "scala", "lua", "sh", "md", "rst", "txt",
@@ -380,7 +380,7 @@ fn read_guard(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&output);
-    if joined.contains("graphify-out/") || joined.contains(&format!("{output_name}/")) {
+    if joined.contains("compass-out/") || joined.contains(&format!("{output_name}/")) {
         return None;
     }
     let source_target = values.iter().any(|value| {
@@ -934,7 +934,7 @@ fn python_pretty_json(value: &Value) -> Result<String, serde_json::Error> {
 }
 
 fn output_root() -> PathBuf {
-    PathBuf::from(std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned()))
+    PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
 }
 
 fn graph_path() -> PathBuf {

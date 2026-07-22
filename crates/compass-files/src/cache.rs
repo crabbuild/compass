@@ -38,8 +38,7 @@ impl Cache {
         let root =
             fs::canonicalize(root.as_ref()).map_err(|source| io_error(root.as_ref(), source))?;
         let cache_root = cache_root.map_or_else(|| root.clone(), Path::to_path_buf);
-        let output_name =
-            std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+        let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
         let hashes = StatHashIndex::load(&cache_root, &output_name);
         let cache = Self {
             root,

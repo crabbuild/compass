@@ -86,7 +86,7 @@ pub fn watch_local_graph(
             path: options.build.root.clone(),
             source,
         })?;
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let filter = WatchPathFilter::new(
         &root,
         &DetectOptions {
@@ -209,8 +209,7 @@ fn process_batch(
     }
     if semantic > 0 {
         let output_root = options.build.output_root.as_deref().unwrap_or(root);
-        let output_name =
-            std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+        let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
         let flag = output_root.join(output_name).join("needs_update");
         write_text_atomic(&flag, "1")?;
         emit(WatchStatus::SemanticUpdateRequired { flag });
@@ -307,8 +306,8 @@ mod tests {
         result?;
 
         assert!(complete, "watch statuses: {:?}", statuses.lock());
-        assert!(root.join("graphify-out/needs_update").is_file());
-        let graph = compass_model::GraphDocument::load(&root.join("graphify-out/graph.json"))?;
+        assert!(root.join("compass-out/needs_update").is_file());
+        let graph = compass_model::GraphDocument::load(&root.join("compass-out/graph.json"))?;
         assert!(
             graph
                 .nodes

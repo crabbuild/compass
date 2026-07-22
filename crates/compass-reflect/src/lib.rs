@@ -61,13 +61,13 @@ pub fn reflect(options: &ReflectOptions) -> Result<ReflectResult, ReflectError> 
             graph
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
-                .join(".graphify_analysis.json")
+                .join(".compass_analysis.json")
         });
         let labels = options.labels.clone().unwrap_or_else(|| {
             graph
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
-                .join(".graphify_labels.json")
+                .join(".compass_labels.json")
         });
         aggregate::load_graph_context(graph, &analysis, &labels)
     });

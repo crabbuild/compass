@@ -692,7 +692,7 @@ fn uninstall_kilo_direct(root: &Path) -> Outcome {
             let _ = fs::remove_file(&skill);
             removed.push(format!("skill removed: {}", skill.display()));
         }
-        let _ = fs::remove_file(skill.with_file_name(".graphify_version"));
+        let _ = fs::remove_file(skill.with_file_name(".compass_version"));
         remove_empty_ancestors(&skill.with_file_name("placeholder"), &home);
         if removed.is_empty() {
             lines.push("nothing to remove".to_owned());
@@ -762,7 +762,7 @@ fn uninstall_antigravity(root: &Path, project: bool) -> Outcome {
                 display_path(&skill, project, root)
             ));
         }
-        let _ = fs::remove_file(skill.with_file_name(".graphify_version"));
+        let _ = fs::remove_file(skill.with_file_name(".compass_version"));
         let _ = fs::remove_dir_all(skill.with_file_name("references"));
     }
     Outcome::success(lines.join("\n"))
@@ -819,7 +819,7 @@ fn install_antigravity_direct(root: &Path, prefix: &str) -> Outcome {
     }
     outcome.stdout.push_str(&format!("\n{}", lines.join("\n")));
     outcome.stdout.push_str("\n\nAntigravity will now check the knowledge graph before answering\ncodebase questions. Run /graphify first to build the graph.");
-    outcome.stdout.push_str("\n\nTo enable full MCP architecture navigation, add this to ~/.gemini/antigravity/mcp_config.json:\n  \"graphify\": {\n    \"command\": \"uv\",\n    \"args\": [\"run\", \"--with\", \"graphifyy\", \"--with\", \"mcp\", \"-m\", \"graphify.serve\", \"${workspace.path}/graphify-out/graph.json\"]\n  }");
+    outcome.stdout.push_str("\n\nTo enable full MCP architecture navigation, add this to ~/.gemini/antigravity/mcp_config.json:\n  \"graphify\": {\n    \"command\": \"uv\",\n    \"args\": [\"run\", \"--with\", \"graphifyy\", \"--with\", \"mcp\", \"-m\", \"graphify.serve\", \"${workspace.path}/compass-out/graph.json\"]\n  }");
     outcome
 }
 
@@ -905,7 +905,7 @@ fn install_skill(
         )
     })?;
     write_owned(destination.clone(), body)?;
-    write_owned(parent.join(".graphify_version"), COMPAT_VERSION)?;
+    write_owned(parent.join(".compass_version"), COMPAT_VERSION)?;
     messages.push(format!(
         "  skill installed  ->  {}",
         display_path(&destination, project, project_dir)
@@ -1056,7 +1056,7 @@ fn install_skill_at(config: Platform, destination: PathBuf) -> Result<SkillInsta
         destination.clone(),
         asset_text(config.skill_file).unwrap_or_default(),
     )?;
-    write_owned(parent.join(".graphify_version"), COMPAT_VERSION)?;
+    write_owned(parent.join(".compass_version"), COMPAT_VERSION)?;
     messages.push(format!("  skill installed  ->  {}", destination.display()));
     Ok(SkillInstall {
         path: destination,
@@ -1174,7 +1174,7 @@ fn uninstall_all(project: bool, purge: bool, project_dir: &Path, prefix: &str) -
         }
     }
     if purge {
-        let output = env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+        let output = env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
         let target = project_dir.join(output);
         if target.exists() {
             if let Err(error) = fs::remove_dir_all(&target) {
@@ -1470,7 +1470,7 @@ fn remove_skill(config: Platform, project: bool, project_dir: &Path, lines: &mut
         ));
     }
     if let Some(parent) = parent {
-        let _ = fs::remove_file(parent.join(".graphify_version"));
+        let _ = fs::remove_file(parent.join(".compass_version"));
         let _ = fs::remove_dir_all(parent.join("references"));
         remove_empty_ancestors(&parent, if project { project_dir } else { Path::new("") });
     }
@@ -1484,7 +1484,7 @@ fn uninstall_vscode(project_dir: &Path) -> Outcome {
             lines.push(format!("  skill removed    ->  {}", path.display()));
         }
         if let Some(parent) = path.parent() {
-            let _ = fs::remove_file(parent.join(".graphify_version"));
+            let _ = fs::remove_file(parent.join(".compass_version"));
             let _ = fs::remove_dir_all(parent.join("references"));
         }
     }
@@ -1915,10 +1915,10 @@ fn capitalize(value: &str) -> String {
 }
 
 const ANTIGRAVITY_WORKFLOW: &str = "---\nname: graphify\ndescription: Turn any folder of files into a navigable knowledge graph\n---\n\n# Workflow: graphify\n\nFollow the graphify skill installed at ~/.gemini/config/skills/graphify/SKILL.md to run the full pipeline.\n\nIf no path argument is given, use `.` (current directory).\n";
-const DEVIN_RULES: &str = "## graphify\n\nThis project has a graphify knowledge graph at graphify-out/.\n\nRules:\n- For codebase or architecture questions, when `graphify-out/graph.json` exists, first run `graphify query \"<question>\"` (or `graphify path \"<A>\" \"<B>\"` / `graphify explain \"<concept>\"`). These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output.\n- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files\n- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context\n- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)\n";
-const CURSOR_RULE: &str = "---\ndescription: graphify knowledge graph context\nalwaysApply: true\n---\n\nThis project has a graphify knowledge graph at graphify-out/.\n\n**MANDATORY: Before using Read, Grep, Glob, or Bash to explore the codebase, you MUST run graphify first:**\n- `graphify query \"<question>\"` — scoped subgraph for any codebase or architecture question\n- `graphify path \"<A>\" \"<B>\"` — dependency path between two symbols\n- `graphify explain \"<concept>\"` — all nodes related to a concept\n\nThis applies to YOU and to every subagent you spawn. Include this rule explicitly in every subagent prompt that involves code exploration. Do not skip graphify because files are \"already known\" or because you are executing a plan — the graph surfaces cross-file dependencies and INFERRED edges that grep and Read cannot find.\n\nOnly use Read/Grep/Glob directly when:\n1. graphify has already oriented you and you need to modify or debug specific lines\n2. `graphify-out/graph.json` does not exist yet\n\n- If `graphify-out/wiki/index.md` exists, navigate it instead of reading raw files\n- Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review when query/path/explain do not surface enough context\n- After modifying code files, run `graphify update .` to keep the graph current (AST-only, no API cost)\n";
-const OPENCODE_PLUGIN: &str = "// graphify OpenCode plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\n//\n// IMPORTANT: keep the reminder string free of backticks and $(...) constructs.\n// The hook prepends `echo \"<reminder>\" && <cmd>` to the user's bash command;\n// backticks inside the double-quoted echo trigger bash command substitution,\n// which both corrupts tool output and silently executes the very graphify\n// command we are only suggesting. Plain words render fine in opencode's TUI.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const GraphifyPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"graphify-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a statement\n        // separator, breaking the first bash command of the session (#1646).\n        output.args.command =\n          'echo \"[graphify] knowledge graph at graphify-out/. For focused questions, run graphify query with your question (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
-const KILO_PLUGIN: &str = "// graphify Kilo plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const GraphifyPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"graphify-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // Separate with ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a\n        // statement separator (\"not a valid statement separator\"), which broke\n        // the first bash command in every OpenCode session on Windows (#1646).\n        // ';' works in PowerShell 5.1, Bash, and POSIX shells alike.\n        output.args.command =\n          'echo \"[graphify] Knowledge graph available. Read graphify-out/GRAPH_REPORT.md for god nodes and architecture context before searching files.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
+const DEVIN_RULES: &str = "## graphify\n\nThis project has a graphify knowledge graph at compass-out/.\n\nRules:\n- For codebase or architecture questions, when `compass-out/graph.json` exists, first run `graphify query \"<question>\"` (or `graphify path \"<A>\" \"<B>\"` / `graphify explain \"<concept>\"`). These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output.\n- If compass-out/wiki/index.md exists, navigate it instead of reading raw files\n- Read compass-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context\n- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)\n";
+const CURSOR_RULE: &str = "---\ndescription: graphify knowledge graph context\nalwaysApply: true\n---\n\nThis project has a graphify knowledge graph at compass-out/.\n\n**MANDATORY: Before using Read, Grep, Glob, or Bash to explore the codebase, you MUST run graphify first:**\n- `graphify query \"<question>\"` — scoped subgraph for any codebase or architecture question\n- `graphify path \"<A>\" \"<B>\"` — dependency path between two symbols\n- `graphify explain \"<concept>\"` — all nodes related to a concept\n\nThis applies to YOU and to every subagent you spawn. Include this rule explicitly in every subagent prompt that involves code exploration. Do not skip graphify because files are \"already known\" or because you are executing a plan — the graph surfaces cross-file dependencies and INFERRED edges that grep and Read cannot find.\n\nOnly use Read/Grep/Glob directly when:\n1. graphify has already oriented you and you need to modify or debug specific lines\n2. `compass-out/graph.json` does not exist yet\n\n- If `compass-out/wiki/index.md` exists, navigate it instead of reading raw files\n- Read `compass-out/GRAPH_REPORT.md` only for broad architecture review when query/path/explain do not surface enough context\n- After modifying code files, run `graphify update .` to keep the graph current (AST-only, no API cost)\n";
+const OPENCODE_PLUGIN: &str = "// graphify OpenCode plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\n//\n// IMPORTANT: keep the reminder string free of backticks and $(...) constructs.\n// The hook prepends `echo \"<reminder>\" && <cmd>` to the user's bash command;\n// backticks inside the double-quoted echo trigger bash command substitution,\n// which both corrupts tool output and silently executes the very graphify\n// command we are only suggesting. Plain words render fine in opencode's TUI.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const GraphifyPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a statement\n        // separator, breaking the first bash command of the session (#1646).\n        output.args.command =\n          'echo \"[graphify] knowledge graph at compass-out/. For focused questions, run graphify query with your question (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
+const KILO_PLUGIN: &str = "// graphify Kilo plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const GraphifyPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // Separate with ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a\n        // statement separator (\"not a valid statement separator\"), which broke\n        // the first bash command in every OpenCode session on Windows (#1646).\n        // ';' works in PowerShell 5.1, Bash, and POSIX shells alike.\n        output.args.command =\n          'echo \"[graphify] Knowledge graph available. Read compass-out/GRAPH_REPORT.md for god nodes and architecture context before searching files.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
 
 #[cfg(test)]
 mod tests {
@@ -2005,7 +2005,7 @@ mod tests {
     fn project_uninstall_all_purges_only_the_scoped_output()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
-        let output = directory.path().join("graphify-out");
+        let output = directory.path().join("compass-out");
         fs::create_dir_all(&output)?;
         fs::write(output.join("graph.json"), "{}")?;
         let outcome = uninstall_all(true, true, directory.path(), "compass");

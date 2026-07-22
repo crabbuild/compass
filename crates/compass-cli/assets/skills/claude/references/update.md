@@ -7,7 +7,7 @@ Load this only when the user passed `--update` or `--cluster-only`. A first-time
 Use when you've added or modified files since the last run. Only re-extracts changed files - saves tokens and time.
 
 ```bash
-$(cat graphify-out/.graphify_python) -c "
+$(cat compass-out/.compass_python) -c "
 import sys, json
 from graphify.detect import detect_incremental, save_manifest
 from pathlib import Path
@@ -15,7 +15,7 @@ from pathlib import Path
 result = detect_incremental(Path('INPUT_PATH'))
 new_total = result.get('new_total', 0)
 print(json.dumps(result, indent=2, ensure_ascii=False))
-Path('graphify-out/.graphify_incremental.json').write_text(json.dumps(result, ensure_ascii=False), encoding=\"utf-8\")
+Path('compass-out/.compass_incremental.json').write_text(json.dumps(result, ensure_ascii=False), encoding=\"utf-8\")
 deleted = list(result.get('deleted_files', []))
 if new_total == 0 and not deleted:
     print('No files changed since last run. Nothing to update.')
@@ -27,14 +27,14 @@ if new_total > 0:
 "
 ```
 
-Then populate `.graphify_detect.json` so Steps 3A–6 (which read it unconditionally) see the right state for an incremental run. `files` carries the changed subset (drives Step 3A AST + Step 3B0 cache check on only what changed); `all_files` carries the full corpus for any step that needs corpus-wide context:
+Then populate `.compass_detect.json` so Steps 3A–6 (which read it unconditionally) see the right state for an incremental run. `files` carries the changed subset (drives Step 3A AST + Step 3B0 cache check on only what changed); `all_files` carries the full corpus for any step that needs corpus-wide context:
 
 ```bash
-$(cat graphify-out/.graphify_python) -c "
+$(cat compass-out/.compass_python) -c "
 import json
 from pathlib import Path
-r = json.loads(Path('graphify-out/.graphify_incremental.json').read_text(encoding=\"utf-8\"))
-Path('graphify-out/.graphify_detect.json').write_text(json.dumps({
+r = json.loads(Path('compass-out/.compass_incremental.json').read_text(encoding=\"utf-8\"))
+Path('compass-out/.compass_detect.json').write_text(json.dumps({
     'files': r.get('new_files', {}),
     'all_files': r.get('files', {}),
     'total_files': r.get('new_total', 0),
@@ -48,11 +48,11 @@ Path('graphify-out/.graphify_detect.json').write_text(json.dumps({
 If new files exist, first check whether all changed files are code files:
 
 ```bash
-$(cat graphify-out/.graphify_python) -c "
+$(cat compass-out/.compass_python) -c "
 import json
 from pathlib import Path
 
-result = json.loads(open('graphify-out/.graphify_incremental.json', encoding='utf-8').read()) if Path('graphify-out/.graphify_incremental.json').exists() else {}
+result = json.loads(open('compass-out/.compass_incremental.json', encoding='utf-8').read()) if Path('compass-out/.compass_incremental.json').exists() else {}
 code_exts = {'.py','.ts','.js','.go','.rs','.java','.cpp','.c','.rb','.swift','.kt','.cs','.scala','.php','.cc','.cxx','.hpp','.h','.kts','.lua','.toc','.f','.F','.f90','.F90','.f95','.F95','.f03','.F03','.f08','.F08'}
 new_files = result.get('new_files', {})
 all_changed = [f for files in new_files.values() for f in files]
@@ -61,20 +61,20 @@ print('code_only:', code_only)
 "
 ```
 
-If `code_only` is True: print `[graphify update] Code-only changes detected - skipping semantic extraction (no LLM needed)`, run only Step 3A (AST) on the changed files, skip Step 3B entirely (no subagents), then go straight to merge and Steps 4–8.
+If `code_only` is True: print `[compass update] Code-only changes detected - skipping semantic extraction (no LLM needed)`, run only Step 3A (AST) on the changed files, skip Step 3B entirely (no subagents), then go straight to merge and Steps 4–8.
 
-If `code_only` is False (any changed file is a doc/paper/image/video): **first, if any changed file is in `new_files['video']`, run `references/transcribe.md` (Step 2.5) on those files, then rewrite `.graphify_detect.json` to move the resulting transcript paths into `files['document']` and drop `files['video']`** — otherwise raw `.mp4/.mp3` paths are fed to semantic subagents as unreadable media (#1392). Then run the full Steps 3A–3C pipeline as normal.
+If `code_only` is False (any changed file is a doc/paper/image/video): **first, if any changed file is in `new_files['video']`, run `references/transcribe.md` (Step 2.5) on those files, then rewrite `.compass_detect.json` to move the resulting transcript paths into `files['document']` and drop `files['video']`** — otherwise raw `.mp4/.mp3` paths are fed to semantic subagents as unreadable media (#1392). Then run the full Steps 3A–3C pipeline as normal.
 
 
 If no new files exist (only deletions), create an empty extraction so the merge step can prune:
 
 ```bash
-if [ ! -f graphify-out/.graphify_extract.json ]; then
-    echo '[graphify update] Only deletions -- creating empty extraction for merge.'
-    $(cat graphify-out/.graphify_python) -c "
+if [ ! -f compass-out/.compass_extract.json ]; then
+    echo '[compass update] Only deletions -- creating empty extraction for merge.'
+    $(cat compass-out/.compass_python) -c "
 import json
 from pathlib import Path
-Path('graphify-out/.graphify_extract.json').write_text(json.dumps({'nodes':[],'edges':[],'hyperedges':[],'input_tokens':0,'output_tokens':0}), encoding='utf-8')
+Path('compass-out/.compass_extract.json').write_text(json.dumps({'nodes':[],'edges':[],'hyperedges':[],'input_tokens':0,'output_tokens':0}), encoding='utf-8')
 "
 fi
 ```
@@ -83,15 +83,15 @@ fi
 Then:
 
 ```bash
-$(cat graphify-out/.graphify_python) -c "
+$(cat compass-out/.compass_python) -c "
 import json
 from pathlib import Path
 from graphify.build import build_merge
 from graphify.detect import save_manifest
 
 # Load new extraction and incremental state
-new_extraction = json.loads(Path('graphify-out/.graphify_extract.json').read_text(encoding=\"utf-8\"))
-incremental = json.loads(Path('graphify-out/.graphify_incremental.json').read_text(encoding=\"utf-8\"))
+new_extraction = json.loads(Path('compass-out/.compass_extract.json').read_text(encoding=\"utf-8\"))
+incremental = json.loads(Path('compass-out/.compass_incremental.json').read_text(encoding=\"utf-8\"))
 deleted = list(incremental.get('deleted_files', []))
 # prune_sources is ONLY for genuinely DELETED files. Changed/re-extracted files are
 # handled by build_merge's replace-on-re-extract (#1344): every source_file in
@@ -111,14 +111,14 @@ prune = list(deleted) or None
 # reciprocal A<->B edges (#1392).
 G = build_merge(
     [new_extraction],
-    graph_path='graphify-out/graph.json',
+    graph_path='compass-out/graph.json',
     prune_sources=prune,
     root='INPUT_PATH',
     directed=IS_DIRECTED,
 )
-print(f'[graphify update] Merged: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges')
+print(f'[compass update] Merged: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges')
 
-# Write merged result back to .graphify_extract.json so Step 4 sees the full graph
+# Write merged result back to .compass_extract.json so Step 4 sees the full graph
 merged_out = {
     'nodes': [{'id': n, **d} for n, d in G.nodes(data=True)],
     'edges': [
@@ -134,8 +134,8 @@ merged_out = {
     'input_tokens': new_extraction.get('input_tokens', 0),
     'output_tokens': new_extraction.get('output_tokens', 0),
 }
-Path('graphify-out/.graphify_extract.json').write_text(json.dumps(merged_out, ensure_ascii=False), encoding=\"utf-8\")
-print(f'[graphify update] Merged extraction written ({len(merged_out[\"nodes\"])} nodes, {len(merged_out[\"edges\"])} edges)')
+Path('compass-out/.compass_extract.json').write_text(json.dumps(merged_out, ensure_ascii=False), encoding=\"utf-8\")
+print(f'[compass update] Merged extraction written ({len(merged_out[\"nodes\"])} nodes, {len(merged_out[\"edges\"])} edges)')
 
 # Save manifest so next --update diffs against today's state, not the
 # prior run's baseline (prevents ghost-node reports on subsequent updates).
@@ -143,7 +143,7 @@ print(f'[graphify update] Merged extraction written ({len(merged_out[\"nodes\"])
 # the scan root — portable across clones/machines, so --update keeps matching
 # cached files instead of missing every one after a move (#1417).
 save_manifest(incremental['files'], root='INPUT_PATH')
-print('[graphify update] Manifest saved.')
+print('[compass update] Manifest saved.')
 "
 ```
 
@@ -152,7 +152,7 @@ Then run Steps 4–8 on the merged graph as normal.
 After Step 4, show the graph diff:
 
 ```bash
-$(cat graphify-out/.graphify_python) -c "
+$(cat compass-out/.compass_python) -c "
 import json
 from graphify.analyze import graph_diff
 from graphify.build import build_from_json
@@ -161,8 +161,8 @@ import networkx as nx
 from pathlib import Path
 
 # Load old graph (before update) from backup written before merge
-old_data = json.loads(Path('graphify-out/.graphify_old.json').read_text(encoding=\"utf-8\")) if Path('graphify-out/.graphify_old.json').exists() else None
-new_extract = json.loads(Path('graphify-out/.graphify_extract.json').read_text(encoding=\"utf-8\"))
+old_data = json.loads(Path('compass-out/.compass_old.json').read_text(encoding=\"utf-8\")) if Path('compass-out/.compass_old.json').exists() else None
+new_extract = json.loads(Path('compass-out/.compass_extract.json').read_text(encoding=\"utf-8\"))
 G_new = build_from_json(new_extract, directed=IS_DIRECTED)
 
 if old_data:
@@ -176,8 +176,8 @@ if old_data:
 "
 ```
 
-Before the merge step, save the old graph: `cp graphify-out/graph.json graphify-out/.graphify_old.json`
-Clean up after: `rm -f graphify-out/.graphify_old.json`
+Before the merge step, save the old graph: `cp compass-out/graph.json compass-out/.compass_old.json`
+Clean up after: `rm -f compass-out/.compass_old.json`
 
 ---
 
@@ -186,7 +186,7 @@ Clean up after: `rm -f graphify-out/.graphify_old.json`
 Skip Steps 1–3. Re-run clustering on the existing graph:
 
 ```bash
-graphify cluster-only .
+compass cluster-only .
 ```
 
-`graphify cluster-only .` is **self-contained**: it re-clusters, names communities, and regenerates `GRAPH_REPORT.md`, `graph.json`, and `graph.html` from the existing graph. **Do not re-run Steps 5–9** — they read intermediate files (`.graphify_extract.json`, `.graphify_detect.json`, `.graphify_analysis.json`) that a prior build's cleanup (Step 9) already deleted, so they raise `FileNotFoundError` (#1392). When it finishes, present the refreshed `GRAPH_REPORT.md` summary as usual.
+`compass cluster-only .` is **self-contained**: it re-clusters, names communities, and regenerates `GRAPH_REPORT.md`, `graph.json`, and `graph.html` from the existing graph. **Do not re-run Steps 5–9** — they read intermediate files (`.compass_extract.json`, `.compass_detect.json`, `.compass_analysis.json`) that a prior build's cleanup (Step 9) already deleted, so they raise `FileNotFoundError` (#1392). When it finishes, present the refreshed `GRAPH_REPORT.md` summary as usual.

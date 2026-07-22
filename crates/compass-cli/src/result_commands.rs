@@ -52,8 +52,7 @@ pub(super) fn command_save_result(frontend: Frontend, args: &[String]) -> Outcom
             }
         }
     };
-    let default_output =
-        std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let default_output = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let memory_dir = options
         .memory_dir
         .unwrap_or_else(|| PathBuf::from(default_output).join("memory"));
@@ -74,7 +73,7 @@ pub(super) fn command_save_result(frontend: Frontend, args: &[String]) -> Outcom
 }
 
 pub(super) fn command_reflect(frontend: Frontend, args: &[String]) -> Outcome {
-    let output_root = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_root = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let mut memory_dir = PathBuf::from(&output_root).join("memory");
     let mut output = PathBuf::from(&output_root).join("reflections/LESSONS.md");
     let mut graph = None;
@@ -155,8 +154,8 @@ pub(super) fn command_reflect(frontend: Frontend, args: &[String]) -> Outcome {
     }
     if let Some(graph_path) = graph.as_deref() {
         let parent = graph_path.parent().unwrap_or_else(|| Path::new("."));
-        analysis.get_or_insert_with(|| parent.join(".graphify_analysis.json"));
-        labels.get_or_insert_with(|| parent.join(".graphify_labels.json"));
+        analysis.get_or_insert_with(|| parent.join(".compass_analysis.json"));
+        labels.get_or_insert_with(|| parent.join(".compass_labels.json"));
     }
     if if_stale
         && lessons_fresh(

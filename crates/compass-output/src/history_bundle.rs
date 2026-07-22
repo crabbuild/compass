@@ -63,16 +63,16 @@ pub fn publish_history_bundle(
 fn build_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), OutputError> {
     write_json_atomic(staging.join("graph.json"), input.document, false)?;
     if let Some(value) = input.analysis {
-        write_json_atomic(staging.join(".graphify_analysis.json"), value, false)?;
+        write_json_atomic(staging.join(".compass_analysis.json"), value, false)?;
     }
     if let Some(value) = input.labels {
-        write_json_atomic(staging.join(".graphify_labels.json"), value, false)?;
+        write_json_atomic(staging.join(".compass_labels.json"), value, false)?;
     }
     if let Some(value) = input.manifest {
         write_json_atomic(staging.join("manifest.json"), value, false)?;
     }
     write_json_atomic(
-        staging.join(".graphify_semantic_marker"),
+        staging.join(".compass_semantic_marker"),
         input.semantic_marker,
         false,
     )?;
@@ -159,16 +159,12 @@ fn render_v1(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), Outpu
             &TreeOptions::default(),
         )?;
     }
-    if requested.contains(".graphify_labels.json.sig") {
+    if requested.contains(".compass_labels.json.sig") {
         let signatures = community_member_signatures(&communities)
             .into_iter()
             .map(|(community, signature)| (community.to_string(), signature))
             .collect::<BTreeMap<_, _>>();
-        write_json_atomic(
-            staging.join(".graphify_labels.json.sig"),
-            &signatures,
-            false,
-        )?;
+        write_json_atomic(staging.join(".compass_labels.json.sig"), &signatures, false)?;
     }
     Ok(())
 }
@@ -180,7 +176,7 @@ fn validate_requests(requests: &[DerivedArtifactRequest]) -> Result<(), OutputEr
         if request.regeneration_version != SUPPORTED_HISTORY_RENDERER
             || !matches!(
                 request.relative_path.as_str(),
-                "GRAPH_REPORT.md" | "graph.html" | "GRAPH_TREE.html" | ".graphify_labels.json.sig"
+                "GRAPH_REPORT.md" | "graph.html" | "GRAPH_TREE.html" | ".compass_labels.json.sig"
             )
         {
             return Err(OutputError::UnsupportedHistoryRenderer {
@@ -267,11 +263,11 @@ fn validate_sidecars(sidecars: &BTreeMap<String, Vec<u8>>) -> Result<(), OutputE
                 | "GRAPH_REPORT.md"
                 | "graph.html"
                 | "GRAPH_TREE.html"
-                | ".graphify_analysis.json"
-                | ".graphify_labels.json"
-                | ".graphify_labels.json.sig"
+                | ".compass_analysis.json"
+                | ".compass_labels.json"
+                | ".compass_labels.json.sig"
                 | "manifest.json"
-                | ".graphify_semantic_marker"
+                | ".compass_semantic_marker"
         ) {
             return Err(OutputError::UnsafeHistoryPath(relative.clone()));
         }

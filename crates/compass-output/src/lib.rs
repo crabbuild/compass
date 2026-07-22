@@ -60,7 +60,7 @@ pub enum OutputError {
     )]
     EmptyWikiCommunities,
     #[error(
-        "all community node IDs are stale — none exist in the graph. Re-run `graphify extract .` to regenerate .graphify_analysis.json."
+        "all community node IDs are stale — none exist in the graph. Re-run `graphify extract .` to regenerate .compass_analysis.json."
     )]
     StaleWikiCommunities,
     #[error("unsupported history renderer {version} for {path}")]

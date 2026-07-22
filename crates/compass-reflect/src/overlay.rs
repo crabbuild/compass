@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 
 use crate::{Aggregate, ProvenanceEvent, ReflectError};
 
-pub const LEARNING_SIDECAR_NAME: &str = ".graphify_learning.json";
+pub const LEARNING_SIDECAR_NAME: &str = ".compass_learning.json";
 const LEARNING_SCHEMA_VERSION: u8 = 1;
 const PROVENANCE_CAP: usize = 5;
 
@@ -174,13 +174,13 @@ fn resolve_source_path(source: &str, graph_path: &Path) -> Option<PathBuf> {
     }
     let output = graph_path.parent().unwrap_or_else(|| Path::new("."));
     let mut candidates = Vec::new();
-    if let Ok(recorded) = fs::read_to_string(output.join(".graphify_root")) {
+    if let Ok(recorded) = fs::read_to_string(output.join(".compass_root")) {
         let recorded = recorded.trim();
         if !recorded.is_empty() {
             candidates.push(PathBuf::from(recorded));
         }
     }
-    if output.file_name().and_then(|name| name.to_str()) == Some("graphify-out") {
+    if output.file_name().and_then(|name| name.to_str()) == Some("compass-out") {
         candidates.push(
             output
                 .parent()
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn overlay_resolves_unique_labels_and_hashes_source() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
-        let output = directory.path().join("graphify-out");
+        let output = directory.path().join("compass-out");
         fs::create_dir_all(&output)?;
         fs::write(directory.path().join("source.rs"), "fn main() {}")?;
         let graph = output.join("graph.json");

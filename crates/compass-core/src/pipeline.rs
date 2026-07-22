@@ -243,7 +243,7 @@ fn build_graph_inner(
         path: options.root.clone(),
         source,
     })?;
-    let output_name = std::env::var("GRAPHIFY_OUT").unwrap_or_else(|_| "graphify-out".to_owned());
+    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let output_root = options
         .output_root
         .as_deref()
@@ -574,7 +574,7 @@ fn build_graph_inner(
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
-                output_dir.join(".graphify_root"),
+                output_dir.join(".compass_root"),
                 &options.root.to_string_lossy(),
             )?;
         }
@@ -622,7 +622,7 @@ fn build_graph_inner(
         BuildPurpose::Update => update_artifacts_complete(&output_dir),
         BuildPurpose::Extract => {
             output_dir.join("graph.json").is_file()
-                && output_dir.join(".graphify_analysis.json").is_file()
+                && output_dir.join(".compass_analysis.json").is_file()
         }
     };
     let unchanged_layers = semantic.is_none()
@@ -705,7 +705,7 @@ fn build_graph_inner(
     )?;
     if options.purpose == BuildPurpose::Update {
         write_text_atomic(
-            output_dir.join(".graphify_root"),
+            output_dir.join(".compass_root"),
             &options.root.to_string_lossy(),
         )?;
     }
@@ -737,16 +737,16 @@ fn build_graph_inner(
         timings.analyze = stage_started.elapsed();
         stage_started = Instant::now();
         if options.purpose == BuildPurpose::Extract {
-            write_json_atomic(output_dir.join(".graphify_analysis.json"), &analysis, true)?;
+            write_json_atomic(output_dir.join(".compass_analysis.json"), &analysis, true)?;
         } else {
             let labels_json = serde_json::to_string_pretty(&labels).map_err(|source| {
                 CoreError::SerializeExtraction {
-                    path: output_dir.join(".graphify_labels.json"),
+                    path: output_dir.join(".compass_labels.json"),
                     source,
                 }
             })?;
             write_text_atomic(
-                output_dir.join(".graphify_labels.json"),
+                output_dir.join(".compass_labels.json"),
                 &format!("{labels_json}\n"),
             )?;
         }
@@ -849,7 +849,7 @@ fn write_semantic_marker(
     let (_, output_tokens) = semantic_tokens(semantic);
     if output_tokens > 0 {
         write_json_atomic(
-            output_dir.join(".graphify_semantic_marker"),
+            output_dir.join(".compass_semantic_marker"),
             &json!({"output_tokens": output_tokens}),
             false,
         )?;
@@ -1616,8 +1616,8 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
     [
         "graph.json",
         "GRAPH_REPORT.md",
-        ".graphify_labels.json",
-        ".graphify_root",
+        ".compass_labels.json",
+        ".compass_root",
     ]
     .into_iter()
     .all(|name| output_dir.join(name).is_file())
@@ -1628,7 +1628,7 @@ fn unchanged_output_document(options: &BuildOptions, output_dir: &Path) -> Optio
     let bytes = fs::read(&graph_path).ok()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let is_clustered = value.get("directed").is_some() && value.get("multigraph").is_some();
-    if options.no_cluster == is_clustered || !output_dir.join(".graphify_root").is_file() {
+    if options.no_cluster == is_clustered || !output_dir.join(".compass_root").is_file() {
         return None;
     }
     let document: GraphDocument = serde_json::from_value(value).ok()?;
@@ -1832,7 +1832,7 @@ mod tests {
         assert!(cold.nodes > 0);
         assert!(cold.output_dir.join("graph.json").is_file());
         assert!(cold.output_dir.join("manifest.json").is_file());
-        assert!(!cold.output_dir.join(".graphify_incomplete").exists());
+        assert!(!cold.output_dir.join(".compass_incomplete").exists());
         let cold_graph = GraphDocument::load(&cold.output_dir.join("graph.json"))?;
         assert!(cold_graph.nodes.iter().all(|node| {
             node.attributes.get("_origin").and_then(Value::as_str) == Some("ast")
@@ -2014,7 +2014,7 @@ mod tests {
         assert!(value.get("links").is_none());
         assert!(value.get("directed").is_none());
         assert!(!result.output_dir.join("GRAPH_REPORT.md").exists());
-        assert!(!result.output_dir.join(".graphify_analysis.json").exists());
+        assert!(!result.output_dir.join(".compass_analysis.json").exists());
 
         let update_dir = tempfile::tempdir()?;
         fs::write(update_dir.path().join("main.py"), "def main():\n    pass\n")?;
@@ -2026,7 +2026,7 @@ mod tests {
         let value: Value = serde_json::from_slice(&bytes)?;
         assert!(value.get("links").is_some());
         assert!(value.get("edges").is_none());
-        assert!(result.output_dir.join(".graphify_root").is_file());
+        assert!(result.output_dir.join(".compass_root").is_file());
         Ok(())
     }
 
@@ -2146,7 +2146,7 @@ mod tests {
                 .is_some_and(|hash| !hash.is_empty())
         );
         let analysis: Value =
-            serde_json::from_slice(&fs::read(first.output_dir.join(".graphify_analysis.json"))?)?;
+            serde_json::from_slice(&fs::read(first.output_dir.join(".compass_analysis.json"))?)?;
         assert_eq!(analysis["tokens"], json!({"input": 13, "output": 7}));
 
         let second_layer = SemanticLayer {
