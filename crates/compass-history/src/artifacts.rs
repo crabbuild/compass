@@ -106,6 +106,11 @@ impl CompletedGraphArtifacts {
 }
 
 impl GraphArtifacts {
+    /// Return the complete deterministic registry for this realization content.
+    pub fn artifact_registry(&self) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
+        artifact_registry(self)
+    }
+
     /// Load the built-in authoritative Compass artifact contract.
     pub fn load(output_dir: &Path) -> Result<Self, HistoryError> {
         Self::load_with_registry(output_dir, &[])

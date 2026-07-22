@@ -101,6 +101,36 @@ impl Outcome {
     }
 }
 
+/// Write a completed command outcome without losing short writes or output failures.
+///
+/// Returns the command's exit code when both streams are written successfully, or `1` when
+/// either stream fails. A stdout failure is reported to stderr when that stream remains usable.
+pub fn write_outcome(outcome: &Outcome, stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
+    if let Err(error) = write_output(stdout, &outcome.stdout, outcome.stdout_trailing_newline) {
+        let _diagnostic = writeln!(stderr, "error: failed to write stdout: {error}");
+        return 1;
+    }
+    if write_output(stderr, &outcome.stderr, outcome.stderr_trailing_newline).is_err() {
+        return 1;
+    }
+    outcome.code
+}
+
+fn write_output(
+    stream: &mut impl Write,
+    output: &str,
+    trailing_newline: bool,
+) -> std::io::Result<()> {
+    if output.is_empty() {
+        return Ok(());
+    }
+    stream.write_all(output.as_bytes())?;
+    if trailing_newline {
+        stream.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
 #[must_use]
 pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) -> Outcome {
     let mut args = arguments

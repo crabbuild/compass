@@ -55,7 +55,7 @@ impl Repository {
 
     /// Return the exact ordered parents recorded by a commit.
     pub fn parents(&self, commit: &CommitId) -> Result<Vec<CommitId>, HistoryError> {
-        let value = git_line(
+        let value = git_line_allow_empty(
             &self.root,
             &[
                 "show",
@@ -84,6 +84,15 @@ fn git_path(current_dir: &Path, arguments: &[&str]) -> Result<PathBuf, HistoryEr
 }
 
 fn git_line(current_dir: &Path, arguments: &[&str]) -> Result<String, HistoryError> {
+    let value = git_line_allow_empty(current_dir, arguments)?;
+    if value.is_empty() {
+        Err(HistoryError::Git("Git returned an empty value".to_owned()))
+    } else {
+        Ok(value)
+    }
+}
+
+fn git_line_allow_empty(current_dir: &Path, arguments: &[&str]) -> Result<String, HistoryError> {
     let output = Command::new("git")
         .args(arguments)
         .current_dir(current_dir)
@@ -97,6 +106,12 @@ fn git_line(current_dir: &Path, arguments: &[&str]) -> Result<String, HistoryErr
             diagnostic
         }));
     }
+    if !output.stderr.is_empty() {
+        return Err(HistoryError::Git(format!(
+            "Git wrote an unexpected diagnostic: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
     if output.stdout.contains(&0) {
         return Err(HistoryError::Git(
             "Git returned a NUL byte in a path".to_owned(),
@@ -104,13 +119,10 @@ fn git_line(current_dir: &Path, arguments: &[&str]) -> Result<String, HistoryErr
     }
     let text = std::str::from_utf8(&output.stdout)
         .map_err(|error| HistoryError::Git(format!("Git returned a non-UTF-8 path: {error}")))?;
-    let mut lines = text.lines();
-    let value = lines
-        .next()
-        .filter(|line| !line.is_empty())
-        .ok_or_else(|| HistoryError::Git("Git returned an empty path".to_owned()))?;
-    if lines.next().is_some() {
-        return Err(HistoryError::Git("Git returned multiple paths".to_owned()));
+    let value = text.strip_suffix('\n').unwrap_or(text);
+    let value = value.strip_suffix('\r').unwrap_or(value);
+    if value.contains(['\r', '\n']) {
+        return Err(HistoryError::Git("Git returned multiple lines".to_owned()));
     }
     Ok(value.to_owned())
 }

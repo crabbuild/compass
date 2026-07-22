@@ -47,6 +47,13 @@ fn frontend_roots_versions_help_and_unknown_commands_are_total() {
 fn graph_command_argument_failures_cover_every_local_dispatch_family() {
     let compass_cases: &[&[&str]] = &[
         &["query"],
+        &["history", "unknown"],
+        &["history", "status", "one", "two"],
+        &["history", "status", "--unknown"],
+        &["history", "list", "--format", "yaml"],
+        &["history", "show"],
+        &["history", "export", "HEAD"],
+        &["diff"],
         &["query", "x", "--depth", "bad"],
         &["query", "x", "--unknown"],
         &["path"],
@@ -109,6 +116,7 @@ fn graph_command_argument_failures_cover_every_local_dispatch_family() {
 #[test]
 fn completed_command_help_routes_and_parser_boundaries_are_total() {
     for command in [
+        "history",
         "update",
         "extract",
         "watch",

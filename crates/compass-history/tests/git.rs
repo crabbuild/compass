@@ -29,6 +29,8 @@ fn resolve_parents_unknown_revisions_and_linked_worktrees() -> Result<(), Box<dy
     git(directory.path(), &["add", "one"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "one"])?;
     let first = git(directory.path(), &["rev-parse", "HEAD"])?;
+    let root_repository = Repository::discover(directory.path())?;
+    assert!(root_repository.parents(&first.parse()?)?.is_empty());
     std::fs::write(directory.path().join("two"), "two")?;
     git(directory.path(), &["add", "two"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "two"])?;
