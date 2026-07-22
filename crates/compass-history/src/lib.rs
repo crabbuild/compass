@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod canonical;
+mod diff;
 mod error;
 mod fingerprint;
 mod git;
@@ -13,6 +14,7 @@ mod validate;
 
 pub use artifacts::{CompletedGraphArtifacts, GraphArtifacts, PartitionedGraph};
 pub use canonical::{CANONICAL_ENCODING_VERSION, canonical_json_bytes};
+pub use diff::{ChangeKind, ChangeSink, GraphChange, RecordKind};
 pub use error::HistoryError;
 pub use fingerprint::{BuildProfile, ExtractionFingerprint, ExtractionFingerprintInput};
 pub use git::Repository;
