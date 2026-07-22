@@ -238,6 +238,20 @@ fn read_command_missing_values_and_load_errors_are_diagnostic() -> Result<(), Bo
         assert_ne!(outcome.code, 0, "{arguments:?}");
         assert!(!outcome.stderr.is_empty(), "{arguments:?}");
     }
+    for frontend in [Frontend::Compass, Frontend::Graphify] {
+        for arguments in [
+            &["query", "q", "--at"][..],
+            &["path", "a", "b", "--at"][..],
+            &["explain", "a", "--at="][..],
+            &["query", "q", "--graph", "graph.json", "--at", "HEAD"][..],
+            &["path", "a", "b", "--at", "HEAD", "--at", "HEAD~1"][..],
+            &["explain", "a", "extra"][..],
+        ] {
+            let outcome = invoke(frontend, arguments);
+            assert_ne!(outcome.code, 0, "{frontend:?} {arguments:?}");
+            assert!(!outcome.stderr.is_empty(), "{frontend:?} {arguments:?}");
+        }
+    }
     Ok(())
 }
 

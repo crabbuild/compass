@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use compass_core::LoadedGraph;
 use compass_history::{
     ArtifactClass, ChangeKind, ChangeSink, GraphChange, HistoryError, HistoryStore, RealizationId,
     RecordKind, Repository,
@@ -35,6 +36,41 @@ pub(crate) fn diff_help(frontend: Frontend) -> String {
         Frontend::Graphify => "graphify",
     };
     format!("Usage: {prefix} diff OLD NEW [--detailed|--format text|json] [--topology-only]")
+}
+
+pub(crate) fn load_graph_at(
+    frontend: Frontend,
+    revision: &str,
+    force_directed: bool,
+) -> Result<LoadedGraph, String> {
+    let repository =
+        Repository::discover(&std::env::current_dir().map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    let commit = repository
+        .resolve(revision)
+        .map_err(|error| error.to_string())?;
+    let history = HistoryStore::open_existing(&repository)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| missing_graph(frontend, revision, &commit))?;
+    let _activity = history.activity().map_err(|error| error.to_string())?;
+    let preferred = history
+        .preferred(&commit)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| missing_graph(frontend, revision, &commit))?;
+    // `artifacts` performs full realization validation before reconstruction.
+    let artifacts = history
+        .artifacts(&preferred.id)
+        .map_err(|error| error.to_string())?;
+    LoadedGraph::from_document(artifacts.artifacts.document, force_directed)
+        .map_err(|error| error.to_string())
+}
+
+fn missing_graph(frontend: Frontend, revision: &str, commit: &impl std::fmt::Display) -> String {
+    let prefix = match frontend {
+        Frontend::Compass => "compass",
+        Frontend::Graphify => "graphify",
+    };
+    format!("no graph realization for {commit}; run `{prefix} history build {revision}`")
 }
 
 pub(crate) fn command_diff(frontend: Frontend, args: &[String]) -> Outcome {

@@ -423,3 +423,133 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     assert_eq!(json_output.stderr, alias.stderr);
     Ok(())
 }
+
+#[test]
+fn query_path_and_explain_read_the_selected_materialized_commit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.txt"), "legacy\n")?;
+    git(directory.path(), &["add", "service.txt"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "legacy"])?;
+    let repository = Repository::discover(directory.path())?;
+    let legacy_commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+    let publish = |commit: compass_history::CommitId,
+                   fingerprint: char,
+                   service_id: &str,
+                   service_label: &str|
+     -> Result<(), Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed":true,
+            "multigraph":false,
+            "nodes":[
+                {"id":service_id,"label":service_label,"source_file":"service.rs"},
+                {"id":"database","label":"Database","source_file":"database.rs"}
+            ],
+            "links":[
+                {"source":service_id,"target":"database","relation":"calls","confidence":"EXTRACTED"}
+            ],
+            "built_at_commit":commit
+        }))?;
+        history.publish(PublishRequest {
+            parents: repository.parents(&commit)?,
+            commit,
+            fingerprint: std::iter::repeat_n(fingerprint, 64)
+                .collect::<String>()
+                .parse::<ExtractionFingerprint>()?,
+            artifacts: GraphArtifacts {
+                document,
+                analysis: None,
+                labels: None,
+                manifest: None,
+                authoritative_sidecars: BTreeMap::new(),
+            },
+            completion: CompletionEvidence {
+                extraction_succeeded: true,
+                allow_partial: false,
+                semantic_files_expected: 0,
+                semantic_files_completed: 0,
+                failed_chunks: 0,
+            },
+            make_preferred: true,
+        })?;
+        Ok(())
+    };
+    publish(legacy_commit, 'e', "legacy", "LegacyService")?;
+
+    std::fs::write(directory.path().join("service.txt"), "replacement\n")?;
+    git(directory.path(), &["add", "service.txt"])?;
+    git(
+        directory.path(),
+        &["commit", "--quiet", "-m", "replacement"],
+    )?;
+    let replacement_commit = repository.resolve("HEAD")?;
+    publish(replacement_commit, 'f', "replacement", "ReplacementService")?;
+    drop(history);
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let graphify = env!("CARGO_BIN_EXE_graphify");
+    let query = run(
+        compass,
+        directory.path(),
+        &["query", "legacy service", "--at", "HEAD~1"],
+    )?;
+    assert!(
+        query.status.success(),
+        "{}",
+        String::from_utf8_lossy(&query.stderr)
+    );
+    let query_text = String::from_utf8_lossy(&query.stdout);
+    assert!(query_text.contains("LegacyService"));
+    assert!(!query_text.contains("ReplacementService"));
+
+    let path = run(
+        compass,
+        directory.path(),
+        &["path", "LegacyService", "Database", "--at=HEAD~1"],
+    )?;
+    assert!(
+        path.status.success(),
+        "{}",
+        String::from_utf8_lossy(&path.stderr)
+    );
+    assert!(String::from_utf8_lossy(&path.stdout).contains("LegacyService"));
+
+    let explain = run(
+        compass,
+        directory.path(),
+        &["explain", "LegacyService", "--at", "HEAD~1"],
+    )?;
+    assert!(
+        explain.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    assert!(String::from_utf8_lossy(&explain.stdout).contains("Database"));
+
+    let alias = run(
+        graphify,
+        directory.path(),
+        &["query", "legacy service", "--at", "HEAD~1"],
+    )?;
+    assert_eq!(query.status.code(), alias.status.code());
+    assert_eq!(query.stdout, alias.stdout);
+
+    std::fs::write(directory.path().join("service.txt"), "unbuilt\n")?;
+    git(directory.path(), &["add", "service.txt"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "unbuilt"])?;
+    let missing = run(
+        compass,
+        directory.path(),
+        &["query", "service", "--at", "HEAD"],
+    )?;
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("compass history build HEAD"));
+    Ok(())
+}

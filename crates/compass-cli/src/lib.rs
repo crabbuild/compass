@@ -164,9 +164,9 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     match command.as_str() {
         "history" => history_commands::command(frontend, &args),
         "diff" => history_commands::command_diff(frontend, &args),
-        "query" => command_query(&args),
-        "path" => command_path(&args),
-        "explain" => command_explain(&args),
+        "query" => command_query(frontend, &args),
+        "path" => command_path(frontend, &args),
+        "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
         "export" => command_export(&args),
         "benchmark" => command_benchmark(&args),
@@ -3345,14 +3345,26 @@ fn callflow_help() -> String {
     "Usage: graphify export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default graphify-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
 }
 
-fn command_query(args: &[String]) -> Outcome {
-    let Some(question) = args.first() else {
-        return Outcome::failure(
-            "Usage: graphify query \"<question>\" [--dfs] [--context C] [--budget N] [--graph path]"
-                .to_owned(),
-        );
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum GraphSelection {
+    File(PathBuf),
+    Commit(String),
+}
+
+fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(query_help(frontend));
+    }
+    let (selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    let mut graph_path = default_graph_path();
+    let Some(question) = args.first() else {
+        return Outcome::failure(query_help(frontend));
+    };
     let mut contexts = Vec::new();
     let mut budget = 2000_usize;
     let mut mode = TraversalMode::Bfs;
@@ -3380,13 +3392,6 @@ fn command_query(args: &[String]) -> Outcome {
                 contexts.push(value.clone());
                 index += 2;
             }
-            "--graph" => {
-                let Some(value) = args.get(index + 1) else {
-                    return Outcome::failure("error: --graph requires a path".to_owned());
-                };
-                graph_path = PathBuf::from(value);
-                index += 2;
-            }
             value if value.starts_with("--budget=") => {
                 let Ok(value) = value[9..].parse::<usize>() else {
                     return Outcome::failure("error: --budget must be an integer".to_owned());
@@ -3398,14 +3403,12 @@ fn command_query(args: &[String]) -> Outcome {
                 contexts.push(value[10..].to_owned());
                 index += 1;
             }
-            value if value.starts_with("--graph=") => {
-                graph_path = PathBuf::from(&value[8..]);
-                index += 1;
+            value => {
+                return Outcome::failure(format!("error: unexpected query argument {value}"));
             }
-            _ => index += 1,
         }
     }
-    let loaded = match load(&graph_path, false) {
+    let loaded = match load_selection(frontend, &selection, false) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
@@ -3418,41 +3421,57 @@ fn command_query(args: &[String]) -> Outcome {
         &contexts,
         &loaded.overlay,
     );
-    integration_commands::touch_query_stamp(&graph_path);
+    touch_selected_query_stamp(&selection);
     Outcome::success(output)
 }
 
-fn command_path(args: &[String]) -> Outcome {
-    if args.len() < 2 {
-        return Outcome::failure(
-            "Usage: graphify path \"<source>\" \"<target>\" [--graph path]".to_owned(),
-        );
+fn command_path(frontend: Frontend, args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(path_help(frontend));
     }
-    let graph_path = parse_graph_path(&args[2..]);
-    let loaded = match load(&graph_path, true) {
+    let (selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    if args.len() != 2 {
+        return Outcome::failure(path_help(frontend));
+    }
+    let loaded = match load_selection(frontend, &selection, true) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
     match render_shortest_path(&loaded.graph, &args[0], &args[1]) {
         Ok(output) => {
-            integration_commands::touch_query_stamp(&graph_path);
+            touch_selected_query_stamp(&selection);
             Outcome::success(output)
         }
         Err(error) => Outcome::failure(error),
     }
 }
 
-fn command_explain(args: &[String]) -> Outcome {
-    let Some(label) = args.first() else {
-        return Outcome::failure("Usage: graphify explain \"<node>\" [--graph path]".to_owned());
+fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(explain_help(frontend));
+    }
+    let (selection, args) = match parse_graph_selection(args) {
+        Ok(parsed) => parsed,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    let graph_path = parse_graph_path(&args[1..]);
-    let loaded = match load(&graph_path, true) {
+    if args.len() != 1 {
+        return Outcome::failure(explain_help(frontend));
+    }
+    let loaded = match load_selection(frontend, &selection, true) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    let output = render_explanation(&loaded.graph, label, &loaded.overlay);
-    integration_commands::touch_query_stamp(&graph_path);
+    let output = render_explanation(&loaded.graph, &args[0], &loaded.overlay);
+    touch_selected_query_stamp(&selection);
     Outcome::success(output)
 }
 
@@ -3524,23 +3543,112 @@ fn command_affected(args: &[String]) -> Outcome {
     Outcome::success(format_affected(&loaded.graph, query, &relations, depth))
 }
 
-fn parse_graph_path(args: &[String]) -> PathBuf {
-    let mut path = default_graph_path();
+fn parse_graph_selection(args: &[String]) -> Result<(GraphSelection, Vec<String>), String> {
+    let mut selection = None;
+    let mut remaining = Vec::new();
+    let mut options = true;
     let mut index = 0;
     while index < args.len() {
-        if args[index] == "--graph" {
-            if let Some(value) = args.get(index + 1) {
-                path = PathBuf::from(value);
+        match args[index].as_str() {
+            "--" if options => options = false,
+            "--graph" if options => {
+                index += 1;
+                let value = args.get(index).ok_or("--graph requires a path")?;
+                if value.is_empty() || value.starts_with('-') {
+                    return Err("--graph requires a path".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::File(value.into()))?;
             }
-            index += 2;
-        } else if let Some(value) = args[index].strip_prefix("--graph=") {
-            path = PathBuf::from(value);
-            index += 1;
-        } else {
-            index += 1;
+            "--at" if options => {
+                index += 1;
+                let value = args.get(index).ok_or("--at requires a revision")?;
+                if value.is_empty() || value.starts_with('-') {
+                    return Err("--at requires a revision".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::Commit(value.clone()))?;
+            }
+            value if options && value.starts_with("--graph=") => {
+                let value = &value[8..];
+                if value.is_empty() {
+                    return Err("--graph requires a path".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::File(value.into()))?;
+            }
+            value if options && value.starts_with("--at=") => {
+                let value = &value[5..];
+                if value.is_empty() {
+                    return Err("--at requires a revision".to_owned());
+                }
+                set_graph_selection(&mut selection, GraphSelection::Commit(value.to_owned()))?;
+            }
+            value => remaining.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    Ok((
+        selection.unwrap_or_else(|| GraphSelection::File(default_graph_path())),
+        remaining,
+    ))
+}
+
+fn set_graph_selection(
+    selected: &mut Option<GraphSelection>,
+    value: GraphSelection,
+) -> Result<(), String> {
+    let Some(existing) = selected else {
+        *selected = Some(value);
+        return Ok(());
+    };
+    let message = if std::mem::discriminant(existing) == std::mem::discriminant(&value) {
+        "graph source selector may only be specified once"
+    } else {
+        "--graph and --at are mutually exclusive"
+    };
+    Err(message.to_owned())
+}
+
+fn load_selection(
+    frontend: Frontend,
+    selection: &GraphSelection,
+    force_directed: bool,
+) -> Result<LoadedGraph, Outcome> {
+    match selection {
+        GraphSelection::File(path) => load(path, force_directed),
+        GraphSelection::Commit(revision) => {
+            history_commands::load_graph_at(frontend, revision, force_directed)
+                .map_err(|error| Outcome::failure(format!("error: {error}")))
         }
     }
-    path
+}
+
+fn touch_selected_query_stamp(selection: &GraphSelection) {
+    if let GraphSelection::File(path) = selection {
+        integration_commands::touch_query_stamp(path);
+    }
+}
+
+fn query_help(frontend: Frontend) -> String {
+    let prefix = frontend_name(frontend);
+    format!(
+        "Usage: {prefix} query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH|--at REV]"
+    )
+}
+
+fn path_help(frontend: Frontend) -> String {
+    let prefix = frontend_name(frontend);
+    format!("Usage: {prefix} path \"<source>\" \"<target>\" [--graph PATH|--at REV]")
+}
+
+fn explain_help(frontend: Frontend) -> String {
+    let prefix = frontend_name(frontend);
+    format!("Usage: {prefix} explain \"<node>\" [--graph PATH|--at REV]")
+}
+
+fn frontend_name(frontend: Frontend) -> &'static str {
+    match frontend {
+        Frontend::Compass => "compass",
+        Frontend::Graphify => "graphify",
+    }
 }
 
 fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
@@ -3584,9 +3692,9 @@ fn compass_command_help(command: &str) -> String {
         "cluster-only" => "Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
         "label" => label_commands::label_help(Frontend::Compass),
         "prs" => prs_commands::prs_help(Frontend::Compass),
-        "query" => "Usage: compass query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH]".to_owned(),
-        "path" => "Usage: compass path \"<source>\" \"<target>\" [--graph PATH]".to_owned(),
-        "explain" => "Usage: compass explain \"<node>\" [--graph PATH]".to_owned(),
+        "query" => query_help(Frontend::Compass),
+        "path" => path_help(Frontend::Compass),
+        "explain" => explain_help(Frontend::Compass),
         "affected" => "Usage: compass affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),
         "tree" => tree_help(Frontend::Compass),
         "export" => export_help().replacen("graphify export", "compass export", 1),

@@ -137,6 +137,19 @@ pub struct LoadedGraph {
 }
 
 impl LoadedGraph {
+    pub fn from_document(
+        mut document: GraphDocument,
+        force_directed: bool,
+    ) -> Result<Self, GraphError> {
+        if force_directed {
+            document.directed = true;
+        }
+        Ok(Self {
+            graph: Graph::from_document(document)?,
+            overlay: HashMap::new(),
+        })
+    }
+
     pub fn load(path: &Path) -> Result<Self, GraphError> {
         let graph = Graph::load(path)?;
         let overlay = load_learning_overlay(path);
