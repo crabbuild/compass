@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask the community
+    url: https://github.com/crabbuild/compass/discussions
+    about: Ask usage questions or explore an idea in GitHub Discussions
+  - name: Report a security vulnerability
+    url: https://github.com/crabbuild/compass/security/advisories/new
+    about: Submit vulnerability details through GitHub private reporting

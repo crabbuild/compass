@@ -1,0 +1,81 @@
+name: Bug report
+description: Report reproducible behavior that appears incorrect
+title: "bug: "
+labels: []
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Compass. Remove credentials and private source code before submitting.
+
+  - type: checkboxes
+    id: routing
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing Issues and Discussions for this behavior.
+          required: true
+        - label: This report doesn't contain a security vulnerability or sensitive exploit details.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Compass version
+      description: Run `compass --version`, or provide the commit hash for a source build.
+      placeholder: compass 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your operating system, architecture, and installation method.
+      placeholder: macOS 15, arm64, cargo install --path
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and configuration
+      description: Include the complete command and relevant non-secret configuration.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Describe the smallest project or input that reproduces the behavior.
+      placeholder: |
+        1. Create a project containing…
+        2. Run…
+        3. Observe…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the output or state you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what happened and include sanitized errors or logs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add links, screenshots, or related details that help explain the problem.

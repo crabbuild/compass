@@ -1,0 +1,71 @@
+name: Feature request
+description: Propose an actionable improvement to Compass
+title: "feature: "
+labels: []
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use Discussions for open-ended exploration. Use this form when the problem and desired outcome are defined.
+
+  - type: checkboxes
+    id: routing
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing Issues and Discussions for this proposal.
+          required: true
+        - label: This request describes one focused problem.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Explain who encounters the problem and what they can't accomplish today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable behavior without requiring one implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example workflow
+      description: Show the command, input, or interaction you want Compass to support.
+      placeholder: |
+        compass example --option value
+        Expected result: …
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or other approaches you evaluated.
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and scope
+      description: Note effects on existing commands, formats, integrations, or performance.
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Tell maintainers whether you may submit an implementation.
+      options:
+        - I can submit a pull request
+        - I can help test or review
+        - I am requesting implementation help
+    validations:
+      required: true
