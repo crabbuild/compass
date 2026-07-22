@@ -41,6 +41,7 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
     }
 
     let mut dropped = HashSet::<(usize, usize)>::new();
+    let mut definition_hashes = Vec::<((usize, usize), Vec<(String, Value)>)>::new();
     for entries in groups.values().filter(|entries| entries.len() > 1) {
         let mut sibling_keys = HashSet::new();
         let mut headers = Vec::new();
@@ -79,6 +80,39 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
         }
         if eligible && sibling_keys.len() == 1 && headers.len() == 1 {
             let keeper = headers[0];
+            if let Some((extraction_index, node_index, _)) = entries
+                .iter()
+                .filter(|(extraction_index, node_index, source)| {
+                    let suffix = Path::new(source)
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    IMPLEMENTATION_SUFFIXES.contains(&suffix.as_str())
+                        && extractions[*extraction_index].nodes[*node_index]
+                            .attributes
+                            .contains_key("implementation_hash")
+                })
+                .min_by_key(|(_, _, source)| source)
+            {
+                let definition = &extractions[*extraction_index].nodes[*node_index];
+                let hashes = [
+                    "_callable",
+                    "signature_hash",
+                    "implementation_hash",
+                    "source_hash",
+                ]
+                .into_iter()
+                .filter_map(|key| {
+                    definition
+                        .attributes
+                        .get(key)
+                        .cloned()
+                        .map(|value| (key.to_owned(), value))
+                })
+                .collect::<Vec<_>>();
+                definition_hashes.push((keeper, hashes));
+            }
             dropped.extend(
                 entries
                     .iter()
@@ -89,6 +123,12 @@ pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
     }
     if dropped.is_empty() {
         return;
+    }
+
+    for ((extraction_index, node_index), hashes) in definition_hashes {
+        extractions[extraction_index].nodes[node_index]
+            .attributes
+            .extend(hashes);
     }
 
     for (extraction_index, extraction) in extractions.iter_mut().enumerate() {
@@ -2352,13 +2392,26 @@ mod tests {
             edges: vec![edge("widget", "widget_draw", "method", "native/Widget.h")],
             ..Extraction::default()
         };
+        let mut implementation_node = node(
+            "widget_draw",
+            "Widget::draw()",
+            "native/Widget.cpp",
+            "method",
+        );
+        implementation_node.attributes.insert(
+            "implementation_hash".to_owned(),
+            Value::String("body-digest".to_owned()),
+        );
+        implementation_node.attributes.insert(
+            "signature_hash".to_owned(),
+            Value::String("signature-digest".to_owned()),
+        );
+        implementation_node.attributes.insert(
+            "source_hash".to_owned(),
+            Value::String("source-digest".to_owned()),
+        );
         let implementation = Extraction {
-            nodes: vec![node(
-                "widget_draw",
-                "Widget::draw()",
-                "native/Widget.cpp",
-                "method",
-            )],
+            nodes: vec![implementation_node],
             edges: vec![
                 edge("widget", "widget_draw", "method", "native/Widget.cpp"),
                 edge("widget_draw", "widget_draw", "calls", "native/Widget.cpp"),
@@ -2384,6 +2437,9 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].label(), "draw");
         assert_eq!(merged[0].string("source_file"), "native/Widget.h");
+        assert_eq!(merged[0].string("implementation_hash"), "body-digest");
+        assert_eq!(merged[0].string("signature_hash"), "signature-digest");
+        assert_eq!(merged[0].string("source_hash"), "source-digest");
         assert_eq!(
             extractions
                 .iter()

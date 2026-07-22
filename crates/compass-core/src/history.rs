@@ -168,6 +168,7 @@ fn run_materialization(
         PublishRequest {
             commit: request.commit.clone(),
             parents: request.repository.parents(&request.commit)?,
+            profile: request.profile.clone(),
             fingerprint,
             artifacts: completed.artifacts,
             completion: completed.completion,
@@ -255,6 +256,7 @@ fn resolve_fingerprint(
 ) -> Result<ExtractionFingerprint, MaterializeError> {
     let mut input =
         ExtractionFingerprintInput::new(env!("CARGO_PKG_VERSION"), "networkx-node-link/v1");
+    input.insert("definition_hash_version", "tree-sitter-ast/v1")?;
     input.insert("build_profile_digest", &hex(&profile.digest()?))?;
     input.insert(
         "commit_configuration_digest",

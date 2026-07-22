@@ -72,6 +72,7 @@ fn request(
     let commit = repository.resolve("HEAD")?;
     Ok(PublishRequest {
         parents: repository.parents(&commit)?,
+        profile: compass_history::BuildProfile::default(),
         artifacts: GraphArtifacts {
             document: graph(commit.as_str(), changed)?,
             analysis: Some(json!({"communities": 16, "fixture": true})),

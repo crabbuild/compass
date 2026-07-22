@@ -82,6 +82,20 @@ fn artifact(root: &Path, name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     Ok(fs::read(root.join("graphify-out").join(name))?)
 }
 
+fn graph_without_definition_hashes(bytes: &[u8]) -> Result<Value, Box<dyn Error>> {
+    let mut graph: Value = serde_json::from_slice(bytes)?;
+    if let Some(nodes) = graph.get_mut("nodes").and_then(Value::as_array_mut) {
+        for node in nodes {
+            if let Some(attributes) = node.as_object_mut() {
+                attributes.remove("signature_hash");
+                attributes.remove("implementation_hash");
+                attributes.remove("source_hash");
+            }
+        }
+    }
+    Ok(graph)
+}
+
 fn fixture(root: &Path) -> Result<(), Box<dyn Error>> {
     fs::write(
         root.join("auth.py"),
@@ -146,11 +160,16 @@ fn cold_force_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
         let actual = run_rust(&arguments, home.path())?;
         assert_same_output(&expected, &actual);
         for (name, expected) in names.into_iter().zip(expected_artifacts) {
-            assert_eq!(
-                artifact(directory.path(), name)?,
-                expected,
-                "{name} mismatch"
-            );
+            let actual = artifact(directory.path(), name)?;
+            if name == "graph.json" {
+                assert_eq!(
+                    graph_without_definition_hashes(&actual)?,
+                    graph_without_definition_hashes(&expected)?,
+                    "{name} mismatch outside definition hashes"
+                );
+            } else {
+                assert_eq!(actual, expected, "{name} mismatch");
+            }
         }
     }
     Ok(())
@@ -170,16 +189,16 @@ fn warm_clustered_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
 
         assert!(run_python(&arguments, home.path())?.status.success());
         let expected = run_python(&arguments, home.path())?;
-        let expected_graph: Value =
-            serde_json::from_slice(&artifact(directory.path(), "graph.json")?)?;
+        let expected_graph =
+            graph_without_definition_hashes(&artifact(directory.path(), "graph.json")?)?;
         let expected_manifest = artifact(directory.path(), "manifest.json")?;
         remove_output(directory.path())?;
 
         assert!(run_rust(&arguments, home.path())?.status.success());
         let actual = run_rust(&arguments, home.path())?;
         assert_same_output(&expected, &actual);
-        let actual_graph: Value =
-            serde_json::from_slice(&artifact(directory.path(), "graph.json")?)?;
+        let actual_graph =
+            graph_without_definition_hashes(&artifact(directory.path(), "graph.json")?)?;
         assert_eq!(actual_graph, expected_graph);
         assert_eq!(
             artifact(directory.path(), "manifest.json")?,

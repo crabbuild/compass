@@ -185,6 +185,9 @@ fn normalize_json(value: &mut serde_json::Value, fixture: &Fixture) {
         serde_json::Value::Object(object) => {
             object.remove("built_at");
             object.remove("built_at_commit");
+            object.remove("signature_hash");
+            object.remove("implementation_hash");
+            object.remove("source_hash");
             for value in object.values_mut() {
                 normalize_json(value, fixture);
             }

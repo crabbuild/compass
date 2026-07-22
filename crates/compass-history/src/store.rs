@@ -173,10 +173,13 @@ impl HistoryStore {
         let hyperedges = self.build_tree(partitioned.hyperedges)?;
         let analysis = self.build_tree(partitioned.analysis)?;
         let metadata = self.build_tree(partitioned.metadata)?;
+        let profile_digest = hex(&request.profile.digest()?);
         let version = GraphVersion {
             schema_version: crate::HISTORY_SCHEMA_VERSION,
             git_commit: request.commit.to_string(),
             git_parents: request.parents.iter().map(ToString::to_string).collect(),
+            build_profile: request.profile,
+            profile_digest,
             extraction_fingerprint: request.fingerprint.to_string(),
             nodes_root: StoredTree::from_tree(&nodes),
             edges_root: StoredTree::from_tree(&edges),
@@ -724,6 +727,11 @@ impl HistoryStore {
             let _: CommitId = parent.parse()?;
         }
         let _: crate::ExtractionFingerprint = version.extraction_fingerprint.parse()?;
+        if version.profile_digest != hex(&version.build_profile.digest()?) {
+            return Err(HistoryError::CorruptHistory(
+                "realization build profile digest does not match its canonical profile".to_owned(),
+            ));
+        }
         let id = RealizationId::for_version(&version)?;
         Ok(PublishedVersion {
             id,
@@ -843,6 +851,16 @@ fn preferred_root_name(commit: &CommitId) -> Vec<u8> {
 fn count(value: usize) -> Result<u64, HistoryError> {
     u64::try_from(value)
         .map_err(|_| HistoryError::InvalidArtifacts("record count exceeds u64".to_owned()))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(value, "{byte:02x}");
+    }
+    value
 }
 
 struct HistoryPaths {

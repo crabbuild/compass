@@ -606,8 +606,9 @@ fn slug_segment(value: &str) -> String {
     output.trim_matches('_').to_owned()
 }
 
-fn collision_rank(node: &NodeRecord) -> (bool, usize, String, String) {
+fn collision_rank(node: &NodeRecord) -> (bool, bool, usize, String, String) {
     (
+        !node.attributes.contains_key("implementation_hash"),
         !defines_id(node),
         node.label().chars().count(),
         node.label().to_owned(),
@@ -793,6 +794,34 @@ mod tests {
         ];
         let result = deduplicate_entities(&nodes, &[], &HashMap::new())?;
         assert_eq!(result.nodes.len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn exact_id_collision_prefers_a_hashed_definition_over_a_declaration() -> Result<(), DedupError>
+    {
+        let mut definition = node(
+            "db_db_impl_dbimpl_compact",
+            "DBImpl::Compact()",
+            "db/db_impl.cc",
+        );
+        definition.attributes.insert(
+            "implementation_hash".to_owned(),
+            json!("implementation-digest"),
+        );
+        let declaration = node("db_db_impl_dbimpl_compact", "Compact", "db/db_impl.h");
+
+        let result = deduplicate_entities(&[definition, declaration], &[], &HashMap::new())?;
+
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(source_file(&result.nodes[0]), "db/db_impl.cc");
+        assert_eq!(
+            result.nodes[0]
+                .attributes
+                .get("implementation_hash")
+                .and_then(Value::as_str),
+            Some("implementation-digest")
+        );
         Ok(())
     }
 

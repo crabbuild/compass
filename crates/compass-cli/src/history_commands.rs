@@ -1,4 +1,5 @@
-use std::io::Write;
+use std::fs::File;
+use std::io::{Seek, SeekFrom, Write};
 
 use compass_core::LoadedGraph;
 use compass_core::{
@@ -6,9 +7,10 @@ use compass_core::{
     materialize_history_with_observer,
 };
 use compass_history::{
-    ArtifactClass, ChangeKind, ChangeSink, ClaimedJob, CommitId, ExtractionFingerprint,
-    GitTargetLimitation, GraphChange, HistoryConfig, HistoryError, HistoryQueue, HistoryStore,
-    JobRequest, JobState, PublishedVersion, RealizationId, RecordKind, Repository,
+    ArtifactClass, BuildProfile, ChangeKind, ChangeSink, ClaimedJob, CommitId,
+    ExtractionFingerprint, GitTargetLimitation, GraphChange, HistoryConfig, HistoryError,
+    HistoryQueue, HistoryStore, JobRequest, JobState, PublishedVersion, RealizationId, RecordKind,
+    Repository,
 };
 
 use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
@@ -21,7 +23,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options] [--format text|json]\n  rebuild REV [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|graphify-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|graphify-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]"
     )
 }
 
@@ -51,7 +53,11 @@ pub(crate) fn diff_help(frontend: Frontend) -> String {
         Frontend::Compass => "compass",
         Frontend::Graphify => "graphify",
     };
-    format!("Usage: {prefix} diff OLD NEW [--detailed|--format text|json] [--topology-only]")
+    format!(
+        "Usage: {prefix} diff OLD NEW [--detailed] [--format text|json] [--topology-only] \
+[--include-locations] [--include-analysis] [--include-metadata] [--fingerprint SHA] \
+[--allow-profile-mismatch]"
+    )
 }
 
 pub(crate) fn load_graph_at(
@@ -65,7 +71,7 @@ pub(crate) fn load_graph_at(
     let commit = repository
         .resolve(revision)
         .map_err(|error| error.to_string())?;
-    let options = HistoryBuildOptions::defaults().map_err(|error| error.to_string())?;
+    let options = configured_build_options(&repository)?;
     let (history, preferred) = resolve_or_materialize(&repository, commit, &options, false, false)?;
     let activity = history.activity().map_err(|error| error.to_string())?;
     // `artifacts` performs full realization validation before reconstruction.
@@ -83,6 +89,19 @@ fn resolve_or_materialize(
     rebuild: bool,
     replace_corrupt: bool,
 ) -> Result<(HistoryStore, PublishedVersion), String> {
+    let existing = HistoryStore::open_existing(repository).map_err(|error| error.to_string())?;
+    if !rebuild && let Some(history) = existing {
+        match history.preferred(&commit) {
+            Ok(Some(preferred)) => {
+                history
+                    .validate(&preferred.id)
+                    .map_err(|error| error.to_string())?;
+                return Ok((history, preferred));
+            }
+            Ok(None) => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
     let history =
         match HistoryStore::open_existing(repository).map_err(|error| error.to_string())? {
             Some(history) => history,
@@ -149,14 +168,27 @@ fn resolve_or_materialize(
     }
 }
 
+fn configured_build_options(repository: &Repository) -> Result<HistoryBuildOptions, String> {
+    let config = HistoryConfig::load(repository).map_err(|error| error.to_string())?;
+    if config.enabled
+        && let Some(profile) = config.profile
+    {
+        return HistoryBuildOptions::from_profile(profile).map_err(|error| error.to_string());
+    }
+    HistoryBuildOptions::defaults().map_err(|error| error.to_string())
+}
+
 pub(crate) fn command_diff(frontend: Frontend, args: &[String]) -> Outcome {
     let mut bytes = Vec::new();
-    let result = command_diff_to_writer(frontend, args, &mut bytes);
+    let mut result = command_diff_to_writer(frontend, args, &mut bytes);
     if result.code != 0 {
         return result;
     }
     match String::from_utf8(bytes) {
-        Ok(stdout) => Outcome::success_exact(stdout),
+        Ok(stdout) => {
+            result.stdout = stdout;
+            result
+        }
         Err(error) => Outcome::failure(format!("error: diff output was not UTF-8: {error}")),
     }
 }
@@ -175,7 +207,20 @@ pub(crate) fn command_diff_to_writer(
             Err(error) => outcome(Err(runtime(output_error(error)))),
         };
     }
-    outcome(execute_diff(frontend, args, writer).map(|()| String::new()))
+    match execute_diff(frontend, args, writer) {
+        Ok(execution) => Outcome {
+            code: 0,
+            stdout: String::new(),
+            stderr: execution.warning.unwrap_or_default(),
+            stdout_trailing_newline: false,
+            stderr_trailing_newline: true,
+        },
+        Err(error) => outcome(Err(error)),
+    }
+}
+
+struct DiffExecution {
+    warning: Option<String>,
 }
 
 fn outcome(result: Result<String, CommandFailure>) -> Outcome {
@@ -206,29 +251,160 @@ enum DiffOutput {
     Json,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DiffOptions {
     output: DiffOutput,
     topology_only: bool,
+    include_locations: bool,
+    include_analysis: bool,
+    include_metadata: bool,
+    fingerprint: Option<String>,
+    allow_profile_mismatch: bool,
 }
 
 fn execute_diff(
     _frontend: Frontend,
     args: &[String],
     writer: &mut dyn Write,
-) -> Result<(), CommandFailure> {
+) -> Result<DiffExecution, CommandFailure> {
     let (revisions, diff_options) = parse_diff(args).map_err(usage)?;
     let repository =
         Repository::discover(&std::env::current_dir().map_err(runtime)?).map_err(runtime)?;
     let old_commit = repository.resolve(&revisions[0]).map_err(runtime)?;
     let new_commit = repository.resolve(&revisions[1]).map_err(runtime)?;
-    let build_options = HistoryBuildOptions::defaults().map_err(runtime)?;
-    let (_, old) = resolve_or_materialize(&repository, old_commit, &build_options, false, false)
-        .map_err(runtime)?;
-    let (history, new) =
-        resolve_or_materialize(&repository, new_commit, &build_options, false, false)
-            .map_err(runtime)?;
-    render_diff(&history, &old.id, &new.id, diff_options, writer).map_err(runtime)
+    let resolved = resolve_comparable_pair(
+        &repository,
+        old_commit,
+        new_commit,
+        diff_options.fingerprint.as_deref(),
+        diff_options.allow_profile_mismatch,
+    )
+    .map_err(runtime)?;
+    render_diff(
+        &resolved.history,
+        &resolved.old,
+        &resolved.new,
+        resolved.profile_mismatch,
+        &diff_options,
+        writer,
+    )
+    .map_err(runtime)?;
+    Ok(DiffExecution {
+        warning: (resolved.profile_mismatch && diff_options.output != DiffOutput::Json).then(|| {
+            format!(
+                "warning: comparing realizations with different extraction fingerprints ({} != {}); results may reflect profile differences",
+                resolved.old.version.extraction_fingerprint,
+                resolved.new.version.extraction_fingerprint
+            )
+        }),
+    })
+}
+
+struct ResolvedDiff {
+    history: HistoryStore,
+    old: PublishedVersion,
+    new: PublishedVersion,
+    profile_mismatch: bool,
+}
+
+fn resolve_comparable_pair(
+    repository: &Repository,
+    old_commit: CommitId,
+    new_commit: CommitId,
+    required_fingerprint: Option<&str>,
+    allow_profile_mismatch: bool,
+) -> Result<ResolvedDiff, String> {
+    let existing = HistoryStore::open_existing(repository).map_err(|error| error.to_string())?;
+    let old = select_existing(existing.as_ref(), &old_commit, required_fingerprint)?;
+    let new = select_existing(existing.as_ref(), &new_commit, required_fingerprint)?;
+    if required_fingerprint.is_some() && (old.is_none() || new.is_none()) {
+        return Err("the requested fingerprint is not materialized at both commits".to_owned());
+    }
+
+    let (history, old, new) = match (old, new) {
+        (Some(old), Some(new)) => (
+            existing.ok_or_else(|| "history store disappeared".to_owned())?,
+            old,
+            new,
+        ),
+        (Some(old), None) => {
+            let options = HistoryBuildOptions::from_profile(old.version.build_profile.clone())
+                .map_err(|error| error.to_string())?;
+            let (history, new) =
+                resolve_or_materialize(repository, new_commit, &options, false, false)?;
+            (history, old, new)
+        }
+        (None, Some(new)) => {
+            let options = HistoryBuildOptions::from_profile(new.version.build_profile.clone())
+                .map_err(|error| error.to_string())?;
+            let (history, old) =
+                resolve_or_materialize(repository, old_commit, &options, false, false)?;
+            (history, old, new)
+        }
+        (None, None) => {
+            let options = configured_build_options(repository)?;
+            let (_, old) = resolve_or_materialize(repository, old_commit, &options, false, false)?;
+            let (history, new) =
+                resolve_or_materialize(repository, new_commit, &options, false, false)?;
+            (history, old, new)
+        }
+    };
+    let profile_mismatch = old.version.extraction_fingerprint != new.version.extraction_fingerprint;
+    if profile_mismatch && !allow_profile_mismatch {
+        return Err(format!(
+            "realizations are not semantically comparable\n\nOLD {} ({}) fingerprint: {}\nNEW {} ({}) fingerprint: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}\n\nOr inspect intentionally:\n  compass diff {} {} --allow-profile-mismatch",
+            old.version.git_commit,
+            old.id,
+            old.version.extraction_fingerprint,
+            new.version.git_commit,
+            new.id,
+            new.version.extraction_fingerprint,
+            new.version.git_commit,
+            old.version.git_commit,
+            old.version.git_commit,
+            new.version.git_commit,
+        ));
+    }
+    Ok(ResolvedDiff {
+        history,
+        old,
+        new,
+        profile_mismatch,
+    })
+}
+
+fn select_existing(
+    history: Option<&HistoryStore>,
+    commit: &CommitId,
+    required_fingerprint: Option<&str>,
+) -> Result<Option<PublishedVersion>, String> {
+    let Some(history) = history else {
+        return Ok(None);
+    };
+    let selected = if let Some(fingerprint) = required_fingerprint {
+        let mut matches = history
+            .list(Some(commit))
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|version| version.version.extraction_fingerprint == fingerprint)
+            .collect::<Vec<_>>();
+        if matches.len() > 1 {
+            return Err(format!(
+                "multiple realizations at {commit} have fingerprint {fingerprint}"
+            ));
+        }
+        matches.pop()
+    } else {
+        history
+            .preferred(commit)
+            .map_err(|error| error.to_string())?
+    };
+    if let Some(selected) = &selected {
+        history
+            .validate(&selected.id)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(selected)
 }
 
 fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
@@ -236,6 +412,11 @@ fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
     let mut format = None;
     let mut detailed = false;
     let mut topology_only = false;
+    let mut include_locations = false;
+    let mut include_analysis = false;
+    let mut include_metadata = false;
+    let mut fingerprint = None;
+    let mut allow_profile_mismatch = false;
     let mut options = true;
     let mut index = 0;
     while index < args.len() {
@@ -252,6 +433,46 @@ fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
                     return Err("duplicate --topology-only".to_owned());
                 }
                 topology_only = true;
+            }
+            "--include-locations" if options => {
+                if include_locations {
+                    return Err("duplicate --include-locations".to_owned());
+                }
+                include_locations = true;
+            }
+            "--include-analysis" if options => {
+                if include_analysis {
+                    return Err("duplicate --include-analysis".to_owned());
+                }
+                include_analysis = true;
+            }
+            "--include-metadata" if options => {
+                if include_metadata {
+                    return Err("duplicate --include-metadata".to_owned());
+                }
+                include_metadata = true;
+            }
+            "--allow-profile-mismatch" if options => {
+                if allow_profile_mismatch {
+                    return Err("duplicate --allow-profile-mismatch".to_owned());
+                }
+                allow_profile_mismatch = true;
+            }
+            "--fingerprint" if options => {
+                index += 1;
+                let value = args.get(index).ok_or("--fingerprint requires a value")?;
+                if fingerprint.replace(value.clone()).is_some() {
+                    return Err("duplicate --fingerprint".to_owned());
+                }
+            }
+            value if options && value.starts_with("--fingerprint=") => {
+                let value = &value[14..];
+                if value.is_empty() {
+                    return Err("--fingerprint requires a value".to_owned());
+                }
+                if fingerprint.replace(value.to_owned()).is_some() {
+                    return Err("duplicate --fingerprint".to_owned());
+                }
             }
             "--format" if options => {
                 index += 1;
@@ -286,6 +507,14 @@ fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
     if detailed && format == "json" {
         return Err("--detailed cannot be combined with --format json".to_owned());
     }
+    if let Some(value) = &fingerprint {
+        value
+            .parse::<ExtractionFingerprint>()
+            .map_err(|_| "--fingerprint must be a lowercase SHA-256 digest".to_owned())?;
+    }
+    if fingerprint.is_some() && allow_profile_mismatch {
+        return Err("--fingerprint cannot be combined with --allow-profile-mismatch".to_owned());
+    }
     Ok((
         revisions,
         DiffOptions {
@@ -297,155 +526,258 @@ fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
                 DiffOutput::Summary
             },
             topology_only,
+            include_locations,
+            include_analysis,
+            include_metadata,
+            fingerprint,
+            allow_profile_mismatch,
         },
     ))
 }
 
 fn render_diff(
     history: &HistoryStore,
-    old: &RealizationId,
-    new: &RealizationId,
-    options: DiffOptions,
+    old: &PublishedVersion,
+    new: &PublishedVersion,
+    profile_mismatch: bool,
+    options: &DiffOptions,
     writer: &mut dyn Write,
 ) -> Result<(), HistoryError> {
     match options.output {
-        DiffOutput::Summary => {
-            let mut sink = SummarySink::new(options.topology_only);
-            history.diff(old, new, &mut sink)?;
-            sink.render(writer)
-        }
-        DiffOutput::Detailed => {
-            let mut sink = DetailedSink::new(writer, options.topology_only);
-            history.diff(old, new, &mut sink)?;
-            sink.finish()
+        DiffOutput::Summary | DiffOutput::Detailed => {
+            let mut sink = TextSink::new(options)?;
+            history.diff(&old.id, &new.id, &mut sink)?;
+            sink.finish(writer)
         }
         DiffOutput::Json => {
-            writer.write_all(b"[").map_err(output_error)?;
+            writer
+                .write_all(b"{\"schema_version\":2,\"comparison\":")
+                .map_err(output_error)?;
+            serde_json::to_writer(
+                &mut *writer,
+                &serde_json::json!({
+                    "old_commit": old.version.git_commit,
+                    "new_commit": new.version.git_commit,
+                    "old_realization": old.id,
+                    "new_realization": new.id,
+                    "old_fingerprint": old.version.extraction_fingerprint,
+                    "new_fingerprint": new.version.extraction_fingerprint,
+                    "profile_mismatch": profile_mismatch,
+                }),
+            )
+            .map_err(json_output_error)?;
+            writer.write_all(b",\"changes\":[").map_err(output_error)?;
             let mut sink = JsonSink::new(writer, options.topology_only);
-            history.diff(old, new, &mut sink)?;
+            history.diff(&old.id, &new.id, &mut sink)?;
             sink.finish()
         }
     }
 }
 
-#[derive(Default)]
-struct SummaryCell {
-    count: u64,
-    examples: Vec<String>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChangeCategory {
+    Semantic,
+    Textual,
+    Location,
+    Analysis,
+    Metadata,
 }
 
-struct SummarySink {
-    cells: Vec<SummaryCell>,
-    topology_only: bool,
-}
-
-impl SummarySink {
-    fn new(topology_only: bool) -> Self {
-        Self {
-            cells: (0..15).map(|_| SummaryCell::default()).collect(),
-            topology_only,
+impl ChangeCategory {
+    fn index(self) -> usize {
+        match self {
+            Self::Semantic => 0,
+            Self::Textual => 1,
+            Self::Location => 2,
+            Self::Analysis => 3,
+            Self::Metadata => 4,
         }
     }
 
-    fn render(&self, writer: &mut dyn Write) -> Result<(), HistoryError> {
-        if self.cells.iter().all(|cell| cell.count == 0) {
-            return writer
-                .write_all(b"no graph changes\n")
-                .map_err(output_error);
+    fn name(self) -> &'static str {
+        match self {
+            Self::Semantic => "semantic",
+            Self::Textual => "textual",
+            Self::Location => "location",
+            Self::Analysis => "analysis",
+            Self::Metadata => "metadata",
         }
-        for record in RECORD_ORDER {
-            for change in CHANGE_ORDER {
-                let cell = &self.cells[summary_index(record, change)];
-                if cell.count == 0 {
-                    continue;
+    }
+
+    fn heading(self) -> &'static str {
+        match self {
+            Self::Semantic => "Semantic graph changes",
+            Self::Textual => "Textual changes",
+            Self::Location => "Location changes",
+            Self::Analysis => "Analysis changes",
+            Self::Metadata => "Metadata changes",
+        }
+    }
+}
+
+const CATEGORY_ORDER: [ChangeCategory; 5] = [
+    ChangeCategory::Semantic,
+    ChangeCategory::Textual,
+    ChangeCategory::Analysis,
+    ChangeCategory::Location,
+    ChangeCategory::Metadata,
+];
+
+struct TextSink {
+    counts: [[u64; 15]; 5],
+    examples: Vec<Vec<String>>,
+    details: Vec<File>,
+    output: DiffOutput,
+    topology_only: bool,
+    include_locations: bool,
+    include_analysis: bool,
+    include_metadata: bool,
+}
+
+impl TextSink {
+    fn new(options: &DiffOptions) -> Result<Self, HistoryError> {
+        let mut details = Vec::with_capacity(5);
+        for _ in 0..5 {
+            details.push(tempfile::tempfile().map_err(output_error)?);
+        }
+        Ok(Self {
+            counts: [[0; 15]; 5],
+            examples: (0..75).map(|_| Vec::new()).collect(),
+            details,
+            output: options.output,
+            topology_only: options.topology_only,
+            include_locations: options.include_locations,
+            include_analysis: options.include_analysis,
+            include_metadata: options.include_metadata,
+        })
+    }
+
+    fn expanded(&self, category: ChangeCategory) -> bool {
+        match category {
+            ChangeCategory::Semantic | ChangeCategory::Textual => {
+                self.output == DiffOutput::Detailed
+            }
+            ChangeCategory::Location => self.include_locations,
+            ChangeCategory::Analysis => self.include_analysis,
+            ChangeCategory::Metadata => self.include_metadata,
+        }
+    }
+
+    fn finish(&mut self, writer: &mut dyn Write) -> Result<(), HistoryError> {
+        let total = self.counts.iter().flatten().copied().sum::<u64>();
+        if total == 0 {
+            let message = if self.topology_only {
+                b"no topology changes\n".as_slice()
+            } else {
+                b"no graph changes\n".as_slice()
+            };
+            return writer.write_all(message).map_err(output_error);
+        }
+        let mut first_section = true;
+        for category in CATEGORY_ORDER {
+            let category_counts = &self.counts[category.index()];
+            let category_total = category_counts.iter().copied().sum::<u64>();
+            if category_total == 0 {
+                continue;
+            }
+            if !first_section {
+                writer.write_all(b"\n").map_err(output_error)?;
+            }
+            first_section = false;
+            writeln!(writer, "{}", category.heading()).map_err(output_error)?;
+            for record in RECORD_ORDER {
+                for change in CHANGE_ORDER {
+                    let index = summary_index(record, change);
+                    let count = category_counts[index];
+                    if count == 0 {
+                        continue;
+                    }
+                    writeln!(
+                        writer,
+                        "  {count} {} {}",
+                        record_name(record, count),
+                        change_name(change)
+                    )
+                    .map_err(output_error)?;
+                    if !self.expanded(category)
+                        && matches!(category, ChangeCategory::Semantic | ChangeCategory::Textual)
+                    {
+                        for example in &self.examples[category.index() * 15 + index] {
+                            writeln!(writer, "    {example}").map_err(output_error)?;
+                        }
+                    }
                 }
+            }
+            if self.expanded(category) {
+                let detail = &mut self.details[category.index()];
+                detail.seek(SeekFrom::Start(0)).map_err(output_error)?;
+                std::io::copy(detail, writer).map_err(output_error)?;
+            } else if matches!(
+                category,
+                ChangeCategory::Location | ChangeCategory::Analysis | ChangeCategory::Metadata
+            ) {
                 writeln!(
                     writer,
-                    "{} {} {}",
-                    cell.count,
-                    record_name(record, cell.count),
-                    change_name(change)
+                    "  (collapsed; use --include-{} to expand)",
+                    match category {
+                        ChangeCategory::Location => "locations",
+                        ChangeCategory::Analysis => "analysis",
+                        ChangeCategory::Metadata => "metadata",
+                        _ => unreachable!(),
+                    }
                 )
                 .map_err(output_error)?;
-                for example in &cell.examples {
-                    writeln!(writer, "  {example}").map_err(output_error)?;
-                }
             }
         }
         Ok(())
     }
 }
 
-impl ChangeSink for SummarySink {
+impl ChangeSink for TextSink {
     fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        if excluded(change.record, self.topology_only) {
+        if topology_excluded(&change, self.topology_only) {
             return Ok(());
         }
-        let cell = &mut self.cells[summary_index(change.record, change.change)];
-        cell.count = cell.count.saturating_add(1);
-        if cell.examples.len() < 20 {
-            cell.examples.push(change.key.join("/"));
+        let category = classify_change(&change);
+        let index = summary_index(change.record, change.change);
+        self.counts[category.index()][index] =
+            self.counts[category.index()][index].saturating_add(1);
+        let examples = &mut self.examples[category.index() * 15 + index];
+        if examples.len() < 20 {
+            examples.push(change.key.join("/"));
+        }
+        if self.expanded(category) {
+            write_change_line(&mut self.details[category.index()], &change)?;
         }
         Ok(())
     }
 }
 
-struct DetailedSink<'a> {
-    writer: &'a mut dyn Write,
-    topology_only: bool,
-    count: u64,
-}
-
-impl<'a> DetailedSink<'a> {
-    fn new(writer: &'a mut dyn Write, topology_only: bool) -> Self {
-        Self {
-            writer,
-            topology_only,
-            count: 0,
-        }
+fn write_change_line(writer: &mut dyn Write, change: &GraphChange) -> Result<(), HistoryError> {
+    write!(
+        writer,
+        "  {} {} {}",
+        record_name(change.record, 1),
+        change_name(change.change),
+        change.key.join("/")
+    )
+    .map_err(output_error)?;
+    if let Some(old) = &change.old {
+        writer.write_all(b"\told=").map_err(output_error)?;
+        serde_json::to_writer(&mut *writer, old).map_err(json_output_error)?;
     }
-
-    fn finish(&mut self) -> Result<(), HistoryError> {
-        if self.count == 0 {
-            self.writer
-                .write_all(b"no graph changes\n")
-                .map_err(output_error)?;
-        }
-        Ok(())
+    if let Some(new) = &change.new {
+        writer.write_all(b"\tnew=").map_err(output_error)?;
+        serde_json::to_writer(&mut *writer, new).map_err(json_output_error)?;
     }
-}
-
-impl ChangeSink for DetailedSink<'_> {
-    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        if excluded(change.record, self.topology_only) {
-            return Ok(());
-        }
-        write!(
-            self.writer,
-            "{} {} {}",
-            record_name(change.record, 1),
-            change_name(change.change),
-            change.key.join("/")
-        )
-        .map_err(output_error)?;
-        if let Some(old) = &change.old {
-            self.writer.write_all(b"\told=").map_err(output_error)?;
-            serde_json::to_writer(&mut *self.writer, old).map_err(json_output_error)?;
-        }
-        if let Some(new) = &change.new {
-            self.writer.write_all(b"\tnew=").map_err(output_error)?;
-            serde_json::to_writer(&mut *self.writer, new).map_err(json_output_error)?;
-        }
-        self.writer.write_all(b"\n").map_err(output_error)?;
-        self.count = self.count.saturating_add(1);
-        Ok(())
-    }
+    writer.write_all(b"\n").map_err(output_error)
 }
 
 struct JsonSink<'a> {
     writer: &'a mut dyn Write,
     topology_only: bool,
     first: bool,
+    summary: [u64; 5],
 }
 
 impl<'a> JsonSink<'a> {
@@ -454,25 +786,59 @@ impl<'a> JsonSink<'a> {
             writer,
             topology_only,
             first: true,
+            summary: [0; 5],
         }
     }
 
     fn finish(&mut self) -> Result<(), HistoryError> {
-        self.writer.write_all(b"]\n").map_err(output_error)
+        writeln!(
+            self.writer,
+            "],\"summary\":{{\"semantic\":{},\"textual\":{},\"location\":{},\"analysis\":{},\"metadata\":{}}}}}",
+            self.summary[ChangeCategory::Semantic.index()],
+            self.summary[ChangeCategory::Textual.index()],
+            self.summary[ChangeCategory::Location.index()],
+            self.summary[ChangeCategory::Analysis.index()],
+            self.summary[ChangeCategory::Metadata.index()],
+        )
+        .map_err(output_error)
     }
 }
 
 impl ChangeSink for JsonSink<'_> {
     fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        if excluded(change.record, self.topology_only) {
+        if topology_excluded(&change, self.topology_only) {
             return Ok(());
         }
+        let category = classify_change(&change);
+        self.summary[category.index()] = self.summary[category.index()].saturating_add(1);
         if self.first {
             self.first = false;
         } else {
             self.writer.write_all(b",").map_err(output_error)?;
         }
-        serde_json::to_writer(&mut *self.writer, &change).map_err(json_output_error)
+        self.writer
+            .write_all(b"{\"category\":")
+            .map_err(output_error)?;
+        serde_json::to_writer(&mut *self.writer, category.name()).map_err(json_output_error)?;
+        self.writer
+            .write_all(b",\"record\":")
+            .map_err(output_error)?;
+        serde_json::to_writer(&mut *self.writer, &change.record).map_err(json_output_error)?;
+        self.writer
+            .write_all(b",\"change\":")
+            .map_err(output_error)?;
+        serde_json::to_writer(&mut *self.writer, &change.change).map_err(json_output_error)?;
+        self.writer.write_all(b",\"key\":").map_err(output_error)?;
+        serde_json::to_writer(&mut *self.writer, &change.key).map_err(json_output_error)?;
+        if let Some(old) = &change.old {
+            self.writer.write_all(b",\"old\":").map_err(output_error)?;
+            serde_json::to_writer(&mut *self.writer, old).map_err(json_output_error)?;
+        }
+        if let Some(new) = &change.new {
+            self.writer.write_all(b",\"new\":").map_err(output_error)?;
+            serde_json::to_writer(&mut *self.writer, new).map_err(json_output_error)?;
+        }
+        self.writer.write_all(b"}").map_err(output_error)
     }
 }
 
@@ -501,8 +867,93 @@ fn summary_index(record: RecordKind, change: ChangeKind) -> usize {
     record * 3 + change
 }
 
-fn excluded(record: RecordKind, topology_only: bool) -> bool {
-    topology_only && matches!(record, RecordKind::Analysis | RecordKind::Metadata)
+fn classify_change(change: &GraphChange) -> ChangeCategory {
+    match change.record {
+        RecordKind::Analysis => return ChangeCategory::Analysis,
+        RecordKind::Metadata => return ChangeCategory::Metadata,
+        RecordKind::Node | RecordKind::Edge | RecordKind::Hyperedge => {}
+    }
+    if change.change != ChangeKind::Changed {
+        return ChangeCategory::Semantic;
+    }
+    let (Some(old), Some(new)) = (&change.old, &change.new) else {
+        return ChangeCategory::Semantic;
+    };
+    if equal_without_location(old, new) {
+        return ChangeCategory::Location;
+    }
+    if exact_source_only_changed(old, new) {
+        return ChangeCategory::Textual;
+    }
+    ChangeCategory::Semantic
+}
+
+fn equal_without_location(old: &serde_json::Value, new: &serde_json::Value) -> bool {
+    stripped(old, StripMode::Location) == stripped(new, StripMode::Location)
+}
+
+fn exact_source_only_changed(old: &serde_json::Value, new: &serde_json::Value) -> bool {
+    let old_source = old.get("source_hash");
+    let new_source = new.get("source_hash");
+    if old_source.is_none() || new_source.is_none() || old_source == new_source {
+        return false;
+    }
+    if old.get("signature_hash") != new.get("signature_hash")
+        || old.get("implementation_hash") != new.get("implementation_hash")
+    {
+        return false;
+    }
+    stripped(old, StripMode::LocationAndSourceHash)
+        == stripped(new, StripMode::LocationAndSourceHash)
+}
+
+#[derive(Clone, Copy)]
+enum StripMode {
+    Location,
+    LocationAndSourceHash,
+}
+
+fn stripped(value: &serde_json::Value, mode: StripMode) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.iter()
+                .filter(|(key, _)| {
+                    !location_field(key)
+                        && !(matches!(mode, StripMode::LocationAndSourceHash)
+                            && key.as_str() == "source_hash")
+                })
+                .map(|(key, value)| (key.clone(), stripped(value, mode)))
+                .collect(),
+        ),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(|value| stripped(value, mode)).collect())
+        }
+        value => value.clone(),
+    }
+}
+
+fn location_field(key: &str) -> bool {
+    matches!(
+        key,
+        "source_file"
+            | "source_location"
+            | "location"
+            | "span"
+            | "line"
+            | "column"
+            | "start_line"
+            | "start_column"
+            | "end_line"
+            | "end_column"
+            | "start_position"
+            | "end_position"
+    )
+}
+
+fn topology_excluded(change: &GraphChange, topology_only: bool) -> bool {
+    topology_only
+        && (change.change == ChangeKind::Changed
+            || !matches!(change.record, RecordKind::Node | RecordKind::Edge))
 }
 
 fn record_name(record: RecordKind, count: u64) -> &'static str {
@@ -830,7 +1281,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             exact(&positionals, 1, "export requires REV")?;
             let output = output.ok_or_else(|| usage("export requires --output PATH"))?;
             let commit = repository.resolve(&positionals[0]).map_err(runtime)?;
-            let build_options = HistoryBuildOptions::defaults().map_err(runtime)?;
+            let build_options = configured_build_options(&repository).map_err(runtime)?;
             let (history, preferred) =
                 resolve_or_materialize(&repository, commit, &build_options, false, false)
                     .map_err(runtime)?;
@@ -1204,11 +1655,28 @@ fn execute_build(
 ) -> Result<String, CommandFailure> {
     let parsed = parse_build_command(command, args).map_err(usage)?;
     let commit = repository.resolve(&parsed.revision).map_err(runtime)?;
+    let options = if let Some(source) = &parsed.profile_from {
+        HistoryBuildOptions::from_profile(stored_profile(repository, source).map_err(runtime)?)
+            .map_err(runtime)?
+    } else {
+        parsed.options
+    };
+    let profile_rebuild = if parsed.profile_from.is_some() {
+        match HistoryStore::open_existing(repository).map_err(runtime)? {
+            Some(history) => history
+                .preferred(&commit)
+                .map_err(runtime)?
+                .is_some_and(|preferred| preferred.version.build_profile != options.profile()),
+            None => false,
+        }
+    } else {
+        false
+    };
     let (_history, published) = resolve_or_materialize(
         repository,
         commit,
-        &parsed.options,
-        command == "rebuild",
+        &options,
+        command == "rebuild" || profile_rebuild,
         parsed.replace_corrupt,
     )
     .map_err(runtime)?;
@@ -1239,6 +1707,30 @@ fn execute_build(
             published.preferred
         ))
     }
+}
+
+fn stored_profile(repository: &Repository, source: &str) -> Result<BuildProfile, String> {
+    let history = HistoryStore::open_existing(repository)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "no graph history is materialized".to_owned())?;
+    if let Ok(commit) = repository.resolve(source) {
+        let version = history
+            .preferred(&commit)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("no preferred realization exists for {source}"))?;
+        history
+            .validate(&version.id)
+            .map_err(|error| error.to_string())?;
+        return Ok(version.version.build_profile);
+    }
+    let id = source
+        .parse::<RealizationId>()
+        .map_err(|_| format!("--profile-from must name a revision or realization, got {source}"))?;
+    let version = history.get(&id).map_err(|error| error.to_string())?;
+    history
+        .validate(&version.id)
+        .map_err(|error| error.to_string())?;
+    Ok(version.version.build_profile)
 }
 
 fn parse(args: &[String]) -> Result<(Vec<String>, String, Option<std::path::PathBuf>), String> {
@@ -1390,6 +1882,32 @@ mod tests {
         assert_eq!(revisions, ["old", "new"]);
         assert_eq!(options.output, DiffOutput::Json);
         assert!(options.topology_only);
+        let fingerprint = "a".repeat(64);
+        let parsed = parse_diff(&[
+            "old".to_owned(),
+            "new".to_owned(),
+            "--include-locations".to_owned(),
+            "--include-analysis".to_owned(),
+            "--include-metadata".to_owned(),
+            format!("--fingerprint={fingerprint}"),
+        ]);
+        let Ok(parsed) = parsed else {
+            assert!(parsed.is_ok());
+            return;
+        };
+        assert!(parsed.1.include_locations);
+        assert!(parsed.1.include_analysis);
+        assert!(parsed.1.include_metadata);
+        assert_eq!(parsed.1.fingerprint.as_deref(), Some(fingerprint.as_str()));
+        assert!(
+            parse_diff(&[
+                "old".to_owned(),
+                "new".to_owned(),
+                format!("--fingerprint={fingerprint}"),
+                "--allow-profile-mismatch".to_owned(),
+            ])
+            .is_err()
+        );
         assert!(
             parse_diff(&[
                 "old".to_owned(),
@@ -1424,6 +1942,48 @@ mod tests {
         assert_eq!(
             parsed.map(|value| value.0),
             Ok(vec!["-old".to_owned(), "-new".to_owned()])
+        );
+    }
+
+    #[test]
+    fn graph_changes_are_classified_by_meaning_before_location_churn() {
+        let location = change(
+            RecordKind::Node,
+            ChangeKind::Changed,
+            Some(json!({"id":"n","implementation_hash":"a","source_location":"L1"})),
+            Some(json!({"id":"n","implementation_hash":"a","source_location":"L9"})),
+        );
+        assert_eq!(classify_change(&location), ChangeCategory::Location);
+
+        let textual = change(
+            RecordKind::Node,
+            ChangeKind::Changed,
+            Some(json!({
+                "id":"n","signature_hash":"s","implementation_hash":"i",
+                "source_hash":"old","source_location":"L1"
+            })),
+            Some(json!({
+                "id":"n","signature_hash":"s","implementation_hash":"i",
+                "source_hash":"new","source_location":"L2"
+            })),
+        );
+        assert_eq!(classify_change(&textual), ChangeCategory::Textual);
+
+        let semantic = change(
+            RecordKind::Node,
+            ChangeKind::Changed,
+            Some(json!({"id":"n","implementation_hash":"old","source_hash":"old"})),
+            Some(json!({"id":"n","implementation_hash":"new","source_hash":"new"})),
+        );
+        assert_eq!(classify_change(&semantic), ChangeCategory::Semantic);
+        assert_eq!(
+            classify_change(&change(
+                RecordKind::Analysis,
+                ChangeKind::Added,
+                None,
+                Some(json!({"community":1})),
+            )),
+            ChangeCategory::Analysis
         );
     }
 
@@ -1473,7 +2033,16 @@ mod tests {
             RecordKind::Metadata,
         ];
         let changes = [ChangeKind::Added, ChangeKind::Removed, ChangeKind::Changed];
-        let mut summary = SummarySink::new(false);
+        let summary_options = DiffOptions {
+            output: DiffOutput::Summary,
+            topology_only: false,
+            include_locations: false,
+            include_analysis: false,
+            include_metadata: false,
+            fingerprint: None,
+            allow_profile_mismatch: false,
+        };
+        let mut summary = TextSink::new(&summary_options)?;
         for record in records {
             for kind in changes {
                 summary.change(change(record, kind, None, None))?;
@@ -1489,7 +2058,7 @@ mod tests {
             })?;
         }
         let mut rendered = Vec::new();
-        summary.render(&mut rendered)?;
+        summary.finish(&mut rendered)?;
         let rendered = String::from_utf8(rendered)?;
         assert!(rendered.contains("26 nodes added"));
         assert!(rendered.contains("analysis record"));
@@ -1504,9 +2073,13 @@ mod tests {
         }
 
         let mut empty = Vec::new();
-        SummarySink::new(true).render(&mut empty)?;
-        assert_eq!(empty, b"no graph changes\n");
-        let mut topology = SummarySink::new(true);
+        let topology_options = DiffOptions {
+            topology_only: true,
+            ..summary_options.clone()
+        };
+        TextSink::new(&topology_options)?.finish(&mut empty)?;
+        assert_eq!(empty, b"no topology changes\n");
+        let mut topology = TextSink::new(&topology_options)?;
         topology.change(change(
             RecordKind::Analysis,
             ChangeKind::Changed,
@@ -1514,11 +2087,15 @@ mod tests {
             None,
         ))?;
         let mut filtered = Vec::new();
-        topology.render(&mut filtered)?;
-        assert_eq!(filtered, b"no graph changes\n");
+        topology.finish(&mut filtered)?;
+        assert_eq!(filtered, b"no topology changes\n");
 
         let mut detailed_bytes = Vec::new();
-        let mut detailed = DetailedSink::new(&mut detailed_bytes, false);
+        let detailed_options = DiffOptions {
+            output: DiffOutput::Detailed,
+            ..summary_options.clone()
+        };
+        let mut detailed = TextSink::new(&detailed_options)?;
         detailed.change(change(
             RecordKind::Edge,
             ChangeKind::Changed,
@@ -1526,14 +2103,14 @@ mod tests {
             Some(json!({"confidence": 0.9})),
         ))?;
         detailed.change(change(RecordKind::Node, ChangeKind::Added, None, None))?;
-        detailed.finish()?;
+        detailed.finish(&mut detailed_bytes)?;
         assert!(String::from_utf8(detailed_bytes)?.contains("old="));
 
         let mut no_details = Vec::new();
-        DetailedSink::new(&mut no_details, true).finish()?;
-        assert_eq!(no_details, b"no graph changes\n");
+        TextSink::new(&topology_options)?.finish(&mut no_details)?;
+        assert_eq!(no_details, b"no topology changes\n");
 
-        let mut json_bytes = b"[".to_vec();
+        let mut json_bytes = b"{\"changes\":[".to_vec();
         let mut json_sink = JsonSink::new(&mut json_bytes, true);
         json_sink.change(change(
             RecordKind::Metadata,
@@ -1545,7 +2122,13 @@ mod tests {
         json_sink.change(change(RecordKind::Edge, ChangeKind::Removed, None, None))?;
         json_sink.finish()?;
         let decoded: serde_json::Value = serde_json::from_slice(&json_bytes)?;
-        assert_eq!(decoded.as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            decoded
+                .get("changes")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
         Ok(())
     }
 
@@ -1612,12 +2195,12 @@ mod tests {
         };
 
         let mut short = ShortWriter(Vec::new());
-        short.write_all(b"[")?;
+        short.write_all(b"{\"changes\":[")?;
         let mut sink = JsonSink::new(&mut short, false);
         sink.change(change.clone())?;
         sink.finish()?;
-        let parsed: Vec<serde_json::Value> = serde_json::from_slice(&short.0)?;
-        assert_eq!(parsed.len(), 1);
+        let parsed: serde_json::Value = serde_json::from_slice(&short.0)?;
+        assert_eq!(parsed["changes"].as_array().map(Vec::len), Some(1));
 
         let mut broken = BrokenWriter;
         let mut sink = JsonSink::new(&mut broken, false);

@@ -25,6 +25,7 @@ pub(crate) struct ParsedBuildCommand {
     pub(crate) revision: String,
     pub(crate) format: String,
     pub(crate) replace_corrupt: bool,
+    pub(crate) profile_from: Option<String>,
     pub(crate) options: HistoryBuildOptions,
 }
 
@@ -513,6 +514,7 @@ pub(crate) fn parse_build_command(
     let mut revision = None;
     let mut format = None;
     let mut replace_corrupt = false;
+    let mut profile_from = None;
     let mut seen = std::collections::BTreeSet::new();
     let mut options = true;
     let mut index = 0;
@@ -550,7 +552,7 @@ pub(crate) fn parse_build_command(
                 }
             }
             "--backend" | "--model" | "--mode" | "--token-budget" | "--resolution"
-            | "--exclude-hubs" | "--format" => {
+            | "--exclude-hubs" | "--format" | "--profile-from" => {
                 if !seen.insert(name.to_owned()) {
                     return Err(format!("duplicate {name}"));
                 }
@@ -564,6 +566,7 @@ pub(crate) fn parse_build_command(
                     "--resolution" => values.resolution = positive_float(name, value)?,
                     "--exclude-hubs" => values.exclude_hubs = Some(finite_float(name, value)?),
                     "--format" => format = Some(value.to_owned()),
+                    "--profile-from" => profile_from = Some(nonempty(name, value)?.to_owned()),
                     _ => unreachable!(),
                 }
             }
@@ -593,11 +596,24 @@ pub(crate) fn parse_build_command(
     if replace_corrupt && command != "rebuild" {
         return Err("--replace-corrupt is only valid for history rebuild".to_owned());
     }
+    if profile_from.is_some() && command != "build" {
+        return Err("--profile-from is only valid for history build".to_owned());
+    }
+    let direct_profile_option = seen.iter().any(|option| {
+        !matches!(
+            option.as_str(),
+            "--format" | "--profile-from" | "--replace-corrupt"
+        )
+    }) || !values.excludes.is_empty();
+    if profile_from.is_some() && direct_profile_option {
+        return Err("--profile-from cannot be combined with build-profile options".to_owned());
+    }
     let options = HistoryBuildOptions::from_values(values).map_err(|error| error.to_string())?;
     Ok(ParsedBuildCommand {
         revision,
         format,
         replace_corrupt,
+        profile_from,
         options,
     })
 }
@@ -944,6 +960,26 @@ mod tests {
         assert_eq!(parsed.revision, "HEAD");
         assert_eq!(parsed.format, "json");
         assert_eq!(parsed.options.profile().value("token_budget"), Some("4096"));
+        let inherited = parse_build_command(
+            "build",
+            &[
+                "HEAD".to_owned(),
+                "--profile-from".to_owned(),
+                "HEAD~1".to_owned(),
+            ],
+        )?;
+        assert_eq!(inherited.profile_from.as_deref(), Some("HEAD~1"));
+        assert!(
+            parse_build_command(
+                "build",
+                &[
+                    "HEAD".to_owned(),
+                    "--profile-from=HEAD~1".to_owned(),
+                    "--cargo".to_owned(),
+                ],
+            )
+            .is_err()
+        );
         assert!(
             parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()]).is_err()
         );
