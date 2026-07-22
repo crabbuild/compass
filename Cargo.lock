@@ -939,6 +939,7 @@ dependencies = [
  "compass-google-workspace",
  "compass-graph",
  "compass-graphdb",
+ "compass-history",
  "compass-ingest",
  "compass-mcp",
  "compass-model",

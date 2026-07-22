@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::HistoryError;
+use crate::{CommitId, HistoryError};
 
 /// Canonical paths that identify a Git repository and its shared common directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -40,9 +40,50 @@ impl Repository {
     pub fn common_dir(&self) -> &Path {
         &self.common_dir
     }
+
+    /// Resolve one revision to a full commit object ID without option ambiguity.
+    pub fn resolve(&self, revision: &str) -> Result<CommitId, HistoryError> {
+        let expression = format!("{revision}^{{commit}}");
+        let value = git_line(
+            &self.root,
+            &["rev-parse", "--verify", "--end-of-options", &expression],
+        )?;
+        value
+            .parse()
+            .map_err(|_| HistoryError::Git(format!("revision {revision:?} is not a commit")))
+    }
+
+    /// Return the exact ordered parents recorded by a commit.
+    pub fn parents(&self, commit: &CommitId) -> Result<Vec<CommitId>, HistoryError> {
+        let value = git_line(
+            &self.root,
+            &[
+                "show",
+                "-s",
+                "--format=%P",
+                "--end-of-options",
+                commit.as_str(),
+            ],
+        )?;
+        if value.is_empty() {
+            return Ok(Vec::new());
+        }
+        value
+            .split_ascii_whitespace()
+            .map(|parent| {
+                parent.parse().map_err(|_| {
+                    HistoryError::Git(format!("Git returned invalid parent ID {parent}"))
+                })
+            })
+            .collect()
+    }
 }
 
 fn git_path(current_dir: &Path, arguments: &[&str]) -> Result<PathBuf, HistoryError> {
+    git_line(current_dir, arguments).map(PathBuf::from)
+}
+
+fn git_line(current_dir: &Path, arguments: &[&str]) -> Result<String, HistoryError> {
     let output = Command::new("git")
         .args(arguments)
         .current_dir(current_dir)
@@ -71,5 +112,5 @@ fn git_path(current_dir: &Path, arguments: &[&str]) -> Result<PathBuf, HistoryEr
     if lines.next().is_some() {
         return Err(HistoryError::Git("Git returned multiple paths".to_owned()));
     }
-    Ok(PathBuf::from(value))
+    Ok(value.to_owned())
 }

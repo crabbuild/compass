@@ -18,6 +18,7 @@ use crate::{
 const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
 const STORE_FORMAT_KEY: &[u8] = b"format";
 const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"history_schema":1,"typed_keys":1}"#;
+type Records = Vec<(Vec<u8>, Vec<u8>)>;
 
 /// Project-owned wrapper around the pinned SQLite Prolly adapter.
 pub struct HistoryStore {
@@ -336,12 +337,35 @@ impl HistoryStore {
         )
     }
 
+    /// Reconstruct all authoritative content for one validated realization.
+    pub fn artifacts(
+        &self,
+        id: &RealizationId,
+    ) -> Result<crate::CompletedGraphArtifacts, HistoryError> {
+        self.validate(id)?;
+        let partitioned = crate::PartitionedGraph {
+            nodes: self.read_tree(&self.load_realization_root(id, b"nodes")?)?,
+            edges: self.read_tree(&self.load_realization_root(id, b"edges")?)?,
+            hyperedges: self.read_tree(&self.load_realization_root(id, b"hyperedges")?)?,
+            analysis: self.read_tree(&self.load_realization_root(id, b"analysis")?)?,
+            metadata: self.read_tree(&self.load_realization_root(id, b"metadata")?)?,
+        };
+        crate::CompletedGraphArtifacts::reconstruct(&partitioned)
+    }
+
     fn build_tree(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Tree, HistoryError> {
         let mut builder = BatchBuilder::new(self.prolly.store().clone(), Config::default());
         for (key, value) in entries {
             builder.add(key, value);
         }
         builder.build().map_err(HistoryError::from)
+    }
+
+    fn read_tree(&self, tree: &Tree) -> Result<Records, HistoryError> {
+        self.prolly
+            .range(tree, &[], None)?
+            .map(|entry| entry.map_err(HistoryError::from))
+            .collect()
     }
 
     fn load_realization_root(

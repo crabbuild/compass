@@ -1,6 +1,7 @@
 //! Command compatibility layer for Compass and the Graphify compatibility binary.
 
 mod dedup_commands;
+mod history_commands;
 mod hook_commands;
 mod ingest_commands;
 mod install_commands;
@@ -131,6 +132,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         return Outcome::success(compass_command_help(&command));
     }
     match command.as_str() {
+        "history" => history_commands::command(frontend, &args),
         "query" => command_query(&args),
         "path" => command_path(&args),
         "explain" => command_explain(&args),
@@ -3518,11 +3520,12 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 
 fn compass_help() -> String {
     "Usage: compass <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  install\n  uninstall\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
-        .to_owned()
+        .replacen("Commands:\n", "Commands:\n  history\n", 1)
 }
 
 fn compass_command_help(command: &str) -> String {
     match command {
+        "history" => history_commands::help(Frontend::Compass),
         "update" => "Usage: compass update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
         "extract" => extract_help(),
         "watch" => watch_help(),
@@ -3567,6 +3570,7 @@ fn graphify_help() -> String {
         .strip_suffix('\n')
         .unwrap_or(include_str!("../assets/graphify-help.txt"))
         .to_owned()
+        + "\n  graphify history --help"
 }
 
 #[cfg(test)]
