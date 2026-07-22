@@ -10,6 +10,7 @@ mod integration_commands;
 mod label_commands;
 mod provider_commands;
 mod prs_commands;
+mod query_commands;
 mod result_commands;
 mod semantic_commands;
 
@@ -18,7 +19,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -48,6 +49,19 @@ use compass_semantic::{
     extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
     resolve_builtin_backend, resolve_custom_backend,
 };
+
+static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
+static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
+
+fn process_cancellation() -> Result<&'static AtomicBool, String> {
+    let installed = SIGNAL_HANDLER.get_or_init(|| {
+        ctrlc::set_handler(|| PROCESS_CANCELLED.store(true, Ordering::Release))
+            .map_err(|error| error.to_string())
+    });
+    installed.as_ref().map_err(Clone::clone)?;
+    PROCESS_CANCELLED.store(false, Ordering::Release);
+    Ok(&PROCESS_CANCELLED)
+}
 
 const GRAPHIFY_COMPAT_VERSION: &str = "0.9.20";
 
@@ -166,7 +180,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "history" => history_commands::command(frontend, &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => history_commands::command_diff(frontend, &args),
-        "query" => command_query(frontend, &args),
+        "query" => query_commands::command_query(frontend, &args),
         "path" => command_path(frontend, &args),
         "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
@@ -486,13 +500,14 @@ fn run_watch_with_frontend(
             return 1;
         }
     };
-    let stop = Arc::new(AtomicBool::new(false));
-    let signal_stop = Arc::clone(&stop);
-    if let Err(error) = ctrlc::set_handler(move || signal_stop.store(true, Ordering::Release)) {
-        let _result = writeln!(stderr, "error: could not install Ctrl+C handler: {error}");
-        return 1;
-    }
-    let result = watch_local_graph(&options, &stop, |status| {
+    let stop = match process_cancellation() {
+        Ok(stop) => stop,
+        Err(error) => {
+            let _result = writeln!(stderr, "error: could not install Ctrl+C handler: {error}");
+            return 1;
+        }
+    };
+    let result = watch_local_graph(&options, stop, |status| {
         write_watch_status(frontend, status, stdout, stderr);
     });
     match result {
@@ -3354,12 +3369,12 @@ fn callflow_help() -> String {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum GraphSelection {
+pub(crate) enum GraphSelection {
     File(PathBuf),
     Commit(String),
 }
 
-fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
+pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outcome {
     if args
         .iter()
         .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
@@ -3551,7 +3566,9 @@ fn command_affected(args: &[String]) -> Outcome {
     Outcome::success(format_affected(&loaded.graph, query, &relations, depth))
 }
 
-fn parse_graph_selection(args: &[String]) -> Result<(GraphSelection, Vec<String>), String> {
+pub(crate) fn parse_graph_selection(
+    args: &[String],
+) -> Result<(GraphSelection, Vec<String>), String> {
     let mut selection = None;
     let mut remaining = Vec::new();
     let mut options = true;
@@ -3615,7 +3632,7 @@ fn set_graph_selection(
     Err(message.to_owned())
 }
 
-fn load_selection(
+pub(crate) fn load_selection(
     frontend: Frontend,
     selection: &GraphSelection,
     force_directed: bool,
@@ -3700,7 +3717,7 @@ fn compass_command_help(command: &str) -> String {
         "cluster-only" => "Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
         "label" => label_commands::label_help(Frontend::Compass),
         "prs" => prs_commands::prs_help(Frontend::Compass),
-        "query" => query_help(Frontend::Compass),
+        "query" => query_commands::query_help(),
         "path" => path_help(Frontend::Compass),
         "explain" => explain_help(Frontend::Compass),
         "affected" => "Usage: compass affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),

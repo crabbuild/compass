@@ -117,6 +117,8 @@ jobs:
           - manifest_input
           - cli_args
           - renderer_input
+          - cql_source
+          - cql_params
           - semantic_fragment
           - avi_audio
     defaults:
@@ -144,6 +146,33 @@ jobs:
             fuzz/artifacts/${{ matrix.target }}
           if-no-files-found: warn
 
+  neo4j-differential:
+    runs-on: ubuntu-24.04
+    services:
+      neo4j:
+        image: neo4j:5.26.12@sha256:9f75e8df4325a24f00fdd7a8c0bcce650a58375049b1058e496e8b43d6c36b37
+        env:
+          NEO4J_AUTH: neo4j/compass-test-password
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p compass-test-password 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+      - name: Run CompassQL native Bolt differential
+        env:
+          COMPASS_NEO4J_URI: bolt://127.0.0.1:7687
+          COMPASS_NEO4J_USER: neo4j
+          COMPASS_NEO4J_PASSWORD: compass-test-password
+        run: cargo test -p compass-query --test neo4j_differential --locked -- --nocapture
+
   mutation:
     name: mutation (${{ matrix.area }})
     runs-on: ubuntu-24.04
@@ -160,6 +189,12 @@ jobs:
           - area: query-scoring
             files: -f crates/compass-query/src/score.rs
             filter: score_nodes|query_match_tier|singleton_score|pick_scored_endpoint|pick_seeds|compute_idf|BestSeed::better_than
+          - area: compassql-compiler
+            files: -f crates/compass-cypher/src/lexer.rs -f crates/compass-cypher/src/parser.rs -f crates/compass-cypher/src/semantic.rs
+            filter: lex|parse|analyze|infer|bind
+          - area: compassql-limits
+            files: -f crates/compass-query/src/cql/execute.rs -f crates/compass-query/src/cql/cache.rs
+            filter: checkpoint|count_expansion|reserve|PlanCache
           - area: graph-atomic-guard
             files: -f crates/compass-files/src/build_guard.rs
             filter: .*

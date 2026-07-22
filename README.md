@@ -11,6 +11,7 @@ The public command surface is exposed directly under `compass`:
 ```bash
 compass update .
 compass query "where is authentication enforced?"
+compass query --cql 'MATCH (f:Function)-[:CALLS]->(a) RETURN f.id, a.id'
 compass path LoginHandler SessionValidator
 compass explain SessionValidator
 compass affected SessionValidator
@@ -32,6 +33,7 @@ compass install
 compass uninstall
 compass cluster-only
 compass query
+compass query --cql
 compass path
 compass explain
 compass diff
@@ -241,6 +243,10 @@ current local baseline are documented in [PERFORMANCE.md](PERFORMANCE.md).
 The frozen compatibility baseline and evidence map are documented in
 [COMPATIBILITY.md](COMPATIBILITY.md). Side-by-side adoption and recovery are
 documented in [MIGRATION.md](MIGRATION.md).
+
+The deterministic structural-query language is documented in
+[docs/COMPASSQL.md](docs/COMPASSQL.md), with its exact accepted/rejected surface
+in [docs/COMPASSQL_SUPPORT.md](docs/COMPASSQL_SUPPORT.md).
 
 ## Distribution
 

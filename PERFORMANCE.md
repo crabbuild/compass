@@ -77,3 +77,17 @@ This local baseline is evidence, not a substitute for release CI. The hardening
 workflow repeats the small, medium, and large matrix, freezes the first approved
 runner result, and rejects a later Compass median regression greater than 10%.
 Release workflows require that frozen baseline before publishing.
+
+## CompassQL qualification
+
+CompassQL measures compile/plan latency, indexed fixed matches, one-hop and
+bounded-path expansion, aggregation, optional matching, cached-plan lookup,
+cancellation latency, expanded relationships, returned rows, and peak RSS.
+Run `scripts/benchmark_compassql.sh [GRAPH_JSON]`; the default graph is
+`graphify-out/graph.json`.
+
+The release gate rejects a cached-plan or query median regression above 10%, a
+working-memory budget violation, any partial result after cancellation/limit,
+or a cancellation checkpoint delay above 100 ms. Raw observations belong under
+`target/compassql-benchmark.csv`; no local observation is promoted to an
+approved baseline without the cross-platform release workflow artifact.

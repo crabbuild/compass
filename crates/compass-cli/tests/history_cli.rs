@@ -968,6 +968,26 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     assert!(query_text.contains("LegacyService"));
     assert!(!query_text.contains("ReplacementService"));
 
+    let cql = run(
+        compass,
+        directory.path(),
+        &[
+            "query",
+            "--cql",
+            "MATCH (a)-[:CALLS]->(b) RETURN a.id AS caller",
+            "--at",
+            "HEAD~1",
+            "--format=json",
+        ],
+    )?;
+    assert!(
+        cql.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cql.stderr)
+    );
+    let cql: serde_json::Value = serde_json::from_slice(&cql.stdout)?;
+    assert_eq!(cql["rows"][0]["caller"]["value"], "legacy");
+
     let path = run(
         compass,
         directory.path(),
