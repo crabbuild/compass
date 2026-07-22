@@ -64,6 +64,7 @@ fn request(
     Ok(PublishRequest {
         commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse()?,
         parents: Vec::new(),
+        profile: compass_history::BuildProfile::default(),
         fingerprint: std::iter::repeat_n(fingerprint, 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,

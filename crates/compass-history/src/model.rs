@@ -5,10 +5,12 @@ use prolly::{Cid, Config, RuntimeConfig, Tree, TreeFormat};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
-use crate::{ExtractionFingerprint, GraphArtifacts, HistoryError, canonical_json_bytes};
+use crate::{
+    BuildProfile, ExtractionFingerprint, GraphArtifacts, HistoryError, canonical_json_bytes,
+};
 
 /// Version of the Compass history realization schema.
-pub const HISTORY_SCHEMA_VERSION: u32 = 1;
+pub const HISTORY_SCHEMA_VERSION: u32 = 2;
 
 /// Persistence treatment for one realization artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -99,6 +101,10 @@ pub struct GraphVersion {
     pub schema_version: u32,
     pub git_commit: String,
     pub git_parents: Vec<String>,
+    #[serde(default)]
+    pub build_profile: BuildProfile,
+    #[serde(default)]
+    pub profile_digest: String,
     pub extraction_fingerprint: String,
     pub nodes_root: StoredTree,
     pub edges_root: StoredTree,
@@ -244,6 +250,7 @@ impl CompletionEvidence {
 pub struct PublishRequest {
     pub commit: CommitId,
     pub parents: Vec<CommitId>,
+    pub profile: BuildProfile,
     pub fingerprint: ExtractionFingerprint,
     pub artifacts: GraphArtifacts,
     pub completion: CompletionEvidence,

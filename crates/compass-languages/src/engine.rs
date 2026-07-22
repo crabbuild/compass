@@ -6,6 +6,7 @@ use std::path::Path;
 
 use compass_model::{EdgeRecord, NodeRecord};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
@@ -60,6 +61,12 @@ impl Engine {
             &generic_config(spec),
             language,
         );
+        attach_definition_hashes(
+            &mut extraction,
+            source,
+            tree.root_node(),
+            &generic_config(spec),
+        );
         if language == "python" {
             add_python_rationale(path, source, tree.root_node(), &mut extraction);
         }
@@ -97,43 +104,22 @@ impl Engine {
         let tree = self.parse(path, spec, &source)?;
         let config = generic_config(spec);
         let root = tree.root_node();
-        if spec.name == "go" {
-            return Ok(crate::go::extract(path, &source, root));
-        }
-        if spec.name == "rust" {
-            return Ok(crate::rust_lang::extract(path, &source, root));
-        }
-        if spec.name == "bash" {
-            return Ok(crate::bash::extract(path, &source, root));
-        }
-        if spec.name == "csharp" {
-            return Ok(crate::csharp::extract(path, &source, root));
-        }
-        if spec.name == "cpp" {
-            return Ok(crate::cpp::extract(path, &source, root));
-        }
-        if spec.name == "php" {
-            return Ok(crate::php::extract(path, &source, root));
-        }
-        if spec.name == "swift" {
-            return Ok(crate::swift::extract(path, &source, root));
-        }
-        if spec.name == "objc" {
-            return Ok(crate::objc::extract(path, &source, root));
-        }
-        if spec.name == "powershell" {
-            return Ok(crate::powershell::extract(path, &source, root));
-        }
-        if spec.name == "elixir" {
-            return Ok(crate::elixir::extract(path, &source, root));
-        }
-        if spec.name == "julia" {
-            return Ok(crate::julia::extract(path, &source, root));
-        }
-        if spec.name == "fortran" {
-            return Ok(crate::fortran::extract(path, &source, root));
-        }
-        let mut extraction = extract_tree(path, &source, root, &config, spec.name);
+        let mut extraction = match spec.name {
+            "go" => crate::go::extract(path, &source, root),
+            "rust" => crate::rust_lang::extract(path, &source, root),
+            "bash" => crate::bash::extract(path, &source, root),
+            "csharp" => crate::csharp::extract(path, &source, root),
+            "cpp" => crate::cpp::extract(path, &source, root),
+            "php" => crate::php::extract(path, &source, root),
+            "swift" => crate::swift::extract(path, &source, root),
+            "objc" => crate::objc::extract(path, &source, root),
+            "powershell" => crate::powershell::extract(path, &source, root),
+            "elixir" => crate::elixir::extract(path, &source, root),
+            "julia" => crate::julia::extract(path, &source, root),
+            "fortran" => crate::fortran::extract(path, &source, root),
+            _ => extract_tree(path, &source, root, &config, spec.name),
+        };
+        attach_definition_hashes(&mut extraction, &source, root, &config);
         if spec.name == "python" {
             add_python_rationale(path, &source, root, &mut extraction);
         }
@@ -312,6 +298,136 @@ fn extract_tree(
     }
     state.walk_function_calls();
     state.extraction
+}
+
+fn attach_definition_hashes(
+    extraction: &mut Extraction,
+    source: &[u8],
+    root: Node<'_>,
+    config: &GenericConfig,
+) {
+    let mut candidates = HashMap::<usize, Vec<usize>>::new();
+    for (index, node) in extraction.nodes.iter().enumerate() {
+        if node.attributes.get("_callable").and_then(Value::as_bool) != Some(true) {
+            continue;
+        }
+        let Some(line) = node
+            .attributes
+            .get("source_location")
+            .and_then(Value::as_str)
+            .and_then(source_line)
+        else {
+            continue;
+        };
+        candidates.entry(line).or_default().push(index);
+    }
+    let mut definitions = Vec::new();
+    collect_definitions(root, config, &mut definitions);
+    for definition in definitions {
+        let at_line = definition.start_position().row + 1;
+        let Some(indices) = candidates.get_mut(&at_line) else {
+            continue;
+        };
+        let Some(index) = indices.first().copied() else {
+            continue;
+        };
+        indices.remove(0);
+        let body = definition.child_by_field_name("body").or_else(|| {
+            let mut cursor = definition.walk();
+            definition.children(&mut cursor).find(|child| {
+                matches!(
+                    child.kind(),
+                    "body" | "block" | "compound_statement" | "class_body" | "declaration_list"
+                )
+            })
+        });
+        let signature_hash = ast_hash(definition, source, body.map(|body| body.id()));
+        let source_hash = source
+            .get(definition.start_byte()..definition.end_byte())
+            .map(normalized_source_hash);
+        let attributes = &mut extraction.nodes[index].attributes;
+        attributes.insert("signature_hash".to_owned(), Value::String(signature_hash));
+        if let Some(body) = body {
+            attributes.insert(
+                "implementation_hash".to_owned(),
+                Value::String(ast_hash(body, source, None)),
+            );
+        }
+        if let Some(source_hash) = source_hash {
+            attributes.insert("source_hash".to_owned(), Value::String(source_hash));
+        }
+    }
+}
+
+fn source_line(location: &str) -> Option<usize> {
+    let location = location.strip_prefix('L')?;
+    let digits = location.split_once('-').map_or(location, |value| value.0);
+    digits.parse().ok()
+}
+
+fn collect_definitions<'tree>(
+    node: Node<'tree>,
+    config: &GenericConfig,
+    output: &mut Vec<Node<'tree>>,
+) {
+    if config.class_types.contains(&node.kind()) || config.function_types.contains(&node.kind()) {
+        output.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_definitions(child, config, output);
+    }
+}
+
+fn ast_hash(node: Node<'_>, source: &[u8], excluded: Option<usize>) -> String {
+    let mut digest = Sha256::new();
+    hash_ast_node(node, source, excluded, &mut digest);
+    hex_digest(&digest.finalize())
+}
+
+fn hash_ast_node(node: Node<'_>, source: &[u8], excluded: Option<usize>, digest: &mut Sha256) {
+    if excluded == Some(node.id()) || node.kind().contains("comment") {
+        return;
+    }
+    digest.update(b"(");
+    digest.update(node.kind().as_bytes());
+    if node.child_count() == 0 {
+        digest.update(b":");
+        if let Some(bytes) = source.get(node.start_byte()..node.end_byte()) {
+            digest.update(bytes);
+        }
+    } else {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            hash_ast_node(child, source, excluded, digest);
+        }
+    }
+    digest.update(b")");
+}
+
+fn normalized_source_hash(source: &[u8]) -> String {
+    let mut normalized = Vec::with_capacity(source.len());
+    let mut index = 0;
+    while index < source.len() {
+        if source[index] == b'\r' && source.get(index + 1) == Some(&b'\n') {
+            normalized.push(b'\n');
+            index += 2;
+        } else {
+            normalized.push(source[index]);
+            index += 1;
+        }
+    }
+    hex_digest(&Sha256::digest(normalized))
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(value, "{byte:02x}");
+    }
+    value
 }
 
 fn add_python_rationale(path: &Path, source: &[u8], root: Node<'_>, extraction: &mut Extraction) {
@@ -2864,6 +2980,70 @@ fn resolve_js_import_path(path: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod rationale_tests {
     use super::*;
+
+    #[test]
+    fn definition_hashes_separate_signature_implementation_and_source_changes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("fixture.cpp");
+        let mut engine = Engine::default();
+        let extract_hashes = |engine: &mut Engine,
+                              path: &Path,
+                              text: &str|
+         -> Result<[String; 3], Box<dyn std::error::Error>> {
+            fs::write(path, text)?;
+            let extraction = engine.extract(path)?;
+            let node = extraction
+                .nodes
+                .iter()
+                .find(|node| node.label() == "value()")
+                .ok_or("missing value function")?;
+            Ok([
+                node.string("signature_hash"),
+                node.string("implementation_hash"),
+                node.string("source_hash"),
+            ])
+        };
+        let original = extract_hashes(&mut engine, &source, "int value() { return 1; }\n")?;
+        let formatted = extract_hashes(
+            &mut engine,
+            &source,
+            "int value() {\n  // retained only by source_hash\n  return 1;\n}\n",
+        )?;
+        let changed = extract_hashes(&mut engine, &source, "int value() { return 2; }\n")?;
+
+        assert_eq!(original[0], formatted[0]);
+        assert_eq!(original[1], formatted[1]);
+        assert_ne!(original[2], formatted[2]);
+        assert_eq!(original[0], changed[0]);
+        assert_ne!(original[1], changed[1]);
+        assert_ne!(original[2], changed[2]);
+        assert!(original.iter().all(|digest| digest.len() == 64));
+        Ok(())
+    }
+
+    #[test]
+    fn definition_hashes_attach_to_qualified_cpp_methods() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("db_impl.cc");
+        fs::write(
+            &source,
+            "int DBImpl::Compact() {\n  return shutting_down ? 0 : 1;\n}\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let node = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "DBImpl::Compact()")
+            .ok_or("missing qualified C++ method")?;
+
+        assert_eq!(node.string("signature_hash").len(), 64);
+        assert_eq!(node.string("implementation_hash").len(), 64);
+        assert_eq!(node.string("source_hash").len(), 64);
+        Ok(())
+    }
 
     #[test]
     fn python_import_alias_uses_match_top_level_function_scan()

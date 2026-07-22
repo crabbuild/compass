@@ -68,6 +68,7 @@ fn request(
     Ok(PublishRequest {
         commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse()?,
         parents: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse()?],
+        profile: compass_history::BuildProfile::default(),
         fingerprint: std::iter::repeat_n(fingerprint, 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -95,11 +96,15 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
     let fixture = Fixture::new()?;
     let repository = Repository::discover(&fixture.path)?;
     let history = HistoryStore::create(&repository)?;
-    let publish = request('a', false)?;
+    let mut publish = request('a', false)?;
+    publish.profile.insert("provider", "none")?;
+    let expected_profile = publish.profile.clone();
     let first = history.publish(publish.clone())?;
     let second = history.publish(publish)?;
     assert_eq!(first.id, second.id);
     assert!(first.preferred && second.preferred);
+    assert_eq!(first.version.build_profile, expected_profile);
+    assert_eq!(first.version.profile_digest.len(), 64);
     drop(history);
 
     let reopened = HistoryStore::open_existing(&repository)?

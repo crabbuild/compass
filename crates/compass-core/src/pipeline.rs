@@ -1859,10 +1859,50 @@ mod tests {
         let changed = build_local_graph(&options)?;
         assert_eq!(changed.files_extracted, 1);
         assert_eq!(changed.files_cached, 1);
+        let changed_graph = GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let changed_graph_bytes = fs::read(changed.output_dir.join("graph.json"))?;
+        assert_ne!(
+            changed_graph_bytes, cold_graph_bytes,
+            "a body-only edit must update definition hashes"
+        );
+        let identities = |document: &GraphDocument| {
+            (
+                document
+                    .nodes
+                    .iter()
+                    .map(|node| node.id.clone())
+                    .collect::<HashSet<_>>(),
+                document
+                    .links
+                    .iter()
+                    .map(|edge| {
+                        (
+                            edge.source.clone(),
+                            edge.target.clone(),
+                            edge.string("relation"),
+                        )
+                    })
+                    .collect::<HashSet<_>>(),
+            )
+        };
+        assert_eq!(identities(&changed_graph), identities(&cold_graph));
+        let implementation_hash = |document: &GraphDocument| {
+            document
+                .nodes
+                .iter()
+                .find(|node| node.label() == "work()")
+                .map(|node| node.string("implementation_hash"))
+        };
+        assert_ne!(
+            implementation_hash(&changed_graph),
+            implementation_hash(&cold_graph)
+        );
+        let warm_changed = build_local_graph(&options)?;
+        assert_eq!(warm_changed.files_extracted, 0);
         assert_eq!(
-            fs::read(changed.output_dir.join("graph.json"))?,
-            cold_graph_bytes,
-            "a body-only incremental edit must preserve cold-build topology"
+            fs::read(warm_changed.output_dir.join("graph.json"))?,
+            changed_graph_bytes,
+            "cached and freshly extracted definition hashes must agree"
         );
 
         fs::remove_file(root.join("helper.py"))?;

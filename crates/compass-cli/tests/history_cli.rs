@@ -255,7 +255,8 @@ fn worker_reconciles_catalog_and_preferred_crash_windows() -> Result<(), Box<dyn
     let candidate = history.publish(PublishRequest {
         commit: commit.clone(),
         parents: repository.parents(&commit)?,
-        fingerprint: std::iter::repeat_n('d', 64)
+        profile: compass_history::BuildProfile::default(),
+        fingerprint: std::iter::repeat_n('c', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
         artifacts: GraphArtifacts {
@@ -368,6 +369,7 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
         Ok(history.publish(PublishRequest {
             commit: commit.clone(),
             parents: repository.parents(&commit)?,
+            profile: compass_history::BuildProfile::default(),
             fingerprint: std::iter::repeat_n(fingerprint, 64)
                 .collect::<String>()
                 .parse::<ExtractionFingerprint>()?,
@@ -584,6 +586,7 @@ fn gc_requires_explicit_confirmation_for_non_preferred_realizations()
         history.publish(PublishRequest {
             commit: commit.clone(),
             parents: Vec::new(),
+            profile: compass_history::BuildProfile::default(),
             fingerprint: std::iter::repeat_n(fingerprint, 64)
                 .collect::<String>()
                 .parse::<ExtractionFingerprint>()?,
@@ -752,6 +755,7 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     history.publish(PublishRequest {
         commit: old_commit.clone(),
         parents: repository.parents(&old_commit)?,
+        profile: compass_history::BuildProfile::default(),
         fingerprint: std::iter::repeat_n('c', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -790,19 +794,21 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
         ],
         "built_at_commit":new_commit
     }))?;
+    let new_artifacts = GraphArtifacts {
+        document: new_document,
+        analysis: Some(json!({"communities":{"0":["b"],"1":["a","c"]}})),
+        labels: None,
+        manifest: None,
+        authoritative_sidecars: BTreeMap::new(),
+    };
     history.publish(PublishRequest {
         commit: new_commit.clone(),
         parents: repository.parents(&new_commit)?,
-        fingerprint: std::iter::repeat_n('d', 64)
+        profile: compass_history::BuildProfile::default(),
+        fingerprint: std::iter::repeat_n('c', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
-        artifacts: GraphArtifacts {
-            document: new_document,
-            analysis: Some(json!({"communities":{"0":["b"],"1":["a","c"]}})),
-            labels: None,
-            manifest: None,
-            authoritative_sidecars: BTreeMap::new(),
-        },
+        artifacts: new_artifacts.clone(),
         completion: CompletionEvidence {
             extraction_succeeded: true,
             allow_partial: false,
@@ -830,7 +836,10 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
         &["diff", "HEAD~1", "HEAD", "--format", "json"],
     )?;
     assert!(json_output.status.success());
-    let changes: Vec<serde_json::Value> = serde_json::from_slice(&json_output.stdout)?;
+    let envelope: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
+    assert_eq!(envelope["schema_version"], 2);
+    assert_eq!(envelope["comparison"]["profile_mismatch"], false);
+    let changes = envelope["changes"].as_array().ok_or("missing changes")?;
     assert!(changes.iter().any(|change| change["record"] == "edge"));
     assert!(
         changes
@@ -855,7 +864,10 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
         directory.path(),
         &["diff", "HEAD~1", "HEAD", "--format=json", "--topology-only"],
     )?;
-    let topology_changes: Vec<serde_json::Value> = serde_json::from_slice(&topology.stdout)?;
+    let topology_envelope: serde_json::Value = serde_json::from_slice(&topology.stdout)?;
+    let topology_changes = topology_envelope["changes"]
+        .as_array()
+        .ok_or("missing topology changes")?;
     assert!(
         topology_changes
             .iter()
@@ -880,6 +892,43 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     assert_eq!(json_output.status.code(), alias.status.code());
     assert_eq!(json_output.stdout, alias.stdout);
     assert_eq!(json_output.stderr, alias.stderr);
+
+    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
+    history.publish(PublishRequest {
+        commit: new_commit,
+        parents: repository.parents(&repository.resolve("HEAD")?)?,
+        profile: compass_history::BuildProfile::default(),
+        fingerprint: std::iter::repeat_n('d', 64)
+            .collect::<String>()
+            .parse::<ExtractionFingerprint>()?,
+        artifacts: new_artifacts,
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        },
+        make_preferred: true,
+    })?;
+    drop(history);
+    let mismatch = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
+    assert_eq!(mismatch.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("not semantically comparable"));
+    let allowed = run(
+        compass,
+        directory.path(),
+        &[
+            "diff",
+            "HEAD~1",
+            "HEAD",
+            "--format=json",
+            "--allow-profile-mismatch",
+        ],
+    )?;
+    assert!(allowed.status.success());
+    let allowed: serde_json::Value = serde_json::from_slice(&allowed.stdout)?;
+    assert_eq!(allowed["comparison"]["profile_mismatch"], true);
     Ok(())
 }
 
@@ -919,6 +968,7 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
         history.publish(PublishRequest {
             parents: repository.parents(&commit)?,
             commit,
+            profile: compass_history::BuildProfile::default(),
             fingerprint: std::iter::repeat_n(fingerprint, 64)
                 .collect::<String>()
                 .parse::<ExtractionFingerprint>()?,
@@ -1019,6 +1069,10 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     )?;
     assert_eq!(query.status.code(), alias.status.code());
     assert_eq!(query.stdout, alias.stdout);
+    assert!(
+        HistoryQueue::open_existing(&repository)?.is_none(),
+        "reading existing realizations must not create a durable job queue"
+    );
 
     Ok(())
 }
@@ -1058,7 +1112,6 @@ fn missing_code_only_commit_is_built_on_first_query() -> Result<(), Box<dyn std:
     );
     assert!(String::from_utf8_lossy(&query.stdout).contains("OldService"));
     assert!(!directory.path().join("graphify-out").exists());
-
     let status = run(compass, directory.path(), &["history", "status", "HEAD~1"])?;
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("validation: valid"));
@@ -1089,6 +1142,12 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
     git(directory.path(), &["commit", "--quiet", "-m", "second"])?;
 
     let compass = env!("CARGO_BIN_EXE_compass");
+    let enabled = run(
+        compass,
+        directory.path(),
+        &["history", "enable", "--exclude", "generated/**"],
+    )?;
+    assert!(enabled.status.success());
     let diff = run(
         compass,
         directory.path(),
@@ -1099,7 +1158,17 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
         "{}",
         String::from_utf8_lossy(&diff.stderr)
     );
-    let _: Vec<serde_json::Value> = serde_json::from_slice(&diff.stdout)?;
+    let envelope: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
+    assert_eq!(envelope["schema_version"], 2);
+    assert!(envelope["changes"].is_array());
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
+    let versions = history.list(None)?;
+    assert_eq!(versions.len(), 2);
+    assert!(versions.iter().all(|version| {
+        version.version.build_profile.value("exclude.000000") == Some("generated/**")
+    }));
+    drop(history);
     let progress = String::from_utf8_lossy(&diff.stderr);
     assert!(progress.contains("building complete graph"));
     assert!(progress.contains("publishing immutable realization"));
