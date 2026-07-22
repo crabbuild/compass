@@ -15,14 +15,15 @@ use crate::{
     PublishedVersion, RealizationId, Repository, StoredTree, canonical_json_bytes,
 };
 
-const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
+pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
 const STORE_FORMAT_KEY: &[u8] = b"format";
 const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"history_schema":1,"typed_keys":1}"#;
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
 
 /// Project-owned wrapper around the pinned SQLite Prolly adapter.
 pub struct HistoryStore {
-    root: PathBuf,
+    pub(crate) root: PathBuf,
+    pub(crate) repository_root: PathBuf,
     database_path: PathBuf,
     lock_path: PathBuf,
     pub(crate) prolly: Prolly<Arc<SqliteStore>>,
@@ -254,7 +255,7 @@ impl HistoryStore {
                 (b"manifest".as_slice(), &manifest),
             ],
         )?;
-        let reopened = self.get(&id)?;
+        let reopened = self.get_without_activity(&id)?;
         if reopened.version != version {
             return Err(HistoryError::CorruptHistory(format!(
                 "reopened realization {id} differs from its manifest"
@@ -282,6 +283,22 @@ impl HistoryStore {
 
     /// Resolve the preferred complete realization for an exact commit.
     pub fn preferred(&self, commit: &CommitId) -> Result<Option<PublishedVersion>, HistoryError> {
+        let guard = self.activity()?;
+        self.preferred_with_activity(commit, &guard)
+    }
+
+    pub fn preferred_with_activity(
+        &self,
+        commit: &CommitId,
+        _guard: &ActivityGuard,
+    ) -> Result<Option<PublishedVersion>, HistoryError> {
+        self.preferred_without_activity(commit)
+    }
+
+    fn preferred_without_activity(
+        &self,
+        commit: &CommitId,
+    ) -> Result<Option<PublishedVersion>, HistoryError> {
         let Some(tree) = self.prolly.load_named_root(&preferred_root_name(commit))? else {
             return Ok(None);
         };
@@ -298,6 +315,19 @@ impl HistoryStore {
 
     /// Load and verify one exact immutable realization.
     pub fn get(&self, id: &RealizationId) -> Result<PublishedVersion, HistoryError> {
+        let guard = self.activity()?;
+        self.get_with_activity(id, &guard)
+    }
+
+    pub fn get_with_activity(
+        &self,
+        id: &RealizationId,
+        _guard: &ActivityGuard,
+    ) -> Result<PublishedVersion, HistoryError> {
+        self.get_without_activity(id)
+    }
+
+    fn get_without_activity(&self, id: &RealizationId) -> Result<PublishedVersion, HistoryError> {
         let manifest_name = version_root_name(id, b"manifest");
         let manifest = self
             .prolly
@@ -316,6 +346,14 @@ impl HistoryStore {
 
     /// List immutable realizations, optionally filtered by exact commit.
     pub fn list(&self, commit: Option<&CommitId>) -> Result<Vec<PublishedVersion>, HistoryError> {
+        let _guard = self.activity()?;
+        self.list_without_activity(commit)
+    }
+
+    pub(crate) fn list_without_activity(
+        &self,
+        commit: Option<&CommitId>,
+    ) -> Result<Vec<PublishedVersion>, HistoryError> {
         let mut versions = Vec::new();
         for named in self.prolly.store().list_roots()? {
             let Ok(segments) = prolly::decode_segments(&named.name) else {
@@ -332,7 +370,7 @@ impl HistoryStore {
             let id = std::str::from_utf8(&segments[3])
                 .map_err(|error| HistoryError::CorruptHistory(error.to_string()))?
                 .parse()?;
-            let published = self.get(&id)?;
+            let published = self.get_without_activity(&id)?;
             if commit.is_none_or(|expected| published.version.git_commit == expected.as_str()) {
                 versions.push(published);
             }
@@ -352,7 +390,7 @@ impl HistoryStore {
         for published in &mut versions {
             let commit: CommitId = published.version.git_commit.parse()?;
             published.preferred = self
-                .preferred(&commit)?
+                .preferred_without_activity(&commit)?
                 .is_some_and(|preferred| preferred.id == published.id);
         }
         Ok(versions)
@@ -366,7 +404,7 @@ impl HistoryStore {
         replacement: &RealizationId,
     ) -> Result<bool, HistoryError> {
         let _guard = self.activity()?;
-        let replacement = self.get(replacement)?;
+        let replacement = self.get_without_activity(replacement)?;
         if replacement.version.git_commit != commit.as_str() {
             return Err(HistoryError::CorruptHistory(
                 "replacement realization belongs to a different commit".to_owned(),
@@ -380,7 +418,7 @@ impl HistoryStore {
             })?;
         let expected_tree = match expected {
             Some(id) => {
-                let expected = self.get(id)?;
+                let expected = self.get_without_activity(id)?;
                 if expected.version.git_commit != commit.as_str() {
                     return Err(HistoryError::CorruptHistory(
                         "expected realization belongs to a different commit".to_owned(),
@@ -410,6 +448,15 @@ impl HistoryStore {
     pub fn corrupt_preferred_token(
         &self,
         commit: &CommitId,
+    ) -> Result<CorruptPreferredToken, HistoryError> {
+        let guard = self.activity()?;
+        self.corrupt_preferred_token_with_activity(commit, &guard)
+    }
+
+    pub fn corrupt_preferred_token_with_activity(
+        &self,
+        commit: &CommitId,
+        _guard: &ActivityGuard,
     ) -> Result<CorruptPreferredToken, HistoryError> {
         let manifest = self
             .prolly
@@ -446,8 +493,8 @@ impl HistoryStore {
                 "corrupt preferred observation belongs to a different store or commit".to_owned(),
             ));
         }
-        self.validate(replacement)?;
-        let replacement = self.get(replacement)?;
+        self.validate_without_activity(replacement)?;
+        let replacement = self.get_without_activity(replacement)?;
         if replacement.version.git_commit != commit.as_str() {
             return Err(HistoryError::CorruptHistory(
                 "replacement realization belongs to a different commit".to_owned(),
@@ -471,7 +518,23 @@ impl HistoryStore {
 
     /// Fully validate one cataloged realization.
     pub fn validate(&self, id: &RealizationId) -> Result<crate::ValidationReport, HistoryError> {
-        let published = self.get(id)?;
+        let guard = self.activity()?;
+        self.validate_with_activity(id, &guard)
+    }
+
+    pub fn validate_with_activity(
+        &self,
+        id: &RealizationId,
+        _guard: &ActivityGuard,
+    ) -> Result<crate::ValidationReport, HistoryError> {
+        self.validate_without_activity(id)
+    }
+
+    fn validate_without_activity(
+        &self,
+        id: &RealizationId,
+    ) -> Result<crate::ValidationReport, HistoryError> {
+        let published = self.get_without_activity(id)?;
         let nodes = self.load_realization_root(id, b"nodes")?;
         let edges = self.load_realization_root(id, b"edges")?;
         let hyperedges = self.load_realization_root(id, b"hyperedges")?;
@@ -496,7 +559,16 @@ impl HistoryStore {
         &self,
         id: &RealizationId,
     ) -> Result<crate::CompletedGraphArtifacts, HistoryError> {
-        self.validate(id)?;
+        let guard = self.activity()?;
+        self.artifacts_with_activity(id, &guard)
+    }
+
+    pub fn artifacts_with_activity(
+        &self,
+        id: &RealizationId,
+        _guard: &ActivityGuard,
+    ) -> Result<crate::CompletedGraphArtifacts, HistoryError> {
+        self.validate_without_activity(id)?;
         let partitioned = crate::PartitionedGraph {
             nodes: self.read_tree(&self.load_realization_root(id, b"nodes")?)?,
             edges: self.read_tree(&self.load_realization_root(id, b"edges")?)?,
@@ -611,7 +683,7 @@ impl HistoryStore {
         manifest: &Tree,
     ) -> Result<PublishedVersion, HistoryError> {
         let parsed = self.version_from_manifest_tree(manifest)?;
-        let catalog = self.get(&parsed.id)?;
+        let catalog = self.get_without_activity(&parsed.id)?;
         let catalog_tree = self
             .prolly
             .load_named_root(&version_root_name(&parsed.id, b"manifest"))?
@@ -670,6 +742,7 @@ impl HistoryStore {
         reject_symlink(&paths.database_path, false)?;
         Ok(Self {
             root: paths.root,
+            repository_root: paths.repository_root,
             database_path: paths.database_path,
             lock_path: paths.lock_path,
             prolly: Prolly::new(backend, Config::default()),
@@ -705,7 +778,7 @@ impl HistoryStore {
     }
 }
 
-fn version_root_name(id: &RealizationId, kind: &[u8]) -> Vec<u8> {
+pub(crate) fn version_root_name(id: &RealizationId, kind: &[u8]) -> Vec<u8> {
     root_name(&[b"compass", b"v1", b"version", id.as_hex().as_bytes(), kind])
 }
 
@@ -720,6 +793,7 @@ fn count(value: usize) -> Result<u64, HistoryError> {
 
 struct HistoryPaths {
     root: PathBuf,
+    repository_root: PathBuf,
     database_path: PathBuf,
     lock_path: PathBuf,
 }
@@ -735,6 +809,7 @@ impl HistoryPaths {
         Ok(Self {
             database_path: root.join("history.sqlite"),
             root,
+            repository_root: repository.root().to_path_buf(),
             lock_path,
         })
     }
@@ -758,6 +833,7 @@ impl HistoryPaths {
         reject_regular_file(&lock_path)?;
         Ok(Some(Self {
             root,
+            repository_root: repository.root().to_path_buf(),
             database_path,
             lock_path,
         }))

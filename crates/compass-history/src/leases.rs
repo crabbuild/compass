@@ -116,3 +116,26 @@ fn read_lease(path: &Path) -> Result<LeaseRecord, HistoryError> {
     }
     Ok(lease)
 }
+
+pub(crate) fn has_live_lease(directory: &Path) -> Result<bool, HistoryError> {
+    if !directory.exists() {
+        reject_symlink(directory, true)?;
+        return Ok(false);
+    }
+    crate::store::reject_directory(directory)?;
+    for entry in
+        std::fs::read_dir(directory).map_err(|source| crate::error::io_error(directory, source))?
+    {
+        let entry = entry.map_err(|source| crate::error::io_error(directory, source))?;
+        let path = entry.path();
+        reject_symlink(&path, false)?;
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "lease")
+            && read_lease(&path)?.expires_at_millis > now_millis()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}

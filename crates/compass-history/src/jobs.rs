@@ -116,6 +116,11 @@ impl HistoryQueue {
     /// Open an existing queue without creating operational paths.
     pub fn open_existing(repository: &Repository) -> Result<Option<Self>, HistoryError> {
         let root = operational_root(repository);
+        Self::open_root_existing(&root)
+    }
+
+    pub(crate) fn open_root_existing(root: &Path) -> Result<Option<Self>, HistoryError> {
+        let root = root.to_path_buf();
         if !root.exists() {
             reject_symlink(&root, true)?;
             return Ok(None);

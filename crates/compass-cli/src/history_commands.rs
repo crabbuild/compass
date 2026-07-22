@@ -67,10 +67,10 @@ pub(crate) fn load_graph_at(
         .map_err(|error| error.to_string())?;
     let options = HistoryBuildOptions::defaults().map_err(|error| error.to_string())?;
     let (history, preferred) = resolve_or_materialize(&repository, commit, &options, false, false)?;
-    let _activity = history.activity().map_err(|error| error.to_string())?;
+    let activity = history.activity().map_err(|error| error.to_string())?;
     // `artifacts` performs full realization validation before reconstruction.
     let artifacts = history
-        .artifacts(&preferred.id)
+        .artifacts_with_activity(&preferred.id, &activity)
         .map_err(|error| error.to_string())?;
     LoadedGraph::from_document(artifacts.artifacts.document, force_directed)
         .map_err(|error| error.to_string())
@@ -555,6 +555,9 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
     if matches!(args[0].as_str(), "build" | "rebuild") {
         return execute_build(&repository, &args[0], &args[1..]);
     }
+    if args[0] == "gc" {
+        return execute_gc(&repository, &args[1..]);
+    }
     if args[0] == "enable" {
         let options = parse_enable_options(&args[1..]).map_err(usage)?;
         HistoryStore::create(&repository).map_err(runtime)?;
@@ -704,7 +707,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                     && matches!(job.state, JobState::Failed | JobState::Incomplete)
                 {
                     prefix.push_str(&format!(
-                        "\nnewer attempt: {}\nattempts: {}",
+                        "\nlatest failed attempt: {}\nattempts: {}",
                         job_state_name(job.state),
                         job.attempts
                     ));
@@ -885,8 +888,85 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             }
             Ok(format!("exported {} to {}", preferred.id, output.display()))
         }
-        "gc" => Err(runtime("history gc is not available yet")),
         other => Err(usage(format!("unknown history command {other}"))),
+    }
+}
+
+fn execute_gc(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
+    let mut prune_non_preferred = false;
+    let mut yes = false;
+    let mut format = "text";
+    let mut format_seen = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--prune-non-preferred" if !prune_non_preferred => prune_non_preferred = true,
+            "--yes" if !yes => yes = true,
+            "--format" => {
+                if format_seen {
+                    return Err(usage("duplicate --format"));
+                }
+                format_seen = true;
+                index += 1;
+                format = args
+                    .get(index)
+                    .ok_or_else(|| usage("--format requires a value"))?;
+            }
+            value if value.starts_with("--format=") => {
+                if format_seen {
+                    return Err(usage("duplicate --format"));
+                }
+                format_seen = true;
+                format = &value[9..];
+            }
+            value => return Err(usage(format!("unknown history gc argument {value}"))),
+        }
+        index += 1;
+    }
+    if yes && !prune_non_preferred {
+        return Err(usage("history gc --yes requires --prune-non-preferred"));
+    }
+    if !matches!(format, "text" | "json") {
+        return Err(usage("history gc --format must be text or json"));
+    }
+    let history = store(repository)?;
+    let plan = history.plan_gc(prune_non_preferred).map_err(runtime)?;
+    if prune_non_preferred && !yes {
+        if format == "json" {
+            return serde_json::to_string(&serde_json::json!({
+                "applied": false,
+                "confirmation_required": true,
+                "plan": plan
+            }))
+            .map_err(runtime);
+        }
+        let ids = plan
+            .prunable_realization_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Ok(format!(
+            "GC plan (not applied)\nprunable realizations: {}\n{}\nreclaimable SQLite node rows: {}\nreclaimable logical bytes: {}\nrerun with --yes to apply",
+            plan.prunable_realizations, ids, plan.reclaimable_nodes, plan.reclaimable_bytes
+        ));
+    }
+    let sweep = history.sweep_gc(plan).map_err(runtime)?;
+    if format == "json" {
+        serde_json::to_string(&serde_json::json!({
+            "applied": true,
+            "result": sweep
+        }))
+        .map_err(runtime)
+    } else {
+        Ok(format!(
+            "GC applied\ndeleted SQLite node rows: {}\nreclaimed logical bytes: {}\ndeleted named roots: {}\ndeleted job records: {}\ndeleted temporary directories: {}\nSQLite file size: unchanged or reusable internally (not compacted)",
+            sweep.deleted_nodes,
+            sweep.deleted_bytes,
+            sweep.deleted_named_roots,
+            sweep.deleted_job_records,
+            sweep.deleted_temp_directories
+        ))
     }
 }
 

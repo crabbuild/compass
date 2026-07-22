@@ -45,9 +45,9 @@ impl HistoryStore {
         new: &RealizationId,
         sink: &mut dyn ChangeSink,
     ) -> Result<(), HistoryError> {
-        let _activity = self.activity()?;
-        let old = self.get(old)?;
-        let new = self.get(new)?;
+        let activity = self.activity()?;
+        let old = self.get_with_activity(old, &activity)?;
+        let new = self.get_with_activity(new, &activity)?;
         for (kind, left, right) in [
             (
                 RecordKind::Node,

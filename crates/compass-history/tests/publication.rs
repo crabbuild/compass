@@ -168,3 +168,26 @@ fn validation_rejects_missing_endpoints_before_catalog_publication()
     assert_eq!((report.nodes, report.edges), (2, 1));
     Ok(())
 }
+
+#[test]
+fn gc_keeps_all_published_versions_and_removes_orphans() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+    let first = history.publish(request('a', false)?)?;
+    let second = history.publish(request('b', true)?)?;
+    let activity = history.activity()?;
+    let orphan = history.prepare_publish_with_activity(request('c', false)?, &activity)?;
+    drop(orphan);
+    drop(activity);
+
+    let plan = history.plan_gc(false)?;
+    assert!(plan.reclaimable_nodes > 0);
+    assert_eq!(plan.prunable_realizations, 0);
+    let sweep = history.sweep_gc(plan)?;
+    assert!(sweep.deleted_nodes > 0);
+    assert_eq!(history.list(None)?.len(), 2);
+    assert!(history.get(&first.id).is_ok());
+    assert!(history.get(&second.id).is_ok());
+    Ok(())
+}

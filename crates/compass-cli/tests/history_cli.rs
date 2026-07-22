@@ -423,6 +423,104 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
 }
 
 #[test]
+fn gc_requires_explicit_confirmation_for_non_preferred_realizations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("fixture.rs"), "pub struct Fixture;\n")?;
+    git(directory.path(), &["add", "fixture.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+    for (fingerprint, label) in [('a', "First"), ('b', "Second")] {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed": true,
+            "multigraph": false,
+            "nodes": [{"id": "fixture", "label": label}],
+            "links": [],
+            "built_at_commit": commit
+        }))?;
+        history.publish(PublishRequest {
+            commit: commit.clone(),
+            parents: Vec::new(),
+            fingerprint: std::iter::repeat_n(fingerprint, 64)
+                .collect::<String>()
+                .parse::<ExtractionFingerprint>()?,
+            artifacts: GraphArtifacts {
+                document,
+                analysis: None,
+                labels: None,
+                manifest: None,
+                authoritative_sidecars: BTreeMap::new(),
+            },
+            completion: CompletionEvidence {
+                extraction_succeeded: true,
+                allow_partial: false,
+                semantic_files_expected: 0,
+                semantic_files_completed: 0,
+                failed_chunks: 0,
+            },
+            make_preferred: true,
+        })?;
+    }
+    drop(history);
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let dry = run(
+        compass,
+        directory.path(),
+        &["history", "gc", "--prune-non-preferred", "--format=json"],
+    )?;
+    assert!(dry.status.success());
+    let dry: serde_json::Value = serde_json::from_slice(&dry.stdout)?;
+    assert_eq!(dry["applied"], false);
+    assert_eq!(dry["plan"]["prunable_realizations"], 1);
+    assert_eq!(
+        HistoryStore::open_existing(&repository)?
+            .ok_or("store")?
+            .list(None)?
+            .len(),
+        2
+    );
+
+    let applied = run(
+        compass,
+        directory.path(),
+        &["history", "gc", "--prune-non-preferred", "--yes"],
+    )?;
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert!(String::from_utf8_lossy(&applied.stdout).contains("not compacted"));
+    assert_eq!(
+        HistoryStore::open_existing(&repository)?
+            .ok_or("store")?
+            .list(None)?
+            .len(),
+        1
+    );
+
+    for arguments in [
+        vec!["history", "gc", directory.path().to_str().ok_or("path")?],
+        vec!["history", "gc", "--yes"],
+    ] {
+        assert_eq!(
+            run(compass, directory.path(), &arguments)?.status.code(),
+            Some(2)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn completed_outcomes_handle_short_and_broken_writers() {
     struct ShortWriter(Vec<u8>);
     impl Write for ShortWriter {

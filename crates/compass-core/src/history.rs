@@ -112,7 +112,7 @@ pub fn materialize_history_with_observer(
     observer: &mut dyn MaterializeObserver,
 ) -> Result<PublishedVersion, MaterializeError> {
     let activity = store.activity()?;
-    let (existing, corrupt) = observe_preferred(store, &request.commit)?;
+    let (existing, corrupt) = observe_preferred(store, &request.commit, &activity)?;
     if !request.rebuild
         && let Some(existing) = existing
     {
@@ -148,7 +148,13 @@ fn run_materialization(
 ) -> Result<PublishedVersion, MaterializeError> {
     let fingerprint = resolve_fingerprint(&request.profile, worktree.path())?;
     observer.resolved(&fingerprint)?;
-    let seed = compatible_seed(store, &request.repository, &request.commit, &fingerprint)?;
+    let seed = compatible_seed(
+        store,
+        &request.repository,
+        &request.commit,
+        &fingerprint,
+        activity,
+    )?;
     observer.entered(MaterializeStage::Building)?;
     let completed = builder.build(
         worktree.path(),
@@ -192,15 +198,16 @@ fn run_materialization(
 fn observe_preferred(
     store: &HistoryStore,
     commit: &CommitId,
+    activity: &compass_history::ActivityGuard,
 ) -> Result<(Option<PublishedVersion>, Option<CorruptPreferredToken>), MaterializeError> {
-    match store.preferred(commit) {
+    match store.preferred_with_activity(commit, activity) {
         Ok(Some(published)) => {
-            store.validate(&published.id)?;
+            store.validate_with_activity(&published.id, activity)?;
             Ok((Some(published), None))
         }
         Ok(None) => Ok((None, None)),
         Err(original) if original.is_catalog_corruption() => {
-            match store.corrupt_preferred_token(commit) {
+            match store.corrupt_preferred_token_with_activity(commit, activity) {
                 Ok(token) => Ok((None, Some(token))),
                 Err(error) if error.is_catalog_corruption() => Err(original.into()),
                 Err(error) => Err(error.into()),
@@ -215,9 +222,10 @@ fn compatible_seed(
     repository: &Repository,
     target: &CommitId,
     fingerprint: &ExtractionFingerprint,
+    activity: &compass_history::ActivityGuard,
 ) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
     for ancestor in repository.first_parent_ancestors(target)? {
-        let preferred = match store.preferred(&ancestor) {
+        let preferred = match store.preferred_with_activity(&ancestor, activity) {
             Ok(preferred) => preferred,
             Err(error) if error.is_catalog_corruption() => continue,
             Err(error) => return Err(error.into()),
@@ -228,12 +236,15 @@ fn compatible_seed(
         if preferred.version.extraction_fingerprint != fingerprint.as_hex() {
             continue;
         }
-        match store.validate(&preferred.id) {
+        match store.validate_with_activity(&preferred.id, activity) {
             Ok(_) => {}
             Err(error) if error.is_catalog_corruption() => continue,
             Err(error) => return Err(error.into()),
         }
-        return store.artifacts(&preferred.id).map(Some).map_err(Into::into);
+        return store
+            .artifacts_with_activity(&preferred.id, activity)
+            .map(Some)
+            .map_err(Into::into);
     }
     Ok(None)
 }
