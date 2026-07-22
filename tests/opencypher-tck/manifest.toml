@@ -1,0 +1,74 @@
+upstream = "https://github.com/opencypher/openCypher"
+tag = "2024.3"
+commit = "677cbafabb8c3c5eed458fd3b1ec0daec8d67d23"
+license = "Apache-2.0"
+
+[[feature]]
+path = "features/clauses/match/Match1.feature"
+sha256 = "bfb162ca3cef27223fd3e3ca98d1dfc195c70729af18b4c844626495c7a8b01b"
+supported = [1, 4, 5]
+support = ["clause.match", "clause.where"]
+rejected = []
+
+[[feature]]
+path = "features/clauses/return/Return1.feature"
+sha256 = "fc66996dcede5f2a77465b6c9f28836623cf7d2ca368c6868e6c1fbd321fa32f"
+supported = [1, 2]
+support = ["clause.return"]
+rejected = []
+
+[[feature]]
+path = "features/clauses/union/Union1.feature"
+sha256 = "cae421ae385d4ddc423de59f7cc3dbdc946718032808fed8cd76817cc0071521"
+supported = [1, 2, 3, 5]
+support = ["clause.union"]
+rejected = []
+
+[[feature]]
+path = "features/clauses/unwind/Unwind1.feature"
+sha256 = "9175e33dc577f6b93ce4da3c3b903d09eb62b0d01250b0e57b66b452881b581a"
+supported = [1, 3, 7, 8, 9, 10, 11, 13]
+support = ["clause.unwind"]
+rejected = [{ id = 6, code = "CQL1007", reason = "MERGE mutation" }, { id = 14, code = "CQL1007", reason = "MERGE mutation" }]
+
+[[feature]]
+path = "features/clauses/with/With1.feature"
+sha256 = "8b3602993fecd85116c9857158a2a162d6ed5fc70f84f39cc4db15d2ea6a308c"
+supported = [5]
+support = ["clause.with", "clause.optional_match"]
+rejected = []
+
+[[feature]]
+path = "features/expressions/aggregation/Aggregation1.feature"
+sha256 = "32e34dd8cc92d1befdbe9ec287d918b89c2dc04dbb58f938912bf1f4c30432d7"
+supported = [1]
+support = ["expression.aggregation"]
+rejected = []
+
+[[feature]]
+path = "features/expressions/boolean/Boolean1.feature"
+sha256 = "5a8ee4fe99da2d8dd9f31fbdf21419f73fa7e04dacb38d60a06f6dbbc5f9c031"
+supported = [1, 2, 3, 4, 5]
+support = ["expression.boolean"]
+rejected = []
+
+[[feature]]
+path = "features/expressions/list/List1.feature"
+sha256 = "9e82223d3bc9e95343a63d28f71f76caa98c21ae9fe26bbfaa7792b282ba88fb"
+supported = [1, 2, 3, 4, 5]
+support = ["expression.list"]
+rejected = []
+
+[[feature]]
+path = "features/expressions/path/Path1.feature"
+sha256 = "d96fba76937c9197bed60c35c4d9e191cb296ed15c0aeaa9c9975d2ba2569c90"
+supported = [1]
+support = ["path.bounded"]
+rejected = []
+
+[[feature]]
+path = "features/expressions/existentialSubqueries/ExistentialSubquery1.feature"
+sha256 = "bb2614b1abfbc3fc076d6a399f5aab1a8820c72b37939f9301496ec2c2752c6d"
+supported = [1, 2, 3, 4]
+support = ["expression.exists"]
+rejected = []

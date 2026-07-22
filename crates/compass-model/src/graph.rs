@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
-use crate::{EdgeRecord, GraphDocument, GraphError, NodeRecord};
+use crate::{EdgeRecord, GraphDocument, GraphError, NodeRecord, QueryIndex, SchemaFingerprint};
 
 pub type NodeIndex = usize;
 pub type EdgeIndex = usize;
@@ -19,6 +19,7 @@ pub struct Graph {
     ids: Arc<HashMap<String, NodeIndex>>,
     outgoing: Vec<Vec<EdgeIndex>>,
     incoming: Vec<Vec<EdgeIndex>>,
+    query_index: Arc<QueryIndex>,
 }
 
 impl Graph {
@@ -132,6 +133,8 @@ impl Graph {
             }
         }
 
+        let query_index = Arc::new(QueryIndex::build(&nodes, &edges, &ids));
+
         Ok(Self {
             directed,
             multigraph,
@@ -140,6 +143,7 @@ impl Graph {
             ids,
             outgoing,
             incoming,
+            query_index,
         })
     }
 
@@ -155,6 +159,10 @@ impl Graph {
 
     pub fn nodes(&self) -> impl Iterator<Item = (NodeIndex, &NodeRecord)> {
         self.nodes.iter().enumerate()
+    }
+
+    pub fn edges(&self) -> impl Iterator<Item = (EdgeIndex, &EdgeRecord)> {
+        self.edges.iter().enumerate()
     }
 
     #[must_use]
@@ -178,6 +186,35 @@ impl Graph {
 
     pub fn incoming_edges(&self, node: NodeIndex) -> impl Iterator<Item = EdgeIndex> + '_ {
         self.incoming[node].iter().copied()
+    }
+
+    #[must_use]
+    pub fn edge_endpoints(&self, edge: EdgeIndex) -> Option<(NodeIndex, NodeIndex)> {
+        let record = self.edges.get(edge)?;
+        Some((
+            self.node_index(&record.source)?,
+            self.node_index(&record.target)?,
+        ))
+    }
+
+    #[must_use]
+    pub fn is_directed(&self) -> bool {
+        self.directed
+    }
+
+    #[must_use]
+    pub fn is_multigraph(&self) -> bool {
+        self.multigraph
+    }
+
+    #[must_use]
+    pub fn query_index(&self) -> &QueryIndex {
+        &self.query_index
+    }
+
+    #[must_use]
+    pub fn schema_fingerprint(&self) -> SchemaFingerprint {
+        self.query_index.schema_fingerprint()
     }
 
     pub fn successors(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {

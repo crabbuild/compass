@@ -19,8 +19,10 @@ sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
 compass-files = { path = "../compass-files", version = "0.1.0" }
+compass-cypher = { path = "../compass-cypher", version = "0.1.0" }
 compass-graph = { path = "../compass-graph", version = "0.1.0" }
 compass-model = { path = "../compass-model", version = "0.1.0" }
+compass-query = { path = "../compass-query", version = "0.1.0" }
 unicode-normalization.workspace = true
 
 [dev-dependencies]

@@ -8,6 +8,7 @@ mod integration_commands;
 mod label_commands;
 mod provider_commands;
 mod prs_commands;
+mod query_commands;
 mod result_commands;
 mod semantic_commands;
 
@@ -16,7 +17,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -46,6 +47,19 @@ use compass_semantic::{
     extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
     resolve_builtin_backend, resolve_custom_backend,
 };
+
+static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
+static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
+
+fn process_cancellation() -> Result<&'static AtomicBool, String> {
+    let installed = SIGNAL_HANDLER.get_or_init(|| {
+        ctrlc::set_handler(|| PROCESS_CANCELLED.store(true, Ordering::Release))
+            .map_err(|error| error.to_string())
+    });
+    installed.as_ref().map_err(Clone::clone)?;
+    PROCESS_CANCELLED.store(false, Ordering::Release);
+    Ok(&PROCESS_CANCELLED)
+}
 
 const GRAPHIFY_COMPAT_VERSION: &str = "0.9.20";
 
@@ -131,7 +145,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         return Outcome::success(compass_command_help(&command));
     }
     match command.as_str() {
-        "query" => command_query(&args),
+        "query" => query_commands::command_query(frontend, &args),
         "path" => command_path(&args),
         "explain" => command_explain(&args),
         "affected" => command_affected(&args),
@@ -432,13 +446,14 @@ fn run_watch_with_frontend(
             return 1;
         }
     };
-    let stop = Arc::new(AtomicBool::new(false));
-    let signal_stop = Arc::clone(&stop);
-    if let Err(error) = ctrlc::set_handler(move || signal_stop.store(true, Ordering::Release)) {
-        let _result = writeln!(stderr, "error: could not install Ctrl+C handler: {error}");
-        return 1;
-    }
-    let result = watch_local_graph(&options, &stop, |status| {
+    let stop = match process_cancellation() {
+        Ok(stop) => stop,
+        Err(error) => {
+            let _result = writeln!(stderr, "error: could not install Ctrl+C handler: {error}");
+            return 1;
+        }
+    };
+    let result = watch_local_graph(&options, stop, |status| {
         write_watch_status(frontend, status, stdout, stderr);
     });
     match result {
@@ -3293,7 +3308,7 @@ fn callflow_help() -> String {
     "Usage: graphify export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default graphify-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
 }
 
-fn command_query(args: &[String]) -> Outcome {
+fn command_natural_query(args: &[String]) -> Outcome {
     let Some(question) = args.first() else {
         return Outcome::failure(
             "Usage: graphify query \"<question>\" [--dfs] [--context C] [--budget N] [--graph path]"
@@ -3530,7 +3545,7 @@ fn compass_command_help(command: &str) -> String {
         "cluster-only" => "Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
         "label" => label_commands::label_help(Frontend::Compass),
         "prs" => prs_commands::prs_help(Frontend::Compass),
-        "query" => "Usage: compass query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH]".to_owned(),
+        "query" => query_commands::query_help(),
         "path" => "Usage: compass path \"<source>\" \"<target>\" [--graph PATH]".to_owned(),
         "explain" => "Usage: compass explain \"<node>\" [--graph PATH]".to_owned(),
         "affected" => "Usage: compass affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),

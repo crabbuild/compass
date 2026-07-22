@@ -3,6 +3,7 @@ members = [
     "crates/compass-cargo",
     "crates/compass-cli",
     "crates/compass-core",
+    "crates/compass-cypher",
     "crates/compass-files",
     "crates/compass-graph",
     "crates/compass-graphdb",
@@ -49,7 +50,7 @@ aws-smithy-http-client = { version = "=1.2.0", default-features = false, feature
 candle-core = "=0.9.2"
 candle-nn = "=0.9.2"
 candle-transformers = "=0.9.2"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 rmp-serde = "1.3.1"
 sha2 = "0.10"

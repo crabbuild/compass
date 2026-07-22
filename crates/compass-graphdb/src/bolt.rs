@@ -11,7 +11,7 @@ use rustls_platform_verifier::ConfigVerifierExt;
 use serde_json::Value;
 use url::Url;
 
-use crate::{CypherOperation, GraphDbError, GraphOperations, PushCounts};
+use crate::{CypherOperation, GraphDbError, GraphOperations, Neo4jQueryResult, PushCounts};
 
 const BOLT_MAGIC: [u8; 4] = [0x60, 0x60, 0xB0, 0x17];
 const BOLT_VERSIONS: [[u8; 4]; 4] = [[0, 0, 4, 4], [0, 0, 3, 4], [0, 0, 2, 4], [0, 0, 1, 4]];
@@ -68,6 +68,103 @@ pub(crate) fn push(
         )));
     }
     execute_operations(&mut stream, operations)
+}
+
+pub(crate) fn query(
+    uri: &str,
+    user: &str,
+    password: &str,
+    statement: &str,
+    parameters: &BTreeMap<String, Value>,
+) -> Result<Neo4jQueryResult, GraphDbError> {
+    let endpoint = BoltEndpoint::parse(uri)?;
+    let (mut stream, _version) = open(&endpoint)?;
+    hello(
+        &mut stream,
+        user,
+        password,
+        endpoint.routing_context.as_ref(),
+    )?;
+    let params = PValue::Map(
+        parameters
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), PValue::from_json(value)?)))
+            .collect::<Result<_, GraphDbError>>()?,
+    );
+    let run = structure(
+        0x10,
+        &[
+            PValue::String(statement.to_owned()),
+            params,
+            PValue::Map(BTreeMap::new()),
+        ],
+    )?;
+    write_message(&mut stream, &run)?;
+    let mut budget = MAX_MESSAGE_BYTES;
+    let metadata = success_metadata(read_response(&mut stream, &mut budget)?, "query")?;
+    let columns = metadata
+        .get("fields")
+        .and_then(PValue::as_list)
+        .ok_or(GraphDbError::Protocol("Neo4j query omitted result fields"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or(GraphDbError::Protocol(
+                    "Neo4j returned a non-string field name",
+                ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let pull = structure(
+        0x3F,
+        &[PValue::Map(BTreeMap::from([(
+            "n".to_owned(),
+            PValue::Integer(-1),
+        )]))],
+    )?;
+    write_message(&mut stream, &pull)?;
+    let mut rows = Vec::new();
+    loop {
+        match read_response(&mut stream, &mut budget)? {
+            PValue::Structure(0x71, fields) => {
+                let values = fields
+                    .first()
+                    .and_then(PValue::as_list)
+                    .ok_or(GraphDbError::Protocol("invalid Neo4j record"))?;
+                rows.push(
+                    values
+                        .iter()
+                        .map(PValue::to_json)
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+            PValue::Structure(0x70, _) => break,
+            PValue::Structure(0x7F, fields) => return Err(failure("query", &fields)),
+            _ => return Err(GraphDbError::Protocol("unexpected Neo4j query response")),
+        }
+    }
+    let goodbye = structure(0x02, &[])?;
+    let _result = write_message(&mut stream, &goodbye);
+    Ok(Neo4jQueryResult { columns, rows })
+}
+
+fn success_metadata(
+    response: PValue,
+    stage: &'static str,
+) -> Result<BTreeMap<String, PValue>, GraphDbError> {
+    match response {
+        PValue::Structure(0x70, fields) => fields
+            .into_iter()
+            .next()
+            .and_then(|value| match value {
+                PValue::Map(values) => Some(values),
+                _ => None,
+            })
+            .ok_or(GraphDbError::Protocol("invalid Neo4j success metadata")),
+        PValue::Structure(0x7F, fields) => Err(failure(stage, &fields)),
+        _ => Err(GraphDbError::Protocol("unexpected Neo4j Bolt response")),
+    }
 }
 
 fn open(endpoint: &BoltEndpoint) -> Result<(Box<dyn ReadWrite>, BoltVersion), GraphDbError> {
@@ -420,6 +517,31 @@ impl PValue {
         match self {
             Self::List(value) => Some(value),
             _ => None,
+        }
+    }
+
+    fn to_json(&self) -> Result<Value, GraphDbError> {
+        match self {
+            Self::Null => Ok(Value::Null),
+            Self::Bool(value) => Ok(Value::Bool(*value)),
+            Self::Integer(value) => Ok(Value::from(*value)),
+            Self::Float(value) => serde_json::Number::from_f64(*value)
+                .map(Value::Number)
+                .ok_or(GraphDbError::Protocol("Neo4j returned a non-finite float")),
+            Self::String(value) => Ok(Value::String(value.clone())),
+            Self::List(values) => values
+                .iter()
+                .map(Self::to_json)
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array),
+            Self::Map(values) => values
+                .iter()
+                .map(|(key, value)| Ok((key.clone(), value.to_json()?)))
+                .collect::<Result<serde_json::Map<_, _>, GraphDbError>>()
+                .map(Value::Object),
+            Self::Structure(_, _) => Err(GraphDbError::Protocol(
+                "Neo4j graph values require an explicit stable scalar projection",
+            )),
         }
     }
 }

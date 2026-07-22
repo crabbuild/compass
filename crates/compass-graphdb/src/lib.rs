@@ -16,6 +16,12 @@ pub struct PushCounts {
     pub edges: usize,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Neo4jQueryResult {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GraphDbError {
     #[error("invalid graph database URI")]
@@ -56,6 +62,23 @@ pub fn push_to_neo4j(
         secrets.push(embedded_password);
     }
     bolt::push(&operations, uri, user, password).map_err(|error| sanitize(error, &secrets))
+}
+
+/// Execute one bounded read query through the native Bolt client.
+pub fn query_neo4j(
+    uri: &str,
+    user: &str,
+    password: &str,
+    statement: &str,
+    parameters: &BTreeMap<String, serde_json::Value>,
+) -> Result<Neo4jQueryResult, GraphDbError> {
+    let embedded_password = uri_password(uri);
+    let mut secrets = vec![password, uri];
+    if let Some(embedded_password) = embedded_password.as_deref() {
+        secrets.push(embedded_password);
+    }
+    bolt::query(uri, user, password, statement, parameters)
+        .map_err(|error| sanitize(error, &secrets))
 }
 
 pub fn push_to_falkordb(
