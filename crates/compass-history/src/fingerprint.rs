@@ -75,6 +75,14 @@ impl BuildProfile {
     pub fn digest(&self) -> Result<[u8; 32], HistoryError> {
         Ok(Sha256::digest(self.canonical_bytes()?).into())
     }
+
+    /// Read one normalized option without exposing mutable profile storage.
+    #[must_use]
+    pub fn value(&self, key: &str) -> Option<&str> {
+        self.values
+            .get(&key.trim().to_ascii_lowercase())
+            .map(String::as_str)
+    }
 }
 
 /// Inputs resolved from a build profile and the exact target commit.

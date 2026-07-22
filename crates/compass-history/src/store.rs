@@ -28,6 +28,13 @@ pub struct HistoryStore {
     pub(crate) prolly: Prolly<Arc<SqliteStore>>,
 }
 
+/// Opaque exact observation required to repair one corrupt preferred pointer.
+pub struct CorruptPreferredToken {
+    database_path: PathBuf,
+    commit: CommitId,
+    manifest: Tree,
+}
+
 impl HistoryStore {
     /// Create or open the repository's shared history store.
     pub fn create(repository: &Repository) -> Result<Self, HistoryError> {
@@ -94,7 +101,7 @@ impl HistoryStore {
     }
 
     /// Publish while reusing a materializer's existing activity guard.
-    pub(crate) fn publish_with_activity(
+    pub fn publish_with_activity(
         &self,
         request: PublishRequest,
         _guard: &ActivityGuard,
@@ -102,7 +109,9 @@ impl HistoryStore {
         request.completion.validate()?;
         let preferred_name = preferred_root_name(&request.commit);
         let observed_preferred = self.prolly.load_named_root(&preferred_name)?;
-        if let Some(tree) = &observed_preferred {
+        if request.make_preferred
+            && let Some(tree) = &observed_preferred
+        {
             self.validated_manifest_pointer(tree)?;
         }
 
@@ -310,6 +319,69 @@ impl HistoryStore {
                 &preferred_root_name(commit),
                 expected_tree.as_ref(),
                 Some(&replacement_tree),
+            )?,
+            NamedRootUpdate::Applied
+        ))
+    }
+
+    /// Observe an unreadable preferred pointer for an explicit exact-CAS repair.
+    pub fn corrupt_preferred_token(
+        &self,
+        commit: &CommitId,
+    ) -> Result<CorruptPreferredToken, HistoryError> {
+        let manifest = self
+            .prolly
+            .load_named_root(&preferred_root_name(commit))?
+            .ok_or_else(|| {
+                HistoryError::CorruptHistory("preferred pointer is absent".to_owned())
+            })?;
+        match self.validated_manifest_pointer(&manifest) {
+            Ok(_) => {
+                return Err(HistoryError::CorruptHistory(
+                    "preferred pointer is valid and cannot use corrupt recovery".to_owned(),
+                ));
+            }
+            Err(error) if error.is_catalog_corruption() => {}
+            Err(error) => return Err(error),
+        }
+        Ok(CorruptPreferredToken {
+            database_path: self.database_path.clone(),
+            commit: commit.clone(),
+            manifest,
+        })
+    }
+
+    /// Replace the exact corrupt pointer represented by `observed` with a validated candidate.
+    pub fn recover_corrupt_preferred_with_activity(
+        &self,
+        commit: &CommitId,
+        observed: &CorruptPreferredToken,
+        replacement: &RealizationId,
+        _guard: &ActivityGuard,
+    ) -> Result<bool, HistoryError> {
+        if observed.database_path != self.database_path || &observed.commit != commit {
+            return Err(HistoryError::CorruptHistory(
+                "corrupt preferred observation belongs to a different store or commit".to_owned(),
+            ));
+        }
+        self.validate(replacement)?;
+        let replacement = self.get(replacement)?;
+        if replacement.version.git_commit != commit.as_str() {
+            return Err(HistoryError::CorruptHistory(
+                "replacement realization belongs to a different commit".to_owned(),
+            ));
+        }
+        let replacement_manifest = self
+            .prolly
+            .load_named_root(&version_root_name(&replacement.id, b"manifest"))?
+            .ok_or_else(|| {
+                HistoryError::CorruptHistory("missing replacement manifest".to_owned())
+            })?;
+        Ok(matches!(
+            self.prolly.compare_and_swap_named_root(
+                &preferred_root_name(commit),
+                Some(&observed.manifest),
+                Some(&replacement_manifest),
             )?,
             NamedRootUpdate::Applied
         ))
@@ -610,7 +682,7 @@ impl HistoryPaths {
     }
 }
 
-fn create_owner_dir(path: &Path) -> Result<(), HistoryError> {
+pub(crate) fn create_owner_dir(path: &Path) -> Result<(), HistoryError> {
     reject_symlink(path, true)?;
     if !path.exists() {
         let mut builder = fs::DirBuilder::new();
@@ -645,7 +717,7 @@ fn create_owner_file(path: &Path) -> Result<(), HistoryError> {
     set_owner_file(path)
 }
 
-fn reject_directory(path: &Path) -> Result<(), HistoryError> {
+pub(crate) fn reject_directory(path: &Path) -> Result<(), HistoryError> {
     reject_symlink(path, false)?;
     let metadata = fs::metadata(path).map_err(|source| crate::error::io_error(path, source))?;
     if metadata.is_dir() {
@@ -671,7 +743,7 @@ fn reject_regular_file(path: &Path) -> Result<(), HistoryError> {
     }
 }
 
-fn reject_symlink(path: &Path, missing_ok: bool) -> Result<(), HistoryError> {
+pub(crate) fn reject_symlink(path: &Path, missing_ok: bool) -> Result<(), HistoryError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(HistoryError::UnsafePath {
             path: path.to_path_buf(),

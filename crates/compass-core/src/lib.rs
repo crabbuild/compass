@@ -2,6 +2,7 @@
 
 mod cluster_existing;
 mod diagnostics;
+mod history;
 mod merge;
 mod pipeline;
 mod raw_guard;
@@ -12,6 +13,10 @@ pub use cluster_existing::{
     ClusterLabelSelection, cluster_existing_graph, cluster_existing_graph_with_labeler,
 };
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
+pub use history::{
+    CompleteGraphBuilder, MaterializeError, MaterializeObserver, MaterializeRequest,
+    MaterializeStage, materialize_history, materialize_history_with_observer,
+};
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
     BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError, SemanticLayer,

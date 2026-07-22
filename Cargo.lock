@@ -967,6 +967,7 @@ dependencies = [
  "compass-files",
  "compass-google-workspace",
  "compass-graph",
+ "compass-history",
  "compass-languages",
  "compass-model",
  "compass-output",

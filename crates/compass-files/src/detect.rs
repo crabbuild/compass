@@ -107,6 +107,16 @@ pub enum FileType {
     Video,
 }
 
+/// Controls whether mutable caller-local Git excludes participate in source discovery.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum IgnorePolicy {
+    /// Current-checkout behavior, including `.git/info/exclude`.
+    #[default]
+    CurrentCheckout,
+    /// Reproducible historical behavior using only committed ignore files and explicit excludes.
+    HistoricalCommit,
+}
+
 impl FileType {
     const ALL: [Self; 5] = [
         Self::Code,
@@ -132,6 +142,7 @@ pub struct DetectOptions {
     pub scan_filesystem: bool,
     pub follow_symlinks: bool,
     pub gitignore: bool,
+    pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
     pub output_name: String,
     pub cache_root: Option<PathBuf>,
@@ -145,6 +156,7 @@ impl Default for DetectOptions {
             scan_filesystem: true,
             follow_symlinks: false,
             gitignore: true,
+            ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
             output_name: std::env::var("GRAPHIFY_OUT")
                 .unwrap_or_else(|_| "graphify-out".to_owned()),
@@ -205,7 +217,7 @@ impl WatchPathFilter {
                 .join(root)
         };
         let root = fs::canonicalize(root).map_err(|source| io_error(root, source))?;
-        let mut patterns = initial_ignore_patterns(&root, options.gitignore);
+        let mut patterns = initial_ignore_patterns(&root, options.gitignore, options.ignore_policy);
         patterns.extend(options.extra_excludes.iter().filter_map(|raw| {
             parse_ignore_line(raw).and_then(|line| IgnorePattern::new(root.clone(), &line))
         }));
@@ -401,7 +413,11 @@ fn vcs_root(root: &Path) -> Option<PathBuf> {
     }
 }
 
-fn initial_ignore_patterns(root: &Path, gitignore: bool) -> Vec<IgnorePattern> {
+fn initial_ignore_patterns(
+    root: &Path,
+    gitignore: bool,
+    policy: IgnorePolicy,
+) -> Vec<IgnorePattern> {
     let ceiling = vcs_root(root).unwrap_or_else(|| root.to_path_buf());
     let mut directories = vec![root.to_path_buf()];
     while directories
@@ -415,7 +431,7 @@ fn initial_ignore_patterns(root: &Path, gitignore: bool) -> Vec<IgnorePattern> {
     }
     directories.reverse();
     let mut patterns = Vec::new();
-    if gitignore {
+    if gitignore && policy == IgnorePolicy::CurrentCheckout {
         let exclude = ceiling.join(".git/info/exclude");
         if let Ok(text) = fs::read_to_string(exclude) {
             patterns.extend(
@@ -818,7 +834,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
     let root = fs::canonicalize(root).map_err(|source| io_error(root, source))?;
     let mut patterns = Vec::new();
     if options.scan_filesystem {
-        patterns = initial_ignore_patterns(&root, options.gitignore);
+        patterns = initial_ignore_patterns(&root, options.gitignore, options.ignore_policy);
         patterns.extend(options.extra_excludes.iter().filter_map(|raw| {
             parse_ignore_line(raw).and_then(|line| IgnorePattern::new(root.clone(), &line))
         }));

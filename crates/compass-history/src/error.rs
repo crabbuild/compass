@@ -32,6 +32,12 @@ pub enum HistoryError {
     /// A Git command failed or returned malformed output.
     #[error("Git repository discovery failed: {0}")]
     Git(String),
+    /// A configured checkout filter could execute unsupported external code.
+    #[error("historical checkout does not support Git filter {0}")]
+    UnsupportedGitFilter(String),
+    /// An exact historical worktree could not be cleaned up safely.
+    #[error("historical worktree cleanup failed: {0}")]
+    WorktreeCleanup(String),
     /// A history path was unsafe or had an unexpected type.
     #[error("unsafe history path {path}: {reason}")]
     UnsafePath {
@@ -75,6 +81,48 @@ pub enum HistoryError {
     /// A realization failed one or more content-integrity checks.
     #[error("invalid graph realization: {0:?}")]
     InvalidRealization(Vec<ValidationProblem>),
+}
+
+impl HistoryError {
+    /// Return whether this failure proves persisted catalog content is malformed or incomplete.
+    ///
+    /// Operational failures such as SQLite, filesystem, lock, and Git errors deliberately return
+    /// false so callers never hide infrastructure failures while looking for an older usable
+    /// realization.
+    #[must_use]
+    pub fn is_catalog_corruption(&self) -> bool {
+        match self {
+            Self::Graph(_)
+            | Self::Json(_)
+            | Self::Canonical(_)
+            | Self::InvalidKey(_)
+            | Self::InvalidFingerprint(_)
+            | Self::InvalidCommit(_)
+            | Self::InvalidArtifacts(_)
+            | Self::CorruptHistory(_)
+            | Self::InvalidRealization(_) => true,
+            Self::Prolly(error) => matches!(
+                error,
+                prolly::Error::NotFound(_)
+                    | prolly::Error::InvalidNode
+                    | prolly::Error::InvalidFormat(_)
+                    | prolly::Error::FormatMismatch { .. }
+                    | prolly::Error::Deserialize(_)
+                    | prolly::Error::CidMismatch { .. }
+                    | prolly::Error::InvalidVersionedMap(_)
+            ),
+            Self::Store(_)
+            | Self::Files(_)
+            | Self::Io { .. }
+            | Self::Git(_)
+            | Self::UnsupportedGitFilter(_)
+            | Self::WorktreeCleanup(_)
+            | Self::UnsafePath { .. }
+            | Self::LockTimeout { .. }
+            | Self::IncompatibleStoreFormat
+            | Self::FingerprintSecretKey(_) => false,
+        }
+    }
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> HistoryError {

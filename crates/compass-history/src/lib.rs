@@ -17,7 +17,7 @@ pub use canonical::{CANONICAL_ENCODING_VERSION, canonical_json_bytes};
 pub use diff::{ChangeKind, ChangeSink, GraphChange, RecordKind};
 pub use error::HistoryError;
 pub use fingerprint::{BuildProfile, ExtractionFingerprint, ExtractionFingerprintInput};
-pub use git::Repository;
+pub use git::{GitTargetLimitation, Repository, WorktreeGuard};
 pub use keys::{edge_key, hyperedge_key, node_key};
 pub use lock::{ActivityGuard, MaintenanceGuard};
 pub use model::{
@@ -25,7 +25,7 @@ pub use model::{
     GraphVersion, HISTORY_SCHEMA_VERSION, PublishRequest, PublishedVersion, RealizationId,
     StoredTree,
 };
-pub use store::HistoryStore;
+pub use store::{CorruptPreferredToken, HistoryStore};
 pub use validate::{
     MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH, MAX_KEY_BYTES,
     MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, ValidationProblem, ValidationReport,
