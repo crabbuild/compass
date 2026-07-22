@@ -61,9 +61,15 @@ pub enum HistoryError {
     /// A fingerprint digest was not strict lowercase SHA-256 text.
     #[error("invalid extraction fingerprint: {0}")]
     InvalidFingerprint(String),
+    /// A commit was not a full SHA-1 or SHA-256 object ID.
+    #[error("invalid Git commit ID: {0}")]
+    InvalidCommit(String),
     /// Graph artifacts violated the immutable history schema.
     #[error("invalid graph artifacts: {0}")]
     InvalidArtifacts(String),
+    /// Durable catalog state conflicts with immutable realization content.
+    #[error("corrupt graph history: {0}")]
+    CorruptHistory(String),
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> HistoryError {

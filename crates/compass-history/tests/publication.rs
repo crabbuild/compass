@@ -1,0 +1,149 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use compass_history::{
+    CommitId, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryStore,
+    PublishRequest, Repository,
+};
+use compass_model::GraphDocument;
+use serde_json::json;
+
+struct Fixture {
+    _directory: tempfile::TempDir,
+    path: PathBuf,
+}
+
+impl Fixture {
+    fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        git(directory.path(), &["init", "--quiet"])?;
+        git(directory.path(), &["config", "user.name", "Compass Test"])?;
+        git(
+            directory.path(),
+            &["config", "user.email", "compass@example.invalid"],
+        )?;
+        std::fs::write(directory.path().join("README.md"), "fixture\n")?;
+        git(directory.path(), &["add", "README.md"])?;
+        git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+        let path = directory.path().to_path_buf();
+        Ok(Self {
+            _directory: directory,
+            path,
+        })
+    }
+}
+
+fn git(directory: &Path, arguments: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned().into())
+    }
+}
+
+fn request(
+    fingerprint: char,
+    extra_node: bool,
+) -> Result<PublishRequest, Box<dyn std::error::Error>> {
+    let mut nodes = vec![json!({"id": "a", "label": "A"})];
+    let mut links = Vec::new();
+    if extra_node {
+        nodes.push(json!({"id": "b", "label": "B"}));
+        links.push(json!({"source": "a", "target": "b", "relation": "calls"}));
+    }
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": true,
+        "multigraph": false,
+        "nodes": nodes,
+        "links": links
+    }))?;
+    Ok(PublishRequest {
+        commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse()?,
+        parents: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse()?],
+        fingerprint: std::iter::repeat_n(fingerprint, 64)
+            .collect::<String>()
+            .parse::<ExtractionFingerprint>()?,
+        artifacts: GraphArtifacts {
+            document,
+            analysis: Some(json!({"score": u8::from(extra_node)})),
+            labels: None,
+            manifest: Some(json!({"complete": true})),
+            authoritative_sidecars: BTreeMap::new(),
+        },
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 1,
+            semantic_files_completed: 1,
+            failed_chunks: 0,
+        },
+        make_preferred: true,
+    })
+}
+
+#[test]
+fn publication_is_atomic_reopenable_and_content_idempotent()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+    let publish = request('a', false)?;
+    let first = history.publish(publish.clone())?;
+    let second = history.publish(publish)?;
+    assert_eq!(first.id, second.id);
+    assert!(first.preferred && second.preferred);
+    drop(history);
+
+    let reopened = HistoryStore::open_existing(&repository)?
+        .ok_or_else(|| std::io::Error::other("history store missing"))?;
+    let commit: CommitId = first.version.git_commit.parse()?;
+    assert_eq!(
+        reopened
+            .preferred(&commit)?
+            .ok_or_else(|| std::io::Error::other("preferred realization missing"))?
+            .id,
+        first.id
+    );
+    assert_eq!(reopened.get(&first.id)?.version, first.version);
+    assert_eq!(reopened.list(None)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn multiple_realizations_remain_addressable_and_preference_uses_cas()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+    let first = history.publish(request('a', false)?)?;
+    let second = history.publish(request('b', true)?)?;
+    assert_ne!(first.id, second.id);
+    let commit: CommitId = first.version.git_commit.parse()?;
+    let listed = history.list(Some(&commit))?;
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed.iter().filter(|version| version.preferred).count(), 1);
+    assert_eq!(
+        history
+            .preferred(&commit)?
+            .ok_or_else(|| std::io::Error::other("preferred realization missing"))?
+            .id,
+        second.id
+    );
+
+    assert!(!history.compare_and_set_preferred(&commit, None, &first.id)?);
+    assert!(history.compare_and_set_preferred(&commit, Some(&second.id), &first.id)?);
+    assert_eq!(
+        history
+            .preferred(&commit)?
+            .ok_or_else(|| std::io::Error::other("preferred realization missing"))?
+            .id,
+        first.id
+    );
+    assert!(history.get(&second.id).is_ok());
+    Ok(())
+}

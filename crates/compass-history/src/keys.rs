@@ -54,7 +54,6 @@ pub fn hyperedge_key(identity: &[u8], occurrence: Option<u64>) -> Vec<u8> {
     }
 }
 
-#[expect(dead_code, reason = "used by immutable catalog publication")]
 pub(crate) fn root_name(parts: &[&[u8]]) -> Vec<u8> {
     parts
         .iter()

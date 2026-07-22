@@ -18,7 +18,8 @@ pub use git::Repository;
 pub use keys::{edge_key, hyperedge_key, node_key};
 pub use lock::{ActivityGuard, MaintenanceGuard};
 pub use model::{
-    ArtifactClass, ArtifactContent, ArtifactRegistryEntry, CompletionEvidence, GraphVersion,
-    HISTORY_SCHEMA_VERSION, RealizationId, StoredTree,
+    ArtifactClass, ArtifactContent, ArtifactRegistryEntry, CommitId, CompletionEvidence,
+    GraphVersion, HISTORY_SCHEMA_VERSION, PublishRequest, PublishedVersion, RealizationId,
+    StoredTree,
 };
 pub use store::HistoryStore;

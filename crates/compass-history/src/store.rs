@@ -2,10 +2,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use prolly::{Config, NamedRootUpdate, Prolly};
+use prolly::{
+    BatchBuilder, Config, KeyBuilder, ManifestStoreScan, NamedRootUpdate, Prolly,
+    TransactionUpdate, Tree,
+};
 use prolly_store_sqlite::{SqliteStore, SqliteStoreConfig};
 
-use crate::{ActivityGuard, HistoryError, MaintenanceGuard, Repository};
+use crate::keys::root_name;
+use crate::{
+    ActivityGuard, CommitId, GraphVersion, HistoryError, MaintenanceGuard, PublishRequest,
+    PublishedVersion, RealizationId, Repository, StoredTree, canonical_json_bytes,
+};
 
 const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
 const STORE_FORMAT_KEY: &[u8] = b"format";
@@ -78,6 +85,342 @@ impl HistoryStore {
         MaintenanceGuard::acquire(&self.lock_path, false)
     }
 
+    /// Publish one immutable graph realization.
+    pub fn publish(&self, request: PublishRequest) -> Result<PublishedVersion, HistoryError> {
+        let guard = self.activity()?;
+        self.publish_with_activity(request, &guard)
+    }
+
+    /// Publish while reusing a materializer's existing activity guard.
+    pub(crate) fn publish_with_activity(
+        &self,
+        request: PublishRequest,
+        _guard: &ActivityGuard,
+    ) -> Result<PublishedVersion, HistoryError> {
+        request.completion.validate()?;
+        let preferred_name = preferred_root_name(&request.commit);
+        let observed_preferred = self.prolly.load_named_root(&preferred_name)?;
+        if let Some(tree) = &observed_preferred {
+            self.validated_manifest_pointer(tree)?;
+        }
+
+        let partitioned = request.artifacts.partition(&request.completion)?;
+        let node_count = count(partitioned.nodes.len())?;
+        let edge_count = count(partitioned.edges.len())?;
+        let hyperedge_count = count(partitioned.hyperedges.len())?;
+        let analysis_count = count(partitioned.analysis.len())?;
+        let metadata_count = count(partitioned.metadata.len())?;
+        let nodes = self.build_tree(partitioned.nodes)?;
+        let edges = self.build_tree(partitioned.edges)?;
+        let hyperedges = self.build_tree(partitioned.hyperedges)?;
+        let analysis = self.build_tree(partitioned.analysis)?;
+        let metadata = self.build_tree(partitioned.metadata)?;
+        let version = GraphVersion {
+            schema_version: crate::HISTORY_SCHEMA_VERSION,
+            git_commit: request.commit.to_string(),
+            git_parents: request.parents.iter().map(ToString::to_string).collect(),
+            extraction_fingerprint: request.fingerprint.to_string(),
+            nodes_root: StoredTree::from_tree(&nodes),
+            edges_root: StoredTree::from_tree(&edges),
+            hyperedges_root: StoredTree::from_tree(&hyperedges),
+            analysis_root: StoredTree::from_tree(&analysis),
+            metadata_root: StoredTree::from_tree(&metadata),
+            node_count,
+            edge_count,
+            hyperedge_count,
+            analysis_count,
+            metadata_count,
+        };
+        let id = RealizationId::for_version(&version)?;
+        let manifest = self.build_tree(vec![(
+            KeyBuilder::new().push_str("manifest").finish(),
+            canonical_json_bytes(&serde_json::to_value(&version)?)?,
+        )])?;
+
+        self.publish_catalog_roots(
+            &id,
+            [
+                (b"nodes".as_slice(), &nodes),
+                (b"edges".as_slice(), &edges),
+                (b"hyperedges".as_slice(), &hyperedges),
+                (b"analysis".as_slice(), &analysis),
+                (b"metadata".as_slice(), &metadata),
+                (b"manifest".as_slice(), &manifest),
+            ],
+        )?;
+        let reopened = self.get(&id)?;
+        if reopened.version != version {
+            return Err(HistoryError::CorruptHistory(format!(
+                "reopened realization {id} differs from its manifest"
+            )));
+        }
+
+        let preferred = if request.make_preferred {
+            matches!(
+                self.prolly.compare_and_swap_named_root(
+                    &preferred_name,
+                    observed_preferred.as_ref(),
+                    Some(&manifest),
+                )?,
+                NamedRootUpdate::Applied
+            )
+        } else {
+            false
+        };
+        Ok(PublishedVersion {
+            id,
+            version,
+            preferred,
+        })
+    }
+
+    /// Resolve the preferred complete realization for an exact commit.
+    pub fn preferred(&self, commit: &CommitId) -> Result<Option<PublishedVersion>, HistoryError> {
+        let Some(tree) = self.prolly.load_named_root(&preferred_root_name(commit))? else {
+            return Ok(None);
+        };
+        let mut published = self.validated_manifest_pointer(&tree)?;
+        if published.version.git_commit != commit.as_str() {
+            return Err(HistoryError::CorruptHistory(format!(
+                "preferred pointer for {commit} targets commit {}",
+                published.version.git_commit
+            )));
+        }
+        published.preferred = true;
+        Ok(Some(published))
+    }
+
+    /// Load and verify one exact immutable realization.
+    pub fn get(&self, id: &RealizationId) -> Result<PublishedVersion, HistoryError> {
+        let manifest_name = version_root_name(id, b"manifest");
+        let manifest = self
+            .prolly
+            .load_named_root(&manifest_name)?
+            .ok_or_else(|| HistoryError::CorruptHistory(format!("missing realization {id}")))?;
+        let published = self.version_from_manifest_tree(&manifest)?;
+        if &published.id != id {
+            return Err(HistoryError::CorruptHistory(format!(
+                "manifest name {id} contains realization {}",
+                published.id
+            )));
+        }
+        self.verify_direct_roots(id, &published.version)?;
+        Ok(published)
+    }
+
+    /// List immutable realizations, optionally filtered by exact commit.
+    pub fn list(&self, commit: Option<&CommitId>) -> Result<Vec<PublishedVersion>, HistoryError> {
+        let mut versions = Vec::new();
+        for named in self.prolly.store().list_roots()? {
+            let Ok(segments) = prolly::decode_segments(&named.name) else {
+                continue;
+            };
+            if segments.len() != 5
+                || segments[0] != b"compass"
+                || segments[1] != b"v1"
+                || segments[2] != b"version"
+                || segments[4] != b"manifest"
+            {
+                continue;
+            }
+            let id = std::str::from_utf8(&segments[3])
+                .map_err(|error| HistoryError::CorruptHistory(error.to_string()))?
+                .parse()?;
+            let published = self.get(&id)?;
+            if commit.is_none_or(|expected| published.version.git_commit == expected.as_str()) {
+                versions.push(published);
+            }
+        }
+        versions.sort_by(|left, right| {
+            (
+                &left.version.git_commit,
+                &left.version.extraction_fingerprint,
+                left.id.as_hex(),
+            )
+                .cmp(&(
+                    &right.version.git_commit,
+                    &right.version.extraction_fingerprint,
+                    right.id.as_hex(),
+                ))
+        });
+        for published in &mut versions {
+            let commit: CommitId = published.version.git_commit.parse()?;
+            published.preferred = self
+                .preferred(&commit)?
+                .is_some_and(|preferred| preferred.id == published.id);
+        }
+        Ok(versions)
+    }
+
+    /// Move a preferred pointer only when its exact observed identity matches.
+    pub fn compare_and_set_preferred(
+        &self,
+        commit: &CommitId,
+        expected: Option<&RealizationId>,
+        replacement: &RealizationId,
+    ) -> Result<bool, HistoryError> {
+        let _guard = self.activity()?;
+        let replacement = self.get(replacement)?;
+        if replacement.version.git_commit != commit.as_str() {
+            return Err(HistoryError::CorruptHistory(
+                "replacement realization belongs to a different commit".to_owned(),
+            ));
+        }
+        let replacement_tree = self
+            .prolly
+            .load_named_root(&version_root_name(&replacement.id, b"manifest"))?
+            .ok_or_else(|| {
+                HistoryError::CorruptHistory("missing replacement manifest".to_owned())
+            })?;
+        let expected_tree = match expected {
+            Some(id) => {
+                let expected = self.get(id)?;
+                if expected.version.git_commit != commit.as_str() {
+                    return Err(HistoryError::CorruptHistory(
+                        "expected realization belongs to a different commit".to_owned(),
+                    ));
+                }
+                Some(
+                    self.prolly
+                        .load_named_root(&version_root_name(id, b"manifest"))?
+                        .ok_or_else(|| {
+                            HistoryError::CorruptHistory("missing expected manifest".to_owned())
+                        })?,
+                )
+            }
+            None => None,
+        };
+        Ok(matches!(
+            self.prolly.compare_and_swap_named_root(
+                &preferred_root_name(commit),
+                expected_tree.as_ref(),
+                Some(&replacement_tree),
+            )?,
+            NamedRootUpdate::Applied
+        ))
+    }
+
+    fn build_tree(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Tree, HistoryError> {
+        let mut builder = BatchBuilder::new(self.prolly.store().clone(), Config::default());
+        for (key, value) in entries {
+            builder.add(key, value);
+        }
+        builder.build().map_err(HistoryError::from)
+    }
+
+    fn publish_catalog_roots(
+        &self,
+        id: &RealizationId,
+        roots: [(&[u8], &Tree); 6],
+    ) -> Result<(), HistoryError> {
+        let transaction = self.prolly.begin_transaction()?;
+        for &(kind, tree) in &roots {
+            let name = version_root_name(id, kind);
+            match transaction.load_named_root(&name)? {
+                Some(existing) if existing == *tree => {}
+                Some(_) => {
+                    return Err(HistoryError::CorruptHistory(format!(
+                        "immutable root collision for {id}/{}",
+                        String::from_utf8_lossy(kind)
+                    )));
+                }
+                None => transaction.publish_named_root(&name, tree)?,
+            }
+        }
+        match transaction.commit()? {
+            TransactionUpdate::Applied { .. } => Ok(()),
+            TransactionUpdate::Conflict(_) => {
+                for &(kind, expected) in &roots {
+                    let actual = self.prolly.load_named_root(&version_root_name(id, kind))?;
+                    if actual.as_ref() != Some(expected) {
+                        return Err(HistoryError::CorruptHistory(format!(
+                            "realization catalog conflict for {id}/{}",
+                            String::from_utf8_lossy(kind)
+                        )));
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn version_from_manifest_tree(
+        &self,
+        manifest: &Tree,
+    ) -> Result<PublishedVersion, HistoryError> {
+        let key = KeyBuilder::new().push_str("manifest").finish();
+        let bytes = self.prolly.get(manifest, &key)?.ok_or_else(|| {
+            HistoryError::CorruptHistory("manifest tree has no manifest record".to_owned())
+        })?;
+        let version: GraphVersion = serde_json::from_slice(&bytes)?;
+        if version.schema_version != crate::HISTORY_SCHEMA_VERSION {
+            return Err(HistoryError::CorruptHistory(format!(
+                "unsupported realization schema {}",
+                version.schema_version
+            )));
+        }
+        let _: CommitId = version.git_commit.parse()?;
+        for parent in &version.git_parents {
+            let _: CommitId = parent.parse()?;
+        }
+        let _: crate::ExtractionFingerprint = version.extraction_fingerprint.parse()?;
+        let id = RealizationId::for_version(&version)?;
+        Ok(PublishedVersion {
+            id,
+            version,
+            preferred: false,
+        })
+    }
+
+    fn validated_manifest_pointer(
+        &self,
+        manifest: &Tree,
+    ) -> Result<PublishedVersion, HistoryError> {
+        let parsed = self.version_from_manifest_tree(manifest)?;
+        let catalog = self.get(&parsed.id)?;
+        let catalog_tree = self
+            .prolly
+            .load_named_root(&version_root_name(&parsed.id, b"manifest"))?
+            .ok_or_else(|| HistoryError::CorruptHistory("missing catalog manifest".to_owned()))?;
+        if &catalog_tree != manifest {
+            return Err(HistoryError::CorruptHistory(
+                "preferred pointer does not match its immutable catalog manifest".to_owned(),
+            ));
+        }
+        Ok(catalog)
+    }
+
+    fn verify_direct_roots(
+        &self,
+        id: &RealizationId,
+        version: &GraphVersion,
+    ) -> Result<(), HistoryError> {
+        for (kind, expected) in [
+            (b"nodes".as_slice(), &version.nodes_root),
+            (b"edges".as_slice(), &version.edges_root),
+            (b"hyperedges".as_slice(), &version.hyperedges_root),
+            (b"analysis".as_slice(), &version.analysis_root),
+            (b"metadata".as_slice(), &version.metadata_root),
+        ] {
+            let actual = self
+                .prolly
+                .load_named_root(&version_root_name(id, kind))?
+                .ok_or_else(|| {
+                    HistoryError::CorruptHistory(format!(
+                        "missing immutable root {id}/{}",
+                        String::from_utf8_lossy(kind)
+                    ))
+                })?;
+            if actual != expected.to_tree() {
+                return Err(HistoryError::CorruptHistory(format!(
+                    "immutable root {id}/{} differs from the manifest",
+                    String::from_utf8_lossy(kind)
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn open(paths: HistoryPaths) -> Result<Self, HistoryError> {
         reject_symlink(&paths.database_path, true)?;
         let backend = Arc::new(SqliteStore::open_with_config(
@@ -126,6 +469,19 @@ impl HistoryStore {
             Err(HistoryError::IncompatibleStoreFormat)
         }
     }
+}
+
+fn version_root_name(id: &RealizationId, kind: &[u8]) -> Vec<u8> {
+    root_name(&[b"compass", b"v1", b"version", id.as_hex().as_bytes(), kind])
+}
+
+fn preferred_root_name(commit: &CommitId) -> Vec<u8> {
+    root_name(&[b"compass", b"v1", b"preferred", commit.as_str().as_bytes()])
+}
+
+fn count(value: usize) -> Result<u64, HistoryError> {
+    u64::try_from(value)
+        .map_err(|_| HistoryError::InvalidArtifacts("record count exceeds u64".to_owned()))
 }
 
 struct HistoryPaths {

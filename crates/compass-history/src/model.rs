@@ -5,7 +5,7 @@ use prolly::{Cid, Config, RuntimeConfig, Tree, TreeFormat};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
-use crate::{HistoryError, canonical_json_bytes};
+use crate::{ExtractionFingerprint, GraphArtifacts, HistoryError, canonical_json_bytes};
 
 /// Version of the Compass history realization schema.
 pub const HISTORY_SCHEMA_VERSION: u32 = 1;
@@ -177,6 +177,37 @@ pub struct CompletionEvidence {
     pub failed_chunks: u64,
 }
 
+/// Fully resolved SHA-1 or SHA-256 Git object identity.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CommitId(String);
+
+impl CommitId {
+    /// Borrow the normalized lowercase object ID.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CommitId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl FromStr for CommitId {
+    type Err = HistoryError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Ok(Self(value.to_ascii_lowercase()))
+        } else {
+            Err(HistoryError::InvalidCommit(value.to_owned()))
+        }
+    }
+}
+
 impl CompletionEvidence {
     pub(crate) fn validate(&self) -> Result<(), HistoryError> {
         if self.extraction_succeeded
@@ -191,6 +222,25 @@ impl CompletionEvidence {
             ))
         }
     }
+}
+
+/// Complete immutable input to one history publication.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PublishRequest {
+    pub commit: CommitId,
+    pub parents: Vec<CommitId>,
+    pub fingerprint: ExtractionFingerprint,
+    pub artifacts: GraphArtifacts,
+    pub completion: CompletionEvidence,
+    pub make_preferred: bool,
+}
+
+/// Addressable realization returned by publication and lookup.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublishedVersion {
+    pub id: RealizationId,
+    pub version: GraphVersion,
+    pub preferred: bool,
 }
 
 const fn hex_nibble(value: u8) -> u8 {
