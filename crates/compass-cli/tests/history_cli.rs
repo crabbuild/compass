@@ -260,3 +260,166 @@ fn completed_outcomes_handle_short_and_broken_writers() {
     );
     assert!(String::from_utf8_lossy(&diagnostics).contains("failed to write stdout"));
 }
+
+#[test]
+fn diff_supports_summary_details_streaming_json_and_topology_filtering()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("README.md"), "old\n")?;
+    git(directory.path(), &["add", "README.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
+    let repository = Repository::discover(directory.path())?;
+    let old_commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+    let old_document: GraphDocument = serde_json::from_value(json!({
+        "directed":true,
+        "multigraph":true,
+        "nodes":[
+            {"id":"a","label":"A","community":0},
+            {"id":"b","label":"B","community":0}
+        ],
+        "links":[
+            {"source":"a","target":"b","relation":"calls","key":"relation"},
+            {"source":"a","target":"a","relation":"references","key":"confidence","confidence":0.5}
+        ],
+        "built_at_commit":old_commit
+    }))?;
+    history.publish(PublishRequest {
+        commit: old_commit.clone(),
+        parents: repository.parents(&old_commit)?,
+        fingerprint: std::iter::repeat_n('c', 64)
+            .collect::<String>()
+            .parse::<ExtractionFingerprint>()?,
+        artifacts: GraphArtifacts {
+            document: old_document,
+            analysis: Some(json!({"communities":{"0":["a","b"]}})),
+            labels: None,
+            manifest: None,
+            authoritative_sidecars: BTreeMap::new(),
+        },
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        },
+        make_preferred: true,
+    })?;
+
+    std::fs::write(directory.path().join("README.md"), "new\n")?;
+    git(directory.path(), &["add", "README.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
+    let new_commit = repository.resolve("HEAD")?;
+    let new_document: GraphDocument = serde_json::from_value(json!({
+        "directed":true,
+        "multigraph":true,
+        "nodes":[
+            {"id":"a","label":"A","community":1},
+            {"id":"b","label":"B","community":0},
+            {"id":"c","label":"C","community":1}
+        ],
+        "links":[
+            {"source":"a","target":"b","relation":"imports","key":"relation"},
+            {"source":"a","target":"a","relation":"references","key":"confidence","confidence":0.9}
+        ],
+        "built_at_commit":new_commit
+    }))?;
+    history.publish(PublishRequest {
+        commit: new_commit.clone(),
+        parents: repository.parents(&new_commit)?,
+        fingerprint: std::iter::repeat_n('d', 64)
+            .collect::<String>()
+            .parse::<ExtractionFingerprint>()?,
+        artifacts: GraphArtifacts {
+            document: new_document,
+            analysis: Some(json!({"communities":{"0":["b"],"1":["a","c"]}})),
+            labels: None,
+            manifest: None,
+            authoritative_sidecars: BTreeMap::new(),
+        },
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        },
+        make_preferred: true,
+    })?;
+    drop(history);
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let graphify = env!("CARGO_BIN_EXE_graphify");
+    let summary = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
+    assert!(
+        summary.status.success(),
+        "{}",
+        String::from_utf8_lossy(&summary.stderr)
+    );
+    assert!(String::from_utf8_lossy(&summary.stdout).contains("1 node added"));
+
+    let json_output = run(
+        compass,
+        directory.path(),
+        &["diff", "HEAD~1", "HEAD", "--format", "json"],
+    )?;
+    assert!(json_output.status.success());
+    let changes: Vec<serde_json::Value> = serde_json::from_slice(&json_output.stdout)?;
+    assert!(changes.iter().any(|change| change["record"] == "edge"));
+    assert!(
+        changes
+            .iter()
+            .any(|change| { change["record"] == "edge" && change["change"] == "changed" })
+    );
+    let order = |record: &str| match record {
+        "node" => 0,
+        "edge" => 1,
+        "hyperedge" => 2,
+        "analysis" => 3,
+        "metadata" => 4,
+        _ => 5,
+    };
+    assert!(changes.windows(2).all(|pair| {
+        order(pair[0]["record"].as_str().unwrap_or_default())
+            <= order(pair[1]["record"].as_str().unwrap_or_default())
+    }));
+
+    let topology = run(
+        compass,
+        directory.path(),
+        &["diff", "HEAD~1", "HEAD", "--format=json", "--topology-only"],
+    )?;
+    let topology_changes: Vec<serde_json::Value> = serde_json::from_slice(&topology.stdout)?;
+    assert!(
+        topology_changes
+            .iter()
+            .all(|change| { !matches!(change["record"].as_str(), Some("analysis" | "metadata")) })
+    );
+
+    let detailed = run(
+        compass,
+        directory.path(),
+        &["diff", "HEAD~1", "HEAD", "--detailed"],
+    )?;
+    assert!(detailed.status.success());
+    assert!(String::from_utf8_lossy(&detailed.stdout).contains("edge changed"));
+
+    let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
+    assert_eq!(String::from_utf8_lossy(&empty.stdout), "no graph changes\n");
+    let alias = run(
+        graphify,
+        directory.path(),
+        &["diff", "HEAD~1", "HEAD", "--format", "json"],
+    )?;
+    assert_eq!(json_output.status.code(), alias.status.code());
+    assert_eq!(json_output.stdout, alias.stdout);
+    assert_eq!(json_output.stderr, alias.stderr);
+    Ok(())
+}

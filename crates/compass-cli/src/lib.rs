@@ -116,8 +116,8 @@ pub fn write_outcome(outcome: &Outcome, stdout: &mut impl Write, stderr: &mut im
     outcome.code
 }
 
-fn write_output(
-    stream: &mut impl Write,
+fn write_output<W: Write + ?Sized>(
+    stream: &mut W,
     output: &str,
     trailing_newline: bool,
 ) -> std::io::Result<()> {
@@ -163,6 +163,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     }
     match command.as_str() {
         "history" => history_commands::command(frontend, &args),
+        "diff" => history_commands::command_diff(frontend, &args),
         "query" => command_query(&args),
         "path" => command_path(&args),
         "explain" => command_explain(&args),
@@ -221,6 +222,25 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         _ => Outcome::failure(format!(
             "error: unknown command '{command}'\nRun 'compass --help' for usage."
         )),
+    }
+}
+
+/// Run the graph-history diff command with direct streaming output.
+pub fn run_diff(
+    frontend: Frontend,
+    arguments: &[OsString],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8 {
+    let arguments = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let outcome = history_commands::command_diff_to_writer(frontend, &arguments, stdout);
+    if write_output(stderr, &outcome.stderr, outcome.stderr_trailing_newline).is_err() {
+        1
+    } else {
+        outcome.code
     }
 }
 
@@ -3550,12 +3570,13 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 
 fn compass_help() -> String {
     "Usage: compass <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  install\n  uninstall\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
-        .replacen("Commands:\n", "Commands:\n  history\n", 1)
+        .replacen("Commands:\n", "Commands:\n  history\n  diff\n", 1)
 }
 
 fn compass_command_help(command: &str) -> String {
     match command {
         "history" => history_commands::help(Frontend::Compass),
+        "diff" => history_commands::diff_help(Frontend::Compass),
         "update" => "Usage: compass update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
         "extract" => extract_help(),
         "watch" => watch_help(),
@@ -3600,7 +3621,7 @@ fn graphify_help() -> String {
         .strip_suffix('\n')
         .unwrap_or(include_str!("../assets/graphify-help.txt"))
         .to_owned()
-        + "\n  graphify history --help"
+        + "\n  graphify history --help\n  graphify diff OLD NEW"
 }
 
 #[cfg(test)]

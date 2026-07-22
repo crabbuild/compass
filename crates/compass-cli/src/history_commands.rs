@@ -1,4 +1,9 @@
-use compass_history::{ArtifactClass, HistoryStore, RealizationId, Repository};
+use std::io::Write;
+
+use compass_history::{
+    ArtifactClass, ChangeKind, ChangeSink, GraphChange, HistoryError, HistoryStore, RealizationId,
+    RecordKind, Repository,
+};
 
 use crate::{Frontend, Outcome};
 
@@ -21,7 +26,48 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
     {
         return Outcome::success(help(frontend));
     }
-    match execute(frontend, args) {
+    outcome(execute(frontend, args))
+}
+
+pub(crate) fn diff_help(frontend: Frontend) -> String {
+    let prefix = match frontend {
+        Frontend::Compass => "compass",
+        Frontend::Graphify => "graphify",
+    };
+    format!("Usage: {prefix} diff OLD NEW [--detailed|--format text|json] [--topology-only]")
+}
+
+pub(crate) fn command_diff(frontend: Frontend, args: &[String]) -> Outcome {
+    let mut bytes = Vec::new();
+    let result = command_diff_to_writer(frontend, args, &mut bytes);
+    if result.code != 0 {
+        return result;
+    }
+    match String::from_utf8(bytes) {
+        Ok(stdout) => Outcome::success_exact(stdout),
+        Err(error) => Outcome::failure(format!("error: diff output was not UTF-8: {error}")),
+    }
+}
+
+pub(crate) fn command_diff_to_writer(
+    frontend: Frontend,
+    args: &[String],
+    writer: &mut dyn Write,
+) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return match writeln!(writer, "{}", diff_help(frontend)) {
+            Ok(()) => Outcome::success_exact(String::new()),
+            Err(error) => outcome(Err(runtime(output_error(error)))),
+        };
+    }
+    outcome(execute_diff(frontend, args, writer).map(|()| String::new()))
+}
+
+fn outcome(result: Result<String, CommandFailure>) -> Outcome {
+    match result {
         Ok(text) => Outcome::success(text),
         Err(CommandFailure {
             code,
@@ -38,6 +84,367 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
             Outcome::failure_with_code(format!("error: {}", error.message), 2)
         }
         Err(error) => Outcome::failure(format!("error: {}", error.message)),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DiffOutput {
+    Summary,
+    Detailed,
+    Json,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DiffOptions {
+    output: DiffOutput,
+    topology_only: bool,
+}
+
+fn execute_diff(
+    frontend: Frontend,
+    args: &[String],
+    writer: &mut dyn Write,
+) -> Result<(), CommandFailure> {
+    let (revisions, options) = parse_diff(args).map_err(usage)?;
+    let repository =
+        Repository::discover(&std::env::current_dir().map_err(runtime)?).map_err(runtime)?;
+    let old_commit = repository.resolve(&revisions[0]).map_err(runtime)?;
+    let new_commit = repository.resolve(&revisions[1]).map_err(runtime)?;
+    let history = store(&repository)?;
+    let old = history
+        .preferred(&old_commit)
+        .map_err(runtime)?
+        .ok_or_else(|| missing_preferred(frontend, &revisions[0], &old_commit))?;
+    let new = history
+        .preferred(&new_commit)
+        .map_err(runtime)?
+        .ok_or_else(|| missing_preferred(frontend, &revisions[1], &new_commit))?;
+    render_diff(&history, &old.id, &new.id, options, writer).map_err(runtime)
+}
+
+fn missing_preferred(
+    frontend: Frontend,
+    revision: &str,
+    commit: &impl std::fmt::Display,
+) -> CommandFailure {
+    let prefix = match frontend {
+        Frontend::Compass => "compass",
+        Frontend::Graphify => "graphify",
+    };
+    runtime(format!(
+        "commit {commit} ({revision}) has no preferred graph realization; run `{prefix} history build {revision}`"
+    ))
+}
+
+fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
+    let mut revisions = Vec::new();
+    let mut format = None;
+    let mut detailed = false;
+    let mut topology_only = false;
+    let mut options = true;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--" if options => options = false,
+            "--detailed" if options => {
+                if detailed {
+                    return Err("duplicate --detailed".to_owned());
+                }
+                detailed = true;
+            }
+            "--topology-only" if options => {
+                if topology_only {
+                    return Err("duplicate --topology-only".to_owned());
+                }
+                topology_only = true;
+            }
+            "--format" if options => {
+                index += 1;
+                let value = args.get(index).ok_or("--format requires a value")?;
+                if format.replace(value.clone()).is_some() {
+                    return Err("duplicate --format".to_owned());
+                }
+            }
+            value if options && value.starts_with("--format=") => {
+                let value = &value[9..];
+                if value.is_empty() {
+                    return Err("--format requires a value".to_owned());
+                }
+                if format.replace(value.to_owned()).is_some() {
+                    return Err("duplicate --format".to_owned());
+                }
+            }
+            value if options && value.starts_with('-') => {
+                return Err(format!("unknown option {value}"));
+            }
+            value => revisions.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    if revisions.len() != 2 {
+        return Err("diff requires exactly OLD and NEW revisions".to_owned());
+    }
+    let format = format.unwrap_or_else(|| "text".to_owned());
+    if !matches!(format.as_str(), "text" | "json") {
+        return Err("--format must be text or json".to_owned());
+    }
+    if detailed && format == "json" {
+        return Err("--detailed cannot be combined with --format json".to_owned());
+    }
+    Ok((
+        revisions,
+        DiffOptions {
+            output: if format == "json" {
+                DiffOutput::Json
+            } else if detailed {
+                DiffOutput::Detailed
+            } else {
+                DiffOutput::Summary
+            },
+            topology_only,
+        },
+    ))
+}
+
+fn render_diff(
+    history: &HistoryStore,
+    old: &RealizationId,
+    new: &RealizationId,
+    options: DiffOptions,
+    writer: &mut dyn Write,
+) -> Result<(), HistoryError> {
+    match options.output {
+        DiffOutput::Summary => {
+            let mut sink = SummarySink::new(options.topology_only);
+            history.diff(old, new, &mut sink)?;
+            sink.render(writer)
+        }
+        DiffOutput::Detailed => {
+            let mut sink = DetailedSink::new(writer, options.topology_only);
+            history.diff(old, new, &mut sink)?;
+            sink.finish()
+        }
+        DiffOutput::Json => {
+            writer.write_all(b"[").map_err(output_error)?;
+            let mut sink = JsonSink::new(writer, options.topology_only);
+            history.diff(old, new, &mut sink)?;
+            sink.finish()
+        }
+    }
+}
+
+#[derive(Default)]
+struct SummaryCell {
+    count: u64,
+    examples: Vec<String>,
+}
+
+struct SummarySink {
+    cells: Vec<SummaryCell>,
+    topology_only: bool,
+}
+
+impl SummarySink {
+    fn new(topology_only: bool) -> Self {
+        Self {
+            cells: (0..15).map(|_| SummaryCell::default()).collect(),
+            topology_only,
+        }
+    }
+
+    fn render(&self, writer: &mut dyn Write) -> Result<(), HistoryError> {
+        if self.cells.iter().all(|cell| cell.count == 0) {
+            return writer
+                .write_all(b"no graph changes\n")
+                .map_err(output_error);
+        }
+        for record in RECORD_ORDER {
+            for change in CHANGE_ORDER {
+                let cell = &self.cells[summary_index(record, change)];
+                if cell.count == 0 {
+                    continue;
+                }
+                writeln!(
+                    writer,
+                    "{} {} {}",
+                    cell.count,
+                    record_name(record, cell.count),
+                    change_name(change)
+                )
+                .map_err(output_error)?;
+                for example in &cell.examples {
+                    writeln!(writer, "  {example}").map_err(output_error)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ChangeSink for SummarySink {
+    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
+        if excluded(change.record, self.topology_only) {
+            return Ok(());
+        }
+        let cell = &mut self.cells[summary_index(change.record, change.change)];
+        cell.count = cell.count.saturating_add(1);
+        if cell.examples.len() < 20 {
+            cell.examples.push(change.key.join("/"));
+        }
+        Ok(())
+    }
+}
+
+struct DetailedSink<'a> {
+    writer: &'a mut dyn Write,
+    topology_only: bool,
+    count: u64,
+}
+
+impl<'a> DetailedSink<'a> {
+    fn new(writer: &'a mut dyn Write, topology_only: bool) -> Self {
+        Self {
+            writer,
+            topology_only,
+            count: 0,
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), HistoryError> {
+        if self.count == 0 {
+            self.writer
+                .write_all(b"no graph changes\n")
+                .map_err(output_error)?;
+        }
+        Ok(())
+    }
+}
+
+impl ChangeSink for DetailedSink<'_> {
+    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
+        if excluded(change.record, self.topology_only) {
+            return Ok(());
+        }
+        write!(
+            self.writer,
+            "{} {} {}",
+            record_name(change.record, 1),
+            change_name(change.change),
+            change.key.join("/")
+        )
+        .map_err(output_error)?;
+        if let Some(old) = &change.old {
+            self.writer.write_all(b"\told=").map_err(output_error)?;
+            serde_json::to_writer(&mut *self.writer, old).map_err(json_output_error)?;
+        }
+        if let Some(new) = &change.new {
+            self.writer.write_all(b"\tnew=").map_err(output_error)?;
+            serde_json::to_writer(&mut *self.writer, new).map_err(json_output_error)?;
+        }
+        self.writer.write_all(b"\n").map_err(output_error)?;
+        self.count = self.count.saturating_add(1);
+        Ok(())
+    }
+}
+
+struct JsonSink<'a> {
+    writer: &'a mut dyn Write,
+    topology_only: bool,
+    first: bool,
+}
+
+impl<'a> JsonSink<'a> {
+    fn new(writer: &'a mut dyn Write, topology_only: bool) -> Self {
+        Self {
+            writer,
+            topology_only,
+            first: true,
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), HistoryError> {
+        self.writer.write_all(b"]\n").map_err(output_error)
+    }
+}
+
+impl ChangeSink for JsonSink<'_> {
+    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
+        if excluded(change.record, self.topology_only) {
+            return Ok(());
+        }
+        if self.first {
+            self.first = false;
+        } else {
+            self.writer.write_all(b",").map_err(output_error)?;
+        }
+        serde_json::to_writer(&mut *self.writer, &change).map_err(json_output_error)
+    }
+}
+
+const RECORD_ORDER: [RecordKind; 5] = [
+    RecordKind::Node,
+    RecordKind::Edge,
+    RecordKind::Hyperedge,
+    RecordKind::Analysis,
+    RecordKind::Metadata,
+];
+const CHANGE_ORDER: [ChangeKind; 3] = [ChangeKind::Added, ChangeKind::Removed, ChangeKind::Changed];
+
+fn summary_index(record: RecordKind, change: ChangeKind) -> usize {
+    let record = match record {
+        RecordKind::Node => 0,
+        RecordKind::Edge => 1,
+        RecordKind::Hyperedge => 2,
+        RecordKind::Analysis => 3,
+        RecordKind::Metadata => 4,
+    };
+    let change = match change {
+        ChangeKind::Added => 0,
+        ChangeKind::Removed => 1,
+        ChangeKind::Changed => 2,
+    };
+    record * 3 + change
+}
+
+fn excluded(record: RecordKind, topology_only: bool) -> bool {
+    topology_only && matches!(record, RecordKind::Analysis | RecordKind::Metadata)
+}
+
+fn record_name(record: RecordKind, count: u64) -> &'static str {
+    match (record, count == 1) {
+        (RecordKind::Node, true) => "node",
+        (RecordKind::Node, false) => "nodes",
+        (RecordKind::Edge, true) => "edge",
+        (RecordKind::Edge, false) => "edges",
+        (RecordKind::Hyperedge, true) => "hyperedge",
+        (RecordKind::Hyperedge, false) => "hyperedges",
+        (RecordKind::Analysis, true) => "analysis record",
+        (RecordKind::Analysis, false) => "analysis records",
+        (RecordKind::Metadata, true) => "metadata record",
+        (RecordKind::Metadata, false) => "metadata records",
+    }
+}
+
+fn change_name(change: ChangeKind) -> &'static str {
+    match change {
+        ChangeKind::Added => "added",
+        ChangeKind::Removed => "removed",
+        ChangeKind::Changed => "changed",
+    }
+}
+
+fn output_error(source: std::io::Error) -> HistoryError {
+    HistoryError::Io {
+        path: std::path::PathBuf::from("<stdout>"),
+        source,
+    }
+}
+
+fn json_output_error(source: serde_json::Error) -> HistoryError {
+    if source.is_io() {
+        output_error(std::io::Error::other(source))
+    } else {
+        HistoryError::Json(source)
     }
 }
 
@@ -397,7 +804,11 @@ fn report_failure(stdout: String, e: impl ToString) -> CommandFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use std::io::{self, Write};
+
+    use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn common_options_support_equals_end_marker_and_reject_duplicates() {
@@ -423,5 +834,85 @@ mod tests {
             .is_err()
         );
         assert!(parse(&["--unknown".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn diff_options_are_total_and_mutually_exclusive() {
+        let parsed = parse_diff(&[
+            "old".to_owned(),
+            "new".to_owned(),
+            "--topology-only".to_owned(),
+            "--format=json".to_owned(),
+        ]);
+        let Ok((revisions, options)) = parsed else {
+            assert!(parsed.is_ok());
+            return;
+        };
+        assert_eq!(revisions, ["old", "new"]);
+        assert_eq!(options.output, DiffOutput::Json);
+        assert!(options.topology_only);
+        assert!(
+            parse_diff(&[
+                "old".to_owned(),
+                "new".to_owned(),
+                "--detailed".to_owned(),
+                "--format=json".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(parse_diff(&["old".to_owned()]).is_err());
+        assert!(
+            parse_diff(&[
+                "old".to_owned(),
+                "new".to_owned(),
+                "--format=yaml".to_owned(),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn json_diff_sink_handles_short_writes_and_propagates_broken_pipes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        struct ShortWriter(Vec<u8>);
+        impl Write for ShortWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                let length = bytes.len().min(1);
+                self.0.extend_from_slice(&bytes[..length]);
+                Ok(length)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        struct BrokenWriter;
+        impl Write for BrokenWriter {
+            fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let change = GraphChange {
+            record: RecordKind::Edge,
+            change: ChangeKind::Changed,
+            key: vec!["edge".to_owned()],
+            old: Some(json!({"confidence":0.5})),
+            new: Some(json!({"confidence":0.9})),
+        };
+
+        let mut short = ShortWriter(Vec::new());
+        short.write_all(b"[")?;
+        let mut sink = JsonSink::new(&mut short, false);
+        sink.change(change.clone())?;
+        sink.finish()?;
+        let parsed: Vec<serde_json::Value> = serde_json::from_slice(&short.0)?;
+        assert_eq!(parsed.len(), 1);
+
+        let mut broken = BrokenWriter;
+        let mut sink = JsonSink::new(&mut broken, false);
+        assert!(sink.change(change).is_err());
+        Ok(())
     }
 }
