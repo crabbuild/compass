@@ -9,6 +9,15 @@ pub enum HistoryError {
     /// A Prolly tree operation failed.
     #[error("prolly operation failed: {0}")]
     Prolly(#[from] prolly::Error),
+    /// A Compass graph document could not be read or reconstructed.
+    #[error("graph document failed: {0}")]
+    Graph(#[from] compass_model::GraphError),
+    /// A compatible artifact file could not be written.
+    #[error("artifact file failed: {0}")]
+    Files(#[from] compass_files::FileError),
+    /// JSON artifact data was malformed.
+    #[error("artifact JSON failed: {0}")]
+    Json(#[from] serde_json::Error),
     /// A filesystem operation failed.
     #[error("history I/O failed at {path}: {source}")]
     Io {
@@ -52,6 +61,9 @@ pub enum HistoryError {
     /// A fingerprint digest was not strict lowercase SHA-256 text.
     #[error("invalid extraction fingerprint: {0}")]
     InvalidFingerprint(String),
+    /// Graph artifacts violated the immutable history schema.
+    #[error("invalid graph artifacts: {0}")]
+    InvalidArtifacts(String),
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> HistoryError {
