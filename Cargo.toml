@@ -21,6 +21,7 @@ members = [
     "crates/compass-reflect",
     "crates/compass-resolve",
     "crates/compass-semantic",
+    "crates/compass-history",
     "crates/compass-transcribe",
     "crates/compass-whisper",
     "vendor/compass-tree-sitter-language-pack",
@@ -57,6 +58,8 @@ sha1 = "0.10"
 md-5 = "0.10"
 mimalloc = { version = "0.1.52", default-features = false }
 notify = "8.2.0"
+prolly-map = "=0.5.0"
+prolly-store-sqlite = "=0.3.0"
 oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compression"] }
 ctrlc = "3.5.2"
 strsim = "0.11"
