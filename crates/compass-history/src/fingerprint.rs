@@ -83,6 +83,13 @@ impl BuildProfile {
             .get(&key.trim().to_ascii_lowercase())
             .map(String::as_str)
     }
+
+    /// Iterate over normalized options in canonical key order.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.values
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+    }
 }
 
 /// Inputs resolved from a build profile and the exact target commit.
@@ -134,13 +141,37 @@ fn checked_key(key: &str) -> Result<String, HistoryError> {
             "field name cannot be empty".to_owned(),
         ));
     }
-    if ["key", "secret", "token", "password", "credential"]
-        .iter()
-        .any(|needle| normalized.contains(needle))
-    {
+    if secret_field_name(&normalized) {
         return Err(HistoryError::FingerprintSecretKey(key.to_owned()));
     }
     Ok(normalized)
+}
+
+fn secret_field_name(key: &str) -> bool {
+    let compact = key.replace(['.', '_', '-'], "");
+    if matches!(key, "key" | "token")
+        || matches!(
+            compact.as_str(),
+            "apikey" | "privatekey" | "accesstoken" | "authtoken" | "bearertoken" | "refreshtoken"
+        )
+    {
+        return true;
+    }
+    let segments = key
+        .split(['.', '_', '-'])
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    segments.iter().any(|segment| {
+        matches!(
+            *segment,
+            "secret" | "password" | "credential" | "credentials"
+        )
+    }) || segments.windows(2).any(|pair| {
+        matches!(
+            pair,
+            ["api" | "private", "key"] | ["access" | "auth" | "bearer" | "refresh", "token"]
+        )
+    })
 }
 
 fn parse_digest(value: &str) -> Result<[u8; 32], HistoryError> {

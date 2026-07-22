@@ -1,11 +1,16 @@
 use std::io::Write;
 
 use compass_core::LoadedGraph;
+use compass_core::{
+    MaterializeError, MaterializeObserver, MaterializeRequest, MaterializeStage,
+    materialize_history_with_observer,
+};
 use compass_history::{
-    ArtifactClass, ChangeKind, ChangeSink, GraphChange, HistoryError, HistoryStore, RealizationId,
-    RecordKind, Repository,
+    ArtifactClass, ChangeKind, ChangeSink, CommitId, GraphChange, HistoryError, HistoryStore,
+    PublishedVersion, RealizationId, RecordKind, Repository,
 };
 
+use crate::history_build::{HistoryBuildOptions, parse_build_command};
 use crate::{Frontend, Outcome};
 
 pub(crate) fn help(frontend: Frontend) -> String {
@@ -39,7 +44,7 @@ pub(crate) fn diff_help(frontend: Frontend) -> String {
 }
 
 pub(crate) fn load_graph_at(
-    frontend: Frontend,
+    _frontend: Frontend,
     revision: &str,
     force_directed: bool,
 ) -> Result<LoadedGraph, String> {
@@ -49,14 +54,9 @@ pub(crate) fn load_graph_at(
     let commit = repository
         .resolve(revision)
         .map_err(|error| error.to_string())?;
-    let history = HistoryStore::open_existing(&repository)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| missing_graph(frontend, revision, &commit))?;
+    let options = HistoryBuildOptions::defaults().map_err(|error| error.to_string())?;
+    let (history, preferred) = resolve_or_materialize(&repository, commit, &options, false, false)?;
     let _activity = history.activity().map_err(|error| error.to_string())?;
-    let preferred = history
-        .preferred(&commit)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| missing_graph(frontend, revision, &commit))?;
     // `artifacts` performs full realization validation before reconstruction.
     let artifacts = history
         .artifacts(&preferred.id)
@@ -65,12 +65,50 @@ pub(crate) fn load_graph_at(
         .map_err(|error| error.to_string())
 }
 
-fn missing_graph(frontend: Frontend, revision: &str, commit: &impl std::fmt::Display) -> String {
-    let prefix = match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    };
-    format!("no graph realization for {commit}; run `{prefix} history build {revision}`")
+fn resolve_or_materialize(
+    repository: &Repository,
+    commit: CommitId,
+    options: &HistoryBuildOptions,
+    rebuild: bool,
+    replace_corrupt: bool,
+) -> Result<(HistoryStore, PublishedVersion), String> {
+    let history =
+        match HistoryStore::open_existing(repository).map_err(|error| error.to_string())? {
+            Some(history) => history,
+            None => HistoryStore::create(repository).map_err(|error| error.to_string())?,
+        };
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("could not resolve current Compass executable: {error}"))?;
+    let builder = options.builder(executable);
+    let mut observer = StderrProgress;
+    let published = materialize_history_with_observer(
+        &history,
+        &builder,
+        MaterializeRequest {
+            repository: repository.clone(),
+            commit,
+            profile: options.profile(),
+            rebuild,
+            replace_corrupt,
+        },
+        &mut observer,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((history, published))
+}
+
+struct StderrProgress;
+
+impl MaterializeObserver for StderrProgress {
+    fn entered(&mut self, stage: MaterializeStage) -> Result<(), MaterializeError> {
+        let message = match stage {
+            MaterializeStage::Building => "building complete graph",
+            MaterializeStage::Validating => "validating complete graph",
+            MaterializeStage::Publishing => "publishing immutable realization",
+        };
+        eprintln!("[graph history] {message}");
+        Ok(())
+    }
 }
 
 pub(crate) fn command_diff(frontend: Frontend, args: &[String]) -> Outcome {
@@ -137,39 +175,22 @@ struct DiffOptions {
 }
 
 fn execute_diff(
-    frontend: Frontend,
+    _frontend: Frontend,
     args: &[String],
     writer: &mut dyn Write,
 ) -> Result<(), CommandFailure> {
-    let (revisions, options) = parse_diff(args).map_err(usage)?;
+    let (revisions, diff_options) = parse_diff(args).map_err(usage)?;
     let repository =
         Repository::discover(&std::env::current_dir().map_err(runtime)?).map_err(runtime)?;
     let old_commit = repository.resolve(&revisions[0]).map_err(runtime)?;
     let new_commit = repository.resolve(&revisions[1]).map_err(runtime)?;
-    let history = store(&repository)?;
-    let old = history
-        .preferred(&old_commit)
-        .map_err(runtime)?
-        .ok_or_else(|| missing_preferred(frontend, &revisions[0], &old_commit))?;
-    let new = history
-        .preferred(&new_commit)
-        .map_err(runtime)?
-        .ok_or_else(|| missing_preferred(frontend, &revisions[1], &new_commit))?;
-    render_diff(&history, &old.id, &new.id, options, writer).map_err(runtime)
-}
-
-fn missing_preferred(
-    frontend: Frontend,
-    revision: &str,
-    commit: &impl std::fmt::Display,
-) -> CommandFailure {
-    let prefix = match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    };
-    runtime(format!(
-        "commit {commit} ({revision}) has no preferred graph realization; run `{prefix} history build {revision}`"
-    ))
+    let build_options = HistoryBuildOptions::defaults().map_err(runtime)?;
+    let (_, old) = resolve_or_materialize(&repository, old_commit, &build_options, false, false)
+        .map_err(runtime)?;
+    let (history, new) =
+        resolve_or_materialize(&repository, new_commit, &build_options, false, false)
+            .map_err(runtime)?;
+    render_diff(&history, &old.id, &new.id, diff_options, writer).map_err(runtime)
 }
 
 fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
@@ -493,6 +514,9 @@ struct CommandFailure {
 fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure> {
     let repository =
         Repository::discover(&std::env::current_dir().map_err(runtime)?).map_err(runtime)?;
+    if matches!(args[0].as_str(), "build" | "rebuild") {
+        return execute_build(&repository, &args[0], &args[1..]);
+    }
     let (positionals, format, output) = parse(&args[1..]).map_err(usage)?;
     if args[0] != "export" && output.is_some() {
         return Err(usage("--output is only valid for history export"));
@@ -687,11 +711,10 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             exact(&positionals, 1, "export requires REV")?;
             let output = output.ok_or_else(|| usage("export requires --output PATH"))?;
             let commit = repository.resolve(&positionals[0]).map_err(runtime)?;
-            let history = store(&repository)?;
-            let preferred = history
-                .preferred(&commit)
-                .map_err(runtime)?
-                .ok_or_else(|| runtime("no preferred realization"))?;
+            let build_options = HistoryBuildOptions::defaults().map_err(runtime)?;
+            let (history, preferred) =
+                resolve_or_materialize(&repository, commit, &build_options, false, false)
+                    .map_err(runtime)?;
             let artifacts = history.artifacts(&preferred.id).map_err(runtime)?;
             if format == "graph-json" {
                 if output.is_dir() {
@@ -746,10 +769,54 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             }
             Ok(format!("exported {} to {}", preferred.id, output.display()))
         }
-        "enable" | "disable" | "build" | "rebuild" | "gc" => {
+        "enable" | "disable" | "gc" => {
             Err(runtime(format!("history {} is not available yet", args[0])))
         }
         other => Err(usage(format!("unknown history command {other}"))),
+    }
+}
+
+fn execute_build(
+    repository: &Repository,
+    command: &str,
+    args: &[String],
+) -> Result<String, CommandFailure> {
+    let parsed = parse_build_command(command, args).map_err(usage)?;
+    let commit = repository.resolve(&parsed.revision).map_err(runtime)?;
+    let (_history, published) = resolve_or_materialize(
+        repository,
+        commit,
+        &parsed.options,
+        command == "rebuild",
+        parsed.replace_corrupt,
+    )
+    .map_err(runtime)?;
+    if parsed.format == "json" {
+        Ok(serde_json::json!({
+            "commit": published.version.git_commit,
+            "realization": published.id,
+            "fingerprint": published.version.extraction_fingerprint,
+            "nodes": published.version.node_count,
+            "edges": published.version.edge_count,
+            "hyperedges": published.version.hyperedge_count,
+            "analysis_records": published.version.analysis_count,
+            "metadata_records": published.version.metadata_count,
+            "preferred": published.preferred
+        })
+        .to_string())
+    } else {
+        Ok(format!(
+            "commit: {}\nrealization: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nhyperedges: {}\nanalysis records: {}\nmetadata records: {}\npreferred: {}",
+            published.version.git_commit,
+            published.id,
+            published.version.extraction_fingerprint,
+            published.version.node_count,
+            published.version.edge_count,
+            published.version.hyperedge_count,
+            published.version.analysis_count,
+            published.version.metadata_count,
+            published.preferred
+        ))
     }
 }
 

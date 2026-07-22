@@ -1,6 +1,7 @@
 //! Command compatibility layer for Compass and the Graphify compatibility binary.
 
 mod dedup_commands;
+mod history_build;
 mod history_commands;
 mod hook_commands;
 mod ingest_commands;
@@ -1636,6 +1637,9 @@ fn command_build_with_validation(
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
     options.gitignore = gitignore;
+    if environment_truthy("COMPASS_HISTORY_BUILD") {
+        options.ignore_policy = compass_files::IgnorePolicy::HistoricalCommit;
+    }
     options.extra_excludes = excludes;
     options.resolution = resolution;
     options.exclude_hubs = exclude_hubs;
@@ -1987,6 +1991,7 @@ fn pending_semantic_count(options: &BuildOptions, incremental: bool) -> usize {
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
+        ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
         output_name: output_name.clone(),
         cache_root: Some(output_root.clone()),
@@ -2056,6 +2061,7 @@ fn graphify_extract_provider_failure(
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
+        ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
         output_name,
         ..DetectOptions::default()
@@ -2377,6 +2383,7 @@ fn build_semantic_graph(
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
+        ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
         output_name,
         ..DetectOptions::default()

@@ -48,6 +48,18 @@ pub enum MaterializeError {
     Files(#[from] compass_files::FileError),
     #[error("graph builder failed: {0}")]
     Builder(String),
+    #[error("could not {operation} graph builder process: {source}")]
+    BuilderIo {
+        operation: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("graph builder exited with {exit_code:?}; stdout={stdout:?}; stderr={stderr:?}")]
+    BuilderProcess {
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+    },
     #[error("materialized graph is incomplete: {0}")]
     Incomplete(String),
     #[error("materialization observer failed: {0}")]
@@ -326,6 +338,7 @@ fn validate_completed(
         &DetectOptions {
             gitignore: profile_gitignore(profile),
             ignore_policy: IgnorePolicy::HistoricalCommit,
+            extra_excludes: profile_excludes(profile),
             cache_root: Some(worktree.output_root().to_path_buf()),
             ..DetectOptions::default()
         },
@@ -380,6 +393,14 @@ fn validate_completed(
 
 fn profile_gitignore(profile: &BuildProfile) -> bool {
     profile.value("gitignore") != Some("false")
+}
+
+fn profile_excludes(profile: &BuildProfile) -> Vec<String> {
+    profile
+        .entries()
+        .filter(|(key, _)| key.starts_with("exclude."))
+        .map(|(_, value)| value.to_owned())
+        .collect()
 }
 
 fn hex(bytes: &[u8]) -> String {

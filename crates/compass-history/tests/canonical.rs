@@ -99,5 +99,9 @@ fn fingerprints_are_order_independent_secret_free_and_strict()
     profile.insert("Mode", "deep")?;
     assert_eq!(profile.digest()?.len(), 32);
     assert!(profile.insert("access_token", "secret").is_err());
+    assert!(profile.insert("api-key", "secret").is_err());
+    assert!(profile.insert("apikey", "secret").is_err());
+    assert!(profile.insert("token", "secret").is_err());
+    profile.insert("token_budget", "8192")?;
     Ok(())
 }

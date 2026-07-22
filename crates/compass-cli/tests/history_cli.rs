@@ -541,15 +541,312 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     assert_eq!(query.status.code(), alias.status.code());
     assert_eq!(query.stdout, alias.stdout);
 
-    std::fs::write(directory.path().join("service.txt"), "unbuilt\n")?;
-    git(directory.path(), &["add", "service.txt"])?;
-    git(directory.path(), &["commit", "--quiet", "-m", "unbuilt"])?;
-    let missing = run(
+    Ok(())
+}
+
+#[test]
+fn missing_code_only_commit_is_built_on_first_query() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct OldService;\nimpl OldService { pub fn run(&self) {} }\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct NewService;\nimpl NewService { pub fn run(&self) {} }\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let query = run(
         compass,
         directory.path(),
-        &["query", "service", "--at", "HEAD"],
+        &["query", "OldService", "--at", "HEAD~1"],
     )?;
-    assert_eq!(missing.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("compass history build HEAD"));
+    assert!(
+        query.status.success(),
+        "{}",
+        String::from_utf8_lossy(&query.stderr)
+    );
+    assert!(String::from_utf8_lossy(&query.stdout).contains("OldService"));
+    assert!(!directory.path().join("graphify-out").exists());
+
+    let status = run(compass, directory.path(), &["history", "status", "HEAD~1"])?;
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("validation: valid"));
+    Ok(())
+}
+
+#[test]
+fn build_rebuild_and_unseen_diff_publish_complete_realizations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct FirstService;\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "first"])?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct SecondService;\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "second"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let diff = run(
+        compass,
+        directory.path(),
+        &["diff", "HEAD~1", "HEAD", "--format=json"],
+    )?;
+    assert!(
+        diff.status.success(),
+        "{}",
+        String::from_utf8_lossy(&diff.stderr)
+    );
+    let _: Vec<serde_json::Value> = serde_json::from_slice(&diff.stdout)?;
+    let progress = String::from_utf8_lossy(&diff.stderr);
+    assert!(progress.contains("building complete graph"));
+    assert!(progress.contains("publishing immutable realization"));
+
+    let first = run(
+        compass,
+        directory.path(),
+        &["history", "build", "HEAD", "--format=json"],
+    )?;
+    assert!(first.status.success());
+    let first: serde_json::Value = serde_json::from_slice(&first.stdout)?;
+    for field in [
+        "commit",
+        "realization",
+        "fingerprint",
+        "nodes",
+        "edges",
+        "hyperedges",
+        "analysis_records",
+        "metadata_records",
+        "preferred",
+    ] {
+        assert!(first.get(field).is_some(), "missing {field}");
+    }
+    assert!(first["preferred"].as_bool().unwrap_or(false));
+
+    let rebuilt = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "rebuild",
+            "HEAD",
+            "--resolution=2",
+            "--format=json",
+        ],
+    )?;
+    assert!(
+        rebuilt.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let rebuilt: serde_json::Value = serde_json::from_slice(&rebuilt.stdout)?;
+    assert_ne!(first["realization"], rebuilt["realization"]);
+    let old = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "show",
+            first["realization"].as_str().ok_or("realization")?,
+            "--format=json",
+        ],
+    )?;
+    assert!(old.status.success());
+    Ok(())
+}
+
+#[test]
+fn historical_build_uses_only_the_exact_commit_tree_and_historical_ignore_policy()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join(".gitignore"),
+        "committed_ignored.rs\n",
+    )?;
+    std::fs::write(
+        directory.path().join("committed_ignored.rs"),
+        "pub struct CommittedIgnored;\n",
+    )?;
+    std::fs::write(
+        directory.path().join("explicit.rs"),
+        "pub struct ExplicitlyExcluded;\n",
+    )?;
+    std::fs::write(
+        directory.path().join("local.rs"),
+        "pub struct LocalIgnoreMustNotApply;\n",
+    )?;
+    git(
+        directory.path(),
+        &["add", ".gitignore", "explicit.rs", "local.rs"],
+    )?;
+    git(directory.path(), &["add", "-f", "committed_ignored.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+    std::fs::write(directory.path().join(".git/info/exclude"), "local.rs\n")?;
+    std::fs::write(
+        directory.path().join("uncommitted.rs"),
+        "pub struct UncommittedMustNotAppear;\n",
+    )?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let built = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "build",
+            "HEAD",
+            "--exclude",
+            "explicit.rs",
+            "--format=json",
+        ],
+    )?;
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let query = run(
+        compass,
+        directory.path(),
+        &["query", "LocalIgnoreMustNotApply", "--at", "HEAD"],
+    )?;
+    assert!(query.status.success());
+    assert!(String::from_utf8_lossy(&query.stdout).contains("LocalIgnoreMustNotApply"));
+    for absent in [
+        "CommittedIgnored",
+        "ExplicitlyExcluded",
+        "UncommittedMustNotAppear",
+    ] {
+        let query = run(
+            compass,
+            directory.path(),
+            &["query", absent, "--at", "HEAD"],
+        )?;
+        assert!(!String::from_utf8_lossy(&query.stdout).contains(absent));
+    }
+    assert!(!directory.path().join("graphify-out").exists());
+    Ok(())
+}
+
+#[test]
+fn provider_failure_leaves_no_preferred_realization() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("document.md"), "# Semantic fixture\n")?;
+    git(directory.path(), &["add", "document.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_compass"));
+    command
+        .args([
+            "history",
+            "build",
+            "HEAD",
+            "--backend",
+            "openai",
+            "--model",
+            "history-test-model",
+        ])
+        .current_dir(directory.path());
+    for key in [
+        "OPENAI_API_KEY",
+        "OPENAI_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ] {
+        command.env_remove(key);
+    }
+    let failed = command.output()?;
+    assert_eq!(failed.status.code(), Some(1));
+    let status = run(
+        env!("CARGO_BIN_EXE_compass"),
+        directory.path(),
+        &["history", "status", "HEAD"],
+    )?;
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("preferred: none"));
+    Ok(())
+}
+
+#[test]
+fn merge_commit_materialization_reads_the_exact_merge_tree()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("base.rs"), "pub struct Base;\n")?;
+    git(directory.path(), &["add", "base.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "base"])?;
+    git(directory.path(), &["checkout", "--quiet", "-b", "feature"])?;
+    std::fs::write(
+        directory.path().join("feature.rs"),
+        "pub struct FeatureSide;\n",
+    )?;
+    git(directory.path(), &["add", "feature.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "feature"])?;
+    git(directory.path(), &["checkout", "--quiet", "-"])?;
+    std::fs::write(directory.path().join("main.rs"), "pub struct MainSide;\n")?;
+    git(directory.path(), &["add", "main.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "main"])?;
+    git(
+        directory.path(),
+        &["merge", "--quiet", "--no-ff", "feature", "-m", "merge"],
+    )?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let built = run(compass, directory.path(), &["history", "build", "HEAD"])?;
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    for symbol in ["FeatureSide", "MainSide"] {
+        let query = run(
+            compass,
+            directory.path(),
+            &["query", symbol, "--at", "HEAD"],
+        )?;
+        assert!(query.status.success());
+        assert!(String::from_utf8_lossy(&query.stdout).contains(symbol));
+    }
     Ok(())
 }
