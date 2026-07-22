@@ -107,11 +107,11 @@ fn diff_reports_topology_attribute_and_analysis_changes() -> Result<(), Box<dyn 
     )?)?;
     let mut changes = VecSink::default();
     history.diff(&old.id, &new.id, &mut changes)?;
-    assert!(
-        changes.0.iter().any(|change| {
-            change.record == RecordKind::Node && change.change == ChangeKind::Added
-        })
-    );
+    assert!(changes.0.iter().any(|change| {
+        change.record == RecordKind::Node
+            && change.change == ChangeKind::Added
+            && change.key == ["c"]
+    }));
     assert!(changes.0.iter().any(|change| {
         change.record == RecordKind::Edge && change.change == ChangeKind::Changed
     }));

@@ -2,6 +2,7 @@ use prolly::{Diff, VersionedValue, decode_segments};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::keys::{EDGE_KIND, HYPEREDGE_KIND, KEY_SCHEMA_V1, NODE_KIND};
 use crate::{HistoryError, HistoryStore, RealizationId, StoredTree};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -109,7 +110,7 @@ impl HistoryStore {
             sink.change(GraphChange {
                 record,
                 change,
-                key: display_key(&key)?,
+                key: display_key(record, &key)?,
                 old,
                 new,
             })?;
@@ -123,9 +124,25 @@ fn decode_value(bytes: &[u8]) -> Result<Value, HistoryError> {
     serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
 }
 
-fn display_key(key: &[u8]) -> Result<Vec<String>, HistoryError> {
-    decode_segments(key)
-        .map_err(|error| HistoryError::InvalidKey(error.to_string()))?
+fn display_key(record: RecordKind, key: &[u8]) -> Result<Vec<String>, HistoryError> {
+    let mut segments =
+        decode_segments(key).map_err(|error| HistoryError::InvalidKey(error.to_string()))?;
+    if let Some(kind) = match record {
+        RecordKind::Node => Some(NODE_KIND),
+        RecordKind::Edge => Some(EDGE_KIND),
+        RecordKind::Hyperedge => Some(HYPEREDGE_KIND),
+        RecordKind::Analysis | RecordKind::Metadata => None,
+    } {
+        if segments.first().map(Vec::as_slice) != Some(KEY_SCHEMA_V1)
+            || segments.get(1).map(Vec::as_slice) != Some(kind)
+        {
+            return Err(HistoryError::InvalidKey(format!(
+                "{record:?} key has an invalid typed prefix"
+            )));
+        }
+        segments.drain(..2);
+    }
+    segments
         .into_iter()
         .map(|segment| {
             if segment
@@ -149,4 +166,42 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(text, "{byte:02x}");
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use prolly::KeyBuilder;
+
+    use super::*;
+    use crate::{edge_key, hyperedge_key, node_key};
+
+    #[test]
+    fn display_keys_hide_valid_internal_typed_prefixes() -> Result<(), HistoryError> {
+        assert_eq!(
+            display_key(RecordKind::Node, &node_key("node-id"))?,
+            ["node-id"]
+        );
+        assert_eq!(
+            display_key(
+                RecordKind::Edge,
+                &edge_key("source", "target", "calls", true, None),
+            )?,
+            ["source", "target", "calls"]
+        );
+        assert_eq!(
+            display_key(RecordKind::Hyperedge, &hyperedge_key(b"identity", None))?,
+            ["identity"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn display_keys_reject_a_mismatched_internal_typed_prefix() {
+        let edge = KeyBuilder::new()
+            .push_segment(KEY_SCHEMA_V1)
+            .push_segment(EDGE_KIND)
+            .push_str("node-id")
+            .finish();
+        assert!(display_key(RecordKind::Node, &edge).is_err());
+    }
 }
