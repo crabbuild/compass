@@ -9,6 +9,7 @@ use prolly::{
 use prolly_store_sqlite::{SqliteStore, SqliteStoreConfig};
 
 use crate::keys::root_name;
+use crate::validate::{RealizationTrees, validate_trees};
 use crate::{
     ActivityGuard, CommitId, GraphVersion, HistoryError, MaintenanceGuard, PublishRequest,
     PublishedVersion, RealizationId, Repository, StoredTree, canonical_json_bytes,
@@ -136,6 +137,19 @@ impl HistoryStore {
             KeyBuilder::new().push_str("manifest").finish(),
             canonical_json_bytes(&serde_json::to_value(&version)?)?,
         )])?;
+
+        validate_trees(
+            &self.prolly,
+            &id,
+            &version,
+            RealizationTrees {
+                nodes: &nodes,
+                edges: &edges,
+                hyperedges: &hyperedges,
+                analysis: &analysis,
+                metadata: &metadata,
+            },
+        )?;
 
         self.publish_catalog_roots(
             &id,
@@ -300,12 +314,54 @@ impl HistoryStore {
         ))
     }
 
+    /// Fully validate one cataloged realization.
+    pub fn validate(&self, id: &RealizationId) -> Result<crate::ValidationReport, HistoryError> {
+        let published = self.get(id)?;
+        let nodes = self.load_realization_root(id, b"nodes")?;
+        let edges = self.load_realization_root(id, b"edges")?;
+        let hyperedges = self.load_realization_root(id, b"hyperedges")?;
+        let analysis = self.load_realization_root(id, b"analysis")?;
+        let metadata = self.load_realization_root(id, b"metadata")?;
+        validate_trees(
+            &self.prolly,
+            id,
+            &published.version,
+            RealizationTrees {
+                nodes: &nodes,
+                edges: &edges,
+                hyperedges: &hyperedges,
+                analysis: &analysis,
+                metadata: &metadata,
+            },
+        )
+    }
+
     fn build_tree(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Tree, HistoryError> {
         let mut builder = BatchBuilder::new(self.prolly.store().clone(), Config::default());
         for (key, value) in entries {
             builder.add(key, value);
         }
         builder.build().map_err(HistoryError::from)
+    }
+
+    fn load_realization_root(
+        &self,
+        id: &RealizationId,
+        kind: &'static [u8],
+    ) -> Result<Tree, HistoryError> {
+        self.prolly
+            .load_named_root(&version_root_name(id, kind))?
+            .ok_or_else(|| {
+                let kind = match kind {
+                    b"nodes" => "nodes",
+                    b"edges" => "edges",
+                    b"hyperedges" => "hyperedges",
+                    b"analysis" => "analysis",
+                    b"metadata" => "metadata",
+                    _ => "unknown",
+                };
+                HistoryError::InvalidRealization(vec![crate::ValidationProblem::MissingRoot(kind)])
+            })
     }
 
     fn publish_catalog_roots(

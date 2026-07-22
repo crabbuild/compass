@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::ValidationProblem;
+
 /// Errors produced by graph-history storage and repository discovery.
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryError {
@@ -70,6 +72,9 @@ pub enum HistoryError {
     /// Durable catalog state conflicts with immutable realization content.
     #[error("corrupt graph history: {0}")]
     CorruptHistory(String),
+    /// A realization failed one or more content-integrity checks.
+    #[error("invalid graph realization: {0:?}")]
+    InvalidRealization(Vec<ValidationProblem>),
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> HistoryError {

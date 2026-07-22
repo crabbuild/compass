@@ -9,6 +9,7 @@ mod keys;
 mod lock;
 mod model;
 mod store;
+mod validate;
 
 pub use artifacts::{CompletedGraphArtifacts, GraphArtifacts, PartitionedGraph};
 pub use canonical::{CANONICAL_ENCODING_VERSION, canonical_json_bytes};
@@ -23,3 +24,7 @@ pub use model::{
     StoredTree,
 };
 pub use store::HistoryStore;
+pub use validate::{
+    MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH, MAX_KEY_BYTES,
+    MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, ValidationProblem, ValidationReport,
+};

@@ -147,3 +147,24 @@ fn multiple_realizations_remain_addressable_and_preference_uses_cas()
     assert!(history.get(&second.id).is_ok());
     Ok(())
 }
+
+#[test]
+fn validation_rejects_missing_endpoints_before_catalog_publication()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+    let mut invalid = request('c', true)?;
+    invalid.artifacts.document.links[0].target = "missing".to_owned();
+    let error = match history.publish(invalid) {
+        Ok(_) => return Err("missing endpoint unexpectedly published".into()),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("MissingEdgeEndpoint"));
+    assert!(history.list(None)?.is_empty());
+
+    let valid = history.publish(request('d', true)?)?;
+    let report = history.validate(&valid.id)?;
+    assert_eq!((report.nodes, report.edges), (2, 1));
+    Ok(())
+}
