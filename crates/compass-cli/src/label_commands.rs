@@ -512,14 +512,6 @@ fn parse_positive(value: &str, option: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("error: {option} requires a positive integer"))
 }
 
-pub(super) fn label_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass label [PATH] [--graph PATH] [--backend NAME] [--model NAME] [--missing-only] [--no-viz] [--resolution N] [--exclude-hubs N] [--max-concurrency N] [--batch-size N] [--min-community-size=N] [--timing]",
-        Frontend::Graphify => "Usage: graphify label [PATH] [--graph PATH] [--backend NAME] [--model NAME] [--missing-only] [--no-viz] [--resolution N] [--exclude-hubs N] [--max-concurrency N] [--batch-size N] [--min-community-size=N] [--timing]",
-    }
-    .to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use compass_model::GraphDocument;
@@ -584,7 +576,6 @@ mod tests {
         assert!(parse_number("inf", "--value").is_err());
         assert!(parse_positive("0", "--value").is_err());
         assert_eq!(python_repr("a'b\\c"), "'a\\'b\\\\c'");
-        assert!(label_help(Frontend::Graphify).starts_with("Usage: graphify"));
         Ok(())
     }
 

@@ -49,6 +49,11 @@ compass prs
 compass hook
 ```
 
+Run `compass --help` to see commands grouped by workflow. Run
+`compass help <command>` or `compass <command> --help` for arguments,
+option descriptions, defaults, examples, and related-command tips. Nested help
+accepts the full path, such as `compass help history build`.
+
 ### Versioned graph history
 
 Compass can materialize a complete immutable graph for an exact Git commit and

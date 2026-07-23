@@ -41,12 +41,6 @@ pub(super) fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
     }
 }
 
-#[must_use]
-pub(super) fn query_help() -> String {
-    "Usage: compass query \"<question>\" [--dfs] [--context VALUE] [--budget N] [--graph PATH|--at REV]\n       compass query --cql <QUERY> [--param NAME=VALUE] [--format table|json|jsonl] [--graph PATH|--at REV]\n       compass query --cql --file PATH [--params-file PATH] [--output PATH]\n       compass query --cql --stdin\n       compass query --cql --repl\n\nCompassQL limits:\n  --timeout-ms N\n  --max-rows N\n  --max-path-depth N\n  --max-expanded-relationships N\n  --max-memory-bytes N"
-        .to_owned()
-}
-
 #[derive(Clone, Copy)]
 enum OutputFormat {
     Table,

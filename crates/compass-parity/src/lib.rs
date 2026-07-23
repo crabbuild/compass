@@ -1428,7 +1428,8 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             let outcome =
                 compass_cli::run(Frontend::Compass, arguments.into_iter().map(OsString::from));
             assert_eq!(outcome.code, 0, "{}", outcome.stderr);
-            assert!(outcome.stdout.starts_with("Usage: compass"));
+            assert!(outcome.stdout.contains("Usage:"));
+            assert!(outcome.stdout.contains("compass "));
             assert!(outcome.stderr.is_empty());
         }
         let version = compass_cli::run(Frontend::Compass, [OsString::from("--version")]);
