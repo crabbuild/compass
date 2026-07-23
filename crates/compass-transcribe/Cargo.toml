@@ -27,7 +27,7 @@ rubato.workspace = true
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true
-compass-whisper = { version = "0.1.1", path = "../compass-whisper", optional = true }
+compass-whisper = { version = "0.1.2", path = "../compass-whisper", optional = true }
 
 [lints]
 workspace = true

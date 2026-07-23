@@ -18,8 +18,8 @@ serde_json.workspace = true
 sha2.workspace = true
 time.workspace = true
 thiserror.workspace = true
-compass-files = { path = "../compass-files", version = "0.1.1" }
-compass-model = { path = "../compass-model", version = "0.1.1" }
+compass-files = { path = "../compass-files", version = "0.1.2" }
+compass-model = { path = "../compass-model", version = "0.1.2" }
 
 [dev-dependencies]
 tempfile.workspace = true
