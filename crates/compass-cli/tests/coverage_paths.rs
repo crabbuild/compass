@@ -151,12 +151,12 @@ fn completed_command_help_routes_and_parser_boundaries_are_total() {
         "hook",
         "install",
         "uninstall",
-        "not-real",
     ] {
         let outcome = invoke(Frontend::Compass, &[command, "--help"]);
         assert_eq!(outcome.code, 0, "{command}: {}", outcome.stderr);
         assert!(!outcome.stdout.is_empty(), "{command}");
     }
+    assert_eq!(invoke(Frontend::Compass, &["not-real", "--help"]).code, 2);
 
     for arguments in [
         vec!["cluster-only", "--resolution"],

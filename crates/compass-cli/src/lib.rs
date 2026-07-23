@@ -1,6 +1,7 @@
 //! Command compatibility layer for Compass and the Graphify compatibility binary.
 
 mod dedup_commands;
+mod help;
 mod history_build;
 mod history_commands;
 mod hook_commands;
@@ -49,6 +50,8 @@ use compass_semantic::{
     extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
     resolve_builtin_backend, resolve_custom_backend,
 };
+
+pub use help::HelpStyle;
 
 static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
@@ -153,8 +156,10 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     if frontend == Frontend::Compass {
+        if let Some(outcome) = help::request(&args, HelpStyle::Plain) {
+            return outcome;
+        }
         match args.first().map(String::as_str) {
-            Some("--help" | "-h" | "help") => return Outcome::success(compass_help()),
             Some("--version" | "-V") => {
                 return Outcome::success(format!("compass {}", env!("CARGO_PKG_VERSION")));
             }
@@ -162,21 +167,10 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         }
     }
     let Some(command) = args.first().cloned() else {
-        return Outcome::success(if frontend == Frontend::Compass {
-            compass_help()
-        } else {
-            graphify_help()
-        });
+        return Outcome::success(graphify_help());
     };
     args.remove(0);
-    if frontend == Frontend::Compass
-        && args
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
-    {
-        return Outcome::success(compass_command_help(&command));
-    }
-    match command.as_str() {
+    let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => history_commands::command_diff(frontend, &args),
@@ -223,11 +217,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
             "error: serve is a long-lived command and must be run from the compass binary"
                 .to_owned(),
         ),
-        "--help" | "-h" | "-?" | "help" => Outcome::success(if frontend == Frontend::Compass {
-            compass_help()
-        } else {
-            graphify_help()
-        }),
+        "--help" | "-h" | "-?" | "help" => Outcome::success(graphify_help()),
         "--version" | "-V" | "-v" | "version" => Outcome::success(match frontend {
             Frontend::Compass => format!("compass {}", env!("CARGO_PKG_VERSION")),
             Frontend::Graphify => format!("graphify {GRAPHIFY_COMPAT_VERSION}"),
@@ -235,10 +225,18 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         _ if frontend == Frontend::Graphify => Outcome::failure(format!(
             "error: unknown command '{command}'\nRun 'graphify --help' for usage."
         )),
-        _ => Outcome::failure(format!(
-            "error: unknown command '{command}'\nRun 'compass --help' for usage."
-        )),
+        _ => Outcome::failure(help::unknown_command(&command)),
+    };
+    if frontend == Frontend::Compass {
+        help::append_usage_hint(outcome, &command, &args)
+    } else {
+        outcome
     }
+}
+
+#[must_use]
+pub fn compass_help_request(arguments: &[OsString], style: HelpStyle) -> Option<Outcome> {
+    help::request_os(arguments, style)
 }
 
 /// Run the graph-history diff command with direct streaming output.
@@ -3697,49 +3695,6 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
             Outcome::failure("error: graph file must be a .json file".to_owned())
         }
         other => Outcome::failure(format!("error: could not load graph: {other}")),
-    }
-}
-
-fn compass_help() -> String {
-    "Usage: compass <command>\n\nCommands:\n  update\n  extract\n  watch\n  serve\n  cluster-only\n  label\n  query\n  path\n  explain\n  affected\n  tree\n  export\n  benchmark\n  diagnose multigraph\n  merge-graphs\n  merge-driver\n  global\n  clone\n  add\n  prs\n  hook\n  install\n  uninstall\n  cache-check\n  merge-chunks\n  merge-semantic\n  provider\n  save-result\n  reflect\n  check-update\n  hook-check\n  hook-guard"
-        .replacen("Commands:\n", "Commands:\n  history\n  diff\n", 1)
-}
-
-fn compass_command_help(command: &str) -> String {
-    match command {
-        "history" => history_commands::help(Frontend::Compass),
-        "diff" => history_commands::diff_help(Frontend::Compass),
-        "update" => "Usage: compass update [PATH] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned(),
-        "extract" => extract_help(),
-        "watch" => watch_help(),
-        "serve" => mcp_help(McpFrontend::Compass),
-        "cluster-only" => "Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned(),
-        "label" => label_commands::label_help(Frontend::Compass),
-        "prs" => prs_commands::prs_help(Frontend::Compass),
-        "query" => query_commands::query_help(),
-        "path" => path_help(Frontend::Compass),
-        "explain" => explain_help(Frontend::Compass),
-        "affected" => "Usage: compass affected \"<node-or-label>\" [--relation R] [--depth N] [--graph PATH]".to_owned(),
-        "tree" => tree_help(Frontend::Compass),
-        "export" => export_help().replacen("graphify export", "compass export", 1),
-        "benchmark" => "Usage: compass benchmark [GRAPH_JSON]".to_owned(),
-        "diagnose" => "Usage: compass diagnose multigraph [--graph PATH] [--json] [--max-examples N] [--directed|--undirected] [--extract-path PATH]".to_owned(),
-        "merge-graphs" => "Usage: compass merge-graphs <graph1.json> <graph2.json> [...] [--out merged.json]".to_owned(),
-        "cache-check" => semantic_commands::cache_check_help(Frontend::Compass),
-        "merge-chunks" => semantic_commands::merge_chunks_help(Frontend::Compass),
-        "merge-semantic" => semantic_commands::merge_semantic_help(Frontend::Compass),
-        "provider" => provider_commands::provider_help(Frontend::Compass),
-        "save-result" => result_commands::save_result_help(Frontend::Compass),
-        "reflect" => result_commands::reflect_help(Frontend::Compass),
-        "check-update" => integration_commands::check_update_help(Frontend::Compass),
-        "merge-driver" => integration_commands::merge_driver_help(Frontend::Compass),
-        "global" => integration_commands::global_help(Frontend::Compass),
-        "clone" => integration_commands::clone_help(Frontend::Compass),
-        "add" => ingest_commands::add_help(Frontend::Compass),
-        "hook" => hook_commands::hook_help(Frontend::Compass),
-        "install" => install_commands::command_install(Frontend::Compass, &["--help".to_owned()]).stdout,
-        "uninstall" => "Usage: compass uninstall [--project] [--purge] [--platform P|P]".to_owned(),
-        _ => compass_help(),
     }
 }
 
