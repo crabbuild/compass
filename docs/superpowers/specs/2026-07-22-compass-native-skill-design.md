@@ -25,7 +25,11 @@ The implementation will not modify or remove an existing Graphify installation. 
 
 `compass install` remains the generic entry point. Direct platform commands such as `compass codex install` continue to call the same installer implementation.
 
-The installer embeds one Compass skill body per platform plus optional reference files. A platform record selects the skill body, destination, and reference set. Global installs resolve the platform’s user configuration directory. Project installs resolve the same structure under the current project.
+The installer embeds one canonical Compass skill body plus a progressive
+reference bundle for every platform. A platform record selects the destination;
+all platforms receive the same native operating contract. Global installs
+resolve the platform’s user configuration directory. Project installs resolve
+the same structure under the current project.
 
 Examples include:
 
@@ -36,7 +40,21 @@ Examples include:
 | Agent Skills compatible tools | `.agents/skills/compass/SKILL.md` |
 | OpenCode | `.opencode/skills/compass/SKILL.md` |
 
-Each installed skill directory contains `SKILL.md`, a `.compass_version` ownership marker, and a `references/` directory when the platform uses sidecar guidance.
+Each installed skill directory contains `SKILL.md`, a `.compass_version`
+ownership marker, and a `references/` directory. The core covers the existing
+graph fast path, build selection, evidence rules, and completion contract.
+Sidecars cover query and CompassQL, refresh, semantic extraction, immutable
+history, hooks, watch and ingestion, exports, MCP serving, repository
+composition, reflections, diagnostics, labeling, security boundaries, a full
+public-command inventory, and graph provenance.
+
+`tools/skillgen/` provides a native Rust build-time guard inspired by Graphify's
+skill generator. Before assets are embedded, it validates frontmatter, minimum
+content coverage, exact agreement between the core reference index and bundled
+sidecars, deterministic discovery, headings, native-brand constraints, the exact
+platform-integration asset set, and every command in
+the rich-help catalog. Public help pages, CLI dispatch, and skill coverage must
+agree; internal worker commands must keep an explicit do-not-invoke boundary.
 
 ## Borrowed skill content
 
@@ -52,7 +70,8 @@ The conversion contract is:
 - References to Graphify-only commands, modules, environment variables, and providers are removed or rewritten
 - Platform-specific trigger wording and progressive-disclosure references remain when they apply to Compass
 
-The skill must not tell an assistant to install `graphifyy`, run `python -m graphify`, locate a Graphify Python interpreter, or configure a Graphify service.
+The skill must not tell an assistant to install a Python package, run a Python
+module, locate a Python interpreter, or configure a non-Compass service.
 
 ## Generated integrations
 
@@ -84,6 +103,8 @@ The test suite verifies:
 - Installed frontmatter declares `name: compass`
 - Installed artifacts use native Compass commands and `compass-out/`
 - Installed artifacts contain no stale `graphify`, `graphifyy`, `GRAPHIFY_*`, or `graphify-out` references
+- The core index and embedded reference bundle have exact path coverage
+- The native build-time skill guard rejects undersized, unlinked, or non-native assets
 - Direct and generic install commands create equivalent artifacts
 - Reinstall is idempotent
 - Uninstall removes Compass artifacts and preserves adjacent Graphify fixtures

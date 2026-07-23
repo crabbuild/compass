@@ -107,7 +107,7 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
     assert!(!filter.allows(&root.join("ignored/secret.rs")));
     assert!(!filter.allows(&root.join("model.generated.rs")));
     assert!(!filter.allows(&root.join(".hidden/main.rs")));
-    assert!(!filter.allows(&root.join("graphify-out/graph.json")));
+    assert!(!filter.allows(&root.join("compass-out/graph.json")));
     assert!(!filter.allows(&root.join("README.unknown")));
     Ok(())
 }
@@ -460,19 +460,19 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     let root = directory.path().join("root");
     let cache_root = directory.path().join("cache-root");
     fs::create_dir_all(&root)?;
-    fs::create_dir_all(cache_root.join("graphify-out/cache/ast/vold"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/vold"))?;
     fs::write(
-        cache_root.join("graphify-out/cache/ast/vold/stale.json"),
+        cache_root.join("compass-out/cache/ast/vold/stale.json"),
         "{}",
     )?;
-    fs::write(cache_root.join("graphify-out/cache/ast/legacy.json"), "{}")?;
-    fs::create_dir_all(cache_root.join("graphify-out/cache/ast/keep"))?;
+    fs::write(cache_root.join("compass-out/cache/ast/legacy.json"), "{}")?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/keep"))?;
     fs::write(
-        cache_root.join("graphify-out/cache/ast/keep/marker"),
+        cache_root.join("compass-out/cache/ast/keep/marker"),
         "preserved",
     )?;
     fs::write(
-        cache_root.join("graphify-out/cache/ast/preserved.txt"),
+        cache_root.join("compass-out/cache/ast/preserved.txt"),
         "preserved",
     )?;
     let source = root.join("main.md");
@@ -529,15 +529,15 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(cache.prune_semantic(&BTreeSet::new()) >= 2);
     cache.clear();
     assert!(cache.cached_files().len() <= 1);
-    assert!(!cache_root.join("graphify-out/cache/ast/vold").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/vold").exists());
     assert!(
         cache_root
-            .join("graphify-out/cache/ast/keep/marker")
+            .join("compass-out/cache/ast/keep/marker")
             .exists()
     );
     assert!(
         cache_root
-            .join("graphify-out/cache/ast/preserved.txt")
+            .join("compass-out/cache/ast/preserved.txt")
             .exists()
     );
 
@@ -604,7 +604,7 @@ fn manifest_incremental_tracks_changes_deletions_exclusions_and_legacy_entries()
     fs::write(&second, "fn second() {}\n")?;
     let first = fs::canonicalize(first)?;
     let second = fs::canonicalize(second)?;
-    let manifest_path = root.join("graphify-out/manifest.json");
+    let manifest_path = root.join("compass-out/manifest.json");
 
     let fresh = Manifest::incremental(
         root,

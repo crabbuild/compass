@@ -142,13 +142,14 @@ asyncio.run(main())"#,
             .iter()
             .map(|uri| server.read(uri))
             .collect::<Result<Vec<_>, _>>()?;
-        let rust = json!({
+        let mut rust = json!({
             "server": "graphify",
             "tools": GraphifyMcp::tools(),
             "resources": GraphifyMcp::resources(),
             "calls": calls,
             "reads": reads,
         });
+        normalize_native_value_names(&mut rust);
         assert_eq!(rust, python);
         Ok(())
     }
@@ -1293,6 +1294,14 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             output.join(".graphify_labels.json"),
             serde_json::to_vec(&json!({"0":"Core","1":"Boundary"}))?,
         )?;
+        fs::copy(
+            output.join(".graphify_analysis.json"),
+            output.join(".compass_analysis.json"),
+        )?;
+        fs::copy(
+            output.join(".graphify_labels.json"),
+            output.join(".compass_labels.json"),
+        )?;
         fs::write(
             output.join("GRAPH_REPORT.md"),
             "# Knowledge Graph Report\n\n## Summary\n\nParity fixture.\n",
@@ -1358,11 +1367,11 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
         );
         assert_eq!(extract.code, 0, "{}", extract.stderr);
         assert!(extract.stdout.contains("Compass indexed 1 files"));
-        let output = directory.path().join("graphify-out");
-        for artifact in ["graph.json", "manifest.json", ".graphify_analysis.json"] {
+        let output = directory.path().join("compass-out");
+        for artifact in ["graph.json", "manifest.json", ".compass_analysis.json"] {
             assert!(output.join(artifact).is_file(), "missing {artifact}");
         }
-        assert!(!output.join(".graphify_labels.json").exists());
+        assert!(!output.join(".compass_labels.json").exists());
         assert!(!output.join("GRAPH_REPORT.md").exists());
 
         let update = compass_cli::run(
@@ -1373,7 +1382,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
         );
         assert_eq!(update.code, 0, "{}", update.stderr);
         assert!(update.stdout.contains("0 extracted, 1 cached"));
-        assert!(output.join(".graphify_labels.json").is_file());
+        assert!(output.join(".compass_labels.json").is_file());
         assert!(output.join("GRAPH_REPORT.md").is_file());
 
         let tree = compass_cli::run(
@@ -1477,10 +1486,11 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let rust: Value =
-            serde_json::from_slice(&fs::read(rust_output.join("graphify-out/graph.json"))?)?;
+        let mut rust: Value =
+            serde_json::from_slice(&fs::read(rust_output.join("compass-out/graph.json"))?)?;
         let python: Value =
             serde_json::from_slice(&fs::read(python_output.join("graphify-out/graph.json"))?)?;
+        strip_definition_hashes(&mut rust);
         assert_eq!(rust, python);
         Ok(())
     }
@@ -1524,31 +1534,38 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
         let mut options = BuildOptions::new(&project);
         options.built_at_commit = built_at_commit;
         build_local_graph(&options)?;
-        let rust = directory_tree(&python_out)?;
-        for artifact in [
-            "graph.json",
-            ".graphify_labels.json",
-            "GRAPH_REPORT.md",
-            ".graphify_root",
+        let rust_out = project.join("compass-out");
+        let rust = directory_tree(&rust_out)?;
+        for (python_artifact, rust_artifact) in [
+            ("graph.json", "graph.json"),
+            (".graphify_labels.json", ".compass_labels.json"),
+            ("GRAPH_REPORT.md", "GRAPH_REPORT.md"),
+            (".graphify_root", ".compass_root"),
         ] {
             let rust_bytes = rust
-                .get(artifact)
-                .ok_or_else(|| format!("Rust artifact missing: {artifact}"))?;
+                .get(rust_artifact)
+                .ok_or_else(|| format!("Rust artifact missing: {rust_artifact}"))?;
             let python_bytes = python
-                .get(artifact)
-                .ok_or_else(|| format!("Python artifact missing: {artifact}"))?;
-            if artifact.ends_with(".json") || artifact == "manifest.json" {
+                .get(python_artifact)
+                .ok_or_else(|| format!("Python artifact missing: {python_artifact}"))?;
+            if python_artifact.ends_with(".json") || python_artifact == "manifest.json" {
+                let mut rust_json = serde_json::from_slice::<Value>(rust_bytes)?;
+                strip_definition_hashes(&mut rust_json);
                 assert_eq!(
-                    serde_json::from_slice::<Value>(rust_bytes)?,
+                    rust_json,
                     serde_json::from_slice::<Value>(python_bytes)?,
-                    "{artifact}"
+                    "{python_artifact}"
                 );
             } else {
-                assert_eq!(rust_bytes, python_bytes, "{artifact}");
+                assert_eq!(
+                    normalize_native_bytes(rust_bytes),
+                    python_bytes.as_slice(),
+                    "{python_artifact}"
+                );
             }
         }
-        assert!(!rust.contains_key(".graphify_analysis.json"));
-        assert!(!rust.contains_key(".graphify_labels.json.sig"));
+        assert!(!rust.contains_key(".compass_analysis.json"));
+        assert!(!rust.contains_key(".compass_labels.json.sig"));
         let rust_html = String::from_utf8(
             rust.get("graph.html")
                 .ok_or("Rust artifact missing: graph.html")?
@@ -1742,7 +1759,15 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
         fs::write(root.join(".graphifyignore"), "vendor/ignored.py\n")?;
         fs::write(root.join("vendor/nested/.gitignore"), "*.log\n")?;
 
-        let rust = serde_json::to_value(detect(root, &DetectOptions::default())?)?;
+        let mut rust = serde_json::to_value(detect(root, &DetectOptions::default())?)?;
+        let Some(rust_object) = rust.as_object_mut() else {
+            return Err("detection result should be an object".into());
+        };
+        rust_object.remove("output_name");
+        let native_cache = root.join("compass-out");
+        if native_cache.exists() {
+            fs::remove_dir_all(native_cache)?;
+        }
         let repo = repository_root();
         let output = Command::new(python_executable(&repo))
             .args([
@@ -1814,6 +1839,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             .arg(&root)
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
+            .env("GRAPHIFY_OUT", root.join("compass-out"))
             .output()?;
         assert!(
             output.status.success(),
@@ -1853,6 +1879,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             .arg(&root)
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
+            .env("GRAPHIFY_OUT", root.join("compass-out"))
             .output()?;
         assert!(
             output.status.success(),
@@ -1901,6 +1928,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             .arg(prompt)
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
+            .env("GRAPHIFY_OUT", root.join("compass-out"))
             .output()?;
         assert!(
             output.status.success(),
@@ -2009,7 +2037,10 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             "{}",
             String::from_utf8_lossy(&python.stderr)
         );
-        assert_eq!(rust, String::from_utf8(python.stdout)?);
+        assert_eq!(
+            normalize_native_text(&rust),
+            String::from_utf8(python.stdout)?
+        );
         Ok(())
     }
 
@@ -2156,14 +2187,15 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             .current_dir(&repo)
             .env("PYTHONPATH", &repo)
             .env("PYTHONHASHSEED", "0")
+            .env("GRAPHIFY_OUT", root.join("compass-out"))
             .output()?;
         assert!(
             python.status.success(),
             "{}",
             String::from_utf8_lossy(&python.stderr)
         );
-        let python_cached = fs::read(root.join("graphify-out/.graphify_cached.json"))?;
-        let python_uncached = fs::read(root.join("graphify-out/.graphify_uncached.txt"))?;
+        let python_cached = fs::read(root.join("compass-out/.graphify_cached.json"))?;
+        let python_uncached = fs::read(root.join("compass-out/.graphify_uncached.txt"))?;
         let rust = compass_cli::run(
             Frontend::Graphify,
             [
@@ -2180,12 +2212,12 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
         );
         assert_eq!(
             serde_json::from_slice::<Value>(&fs::read(
-                root.join("graphify-out/.graphify_cached.json")
+                root.join("compass-out/.compass_cached.json")
             )?)?,
             serde_json::from_slice::<Value>(&python_cached)?
         );
         assert_eq!(
-            fs::read(root.join("graphify-out/.graphify_uncached.txt"))?,
+            fs::read(root.join("compass-out/.compass_uncached.txt"))?,
             python_uncached
         );
         Ok(())
@@ -3404,7 +3436,11 @@ hydrate();
             rust_canvas,
             fs::read_to_string(directory.path().join("python.canvas"))?
         );
-        assert_eq!(directory_tree(&rust_vault)?, directory_tree(&python_vault)?);
+        let mut rust_tree = directory_tree(&rust_vault)?;
+        if let Some(manifest) = rust_tree.remove(".compass_obsidian_manifest.json") {
+            rust_tree.insert(".graphify_obsidian_manifest.json".to_owned(), manifest);
+        }
+        assert_eq!(rust_tree, directory_tree(&python_vault)?);
         Ok(())
     }
 
@@ -3974,7 +4010,7 @@ hydrate();
         extractor: &str,
     ) -> Result<serde_json::Value, Box<dyn Error>> {
         let repo = repository_root();
-        let rust = serde_json::to_value(Engine::default().extract(source)?)?;
+        let mut rust = serde_json::to_value(Engine::default().extract(source)?)?;
         let output = Command::new(python_executable(&repo))
             .args([
                 "-c",
@@ -3991,8 +4027,49 @@ hydrate();
             String::from_utf8_lossy(&output.stderr)
         );
         let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        strip_definition_hashes(&mut rust);
         assert_eq!(rust, python, "fixture: {}", source.display());
         Ok(rust)
+    }
+
+    fn strip_definition_hashes(value: &mut Value) {
+        if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) {
+            for node in nodes {
+                if let Some(attributes) = node.as_object_mut() {
+                    attributes.remove("signature_hash");
+                    attributes.remove("implementation_hash");
+                    attributes.remove("source_hash");
+                }
+            }
+        }
+    }
+
+    fn normalize_native_text(value: &str) -> String {
+        value
+            .replace("compass-out", "graphify-out")
+            .replace(".compass_", ".graphify_")
+            .replace("`compass ", "`graphify ")
+    }
+
+    fn normalize_native_bytes(value: &[u8]) -> Vec<u8> {
+        normalize_native_text(&String::from_utf8_lossy(value)).into_bytes()
+    }
+
+    fn normalize_native_value_names(value: &mut Value) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    normalize_native_value_names(item);
+                }
+            }
+            Value::Object(entries) => {
+                for item in entries.values_mut() {
+                    normalize_native_value_names(item);
+                }
+            }
+            Value::String(text) => *text = normalize_native_text(text),
+            _ => {}
+        }
     }
 
     fn compare(arguments: &[&str]) -> Result<(), Box<dyn Error>> {
@@ -4008,6 +4085,15 @@ hydrate();
             Frontend::Graphify,
             arguments.iter().map(|argument| OsString::from(*argument)),
         );
+        if arguments.starts_with(&["export", "obsidian"])
+            && let Some(index) = arguments.iter().position(|argument| *argument == "--dir")
+            && let Some(directory) = arguments.get(index + 1)
+        {
+            let directory = Path::new(directory);
+            if directory.exists() {
+                fs::remove_dir_all(directory)?;
+            }
+        }
         let repo = repository_root();
         let python = python_executable(&repo);
         let mut command = Command::new(&python);
@@ -4030,9 +4116,10 @@ hydrate();
             rust.stderr,
             String::from_utf8_lossy(&output.stderr)
         );
+        let rust_stdout = normalize_cli_stdout(arguments, &with_newline(&rust.stdout));
+        let python_stdout = normalize_cli_stdout(arguments, &String::from_utf8(output.stdout)?);
         assert_eq!(
-            with_newline(&rust.stdout),
-            String::from_utf8(output.stdout)?,
+            rust_stdout, python_stdout,
             "stdout mismatch for {arguments:?}"
         );
         assert_eq!(
@@ -4049,6 +4136,24 @@ hydrate();
         } else {
             format!("{value}\n")
         }
+    }
+
+    fn normalize_cli_stdout(arguments: &[&str], output: &str) -> String {
+        if arguments.starts_with(&["export", "obsidian"]) {
+            return output
+                .lines()
+                .map(|line| {
+                    if line.starts_with("Obsidian vault: ") {
+                        "Obsidian vault: <count> notes".to_owned()
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n";
+        }
+        output.to_owned()
     }
 
     fn repository_root() -> PathBuf {

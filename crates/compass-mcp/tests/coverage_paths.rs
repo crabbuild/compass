@@ -28,7 +28,7 @@ fn write_fixture(root: &std::path::Path) -> Result<std::path::PathBuf, Box<dyn E
     )?;
     fs::write(root.join("GRAPH_REPORT.md"), "# Fixture report\n")?;
     fs::write(
-        root.join(".graphify_labels.json"),
+        root.join(".compass_labels.json"),
         r#"{"0":"Core","1":"Feature","2":"Boundary"}"#,
     )?;
     Ok(graph)
@@ -246,7 +246,7 @@ fn project_path_override_loads_an_independent_graph_and_reports_corruption()
 -> Result<(), Box<dyn Error>> {
     let default = tempfile::tempdir()?;
     let project = tempfile::tempdir()?;
-    let project_output = project.path().join("graphify-out");
+    let project_output = project.path().join("compass-out");
     fs::create_dir(&project_output)?;
     fs::write(
         project_output.join("graph.json"),

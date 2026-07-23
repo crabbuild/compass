@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -23,7 +25,7 @@ fn run_python(arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
 }
 
 fn run_rust(arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-    Ok(Command::new(env!("CARGO_BIN_EXE_graphify"))
+    Ok(support::compat_command()
         .arg("diagnose")
         .args(arguments)
         .current_dir(repository_root())

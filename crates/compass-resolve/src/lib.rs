@@ -949,7 +949,7 @@ fn resolve_cross_file_calls_with_root_calls(
         {
             continue;
         }
-        let candidates = candidate_calls(&raw, &exact, &folded, &source_by_id);
+        let candidates = candidate_calls(raw, &exact, &folded, &source_by_id);
         if candidates.is_empty() {
             continue;
         }
@@ -998,7 +998,7 @@ fn resolve_cross_file_calls_with_root_calls(
                 })
                 && call_like.insert((raw.caller_nid.clone(), target.clone()))
             {
-                let mut edge = resolved_edge(&raw, &target, "INFERRED", 0.8);
+                let mut edge = resolved_edge(raw, &target, "INFERRED", 0.8);
                 edge.attributes.insert(
                     "relation".to_owned(),
                     Value::String("indirect_call".to_owned()),
@@ -1019,7 +1019,7 @@ fn resolve_cross_file_calls_with_root_calls(
         }
         if existing.insert((raw.caller_nid.clone(), target.clone())) {
             let mut edge = resolved_edge(
-                &raw,
+                raw,
                 &target,
                 if import_evidence {
                     "EXTRACTED"
@@ -1210,7 +1210,7 @@ fn resolve_python_import_guided_with_calls(
         {
             continue;
         }
-        let mut edge = resolved_edge(&raw, target, "EXTRACTED", 1.0);
+        let mut edge = resolved_edge(raw, target, "EXTRACTED", 1.0);
         edge.attributes.remove("confidence_score");
         extraction.edges.push(edge);
     }

@@ -1,3 +1,5 @@
+mod support;
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -26,7 +28,7 @@ fn run_python(arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
 }
 
 fn run_rust(arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_graphify"));
+    let mut command = support::compat_command();
     command
         .arg("cluster-only")
         .args(arguments)
@@ -65,10 +67,11 @@ fn snapshot(directory: &Path) -> Result<BTreeMap<String, Vec<u8>>, Box<dyn Error
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
         if entry.file_type()?.is_file() {
-            files.insert(
-                entry.file_name().to_string_lossy().into_owned(),
-                std::fs::read(entry.path())?,
-            );
+            let name = entry
+                .file_name()
+                .to_string_lossy()
+                .replace(".compass_", ".graphify_");
+            files.insert(name, std::fs::read(entry.path())?);
         }
     }
     Ok(files)
@@ -163,8 +166,8 @@ fn cluster_only_reuses_existing_labels_like_python() -> Result<(), Box<dyn Error
     let expected_files = snapshot(&output)?;
 
     reset_fixture(root)?;
-    std::fs::write(output.join(".graphify_labels.json"), labels)?;
-    std::fs::write(output.join(".graphify_labels.json.sig"), signatures)?;
+    std::fs::write(output.join(".compass_labels.json"), labels)?;
+    std::fs::write(output.join(".compass_labels.json.sig"), signatures)?;
     let actual_output = run_rust(&arguments)?;
     assert_same(&expected_output, &actual_output);
     assert_eq!(snapshot(&output)?, expected_files);

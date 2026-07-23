@@ -977,10 +977,16 @@ mod tests {
 
     #[test]
     fn nested_help_forms_are_equivalent() {
-        let flag = request(&strings(&["history", "build", "--help"]), HelpStyle::Plain)
-            .expect("help request");
-        let command = request(&strings(&["help", "history", "build"]), HelpStyle::Plain)
-            .expect("help request");
+        let flag = request(&strings(&["history", "build", "--help"]), HelpStyle::Plain);
+        assert!(flag.is_some(), "expected help request");
+        let Some(flag) = flag else {
+            return;
+        };
+        let command = request(&strings(&["help", "history", "build"]), HelpStyle::Plain);
+        assert!(command.is_some(), "expected help request");
+        let Some(command) = command else {
+            return;
+        };
         assert_eq!(flag.code, 0);
         assert_eq!(flag.stdout, command.stdout);
         assert!(flag.stdout.contains("--profile-from"));
@@ -999,8 +1005,13 @@ mod tests {
             HelpStyle::Plain
         );
         assert_eq!(HelpStyle::detect(true, None, None), HelpStyle::Ansi);
-        let plain = render_page(page("update").expect("update page"), HelpStyle::Plain);
-        let styled = render_page(page("update").expect("update page"), HelpStyle::Ansi);
+        let update_page = page("update");
+        assert!(update_page.is_some(), "expected update page");
+        let Some(update_page) = update_page else {
+            return;
+        };
+        let plain = render_page(update_page, HelpStyle::Plain);
+        let styled = render_page(update_page, HelpStyle::Ansi);
         assert!(!plain.contains('\x1b'));
         assert_eq!(strip_ansi(&styled), plain);
         for page in PAGES {
@@ -1017,8 +1028,11 @@ mod tests {
     fn typo_suggestions_are_conservative() {
         assert!(unknown_command("udpate").contains("Did you mean 'update'?"));
         assert!(!unknown_command("bananas").contains("Did you mean"));
-        let outcome = request(&strings(&["help", "history", "buidl"]), HelpStyle::Plain)
-            .expect("help request");
+        let outcome = request(&strings(&["help", "history", "buidl"]), HelpStyle::Plain);
+        assert!(outcome.is_some(), "expected help request");
+        let Some(outcome) = outcome else {
+            return;
+        };
         assert_eq!(outcome.code, 2);
         assert!(outcome.stderr.contains("Did you mean 'build'?"));
     }

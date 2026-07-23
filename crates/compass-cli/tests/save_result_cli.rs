@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -84,7 +86,7 @@ fn save_result_cli_matches_python_artifact() -> Result<(), Box<dyn Error>> {
         "{}",
         String::from_utf8_lossy(&python.stderr)
     );
-    let native = Command::new(env!("CARGO_BIN_EXE_graphify"))
+    let native = support::compat_command()
         .arg("save-result")
         .args(common)
         .args(["--answer-file"])

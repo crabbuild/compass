@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::process::Command;
 
@@ -55,8 +57,7 @@ fn compassql_cli_supports_typed_output_files_limits_and_graphify_isolation()
     assert_eq!(value["rows"][0]["caller"]["value"], "a");
     assert_eq!(value["profile"]["plan_cache_hit"], false);
 
-    let graphify = env!("CARGO_BIN_EXE_graphify");
-    let rejected = Command::new(graphify)
+    let rejected = support::compat_command()
         .args(["query", "--cql", "RETURN 1"])
         .output()?;
     assert!(!rejected.status.success());

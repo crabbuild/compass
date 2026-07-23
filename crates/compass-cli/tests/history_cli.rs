@@ -50,7 +50,9 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     let compass = env!("CARGO_BIN_EXE_compass");
     let help = run(compass, directory.path(), &["history", "--help"])?;
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stdout).contains("build REV"));
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("compass history build HEAD"));
+    assert!(help.contains("compass help history <command>"));
     let status = run(compass, directory.path(), &["history", "status", "HEAD"])?;
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("no store"));

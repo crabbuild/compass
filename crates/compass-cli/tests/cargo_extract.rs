@@ -2,6 +2,8 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod support;
+
 fn repository_root() -> PathBuf {
     if let Some(root) = std::env::var_os("GRAPHIFY_REPO_ROOT") {
         return PathBuf::from(root);
@@ -39,7 +41,7 @@ fn run(
     cargo: bool,
 ) -> Result<Output, Box<dyn Error>> {
     let python = repository.join(".venv/bin/python");
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repository);
@@ -99,7 +101,7 @@ fn cargo_extract_graph_facts_match_python_oracle() -> Result<(), Box<dyn Error>>
         true,
     )?;
     let actual_process = run(
-        Path::new(env!("CARGO_BIN_EXE_compass")),
+        support::compat_executable(),
         &repository,
         rust_directory.path(),
         true,
@@ -130,7 +132,7 @@ fn cargo_extract_graph_facts_match_python_oracle() -> Result<(), Box<dyn Error>>
         false,
     )?;
     let actual_without_cargo = run(
-        Path::new(env!("CARGO_BIN_EXE_compass")),
+        support::compat_executable(),
         &repository,
         rust_directory.path(),
         false,

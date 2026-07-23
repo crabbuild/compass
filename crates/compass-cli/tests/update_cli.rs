@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,7 +71,7 @@ impl Fixture {
         extra: &[&str],
         environment: &[(&str, &str)],
     ) -> Result<Output, Box<dyn Error>> {
-        Ok(Command::new(env!("CARGO_BIN_EXE_graphify"))
+        Ok(support::compat_command()
             .arg("update")
             .arg(&self.native_root)
             .args(extra)
@@ -168,7 +170,14 @@ fn output_files(root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter(|entry| entry.path().is_file())
-        .map(|entry| PathBuf::from(entry.file_name()))
+        .map(|entry| {
+            PathBuf::from(
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .replace(".compass_", ".graphify_"),
+            )
+        })
         .collect::<Vec<_>>();
     files.sort();
     Ok(files)

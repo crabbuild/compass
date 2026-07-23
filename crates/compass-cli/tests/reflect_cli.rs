@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -32,7 +34,7 @@ fn run_python(repo: &Path, root: &Path, arguments: &[&str]) -> Result<Output, Bo
 }
 
 fn run_native(root: &Path, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-    Ok(Command::new(env!("CARGO_BIN_EXE_graphify"))
+    Ok(support::compat_command()
         .args(arguments)
         .current_dir(root)
         .output()?)
@@ -72,7 +74,15 @@ fn seed(root: &Path) -> Result<(), Box<dyn Error>> {
         serde_json::to_vec(&json!({"communities":{"0":["auth_id"]}}))?,
     )?;
     std::fs::write(
+        output.join(".compass_analysis.json"),
+        serde_json::to_vec(&json!({"communities":{"0":["auth_id"]}}))?,
+    )?;
+    std::fs::write(
         output.join(".graphify_labels.json"),
+        serde_json::to_vec(&json!({"0":"Authentication"}))?,
+    )?;
+    std::fs::write(
+        output.join(".compass_labels.json"),
         serde_json::to_vec(&json!({"0":"Authentication"}))?,
     )?;
     Ok(())
@@ -82,6 +92,12 @@ fn normalized_overlay(path: &Path) -> Result<Value, Box<dyn Error>> {
     let mut value: Value = serde_json::from_slice(&std::fs::read(path)?)?;
     value["generated_at"] = Value::String("<timestamp>".to_owned());
     Ok(value)
+}
+
+fn normalize_native_names(bytes: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(bytes)
+        .replace("compass-out", "graphify-out")
+        .into_bytes()
 }
 
 #[test]
@@ -109,11 +125,13 @@ fn reflect_cli_and_learning_sidecar_match_python() -> Result<(), Box<dyn Error>>
     assert_eq!(native.stderr, python.stderr);
     assert_eq!(
         std::fs::read(python_root.join("graphify-out/reflections/LESSONS.md"))?,
-        std::fs::read(native_root.join("graphify-out/reflections/LESSONS.md"))?
+        normalize_native_names(&std::fs::read(
+            native_root.join("graphify-out/reflections/LESSONS.md"),
+        )?)
     );
     assert_eq!(
         normalized_overlay(&python_root.join("graphify-out/.graphify_learning.json"))?,
-        normalized_overlay(&native_root.join("graphify-out/.graphify_learning.json"))?
+        normalized_overlay(&native_root.join("graphify-out/.compass_learning.json"))?
     );
 
     let stale_arguments = ["reflect", "--half-life-days", "0", "--if-stale"];

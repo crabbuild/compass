@@ -1,7 +1,9 @@
+mod support;
+
 use std::error::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use serde_json::{Value, json};
 
@@ -31,7 +33,7 @@ fn run(
     stdin: &str,
     environment: &[(&str, &str)],
 ) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python_executable(repo) {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -69,7 +71,7 @@ fn compare(
         environment,
     )?;
     let native = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         root,
         arguments,
@@ -77,6 +79,12 @@ fn compare(
         environment,
     )?;
     Ok((python, native))
+}
+
+fn normalize_native_names(bytes: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(bytes)
+        .replace("compass-out", "graphify-out")
+        .into_bytes()
 }
 
 #[test]
@@ -101,8 +109,16 @@ fn hook_runtime_commands_match_python_oracle() -> Result<(), Box<dyn Error>> {
     for (arguments, stdin) in cases {
         let (python, native) = compare(directory.path(), &arguments, stdin, &[])?;
         assert_eq!(native.status.code(), python.status.code(), "{arguments:?}");
-        assert_eq!(native.stdout, python.stdout, "{arguments:?}");
-        assert_eq!(native.stderr, python.stderr, "{arguments:?}");
+        assert_eq!(
+            normalize_native_names(&native.stdout),
+            python.stdout,
+            "{arguments:?}"
+        );
+        assert_eq!(
+            normalize_native_names(&native.stderr),
+            python.stderr,
+            "{arguments:?}"
+        );
     }
     Ok(())
 }
@@ -154,7 +170,7 @@ fn strict_read_guard_matches_python_and_denies_once() -> Result<(), Box<dyn Erro
         &[],
     )?;
     let native = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &args,
@@ -163,7 +179,7 @@ fn strict_read_guard_matches_python_and_denies_once() -> Result<(), Box<dyn Erro
     )?;
     assert_eq!(native.stdout, python.stdout);
     let native_second = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &args,
@@ -231,7 +247,7 @@ fn check_update_and_merge_driver_match_python() -> Result<(), Box<dyn Error>> {
         &[],
     )?;
     let native = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &arguments,

@@ -177,7 +177,7 @@ fn completed_seed_writes_normalized_marker_and_opaque_sidecars()
         vec![0, 1, 255]
     );
     let marker: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        directory.path().join(".graphify_semantic_marker"),
+        directory.path().join(".compass_semantic_marker"),
     )?)?;
     assert_eq!(marker["schema"], "compass.history.completion");
     assert_eq!(marker["semantic_files_expected"], 1);
@@ -245,8 +245,8 @@ fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
     let opaque = vec![0, 1, 255];
     for (path, bytes) in [
         ("graph.json", graph.as_slice()),
-        (".graphify_analysis.json", analysis.as_slice()),
-        (".graphify_labels.json", labels.as_slice()),
+        (".compass_analysis.json", analysis.as_slice()),
+        (".compass_labels.json", labels.as_slice()),
         ("manifest.json", manifest.as_slice()),
         ("semantic/facts.bin", opaque.as_slice()),
     ] {
@@ -268,8 +268,8 @@ fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
     };
     let mut registry = vec![
         authoritative("graph.json", &graph),
-        authoritative(".graphify_analysis.json", &analysis),
-        authoritative(".graphify_labels.json", &labels),
+        authoritative(".compass_analysis.json", &analysis),
+        authoritative(".compass_labels.json", &labels),
         authoritative("manifest.json", &manifest),
         authoritative("semantic/facts.bin", &opaque),
     ];

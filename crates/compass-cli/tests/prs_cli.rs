@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod support;
+
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -96,7 +98,7 @@ fn run_with_environment(
     environment: &[(&str, &str)],
 ) -> Result<Output, Box<dyn Error>> {
     let python = repo.join(".venv/bin/python");
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -145,13 +147,7 @@ fn prs_dashboard_detail_conflicts_and_worktrees_match_python() -> Result<(), Box
         vec!["--worktrees", "--base", "v8"],
     ] {
         let expected = run(&python, &repo, root, &bin, &args)?;
-        let actual = run(
-            Path::new(env!("CARGO_BIN_EXE_graphify")),
-            &repo,
-            root,
-            &bin,
-            &args,
-        )?;
+        let actual = run(support::compat_executable(), &repo, root, &bin, &args)?;
         assert_eq!(actual.status.code(), expected.status.code(), "{args:?}");
         assert_eq!(actual.stdout, expected.stdout, "stdout {args:?}");
         assert_eq!(actual.stderr, expected.stderr, "stderr {args:?}");
@@ -186,7 +182,7 @@ fn prs_custom_provider_triage_matches_python_without_issuing_a_call() -> Result<
         &environment,
     )?;
     let actual = run_with_environment(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         root,
         &bin,
@@ -217,7 +213,7 @@ fn prs_help_and_compass_namespace_are_compatible() -> Result<(), Box<dyn Error>>
             &args,
         )?;
         let actual = run(
-            Path::new(env!("CARGO_BIN_EXE_graphify")),
+            support::compat_executable(),
             &repo,
             directory.path(),
             &bin,
@@ -296,7 +292,7 @@ fn prs_triage_uses_the_native_provider_and_exact_prompt_shape() -> Result<(), Bo
         let _ = sender.send(request);
     });
     let path = std::env::join_paths([bin, PathBuf::from("/usr/bin"), PathBuf::from("/bin")])?;
-    let output = Command::new(env!("CARGO_BIN_EXE_graphify"))
+    let output = support::compat_command()
         .current_dir(directory.path())
         .env("PATH", path)
         .env("NO_COLOR", "1")
