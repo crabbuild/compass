@@ -928,6 +928,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-analysis"
+version = "0.1.0"
+dependencies = [
+ "compass-ir",
+ "serde",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "compass-cargo"
 version = "0.1.0"
 dependencies = [
@@ -1243,6 +1253,17 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
+]
+
+[[package]]
+name = "compass-program"
+version = "0.1.0"
+dependencies = [
+ "compass-ir",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/compass-analysis",
     "crates/compass-cargo",
     "crates/compass-cli",
     "crates/compass-core",
@@ -19,6 +20,7 @@ members = [
     "crates/compass-parity",
     "crates/compass-postgres",
     "crates/compass-prs",
+    "crates/compass-program",
     "crates/compass-query",
     "crates/compass-reflect",
     "crates/compass-resolve",
