@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="430" viewBox="0 0 1160 430" role="img" aria-labelledby="title desc">
+  <title id="title">Relationship provenance in Compass</title>
+  <desc id="desc">Direct source evidence produces extracted relationships. Multiple structural facts resolved to one stable target produce inferred relationships. Multiple viable targets preserve an ambiguous relationship that requires review.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.box{fill:#fff;stroke:#486581;stroke-width:2}.good{fill:#e3f4ea;stroke:#287d4f;stroke-width:2}.resolve{fill:#e5edff;stroke:#355ca8;stroke-width:2}.warn{fill:#fff0e5;stroke:#b45420;stroke-width:2}.head{font:700 19px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:15px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.mono{font:14px ui-monospace,SFMono-Regular,monospace;fill:#334e68}.line{fill:none;stroke:#627d98;stroke-width:3}.arrow{fill:#627d98}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.box{fill:#1f2937;stroke:#9fb3c8}.good{fill:#163b2a;stroke:#6bc993}.resolve{fill:#213659;stroke:#89aef2}.warn{fill:#422519;stroke:#ef9a6d}.head{fill:#f3f4f6}.body,.mono{fill:#d1d5db}.line{stroke:#9fb3c8}.arrow{fill:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1160" height="430" rx="24"/>
+  <rect class="box" x="30" y="52" width="270" height="112" rx="15"/>
+  <text class="head" x="165" y="88" text-anchor="middle">Direct evidence</text>
+  <text class="body" x="165" y="118" text-anchor="middle">syntax or authoritative input</text>
+  <text class="mono" x="165" y="145" text-anchor="middle">caller invokes target</text>
+  <line class="line" x1="300" y1="108" x2="380" y2="108"/>
+  <polygon class="arrow" points="380,100 396,108 380,116"/>
+  <rect class="good" x="396" y="52" width="330" height="112" rx="15"/>
+  <text class="head" x="561" y="91" text-anchor="middle">EXTRACTED</text>
+  <text class="body" x="561" y="122" text-anchor="middle">the exact relation is directly supported</text>
+  <text class="mono" x="561" y="147" text-anchor="middle">source --CALLS--> target</text>
+  <rect class="box" x="30" y="206" width="270" height="150" rx="15"/>
+  <text class="head" x="165" y="242" text-anchor="middle">Combined evidence</text>
+  <text class="body" x="165" y="274" text-anchor="middle">import + scope + call fact</text>
+  <text class="body" x="165" y="300" text-anchor="middle">member/type/project metadata</text>
+  <text class="mono" x="165" y="330" text-anchor="middle">resolver selects target(s)</text>
+  <path class="line" d="M300 281 H350 V238 H380"/>
+  <polygon class="arrow" points="380,230 396,238 380,246"/>
+  <rect class="resolve" x="396" y="182" width="330" height="112" rx="15"/>
+  <text class="head" x="561" y="221" text-anchor="middle">One stable target</text>
+  <text class="body" x="561" y="252" text-anchor="middle">resolved from structural facts</text>
+  <line class="line" x1="726" y1="238" x2="796" y2="238"/>
+  <polygon class="arrow" points="796,230 812,238 796,246"/>
+  <rect class="resolve" x="812" y="182" width="318" height="112" rx="15"/>
+  <text class="head" x="971" y="221" text-anchor="middle">INFERRED</text>
+  <text class="body" x="971" y="252" text-anchor="middle">derived, evidence-backed connection</text>
+  <path class="line" d="M350 281 V356 H796"/>
+  <polygon class="arrow" points="796,348 812,356 796,364"/>
+  <rect class="warn" x="812" y="320" width="318" height="82" rx="15"/>
+  <text class="head" x="971" y="353" text-anchor="middle">AMBIGUOUS</text>
+  <text class="body" x="971" y="382" text-anchor="middle">multiple viable interpretations remain</text>
+</svg>

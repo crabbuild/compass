@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Compass graph construction and query pipeline</title>
+  <desc id="desc">Source code, project metadata, and optional semantic sources flow through discovery, extraction, resolution, analysis, and atomic publication. Query commands then load indexed graph snapshots and return focused or exact results.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.box{fill:#fff;stroke:#486581;stroke-width:2}.local{fill:#e3f4ea;stroke:#287d4f;stroke-width:2}.optional{fill:#fff4d6;stroke:#9b6b00;stroke-width:2}.output{fill:#e5edff;stroke:#355ca8;stroke-width:2}.head{font:700 18px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:14px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.small{font:13px ui-monospace,SFMono-Regular,monospace;fill:#334e68}.line{fill:none;stroke:#627d98;stroke-width:3}.dash{stroke-dasharray:8 6}.arrow{fill:#627d98}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.box{fill:#1f2937;stroke:#9fb3c8}.local{fill:#163b2a;stroke:#6bc993}.optional{fill:#3b3015;stroke:#e0b84e}.output{fill:#213659;stroke:#89aef2}.head{fill:#f3f4f6}.body,.small{fill:#d1d5db}.line{stroke:#9fb3c8}.arrow{fill:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="560" rx="24"/>
+  <text class="head" x="35" y="42">Inputs</text>
+  <rect class="box" x="35" y="62" width="180" height="90" rx="14"/>
+  <text class="head" x="125" y="96" text-anchor="middle">Source code</text>
+  <text class="small" x="125" y="126" text-anchor="middle">.rs .py .ts ...</text>
+  <rect class="box" x="35" y="178" width="180" height="90" rx="14"/>
+  <text class="head" x="125" y="212" text-anchor="middle">Project metadata</text>
+  <text class="small" x="125" y="242" text-anchor="middle">manifests / schemas</text>
+  <rect class="optional" x="35" y="294" width="180" height="110" rx="14"/>
+  <text class="head" x="125" y="328" text-anchor="middle">Semantic sources</text>
+  <text class="small" x="125" y="358" text-anchor="middle">docs / media</text>
+  <text class="body" x="125" y="384" text-anchor="middle">optional provider path</text>
+  <path class="line" d="M215 107 H268 M215 223 H245 V107 H268 M215 349 H245 V107"/>
+  <polygon class="arrow" points="268,99 284,107 268,115"/>
+  <rect class="local" x="284" y="64" width="150" height="86" rx="14"/>
+  <text class="head" x="359" y="98" text-anchor="middle">Discover</text>
+  <text class="body" x="359" y="126" text-anchor="middle">classify + ignore</text>
+  <line class="line" x1="434" y1="107" x2="474" y2="107"/>
+  <polygon class="arrow" points="474,99 490,107 474,115"/>
+  <rect class="local" x="490" y="64" width="150" height="86" rx="14"/>
+  <text class="head" x="565" y="98" text-anchor="middle">Extract</text>
+  <text class="body" x="565" y="126" text-anchor="middle">per-file facts</text>
+  <line class="line" x1="640" y1="107" x2="680" y2="107"/>
+  <polygon class="arrow" points="680,99 696,107 680,115"/>
+  <rect class="local" x="696" y="64" width="150" height="86" rx="14"/>
+  <text class="head" x="771" y="98" text-anchor="middle">Resolve</text>
+  <text class="body" x="771" y="126" text-anchor="middle">cross-file links</text>
+  <line class="line" x1="846" y1="107" x2="886" y2="107"/>
+  <polygon class="arrow" points="886,99 902,107 886,115"/>
+  <rect class="local" x="902" y="64" width="150" height="86" rx="14"/>
+  <text class="head" x="977" y="98" text-anchor="middle">Analyze</text>
+  <text class="body" x="977" y="126" text-anchor="middle">cluster + report</text>
+  <path class="line" d="M977 150 V202"/>
+  <polygon class="arrow" points="969,202 977,218 985,202"/>
+  <rect class="output" x="860" y="218" width="235" height="150" rx="16"/>
+  <text class="head" x="977" y="252" text-anchor="middle">Atomic publication</text>
+  <text class="small" x="890" y="288">graph.json</text>
+  <text class="small" x="890" y="314">GRAPH_REPORT.md</text>
+  <text class="small" x="890" y="340">graph.html / manifest.json</text>
+  <path class="line" d="M860 293 H730"/>
+  <polygon class="arrow" points="746,285 730,293 746,301"/>
+  <rect class="box" x="472" y="218" width="258" height="150" rx="16"/>
+  <text class="head" x="601" y="252" text-anchor="middle">Indexed graph snapshot</text>
+  <text class="body" x="601" y="286" text-anchor="middle">stable IDs + adjacency</text>
+  <text class="body" x="601" y="314" text-anchor="middle">query index + schema fingerprint</text>
+  <text class="body" x="601" y="342" text-anchor="middle">bounded loading and caches</text>
+  <path class="line" d="M601 368 V416"/>
+  <polygon class="arrow" points="593,416 601,432 609,416"/>
+  <rect class="output" x="285" y="432" width="632" height="88" rx="16"/>
+  <text class="head" x="601" y="466" text-anchor="middle">Query surfaces</text>
+  <text class="small" x="601" y="496" text-anchor="middle">query · explain · path · affected · tree · CompassQL</text>
+</svg>

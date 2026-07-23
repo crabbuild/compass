@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
+  <title id="title">Three reader journeys through Compass documentation</title>
+  <desc id="desc">Evaluators, users and integrators, and contributors enter through the Compass documentation hub and follow separate paths to concepts, guides, references, and implementation details.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.panel{fill:#fff;stroke:#49637a;stroke-width:2}.hub{fill:#16324f;stroke:#0d2236;stroke-width:2}.head{font:700 22px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:16px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.hubtext{font:700 24px ui-sans-serif,system-ui,sans-serif;fill:#fff}.line{fill:none;stroke:#627d98;stroke-width:3}.arrow{fill:#627d98}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.panel{fill:#1f2937;stroke:#9fb3c8}.head{fill:#f3f4f6}.body{fill:#d1d5db}.hub{fill:#315b7d;stroke:#9fb3c8}.line{stroke:#9fb3c8}.arrow{fill:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="520" rx="24"/>
+  <rect class="hub" x="410" y="34" width="300" height="76" rx="16"/>
+  <text class="hubtext" x="560" y="80" text-anchor="middle">Compass docs hub</text>
+  <path class="line" d="M560 110 V158 H190 V190"/>
+  <path class="line" d="M560 158 V190"/>
+  <path class="line" d="M560 158 H930 V190"/>
+  <polygon class="arrow" points="184,181 196,181 190,193"/>
+  <polygon class="arrow" points="554,181 566,181 560,193"/>
+  <polygon class="arrow" points="924,181 936,181 930,193"/>
+  <rect class="panel" x="40" y="190" width="300" height="280" rx="18"/>
+  <text class="head" x="190" y="232" text-anchor="middle">Evaluating Compass</text>
+  <text class="body" x="70" y="275">1. Getting started</text>
+  <text class="body" x="70" y="310">2. How it works</text>
+  <text class="body" x="70" y="345">3. Graph model</text>
+  <text class="body" x="70" y="380">4. Security and privacy</text>
+  <text class="body" x="70" y="415">5. Compatibility and performance</text>
+  <rect class="panel" x="410" y="190" width="300" height="280" rx="18"/>
+  <text class="head" x="560" y="232" text-anchor="middle">Using and integrating</text>
+  <text class="body" x="440" y="275">1. Task guides</text>
+  <text class="body" x="440" y="310">2. Cookbook recipes</text>
+  <text class="body" x="440" y="345">3. CompassQL</text>
+  <text class="body" x="440" y="380">4. Commands and configuration</text>
+  <text class="body" x="440" y="415">5. Output contracts</text>
+  <rect class="panel" x="780" y="190" width="300" height="280" rx="18"/>
+  <text class="head" x="930" y="232" text-anchor="middle">Extending Compass</text>
+  <text class="body" x="810" y="275">1. Design principles</text>
+  <text class="body" x="810" y="310">2. Architecture</text>
+  <text class="body" x="810" y="345">3. Workspace tour</text>
+  <text class="body" x="810" y="380">4. Implementation pipelines</text>
+  <text class="body" x="810" y="415">5. Contribution workflow</text>
+</svg>

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="300" viewBox="0 0 1120 300" role="img" aria-labelledby="title desc">
+  <title id="title">From a source project to the first Compass answer</title>
+  <desc id="desc">A project directory enters Compass update, which writes graph JSON, a graph report, an optional HTML view, and a manifest. Query commands read the graph and return focused answers.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.box{fill:#fff;stroke:#49637a;stroke-width:2}.accent{fill:#d9eafd;stroke:#1d5f91;stroke-width:2}.head{font:700 19px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:15px ui-monospace,SFMono-Regular,monospace;fill:#334e68}.line{stroke:#627d98;stroke-width:4}.arrow{fill:#627d98}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.box{fill:#1f2937;stroke:#9fb3c8}.accent{fill:#213f59;stroke:#78b7e5}.head{fill:#f3f4f6}.body{fill:#d1d5db}.line{stroke:#9fb3c8}.arrow{fill:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="300" rx="24"/>
+  <rect class="box" x="30" y="70" width="220" height="150" rx="16"/>
+  <text class="head" x="140" y="110" text-anchor="middle">Project directory</text>
+  <text class="body" x="65" y="148">src/</text>
+  <text class="body" x="65" y="177">Cargo.toml</text>
+  <text class="body" x="65" y="206">docs/ ...</text>
+  <line class="line" x1="250" y1="145" x2="340" y2="145"/>
+  <polygon class="arrow" points="340,137 356,145 340,153"/>
+  <rect class="accent" x="356" y="88" width="220" height="114" rx="16"/>
+  <text class="head" x="466" y="128" text-anchor="middle">Compass</text>
+  <text class="body" x="466" y="166" text-anchor="middle">compass update .</text>
+  <line class="line" x1="576" y1="145" x2="666" y2="145"/>
+  <polygon class="arrow" points="666,137 682,145 666,153"/>
+  <rect class="box" x="682" y="45" width="200" height="200" rx="16"/>
+  <text class="head" x="782" y="83" text-anchor="middle">compass-out/</text>
+  <text class="body" x="712" y="122">graph.json</text>
+  <text class="body" x="712" y="151">GRAPH_REPORT.md</text>
+  <text class="body" x="712" y="180">graph.html</text>
+  <text class="body" x="712" y="209">manifest.json</text>
+  <line class="line" x1="882" y1="145" x2="948" y2="145"/>
+  <polygon class="arrow" points="948,137 964,145 948,153"/>
+  <rect class="accent" x="964" y="84" width="130" height="122" rx="16"/>
+  <text class="head" x="1029" y="124" text-anchor="middle">Answers</text>
+  <text class="body" x="1029" y="160" text-anchor="middle">query</text>
+  <text class="body" x="1029" y="184" text-anchor="middle">path / explain</text>
+</svg>

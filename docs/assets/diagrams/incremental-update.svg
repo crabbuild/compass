@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="600" viewBox="0 0 1240 600" role="img" aria-labelledby="title desc">
+  <title id="title">Cold and incremental Compass update paths</title>
+  <desc id="desc">A cold build extracts all discovered files. An incremental build compares the new filesystem snapshot with a manifest, reuses compatible unchanged extraction facts, extracts changed files, removes deleted facts, then always resolves and analyzes a complete logical corpus before atomically publishing graph and manifest together.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.box{fill:#fff;stroke:#486581;stroke-width:2}.cold{fill:#fff4d6;stroke:#9b6b00;stroke-width:2}.warm{fill:#e3f4ea;stroke:#287d4f;stroke-width:2}.join{fill:#e5edff;stroke:#355ca8;stroke-width:2}.head{font:700 18px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:14px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.line{fill:none;stroke:#627d98;stroke-width:3}.arrow{fill:#627d98}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.box{fill:#1f2937;stroke:#9fb3c8}.cold{fill:#3b3015;stroke:#e0b84e}.warm{fill:#163b2a;stroke:#6bc993}.join{fill:#213659;stroke:#89aef2}.head{fill:#f3f4f6}.body{fill:#d1d5db}.line{stroke:#9fb3c8}.arrow{fill:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1240" height="600" rx="24"/>
+  <rect class="box" x="455" y="35" width="330" height="75" rx="15"/>
+  <text class="head" x="620" y="67" text-anchor="middle">Discover current filesystem snapshot</text>
+  <text class="body" x="620" y="93" text-anchor="middle">classify · ignore · fingerprint</text>
+  <path class="line" d="M620 110 V150 H300 M620 150 H940"/>
+  <polygon class="arrow" points="292,142 308,142 300,158"/>
+  <polygon class="arrow" points="932,142 948,142 940,158"/>
+  <rect class="cold" x="90" y="158" width="420" height="150" rx="16"/>
+  <text class="head" x="300" y="195" text-anchor="middle">Cold build</text>
+  <text class="body" x="300" y="227" text-anchor="middle">no compatible manifest/cache</text>
+  <text class="body" x="300" y="255" text-anchor="middle">extract every supported file</text>
+  <text class="body" x="300" y="283" text-anchor="middle">create complete per-file fact set</text>
+  <rect class="warm" x="730" y="158" width="420" height="190" rx="16"/>
+  <text class="head" x="940" y="195" text-anchor="middle">Incremental build</text>
+  <text class="body" x="940" y="227" text-anchor="middle">compare manifest + compatible fingerprints</text>
+  <text class="body" x="940" y="255" text-anchor="middle">reuse unchanged extraction facts</text>
+  <text class="body" x="940" y="283" text-anchor="middle">extract added / changed / renamed</text>
+  <text class="body" x="940" y="311" text-anchor="middle">remove deleted facts</text>
+  <path class="line" d="M300 308 V365 H560 V385 M940 348 V365 H680 V385"/>
+  <polygon class="arrow" points="552,369 568,369 560,385"/>
+  <polygon class="arrow" points="672,369 688,369 680,385"/>
+  <rect class="join" x="420" y="385" width="400" height="90" rx="16"/>
+  <text class="head" x="620" y="420" text-anchor="middle">Complete logical corpus</text>
+  <text class="body" x="620" y="450" text-anchor="middle">resolve cross-file facts · build · cluster · analyze</text>
+  <line class="line" x1="620" y1="475" x2="620" y2="518"/>
+  <polygon class="arrow" points="612,518 620,534 628,518"/>
+  <rect class="join" x="365" y="534" width="510" height="52" rx="14"/>
+  <text class="head" x="620" y="567" text-anchor="middle">Atomically publish matching graph + report + manifest</text>
+</svg>

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="720" viewBox="0 0 1260 720" role="img" aria-labelledby="title desc">
+  <title id="title">Compass Rust workspace architecture</title>
+  <desc id="desc">Compass CLI and MCP interfaces call core application services. Core orchestrates file discovery, language extraction, cross-file resolution, graph algorithms, semantic integrations, query engines, outputs, and immutable history. Focused integration crates sit at explicit external boundaries.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.interface{fill:#16324f;stroke:#0d2236;stroke-width:2}.core{fill:#e5edff;stroke:#355ca8;stroke-width:2}.domain{fill:#e3f4ea;stroke:#287d4f;stroke-width:2}.optional{fill:#fff4d6;stroke:#9b6b00;stroke-width:2}.store{fill:#f3e8ff;stroke:#7b3fa1;stroke-width:2}.head{font:700 17px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:13px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.light{font:700 18px ui-sans-serif,system-ui,sans-serif;fill:#fff}.ifbody{font:13px ui-sans-serif,system-ui,sans-serif;fill:#d9e2ec}.line{fill:none;stroke:#627d98;stroke-width:3}.dash{stroke-dasharray:8 6}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.interface{fill:#315b7d;stroke:#9fb3c8}.core{fill:#213659;stroke:#89aef2}.domain{fill:#163b2a;stroke:#6bc993}.optional{fill:#3b3015;stroke:#e0b84e}.store{fill:#352040;stroke:#c79be2}.head{fill:#f3f4f6}.body{fill:#d1d5db}.ifbody{fill:#f3f4f6}.line{stroke:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1260" height="720" rx="24"/>
+  <text class="head" x="35" y="38">Interfaces</text>
+  <rect class="interface" x="240" y="55" width="300" height="76" rx="15"/>
+  <text class="light" x="390" y="88" text-anchor="middle">compass-cli</text>
+  <text class="ifbody" x="390" y="112" text-anchor="middle">commands · help · exits · rendering</text>
+  <rect class="interface" x="720" y="55" width="300" height="76" rx="15"/>
+  <text class="light" x="870" y="88" text-anchor="middle">compass-mcp</text>
+  <text class="ifbody" x="870" y="112" text-anchor="middle">tools · resources · stdio / HTTP</text>
+  <path class="line" d="M390 131 V168 H630 M870 131 V168 H630"/>
+  <rect class="core" x="480" y="168" width="300" height="78" rx="15"/>
+  <text class="head" x="630" y="201" text-anchor="middle">compass-core</text>
+  <text class="body" x="630" y="226" text-anchor="middle">build · watch · merge · diagnostics · materialize</text>
+  <path class="line" d="M630 246 V282 H185 M630 282 H1075"/>
+  <text class="head" x="35" y="292">Domain</text>
+  <rect class="domain" x="35" y="310" width="205" height="90" rx="14"/>
+  <text class="head" x="137" y="344" text-anchor="middle">compass-files</text>
+  <text class="body" x="137" y="372" text-anchor="middle">detect · cache · atomic I/O</text>
+  <rect class="domain" x="272" y="310" width="205" height="90" rx="14"/>
+  <text class="head" x="374" y="344" text-anchor="middle">compass-languages</text>
+  <text class="body" x="374" y="372" text-anchor="middle">per-file facts</text>
+  <rect class="domain" x="509" y="310" width="205" height="90" rx="14"/>
+  <text class="head" x="611" y="344" text-anchor="middle">compass-resolve</text>
+  <text class="body" x="611" y="372" text-anchor="middle">cross-file identity</text>
+  <rect class="domain" x="746" y="310" width="205" height="90" rx="14"/>
+  <text class="head" x="848" y="344" text-anchor="middle">compass-graph</text>
+  <text class="body" x="848" y="372" text-anchor="middle">build · cluster · analyze</text>
+  <rect class="domain" x="983" y="310" width="240" height="90" rx="14"/>
+  <text class="head" x="1103" y="344" text-anchor="middle">compass-model</text>
+  <text class="body" x="1103" y="372" text-anchor="middle">document · graph · indexes</text>
+  <path class="line" d="M240 355 H272 M477 355 H509 M714 355 H746 M951 355 H983"/>
+  <rect class="core" x="190" y="450" width="250" height="86" rx="14"/>
+  <text class="head" x="315" y="484" text-anchor="middle">compass-cypher</text>
+  <text class="body" x="315" y="512" text-anchor="middle">CompassQL compiler + plan</text>
+  <rect class="core" x="505" y="450" width="250" height="86" rx="14"/>
+  <text class="head" x="630" y="484" text-anchor="middle">compass-query</text>
+  <text class="body" x="630" y="512" text-anchor="middle">search · traversal · execute</text>
+  <rect class="core" x="820" y="450" width="250" height="86" rx="14"/>
+  <text class="head" x="945" y="484" text-anchor="middle">compass-output</text>
+  <text class="body" x="945" y="512" text-anchor="middle">report · HTML · exports</text>
+  <path class="line" d="M315 450 V428 H630 V450 M848 400 V428 H945 V450 M1103 400 V428 H630"/>
+  <text class="head" x="35" y="582">Optional and durable boundaries</text>
+  <rect class="optional" x="35" y="610" width="360" height="76" rx="14"/>
+  <text class="head" x="215" y="641" text-anchor="middle">Semantic and media</text>
+  <text class="body" x="215" y="667" text-anchor="middle">semantic · media · transcribe · whisper</text>
+  <rect class="store" x="450" y="610" width="360" height="76" rx="14"/>
+  <text class="head" x="630" y="641" text-anchor="middle">compass-history</text>
+  <text class="body" x="630" y="667" text-anchor="middle">immutable realizations · SQLite · Prolly</text>
+  <rect class="optional" x="865" y="610" width="360" height="76" rx="14"/>
+  <text class="head" x="1045" y="641" text-anchor="middle">Focused integrations</text>
+  <text class="body" x="1045" y="667" text-anchor="middle">Cargo · DB · ingest · PRs · global · reflect</text>
+  <path class="line dash" d="M630 536 V585 M215 610 V585 H1045 V610"/>
+</svg>

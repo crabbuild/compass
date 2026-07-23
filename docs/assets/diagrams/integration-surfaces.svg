@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
+  <title id="title">Compass integration surfaces</title>
+  <desc id="desc">A validated Compass graph snapshot is exposed through human reports and HTML, versioned CompassQL JSON and JSONL, full graph JSON, MCP service tools, history exports, global graph registration, and external graph database exporters.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.core{fill:#16324f;stroke:#0d2236;stroke-width:2}.box{fill:#fff;stroke:#486581;stroke-width:2}.machine{fill:#e5edff;stroke:#355ca8;stroke-width:2}.human{fill:#e3f4ea;stroke:#287d4f;stroke-width:2}.head{font:700 18px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:14px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.coretext{font:700 22px ui-sans-serif,system-ui,sans-serif;fill:#fff}.line{fill:none;stroke:#627d98;stroke-width:3}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.core{fill:#315b7d;stroke:#9fb3c8}.box{fill:#1f2937;stroke:#9fb3c8}.machine{fill:#213659;stroke:#89aef2}.human{fill:#163b2a;stroke:#6bc993}.head{fill:#f3f4f6}.body{fill:#d1d5db}.line{stroke:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="540" rx="24"/>
+  <rect class="core" x="410" y="205" width="380" height="130" rx="20"/>
+  <text class="coretext" x="600" y="253" text-anchor="middle">Validated graph snapshot</text>
+  <text class="coretext" x="600" y="292" text-anchor="middle">stable IDs · directed edges</text>
+  <path class="line" d="M410 245 H345 V110 H310 M410 285 H345 V430 H310 M790 245 H855 V110 H890 M790 285 H855 V430 H890 M600 205 V140 M600 335 V400"/>
+  <rect class="human" x="40" y="55" width="270" height="110" rx="16"/>
+  <text class="head" x="175" y="93" text-anchor="middle">Human exploration</text>
+  <text class="body" x="175" y="123" text-anchor="middle">report · HTML · CLI text</text>
+  <rect class="machine" x="40" y="375" width="270" height="110" rx="16"/>
+  <text class="head" x="175" y="413" text-anchor="middle">Full graph consumers</text>
+  <text class="body" x="175" y="443" text-anchor="middle">graph.json · history export</text>
+  <rect class="machine" x="465" y="30" width="270" height="110" rx="16"/>
+  <text class="head" x="600" y="68" text-anchor="middle">Application queries</text>
+  <text class="body" x="600" y="98" text-anchor="middle">CompassQL JSON / JSONL</text>
+  <rect class="machine" x="465" y="400" width="270" height="110" rx="16"/>
+  <text class="head" x="600" y="438" text-anchor="middle">Assistant tools</text>
+  <text class="body" x="600" y="468" text-anchor="middle">MCP stdio / authenticated HTTP</text>
+  <rect class="box" x="890" y="55" width="270" height="110" rx="16"/>
+  <text class="head" x="1025" y="93" text-anchor="middle">Cross-repository index</text>
+  <text class="body" x="1025" y="123" text-anchor="middle">compass global</text>
+  <rect class="box" x="890" y="375" width="270" height="110" rx="16"/>
+  <text class="head" x="1025" y="413" text-anchor="middle">External graph systems</text>
+  <text class="body" x="1025" y="443" text-anchor="middle">Neo4j · FalkorDB exporters</text>
+</svg>
