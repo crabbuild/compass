@@ -54,6 +54,10 @@ extractor.
   derived conclusion.
 - Represent ambiguity and incomplete coverage explicitly.
 - Keep static analysis and primary graph operations local-first.
+- Treat Tree-sitter as the deterministic syntax baseline, not as a substitute
+  for compiler semantics.
+- Merge complementary syntax, index, compiler, and binary evidence through one
+  provider-neutral Program IR.
 - Ingest offline runtime artifacts before adding read-only connectors.
 - Optimize deep analysis for a large monorepository before adding distributed
   graph federation.
@@ -95,9 +99,9 @@ executable model of how behavior and information propagate through a program.
 
 ### Capabilities
 
-- A typed semantic intermediate representation for functions, methods, values,
-  types, call sites, branches, reads, writes, exceptions, asynchronous
-  boundaries, and effects
+- A typed, provider-neutral Program IR for functions, methods, values, types,
+  call sites, branches, reads, writes, exceptions, asynchronous boundaries,
+  and effects
 - Higher-precision call resolution for interfaces, traits, virtual dispatch,
   callbacks, closures, dependency injection, reflection hints, and framework
   routing
@@ -128,7 +132,57 @@ Compass will distinguish three support tiers:
 Rust and TypeScript/JavaScript are the first deep-tier languages. Rust
 dogfoods the analysis on Compass itself. TypeScript/JavaScript exercises large
 application monorepositories and dynamic framework behavior. Python,
-Java/Kotlin, and Go follow through explicit language adapters.
+Java/Kotlin, and Go follow through explicit evidence providers. A language may
+reach the resolved tier from an offline semantic index before Compass ships a
+native deep analyzer for it.
+
+### Program-evidence provider model
+
+Program IR is a normalized evidence model, not the output of one universal
+parser. Compass composes four provider classes:
+
+1. **Syntax providers** analyze individual source files without a build. The
+   first implementation reuses Compass's Tree-sitter parsers for stable spans,
+   declarations, lexical operations, and conservative source-level control
+   flow. Syntax providers maximize breadth and always remain a fallback.
+2. **Artifact providers** ingest repository-scoped files generated outside
+   Compass. Official SCIP indexes are the first semantic artifact. Compiler
+   indexes, language-specific analysis exports, LLVM bitcode, JVM class files,
+   and comparable offline artifacts may follow.
+3. **Project analyzers** use a language's compiler or project model when deeper
+   precision justifies the toolchain cost. Candidate integrations include the
+   TypeScript compiler API, Go SSA, Roslyn, Clang, and a stable Rust compiler or
+   rust-analyzer interface.
+4. **Read-only live providers** query language servers or external systems only
+   after the offline contracts are mature. Their observations are overlays and
+   never become an undeclared prerequisite for a reproducible build.
+
+The initial foundation implements Tree-sitter syntax evidence for Rust and the
+TypeScript family plus optional official SCIP ingestion. It does not invoke an
+indexer, compiler, language server, network service, or model. Projects supply
+offline artifacts explicitly or place a supported conventional artifact in the
+repository. Because raw SCIP does not carry source-content digests, its
+freshness is declared unverified unless an optional Compass companion manifest
+binds the index digest and document paths to exact source digests.
+
+Providers emit normalized evidence batches rather than final IR. Every batch
+declares provider identity, kind, version, scope, input digest, configuration
+digest, and capability coverage. Evidence is merged deterministically using
+stable source anchors and semantic symbol identities:
+
+- syntax evidence owns source structure, lexical operations, and source spans;
+- semantic indexes and compiler providers may resolve identities, references,
+  types, roles, implementations, and call targets;
+- deeper providers may add control-flow, data-flow, effect, and contract facts;
+- no provider silently overwrites contradictory evidence;
+- conflicts remain explicit evidence and reduce only the affected capability's
+  coverage.
+
+Authority is capability-specific, not a global provider ranking. For example,
+SCIP may be authoritative for a call target while Tree-sitter remains
+authoritative for the call's exact source span. Facts retain all supporting
+evidence IDs so users and downstream analyses can explain how a conclusion was
+formed.
 
 ### Incremental model
 
@@ -136,6 +190,14 @@ Editing a symbol invalidates its behavior summary and only the dependent
 summaries affected by changed facts. Versioned summaries live alongside graph
 realizations so historical analysis and semantic diff can reuse unchanged
 results.
+
+Provider caches have different scopes. Syntax evidence is keyed by logical
+path, source digest, schema, and syntax-provider version. Artifact evidence is
+keyed by artifact digest and decoder version and is normalized into document
+shards. Project evidence is keyed by repository snapshot, build-context digest,
+and analyzer version. The final merge fingerprint includes the ordered provider
+manifest, so changing an offline index can refresh resolutions without forcing
+source parsing.
 
 ### Qualification
 
@@ -371,8 +433,18 @@ presentation code.
 
 Conceptual components are:
 
-- **Semantic IR:** language-neutral program behavior
-- **Language adapters:** language- and framework-specific translation
+- **Program IR:** language-neutral program behavior with fact-level provenance
+  and capability-specific coverage
+- **Provider contracts:** separate file, repository-artifact, and project
+  analysis scopes
+- **Syntax providers:** deterministic Tree-sitter baseline and fallback
+- **Artifact providers:** bounded decoding of official SCIP and later offline
+  compiler or binary artifacts
+- **Project analyzers:** selected native compiler integrations for deep-tier
+  languages
+- **Evidence merger:** deterministic identity reconciliation, authority rules,
+  conflict preservation, and canonical ordering
+- **Framework providers:** language- and framework-specific semantic enrichment
 - **Summary engine:** immutable summaries and dependency invalidation
 - **Evidence store:** runtime, test, coverage, and profile overlays
 - **Impact engine:** semantic comparison and reverse-dependency traversal
@@ -384,13 +456,18 @@ Conceptual components are:
 The primary flow is:
 
 ```text
-Source and manifests
-        |
-        v
-Language and framework adapters
-        |
-        v
-Typed semantic IR
+Source files ------------> Tree-sitter syntax providers -------+
+Offline SCIP/indexes ----> artifact providers -----------------+
+Project/build context ---> native project analyzers -----------+
+                                                               |
+                                                               v
+                                      normalized evidence batches
+                                                               |
+                                                               v
+                            deterministic reconciliation and merge
+                                                               |
+                                                               v
+                                     provenance-aware Program IR
         |
         +--> control and data-flow analysis
         +--> contract extraction
@@ -414,7 +491,16 @@ CLI, CompassQL, MCP, PR reports, and agent evidence API
 
 - Static facts, runtime observations, deterministic conclusions, hypotheses,
   and agent assertions remain distinct.
-- Language adapters do not perform organization-level impact analysis.
+- Program IR is not LLVM IR and is not required to encode every language in
+  one lowest-common-denominator instruction set. It preserves source concepts
+  needed for code intelligence and permits capability-specific extensions.
+- Tree-sitter providers never claim compiler-resolved types, dispatch, data
+  flow, or macro-expanded behavior from syntax alone.
+- Artifact providers consume bytes already present on disk; Compass does not
+  automatically run third-party indexers in the foundation.
+- Absolute checkout roots, SCIP `project_root` values, timestamps, and provider
+  input order never affect canonical output.
+- Provider implementations do not perform organization-level impact analysis.
 - Runtime evidence does not mutate static graph realizations.
 - Federation consumes immutable published summaries rather than another
   repository's working tree.
@@ -428,11 +514,29 @@ CLI, CompassQL, MCP, PR reports, and agent evidence API
 These are conceptual interfaces first. New Rust crates are justified only by
 independent ownership, dependency direction, or compile-time isolation.
 
+### Alternatives rejected
+
+- **Tree-sitter-only generation:** broad and deterministic, but unable to
+  provide reliable type checking, overload resolution, macro expansion,
+  virtual dispatch, or build-aware semantics.
+- **Compiler-native-only generation:** precise, but makes every supported
+  language depend on a distinct toolchain and project loader before Compass can
+  provide baseline value.
+- **LSP-first generation:** useful for later read-only enrichment, but language
+  servers are stateful, workspace-dependent, and do not expose a portable
+  control-flow or data-flow model.
+- **Binary-IR-first generation:** valuable for observed build artifacts, but
+  optimized binaries lose source constructs and exclude code that was not
+  compiled.
+
+The hybrid provider model is selected because each additional evidence source
+improves the same canonical artifact without making that source mandatory.
+
 ## Delivery sequence
 
 | Horizon | Primary milestone | User-visible outcome |
 | --- | --- | --- |
-| 0-3 months | Analysis foundation | Versioned semantic IR, summary store, benchmark corpus, and language-adapter contract |
+| 0-3 months | Analysis foundation | Versioned Program IR, provider contracts, Tree-sitter baseline, optional SCIP enrichment, summary store, and benchmark corpus |
 | 3-6 months | Deep Rust and TypeScript analysis | High-precision call graphs, control flow, effects, and explainable resolution |
 | 6-9 months | Data flow, contracts, runtime artifacts | Data paths, contract graph, and coverage, trace, and profile overlays |
 | 9-12 months | Semantic impact intelligence | Behavioral diff, impact cones, test selection, and invariant regression detection |
@@ -458,7 +562,9 @@ The first vertical slice is:
 
 ## Failure and completeness model
 
-Every result declares one state:
+Every result declares coverage separately for syntax, symbol identity,
+definitions, references, types, call resolution, control flow, data flow,
+effects, and contracts. Each capability declares one state:
 
 - **Complete:** every required evidence source and analysis pass succeeded
   within the declared scope.
@@ -468,10 +574,15 @@ Every result declares one state:
 - **Failed:** corruption, incompatible schemas, invalid artifacts, or execution
   errors prevented a valid result.
 
-Partial results identify exactly what is missing and which conclusions may be
-affected. Timeouts and resource limits return bounded partial results when a
-valid subset exists. They never silently reduce precision or claim complete
-coverage.
+Partial results identify exactly what is missing, the responsible provider or
+artifact, and which conclusions may be affected. A companion-manifest digest
+mismatch can identify a stale SCIP document; Compass excludes that document's
+semantic facts without discarding valid syntax evidence. Raw SCIP remains
+usable but declares its freshness unverified. Malformed artifacts, incompatible
+schemas, unsafe paths, and resource-limit violations are typed failures and
+never replace the previous valid `program.json`. Timeouts and resource limits
+return bounded partial results only when a validated subset exists. They never
+silently reduce precision or claim complete coverage.
 
 ## Evaluation
 

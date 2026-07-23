@@ -1,204 +1,295 @@
-# Semantic IR Foundation Implementation Plan
+# Program IR Evidence Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For implementers:** execute this plan task by task with
+> `superpowers:executing-plans`. Use red-green-refactor for every task and run
+> the stated verification before each commit.
 
-**Goal:** Make native Compass builds emit, cache, validate, summarize, and historically preserve a deterministic semantic-program artifact for Rust and TypeScript/JavaScript source files.
+**Goal:** Make native Compass builds emit, cache, validate, summarize, and
+historically preserve a deterministic `program.json` assembled from
+complementary program-evidence providers.
 
-**Architecture:** Add a dependency-light `compass-ir` crate for the versioned language-neutral schema and a `compass-analysis` crate for deterministic per-function summaries and reverse dependencies. `compass-languages` supplies seed Rust and TypeScript adapters, `compass-core` orchestrates path-safe content-addressed per-file analysis and atomically writes `program.json`, and `compass-history` stores program records in a sixth Prolly tree while retaining read compatibility with schema-2 realizations.
+**Architecture:** `compass-ir` owns the provider-neutral schema.
+`compass-program` owns provider contracts, official SCIP decoding, and
+deterministic evidence reconciliation. `compass-languages` provides the initial
+Tree-sitter syntax providers for Rust and TypeScript/JavaScript.
+`compass-analysis` derives behavior summaries from the merged Program IR.
+`compass-core` orchestrates the provider scopes, caches evidence independently,
+and atomically installs the final artifact. Tree-sitter is the zero-configuration
+syntax baseline, not the universal semantic engine.
 
-**Tech Stack:** Rust 1.97.1, Rust 2024 edition, Serde/JSON, SHA-256, tree-sitter 0.26, Rayon, `prolly-map = "=0.5.0"`, `prolly-store-sqlite = "=0.3.0"`, the existing Compass cache, graph pipeline, and history store.
+**Tech stack:** Rust 1.97.1, Rust 2024 edition, Serde/JSON, SHA-256,
+Tree-sitter 0.26, official `scip = "=0.9.0"` protobuf bindings, bounded
+protobuf decoding, Rayon, `prolly-map = "=0.5.0"`, and
+`prolly-store-sqlite = "=0.3.0"`.
 
-## Global Constraints
+## Decisions fixed by this plan
 
-- Implement inside the standalone Compass repository at `/Users/haipingfu/graphify/compass`.
-- Preserve the workspace's `unsafe_code = "forbid"` and denied Clippy lint policy.
-- Structural extraction for every existing language must remain unchanged.
-- Rust and TypeScript/JavaScript are the only deep-tier seed adapters in this plan.
-- Static facts, derived summaries, runtime observations, hypotheses, and agent assertions remain separate record classes; this plan creates only static facts and deterministic derived summaries.
-- Every derived summary carries its source symbol, schema versions, completeness, and deterministic digests.
-- Unsupported source files produce no program module; supported but incompletely modeled constructs produce explicit partial reasons.
-- Repository-relative source identity, source bytes, adapter version, and analyzer version are meaning-affecting inputs; absolute checkout paths never enter program artifacts.
-- Two files with identical bytes but different repository-relative paths must have distinct cache entries, module identities, and symbol identities.
-- Identical repository content and analyzer versions in different checkout roots must produce byte-equivalent canonical program artifacts.
-- Incremental output must equal a clean full build.
-- Program artifacts use their own versioned Prolly root and share unchanged content across realizations.
-- Program IR schema, adapter algorithm, summary schema, and analyzer algorithm versions participate in cache namespaces and history extraction fingerprints.
-- Graphify compatibility mode must not emit `program.json` or change its legacy output file set.
-- Do not add network access, a model call, runtime telemetry collection, a graph database server, or autonomous editing.
-- After code changes, run `compass update .` from the Compass repository to refresh `compass-out/`, then run `graphify update .` from `/Users/haipingfu/graphify` to refresh the superproject graph required by its `AGENTS.md`.
-
----
+- The only native artifact name is `compass-out/program.json`. Never create,
+  read, migrate, reserve, or document `.compass_program.json`.
+- Program IR is a source-oriented evidence model inspired by LLVM's stable
+  intermediate layer; it is not LLVM IR and does not reduce all languages to
+  one instruction set.
+- The first provider stack is:
+  1. Tree-sitter syntax evidence for Rust, TypeScript, TSX, and JavaScript;
+  2. optional official SCIP protobuf evidence already present on disk;
+  3. a project-analyzer contract with no production compiler integration yet.
+- Compass never invokes an indexer, compiler, language server, network service,
+  or model in this foundation.
+- Native `compass update`, `extract`, and `watch` enable program analysis.
+  Graphify compatibility mode preserves its current file set and output.
+- A repository-root `index.scip` is discovered automatically. The repeatable
+  native CLI option `--program-artifact <PATH>` adds explicit artifacts.
+  Explicit missing paths are errors; an absent conventional artifact is not.
+- A raw SCIP index has no trustworthy source-content digest. Compass uses its
+  facts but marks affected semantic capabilities partial with
+  `artifact_revision_unverified`.
+- An optional companion file `<artifact>.compass-manifest.json` can prove
+  freshness. It contains the index SHA-256 and normalized path-to-source-digest
+  entries. A manifest/index digest mismatch is fatal. A source digest mismatch
+  excludes only that document and records `stale_artifact_document`.
+- Syntax evidence owns source structure, operation order, and exact spans.
+  SCIP may enrich symbol identity, definitions, references, roles,
+  implementations, types, and call targets. Authority is per capability.
+- Evidence conflicts are retained and lower only the affected capability's
+  coverage. Input order must never decide a conflict.
+- Unsupported source files produce no program module. SCIP for an unsupported
+  language continues through the existing structural graph ingestion path but
+  does not fabricate a Program IR body.
+- Absolute checkout paths, SCIP `project_root`, timestamps, protobuf field
+  order, provider input order, and cache location never enter canonical output.
+- Incremental and clean builds of the same logical inputs must emit identical
+  `program.json` bytes.
+- Program facts and summaries are authoritative historical state in their own
+  Prolly roots.
+- After code changes, run `compass update .` in this repository and then
+  `graphify update .` in `/Users/haipingfu/graphify`.
 
 ## Scope boundary
 
-This plan implements the first independently testable subproject from the
-technical-moat roadmap. It does not implement interprocedural fixed-point data
-flow, runtime evidence overlays, `compass impact`, federated repositories, or
-agent APIs. Those capabilities consume the stable interfaces produced here and
-receive separate specs and plans.
+This plan delivers the evidence ingestion and normalization foundation. It does
+not implement branch-complete CFGs, interprocedural fixed-point data flow,
+native compiler integrations, runtime overlays, semantic impact, repository
+federation, or agent APIs.
 
-The delivered artifact is:
+The first artifact schema is `compass.program/1`. It contains:
+
+- the exact provider manifest used for the build;
+- evidence provenance and capability-specific coverage;
+- normalized modules, functions, source anchors, operations, and resolutions;
+- deterministic function summaries and reverse-call dependencies.
+
+The foundation deliberately reports syntax-only limitations. A Tree-sitter
+provider may report complete syntax extraction and partial or unavailable type,
+call-resolution, CFG, data-flow, effect, and contract coverage at the same time.
+
+## Dependency direction and file ownership
 
 ```text
-compass-out/program.json
+compass-ir
+    ^
+    |
+compass-program <----- compass-languages
+    ^                         ^
+    |                         |
+compass-analysis         compass-core
+    ^                         |
+    +-------------------------+
+                              |
+                       compass-history
 ```
 
-Its schema is `compass.program/1`. It contains normalized per-file IR,
-deterministic function summaries, and a reverse-call index. It is authoritative
-static analysis state and participates in history realization identity.
-
-Because this capability has not shipped, the rename is a clean cut:
-implementations must never read, write, register, reserve, document, or migrate
-`.compass_program.json`. The only artifact name is `program.json`, under an
-output directory owned by Compass (`compass-out/`) or Graphify compatibility
-mode (`graphify-out/`, where program analysis remains disabled).
-
-The artifact lifecycle is complete only when all of these paths agree on that
-name and the same canonical value:
-
-1. native pipeline production and unchanged-build validation;
-2. per-file cache reconstruction;
-3. history ingestion, partitioning, publication, reopen, and materialization;
-4. full diff, topology-only exclusion, structural sharing, and garbage
-   collection;
-5. `history export --format compass-out`;
-6. documentation and clean-versus-incremental qualification.
-
-## File and responsibility map
+`compass-program` must not depend on `compass-languages` or `compass-core`.
+`compass-languages` implements provider traits defined by `compass-program`.
 
 ### New crates
 
-- `crates/compass-ir/Cargo.toml`: package metadata and minimal serialization dependencies.
-- `crates/compass-ir/src/lib.rs`: public exports and schema constants.
-- `crates/compass-ir/src/model.rs`: language-neutral IR and completeness types.
-- `crates/compass-ir/src/canonical.rs`: canonical ordering, bytes, and digest.
-- `crates/compass-ir/src/validation.rs`: structural invariants and typed errors.
-- `crates/compass-ir/tests/schema.rs`: serialization, determinism, and rejection coverage.
-- `crates/compass-analysis/Cargo.toml`: summary engine package metadata.
-- `crates/compass-analysis/src/lib.rs`: public summary and invalidation API.
-- `crates/compass-analysis/src/summary.rs`: per-function behavior summaries.
-- `crates/compass-analysis/src/invalidation.rs`: reverse dependencies and affected-summary closure.
-- `crates/compass-analysis/tests/summary.rs`: summary and incremental-equivalence coverage.
+- `crates/compass-ir/`: pure schema, canonicalization, validation, and digests.
+- `crates/compass-program/`: provider contracts, evidence model, SCIP decoder,
+  merge rules, and conflict diagnostics.
+- `crates/compass-analysis/`: immutable behavior summaries and invalidation.
 
-### Language adapters
+### Existing crates
 
-- `crates/compass-languages/src/program/mod.rs`: supported-language dispatch and adapter contract.
-- `crates/compass-languages/src/program/rust.rs`: Rust seed adapter.
-- `crates/compass-languages/src/program/typescript.rs`: TypeScript, TSX, and JavaScript seed adapter.
-- `crates/compass-languages/tests/program_ir.rs`: adapter fixtures and explicit partial-state tests.
+- `crates/compass-languages/src/program/`: Tree-sitter syntax providers.
+- `crates/compass-files/src/cache.rs`: isolated syntax and artifact caches.
+- `crates/compass-core/src/program.rs`: discovery, orchestration, merge,
+  summarization, and atomic output.
+- `crates/compass-history/`: Program IR and summary Prolly roots.
+- `crates/compass-cli/`: native artifact options and stable status reporting.
+- `crates/compass-output/src/backup.rs`: protected-output backup registration.
 
-### Pipeline and cache
-
-- `crates/compass-files/src/cache.rs`: versioned `Program` cache kind.
-- `crates/compass-files/tests/contracts.rs`: program-cache isolation and clearing.
-- `crates/compass-core/src/program.rs`: program analysis collection, canonical merge, and sidecar writing.
-- `crates/compass-core/src/pipeline.rs`: invoke program analysis beside AST extraction and include counts in `BuildResult`.
-- `crates/compass-core/src/lib.rs`: export program build result types.
-- `crates/compass-core/tests/program_pipeline.rs`: cold, warm, changed-file, deleted-file, and clean-build equivalence.
-- `crates/compass-output/src/backup.rs`: preserve `program.json` with protected authoritative output.
-
-### History
-
-- `crates/compass-history/src/model.rs`: optional schema-3 program root and count with schema-2 compatibility.
-- `crates/compass-history/src/artifacts.rs`: load, partition, reconstruct, register, and write the program artifact.
-- `crates/compass-history/src/keys.rs`: typed program keys.
-- `crates/compass-history/src/store.rs`: build, publish, open, and verify the program tree.
-- `crates/compass-history/src/validate.rs`: scan and validate program records and counts.
-- `crates/compass-history/src/diff.rs`: stream exact program-record changes in full diffs.
-- `crates/compass-history/src/gc.rs`: retain and prune schema-aware program named roots.
-- `crates/compass-history/tests/roundtrip.rs`: artifact round trip.
-- `crates/compass-history/tests/publication.rs`: schema-3 publication and schema-2 reopen.
-- `crates/compass-history/tests/fixtures/schema2_graph_version.json`: pre-schema-3 canonical manifest golden.
-- `crates/compass-history/tests/performance.rs`: structural sharing for unchanged summaries.
-- `crates/compass-history/tests/diff.rs`: program-record diff and topology-only exclusion.
-- `crates/compass-history/tests/maintenance.rs`: mixed schema-2/schema-3 garbage collection.
-
-### Product qualification
-
-- `crates/compass-core/src/history.rs`: include program algorithm versions in exact-checkout fingerprints.
-- `crates/compass-cli/src/lib.rs`: enable program analysis only for the Compass frontend and initialize every `BuildResult` fixture.
-- `crates/compass-cli/src/history_build.rs`: persist and validate program algorithm versions in history build profiles.
-- `crates/compass-cli/src/history_commands.rs`: include `program.json` in `history export --format compass-out`.
-- `crates/compass-cli/tests/program_cli.rs`: native CLI artifact and compatibility isolation.
-- `crates/compass-output/src/history_bundle.rs`: write and validate the authoritative `program.json` during history export.
-- `crates/compass-output/tests/history_bundle.rs`: exported program artifact equivalence and reserved-path coverage.
-- `scripts/qualify_program_foundation.sh`: clean/incremental equivalence qualification.
-- `README.md`: program artifact and language-tier documentation.
-- `PERFORMANCE.md`: qualification command and initial baseline fields.
+The existing `compass-languages/src/scip.rs` simplified-JSON structural graph
+ingestor remains unchanged. Official protobuf Program IR ingestion is a
+separate implementation in `compass-program`.
 
 ## Public interfaces fixed by this plan
 
+The names may be reorganized internally, but these semantic contracts must not
+change during implementation.
+
 ```rust
 // compass-ir
+pub const PROGRAM_SCHEMA: &str = "compass.program/1";
 pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
+
+pub type EvidenceId = String;
 pub type SymbolId = String;
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    Syntax,
+    Artifact,
+    Project,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Capability {
+    Syntax,
+    SymbolIdentity,
+    Definitions,
+    References,
+    Types,
+    CallResolution,
+    ControlFlow,
+    DataFlow,
+    Effects,
+    Contracts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CoverageState {
+    Complete,
+    Partial { reasons: Vec<String> },
+    Unavailable { reasons: Vec<String> },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProviderDescriptor {
+    pub id: String,
+    pub kind: ProviderKind,
+    pub version: String,
+    pub scope: String,
+    pub input_digest: String,
+    pub configuration_digest: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EvidenceRecord {
+    pub id: EvidenceId,
+    pub provider_id: String,
+    pub source_file: Option<String>,
+    pub capability: Capability,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProgramBundle {
-    pub schema_version: u32,
-    pub adapter_version: u32,
+    pub schema: String,
+    pub providers: Vec<ProviderDescriptor>,
+    pub evidence: Vec<EvidenceRecord>,
     pub modules: Vec<ModuleIr>,
 }
+```
 
-pub struct ModuleIr {
-    pub language: String,
-    pub source_file: String,
-    pub source_digest: String,
-    pub functions: Vec<FunctionIr>,
+Every `ModuleIr`, `FunctionIr`, `Operation`, type resolution, and call
+resolution has a sorted, deduplicated `evidence: Vec<EvidenceId>`. Modules and
+functions have `coverage: BTreeMap<Capability, CoverageState>`. A
+`SourceAnchor` contains only a normalized repository-relative path and a
+half-open UTF-8 byte span. Syntax calls store the callee identifier span
+separately from the full expression span so semantic occurrences can be joined
+without heuristics.
+
+```rust
+// compass-program
+pub struct FileInput<'a> {
+    pub source_file: &'a str,
+    pub language: &'a str,
+    pub source: &'a [u8],
 }
 
-pub struct FunctionIr {
-    pub symbol_id: SymbolId,
-    pub graph_node_id: String,
-    pub name: String,
-    pub span: SourceSpan,
-    pub signature_digest: String,
-    pub implementation_digest: String,
-    pub parameters: Vec<Parameter>,
-    pub return_type: Option<TypeRef>,
-    pub blocks: Vec<BasicBlock>,
-    pub completeness: Completeness,
+pub struct ArtifactInput<'a> {
+    pub logical_name: &'a str,
+    pub input_digest: &'a str,
+    pub byte_len: u64,
+    pub manifest: Option<&'a ArtifactManifest>,
+    pub source_digests: &'a BTreeMap<String, String>,
+    pub limits: ArtifactLimits,
 }
 
+pub struct ProjectInput<'a> {
+    pub repository_digest: &'a str,
+    pub build_context_digest: &'a str,
+    pub files: &'a [ProjectFile<'a>],
+}
+
+pub trait SyntaxProvider {
+    fn descriptor(&self, input: &FileInput<'_>) -> ProviderDescriptor;
+    fn analyze_file(
+        &mut self,
+        input: FileInput<'_>,
+    ) -> Result<Option<EvidenceBatch>, ProviderError>;
+}
+
+pub trait ArtifactProvider {
+    fn descriptor(&self, input: &ArtifactInput<'_>) -> ProviderDescriptor;
+    fn analyze_artifact(
+        &self,
+        input: ArtifactInput<'_>,
+        reader: &mut dyn ArtifactReader,
+    ) -> Result<EvidenceBatch, ProviderError>;
+}
+
+pub trait ProjectAnalyzer {
+    fn descriptor(
+        &self,
+        repository_digest: &str,
+        build_context_digest: &str,
+    ) -> ProviderDescriptor;
+    fn analyze_project(
+        &self,
+        input: ProjectInput<'_>,
+    ) -> Result<EvidenceBatch, ProviderError>;
+}
+
+pub fn merge_evidence(
+    batches: Vec<EvidenceBatch>,
+) -> Result<ProgramBundle, MergeError>;
+
+pub trait ArtifactReader: std::io::Read + std::io::Seek {}
+impl<T: std::io::Read + std::io::Seek> ArtifactReader for T {}
+```
+
+`EvidenceBatch` contains one descriptor, scoped facts, and declared coverage.
+It is validated before merging. `merge_evidence` sorts batches by the canonical
+descriptor tuple and produces the same bytes for every permutation. Descriptor
+IDs identify one provider invocation, not merely an implementation: syntax IDs
+include logical file scope and input digest, artifact IDs include artifact
+digest, and project IDs include repository and build-context digests.
+`ArtifactInput.logical_name` is diagnostic-only and is never copied into a
+descriptor or canonical evidence.
+
+```rust
 // compass-analysis
 pub const ANALYSIS_SCHEMA_VERSION: u32 = 1;
 pub const ANALYZER_VERSION: u32 = 1;
 
 pub struct AnalysisBundle {
-    pub schema_version: u32,
-    pub ir_schema_version: u32,
-    pub analyzer_version: u32,
     pub program: ProgramBundle,
-    pub summaries: Vec<BehaviorSummary>,
+    pub summaries: Vec<FunctionSummary>,
     pub reverse_calls: BTreeMap<SymbolId, Vec<SymbolId>>,
 }
 
 pub fn analyze(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError>;
-impl AnalysisBundle {
-    pub fn validate(&self) -> Result<(), AnalysisError>;
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AnalysisError>;
-}
-pub fn invalidation_plan(
-    previous: &AnalysisBundle,
-    current: &AnalysisBundle,
-) -> InvalidationPlan;
-
-// compass-languages
-pub const PROGRAM_ADAPTER_VERSION: u32 = 1;
-
-impl Engine {
-    pub fn program_ir_source(
-        &mut self,
-        path: &Path,
-        source: &[u8],
-    ) -> Result<Option<ModuleIr>, ExtractError>;
-}
 ```
 
-### Task 1: Add the versioned semantic IR crate
+## Task 1: Add the provenance-aware Program IR schema
 
 **Files:**
+
 - Modify: `Cargo.toml`
-- Modify: `Cargo.lock`
 - Create: `crates/compass-ir/Cargo.toml`
 - Create: `crates/compass-ir/src/lib.rs`
 - Create: `crates/compass-ir/src/model.rs`
@@ -206,106 +297,19 @@ impl Engine {
 - Create: `crates/compass-ir/src/validation.rs`
 - Create: `crates/compass-ir/tests/schema.rs`
 
-**Interfaces:**
-- Consumes: Serde, `serde_json`, SHA-256, and `thiserror`.
-- Produces: `ProgramBundle`, `ModuleIr`, `FunctionIr`, CFG operation types, `Completeness`, `IrError`, `canonical_bytes`, and `digest`.
+### Step 1: Write failing schema tests
 
-- [ ] **Step 1: Write the schema contract tests**
+Add tests that construct two logically identical bundles with reversed
+providers, evidence, modules, functions, blocks, operations, coverage reasons,
+and evidence IDs. Assert:
 
-Create `crates/compass-ir/tests/schema.rs` with fixtures that exercise ordering,
-CFG targets, completeness, and digests:
-
-```rust
-use compass_ir::{
-    BasicBlock, Completeness, FunctionIr, ModuleIr, Operation, OperationKind, ProgramBundle,
-    SourceSpan, Terminator, PROGRAM_SCHEMA_VERSION,
-};
-
-fn function(symbol: &str, callee: &str) -> FunctionIr {
-    FunctionIr {
-        symbol_id: symbol.to_owned(),
-        graph_node_id: symbol.to_owned(),
-        name: symbol.to_owned(),
-        span: SourceSpan::lines(1, 3),
-        signature_digest: "a".repeat(64),
-        implementation_digest: "b".repeat(64),
-        parameters: Vec::new(),
-        return_type: None,
-        blocks: vec![BasicBlock {
-            id: 0,
-            operations: vec![Operation {
-                ordinal: 0,
-                span: SourceSpan::lines(2, 2),
-                kind: OperationKind::Call {
-                    callee: callee.to_owned(),
-                    resolved_symbol: None,
-                    receiver_type: None,
-                },
-            }],
-            terminator: Terminator::Return,
-        }],
-        completeness: Completeness::Complete,
-    }
-}
-
-fn bundle(functions: Vec<FunctionIr>) -> ProgramBundle {
-    ProgramBundle {
-        schema_version: PROGRAM_SCHEMA_VERSION,
-        adapter_version: 1,
-        modules: vec![ModuleIr {
-            language: "rust".to_owned(),
-            source_file: "src/lib.rs".to_owned(),
-            source_digest: "c".repeat(64),
-            functions,
-        }],
-    }
-}
-
-#[test]
-fn canonical_bytes_ignore_module_and_function_insertion_order()
--> Result<(), Box<dyn std::error::Error>> {
-    let first = bundle(vec![function("b", "a"), function("a", "external")]);
-    let second = bundle(vec![function("a", "external"), function("b", "a")]);
-    assert_eq!(first.canonical_bytes()?, second.canonical_bytes()?);
-    assert_eq!(first.digest()?, second.digest()?);
-    Ok(())
-}
-
-#[test]
-fn validation_rejects_unknown_cfg_targets_and_duplicate_symbols() {
-    let mut invalid_target = function("a", "external");
-    invalid_target.blocks[0].terminator = Terminator::Goto { target: 7 };
-    assert!(bundle(vec![invalid_target]).validate().is_err());
-    assert!(bundle(vec![function("a", "x"), function("a", "y")])
-        .validate()
-        .is_err());
-}
-
-#[test]
-fn partial_reasons_are_nonempty_and_canonical()
--> Result<(), Box<dyn std::error::Error>> {
-    let mut item = function("a", "external");
-    item.completeness = Completeness::Partial {
-        reasons: vec!["reflection".to_owned(), "dynamic dispatch".to_owned()],
-    };
-    let value = bundle(vec![item]).canonicalized()?;
-    assert_eq!(
-        value.modules[0].functions[0].completeness,
-        Completeness::Partial {
-            reasons: vec!["dynamic dispatch".to_owned(), "reflection".to_owned()],
-        }
-    );
-    Ok(())
-}
-```
-
-Validation must reject `schema_version != PROGRAM_SCHEMA_VERSION`,
-`adapter_version == 0`, absolute or non-normalized `source_file` values,
-duplicate module paths, duplicate symbol IDs, invalid digests, empty partial
-reasons, and invalid CFG targets. An empty `graph_node_id` is permitted only
-when the function is partial with reason `missing_graph_identity`.
-
-- [ ] **Step 2: Run the tests and verify the crate is absent**
+- `canonical_bytes()` are identical;
+- `digest()` is identical;
+- canonical output contains `compass.program/1`;
+- absolute paths and unknown evidence IDs fail validation;
+- duplicate provider IDs and duplicate evidence IDs fail validation;
+- an operation may be syntax-complete while call resolution is partial;
+- every declared `EvidenceId` resolves to a record from a registered provider.
 
 Run:
 
@@ -313,330 +317,181 @@ Run:
 cargo test -p compass-ir --test schema
 ```
 
-Expected: Cargo fails because package `compass-ir` does not exist.
+Expected: Cargo reports that `compass-ir` does not exist.
 
-- [ ] **Step 3: Add the workspace package and schema types**
+### Step 2: Create the crate and schema
 
-Add `"crates/compass-ir"` to the root workspace members. Create
-`crates/compass-ir/Cargo.toml`:
+Add the crate to the workspace. Use only workspace `serde`, `serde_json`,
+`sha2`, and `thiserror`. Implement the public types above plus:
 
-```toml
-[package]
-name = "compass-ir"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-readme.workspace = true
-description.workspace = true
-keywords.workspace = true
-categories.workspace = true
+- `ModuleIr`, `FunctionIr`, `BasicBlock`, `Operation`, and `Terminator`;
+- `SourceAnchor { source_file, start_byte, end_byte }`;
+- `OperationKind::{Call, Read, Write, Await, Throw}`;
+- optional semantic identity and resolution fields without a provider-specific
+  payload;
+- `ProgramBundle::validate`, `canonicalized`, `canonical_bytes`, and `digest`.
 
-[dependencies]
-serde.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
+Canonicalization sorts and deduplicates every set-like field. It preserves
+source order only through explicit operation ordinals. Validation rejects:
 
-[lints]
-workspace = true
-```
+- noncanonical, absolute, empty, `.` or `..` source paths;
+- invalid or overlapping half-open byte spans where nesting is not allowed;
+- missing evidence and provider references;
+- duplicate IDs;
+- block edges to missing block IDs;
+- resolved call targets without call-resolution evidence;
+- `Complete` coverage with a nonempty reason list.
 
-Define the model in `src/model.rs`. Use `snake_case` enum serialization and
-ordered collections only where the order has semantic meaning:
+### Step 3: Prove checkout-root and provider-order independence
 
-```rust
-use serde::{Deserialize, Serialize};
-
-pub type SymbolId = String;
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ProgramBundle {
-    pub schema_version: u32,
-    pub adapter_version: u32,
-    pub modules: Vec<ModuleIr>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ModuleIr {
-    pub language: String,
-    pub source_file: String,
-    pub source_digest: String,
-    pub functions: Vec<FunctionIr>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct FunctionIr {
-    pub symbol_id: SymbolId,
-    pub graph_node_id: String,
-    pub name: String,
-    pub span: SourceSpan,
-    pub signature_digest: String,
-    pub implementation_digest: String,
-    pub parameters: Vec<Parameter>,
-    pub return_type: Option<TypeRef>,
-    pub blocks: Vec<BasicBlock>,
-    pub completeness: Completeness,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Parameter {
-    pub name: String,
-    pub type_ref: Option<TypeRef>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TypeRef {
-    pub display: String,
-    pub resolved_symbol: Option<SymbolId>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SourceSpan {
-    pub start_line: u32,
-    pub start_column: u32,
-    pub end_line: u32,
-    pub end_column: u32,
-}
-
-impl SourceSpan {
-    #[must_use]
-    pub const fn lines(start_line: u32, end_line: u32) -> Self {
-        Self {
-            start_line,
-            start_column: 0,
-            end_line,
-            end_column: 0,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BasicBlock {
-    pub id: u32,
-    pub operations: Vec<Operation>,
-    pub terminator: Terminator,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Operation {
-    pub ordinal: u32,
-    pub span: SourceSpan,
-    pub kind: OperationKind,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum OperationKind {
-    Call {
-        callee: String,
-        resolved_symbol: Option<SymbolId>,
-        receiver_type: Option<String>,
-    },
-    Read { path: String },
-    Write { path: String },
-    Await,
-    Throw,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Terminator {
-    Return,
-    Goto { target: u32 },
-    Branch { then_target: u32, else_target: u32 },
-    Unreachable,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum Completeness {
-    Complete,
-    Partial { reasons: Vec<String> },
-}
-```
-
-- [ ] **Step 4: Implement validation and canonicalization**
-
-In `src/validation.rs`, validate schema version `1`, lowercase SHA-256 text,
-unique source files and symbols, nonempty partial reasons, contiguous operation
-ordinals, unique block IDs, block zero, and valid branch targets. Define exact
-typed failures:
-
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum IrError {
-    #[error("unsupported program schema {0}")]
-    Schema(u32),
-    #[error("duplicate source file {0}")]
-    DuplicateSource(String),
-    #[error("duplicate symbol {0}")]
-    DuplicateSymbol(String),
-    #[error("function {symbol} has no entry block 0")]
-    MissingEntry { symbol: String },
-    #[error("function {symbol} block {block} targets missing block {target}")]
-    MissingTarget {
-        symbol: String,
-        block: u32,
-        target: u32,
-    },
-    #[error("function {symbol} block {block} has non-contiguous operation ordinals")]
-    OperationOrder { symbol: String, block: u32 },
-    #[error("partial analysis for {0} has no reason")]
-    EmptyPartialReason(String),
-    #[error("invalid SHA-256 digest in {field} for {owner}")]
-    Digest {
-        owner: String,
-        field: &'static str,
-    },
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
-}
-```
-
-In `src/canonical.rs`, clone and sort modules by `source_file`, functions by
-`symbol_id`, blocks by `id`, partial reasons lexicographically, and JSON object
-keys recursively. Do not reorder parameters, operations, or control-flow
-targets. Hash the canonical bytes with SHA-256.
-
-In `src/lib.rs`, re-export the types and implement:
-
-```rust
-pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
-
-impl ProgramBundle {
-    pub fn validate(&self) -> Result<(), IrError>;
-    pub fn canonicalized(&self) -> Result<Self, IrError>;
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IrError>;
-    pub fn digest(&self) -> Result<String, IrError>;
-}
-```
-
-- [ ] **Step 5: Run schema tests, formatting, and Clippy**
+Add fixtures whose logical paths and content are identical but whose temporary
+checkout roots differ. Add all `3!` permutations of three providers and assert
+one digest. Ensure provider `input_digest` changes the result while the
+artifact's absolute path does not.
 
 Run:
 
 ```bash
 cargo test -p compass-ir
-cargo fmt --check
 cargo clippy -p compass-ir --all-targets -- -D warnings
 ```
 
-Expected: all commands succeed.
+Expected: all tests pass.
 
-- [ ] **Step 6: Commit the IR contract**
+### Step 4: Commit
 
 ```bash
 git add Cargo.toml Cargo.lock crates/compass-ir
-git commit -m "feat(ir): add versioned semantic program schema"
+git commit -m "feat(ir): add provenance-aware Program IR schema"
 ```
 
-### Task 2: Add deterministic behavior summaries and invalidation
+## Task 2: Add provider contracts and deterministic evidence merge
 
 **Files:**
+
 - Modify: `Cargo.toml`
-- Modify: `Cargo.lock`
+- Create: `crates/compass-program/Cargo.toml`
+- Create: `crates/compass-program/src/lib.rs`
+- Create: `crates/compass-program/src/provider.rs`
+- Create: `crates/compass-program/src/evidence.rs`
+- Create: `crates/compass-program/src/merge.rs`
+- Create: `crates/compass-program/src/path.rs`
+- Create: `crates/compass-program/tests/merge.rs`
+
+### Step 1: Write merge-contract tests
+
+Create fixture syntax, artifact, and project batches for one call. Assert:
+
+1. syntax supplies the module, function, operation order, expression span, and
+   callee span;
+2. artifact evidence upgrades the callee to a semantic `SymbolId`;
+3. project evidence may add a type without replacing either source span;
+4. all six batch permutations produce byte-identical Program IR;
+5. two incompatible resolved targets are both retained and mark only
+   `CallResolution` partial with `provider_conflict`;
+6. an artifact occurrence without an unambiguous source anchor remains
+   unattached evidence and marks `unmatched_semantic_occurrence`;
+7. a fake `ProjectAnalyzer` can emit a batch without filesystem or process
+   access.
+
+Run:
+
+```bash
+cargo test -p compass-program --test merge
+```
+
+Expected: the package does not exist.
+
+### Step 2: Implement provider inputs and path safety
+
+Add `compass-ir`, `serde`, `serde_json`, `sha2`, and `thiserror`.
+`FileInput` and evidence batches accept logical paths only. Implement one path
+normalizer shared by the merger and later SCIP decoder:
+
+- convert separators to `/`;
+- reject absolute paths, drive prefixes, NUL, empty components, `.`, and `..`;
+- reject paths that normalize to the output directory or program cache;
+- preserve case and Unicode bytes;
+- return a typed `ProviderError::UnsafePath`.
+
+`ProjectInput` is an in-memory contract only. It contains normalized files and
+digests, not a checkout root or command runner.
+
+Generate every `EvidenceId` as lowercase SHA-256 over canonical bytes for
+`(provider_id, capability, normalized_path, anchor, fact_kind, fact_payload)`.
+The configuration digest includes only meaning-affecting normalized settings.
+For SCIP it distinguishes raw from companion-verified input by including the
+companion manifest digest; it never includes resource limits or filesystem
+paths. Provider algorithm and grammar changes increment the provider version.
+
+### Step 3: Implement capability-specific merge rules
+
+Implement these rules in `merge.rs`:
+
+- create source structure only from syntax or future project evidence that
+  explicitly declares source structure;
+- join semantic facts by exact source file and callee/identifier span first;
+- use a smallest-enclosing occurrence only when exactly one candidate exists;
+- prefer no result over a guessed match;
+- union identical facts and their evidence IDs;
+- retain incompatible facts and add deterministic conflict evidence;
+- compute module/function coverage per capability from attached facts and
+  provider declarations;
+- canonicalize after reconciliation, never before conflict detection;
+- reject a provider that claims facts outside its declared scope.
+
+Do not implement one global provider precedence number.
+
+### Step 4: Add property tests for order and idempotence
+
+Without adding a random dependency, generate deterministic permutations and
+duplicate-batch cases. Assert:
+
+```text
+merge(permutation(inputs)) == merge(inputs)
+merge(inputs + duplicate_identical_batch) == merge(inputs)
+merge(canonicalized_inputs) == merge(inputs)
+```
+
+Run:
+
+```bash
+cargo test -p compass-program
+cargo clippy -p compass-program --all-targets -- -D warnings
+```
+
+Expected: all tests pass.
+
+### Step 5: Commit
+
+```bash
+git add Cargo.toml Cargo.lock crates/compass-program
+git commit -m "feat(program): add evidence providers and deterministic merge"
+```
+
+## Task 3: Add deterministic summaries and invalidation
+
+**Files:**
+
+- Modify: `Cargo.toml`
 - Create: `crates/compass-analysis/Cargo.toml`
 - Create: `crates/compass-analysis/src/lib.rs`
 - Create: `crates/compass-analysis/src/summary.rs`
 - Create: `crates/compass-analysis/src/invalidation.rs`
 - Create: `crates/compass-analysis/tests/summary.rs`
 
-**Interfaces:**
-- Consumes: `compass_ir::ProgramBundle`.
-- Produces: `AnalysisBundle`, canonical program-artifact bytes, `BehaviorSummary`, `EffectKind`, `AnalysisError`, `analyze`, `InvalidationPlan`, and `invalidation_plan`.
+### Step 1: Write failing summary tests
 
-- [ ] **Step 1: Write failing summary and invalidation tests**
+Construct merged Program IR rather than provider-specific modules. Test:
 
-Create `crates/compass-analysis/tests/summary.rs`:
-
-```rust
-use compass_analysis::{EffectKind, analyze, invalidation_plan};
-use compass_ir::{
-    BasicBlock, Completeness, FunctionIr, ModuleIr, Operation, OperationKind, ProgramBundle,
-    SourceSpan, Terminator, PROGRAM_SCHEMA_VERSION,
-};
-
-fn program(body_digest: char, call: &str) -> ProgramBundle {
-    ProgramBundle {
-        schema_version: PROGRAM_SCHEMA_VERSION,
-        adapter_version: 1,
-        modules: vec![ModuleIr {
-            language: "rust".to_owned(),
-            source_file: "src/lib.rs".to_owned(),
-            source_digest: "c".repeat(64),
-            functions: vec![
-                FunctionIr {
-                    symbol_id: "caller".to_owned(),
-                    graph_node_id: "caller".to_owned(),
-                    name: "caller".to_owned(),
-                    span: SourceSpan::lines(1, 4),
-                    signature_digest: "a".repeat(64),
-                    implementation_digest: body_digest.to_string().repeat(64),
-                    parameters: Vec::new(),
-                    return_type: None,
-                    blocks: vec![BasicBlock {
-                        id: 0,
-                        operations: vec![
-                            Operation {
-                                ordinal: 0,
-                                span: SourceSpan::lines(2, 2),
-                                kind: OperationKind::Call {
-                                    callee: call.to_owned(),
-                                    resolved_symbol: Some(call.to_owned()),
-                                    receiver_type: None,
-                                },
-                            },
-                            Operation {
-                                ordinal: 1,
-                                span: SourceSpan::lines(3, 3),
-                                kind: OperationKind::Await,
-                            },
-                        ],
-                        terminator: Terminator::Return,
-                    }],
-                    completeness: Completeness::Complete,
-                },
-            ],
-        }],
-    }
-}
-
-#[test]
-fn summaries_collect_calls_effects_and_reverse_edges()
--> Result<(), Box<dyn std::error::Error>> {
-    let analysis = analyze(program('b', "callee"))?;
-    let summary = &analysis.summaries[0];
-    assert_eq!(
-        summary.resolved_callees,
-        std::collections::BTreeSet::from(["callee".to_owned()])
-    );
-    assert!(summary.effects.contains(&EffectKind::Awaits));
-    assert_eq!(analysis.reverse_calls["callee"], ["caller"]);
-    Ok(())
-}
-
-#[test]
-fn invalidation_closes_over_reverse_callers()
--> Result<(), Box<dyn std::error::Error>> {
-    let previous = analyze(program('b', "callee"))?;
-    let current = analyze(program('d', "callee"))?;
-    let plan = invalidation_plan(&previous, &current);
-    assert_eq!(
-        plan.changed,
-        std::collections::BTreeSet::from(["caller".to_owned()])
-    );
-    assert_eq!(
-        plan.affected,
-        std::collections::BTreeSet::from(["caller".to_owned()])
-    );
-    Ok(())
-}
-```
-
-- [ ] **Step 2: Run the tests and verify the package is absent**
+- calls, reads, writes, awaits, throws, and unresolved calls are summarized;
+- summary evidence is the sorted union of supporting operation evidence;
+- capability coverage propagates without collapsing into one global state;
+- reverse calls use only unambiguous resolved targets;
+- provider-conflicted calls do not enter the definitive reverse-call index;
+- changing one body digest invalidates its summary and the reverse resolved
+  callers, while changing unattached evidence invalidates nothing;
+- clean recomputation equals incremental recomputation byte for byte.
 
 Run:
 
@@ -644,749 +499,434 @@ Run:
 cargo test -p compass-analysis --test summary
 ```
 
-Expected: Cargo fails because package `compass-analysis` does not exist.
+Expected: the package does not exist.
 
-- [ ] **Step 3: Add summary model and aggregation**
+### Step 2: Implement summaries
 
-Create the package with dependencies on `compass-ir`, Serde, SHA-256,
-`serde_json`, and `thiserror`. Define:
+Add `compass-ir` and no dependency on provider implementations. Define
+`FunctionSummary` with symbol, body digest, calls, reads, writes, effects,
+errors, evidence, coverage, and summary digest. Keep unresolved call text
+separate from resolved `SymbolId` values.
 
-```rust
-use std::collections::{BTreeMap, BTreeSet};
-use compass_ir::{Completeness, ProgramBundle, SymbolId};
-use serde::{Deserialize, Serialize};
+`AnalysisBundle::canonical_bytes()` validates the embedded Program IR, sorts
+summaries and reverse dependencies, and uses the same canonical JSON rules as
+`compass-ir`.
 
-pub const ANALYSIS_SCHEMA_VERSION: u32 = 1;
-pub const ANALYZER_VERSION: u32 = 1;
+### Step 3: Implement invalidation
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EffectKind {
-    ReadsState,
-    WritesState,
-    Awaits,
-    MayThrow,
-    CallsUnknown,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BehaviorSummary {
-    pub symbol_id: SymbolId,
-    pub signature_digest: String,
-    pub implementation_digest: String,
-    pub resolved_callees: BTreeSet<SymbolId>,
-    pub unresolved_callees: BTreeSet<String>,
-    pub reads: BTreeSet<String>,
-    pub writes: BTreeSet<String>,
-    pub effects: BTreeSet<EffectKind>,
-    pub completeness: Completeness,
-    pub summary_digest: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisBundle {
-    pub schema_version: u32,
-    pub ir_schema_version: u32,
-    pub analyzer_version: u32,
-    pub program: ProgramBundle,
-    pub summaries: Vec<BehaviorSummary>,
-    pub reverse_calls: BTreeMap<SymbolId, Vec<SymbolId>>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AnalysisError {
-    #[error(transparent)]
-    Ir(#[from] compass_ir::IrError),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
-    #[error("invalid analysis bundle: {0}")]
-    InvalidBundle(String),
-}
-```
-
-`ANALYSIS_SCHEMA_VERSION` versions the serialized result shape.
-`ANALYZER_VERSION` versions meaning-affecting summary behavior even when the
-shape does not change and is serialized into `AnalysisBundle.analyzer_version`.
-`ProgramBundle.adapter_version` records the meaning-affecting producer version
-supplied by the pipeline. `analyze` validates and canonicalizes the program,
-visits operations in block and ordinal order, collects call/read/write/effect sets, computes a digest from
-the summary with an empty `summary_digest`, sorts summaries by `symbol_id`, and
-deduplicates every reverse-call caller list.
-
-`AnalysisBundle::validate` must prove:
-
-- current analysis, IR, and analyzer versions plus a valid nested program;
-- exactly one summary for every function and no summary for an unknown symbol;
-- summary signature, implementation, and completeness fields match their
-  source function;
-- every `summary_digest` recomputes exactly;
-- every resolved callee names a program symbol; and
-- `reverse_calls` is the exact duplicate-free inverse of resolved calls,
-  independent of input vector order.
-
-Add negative tests for a forged summary digest, a missing summary, a dangling
-resolved callee, and an inconsistent reverse-call entry.
-
-`AnalysisBundle::canonical_bytes` validates current IR/analysis schemas, a
-nonzero recorded adapter version, and the current analyzer version;
-canonicalizes a clone of its nested program, summaries, sets, and reverse-call
-vectors; validates that canonical clone; then returns compact UTF-8
-`serde_json` bytes with no trailing newline.
-It is the sole byte contract for native output, history registry digests, and
-history export. Add a test with non-ASCII identifiers and reversed insertion
-order that asserts two equivalent bundles produce identical bytes.
-
-- [ ] **Step 4: Implement deterministic invalidation**
-
-Define:
+Expose:
 
 ```rust
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct InvalidationPlan {
-    pub added: BTreeSet<SymbolId>,
-    pub removed: BTreeSet<SymbolId>,
-    pub changed: BTreeSet<SymbolId>,
-    pub affected: BTreeSet<SymbolId>,
-}
+pub fn affected_summaries(
+    previous: &AnalysisBundle,
+    current: &ProgramBundle,
+) -> Result<BTreeSet<SymbolId>, AnalysisError>;
 ```
 
-`invalidation_plan` compares `summary_digest` by symbol. Seed `affected` with
-added, removed, and changed symbols, then breadth-first traverse the union of
-the previous and current `reverse_calls` maps until no new caller is added.
-Use a `VecDeque` and `BTreeSet` so output is deterministic.
-
-- [ ] **Step 5: Run focused and workspace-compatible checks**
+Compare semantic function digests, then walk the previous and current reverse
+resolved-call indexes to a fixed point. Provider manifest changes alone do not
+invalidate every summary; only changed merged function facts do.
 
 Run:
 
 ```bash
 cargo test -p compass-analysis
-cargo fmt --check
 cargo clippy -p compass-analysis --all-targets -- -D warnings
 ```
 
-Expected: all commands succeed.
+Expected: all tests pass.
 
-- [ ] **Step 6: Commit the analysis engine**
+### Step 4: Commit
 
 ```bash
 git add Cargo.toml Cargo.lock crates/compass-analysis
-git commit -m "feat(analysis): summarize program behavior and invalidation"
+git commit -m "feat(analysis): derive evidence-backed function summaries"
 ```
 
-### Task 3: Add a schema-isolated program cache
+## Task 4: Add scope-correct program caches
 
 **Files:**
+
 - Modify: `crates/compass-files/src/cache.rs`
+- Modify: `crates/compass-files/src/lib.rs`
 - Modify: `crates/compass-files/tests/contracts.rs`
 
-**Interfaces:**
-- Consumes: existing content hashing, atomic JSON writes, and path normalization.
-- Produces: `CacheKind::Program { ir_schema: u32, adapter_version: u32, analysis_schema: u32, analyzer_version: u32 }` with repository-relative, path-sensitive entry identities and live-key pruning.
+### Step 1: Write failing cache isolation tests
 
-- [ ] **Step 1: Add a failing cache-isolation test**
-
-Append to `crates/compass-files/tests/contracts.rs`:
+Test three independent namespaces:
 
 ```rust
-#[test]
-fn program_cache_is_path_sensitive_and_version_isolated()
--> Result<(), Box<dyn std::error::Error>> {
-    let directory = tempfile::tempdir()?;
-    let first = directory.path().join("a/main.rs");
-    let second = directory.path().join("b/main.rs");
-    std::fs::create_dir_all(first.parent().ok_or("first parent missing")?)?;
-    std::fs::create_dir_all(second.parent().ok_or("second parent missing")?)?;
-    std::fs::write(&first, "fn main() {}\n")?;
-    std::fs::write(&second, "fn main() {}\n")?;
-    let mut cache = Cache::new(directory.path(), None)?;
-    let v1 = CacheKind::Program {
-        ir_schema: 1,
-        adapter_version: 1,
-        analysis_schema: 1,
-        analyzer_version: 1,
-    };
-    let v2 = CacheKind::Program {
-        ir_schema: 1,
-        adapter_version: 2,
-        analysis_schema: 1,
-        analyzer_version: 1,
-    };
-    cache.save(
-        &first,
-        &serde_json::json!({"source_file": "a/main.rs"}),
-        &v1,
-        None,
-    )?;
-    cache.save(
-        &second,
-        &serde_json::json!({"source_file": "b/main.rs"}),
-        &v1,
-        None,
-    )?;
-    let first_value = cache
-        .load(&first, &v1, None, false, false)?
-        .ok_or("first program cache entry missing")?;
-    let second_value = cache
-        .load(&second, &v1, None, false, false)?
-        .ok_or("second program cache entry missing")?;
-    assert_eq!(
-        first_value["source_file"].as_str(),
-        Some("a/main.rs")
-    );
-    assert_eq!(
-        second_value["source_file"].as_str(),
-        Some("b/main.rs")
-    );
-    assert!(cache.load(&first, &v2, None, false, false)?.is_none());
-    assert_ne!(cache.directory(&v1, None), cache.directory(&v2, None));
-    cache.clear();
-    assert!(cache.load(&first, &v1, None, false, false)?.is_none());
-    Ok(())
+CacheKind::ProgramSyntax {
+    ir_schema: 1,
+    provider_version: "tree-sitter-rust/1".to_owned(),
+}
+CacheKind::ProgramArtifact {
+    ir_schema: 1,
+    decoder_version: "scip/1".to_owned(),
+}
+CacheKind::ProgramMerge {
+    ir_schema: 1,
+    merger_version: 1,
+    analyzer_version: 1,
 }
 ```
 
-Add a second case with two different checkout roots, one shared external cache
-root, and the same `src/lib.rs` bytes. Save from the first checkout, load from
-the second, and assert the cache hits while the stored and loaded
-`source_file` remains exactly `src/lib.rs`.
+Assert:
 
-Add a pruning case that saves a program entry, changes that file, saves its new
-entry, deletes a second cached source, and calls:
-
-```rust
-cache.prune_program(&v1, &[changed.clone()])?
-```
-
-Assert the changed file's current entry remains, its old-content entry and the
-deleted-file entry are removed, and other cache kinds are untouched.
-
-- [ ] **Step 2: Run the test and verify the enum variant is absent**
+- syntax keys include normalized relative path plus source digest;
+- same bytes at different logical paths do not alias;
+- artifact keys include artifact digest and decoder version;
+- changing `index.scip` does not evict syntax entries;
+- merge keys include the canonical provider-manifest digest;
+- corrupt JSON is ignored and recomputed;
+- `clear_all` and the existing cache cleanup include all three namespaces.
 
 Run:
 
 ```bash
-cargo test -p compass-files --test contracts program_cache_is_path_sensitive
+cargo test -p compass-files --test contracts program_cache
 ```
 
-Expected: compilation fails because `CacheKind::Program` is undefined.
+Expected: compilation fails because the variants do not exist.
 
-- [ ] **Step 3: Implement the program cache namespace**
+### Step 2: Add logical-input cache APIs
 
-Extend `CacheKind`:
+The current cache API hashes filesystem paths and absolutizes graph source
+fields. Do not reuse that behavior for Program IR. Add:
 
 ```rust
-Program {
-    ir_schema: u32,
-    adapter_version: u32,
-    analysis_schema: u32,
-    analyzer_version: u32,
-},
-```
-
-Map it to:
-
-```rust
-format!(
-    "program/ir{ir_schema}-adapter{adapter_version}-analysis{analysis_schema}-analyzer{analyzer_version}"
-)
-```
-
-Add a private `entry_key(&mut self, path: &Path, kind: &CacheKind)` used by
-`load`, `save`, and `save_batch`. Existing kinds retain the current content hash.
-For `Program`, compute lowercase SHA-256 over:
-
-```text
-normalized repository-relative path bytes
-0x00
-content hash bytes
-```
-
-Normalize separators to `/` and reject a path outside `Cache::root`. Update
-`cached_files` and `clear` to recurse through `cache/program`. Do not allow
-semantic prompt fingerprints or AST extractor-version fallback for this kind.
-The existing generic cache transforms absolute `source_file` values on save
-and load; bypass both transforms for `Program`. Program values must already
-contain the normalized repository-relative path used by `entry_key`, and
-`save`/`save_batch` reject a mismatched, absolute, or non-normalized
-`source_file`.
-On `load`, treat a missing or mismatched program `source_file` as a cache miss
-rather than returning it.
-
-Implement:
-
-```rust
-pub fn prune_program(
-    &mut self,
+pub fn load_program<T: DeserializeOwned>(
+    &self,
     kind: &CacheKind,
-    live_paths: &[PathBuf],
-) -> Result<usize, FileError>;
+    logical_key: &str,
+) -> Result<Option<T>, FileError>;
+
+pub fn save_program<T: Serialize>(
+    &self,
+    kind: &CacheKind,
+    logical_key: &str,
+    value: &T,
+) -> Result<(), FileError>;
 ```
 
-Require `kind` to be `Program`, compute the current live `entry_key` set, and
-delete only obsolete JSON entries in that exact version directory. Missing live
-files are excluded. Never prune `Ast` or semantic namespaces through this API;
-`clear` remains the explicit all-version cleanup.
-Keep the existing `Ast`, `Semantic`, and `SemanticMode` paths byte-for-byte
-unchanged.
+Hash the UTF-8 logical key with SHA-256. Program cache values must never pass
+through `absolutize_source_files`. Save atomically. Validate loaded values in
+their owning crate; a cache hit is not trusted merely because JSON parsed.
 
-- [ ] **Step 4: Run cache and file-contract tests**
+### Step 3: Add pruning by live logical key
+
+Add namespace-specific pruning after a successful provider phase. Never prune
+syntax entries after artifact failure, and never prune artifact shards after
+syntax failure. Add interrupted-write and concurrent-reader coverage.
 
 Run:
 
 ```bash
-cargo test -p compass-files --test contracts
+cargo test -p compass-files
 cargo clippy -p compass-files --all-targets -- -D warnings
 ```
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit the cache contract**
+### Step 4: Commit
 
 ```bash
-git add crates/compass-files/src/cache.rs crates/compass-files/tests/contracts.rs
-git commit -m "feat(files): add versioned program analysis cache"
+git add crates/compass-files
+git commit -m "feat(files): add isolated program evidence caches"
 ```
 
-### Task 4: Add the adapter contract and Rust seed IR
+## Task 5: Implement the Tree-sitter syntax baseline
 
 **Files:**
+
 - Modify: `crates/compass-languages/Cargo.toml`
 - Modify: `crates/compass-languages/src/lib.rs`
 - Modify: `crates/compass-languages/src/engine.rs`
 - Create: `crates/compass-languages/src/program/mod.rs`
 - Create: `crates/compass-languages/src/program/rust.rs`
-- Create: `crates/compass-languages/tests/program_ir.rs`
+- Create: `crates/compass-languages/src/program/typescript.rs`
+- Create: `crates/compass-languages/tests/program_evidence.rs`
 
-**Interfaces:**
-- Consumes: `compass-ir`, the existing registry, parser cache, tree-sitter trees, `make_id`, and source bytes.
-- Produces: `PROGRAM_ADAPTER_VERSION`, `Engine::program_ir_source`, and Rust `ModuleIr` records.
+### Step 1: Write failing provider tests
 
-- [ ] **Step 1: Write failing Rust adapter tests**
+Use `TreeSitterSyntaxProvider::default()` through the `SyntaxProvider` trait.
+Add Rust and TypeScript fixtures containing functions, methods, calls, reads,
+writes, `await`, `throw`/panic, branches, and ambiguous dispatch.
 
-Create `crates/compass-languages/tests/program_ir.rs`:
+Assert:
 
-```rust
-use std::path::Path;
-use compass_ir::{Completeness, OperationKind};
-use compass_languages::Engine;
-
-#[test]
-fn rust_program_ir_captures_functions_calls_state_and_await()
--> Result<(), Box<dyn std::error::Error>> {
-    let source = br#"
-async fn load(state: &mut State) -> Result<Item, Error> {
-    state.count = state.count + 1;
-    let item = fetch(state.id).await?;
-    Ok(item)
-}
-"#;
-    let module = Engine::default()
-        .program_ir_source(Path::new("src/lib.rs"), source)?
-        .ok_or("Rust adapter returned no module")?;
-    assert_eq!(module.language, "rust");
-    let function = &module.functions[0];
-    assert_eq!(function.name, "load");
-    assert_eq!(function.blocks[0].id, 0);
-    let operations = function
-        .blocks
-        .iter()
-        .flat_map(|block| &block.operations)
-        .map(|operation| &operation.kind)
-        .collect::<Vec<_>>();
-    assert!(operations.iter().any(|kind| matches!(
-        kind,
-        OperationKind::Call { callee, .. } if callee == "fetch"
-    )));
-    assert!(operations.iter().any(|kind| matches!(kind, OperationKind::Write { .. })));
-    assert!(operations.iter().any(|kind| matches!(kind, OperationKind::Await)));
-    assert!(matches!(
-        function.completeness,
-        Completeness::Partial { ref reasons }
-            if reasons.iter().any(|reason| reason == "question_mark_control_flow")
-    ));
-    Ok(())
-}
-
-#[test]
-fn unsupported_languages_return_no_program_module()
--> Result<(), Box<dyn std::error::Error>> {
-    let module = Engine::default()
-        .program_ir_source(Path::new("main.go"), b"package main")
-        ?;
-    assert!(module.is_none());
-    Ok(())
-}
-```
-
-- [ ] **Step 2: Run the tests and verify the API is absent**
+- supported files return one valid `EvidenceBatch`;
+- unsupported Go returns `None`;
+- exact operation and callee spans slice the expected source bytes;
+- syntax, definitions, and lexical effects have syntax evidence IDs;
+- types and call resolution are partial or unavailable rather than invented;
+- a uniquely resolvable same-module call may carry a conservative local target;
+- traits, imports, virtual calls, dynamic access, macros, decorators, JSX, and
+  branch-sensitive CFGs add exact capability reasons;
+- two identical files at different logical paths have distinct symbol IDs;
+- all TypeScript-family registry extensions dispatch correctly.
 
 Run:
 
 ```bash
-cargo test -p compass-languages --test program_ir rust_program_ir
+cargo test -p compass-languages --test program_evidence
 ```
 
-Expected: compilation fails because `program_ir_source` is undefined.
+Expected: `TreeSitterSyntaxProvider` is undefined.
 
-- [ ] **Step 3: Add the program dispatch API**
+### Step 2: Add the provider dispatch
 
-Add `compass-ir` to `compass-languages/Cargo.toml`. In `program/mod.rs`, expose
-crate-local adapters:
+Add dependencies on `compass-ir` and `compass-program`. Export:
 
 ```rust
-mod rust;
-mod typescript;
-
-use std::path::Path;
-use compass_ir::ModuleIr;
-use tree_sitter::Node;
-
-pub const PROGRAM_ADAPTER_VERSION: u32 = 1;
-
-pub(crate) fn extract(
-    language: &str,
-    path: &Path,
-    source: &[u8],
-    root: Node<'_>,
-) -> Option<ModuleIr> {
-    match language {
-        "rust" => Some(rust::extract(path, source, root)),
-        "javascript" | "typescript" | "tsx" => {
-            Some(typescript::extract(language, path, source, root))
-        }
-        _ => None,
-    }
+pub const TREE_SITTER_PROGRAM_PROVIDER_VERSION: u32 = 1;
+pub struct TreeSitterSyntaxProvider {
+    engine: Engine,
 }
 ```
 
-In `Engine`, implement `program_ir_source` by resolving the existing
-`LanguageSpec`, returning `Ok(None)` before parsing unsupported languages,
-parsing with the existing cached parser, invoking `program::extract`, then
-validating the one-module bundle. Map an invalid adapter result to:
+Implement `SyntaxProvider` by resolving the existing `LanguageSpec`, parsing
+with the existing statically linked grammar, and dispatching to the Rust or
+TypeScript-family module. Do not expose the old proposed
+`Engine::program_ir_source` API; providers emit `EvidenceBatch`, not final IR.
 
-```rust
-ExtractError::InvalidProgram {
-    path: path.to_path_buf(),
-    detail: error.to_string(),
-}
+Map invalid output to a typed `ExtractError::InvalidProgramEvidence` containing
+the logical path and validation detail.
+
+### Step 3: Implement Rust syntax evidence
+
+Reuse existing Tree-sitter nodes and structural graph identity helpers. Emit:
+
+- functions and `impl` methods;
+- stable symbols based on logical path, qualified owner, name, and signature
+  digest;
+- signature and body digests;
+- a conservative entry block and source-ordered operations;
+- exact identifier spans for calls and exact expression spans for operations;
+- reads, writes, awaits, explicit returns, panic/error macro calls;
+- unique same-module call resolution only when provable from syntax.
+
+Mark capability-specific reasons including:
+
+```text
+branch_sensitive_cfg
+question_mark_control_flow
+macro_expansion_unavailable
+trait_dispatch_unresolved
+reflection_unresolved
+graph_identity_collision
 ```
 
-Add that exact variant to `ExtractError`.
+Do not mark type or data-flow coverage complete.
 
-Adapters reproduce the existing structural extractor's `make_id` inputs when a
-function has a structural graph node. If no exact existing identity can be
-proven, emit an empty `graph_node_id` and add `missing_graph_identity`; never
-invent a dangling graph reference.
+### Step 4: Implement TypeScript-family syntax evidence
 
-The public re-export in `compass-languages/src/lib.rs` is:
+Cover functions, methods, variable-bound arrow functions, calls, property
+reads, writes, `await`, `throw`, and explicit returns for `.ts`, `.mts`, `.cts`,
+`.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs`.
 
-```rust
-pub use program::PROGRAM_ADAPTER_VERSION;
+Use exact reasons:
+
+```text
+compiler_types_unavailable
+import_resolution_unavailable
+dynamic_property_access
+prototype_mutation
+decorator_semantics
+eval_or_function_constructor
+branch_sensitive_cfg
+exception_flow
+jsx_framework_dispatch
 ```
 
-- [ ] **Step 4: Implement the Rust seed adapter**
-
-The Rust adapter must:
-
-- create one `FunctionIr` for free functions and `impl` methods;
-- use the same `make_id` inputs as `rust_lang.rs` for `graph_node_id`;
-- receive a normalized repository-relative path with `/` separators from
-  `compass-core`, never an absolute checkout path;
-- derive `symbol_id` from that normalized source path, the fully qualified impl
-  owner (`Type` or `<Type as Trait>`), function name, and signature digest;
-- hash the signature range and body range separately with SHA-256;
-- preserve parameter order and return-type spelling;
-- emit a deterministic entry block `0`;
-- emit calls, field reads, assignment writes, `await`, explicit `return`, and
-  explicit panic/error macro calls;
-- mark `?`, macro-expanded behavior, trait dispatch, and reflection-like calls
-  as named partial reasons;
-- preserve source order through operation ordinals.
-- pre-collect same-module definitions and set `resolved_symbol` only when an
-  unqualified call has exactly one same-module target; every other call remains
-  unresolved.
-
-The existing structural Rust extractor intentionally collapses some trait-impl
-methods onto the same `graph_node_id`. Do not change that extractor in this
-plan. Preserve distinct program `symbol_id` values, mark each affected
-function partial with `graph_identity_collision`, and leave calls between the
-colliding candidates unresolved. Add a fixture with two traits implementing
-the same method name for one type to lock this behavior.
-
-Use these helpers:
-
-```rust
-fn span(node: tree_sitter::Node<'_>) -> compass_ir::SourceSpan;
-fn text<'a>(source: &'a [u8], node: tree_sitter::Node<'_>) -> &'a str;
-fn sha256(bytes: &[u8]) -> String;
-fn function_id(
-    path: &Path,
-    owner: Option<&str>,
-    name: &str,
-    signature_digest: &str,
-) -> String;
-fn collect_operations(
-    source: &[u8],
-    body: tree_sitter::Node<'_>,
-) -> (Vec<compass_ir::Operation>, Vec<String>);
-```
-
-The seed adapter intentionally emits one basic block per function with a
-`Return` or `Unreachable` terminator. Full branch-sensitive CFG construction is
-the next Rust deep-analysis subproject. Encountering `if`, `match`, a loop,
-`break`, `continue`, or `?` therefore adds an exact partial reason rather than
-claiming a complete CFG.
-
-- [ ] **Step 5: Run Rust adapter and existing extraction tests**
+### Step 5: Verify structural extraction did not change
 
 Run:
 
 ```bash
-cargo test -p compass-languages --test program_ir rust_program_ir
+cargo test -p compass-languages --test program_evidence
 cargo test -p compass-languages
 cargo clippy -p compass-languages --all-targets -- -D warnings
 ```
 
-Expected: all commands succeed and existing graph extraction fixtures remain
-unchanged.
+Expected: all new tests pass and existing graph fixtures remain byte-equivalent.
 
-- [ ] **Step 6: Commit the Rust adapter**
+### Step 6: Commit
 
 ```bash
 git add crates/compass-languages
-git commit -m "feat(languages): add Rust semantic IR seed adapter"
+git commit -m "feat(languages): add Tree-sitter program evidence providers"
 ```
 
-### Task 5: Add the TypeScript and JavaScript seed adapter
+## Task 6: Ingest official SCIP as an offline artifact provider
 
 **Files:**
-- Modify: `crates/compass-languages/src/program/typescript.rs`
-- Modify: `crates/compass-languages/tests/program_ir.rs`
 
-**Interfaces:**
-- Consumes: the adapter dispatch from Task 4.
-- Produces: `ModuleIr` for `.ts`, `.mts`, `.cts`, `.tsx`, `.js`, `.jsx`,
-  `.mjs`, and `.cjs` inputs.
+- Modify: `Cargo.toml`
+- Modify: `crates/compass-program/Cargo.toml`
+- Modify: `crates/compass-program/src/lib.rs`
+- Create: `crates/compass-program/src/scip.rs`
+- Create: `crates/compass-program/src/scip_stream.rs`
+- Create: `crates/compass-program/src/manifest.rs`
+- Create: `crates/compass-program/tests/scip.rs`
+- Create: `crates/compass-program/tests/support/scip_fixture.rs`
 
-- [ ] **Step 1: Add failing TypeScript behavior tests**
+### Step 1: Add official SCIP fixtures and failing tests
 
-Append:
+Build fixtures in memory from the official generated message types and serialize
+them with `Message::write_to_bytes`; pass the bytes through `Cursor<Vec<u8>>`.
+The support module also writes top-level fields in alternate valid wire orders
+for the order-independence case. Tests must cover:
+
+- metadata and document path normalization;
+- UTF-8 and UTF-16 occurrence-range conversion to UTF-8 byte spans;
+- definitions, references, imports, reads, writes, implementations, type
+  definitions, symbol kind, and enclosing range;
+- symbol and relationship identity without copying `project_root`;
+- unknown protobuf fields;
+- raw index coverage reason `artifact_revision_unverified`;
+- valid companion manifest removes that reason;
+- stale source digest skips only the stale document;
+- companion index-digest mismatch fails the artifact;
+- absolute, parent-traversing, duplicate-normalized, and output-directory
+  document paths fail;
+- malformed, truncated, oversized-document, excessive-record, and unsupported
+  text-encoding cases return typed errors;
+- protobuf field order and input document order do not affect normalized batch
+  bytes.
+
+Run:
+
+```bash
+cargo test -p compass-program --test scip
+```
+
+Expected: `OfficialScipProvider` is undefined.
+
+### Step 2: Pin official bindings and implement bounded streaming
+
+Add workspace `scip = "=0.9.0"` and the exact compatible `protobuf` version
+selected into `Cargo.lock`. Do not shell out to `scip`, an indexer, or `protoc`.
+
+Define:
 
 ```rust
-#[test]
-fn typescript_program_ir_captures_methods_callbacks_and_effects()
--> Result<(), Box<dyn std::error::Error>> {
-    let source = br#"
-export class Checkout {
-  async submit(order: Order): Promise<Result> {
-    this.pending = order.id;
-    const result = await gateway.charge(order);
-    return result;
+pub const SCIP_PROVIDER_VERSION: u32 = 1;
+
+pub struct ArtifactLimits {
+    pub max_artifact_bytes: u64,   // default 2 GiB
+    pub max_document_bytes: u64,   // default 64 MiB
+    pub max_metadata_bytes: u64,   // default 8 MiB
+    pub max_records: u64,          // default 50,000,000
+}
+```
+
+Read the top-level protobuf wire format in safe Rust and decode one length-
+delimited `Document` at a time with official message types. Use a seekable
+two-pass reader so metadata and document encoding are known even when protobuf
+fields arrive in a different order: the first pass validates metadata and
+external symbols; the second normalizes documents. Retain external symbols only
+as bounded normalized maps. Do not deserialize the whole index into one object
+or read it into one `Vec<u8>`. Check the file length before reading and
+checked-add all record counters.
+
+### Step 3: Implement the companion manifest
+
+Schema:
+
+```json
+{
+  "schema": "compass.scip-manifest/1",
+  "index_sha256": "<lowercase hex>",
+  "documents": {
+    "src/lib.rs": "<source sha256>"
   }
 }
-
-export const retry = (job: Job) => queue.enqueue(job);
-"#;
-    let module = Engine::default()
-        .program_ir_source(Path::new("src/checkout.ts"), source)?
-        .ok_or("TypeScript adapter returned no module")?;
-    assert_eq!(module.language, "typescript");
-    assert_eq!(
-        module.functions.iter().map(|function| function.name.as_str()).collect::<Vec<_>>(),
-        ["Checkout.submit", "retry"]
-    );
-    let submit = &module.functions[0];
-    assert!(submit.blocks[0].operations.iter().any(|operation| matches!(
-        &operation.kind,
-        OperationKind::Call { callee, receiver_type, .. }
-            if callee == "charge" && receiver_type.as_deref() == Some("gateway")
-    )));
-    assert!(submit.blocks[0].operations.iter().any(|operation| {
-        matches!(&operation.kind, OperationKind::Write { path } if path == "this.pending")
-    }));
-    assert!(submit.blocks[0]
-        .operations
-        .iter()
-        .any(|operation| matches!(operation.kind, OperationKind::Await)));
-    Ok(())
-}
 ```
 
-- [ ] **Step 2: Run the test and verify the empty adapter fails**
+Canonicalize document paths through the shared path validator. Reject duplicate
+normalized paths, malformed digests, unknown schema versions, and an index
+digest mismatch. A missing document digest means freshness is unverified for
+that document; a mismatched digest means skip its semantic facts and emit
+`stale_artifact_document`.
+
+### Step 4: Normalize SCIP facts
+
+Map official fields into provider-neutral evidence:
+
+- `Document.relative_path` to normalized source file;
+- occurrence ranges to `SourceAnchor`;
+- occurrence symbol and roles to definitions/references/import/read/write;
+- `SymbolInformation.relationships` to implementation, type-definition,
+  definition, and reference facts;
+- symbol documentation/signature only as bounded evidence detail, not as
+  Program IR source structure;
+- metadata tool name/version into evidence detail while descriptor version
+  remains Compass's decoder version.
+
+Ignore SCIP `project_root` after validating metadata shape. Never hash it into
+the descriptor. Descriptor `input_digest` is the exact artifact SHA-256.
+
+### Step 5: Test merge enrichment
+
+Combine the Rust/TypeScript syntax fixtures with SCIP evidence and assert:
+
+- the module and operation sequence are unchanged;
+- definitions, references, symbol identity, and call resolution improve;
+- explicit SCIP type-definition relationships add type-definition evidence,
+  while general expression-type coverage remains partial;
+- every improved fact cites both its syntax anchor and SCIP evidence when both
+  support it;
+- conflicting targets stay visible and lower call-resolution coverage;
+- SCIP for a Go-only fixture creates no Program IR module.
 
 Run:
 
 ```bash
-cargo test -p compass-languages --test program_ir typescript_program_ir
+cargo test -p compass-program
+cargo test -p compass-languages --test program_evidence
+cargo clippy -p compass-program --all-targets -- -D warnings
 ```
 
-Expected: the assertion fails because no TypeScript functions are returned.
+Expected: all tests pass.
 
-- [ ] **Step 3: Implement TypeScript-family extraction**
-
-Implement functions, methods, arrow functions bound to variables, calls,
-property reads, assignment writes, `await`, and `throw`. Use normalized
-repository-relative source-path, class, and function names for stable symbol
-IDs. Pre-collect module definitions and resolve only unique same-module calls;
-leave imported, dynamic, or ambiguous targets unresolved. Hash exact
-signature and body byte ranges. Reproduce the generic structural extractor's
-ID inputs for `graph_node_id`; use the adapter contract's
-`missing_graph_identity` fallback for constructs the structural tier does not
-represent.
-
-Add partial reasons for:
-
-- `dynamic_property_access`
-- `prototype_mutation`
-- `decorator_semantics`
-- `eval_or_function_constructor`
-- `branch_sensitive_cfg`
-- `exception_flow`
-
-JavaScript functions use `language = "javascript"` and omit unavailable type
-references. TSX uses `language = "tsx"` and marks JSX framework dispatch as
-`jsx_framework_dispatch`.
-
-- [ ] **Step 4: Test every TypeScript-family registry spelling**
-
-Add a table-driven test using these pairs:
-
-```rust
-[
-    ("sample.ts", "typescript"),
-    ("sample.mts", "typescript"),
-    ("sample.cts", "typescript"),
-    ("sample.tsx", "tsx"),
-    ("sample.js", "javascript"),
-    ("sample.jsx", "javascript"),
-    ("sample.mjs", "javascript"),
-    ("sample.cjs", "javascript"),
-]
-```
-
-For each file, analyze `const run = () => work();` and assert one function,
-one call, the expected module language, and a valid bundle.
-
-- [ ] **Step 5: Run language tests and commit**
-
-Run:
+### Step 6: Commit
 
 ```bash
-cargo test -p compass-languages --test program_ir
-cargo test -p compass-languages
-cargo clippy -p compass-languages --all-targets -- -D warnings
+git add Cargo.toml Cargo.lock crates/compass-program
+git commit -m "feat(program): ingest official SCIP evidence"
 ```
 
-Expected: all commands succeed.
-
-```bash
-git add crates/compass-languages/src/program/typescript.rs crates/compass-languages/tests/program_ir.rs
-git commit -m "feat(languages): add TypeScript semantic IR seed adapter"
-```
-
-### Task 6: Integrate program analysis into the atomic graph pipeline
+## Task 7: Orchestrate providers and atomically emit `program.json`
 
 **Files:**
+
 - Modify: `crates/compass-core/Cargo.toml`
 - Modify: `crates/compass-core/src/lib.rs`
 - Modify: `crates/compass-core/src/pipeline.rs`
-- Modify: `crates/compass-cli/src/lib.rs`
-- Modify: `crates/compass-output/src/backup.rs`
 - Create: `crates/compass-core/src/program.rs`
 - Create: `crates/compass-core/tests/program_pipeline.rs`
+- Modify: `crates/compass-cli/src/lib.rs`
 - Create: `crates/compass-cli/tests/program_cli.rs`
+- Modify: `crates/compass-output/src/backup.rs`
 
-**Interfaces:**
-- Consumes: `Engine::program_ir_source`, the program cache, `compass_analysis::analyze`, `AnalysisBundle::canonical_bytes`, and `write_bytes_atomic`.
-- Produces: `program.json`, `BuildResult.program_modules`, `BuildResult.program_summaries`, `BuildResult.program_files_analyzed`, and `BuildResult.program_files_reused`.
+### Step 1: Write end-to-end failing tests
 
-- [ ] **Step 1: Write cold, warm, change, and deletion tests**
+Create a repository with Rust and TypeScript source plus `index.scip` and a
+freshness manifest. Test:
 
-Create `crates/compass-core/tests/program_pipeline.rs`. The test must:
-
-1. create `src/lib.rs`, `web/app.ts`, and two same-content Rust files at
-   different repository-relative paths;
-2. set `options.program_analysis = true` and run `build_local_graph`;
-3. load `program.json` as `AnalysisBundle`;
-4. assert every module source is relative, the same-content files retain
-   distinct identities, and every nonempty `graph_node_id` exists in
-   `graph.json`;
-5. run a warm build and assert every supported file is reused without fresh
-   analysis;
-6. change only `web/app.ts` and assert one file is analyzed while the other
-   supported files are reused;
-7. delete `src/lib.rs` and assert no Rust module remains;
-8. copy the final source tree into a second temporary checkout with a different
-   absolute root, force a clean build there, and compare canonical bytes;
-9. replace `program.json` with a directory, change a supported source, and
-   assert the build fails while `.compass-build-incomplete` remains; remove the
-   obstruction, rerun, and assert the marker is cleared and the artifact is
-   valid.
-
-Add focused cases that replace only `adapter_version` or `analyzer_version`
-inside an otherwise valid existing artifact. An unchanged build must reject the
-stale header, reconstruct from the current cache/analysis code, and restore the
-current version without re-running AST extraction.
-
-Use this assertion shape:
-
-```rust
-let cold = build_local_graph(&options)?;
-assert_eq!(cold.program_files_analyzed, 4);
-assert_eq!(cold.program_files_reused, 0);
-
-let warm = build_local_graph(&options)?;
-assert_eq!(warm.program_files_analyzed, 0);
-assert_eq!(warm.program_files_reused, 4);
-```
-
-Create `crates/compass-cli/tests/program_cli.rs`:
-
-```rust
-mod support;
-
-use std::error::Error;
-use std::fs;
-use std::process::Command;
-
-#[test]
-fn compass_update_emits_program_artifact_but_graphify_compat_does_not()
--> Result<(), Box<dyn Error>> {
-    let directory = tempfile::tempdir()?;
-    let native = directory.path().join("native");
-    let compat = directory.path().join("compat");
-    fs::create_dir_all(&native)?;
-    fs::create_dir_all(&compat)?;
-    fs::write(native.join("main.rs"), "fn main() { work(); }\n")?;
-    fs::write(compat.join("main.rs"), "fn main() { work(); }\n")?;
-
-    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .arg("update")
-        .arg(&native)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(native.join("compass-out/program.json").is_file());
-
-    let output = support::compat_command()
-        .arg("update")
-        .arg(&compat)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(!compat.join("graphify-out/program.json").exists());
-    Ok(())
-}
-```
-
-- [ ] **Step 2: Run the test and verify `BuildResult` lacks program fields**
+1. cold native build emits canonical `compass-out/program.json`;
+2. warm build reuses syntax and artifact caches;
+3. changing only SCIP reuses syntax but decodes/merges artifact evidence;
+4. changing one TypeScript file reanalyzes one syntax entry and excludes a
+   stale SCIP document;
+5. deleting a source removes its module;
+6. two checkout roots produce byte-identical artifacts;
+7. reversing explicit artifact arguments does not change output;
+8. malformed explicit or discovered SCIP fails before replacing the previous
+   valid artifact and leaves the build-incomplete marker;
+9. a directory obstructing `program.json` fails atomically;
+10. Graphify compatibility emits no `program.json` and no new status text.
 
 Run:
 
@@ -1395,28 +935,65 @@ cargo test -p compass-core --test program_pipeline
 cargo test -p compass-cli --test program_cli
 ```
 
-Expected: compilation fails on the missing `BuildResult` fields and native
-Compass does not yet create `program.json`.
+Expected: `BuildOptions` lacks program fields.
 
-- [ ] **Step 3: Add program orchestration**
+### Step 2: Add build inputs and result metrics
 
-Add dependencies on `compass-ir` and `compass-analysis`. Define in
-`program.rs`:
+Extend `BuildOptions`:
+
+```rust
+pub program_analysis: bool,
+pub program_artifacts: Vec<PathBuf>,
+pub program_artifact_limits: compass_program::ArtifactLimits,
+```
+
+Default `program_analysis` to `false` for embedders. Extend `BuildResult`:
+
+```rust
+pub program_modules: usize,
+pub program_summaries: usize,
+pub program_syntax_analyzed: usize,
+pub program_syntax_reused: usize,
+pub program_artifacts_loaded: usize,
+pub program_artifacts_reused: usize,
+pub program_conflicts: usize,
+```
+
+Set `program_analysis = true` only at native Compass update/extract/watch
+frontend boundaries. Compatibility frontends keep it false.
+
+### Step 3: Implement artifact discovery
+
+In `compass-core/src/program.rs`:
+
+- discover `root/index.scip` when it is a regular file;
+- append explicit paths, resolve them once, and require regular files;
+- reject output/cache paths and paths outside the repository unless explicitly
+  supplied;
+- use the explicit artifact's filename only as a logical name;
+- sort by content digest and deduplicate byte-identical artifacts;
+- use provider IDs derived from format plus content digest, never argument
+  position or filename;
+- discover the exact companion filename
+  `<artifact>.compass-manifest.json`;
+- open a seekable bounded reader, validate file length, and compute the digest
+  without retaining the entire artifact in memory.
+
+An explicit outside-repository artifact is allowed, but its absolute path never
+enters evidence, cache keys, errors serialized into `program.json`, or history.
+
+### Step 4: Implement scoped orchestration
+
+Expose internally:
 
 ```rust
 pub(crate) const PROGRAM_ARTIFACT: &str = "program.json";
 
-pub(crate) struct ProgramBuild {
-    pub analysis: compass_analysis::AnalysisBundle,
-    pub files_analyzed: usize,
-    pub files_reused: usize,
-}
-
 pub(crate) fn build_program(
     root: &Path,
     sources: &[PathBuf],
+    options: &BuildOptions,
     cache: &mut compass_files::Cache,
-    max_workers: usize,
 ) -> Result<ProgramBuild, CoreError>;
 
 pub(crate) fn write_program(
@@ -1425,660 +1002,321 @@ pub(crate) fn write_program(
 ) -> Result<(), CoreError>;
 ```
 
-`write_program` obtains `analysis.canonical_bytes()` and atomically installs
-those bytes with `write_bytes_atomic`; it must not independently serialize the
-bundle.
+`build_program` performs:
 
-`build_program` loads each supported file from:
+1. normalize source paths and compute source digests;
+2. load or produce per-file syntax evidence;
+3. load or decode each artifact into document-sharded evidence;
+4. validate every cached batch before use;
+5. merge all live batches with `merge_evidence`;
+6. analyze the merged Program IR;
+7. cache the merge by canonical provider-manifest digest;
+8. prune only namespaces whose provider phase completed.
 
-```rust
-CacheKind::Program {
-    ir_schema: compass_ir::PROGRAM_SCHEMA_VERSION,
-    adapter_version: compass_languages::PROGRAM_ADAPTER_VERSION,
-    analysis_schema: compass_analysis::ANALYSIS_SCHEMA_VERSION,
-    analyzer_version: compass_analysis::ANALYZER_VERSION,
-}
-```
+Use the existing sequential-under-256 and build-local bounded Rayon policy for
+syntax files. Decode artifacts sequentially in canonical order in this
+foundation; document streaming bounds memory.
 
-Cache values are individual `ModuleIr` records, not a repository bundle. Build
-the repository `ProgramBundle` with
-`adapter_version: compass_languages::PROGRAM_ADAPTER_VERSION`. Analyze
-cache misses with the same sequential-under-256 and bounded Rayon-pool policy as
-AST extraction. Before calling `Engine::program_ir_source`, convert each source
-to its normalized repository-relative path and pass that logical path with the
-already-read bytes. Sort modules through `ProgramBundle::canonicalized`, call
-`compass_analysis::analyze`, and save only successful module records. After all
-supported files have produced valid cached or fresh modules, call
-`prune_program` with exactly those live supported paths. Do not prune after a
-failed or incomplete program phase.
+### Step 5: Preserve unchanged and atomic build paths
 
-- [ ] **Step 4: Wire atomic output and unchanged-build behavior**
+Before the earliest manifest-unchanged return, validate existing
+`program.json`:
 
-Add `BuildOptions.program_analysis: bool` with default `false`. This preserves
-the existing behavior of embedders and compatibility entry points until they
-opt in. Add these
-`BuildResult` fields:
+- canonical bytes exactly match the parsed value;
+- all schema/analyzer versions are current;
+- provider manifest matches current source/artifact discovery and digests;
+- embedded evidence and IR validate.
 
-```rust
-pub program_modules: usize,
-pub program_summaries: usize,
-pub program_files_analyzed: usize,
-pub program_files_reused: usize,
-```
+If valid, return counts without opening program caches. If invalid or absent,
+rebuild only the program phase; do not force AST extraction.
 
-Before the first manifest-unchanged return, if program analysis is enabled,
-load and validate the existing `program.json`. That fast path is eligible only
-when the artifact's IR schema, adapter version, analysis schema, and analyzer
-version all equal the current public constants and its on-disk bytes exactly
-equal `AnalysisBundle::canonical_bytes()`. A valid artifact supplies the module
-and summary counts without opening the cache. A missing, corrupt, noncanonical,
-or version-mismatched artifact disables the return and continues into normal
-cache setup.
+On every successful clustered, raw, topology-unchanged, and incremental branch,
+write canonical bytes with the existing atomic byte writer immediately before
+the build guard commits. Never independently serialize the value a second way.
 
-After AST cache setup, call `build_program` when no valid unchanged artifact was
-loaded. Keep the validated `AnalysisBundle` in memory until the graph path has
-reached a successful output branch. On every successful clustered, raw,
-topology-unchanged, and extract-incremental branch, write `program.json` with
-`write_program` immediately before `guard.commit()`. The file
-replacement is atomic; if a later artifact write fails, the existing build
-guard continues to mark the output incomplete so the next invocation rebuilds
-before using the mixed directory.
+Malformed provider input, fresh provider failure, invalid merged IR, or output
+failure must leave the previous valid artifact untouched.
 
-The later topology-unchanged path uses the freshly reconstructed or previously
-validated in-memory artifact. A program artifact failure forces only the
-program phase, not AST extraction. A valid artifact loaded by the first fast
-path reports its module count as `program_files_reused`, not as a cache hit.
+### Step 6: Add native CLI options and stable output
 
-When `program_analysis` is false, remove no user file, emit no artifact, and
-report zero program counts.
-
-Update every `BuildResult` constructor in `compass-core` and the
-`sample_build_result` fixture in `compass-cli`. At both update/extract and watch
-frontend boundaries, set:
-
-```rust
-options.program_analysis = frontend == Frontend::Compass;
-options.build.program_analysis = frontend == Frontend::Compass;
-```
-
-Add unit coverage around `parse_watch_options` asserting native watch enables
-the flag and Graphify watch disables it. This keeps every intermediate commit
-buildable and prevents update, extract, or watch compatibility frontends from
-changing their file sets.
-
-Extend native build and watch status output with one stable line:
+Add the repeatable native-only option:
 
 ```text
-Program analysis: <analyzed> analyzed, <reused> reused, <modules> modules, <summaries> summaries
+--program-artifact <PATH>
 ```
 
-Print it only when `program_analysis` is enabled; do not change Graphify
-compatibility output. Assert the native line and compatibility omission in
-`program_cli.rs`. The qualification script parses this exact line rather than
-inferring cache behavior from artifact counts.
+Support update, extract, and watch. Reject it in Graphify compatibility mode
+with a clear unsupported-option error rather than silently ignoring it.
 
-- [ ] **Step 5: Make partial analysis visible without failing the graph build**
+Print one native line:
 
-Add:
-
-```rust
-#[error(transparent)]
-ProgramAnalysis(#[from] compass_analysis::AnalysisError),
+```text
+Program analysis: <syntax_analyzed> syntax analyzed, <syntax_reused> syntax reused, <artifacts_loaded> artifacts loaded, <artifacts_reused> artifacts reused, <modules> modules, <summaries> summaries, <conflicts> conflicts
 ```
 
-Adapter-declared `Completeness::Partial` is valid output. Corrupt cache content
-is ignored and recomputed once; if fresh analysis cannot validate, fail the
-build before replacing the previous artifact.
+Do not change compatibility output.
 
-- [ ] **Step 6: Preserve the artifact in protected-output backups**
+### Step 7: Protect backups and errors
 
-Add `program.json` to `BACKUP_ARTIFACTS` in
-`crates/compass-output/src/backup.rs`. Extend its unit test to create a
-distinct program fixture before `backup_if_protected`, then assert the dated
-backup contains byte-identical `program.json`. This keeps the new authoritative
-artifact aligned with the existing graph, analysis, labels, and manifest
-recovery contract.
+Add `program.json` to `BACKUP_ARTIFACTS`. Extend the backup test with distinct
+bytes and assert byte-identical recovery.
 
-- [ ] **Step 7: Run core pipeline and equivalence tests**
+Add transparent `CoreError` variants for IR validation, provider decoding,
+merge, and analysis. Do not convert typed failures to generic strings before
+the CLI boundary.
 
 Run:
 
 ```bash
 cargo test -p compass-core --test program_pipeline
 cargo test -p compass-core
-cargo test -p compass-output backup
 cargo test -p compass-cli --test program_cli
-cargo clippy -p compass-core --all-targets -- -D warnings
+cargo test -p compass-output backup
+cargo clippy -p compass-core -p compass-cli -p compass-output --all-targets -- -D warnings
 ```
 
-Expected: cold, warm, incremental, deletion, and clean-build outputs are
-equivalent and all existing core tests pass.
+Expected: all tests pass.
 
-- [ ] **Step 8: Commit pipeline integration**
+### Step 8: Commit
 
 ```bash
-git add crates/compass-core crates/compass-cli/src/lib.rs crates/compass-cli/tests/program_cli.rs crates/compass-output/src/backup.rs
-git commit -m "feat(core): emit incremental program analysis"
+git add crates/compass-core crates/compass-cli crates/compass-output
+git commit -m "feat(core): build Program IR from evidence providers"
 ```
 
-### Task 7: Persist program analysis in graph history
+## Task 8: Preserve Program IR in immutable history
 
 **Files:**
+
 - Modify: `crates/compass-history/Cargo.toml`
-- Modify: `crates/compass-history/src/model.rs`
 - Modify: `crates/compass-history/src/artifacts.rs`
-- Modify: `crates/compass-history/src/keys.rs`
+- Modify: `crates/compass-history/src/fingerprint.rs`
+- Modify: `crates/compass-history/src/model.rs`
 - Modify: `crates/compass-history/src/store.rs`
-- Modify: `crates/compass-history/src/validate.rs`
 - Modify: `crates/compass-history/src/diff.rs`
 - Modify: `crates/compass-history/src/gc.rs`
-- Modify: `crates/compass-core/src/history.rs`
-- Modify: `crates/compass-cli/src/history_build.rs`
+- Modify: `crates/compass-history/src/validate.rs`
 - Modify: `crates/compass-history/tests/roundtrip.rs`
-- Modify: `crates/compass-history/tests/publication.rs`
-- Create: `crates/compass-history/tests/fixtures/schema2_graph_version.json`
-- Modify: `crates/compass-history/tests/performance.rs`
 - Modify: `crates/compass-history/tests/diff.rs`
 - Modify: `crates/compass-history/tests/maintenance.rs`
-- Modify: `crates/compass-core/tests/history_materialize.rs`
+- Modify: `crates/compass-cli/src/history_commands.rs`
 - Modify: `crates/compass-cli/tests/history_cli.rs`
 
-**Interfaces:**
-- Consumes: `program.json` and `compass_analysis::AnalysisBundle`.
-- Produces: schema-3 realizations with `program_root`, `program_count`, typed program records, exact program diffs, schema-aware GC and structural sharing, versioned build fingerprints, reconstruction, and schema-2 read compatibility.
+### Step 1: Write schema-3 compatibility tests
 
-- [ ] **Step 1: Add failing artifact round-trip coverage**
+Bump `HISTORY_SCHEMA_VERSION` from 2 to 3 and add tests that:
 
-Extend the primary round-trip fixture with:
-
-```rust
-program: Some(compass_analysis::analyze(compass_ir::ProgramBundle {
-    schema_version: compass_ir::PROGRAM_SCHEMA_VERSION,
-    adapter_version: 1,
-    modules: Vec::new(),
-})?),
-```
-
-Assert:
-
-```rust
-assert_eq!(restored.program, artifacts.program);
-assert!(!partitioned.program.is_empty());
-```
-
-Add a publication test that changes only one function's
-`implementation_digest`, publishes both realizations, and asserts different
-realization IDs with a nonempty shared-node count.
-
-Add focused tests that establish:
-
-- full diff returns `RecordKind::Program` for a changed summary;
-- topology-only diff excludes program records;
-- GC retains schema-3 program roots and does not expect a program root for a
-  schema-2 realization;
-- changing `PROGRAM_ADAPTER_VERSION` or `ANALYZER_VERSION` changes the
-  extraction fingerprint.
-
-- [ ] **Step 2: Run focused tests and verify the fields are absent**
+- ingest schema-2 realizations with empty program trees;
+- store and reopen Program IR facts and summaries;
+- preserve providers and evidence exactly;
+- change realization identity when provider input digest changes even if the
+  structural graph is unchanged;
+- exclude an absolute artifact path from identity;
+- share unchanged program subtrees between revisions;
+- include program facts in full diff and exclude them from topology-only diff;
+- make GC retain reachable program chunks and delete unreachable ones;
+- export canonical `program.json` in `history export --format compass-out`.
 
 Run:
 
 ```bash
-cargo test -p compass-history --test roundtrip complete_graph_and_build_state_round_trip
-cargo test -p compass-history --test publication publication_is_atomic
-```
-
-Expected: compilation fails on missing `program` fields.
-
-- [ ] **Step 3: Add typed program partitioning**
-
-Add `compass-ir` and `compass-analysis` dependencies. Extend:
-
-```rust
-pub struct GraphArtifacts {
-    pub document: GraphDocument,
-    pub analysis: Option<Value>,
-    pub labels: Option<Value>,
-    pub manifest: Option<Value>,
-    pub program: Option<compass_analysis::AnalysisBundle>,
-    pub authoritative_sidecars: BTreeMap<String, ArtifactContent>,
-}
-
-pub struct PartitionedGraph {
-    pub nodes: Vec<(Vec<u8>, Vec<u8>)>,
-    pub edges: Vec<(Vec<u8>, Vec<u8>)>,
-    pub hyperedges: Vec<(Vec<u8>, Vec<u8>)>,
-    pub analysis: Vec<(Vec<u8>, Vec<u8>)>,
-    pub program: Vec<(Vec<u8>, Vec<u8>)>,
-    pub metadata: Vec<(Vec<u8>, Vec<u8>)>,
-}
-```
-
-Use typed keys:
-
-```text
-[program-schema=1, program-kind=6, "header"]
-[program-schema=1, program-kind=6, "module", source_file]
-[program-schema=1, program-kind=6, "summary", symbol_id]
-[program-schema=1, program-kind=6, "reverse", callee]
-```
-
-Store the bundle header with schema versions, store modules and summaries
-individually, and store each reverse-caller vector individually. Reconstruct,
-validate, canonicalize, and compare the rebuilt bundle with the source.
-
-Register `program.json` as a built-in authoritative artifact with media
-type `application/vnd.compass.program+json` and schema version `1`. Load and
-write it beside the existing built-in sidecars. Its registry digest and
-materialized bytes must come from `AnalysisBundle::canonical_bytes`, never from
-a round-trip through `serde_json::Value`.
-
-- [ ] **Step 4: Add schema-3 publication with schema-2 reads**
-
-Set:
-
-```rust
-pub const HISTORY_SCHEMA_VERSION: u32 = 3;
-pub const LEGACY_HISTORY_SCHEMA_VERSION: u32 = 2;
-```
-
-Extend `GraphVersion`:
-
-```rust
-#[serde(default, skip_serializing_if = "Option::is_none")]
-pub program_root: Option<StoredTree>,
-#[serde(default, skip_serializing_if = "Option::is_none")]
-pub program_count: Option<u64>,
-```
-
-New publications always use schema `3` and set both values, including an empty
-program tree. Schema-2 manifests must omit both fields. Accept schema `2` or `3`
-while opening:
-
-- schema 2: require both program fields to be absent and preserve its original
-  canonical realization ID;
-- schema 3: require both program fields to be present and verify the direct
-  named root and count;
-- every other schema: fail with the existing unsupported-schema diagnostic.
-
-Publish `program` beside `nodes`, `edges`, `hyperedges`, `analysis`, `metadata`,
-and `manifest`. Change `publish_catalog_roots` from a fixed six-element array to
-a checked slice so schema-2 and schema-3 root sets can coexist.
-
-Audit and update every hard-coded realization-root list in `store.rs`:
-
-- staged publication and destructuring;
-- catalog publication;
-- direct-root verification;
-- full validation;
-- artifact reconstruction;
-- missing-root diagnostics;
-- structural-sharing reachability.
-
-For schema 2, those paths use the existing five data roots plus `manifest`. For
-schema 3, they add `program` before `metadata` and `manifest`.
-
-- [ ] **Step 5: Extend validation and reconstruction**
-
-Add `program_records` to `ValidationReport`, make
-`RealizationTrees.program: Option<&Tree>`, scan the program tree under the
-existing key, value, depth, total-byte, and record-count limits, include it in
-`PartitionedGraph`, and let `GraphArtifacts::reconstruct` validate cross-record
-consistency.
-
-For schema 2, supply an empty `program` record vector and reconstruct
-`GraphArtifacts.program = None`.
-
-- [ ] **Step 6: Include program algorithms in history fingerprints**
-
-In `crates/compass-cli/src/history_build.rs`, add these normalized
-build-profile fields in current-profile construction and the supported-field
-allowlist:
-
-```text
-program_ir_schema=1
-program_adapter_version=1
-program_analysis_schema=1
-program_analyzer_version=1
-```
-
-Source the values from the public crate constants rather than repeating
-numeric literals in production code.
-
-Make persisted-profile validation accept the enclosing history schema:
-
-- schema 2 requires all four program fields to be absent;
-- schema 3 requires all four fields to equal the current public constants;
-- any other schema remains unsupported.
-
-Update every `HistoryBuildOptions::from_profile` call to pass the source
-realization's schema. When build settings are reused from a schema-2
-realization to create new work, preserve its semantic/user options but insert
-the four current program fields into the returned profile before building or
-publishing; never publish a schema-3 realization with a legacy profile.
-Materializing or exporting an already stored schema-2 realization does not
-upgrade or rewrite it. Add CLI tests for schema-2 export, schema-2
-profile-derived rebuild, missing schema-3 fields, and mismatched schema-3
-versions.
-
-In `crates/compass-core/src/history.rs`,
-insert the same four fields into `ExtractionFingerprintInput` before digesting
-an exact checkout. Add tests that build otherwise identical inputs with one
-program version changed and assert different fingerprints.
-
-- [ ] **Step 7: Add exact program diff and schema-aware GC**
-
-Add `RecordKind::Program`. Full `HistoryStore::diff` includes it; topology-only
-callers continue requesting only node, edge, and hyperedge roots. Validate and
-strip the program typed-key prefix in `display_key`.
-
-When both realizations have program roots, stream their Prolly diff. When
-neither has a program root, emit nothing. When exactly one has a program root,
-diff it against an empty tree so an explicitly allowed cross-profile comparison
-reports added or removed program records instead of hiding them.
-
-Replace `gc.rs`'s fixed `REALIZATION_ROOT_KINDS` assumption with a helper that
-derives root kinds from each `GraphVersion`: schema 2 has the existing six
-catalog roots; schema 3 has those roots plus `program`. Use the same helper for
-prune planning and stale-plan verification.
-
-- [ ] **Step 8: Add a schema-2 golden reopen test**
-
-Before editing `GraphVersion`, use the current schema-2 serializer once to
-capture canonical bytes for a fixed, minimal valid set of deterministic test
-records in
-`tests/fixtures/schema2_graph_version.json` and record its 64-hex
-`RealizationId` as a string literal in the test. Review the fixture to confirm
-it has no program fields or trailing newline, then do not regenerate it from
-schema-3 code. Keep the deterministic record builder in the test so it
-recreates the direct-root CIDs named by the fixture.
-
-Publish the fixture's five direct roots and exact manifest bytes through the
-existing test Prolly handle, reopen the store, and assert:
-
-```rust
-assert_eq!(opened.version.schema_version, 2);
-assert!(opened.version.program_root.is_none());
-assert!(opened.version.program_count.is_none());
-assert_eq!(opened.id.to_string(), EXPECTED_SCHEMA2_REALIZATION_ID);
-assert_eq!(
-    canonical_json_bytes(&serde_json::to_value(&opened.version)?)?,
-    include_bytes!("fixtures/schema2_graph_version.json")
-);
-```
-
-The expected ID must never be computed from the deserialized fixture inside the
-test. This catches a defaulted field, field-order change, or serializer change
-that would alter an existing realization's canonical bytes.
-
-- [ ] **Step 9: Run history correctness and performance tests**
-
-Run:
-
-```bash
-cargo test -p compass-history --test roundtrip
-cargo test -p compass-history --test publication
-cargo test -p compass-history --test performance
-cargo test -p compass-history --test diff
-cargo test -p compass-history --test maintenance
-cargo test -p compass-cli --test history_cli
 cargo test -p compass-history
+```
+
+Expected: schema and field assertions fail.
+
+### Step 2: Add program trees to the realization
+
+Add:
+
+```rust
+pub program_facts_root: StoredTree,
+pub program_summaries_root: StoredTree,
+pub program_fact_count: u64,
+pub program_summary_count: u64,
+```
+
+Add a schema-aware deserializer that supplies empty roots/counts using the
+current Prolly tree format for schema-2 input; do not rely on a derived default
+whose tree format could drift. The version reader explicitly accepts versions 2
+and 3. New writes use schema 3 only.
+Partition canonical Program IR by stable logical keys:
+
+```text
+provider/<provider-id>
+evidence/<evidence-id>
+module/<source-file>
+summary/<symbol-id>
+reverse-call/<target-symbol-id>
+```
+
+Do not store the entire JSON sidecar as one opaque value.
+
+### Step 3: Extend profile and extraction fingerprint
+
+The build profile records enabled provider policy, IR schema, merger version,
+analysis schema, and analyzer version. The extraction fingerprint records the
+actual canonical provider manifest, including artifact content digests and
+configuration digests.
+
+Do not include artifact filesystem paths. A change from raw unverified SCIP to
+the same SCIP plus a freshness manifest changes the configuration digest and
+therefore realization identity.
+
+### Step 4: Extend diff, GC, and export
+
+Full diff reports added, removed, and changed program keys plus summary counts.
+Topology-only diff deliberately ignores program roots. GC traverses both new
+trees. Export reconstructs `AnalysisBundle`, validates it, obtains canonical
+bytes, and writes exactly `program.json`.
+
+Run:
+
+```bash
+cargo test -p compass-history
+cargo test -p compass-cli history
 cargo clippy -p compass-history --all-targets -- -D warnings
 ```
 
-Expected: schema-2 stores reopen, schema-3 stores round-trip and diff program
-analysis, mixed-schema GC retains the correct root sets, version changes alter
-fingerprints, and changing one summary preserves structural sharing for
-unchanged program records.
+Expected: schema-2 compatibility and schema-3 round trips pass.
 
-- [ ] **Step 10: Commit history integration**
+### Step 5: Commit
 
 ```bash
-git add crates/compass-history crates/compass-core/src/history.rs crates/compass-core/tests/history_materialize.rs crates/compass-cli/src/history_build.rs crates/compass-cli/tests/history_cli.rs
-git commit -m "feat(history): version semantic program summaries"
+git add crates/compass-history crates/compass-cli/src/history_commands.rs crates/compass-cli/tests/history_cli.rs
+git commit -m "feat(history): version Program IR evidence"
 ```
 
-### Task 8: Export and qualify the native program artifact
+## Task 9: Qualify determinism, scale, security, and documentation
 
 **Files:**
-- Modify: `crates/compass-cli/src/history_commands.rs`
-- Modify: `crates/compass-cli/tests/history_cli.rs`
-- Modify: `crates/compass-output/src/history_bundle.rs`
-- Modify: `crates/compass-output/tests/history_bundle.rs`
-- Create: `scripts/qualify_program_foundation.sh`
+
+- Create: `scripts/qualify_program_ir.sh`
+- Create: `fixtures/program-ir/README.md`
+- Create: `fixtures/program-ir/rust/`
+- Create: `fixtures/program-ir/typescript/`
+- Create: `fixtures/program-ir/scip/`
 - Modify: `README.md`
-- Modify: `PERFORMANCE.md`
+- Modify: `docs/roadmap.md`
+- Modify: `docs/reference/commands.md`
+- Modify: `docs/reference/outputs.md`
+- Modify: `docs/design/architecture.md`
+- Modify: `docs/design/storage-and-history.md`
+- Modify: `docs/design/security-and-privacy.md`
 
-**Interfaces:**
-- Consumes: pipeline and history integration from Tasks 6 and 7.
-- Produces: lossless `history export --format compass-out`, native output qualification, and a repeatable clean/incremental qualification command.
+Only modify a listed documentation file if it is tracked when implementation
+begins. If the documentation-system work is not yet merged, update `README.md`
+and this plan's roadmap design instead of inventing a parallel documentation
+tree.
 
-- [ ] **Step 1: Write failing history-export tests**
+### Step 1: Add the qualification corpus
 
-Extend `crates/compass-output/tests/history_bundle.rs` with an exact byte
-fixture whose field order and escaped non-ASCII identifier make accidental
-re-serialization visible:
+Fixtures cover:
 
-```rust
-#[test]
-fn history_bundle_preserves_program_json()
--> Result<(), Box<dyn std::error::Error>> {
-    let directory = tempfile::tempdir()?;
-    let destination = directory.path().join("exported");
-    let program = br#"{"schema_version":1,"ir_schema_version":1,"analyzer_version":1,"program":{"schema_version":1,"adapter_version":1,"modules":[]},"summaries":[],"reverse_calls":{"caf\u00e9":[]}}"#;
-    let document = document()?;
-    let marker = serde_json::json!({
-        "schema": "compass.history.completion",
-        "schema_version": 1
-    });
-    let sidecars = std::collections::BTreeMap::new();
-    publish_history_bundle(
-        &destination,
-        &HistoryBundleInput {
-            document: &document,
-            analysis: None,
-            labels: None,
-            manifest: None,
-            program: Some(program),
-            authoritative_sidecars: &sidecars,
-            semantic_marker: &marker,
-            derived: &[],
-        },
-    )?;
-    assert_eq!(
-        std::fs::read(destination.join("program.json"))?,
-        program
-    );
-    Ok(())
-}
-```
+- Rust traits, impl collisions, macros, `?`, async, and ambiguous calls;
+- TypeScript imports, overload-like syntax, decorators, JSX, callbacks,
+  dynamic properties, and async;
+- matching, stale, conflicting, UTF-16, malformed, and oversized SCIP;
+- same-content/different-path and same-repository/different-checkout cases.
 
-Use the existing `document()` fixture. Add a `history_cli.rs` case that
-publishes `GraphArtifacts.program = Some(...)`,
-exports `--format compass-out`, and asserts canonical `program.json` equality.
-Add a bundle test that supplies an opaque sidecar named `program.json` and
-asserts the existing reserved-built-in-path error, proving a caller cannot
-shadow the authoritative artifact.
+Each fixture includes expected provider coverage and expected conflicts, not
+only output snapshots.
 
-- [ ] **Step 2: Run the tests and verify the bundle input lacks `program`**
+### Step 2: Add the qualification script
 
-Run:
+The script must:
 
-```bash
-cargo test -p compass-output --test history_bundle history_bundle_preserves_program_json
-cargo test -p compass-cli --test history_cli history_export_preserves_program_json
-```
+1. build Compass once;
+2. run every new package test;
+3. perform cold, warm, syntax-change, artifact-change, and clean rebuilds;
+4. compare canonical `program.json` bytes after each equivalent state;
+5. assert an artifact-only change reports zero syntax analyses;
+6. run two checkout roots and compare bytes;
+7. run history ingest/reopen/diff/GC/export;
+8. assert Graphify compatibility produces no `program.json`;
+9. run workspace format, tests, and denied Clippy.
 
-Expected: compilation fails because `HistoryBundleInput.program` is undefined.
+Use a temporary directory from `mktemp -d` and a trap for cleanup. Do not
+modify tracked fixtures during the run.
 
-- [ ] **Step 3: Wire program data through history export**
+### Step 3: Document honest capability boundaries
 
-Add this field without adding a dependency from `compass-output` to the
-analysis crate:
+Document:
 
-```rust
-pub program: Option<&'a [u8]>,
-```
+- what Program IR can support now and later;
+- why Tree-sitter is a baseline rather than compiler semantics;
+- how official SCIP is supplied and how freshness is proven;
+- the exact meaning of capability coverage and conflicts;
+- no indexer or language server is invoked;
+- the difference between structural SCIP JSON ingestion and official protobuf
+  Program IR enrichment;
+- `program.json` schema and history behavior;
+- native versus Graphify compatibility behavior.
 
-`build_staging` writes `program.json` with `write_bytes_atomic`. Staging
-validation first parses it as JSON, then compares the complete byte slice.
-Add `program.json` to the reserved built-in path list so opaque sidecars cannot
-shadow it. Update every `HistoryBundleInput` fixture with `program: None`.
+Remove or correct any statement claiming full semantic resolution from
+Tree-sitter alone.
 
-In `history_commands.rs`, obtain the typed bundle's canonical bytes before
-constructing the borrowed input:
-
-```rust
-let program = artifacts
-    .artifacts
-    .program
-    .as_ref()
-    .map(compass_analysis::AnalysisBundle::canonical_bytes)
-    .transpose()
-    .map_err(runtime)?;
-```
-
-Pass `program.as_deref()` to `HistoryBundleInput`. The canonical artifact
-registry digest remains owned by `compass-history`; export reproduces the exact
-native bytes without regenerating, key-reordering, or reinterpreting program
-records.
-
-- [ ] **Step 4: Add a clean-versus-incremental qualification script**
-
-Create an executable `scripts/qualify_program_foundation.sh` that:
-
-1. accepts one repository path;
-2. resolves it to a physical absolute path and builds release Compass once;
-3. copies the repository into `initial-clean` and `incremental` source
-   directories under one temporary directory;
-4. writes outputs to separate sibling output roots, never inside either copied
-   source tree, and runs a forced clean update in both;
-5. creates the same previously absent `compass_qualification_probe.rs` file in
-   the incremental copy and runs a non-forced incremental update;
-6. creates byte-identical `compass_qualification_probe.rs` in `initial-clean`,
-   removes only that checkout's validated temporary output root, and runs a
-   forced clean update;
-7. compares the two final canonical `program.json` files with `cmp`;
-8. asserts the incremental run reports exactly one changed program file and
-   that both final artifacts report the same counts;
-9. prints module count, summary count, partial count, elapsed time, and artifact
-   bytes using a short `python3 -c` JSON reader;
-10. removes its temporary directory through a shell trap.
-
-Use `mktemp -d`; reject `/`, `$HOME`, nonexistent input directories, and an
-input that already contains `compass_qualification_probe.rs` before copying.
-Resolve the release binary to an absolute path before changing directories.
-Quote every path, keep the two output roots beneath the validated temporary
-directory, and never remove an output path derived from user input.
-
-- [ ] **Step 5: Document the output and support tiers**
-
-Add a README section containing:
-
-```text
-compass-out/program.json
-```
-
-Document `compass.program/1`, Rust and TypeScript/JavaScript as seed deep-tier
-languages, explicit partial reasons, local-only operation, and the distinction
-between structural graph facts and deterministic behavior summaries.
-Add `program.json` to the authoritative artifact table, history export list,
-and any output-cleanup/ownership documentation. Do not mention or accept the
-superseded `.compass_program.json` name.
-
-In `PERFORMANCE.md`, document:
-
-```bash
-scripts/qualify_program_foundation.sh /path/to/large/repository
-```
-
-Record these required fields for each baseline:
-
-- repository commit;
-- file, module, function, summary, and partial counts;
-- cold and incremental wall time;
-- fresh program files analyzed and program files reused;
-- peak RSS;
-- artifact bytes;
-- changed-file count;
-- affected-summary count.
-
-- [ ] **Step 6: Run the complete qualification gate**
+### Step 4: Run complete verification
 
 Run:
 
 ```bash
-cargo test -p compass-ir
-cargo test -p compass-analysis
-cargo test -p compass-files
-cargo test -p compass-languages
-cargo test -p compass-core
-cargo test -p compass-history
-cargo test -p compass-output --test history_bundle
-cargo test -p compass-cli --test program_cli
-cargo test -p compass-cli --test history_cli
-cargo test -p compass-cli --test update_cli
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
+bash scripts/qualify_program_ir.sh
+cargo fmt --all -- --check
 cargo test --workspace
-scripts/qualify_program_foundation.sh .
+cargo clippy --workspace --all-targets -- -D warnings
 compass update .
-cd /Users/haipingfu/graphify
-graphify update .
-git diff --check
+cd /Users/haipingfu/graphify && graphify update .
 ```
 
-Expected:
+Expected: every command succeeds, clean and incremental Program IR bytes match,
+and both repository graphs are current.
 
-- every command exits `0`;
-- native Compass writes `program.json`;
-- compatibility mode retains its previous output set;
-- warm and incremental analysis report exact fresh and reused program-file counts;
-- history export reproduces canonical `program.json`;
-- clean and incremental final artifacts are byte-equivalent;
-- schema-2 and schema-3 history tests pass;
-- `compass-out/` and the Graphify superproject's `graphify-out/` reflect the final code.
-
-- [ ] **Step 7: Commit product qualification**
+### Step 5: Commit
 
 ```bash
-git add crates/compass-cli/src/history_commands.rs crates/compass-cli/tests/history_cli.rs crates/compass-output/src/history_bundle.rs crates/compass-output/tests/history_bundle.rs scripts/qualify_program_foundation.sh README.md PERFORMANCE.md
-git commit -m "docs: qualify semantic program foundation"
+git add scripts/qualify_program_ir.sh fixtures/program-ir README.md docs/roadmap.md docs/reference/commands.md docs/reference/outputs.md docs/design/architecture.md docs/design/storage-and-history.md docs/design/security-and-privacy.md compass-out
+git commit -m "test(program): qualify the evidence foundation"
 ```
 
 ## Completion criteria
 
-The foundation is complete only when:
+- `program.json` is the only Program IR artifact name.
+- Tree-sitter is represented and tested as a syntax provider, not a universal
+  semantic generator.
+- Official SCIP is decoded from protobuf without invoking external tools.
+- Raw SCIP freshness uncertainty is visible; the optional companion manifest
+  can prove or disprove document freshness.
+- File, artifact, and project provider scopes are explicit and independently
+  cacheable.
+- Every semantic fact can be traced to registered evidence.
+- Coverage is per capability and conflicts are preserved.
+- Provider and input order cannot affect canonical bytes.
+- Artifact-only changes reuse syntax evidence.
+- Unsupported languages do not receive fabricated Program IR bodies.
+- Native update/extract/watch emit and report `program.json`.
+- Graphify compatibility output is unchanged.
+- Failed provider or output phases do not replace the previous valid artifact.
+- History schema 3 reads schema 2 and versions Program IR in separate Prolly
+  roots.
+- Full diff, topology-only diff, GC, export, backup, and unchanged fast paths
+  handle Program IR correctly.
+- Clean and incremental builds are byte-equivalent across checkout roots.
+- Workspace tests and denied Clippy pass.
+- Compass and superproject knowledge graphs are refreshed after code changes.
 
-1. `compass update` emits a validated `compass.program/1` artifact for Rust and
-   TypeScript-family sources.
-2. Unsupported languages remain structurally extracted and do not fabricate
-   program analysis.
-3. Partial constructs carry exact reasons.
-4. Warm and changed-file builds use path-sensitive, algorithm-versioned program
-   cache entries and report fresh versus reused files consistently.
-5. Incremental and clean final artifacts are byte-equivalent.
-6. Behavior summaries and reverse-call indexes are deterministic.
-7. Schema-3 history publications preserve program records in their own Prolly
-   root.
-8. Existing schema-2 realizations reopen with their original realization IDs.
-9. Changing one summary reuses unchanged program-tree content.
-10. Full history diff includes program records, topology-only diff excludes
-    them, mixed-schema GC handles the correct root set, and `compass-out`
-    history export restores `program.json`.
-11. Graphify compatibility output and existing structural graph behavior remain
-    unchanged.
-12. Workspace tests, formatting, Clippy, qualification, and graph refresh pass.
+## Follow-on plans
 
-## Follow-on implementation plans
+Write separate design and implementation plans, in this order:
 
-After this foundation ships, create separate specs and plans in this order:
-
-1. Rust branch-sensitive CFG and trait/call resolution
-2. TypeScript branch-sensitive CFG and framework dispatch
-3. Interprocedural data flow, effects, and contract extraction
-4. CompassQL program-evidence mapping and witness paths
-5. Behavioral diff, impact cones, and test selection
-6. Runtime evidence overlays
-7. Cross-repository contract federation
-8. Agent evidence APIs
+1. TypeScript compiler project analyzer and build-context fingerprinting.
+2. Rust call resolution using a stable rust-analyzer/SCIP path; evaluate rustc
+   HIR/MIR only behind an explicitly versioned toolchain boundary.
+3. Branch-complete CFG and exception/async control flow.
+4. Go SSA, Roslyn, and Clang project analyzers.
+5. Interprocedural data flow, effects, contracts, and witness paths.
+6. Offline runtime/test/coverage/profile overlays.
+7. Semantic change, impact prediction, and test selection.
+8. Cross-repository contract federation.
+9. Read-only LSP and external-system connectors.
+10. Graph-grounded agent planning and verification.
