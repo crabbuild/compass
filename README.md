@@ -2,7 +2,31 @@
 
 Compass turns source code and project artifacts into a searchable knowledge graph. Use it to find implementation paths, understand dependencies, estimate change impact, give coding assistants focused context, or export the graph to other tools.
 
-Compass is the native Rust implementation of [Graphify](https://github.com/Graphify-Labs/graphify). Structural extraction and graph queries run locally without Python, embeddings, a vector database, runtime grammar downloads, or separately installed native libraries. Semantic extraction is optional and uses the model provider you configure.
+Compass is inspired by [Graphify](https://github.com/Graphify-Labs/graphify),
+built natively in Rust, and evolving independently beyond its original
+compatibility baseline. Structural extraction and graph queries run locally
+without Python, embeddings, a vector database, runtime grammar downloads, or
+separately installed native libraries. Semantic extraction is optional and uses
+only the model provider you configure.
+
+> **Repository description:** Native, local-first knowledge graph engine for
+> code and project artifacts—inspired by Graphify, built in Rust, and evolving
+> beyond it.
+
+## Documentation
+
+Start with the path that matches your goal:
+
+| Reader | Start here |
+| --- | --- |
+| Evaluating Compass | [Getting started](docs/getting-started.md) → [How it works](docs/concepts/how-it-works.md) |
+| Using or integrating Compass | [Guides](docs/README.md#complete-a-task) → [Cookbook](docs/cookbook/README.md) → [Reference](docs/README.md#look-up-an-exact-contract) |
+| Extending the Rust workspace | [Design principles](docs/design/principles.md) → [Architecture](docs/design/architecture.md) → [Workspace tour](docs/implementation/workspace-tour.md) |
+
+The [documentation hub](docs/README.md) includes comprehensive guides for
+versioned history, CompassQL, assistant setup, security, operations,
+implementation, troubleshooting, and the status-qualified
+[roadmap](docs/roadmap.md). Diagrams use portable ASCII or accessible SVG.
 
 ## Command surface and graph history
 

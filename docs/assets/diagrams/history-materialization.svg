@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1220" height="560" viewBox="0 0 1220 560" role="img" aria-labelledby="title desc">
+  <title id="title">Compass history materialization</title>
+  <desc id="desc">A Git revision resolves to an exact commit. Compass combines that commit with a build profile, creates a protected offline worktree, builds and validates artifacts, and publishes an immutable realization into a SQLite-backed Prolly store. Queries, diffs, and exports read validated preferred realizations.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.box{fill:#fff;stroke:#486581;stroke-width:2}.process{fill:#e5edff;stroke:#355ca8;stroke-width:2}.store{fill:#e3f4ea;stroke:#287d4f;stroke-width:2}.warn{fill:#fff4d6;stroke:#9b6b00;stroke-width:2}.head{font:700 18px ui-sans-serif,system-ui,sans-serif;fill:#102a43}.body{font:14px ui-sans-serif,system-ui,sans-serif;fill:#334e68}.mono{font:13px ui-monospace,SFMono-Regular,monospace;fill:#334e68}.line{fill:none;stroke:#627d98;stroke-width:3}.arrow{fill:#627d98}
+      @media (prefers-color-scheme:dark){.bg{fill:#111827}.box{fill:#1f2937;stroke:#9fb3c8}.process{fill:#213659;stroke:#89aef2}.store{fill:#163b2a;stroke:#6bc993}.warn{fill:#3b3015;stroke:#e0b84e}.head{fill:#f3f4f6}.body,.mono{fill:#d1d5db}.line{stroke:#9fb3c8}.arrow{fill:#9fb3c8}}
+    </style>
+  </defs>
+  <rect class="bg" width="1220" height="560" rx="24"/>
+  <rect class="box" x="35" y="52" width="220" height="110" rx="16"/>
+  <text class="head" x="145" y="90" text-anchor="middle">Git revision</text>
+  <text class="mono" x="145" y="124" text-anchor="middle">HEAD~20 / tag / SHA</text>
+  <rect class="box" x="35" y="208" width="220" height="130" rx="16"/>
+  <text class="head" x="145" y="246" text-anchor="middle">Build profile</text>
+  <text class="body" x="145" y="278" text-anchor="middle">code-only or semantic</text>
+  <text class="body" x="145" y="306" text-anchor="middle">model · excludes · versions</text>
+  <path class="line" d="M255 107 H310 V190 H338 M255 273 H310 V190"/>
+  <polygon class="arrow" points="338,182 354,190 338,198"/>
+  <rect class="process" x="354" y="124" width="220" height="132" rx="16"/>
+  <text class="head" x="464" y="160" text-anchor="middle">Resolve + fingerprint</text>
+  <text class="body" x="464" y="193" text-anchor="middle">exact commit SHA</text>
+  <text class="body" x="464" y="221" text-anchor="middle">meaning-affecting inputs</text>
+  <line class="line" x1="574" y1="190" x2="632" y2="190"/>
+  <polygon class="arrow" points="632,182 648,190 632,198"/>
+  <rect class="process" x="648" y="95" width="235" height="190" rx="16"/>
+  <text class="head" x="765" y="132" text-anchor="middle">Protected worktree</text>
+  <text class="body" x="765" y="166" text-anchor="middle">detached · offline · no hooks</text>
+  <text class="body" x="765" y="194" text-anchor="middle">no fetch · no filter execution</text>
+  <text class="body" x="765" y="222" text-anchor="middle">build complete artifacts</text>
+  <text class="body" x="765" y="250" text-anchor="middle">validate before publication</text>
+  <line class="line" x1="883" y1="190" x2="940" y2="190"/>
+  <polygon class="arrow" points="940,182 956,190 940,198"/>
+  <rect class="store" x="956" y="80" width="230" height="220" rx="18"/>
+  <text class="head" x="1071" y="118" text-anchor="middle">History store</text>
+  <text class="body" x="1071" y="150" text-anchor="middle">SQLite + WAL durability</text>
+  <text class="body" x="1071" y="178" text-anchor="middle">content-addressed Prolly roots</text>
+  <text class="body" x="1071" y="206" text-anchor="middle">immutable realizations</text>
+  <text class="body" x="1071" y="234" text-anchor="middle">preferred pointer</text>
+  <text class="body" x="1071" y="262" text-anchor="middle">jobs · leases · locks beside DB</text>
+  <path class="line" d="M1071 300 V372 H830"/>
+  <polygon class="arrow" points="846,364 830,372 846,380"/>
+  <rect class="box" x="560" y="372" width="270" height="130" rx="16"/>
+  <text class="head" x="695" y="410" text-anchor="middle">Read surfaces</text>
+  <text class="body" x="695" y="444" text-anchor="middle">query --at · path --at · explain --at</text>
+  <text class="body" x="695" y="474" text-anchor="middle">diff · export · list / show</text>
+  <rect class="warn" x="35" y="398" width="370" height="104" rx="16"/>
+  <text class="head" x="220" y="434" text-anchor="middle">Comparable means same semantics</text>
+  <text class="body" x="220" y="465" text-anchor="middle">Different fingerprints require an explicit choice.</text>
+</svg>
