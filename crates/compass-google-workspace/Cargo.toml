@@ -16,7 +16,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-compass-media = { path = "../compass-media", version = "0.1.0" }
+compass-media = { path = "../compass-media", version = "0.1.1" }
 url.workspace = true
 wait-timeout.workspace = true
 
