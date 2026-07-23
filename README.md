@@ -69,6 +69,29 @@ compass history gc
 compass history disable
 ```
 
+For a fully local code graph with no model credentials, select a code-only
+history profile explicitly:
+
+```bash
+compass history enable --code-only
+compass diff HEAD~1 HEAD --topology-only
+```
+
+Code-only and semantic realizations have different extraction fingerprints and
+are never mixed by a normal diff. Compass does not silently downgrade a
+semantic profile when provider credentials are missing.
+
+To qualify history correctness and performance against two commits in a clean
+real repository checkout, run:
+
+```bash
+scripts/qualify_history_real_repo.sh /path/to/repository OLD NEW
+```
+
+The harness builds in an isolated shared clone, checks deterministic and
+reverse-symmetric JSON, reopens the SQLite store, verifies topology filtering,
+and requires topology-only diff to be at least twice as fast as a full diff.
+
 `compass history enable` records a repository-wide build profile and installs
 managed `post-commit` and `post-merge` hooks. The hooks capture the resulting
 commit SHA and durably enqueue work, then return without waiting for extraction.

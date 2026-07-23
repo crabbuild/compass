@@ -17,6 +17,7 @@ pub(crate) struct HistoryBuildOptions {
     forwarded: Vec<String>,
     gitignore: bool,
     excludes: Vec<String>,
+    code_only: bool,
     semantic_environment: Vec<(String, String)>,
     semantic_environment_remove: Vec<String>,
 }
@@ -46,11 +47,15 @@ impl HistoryBuildOptions {
             .filter(|(key, _)| key.starts_with("exclude."))
             .map(|(_, value)| value.to_owned())
             .collect::<Vec<_>>();
+        let code_only = profile.value("code_only") == Some("true");
         let mut forwarded = Vec::new();
         push_profile_option(&profile, &mut forwarded, "provider", "--backend", "none");
         push_profile_option(&profile, &mut forwarded, "model", "--model", "none");
         if profile.value("semantic_mode") == Some("deep") {
             forwarded.extend(["--mode".to_owned(), "deep".to_owned()]);
+        }
+        if code_only {
+            forwarded.push("--code-only".to_owned());
         }
         for (key, flag) in [("cargo", "--cargo"), ("dedup_llm", "--dedup-llm")] {
             if profile.value(key) == Some("true") {
@@ -93,6 +98,7 @@ impl HistoryBuildOptions {
             forwarded,
             gitignore,
             excludes,
+            code_only,
         })
     }
 
@@ -102,13 +108,27 @@ impl HistoryBuildOptions {
             forwarded: self.forwarded.clone(),
             gitignore: self.gitignore,
             excludes: self.excludes.clone(),
+            code_only: self.code_only,
             semantic_environment: self.semantic_environment.clone(),
             semantic_environment_remove: self.semantic_environment_remove.clone(),
         }
     }
 
     fn from_values(mut values: HistoryBuildValues) -> Result<Self, HistoryError> {
-        resolve_provider(&mut values)?;
+        if values.code_only {
+            if values.backend.is_some()
+                || values.model.is_some()
+                || values.deep
+                || values.dedup_llm
+                || values.token_budget.is_some()
+            {
+                return Err(HistoryError::InvalidFingerprint(
+                    "--code-only cannot be combined with semantic-provider options".to_owned(),
+                ));
+            }
+        } else {
+            resolve_provider(&mut values)?;
+        }
         let mut profile = BuildProfile::default();
         for (key, value) in [
             ("compass_version", env!("CARGO_PKG_VERSION").to_owned()),
@@ -121,6 +141,7 @@ impl HistoryBuildOptions {
             ("cluster_algorithm", "seeded-louvain/v1".to_owned()),
             ("cluster_seed", "42".to_owned()),
             ("gitignore", values.gitignore.to_string()),
+            ("code_only", values.code_only.to_string()),
             ("cargo", values.cargo.to_string()),
             ("dedup_llm", values.dedup_llm.to_string()),
             (
@@ -192,6 +213,9 @@ impl HistoryBuildOptions {
         if let Some(model) = &values.model {
             forwarded.extend(["--model".to_owned(), model.clone()]);
         }
+        if values.code_only {
+            forwarded.push("--code-only".to_owned());
+        }
         if values.deep {
             forwarded.extend(["--mode".to_owned(), "deep".to_owned()]);
         }
@@ -227,6 +251,7 @@ impl HistoryBuildOptions {
             forwarded,
             gitignore: values.gitignore,
             excludes: values.excludes,
+            code_only: values.code_only,
         })
     }
 }
@@ -245,6 +270,7 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 | "cluster_algorithm"
                 | "cluster_seed"
                 | "gitignore"
+                | "code_only"
                 | "cargo"
                 | "dedup_llm"
                 | "semantic_mode"
@@ -288,6 +314,11 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 "persisted {key} is not boolean"
             )));
         }
+    }
+    if !matches!(profile.value("code_only"), None | Some("true" | "false")) {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted code_only is not boolean".to_owned(),
+        ));
     }
     let resolution = profile
         .value("resolution")
@@ -471,6 +502,7 @@ fn pinned_provider_environment(profile: &BuildProfile) -> (Vec<(String, String)>
 struct HistoryBuildValues {
     backend: Option<String>,
     model: Option<String>,
+    code_only: bool,
     deep: bool,
     cargo: bool,
     dedup_llm: bool,
@@ -490,6 +522,7 @@ impl Default for HistoryBuildValues {
         Self {
             backend: None,
             model: None,
+            code_only: false,
             deep: false,
             cargo: false,
             dedup_llm: false,
@@ -536,7 +569,7 @@ pub(crate) fn parse_build_command(
             .split_once('=')
             .map_or((argument, None), |(name, value)| (name, Some(value)));
         match name {
-            "--cargo" | "--dedup-llm" | "--no-gitignore" | "--replace-corrupt" => {
+            "--cargo" | "--code-only" | "--dedup-llm" | "--no-gitignore" | "--replace-corrupt" => {
                 if inline.is_some() {
                     return Err(format!("{name} does not accept a value"));
                 }
@@ -545,6 +578,7 @@ pub(crate) fn parse_build_command(
                 }
                 match name {
                     "--cargo" => values.cargo = true,
+                    "--code-only" => values.code_only = true,
                     "--dedup-llm" => values.dedup_llm = true,
                     "--no-gitignore" => values.gitignore = false,
                     "--replace-corrupt" => replace_corrupt = true,
@@ -574,7 +608,7 @@ pub(crate) fn parse_build_command(
                 let value = option_value(args, &mut index, name, inline)?;
                 values.excludes.push(nonempty(name, value)?.to_owned());
             }
-            "--allow-partial" | "--code-only" | "--no-cluster" => {
+            "--allow-partial" | "--no-cluster" => {
                 return Err(format!(
                     "{name} is incompatible with complete graph history"
                 ));
@@ -749,6 +783,7 @@ pub(crate) struct NativeCompleteGraphBuilder {
     forwarded: Vec<String>,
     gitignore: bool,
     excludes: Vec<String>,
+    code_only: bool,
     semantic_environment: Vec<(String, String)>,
     semantic_environment_remove: Vec<String>,
 }
@@ -811,11 +846,15 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
                 ..DetectOptions::default()
             },
         )?;
-        let semantic = ["document", "paper", "image", "video"]
-            .into_iter()
-            .flat_map(|kind| detection.files.get(kind).into_iter().flatten())
-            .map(PathBuf::from)
-            .collect::<Vec<_>>();
+        let semantic = if self.code_only {
+            Vec::new()
+        } else {
+            ["document", "paper", "image", "video"]
+                .into_iter()
+                .flat_map(|kind| detection.files.get(kind).into_iter().flatten())
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        };
         let manifest = Manifest::load(&output_dir.join("manifest.json"), Some(checkout));
         let completed = semantic
             .iter()
@@ -980,8 +1019,26 @@ mod tests {
             )
             .is_err()
         );
+        let code_only =
+            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])?;
+        assert_eq!(code_only.options.profile().value("code_only"), Some("true"));
+        assert_eq!(code_only.options.profile().value("provider"), Some("none"));
         assert!(
-            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()]).is_err()
+            code_only
+                .options
+                .forwarded
+                .contains(&"--code-only".to_owned())
+        );
+        assert!(
+            parse_build_command(
+                "build",
+                &[
+                    "HEAD".to_owned(),
+                    "--code-only".to_owned(),
+                    "--backend=openai".to_owned(),
+                ],
+            )
+            .is_err()
         );
         assert!(
             parse_build_command(
@@ -1057,7 +1114,6 @@ mod tests {
             vec!["HEAD", "--format", "yaml"],
             vec!["HEAD", "--unknown"],
             vec!["HEAD", "--allow-partial"],
-            vec!["HEAD", "--code-only"],
             vec!["HEAD", "--no-cluster"],
             vec!["HEAD", "--google-workspace"],
             vec!["HEAD", "--postgres"],

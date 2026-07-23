@@ -371,10 +371,14 @@ fn validate_completed(
             ..DetectOptions::default()
         },
     )?;
-    let semantic_files = ["document", "paper", "image", "video"]
-        .into_iter()
-        .flat_map(|kind| detection.files.get(kind).into_iter().flatten())
-        .collect::<Vec<_>>();
+    let semantic_files = if profile.value("code_only") == Some("true") {
+        Vec::new()
+    } else {
+        ["document", "paper", "image", "video"]
+            .into_iter()
+            .flat_map(|kind| detection.files.get(kind).into_iter().flatten())
+            .collect::<Vec<_>>()
+    };
     let semantic_expected = u64::try_from(semantic_files.len())
         .map_err(|_| MaterializeError::Incomplete("semantic inventory exceeds u64".to_owned()))?;
     if completed.completion.semantic_files_expected != semantic_expected {

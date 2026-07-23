@@ -23,7 +23,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -399,11 +399,12 @@ fn select_existing(
             .preferred(commit)
             .map_err(|error| error.to_string())?
     };
-    if let Some(selected) = &selected {
-        history
-            .validate(&selected.id)
-            .map_err(|error| error.to_string())?;
-    }
+    // Publication validates the complete immutable realization before making
+    // it visible, while `preferred`/`list` authenticate the manifest and its
+    // direct roots. The diff traversal then verifies every Prolly node it
+    // actually reads. Re-scanning and reconstructing all five trees here made
+    // even a topology-only diff pay the full graph-validation cost twice and
+    // defeated structural sharing.
     Ok(selected)
 }
 
@@ -546,7 +547,7 @@ fn render_diff(
     match options.output {
         DiffOutput::Summary | DiffOutput::Detailed => {
             let mut sink = TextSink::new(options)?;
-            history.diff(&old.id, &new.id, &mut sink)?;
+            stream_diff(history, old, new, options.topology_only, &mut sink)?;
             sink.finish(writer)
         }
         DiffOutput::Json => {
@@ -568,9 +569,28 @@ fn render_diff(
             .map_err(json_output_error)?;
             writer.write_all(b",\"changes\":[").map_err(output_error)?;
             let mut sink = JsonSink::new(writer, options.topology_only);
-            history.diff(&old.id, &new.id, &mut sink)?;
+            stream_diff(history, old, new, options.topology_only, &mut sink)?;
             sink.finish()
         }
+    }
+}
+
+fn stream_diff(
+    history: &HistoryStore,
+    old: &PublishedVersion,
+    new: &PublishedVersion,
+    topology_only: bool,
+    sink: &mut dyn ChangeSink,
+) -> Result<(), HistoryError> {
+    if topology_only {
+        history.diff_records(
+            &old.id,
+            &new.id,
+            &[RecordKind::Node, RecordKind::Edge],
+            sink,
+        )
+    } else {
+        history.diff(&old.id, &new.id, sink)
     }
 }
 

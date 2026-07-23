@@ -46,6 +46,32 @@ impl HistoryStore {
         new: &RealizationId,
         sink: &mut dyn ChangeSink,
     ) -> Result<(), HistoryError> {
+        self.diff_records(
+            old,
+            new,
+            &[
+                RecordKind::Node,
+                RecordKind::Edge,
+                RecordKind::Hyperedge,
+                RecordKind::Analysis,
+                RecordKind::Metadata,
+            ],
+            sink,
+        )
+    }
+
+    /// Stream only the requested record roots.
+    ///
+    /// This is more than a presentation filter: omitted Prolly roots are never
+    /// opened or traversed. Callers such as topology-only diff can therefore
+    /// avoid decoding analysis and reconstruction metadata entirely.
+    pub fn diff_records(
+        &self,
+        old: &RealizationId,
+        new: &RealizationId,
+        records: &[RecordKind],
+        sink: &mut dyn ChangeSink,
+    ) -> Result<(), HistoryError> {
         let activity = self.activity()?;
         let old = self.get_with_activity(old, &activity)?;
         let new = self.get_with_activity(new, &activity)?;
@@ -76,7 +102,9 @@ impl HistoryStore {
                 &new.version.metadata_root,
             ),
         ] {
-            self.diff_root(kind, left, right, sink)?;
+            if records.contains(&kind) {
+                self.diff_root(kind, left, right, sink)?;
+            }
         }
         Ok(())
     }

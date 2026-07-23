@@ -124,6 +124,19 @@ fn diff_reports_topology_attribute_and_analysis_changes() -> Result<(), Box<dyn 
             .iter()
             .any(|change| change.record == RecordKind::Analysis)
     );
+    let mut topology_roots = VecSink::default();
+    history.diff_records(
+        &old.id,
+        &new.id,
+        &[RecordKind::Node, RecordKind::Edge],
+        &mut topology_roots,
+    )?;
+    assert!(
+        topology_roots
+            .0
+            .iter()
+            .all(|change| matches!(change.record, RecordKind::Node | RecordKind::Edge))
+    );
     Ok(())
 }
 

@@ -48,7 +48,6 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
 
     let compass = env!("CARGO_BIN_EXE_compass");
-    let graphify = env!("CARGO_BIN_EXE_graphify");
     let help = run(compass, directory.path(), &["history", "--help"])?;
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("build REV"));
@@ -66,11 +65,6 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
         false
     );
     assert!(!directory.path().join(".git/compass").exists());
-    let alias = run(graphify, directory.path(), &["history", "status", "HEAD"])?;
-    assert_eq!(status.status.code(), alias.status.code());
-    assert_eq!(status.stdout, alias.stdout);
-    assert_eq!(status.stderr, alias.stderr);
-
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::create(&repository)?;
     let database = history.database_path().to_path_buf();
@@ -113,7 +107,7 @@ fn enable_disable_are_explicit_idempotent_and_invalid_profiles_roll_back()
     let invalid = run(
         compass,
         directory.path(),
-        &["history", "enable", "--code-only"],
+        &["history", "enable", "--allow-partial"],
     )?;
     assert_eq!(invalid.status.code(), Some(2));
     assert_eq!(std::fs::read(&config)?, before);
@@ -398,7 +392,6 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     drop(history);
 
     let compass = env!("CARGO_BIN_EXE_compass");
-    let graphify = env!("CARGO_BIN_EXE_graphify");
     let list = run(
         compass,
         directory.path(),
@@ -410,13 +403,6 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     let list_text = run(compass, directory.path(), &["history", "list", "HEAD"])?;
     assert!(list_text.status.success());
     assert!(String::from_utf8_lossy(&list_text.stdout).contains("alternate"));
-    let alias = run(
-        graphify,
-        directory.path(),
-        &["history", "list", "HEAD", "--format", "json"],
-    )?;
-    assert_eq!(list.stdout, alias.stdout);
-
     let show = run(
         compass,
         directory.path(),
@@ -496,14 +482,14 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
 
     let bundle = directory.path().join("historical-out");
     let export = run(
-        graphify,
+        compass,
         directory.path(),
         &[
             "history",
             "export",
             "HEAD",
             "--format",
-            "graphify-out",
+            "compass-out",
             "--output",
             bundle.to_str().ok_or("path")?,
         ],
@@ -527,7 +513,7 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
             "history",
             "export",
             "HEAD",
-            "--format=graphify-out",
+            "--format=compass-out",
             "--output",
             bundle.to_str().ok_or("path")?,
         ],
@@ -821,7 +807,6 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     drop(history);
 
     let compass = env!("CARGO_BIN_EXE_compass");
-    let graphify = env!("CARGO_BIN_EXE_graphify");
     let summary = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
     assert!(
         summary.status.success(),
@@ -868,11 +853,10 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     let topology_changes = topology_envelope["changes"]
         .as_array()
         .ok_or("missing topology changes")?;
-    assert!(
-        topology_changes
-            .iter()
-            .all(|change| { !matches!(change["record"].as_str(), Some("analysis" | "metadata")) })
-    );
+    assert!(topology_changes.iter().all(|change| {
+        matches!(change["record"].as_str(), Some("node" | "edge"))
+            && matches!(change["change"].as_str(), Some("added" | "removed"))
+    }));
 
     let detailed = run(
         compass,
@@ -884,15 +868,6 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
 
     let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
     assert_eq!(String::from_utf8_lossy(&empty.stdout), "no graph changes\n");
-    let alias = run(
-        graphify,
-        directory.path(),
-        &["diff", "HEAD~1", "HEAD", "--format", "json"],
-    )?;
-    assert_eq!(json_output.status.code(), alias.status.code());
-    assert_eq!(json_output.stdout, alias.stdout);
-    assert_eq!(json_output.stderr, alias.stderr);
-
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
     history.publish(PublishRequest {
         commit: new_commit,
@@ -1003,7 +978,6 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     drop(history);
 
     let compass = env!("CARGO_BIN_EXE_compass");
-    let graphify = env!("CARGO_BIN_EXE_graphify");
     let query = run(
         compass,
         directory.path(),
@@ -1062,13 +1036,6 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     );
     assert!(String::from_utf8_lossy(&explain.stdout).contains("Database"));
 
-    let alias = run(
-        graphify,
-        directory.path(),
-        &["query", "legacy service", "--at", "HEAD~1"],
-    )?;
-    assert_eq!(query.status.code(), alias.status.code());
-    assert_eq!(query.stdout, alias.stdout);
     assert!(
         HistoryQueue::open_existing(&repository)?.is_none(),
         "reading existing realizations must not create a durable job queue"
@@ -1111,7 +1078,7 @@ fn missing_code_only_commit_is_built_on_first_query() -> Result<(), Box<dyn std:
         String::from_utf8_lossy(&query.stderr)
     );
     assert!(String::from_utf8_lossy(&query.stdout).contains("OldService"));
-    assert!(!directory.path().join("graphify-out").exists());
+    assert!(!directory.path().join("compass-out").exists());
     let status = run(compass, directory.path(), &["history", "status", "HEAD~1"])?;
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("validation: valid"));
@@ -1132,7 +1099,11 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
         directory.path().join("service.rs"),
         "pub struct FirstService;\n",
     )?;
-    git(directory.path(), &["add", "service.rs"])?;
+    std::fs::write(
+        directory.path().join("README.md"),
+        "A semantic document that code-only history deliberately excludes.\n",
+    )?;
+    git(directory.path(), &["add", "service.rs", "README.md"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "first"])?;
     std::fs::write(
         directory.path().join("service.rs"),
@@ -1145,7 +1116,13 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
     let enabled = run(
         compass,
         directory.path(),
-        &["history", "enable", "--exclude", "generated/**"],
+        &[
+            "history",
+            "enable",
+            "--code-only",
+            "--exclude",
+            "generated/**",
+        ],
     )?;
     assert!(enabled.status.success());
     let diff = run(
@@ -1167,6 +1144,7 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
     assert_eq!(versions.len(), 2);
     assert!(versions.iter().all(|version| {
         version.version.build_profile.value("exclude.000000") == Some("generated/**")
+            && version.version.build_profile.value("code_only") == Some("true")
     }));
     drop(history);
     let progress = String::from_utf8_lossy(&diff.stderr);
@@ -1202,6 +1180,7 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
             "history",
             "rebuild",
             "HEAD",
+            "--code-only",
             "--resolution=2",
             "--format=json",
         ],
@@ -1302,7 +1281,7 @@ fn historical_build_uses_only_the_exact_commit_tree_and_historical_ignore_policy
         )?;
         assert!(!String::from_utf8_lossy(&query.stdout).contains(absent));
     }
-    assert!(!directory.path().join("graphify-out").exists());
+    assert!(!directory.path().join("compass-out").exists());
     Ok(())
 }
 
@@ -1423,7 +1402,7 @@ fn normal_graph_export_and_historical_queries_are_semantically_identical()
         "{}",
         String::from_utf8_lossy(&extracted.stderr)
     );
-    let graph_path = directory.path().join("graphify-out/graph.json");
+    let graph_path = directory.path().join("compass-out/graph.json");
     let original: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
 
     let built = run(compass, directory.path(), &["history", "build", "HEAD"])?;
