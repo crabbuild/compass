@@ -10,6 +10,7 @@ members = [
     "crates/compass-global",
     "crates/compass-google-workspace",
     "crates/compass-ingest",
+    "crates/compass-ir",
     "crates/compass-languages",
     "crates/compass-media",
     "crates/compass-mcp",

@@ -1112,6 +1112,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-ir"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "compass-languages"
 version = "0.1.0"
 dependencies = [
