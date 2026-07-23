@@ -554,14 +554,16 @@ pub(crate) fn request(arguments: &[String], style: HelpStyle) -> Option<Outcome>
         return Some(Outcome::success(render_root(style)));
     }
     let explicit_help = arguments.first().is_some_and(|value| value == "help");
-    let help_index = arguments
-        .iter()
-        .position(|value| matches!(value.as_str(), "-h" | "--help"));
+    let help_index = arguments.iter().position(|value| is_help_flag(value));
     if !explicit_help && help_index.is_none() {
         return None;
     }
     let tokens = if explicit_help {
-        &arguments[1..]
+        let arguments = &arguments[1..];
+        &arguments[..arguments
+            .iter()
+            .position(|value| is_help_flag(value))
+            .unwrap_or(arguments.len())]
     } else {
         &arguments[..help_index.unwrap_or(arguments.len())]
     };
@@ -590,6 +592,10 @@ pub(crate) fn request(arguments: &[String], style: HelpStyle) -> Option<Outcome>
         return Some(unknown_child_error(matched.path, leading[length]));
     }
     Some(Outcome::success(render_page(matched, style)))
+}
+
+fn is_help_flag(value: &str) -> bool {
+    matches!(value, "-h" | "--help" | "-?")
 }
 
 pub(crate) fn unknown_command(command: &str) -> String {

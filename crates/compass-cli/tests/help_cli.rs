@@ -162,6 +162,21 @@ fn help_suggestions_and_terminal_policy_are_conservative() {
 }
 
 #[test]
+fn compatibility_help_flags_use_the_rich_renderer() {
+    let root = invoke(&["--help"]);
+    for arguments in [&["-?"][..], &["help", "--help"]] {
+        let outcome = invoke(arguments);
+        assert_eq!(outcome.code, 0, "{arguments:?}: {}", outcome.stderr);
+        assert_eq!(outcome.stdout, root.stdout, "{arguments:?}");
+    }
+
+    let query = invoke(&["query", "-?"]);
+    assert_eq!(query.code, 0, "{}", query.stderr);
+    assert!(query.stdout.contains("Search the graph"));
+    assert!(query.stdout.contains("Examples:"));
+}
+
+#[test]
 fn graphify_help_asset_remains_byte_for_byte_unchanged() {
     let outcome = run(Frontend::Graphify, [OsString::from("--help")]);
     assert_eq!(outcome.code, 0);
