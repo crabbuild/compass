@@ -47,6 +47,8 @@ pub enum FileError {
     TooLarge { path: PathBuf, limit: u64 },
     #[error("an interrupted graph build is recorded at {0}")]
     IncompleteBuild(PathBuf),
+    #[error("invalid cache kind for operation: {0}")]
+    InvalidCacheKind(String),
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> FileError {
