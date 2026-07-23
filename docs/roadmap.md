@@ -147,11 +147,27 @@ Compass is dual-licensed under MIT or Apache-2.0 and includes:
 
 ## Planned
 
-The items below have committed design or implementation-plan evidence in the
-default branch. They are not listed in the current public command surface
-unless explicitly moved to Available now. Ideas that exist only in an
-uncommitted workspace or a separate development branch are intentionally not
-promoted to committed plans here.
+The items below have committed design or implementation-plan evidence. They are
+not listed in the current public command surface unless explicitly moved to
+Available now.
+
+### Compass Guard: architecture governance
+
+Goal: build a production CI architecture-governance product on CompassQL and
+versioned graphs. The planned `compass check` surface would:
+
+- evaluate portable read-only CompassQL policies;
+- report witness evidence;
+- support accountable exemptions;
+- compare against baselines so CI can fail only on newly introduced
+  violations;
+- emit stable machine output such as SARIF;
+- integrate with major CI systems.
+
+Evidence:
+
+- [`docs/superpowers/plans/2026-07-22-compass-guard.md`](superpowers/plans/2026-07-22-compass-guard.md)
+- [`docs/superpowers/plans/2026-07-22-compassql-policy.md`](superpowers/plans/2026-07-22-compassql-policy.md)
 
 ### Reusable CompassQL policy and integration surfaces
 
@@ -171,6 +187,43 @@ Evidence:
 
 - [`docs/superpowers/plans/2026-07-22-compassql-integrations.md`](superpowers/plans/2026-07-22-compassql-integrations.md)
 - [`docs/superpowers/plans/2026-07-22-compassql-policy.md`](superpowers/plans/2026-07-22-compassql-policy.md)
+
+### PR Intelligence foundation
+
+Goal: create a trusted, typed, immutable foundation for graph-aware pull-request
+reports.
+
+Planned foundation:
+
+- shared immutable graph snapshots;
+- exact pull-request revision capture;
+- a versioned typed report;
+- immutable evidence manifests;
+- durable report persistence;
+- compatibility-safe CLI and MCP adapters.
+
+Evidence:
+
+- [`docs/superpowers/specs/2026-07-22-pr-intelligence-design.md`](superpowers/specs/2026-07-22-pr-intelligence-design.md)
+- [`docs/superpowers/plans/2026-07-22-pr-intelligence-foundation.md`](superpowers/plans/2026-07-22-pr-intelligence-foundation.md)
+
+### Continued version-history hardening
+
+The core versioned graph surface is available. Committed designs also describe
+continued hardening around:
+
+- resolution-sensitive identity;
+- semantic diff interpretation;
+- gaps discovered by correctness audits;
+- production qualification and compatibility.
+
+Evidence:
+
+- [`docs/superpowers/specs/2026-07-22-versioned-graph-gap-mitigations-design.md`](superpowers/specs/2026-07-22-versioned-graph-gap-mitigations-design.md)
+
+Before treating an individual mitigation as incomplete, inspect current source
+and tests: some planned items may already have landed without the plan file
+being removed.
 
 ## Aspirational
 
