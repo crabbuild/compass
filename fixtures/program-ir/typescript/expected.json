@@ -1,0 +1,26 @@
+{
+  "language": "tsx",
+  "required_constructs": [
+    "imports_and_exports",
+    "overload_signatures",
+    "decorator",
+    "jsx",
+    "callback",
+    "dynamic_property",
+    "optional_call",
+    "async_function"
+  ],
+  "syntax_provider": {
+    "syntax": "complete",
+    "symbol_identity": "partial",
+    "call_resolution": "partial",
+    "types": "indeterminate",
+    "decorator_semantics": "indeterminate"
+  },
+  "expected_conflicts": [],
+  "must_not_claim": [
+    "typescript_checker_overload_resolution",
+    "dynamic_property_target",
+    "decorator_runtime_effect"
+  ]
+}

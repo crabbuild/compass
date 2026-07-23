@@ -622,3 +622,30 @@ Release gates are capability- and language-specific. A language may remain in
 the structural or resolved tier while another qualifies for deep analysis.
 Compass never hides unsupported depth behind one generic supported-language
 label.
+
+## Implemented foundation status
+
+The first Program IR foundation described above is now implemented. Native
+`update`, `extract`, and `watch` orchestrate content-addressed per-file syntax
+analysis, optional offline official SCIP ingestion, deterministic
+provenance-aware merge, and derived summaries. The only output artifact is
+`program.json`; `.compass_program.json` is neither read nor written.
+
+Rust and the TypeScript/JavaScript family currently have Tree-sitter syntax
+providers. Their evidence is deliberately conservative: unsupported compiler
+semantics remain partial or indeterminate. Official SCIP protobuf is decoded
+in-process with bounded streaming, path validation, freshness reporting, and an
+optional digest-binding companion manifest. Compass does not invoke an indexer
+or language server.
+
+History schema 3 stores Program IR facts and summaries in separate
+content-addressed roots, while continuing to read schema-2 realizations as
+having empty program roots. Full history diff includes program records;
+topology-only diff excludes them. GC, validation, backup, export, and
+unchanged-output reuse all cover `program.json`.
+
+The executable qualification corpus is in `fixtures/program-ir/`, and
+`scripts/qualify_program_ir.sh` checks cold/warm equivalence, incremental
+invalidation, artifact freshness and conflicts, checkout-root independence,
+history behavior, compatibility output, workspace tests, formatting, and
+denied Clippy warnings.

@@ -279,6 +279,7 @@ Compass writes the graph and its supporting artifacts to `compass-out/`:
 | `GRAPH_REPORT.md` | Architecture summary, communities, god nodes, and graph diagnostics |
 | `graph.html` | Interactive browser exploration when the graph is within the visualization limit |
 | `manifest.json` | Incremental build state |
+| `program.json` | Canonical, provenance-aware Program IR and derived function summaries |
 
 Open `compass-out/graph.html` in a browser for a visual tour. Start with `GRAPH_REPORT.md` when you need a repository-wide architecture view.
 
@@ -289,6 +290,55 @@ compass query "where is authentication enforced?"
 ```
 
 This query searches and traverses the saved graph. It returns relevant nodes and relationships, not a model-generated narrative, and it doesn't access the network.
+
+### Understand program behavior with evidence
+
+Native `update`, `extract`, and `watch` builds also produce `program.json`.
+This language-neutral Program IR records functions, conservative basic blocks,
+operations, call candidates, capability coverage, evidence provenance, and
+derived summaries. It is designed for semantic change analysis and future
+impact, test-selection, contract, and agent-verification features; it is not
+LLVM IR and is not an executable compiler representation.
+
+The initial offline pipeline combines:
+
+- deterministic Tree-sitter syntax evidence for Rust and
+  TypeScript/JavaScript, including TSX;
+- official SCIP protobuf indexes already present on disk;
+- deterministic reconciliation that retains contradictory evidence instead of
+  silently choosing one answer;
+- content-addressed file and artifact caches; and
+- immutable Program IR fact and summary roots in graph history schema 3.
+
+Tree-sitter provides syntax, stable source spans, declarations, lexical
+operations, and conservative source-level control flow. It does not claim
+compiler-resolved types, dynamic dispatch, macro expansion, or complete data
+flow. Those capabilities require stronger evidence such as SCIP or later
+compiler-backed project analyzers. Every capability in `program.json` reports
+its own `complete`, `partial`, `indeterminate`, or `failed` coverage state.
+
+Compass automatically discovers `index.scip`. Supply other offline indexes
+explicitly with a repeatable option:
+
+```bash
+compass update . --program-artifact artifacts/backend.scip \
+  --program-artifact artifacts/frontend.scip
+```
+
+Raw SCIP is accepted with unverified freshness because the format does not bind
+documents to source-content digests. An optional companion named
+`INDEX.scip.compass-manifest.json` can bind the index SHA-256 and each logical
+document path to its exact source SHA-256. Stale documents are excluded while
+valid syntax evidence remains available. Compass decodes supplied artifacts
+itself; it does not invoke an indexer, compiler, language server, model, or
+network service.
+
+Run the deterministic, incremental, history, malformed-input, and
+cross-checkout qualification matrix with:
+
+```bash
+bash scripts/qualify_program_ir.sh
+```
 
 ## Explore the graph with concrete questions
 

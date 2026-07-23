@@ -1,0 +1,25 @@
+{
+  "language": "rust",
+  "required_constructs": [
+    "trait",
+    "multiple_impls_with_same_method_name",
+    "macro_invocation",
+    "try_operator",
+    "async_function",
+    "generic_dispatch",
+    "callback"
+  ],
+  "syntax_provider": {
+    "syntax": "complete",
+    "symbol_identity": "partial",
+    "call_resolution": "partial",
+    "types": "indeterminate",
+    "macro_expansion": "indeterminate"
+  },
+  "expected_conflicts": [],
+  "must_not_claim": [
+    "compiler_resolved_generic_dispatch",
+    "macro_expanded_control_flow",
+    "concrete_async_state_machine"
+  ]
+}
