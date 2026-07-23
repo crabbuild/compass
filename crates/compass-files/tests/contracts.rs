@@ -301,6 +301,47 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
 }
 
 #[test]
+fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let first = directory.path().join("first.rs");
+    let second = directory.path().join("second.rs");
+    fs::write(&first, "fn first() {}\n")?;
+    fs::write(&second, "fn second() {}\n")?;
+    let first_value =
+        json!({"nodes":[{"id":"first","source_file":first.to_string_lossy()}],"edges":[]});
+    let second_value =
+        json!({"nodes":[{"id":"second","source_file":second.to_string_lossy()}],"edges":[]});
+    let mut cache = Cache::new(directory.path(), None)?;
+
+    cache.save_batch(
+        &[
+            (first.clone(), first_value.clone()),
+            (second.clone(), second_value.clone()),
+        ],
+        &CacheKind::Ast,
+        None,
+    )?;
+    assert_eq!(
+        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        Some(first_value)
+    );
+    assert_eq!(
+        cache.load(&second, &CacheKind::Ast, None, false, false)?,
+        Some(second_value)
+    );
+
+    fs::write(&first, "fn first_changed() {}\n")?;
+    let changed =
+        json!({"nodes":[{"id":"first_changed","source_file":first.to_string_lossy()}],"edges":[]});
+    cache.save_batch(&[(first.clone(), changed.clone())], &CacheKind::Ast, None)?;
+    assert_eq!(
+        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        Some(changed)
+    );
+    Ok(())
+}
+
+#[test]
 fn malformed_and_non_object_cache_entries_fail_closed() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("main.py");

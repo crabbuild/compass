@@ -169,9 +169,35 @@ pub fn score_communities(
     communities: &Communities,
 ) -> BTreeMap<usize, f64> {
     let graph = WeightedGraph::from_document(document);
+    let positions = graph.position_map();
+    let mut node_community = vec![None; graph.len()];
+    let mut internal_edges = HashMap::<usize, usize>::new();
+    for (community, members) in communities {
+        for member in members {
+            if let Some(position) = positions.get(member) {
+                node_community[*position] = Some(*community);
+            }
+        }
+    }
+    for (left, right, _) in graph.edges() {
+        if let Some(community) = node_community[left]
+            && node_community[right] == Some(community)
+        {
+            *internal_edges.entry(community).or_default() += 1;
+        }
+    }
     communities
         .iter()
-        .map(|(community, members)| (*community, cohesion_score_graph(&graph, members)))
+        .map(|(community, members)| {
+            let count = members.len();
+            let possible = count.saturating_mul(count.saturating_sub(1)) / 2;
+            let score = if possible == 0 {
+                1.0
+            } else {
+                internal_edges.get(community).copied().unwrap_or_default() as f64 / possible as f64
+            };
+            (*community, score)
+        })
         .collect()
 }
 
@@ -183,23 +209,20 @@ pub fn remap_communities_to_previous(
     if communities.is_empty() {
         return Communities::new();
     }
-    let new_sets = communities
-        .iter()
-        .map(|(community, nodes)| (*community, nodes.iter().collect::<HashSet<_>>()))
-        .collect::<HashMap<_, _>>();
-    let mut old_sets = HashMap::<usize, HashSet<&String>>::new();
-    for (node, community) in previous {
-        old_sets.entry(*community).or_default().insert(node);
-    }
-    let mut overlaps = Vec::<(usize, usize, usize)>::new();
-    for (old_community, old_nodes) in old_sets {
-        for (new_community, new_nodes) in &new_sets {
-            let overlap = old_nodes.intersection(new_nodes).count();
-            if overlap > 0 {
-                overlaps.push((overlap, old_community, *new_community));
+    let mut overlap_counts = HashMap::<(usize, usize), usize>::new();
+    for (new_community, nodes) in communities {
+        for node in nodes {
+            if let Some(old_community) = previous.get(node) {
+                *overlap_counts
+                    .entry((*old_community, *new_community))
+                    .or_default() += 1;
             }
         }
     }
+    let mut overlaps = overlap_counts
+        .into_iter()
+        .map(|((old, new), overlap)| (overlap, old, new))
+        .collect::<Vec<_>>();
     overlaps.sort_by_key(|(overlap, old, new)| (std::cmp::Reverse(*overlap), *old, *new));
     let mut mapping = HashMap::new();
     let mut used_old = HashSet::new();
@@ -332,15 +355,20 @@ fn cohesion_score_graph(graph: &WeightedGraph, members: &[String]) -> f64 {
     if count <= 1 {
         return 1.0;
     }
-    let member_set = members.iter().map(String::as_str).collect::<HashSet<_>>();
-    let actual = graph
-        .edges()
+    let positions = graph.position_map();
+    let member_set = members
         .iter()
-        .filter(|(left, right, _)| {
-            member_set.contains(graph.ids[*left].as_str())
-                && member_set.contains(graph.ids[*right].as_str())
+        .filter_map(|member| positions.get(member).copied())
+        .collect::<HashSet<_>>();
+    let actual = member_set
+        .iter()
+        .map(|left| {
+            graph.adjacency[*left]
+                .iter()
+                .filter(|(right, _)| left <= right && member_set.contains(right))
+                .count()
         })
-        .count();
+        .sum::<usize>();
     let possible = count * (count - 1) / 2;
     actual as f64 / possible as f64
 }
@@ -487,26 +515,34 @@ fn weight_for(weights: &[(usize, f64)], community: usize) -> f64 {
 }
 
 fn modularity(graph: &WeightedGraph, communities: &[BTreeSet<usize>], resolution: f64) -> f64 {
-    let degree_sum = (0..graph.len())
+    let degrees = (0..graph.len())
         .map(|node| graph.degree_weighted(node))
-        .sum::<f64>();
+        .collect::<Vec<_>>();
+    let degree_sum = degrees.iter().sum::<f64>();
+    if degree_sum == 0.0 {
+        return 0.0;
+    }
     let total_weight = degree_sum / 2.0;
     let norm = 1.0 / degree_sum.powi(2);
-    communities
-        .iter()
-        .map(|community| {
-            let internal = graph
-                .edges()
-                .iter()
-                .filter(|(left, right, _)| community.contains(left) && community.contains(right))
-                .map(|(_, _, weight)| *weight)
-                .sum::<f64>();
-            let degree = community
-                .iter()
-                .map(|node| graph.degree_weighted(*node))
-                .sum::<f64>();
-            internal / total_weight - resolution * degree.powi(2) * norm
-        })
+    let mut node_community = vec![usize::MAX; graph.len()];
+    let mut community_degrees = vec![0.0; communities.len()];
+    let mut internal_weights = vec![0.0; communities.len()];
+    for (community, nodes) in communities.iter().enumerate() {
+        for node in nodes {
+            node_community[*node] = community;
+            community_degrees[community] += degrees[*node];
+        }
+    }
+    for (left, right, weight) in graph.edges() {
+        let community = node_community[left];
+        if community != usize::MAX && node_community[right] == community {
+            internal_weights[community] += weight;
+        }
+    }
+    internal_weights
+        .into_iter()
+        .zip(community_degrees)
+        .map(|(internal, degree)| internal / total_weight - resolution * degree.powi(2) * norm)
         .sum()
 }
 
@@ -561,17 +597,25 @@ impl WeightedGraph {
             .map(|(index, id)| (id.clone(), index))
             .collect::<HashMap<_, _>>();
         let mut graph = Self::new(ids, members);
-        let mut edges = document.links.iter().collect::<Vec<_>>();
+        let mut edges = document
+            .links
+            .iter()
+            .map(|edge| {
+                (
+                    edge.source.as_str(),
+                    edge.target.as_str(),
+                    canonical_attributes(&edge.attributes),
+                    edge,
+                )
+            })
+            .collect::<Vec<_>>();
         edges.sort_by(|left, right| {
-            left.source
-                .cmp(&right.source)
-                .then_with(|| left.target.cmp(&right.target))
-                .then_with(|| {
-                    canonical_attributes(&left.attributes)
-                        .cmp(&canonical_attributes(&right.attributes))
-                })
+            left.0
+                .cmp(right.0)
+                .then_with(|| left.1.cmp(right.1))
+                .then_with(|| left.2.cmp(&right.2))
         });
-        for edge in edges {
+        for (_, _, _, edge) in edges {
             let (Some(left), Some(right)) =
                 (positions.get(&edge.source), positions.get(&edge.target))
             else {
@@ -596,7 +640,7 @@ impl WeightedGraph {
     }
 
     fn edge_count(&self) -> usize {
-        self.edges().len()
+        self.edges().count()
     }
 
     fn position_map(&self) -> HashMap<&String, usize> {
@@ -628,7 +672,7 @@ impl WeightedGraph {
     }
 
     fn total_weight(&self) -> f64 {
-        self.edges().iter().map(|(_, _, weight)| *weight).sum()
+        self.edges().map(|(_, _, weight)| weight).sum()
     }
 
     fn set_edge(&mut self, left: usize, right: usize, weight: f64) {
@@ -673,18 +717,16 @@ impl WeightedGraph {
         }
     }
 
-    fn edges(&self) -> Vec<(usize, usize, f64)> {
-        let mut output = Vec::new();
-        let mut visited = HashSet::new();
-        for left in 0..self.len() {
-            for (right, weight) in &self.adjacency[left] {
-                if !visited.contains(right) {
-                    output.push((left, *right, *weight));
-                }
-            }
-            visited.insert(left);
-        }
-        output
+    fn edges(&self) -> impl Iterator<Item = (usize, usize, f64)> + '_ {
+        self.adjacency
+            .iter()
+            .enumerate()
+            .flat_map(|(left, neighbors)| {
+                neighbors
+                    .iter()
+                    .filter(move |(right, _)| left <= *right)
+                    .map(move |(right, weight)| (left, *right, *weight))
+            })
     }
 
     fn subgraph(&self, selected: &[usize]) -> Self {
@@ -989,6 +1031,58 @@ mod tests {
             ("z".to_owned(), json!([{"a":1,"b":2}])),
         ]);
         assert_eq!(canonical_attributes(&left), canonical_attributes(&right));
+    }
+
+    #[test]
+    fn linear_aggregations_match_the_reference_formulas() {
+        let ids = ["a", "b", "c", "d"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let members = ids.iter().cloned().map(|id| BTreeSet::from([id])).collect();
+        let mut weighted = WeightedGraph::new(ids, members);
+        weighted.add_edge(0, 1, 2.0);
+        weighted.add_edge(1, 2, 1.5);
+        weighted.add_edge(2, 3, 3.0);
+        weighted.add_edge(3, 3, 0.5);
+        let partition = [BTreeSet::from([0, 1]), BTreeSet::from([2, 3])];
+
+        let degree_sum = (0..weighted.len())
+            .map(|node| weighted.degree_weighted(node))
+            .sum::<f64>();
+        let total_weight = degree_sum / 2.0;
+        let norm = 1.0 / degree_sum.powi(2);
+        let reference = partition
+            .iter()
+            .map(|community| {
+                let internal = weighted
+                    .edges()
+                    .filter(|(left, right, _)| {
+                        community.contains(left) && community.contains(right)
+                    })
+                    .map(|(_, _, weight)| weight)
+                    .sum::<f64>();
+                let degree = community
+                    .iter()
+                    .map(|node| weighted.degree_weighted(*node))
+                    .sum::<f64>();
+                internal / total_weight - degree.powi(2) * norm
+            })
+            .sum::<f64>();
+        assert!((modularity(&weighted, &partition, 1.0) - reference).abs() < 1e-12);
+
+        let document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("b", "c"), ("c", "d")]);
+        let communities = BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+        let scores = score_communities(&document, &communities);
+        for (community, nodes) in &communities {
+            assert_eq!(
+                scores.get(community),
+                Some(&cohesion_score(&document, nodes))
+            );
+        }
     }
 
     #[test]

@@ -419,36 +419,54 @@ fn networkx_edge_order(
     links: &[EdgeRecord],
     directed: bool,
 ) -> Vec<EdgeRecord> {
+    let positions = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut incident = vec![Vec::new(); nodes.len()];
+    for (edge_index, edge) in links.iter().enumerate() {
+        let Some(&source) = positions.get(edge.source.as_str()) else {
+            continue;
+        };
+        incident[source].push(edge_index);
+        if !directed
+            && let Some(&target) = positions.get(edge.target.as_str())
+            && target != source
+        {
+            incident[target].push(edge_index);
+        }
+    }
+
     if directed {
         let mut output = Vec::with_capacity(links.len());
-        for node in nodes {
-            output.extend(links.iter().filter(|edge| edge.source == node.id).cloned());
+        for edge_indices in incident {
+            output.extend(edge_indices.into_iter().map(|index| links[index].clone()));
         }
         return output;
     }
+
     let mut output = Vec::with_capacity(links.len());
-    let mut visited = std::collections::HashSet::new();
-    for node in nodes {
-        for edge in links {
-            let other = if edge.source == node.id {
-                Some(edge.target.as_str())
-            } else if edge.target == node.id {
-                Some(edge.source.as_str())
-            } else {
-                None
-            };
-            let Some(other) = other else {
+    let mut visited = vec![false; nodes.len()];
+    for (node_index, edge_indices) in incident.into_iter().enumerate() {
+        for edge_index in edge_indices {
+            let edge = &links[edge_index];
+            let Some(&source) = positions.get(edge.source.as_str()) else {
                 continue;
             };
-            if visited.contains(other) {
+            let Some(&target) = positions.get(edge.target.as_str()) else {
+                continue;
+            };
+            let other = if source == node_index { target } else { source };
+            if visited[other] {
                 continue;
             }
             let mut emitted = edge.clone();
-            emitted.source = node.id.clone();
-            emitted.target = other.to_owned();
+            emitted.source.clone_from(&nodes[node_index].id);
+            emitted.target.clone_from(&nodes[other].id);
             output.push(emitted);
         }
-        visited.insert(node.id.clone());
+        visited[node_index] = true;
     }
     output
 }

@@ -4,6 +4,19 @@ use std::fs;
 use compass_languages::{Engine, ExtractError, make_id};
 
 #[test]
+fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("source.rs");
+    let source = b"pub struct Service;\nimpl Service { pub fn run(&self) {} }\n";
+    fs::write(&path, source)?;
+
+    let from_file = Engine::default().extract(&path)?;
+    let from_memory = Engine::default().extract_source(&path, source)?;
+    assert_eq!(from_memory, from_file);
+    Ok(())
+}
+
+#[test]
 fn python_indirect_rationale_types_and_binding_shapes_are_extracted() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;

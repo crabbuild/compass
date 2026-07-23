@@ -15,6 +15,8 @@ use crate::{
     ExtractError, Extraction, ExtractorKind, LanguageSpec, RawCall, Registry, file_stem, make_id,
 };
 
+const JSON_MAX_BYTES: u64 = 1_048_576;
+
 #[derive(Default)]
 pub struct Engine {
     parsers: HashMap<&'static str, Parser>,
@@ -38,6 +40,24 @@ impl Engine {
             ExtractorKind::ProjectXml => crate::dotnet_project::extract_project(path),
             ExtractorKind::Xaml => crate::xaml::extract(self, path),
             ExtractorKind::Template => crate::templates::extract(self, path, spec.name),
+        }
+    }
+
+    /// Extract from bytes already read by the caller. Source-driven extractors
+    /// use the supplied buffer directly; format-specific fallbacks retain their
+    /// existing file-based implementations.
+    pub fn extract_source(
+        &mut self,
+        path: &Path,
+        source: &[u8],
+    ) -> Result<Extraction, ExtractError> {
+        let spec =
+            Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
+        match spec.kind {
+            ExtractorKind::Generic => self.extract_generic_source(path, spec, source),
+            ExtractorKind::JsonConfig => self.extract_json_source(path, spec, source),
+            ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
+            _ => self.extract(path),
         }
     }
 
@@ -78,50 +98,64 @@ impl Engine {
         path: &Path,
         spec: LanguageSpec,
     ) -> Result<Extraction, ExtractError> {
-        let mut source = fs::read(path).map_err(|source| compass_files::FileError::Io {
+        let source = fs::read(path).map_err(|source| compass_files::FileError::Io {
             path: path.to_path_buf(),
             source,
         })?;
+        self.extract_generic_source(path, spec, &source)
+    }
+
+    fn extract_generic_source(
+        &mut self,
+        path: &Path,
+        spec: LanguageSpec,
+        source: &[u8],
+    ) -> Result<Extraction, ExtractError> {
         if spec.name == "groovy" {
-            return Ok(crate::groovy::extract(path, &source));
+            return Ok(crate::groovy::extract(path, source));
         }
         // These extractors are intentionally source-driven and do not consume a
         // tree-sitter root. Avoid initializing and touching their large static
         // grammar tables only to discard the tree; this materially lowers cold
         // multilingual startup RSS and latency while preserving identical facts.
         match spec.name {
-            "zig" => return Ok(crate::zig::extract(path, &source)),
-            "verilog" => return Ok(crate::verilog::extract(path, &source)),
-            "sql" => return Ok(crate::sql::extract(path, &source)),
-            "pascal" => return Ok(crate::pascal::extract(path, &source)),
-            "apex" => return Ok(crate::apex::extract(path, &source)),
-            "dart" => return Ok(crate::dart::extract(path, &source)),
+            "zig" => return Ok(crate::zig::extract(path, source)),
+            "verilog" => return Ok(crate::verilog::extract(path, source)),
+            "sql" => return Ok(crate::sql::extract(path, source)),
+            "pascal" => return Ok(crate::pascal::extract(path, source)),
+            "apex" => return Ok(crate::apex::extract(path, source)),
+            "dart" => return Ok(crate::dart::extract(path, source)),
             _ => {}
         }
-        if spec.name == "objc" {
-            crate::objc::mask_annotation_macros(&mut source);
-        }
-        let tree = self.parse(path, spec, &source)?;
+        let mut masked = Vec::new();
+        let source = if spec.name == "objc" {
+            masked.extend_from_slice(source);
+            crate::objc::mask_annotation_macros(&mut masked);
+            masked.as_slice()
+        } else {
+            source
+        };
+        let tree = self.parse(path, spec, source)?;
         let config = generic_config(spec);
         let root = tree.root_node();
         let mut extraction = match spec.name {
-            "go" => crate::go::extract(path, &source, root),
-            "rust" => crate::rust_lang::extract(path, &source, root),
-            "bash" => crate::bash::extract(path, &source, root),
-            "csharp" => crate::csharp::extract(path, &source, root),
-            "cpp" => crate::cpp::extract(path, &source, root),
-            "php" => crate::php::extract(path, &source, root),
-            "swift" => crate::swift::extract(path, &source, root),
-            "objc" => crate::objc::extract(path, &source, root),
-            "powershell" => crate::powershell::extract(path, &source, root),
-            "elixir" => crate::elixir::extract(path, &source, root),
-            "julia" => crate::julia::extract(path, &source, root),
-            "fortran" => crate::fortran::extract(path, &source, root),
-            _ => extract_tree(path, &source, root, &config, spec.name),
+            "go" => crate::go::extract(path, source, root),
+            "rust" => crate::rust_lang::extract(path, source, root),
+            "bash" => crate::bash::extract(path, source, root),
+            "csharp" => crate::csharp::extract(path, source, root),
+            "cpp" => crate::cpp::extract(path, source, root),
+            "php" => crate::php::extract(path, source, root),
+            "swift" => crate::swift::extract(path, source, root),
+            "objc" => crate::objc::extract(path, source, root),
+            "powershell" => crate::powershell::extract(path, source, root),
+            "elixir" => crate::elixir::extract(path, source, root),
+            "julia" => crate::julia::extract(path, source, root),
+            "fortran" => crate::fortran::extract(path, source, root),
+            _ => extract_tree(path, source, root, &config, spec.name),
         };
-        attach_definition_hashes(&mut extraction, &source, root, &config);
+        attach_definition_hashes(&mut extraction, source, root, &config);
         if spec.name == "python" {
-            add_python_rationale(path, &source, root, &mut extraction);
+            add_python_rationale(path, source, root, &mut extraction);
         }
         Ok(extraction)
     }
@@ -131,24 +165,32 @@ impl Engine {
         path: &Path,
         spec: LanguageSpec,
     ) -> Result<Extraction, ExtractError> {
-        const MAX_BYTES: u64 = 1_048_576;
         let mut source = Vec::new();
         File::open(path)
             .map_err(|source| compass_files::FileError::Io {
                 path: path.to_path_buf(),
                 source,
             })?
-            .take(MAX_BYTES + 1)
+            .take(JSON_MAX_BYTES + 1)
             .read_to_end(&mut source)
             .map_err(|source| compass_files::FileError::Io {
                 path: path.to_path_buf(),
                 source,
             })?;
-        if source.len() > MAX_BYTES as usize {
+        self.extract_json_source(path, spec, &source)
+    }
+
+    fn extract_json_source(
+        &mut self,
+        path: &Path,
+        spec: LanguageSpec,
+        source: &[u8],
+    ) -> Result<Extraction, ExtractError> {
+        if source.len() > JSON_MAX_BYTES as usize {
             return Ok(crate::json_config::error("json file too large to index"));
         }
-        let tree = self.parse(path, spec, &source)?;
-        Ok(crate::json_config::extract(path, &source, tree.root_node()))
+        let tree = self.parse(path, spec, source)?;
+        Ok(crate::json_config::extract(path, source, tree.root_node()))
     }
 
     fn extract_terraform(
@@ -160,8 +202,17 @@ impl Engine {
             path: path.to_path_buf(),
             source,
         })?;
-        let tree = self.parse(path, spec, &source)?;
-        Ok(crate::terraform::extract(path, &source, tree.root_node()))
+        self.extract_terraform_source(path, spec, &source)
+    }
+
+    fn extract_terraform_source(
+        &mut self,
+        path: &Path,
+        spec: LanguageSpec,
+        source: &[u8],
+    ) -> Result<Extraction, ExtractError> {
+        let tree = self.parse(path, spec, source)?;
+        Ok(crate::terraform::extract(path, source, tree.root_node()))
     }
 
     fn extract_dreammaker(&mut self, path: &Path) -> Result<Extraction, ExtractError> {

@@ -9,6 +9,7 @@ use std::path::Path;
 
 use compass_languages::{Extraction, RawCall, make_id};
 use compass_model::{EdgeRecord, NodeRecord};
+use rayon::prelude::*;
 use regex::Regex;
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
@@ -174,13 +175,6 @@ pub fn resolve_with_root(
         merged
             .hyperedges
             .extend(extraction.hyperedges.iter().cloned());
-        if let Some(raw_calls) = &extraction.raw_calls {
-            merged
-                .raw_calls
-                .get_or_insert_with(Vec::new)
-                .extend(raw_calls.iter().cloned());
-        }
-        merged.extensions.extend(extraction.extensions.clone());
     }
     finish_resolution(merged, language_facts, sources, root)
 }
@@ -194,41 +188,37 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let language_facts = members::collect_language_call_facts(&extractions);
+    let language_facts = members::collect_language_call_facts_owned(&mut extractions);
     let mut merged = Extraction::default();
     for extraction in &mut extractions {
         merged.nodes.append(&mut extraction.nodes);
         merged.edges.append(&mut extraction.edges);
         merged.hyperedges.append(&mut extraction.hyperedges);
-        if let Some(raw_calls) = extraction.raw_calls.as_mut() {
-            merged
-                .raw_calls
-                .get_or_insert_with(Vec::new)
-                .append(raw_calls);
-        }
-        merged.extensions.append(&mut extraction.extensions);
     }
+    extractions.into_par_iter().for_each(drop);
     finish_resolution(merged, language_facts, sources, root)
 }
 
 fn finish_resolution(
     mut merged: Extraction,
-    language_facts: members::LanguageCallFacts,
+    mut language_facts: members::LanguageCallFacts,
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
     resolve_javascript_reexports(&mut merged);
     canonicalize_import_targets(&mut merged);
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    disambiguate_colliding_node_ids(&mut merged, &canonical_root);
+    disambiguate_colliding_node_ids_with_calls(
+        &mut merged,
+        &canonical_root,
+        &mut language_facts.calls,
+    );
     canonicalize_csharp_namespace_nodes(&mut merged);
     resolve_php_type_references(&mut merged, sources);
     rewire_unique_family_stubs(&mut merged);
     rewire_unique_stub_nodes(&mut merged);
-    resolve_cross_file_calls_with_root(&mut merged, sources, root);
+    resolve_cross_file_calls_with_root_calls(&mut merged, sources, root, &language_facts.calls);
     members::resolve_language_call_facts(language_facts, &mut merged);
-    merged.raw_calls = None;
-    merged.extensions.clear();
     merged
 }
 
@@ -700,7 +690,22 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
 }
 
+#[cfg(test)]
 fn disambiguate_colliding_node_ids(extraction: &mut Extraction, root: &Path) {
+    let mut raw_calls = extraction.raw_calls.take();
+    if let Some(calls) = raw_calls.as_mut() {
+        disambiguate_colliding_node_ids_with_calls(extraction, root, calls);
+    } else {
+        disambiguate_colliding_node_ids_with_calls(extraction, root, &mut []);
+    }
+    extraction.raw_calls = raw_calls;
+}
+
+fn disambiguate_colliding_node_ids_with_calls(
+    extraction: &mut Extraction,
+    root: &Path,
+    raw_calls: &mut [RawCall],
+) {
     let mut groups = HashMap::<String, Vec<usize>>::new();
     for (index, node) in extraction.nodes.iter().enumerate() {
         if matches!(
@@ -804,12 +809,10 @@ fn disambiguate_colliding_node_ids(extraction: &mut Extraction, root: &Path) {
             edge.target.clone_from(new_id);
         }
     }
-    if let Some(raw_calls) = extraction.raw_calls.as_mut() {
-        for raw in raw_calls {
-            let key = source_key(&raw.source_file, root);
-            if let Some(new_id) = remap.get(&(raw.caller_nid.clone(), key)) {
-                raw.caller_nid.clone_from(new_id);
-            }
+    for raw in raw_calls {
+        let key = source_key(&raw.source_file, root);
+        if let Some(new_id) = remap.get(&(raw.caller_nid.clone(), key)) {
+            raw.caller_nid.clone_from(new_id);
         }
     }
 }
@@ -854,7 +857,17 @@ fn resolve_cross_file_calls_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) {
-    resolve_python_import_guided(extraction, sources, root);
+    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
+    resolve_cross_file_calls_with_root_calls(extraction, sources, root, &raw_calls);
+}
+
+fn resolve_cross_file_calls_with_root_calls(
+    extraction: &mut Extraction,
+    sources: &HashMap<String, String>,
+    root: &Path,
+    raw_calls: &[RawCall],
+) {
+    resolve_python_import_guided_with_calls(extraction, sources, root, raw_calls);
     resolve_python_class_uses(extraction, sources, root);
     let mut exact = HashMap::<String, Vec<String>>::new();
     let mut folded = HashMap::<String, Vec<String>>::new();
@@ -928,7 +941,6 @@ fn resolve_cross_file_calls_with_root(
         }
     }
 
-    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
     for raw in raw_calls {
         if raw.callee.is_empty()
             || raw.is_member_call == Some(true)
@@ -1029,10 +1041,21 @@ fn resolve_cross_file_calls_with_root(
     }
 }
 
+#[cfg(test)]
 fn resolve_python_import_guided(
     extraction: &mut Extraction,
     sources: &HashMap<String, String>,
     root: &Path,
+) {
+    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
+    resolve_python_import_guided_with_calls(extraction, sources, root, &raw_calls);
+}
+
+fn resolve_python_import_guided_with_calls(
+    extraction: &mut Extraction,
+    sources: &HashMap<String, String>,
+    root: &Path,
+    raw_calls: &[RawCall],
 ) {
     let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
     for node in &extraction.nodes {
@@ -1147,7 +1170,6 @@ fn resolve_python_import_guided(
             }
         }
     }
-    let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
     let aliases_by_source = sources
         .iter()
         .filter(|(source_file, _)| extension(source_file) == "py")
