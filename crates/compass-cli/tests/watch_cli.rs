@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -24,7 +26,7 @@ fn run_python(arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
 }
 
 fn run_rust(arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-    Ok(Command::new(env!("CARGO_BIN_EXE_graphify"))
+    Ok(support::compat_command()
         .arg("watch")
         .args(arguments)
         .current_dir(repository_root())
@@ -118,7 +120,7 @@ fn watch_startup_and_interrupt_match_python() -> Result<(), Box<dyn Error>> {
         .env("PYTHONUNBUFFERED", "1");
     let expected = run_until_interrupted(python)?;
 
-    let mut rust = Command::new(env!("CARGO_BIN_EXE_graphify"));
+    let mut rust = support::compat_command();
     rust.args(["watch", root.as_ref(), "--ignored"])
         .current_dir(&repository);
     let actual = run_until_interrupted(rust)?;

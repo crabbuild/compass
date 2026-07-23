@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -26,7 +28,7 @@ fn run(
     cwd: &Path,
     args: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python_executable(repo) {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -39,7 +41,7 @@ fn add_usage_and_blocked_urls_match_python_oracle() -> Result<(), Box<dyn Error>
     let directory = tempfile::tempdir()?;
     let repo = repository_root();
     let python = python_executable(&repo);
-    let native = Path::new(env!("CARGO_BIN_EXE_graphify"));
+    let native = support::compat_executable();
     for arguments in [
         vec!["add"],
         vec!["add", "--help"],

@@ -24,7 +24,7 @@ fn document() -> Result<GraphDocument, serde_json::Error> {
 fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
-    let destination = directory.path().join("graphify-out");
+    let destination = directory.path().join("compass-out");
     let document = document()?;
     let analysis = json!({"communities":{"0":["a","b"]}});
     let labels = json!({"0":"Core"});
@@ -35,7 +35,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         "GRAPH_REPORT.md",
         "graph.html",
         "GRAPH_TREE.html",
-        ".graphify_labels.json.sig",
+        ".compass_labels.json.sig",
     ]
     .map(|path| DerivedArtifactRequest {
         relative_path: path.to_owned(),
@@ -60,7 +60,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
     assert!(destination.join("GRAPH_REPORT.md").is_file());
     assert!(destination.join("graph.html").is_file());
     assert!(destination.join("GRAPH_TREE.html").is_file());
-    assert!(destination.join(".graphify_labels.json.sig").is_file());
+    assert!(destination.join(".compass_labels.json.sig").is_file());
     assert!(
         std::fs::read_to_string(destination.join("GRAPH_REPORT.md"))?
             .contains("# Graph Report - fixture")
@@ -71,7 +71,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
             .contains("graphify tree viewer")
     );
     let signatures: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        destination.join(".graphify_labels.json.sig"),
+        destination.join(".compass_labels.json.sig"),
     )?)?;
     assert!(signatures.get("0").is_some());
     assert_eq!(
@@ -99,7 +99,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
 #[test]
 fn unknown_renderer_fails_without_creating_destination() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
-    let destination = directory.path().join("graphify-out");
+    let destination = directory.path().join("compass-out");
     let document = document()?;
     let marker = json!({});
     let request = [DerivedArtifactRequest {

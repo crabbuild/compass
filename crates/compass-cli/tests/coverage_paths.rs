@@ -549,9 +549,9 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
         })
         .ok_or("repository root")?;
     fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
-    fs::write(output.join(".graphify_labels.json"), r#"{"0":"Core"}"#)?;
+    fs::write(output.join(".compass_labels.json"), r#"{"0":"Core"}"#)?;
     fs::write(
-        output.join(".graphify_analysis.json"),
+        output.join(".compass_analysis.json"),
         r#"{"communities":{"0":["n_transformer","n_attention","n_layernorm","n_concept_attn"]},"cohesion":{"0":0.75}}"#,
     )?;
     fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;
@@ -725,9 +725,9 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
         })
         .ok_or("repository root")?;
     fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
-    fs::write(output.join(".graphify_labels.json"), r#"{"0":"Core"}"#)?;
+    fs::write(output.join(".compass_labels.json"), r#"{"0":"Core"}"#)?;
     fs::write(
-        output.join(".graphify_analysis.json"),
+        output.join(".compass_analysis.json"),
         r#"{"communities":{"0":["n_transformer","n_attention"]},"cohesion":{"0":0.5}}"#,
     )?;
     fs::write(output.join("GRAPH_REPORT.md"), "# Fixture\n")?;

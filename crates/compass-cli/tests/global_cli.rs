@@ -1,6 +1,8 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::{Value, json};
 
@@ -28,7 +30,7 @@ fn run(
     home: &Path,
     arguments: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python_executable(repo) {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -89,7 +91,7 @@ fn global_cli_lifecycle_matches_python() -> Result<(), Box<dyn Error>> {
     seed_graph(&source_b, "ModB", "b")?;
     let repo = repository_root();
     let python_exe = python_executable(&repo);
-    let native_exe = Path::new(env!("CARGO_BIN_EXE_graphify"));
+    let native_exe = support::compat_executable();
 
     for arguments in [
         vec![

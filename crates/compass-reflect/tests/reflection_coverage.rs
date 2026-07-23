@@ -153,7 +153,7 @@ fn reflection_loads_memory_graph_context_writes_overlay_and_tracks_freshness()
     })?;
     assert_eq!(result.aggregate.total, 1);
     assert!(lessons.is_file());
-    assert!(output_dir.join(".graphify_learning.json").is_file());
+    assert!(output_dir.join(".compass_learning.json").is_file());
     assert!(lessons_fresh(
         &lessons,
         &memory_dir,

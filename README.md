@@ -264,6 +264,19 @@ compass --version
 The installed `compass` binary doesn't require Python. The development parity
 suite uses Python only to compare selected behavior with Graphify.
 
+Register the native Compass skill with your coding assistant:
+
+```bash
+compass install
+```
+
+Use a project-scoped skill when the configuration should travel with the
+repository:
+
+```bash
+compass install --project --platform codex
+```
+
 After the crate is published to crates.io, install it with:
 
 ```bash
@@ -420,6 +433,15 @@ compass install --platform codex --project
 ```
 
 The integration tells the assistant when to read the architecture report and when to run a focused graph query. It doesn't upload the graph.
+
+Every platform receives the same canonical `compass` skill and progressive
+reference bundle. The core handles graph-first navigation and evidence rules;
+on-demand references cover CompassQL, semantic extraction, immutable history,
+labeling, hooks, exports, MCP serving, multi-repository workflows, reflections,
+diagnostics, and security boundaries. The bundle currently contains 15
+progressive-disclosure references. A native build-time guard checks exact
+reference coverage and reads the public CLI inventory to ensure every command
+has dedicated help and installed skill guidance.
 
 List every supported platform and installation option:
 

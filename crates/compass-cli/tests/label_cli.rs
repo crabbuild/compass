@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -53,7 +55,7 @@ fn run_with_environment(
     } else {
         repo.join(".venv/bin/python")
     };
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -97,6 +99,10 @@ fn seed(root: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn native_artifact_name(name: &str) -> String {
+    name.replace(".graphify_", ".compass_")
+}
+
 #[test]
 fn label_without_provider_matches_python_surface_and_artifacts() -> Result<(), Box<dyn Error>> {
     let repo = repository_root();
@@ -114,7 +120,7 @@ fn label_without_provider_matches_python_surface_and_artifacts() -> Result<(), B
     };
     let expected = run(&python, &repo, &python_root, &isolated_home, &[])?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -129,7 +135,11 @@ fn label_without_provider_matches_python_surface_and_artifacts() -> Result<(), B
         ".graphify_analysis.json",
     ] {
         let expected = std::fs::read(python_root.join("graphify-out").join(artifact))?;
-        let actual = std::fs::read(native_root.join("graphify-out").join(artifact))?;
+        let actual = std::fs::read(
+            native_root
+                .join("graphify-out")
+                .join(native_artifact_name(artifact)),
+        )?;
         assert_eq!(actual, expected, "{artifact}");
     }
     let expected: serde_json::Value =
@@ -156,7 +166,7 @@ fn missing_only_preserves_curated_labels_like_python() -> Result<(), Box<dyn Err
         labels,
     )?;
     std::fs::write(
-        native_root.join("graphify-out/.graphify_labels.json"),
+        native_root.join("graphify-out/.compass_labels.json"),
         labels,
     )?;
     let python = if cfg!(windows) {
@@ -172,7 +182,7 @@ fn missing_only_preserves_curated_labels_like_python() -> Result<(), Box<dyn Err
         &["--missing-only"],
     )?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -182,7 +192,7 @@ fn missing_only_preserves_curated_labels_like_python() -> Result<(), Box<dyn Err
     assert_eq!(actual.stdout, expected.stdout);
     assert_eq!(actual.stderr, expected.stderr);
     assert_eq!(
-        std::fs::read(native_root.join("graphify-out/.graphify_labels.json"))?,
+        std::fs::read(native_root.join("graphify-out/.compass_labels.json"))?,
         std::fs::read(python_root.join("graphify-out/.graphify_labels.json"))?
     );
     Ok(())
@@ -222,7 +232,7 @@ fn project_local_provider_gate_matches_python_warning() -> Result<(), Box<dyn Er
     };
     let expected = run(&python, &repo, &python_root, &isolated_home, &[])?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -255,7 +265,7 @@ fn global_provider_endpoint_warning_matches_python() -> Result<(), Box<dyn Error
     };
     let expected = run(&python, &repo, &python_root, &isolated_home, &[])?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -275,10 +285,8 @@ fn report_learning_section_matches_python() -> Result<(), Box<dyn Error>> {
     let isolated_home = parent.path().join("home");
     seed(&root)?;
     std::fs::create_dir_all(&isolated_home)?;
-    std::fs::write(
-        root.join("graphify-out/.graphify_learning.json"),
-        r#"{"version":1,"nodes":{"orders":{"status":"preferred","score":1.5,"uses":3,"last":"2026-07-19","label":"OrderService","source_file":"","code_fingerprint":"","provenance":[]}}}"#,
-    )?;
+    let learning = r#"{"version":1,"nodes":{"orders":{"status":"preferred","score":1.5,"uses":3,"last":"2026-07-19","label":"OrderService","source_file":"","code_fingerprint":"","provenance":[]}}}"#;
+    std::fs::write(root.join("graphify-out/.graphify_learning.json"), learning)?;
     std::fs::create_dir_all(root.join("graphify-out/memory"))?;
     std::fs::write(
         root.join("graphify-out/memory/dead-end.md"),
@@ -302,8 +310,9 @@ fn report_learning_section_matches_python() -> Result<(), Box<dyn Error>> {
     ] {
         let _ = std::fs::remove_file(root.join("graphify-out").join(artifact));
     }
+    std::fs::write(root.join("graphify-out/.compass_learning.json"), learning)?;
     let actual_run = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &root,
         &isolated_home,
@@ -332,7 +341,7 @@ fn timing_diagnostics_match_python_stage_order() -> Result<(), Box<dyn Error>> {
     };
     let expected = run(&python, &repo, &python_root, &isolated_home, &["--timing"])?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -374,7 +383,7 @@ fn oversized_graph_warning_and_core_refresh_match_python() -> Result<(), Box<dyn
         &environment,
     )?;
     let actual = run_with_environment(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -411,7 +420,7 @@ fn unknown_backend_failure_surface_matches_python() -> Result<(), Box<dyn Error>
         &["--backend=definitely-unknown"],
     )?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -440,7 +449,7 @@ fn graphify_help_flag_retains_python_legacy_behavior() -> Result<(), Box<dyn Err
     };
     let expected = run(&python, &repo, &python_root, &isolated_home, &["--help"])?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,
@@ -483,7 +492,7 @@ fn graph_override_accepts_non_json_extension_like_python() -> Result<(), Box<dyn
         &["--graph", &python_graph.to_string_lossy()],
     )?;
     let actual = run(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         &native_root,
         &isolated_home,

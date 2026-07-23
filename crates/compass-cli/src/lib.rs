@@ -159,11 +159,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         if let Some(outcome) = help::request(&args, HelpStyle::Plain) {
             return outcome;
         }
-        match args.first().map(String::as_str) {
-            Some("--version" | "-V") => {
-                return Outcome::success(format!("compass {}", env!("CARGO_PKG_VERSION")));
-            }
-            _ => {}
+        if let Some("--version" | "-V") = args.first().map(String::as_str) {
+            return Outcome::success(format!("compass {}", env!("CARGO_PKG_VERSION")));
         }
     }
     let Some(command) = args.first().cloned() else {

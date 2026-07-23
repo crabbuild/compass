@@ -31,223 +31,264 @@ const PROJECT_PLATFORMS: &[&str] = &[
     "cursor",
 ];
 
-const DIRECT_PLATFORMS: &[&str] = &[
+const GLOBAL_PLATFORMS: &[&str] = &[
     "claude",
-    "codebuddy",
-    "gemini",
-    "cursor",
-    "vscode",
-    "copilot",
-    "kilo",
-    "kiro",
-    "devin",
-    "pi",
-    "amp",
-    "agents",
-    "skills",
-    "aider",
     "codex",
     "opencode",
+    "kilo",
+    "aider",
+    "copilot",
     "claw",
     "droid",
     "trae",
     "trae-cn",
     "hermes",
+    "kiro",
+    "pi",
+    "codebuddy",
     "antigravity",
+    "antigravity-windows",
+    "windows",
+    "kimi",
+    "amp",
+    "agents",
+    "devin",
+    "gemini",
+    "cursor",
 ];
 
 #[test]
-fn every_project_installer_lifecycle_matches_python() -> Result<(), Box<dyn Error>> {
+fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let output = fixture.run(&["install", "--platform", "codex", "--project"])?;
+    assert_success("codex project install", &output);
+
+    let skill = fixture.project.join(".codex/skills/compass/SKILL.md");
+    let body = fs::read_to_string(&skill)?;
+    assert!(body.starts_with("---\nname: compass\n"));
+    assert!(body.contains("compass query"));
+    assert!(body.contains("compass-out/"));
+    assert!(body.contains("references/history.md"));
+    assert!(body.contains("references/semantic-extraction.md"));
+    assert!(body.contains("references/operations.md"));
+    assert!(body.contains("references/command-reference.md"));
+    assert!(body.contains("references/labeling.md"));
+    assert!(body.contains("references/security-and-boundaries.md"));
+    assert_native(&body);
+    assert!(skill.with_file_name(".compass_version").is_file());
+    assert!(
+        skill
+            .with_file_name("references")
+            .join("query.md")
+            .is_file()
+    );
+    let references = skill.with_file_name("references");
+    assert_eq!(
+        fs::read_dir(&references)?
+            .collect::<Result<Vec<_>, _>>()?
+            .len(),
+        15
+    );
+    Ok(())
+}
+
+#[test]
+fn every_project_platform_installs_native_content() -> Result<(), Box<dyn Error>> {
     for platform in PROJECT_PLATFORMS {
         let fixture = InstallFixture::new()?;
-        fixture.assert_command(&["install", "--platform", platform, "--project"])?;
-        fixture.assert_trees(platform)?;
-        fixture.assert_command(&["uninstall", "--platform", platform, "--project"])?;
-        fixture.assert_trees(platform)?;
+        let output = fixture.run(&["install", "--platform", platform, "--project"])?;
+        assert_success(&format!("{platform} project install"), &output);
+        assert_native_tree(&fixture.project)?;
+        assert_native_tree(&fixture.home)?;
+
+        let output = fixture.run(&["uninstall", "--platform", platform, "--project"])?;
+        assert_success(&format!("{platform} project uninstall"), &output);
+        assert!(
+            !tree_contains_compass_skill(&fixture.project)?,
+            "{platform} left a project Compass skill after uninstall"
+        );
     }
     Ok(())
 }
 
 #[test]
-fn every_direct_installer_lifecycle_matches_python() -> Result<(), Box<dyn Error>> {
-    for platform in DIRECT_PLATFORMS {
+fn every_global_platform_installs_native_content() -> Result<(), Box<dyn Error>> {
+    for platform in GLOBAL_PLATFORMS {
         let fixture = InstallFixture::new()?;
-        fixture.assert_command(&[platform, "install"])?;
-        fixture.assert_trees(platform)?;
-        fixture.assert_command(&[platform, "uninstall"])?;
-        fixture.assert_trees(platform)?;
+        let output = fixture.run(&["install", "--platform", platform])?;
+        assert_success(&format!("{platform} global install"), &output);
+        assert_native_tree(&fixture.project)?;
+        assert_native_tree(&fixture.home)?;
     }
     Ok(())
 }
 
 #[test]
-fn global_skill_installers_match_python() -> Result<(), Box<dyn Error>> {
-    for platform in [
-        "claude",
-        "codex",
-        "opencode",
-        "kilo",
-        "aider",
-        "copilot",
-        "claw",
-        "droid",
-        "trae",
-        "trae-cn",
-        "hermes",
-        "kiro",
-        "pi",
-        "codebuddy",
-        "antigravity",
-        "antigravity-windows",
-        "windows",
-        "kimi",
-        "amp",
-        "agents",
-        "devin",
-        "gemini",
-        "cursor",
-    ] {
-        let fixture = InstallFixture::new()?;
-        let arguments = ["install", "--platform", platform];
-        let python = fixture.python(&arguments)?;
-        let rust = fixture.rust(&arguments)?;
-        fixture.assert_output(platform, &rust, &python)?;
-        fixture.assert_trees(platform)?;
-    }
+fn direct_and_generic_codex_installs_match() -> Result<(), Box<dyn Error>> {
+    let generic = InstallFixture::new()?;
+    let direct = InstallFixture::new()?;
+    assert_success(
+        "generic codex install",
+        &generic.run(&["install", "--platform", "codex", "--project"])?,
+    );
+    assert_success(
+        "direct codex install",
+        &direct.run(&["codex", "install", "--project"])?,
+    );
+    assert_eq!(
+        directory_tree(&generic.project)?,
+        directory_tree(&direct.project)?
+    );
+    Ok(())
+}
+
+#[test]
+fn compass_lifecycle_preserves_adjacent_graphify_install() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let graphify = fixture.project.join(".codex/skills/graphify/SKILL.md");
+    fs::create_dir_all(graphify.parent().ok_or("graphify parent")?)?;
+    fs::write(&graphify, "---\nname: graphify\n---\n")?;
+    fs::create_dir_all(fixture.project.join("graphify-out"))?;
+
+    assert_success(
+        "install beside graphify",
+        &fixture.run(&["install", "--platform", "codex", "--project"])?,
+    );
+    assert_success(
+        "uninstall beside graphify",
+        &fixture.run(&["uninstall", "--platform", "codex", "--project"])?,
+    );
+
+    assert_eq!(fs::read_to_string(graphify)?, "---\nname: graphify\n---\n");
+    assert!(fixture.project.join("graphify-out").is_dir());
+    Ok(())
+}
+
+#[test]
+fn reinstall_is_idempotent_and_parser_errors_do_not_mutate() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    assert_success(
+        "first install",
+        &fixture.run(&["install", "--platform", "codex", "--project"])?,
+    );
+    let first = directory_tree(&fixture.project)?;
+    assert_success(
+        "second install",
+        &fixture.run(&["install", "--platform", "codex", "--project"])?,
+    );
+    assert_eq!(directory_tree(&fixture.project)?, first);
+
+    let rejected = fixture.run(&["install", "--unknown"])?;
+    assert!(!rejected.status.success());
+    assert_eq!(directory_tree(&fixture.project)?, first);
+    Ok(())
+}
+
+#[test]
+fn install_does_not_overwrite_an_unowned_compass_skill() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let skill = fixture.project.join(".codex/skills/compass/SKILL.md");
+    fs::create_dir_all(skill.parent().ok_or("skill parent")?)?;
+    fs::write(&skill, "user-owned")?;
+
+    let output = fixture.run(&["install", "--platform", "codex", "--project"])?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not managed by Compass"));
+    assert_eq!(fs::read_to_string(skill)?, "user-owned");
+    Ok(())
+}
+
+#[test]
+fn purge_removes_only_compass_output() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    fs::create_dir_all(fixture.project.join("compass-out"))?;
+    fs::create_dir_all(fixture.project.join("graphify-out"))?;
+    fs::write(fixture.project.join("compass-out/graph.json"), "{}")?;
+    fs::write(fixture.project.join("graphify-out/graph.json"), "{}")?;
+
+    let output = fixture.run(&["uninstall", "--project", "--purge"])?;
+    assert_success("purge", &output);
+    assert!(!fixture.project.join("compass-out").exists());
+    assert!(fixture.project.join("graphify-out/graph.json").is_file());
     Ok(())
 }
 
 struct InstallFixture {
     _directory: TempDir,
-    repo: PathBuf,
-    python_project: PathBuf,
-    rust_project: PathBuf,
-    python_home: PathBuf,
-    rust_home: PathBuf,
+    project: PathBuf,
+    home: PathBuf,
 }
 
 impl InstallFixture {
     fn new() -> Result<Self, Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
-        let repo = std::env::var_os("GRAPHIFY_REPO_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
-        let python_project = directory.path().join("python-project");
-        let rust_project = directory.path().join("rust-project");
-        let python_home = directory.path().join("python-home");
-        let rust_home = directory.path().join("rust-home");
-        for path in [&python_project, &rust_project, &python_home, &rust_home] {
-            fs::create_dir(path)?;
-        }
+        let project = directory.path().join("project");
+        let home = directory.path().join("home");
+        fs::create_dir_all(&project)?;
+        fs::create_dir_all(&home)?;
         Ok(Self {
             _directory: directory,
-            repo,
-            python_project,
-            rust_project,
-            python_home,
-            rust_home,
+            project,
+            home,
         })
     }
 
-    fn python(&self, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-        let python = std::env::var_os("GRAPHIFY_PYTHON")
-            .map(PathBuf::from)
-            .map(|path| {
-                if path.is_absolute() {
-                    path
-                } else {
-                    self.repo.join("rust").join(path)
-                }
-            })
-            .unwrap_or_else(|| self.repo.join(".venv/bin/python"));
-        let display = python.display().to_string();
-        Ok(Command::new(python)
-            .args(["-m", "graphify"])
+    fn run(&self, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
+        Ok(Command::new(env!("CARGO_BIN_EXE_compass"))
             .args(arguments)
-            .current_dir(&self.python_project)
-            .env("PYTHONPATH", &self.repo)
-            .env("HOME", &self.python_home)
-            .env("USERPROFILE", &self.python_home)
-            .output()
-            .map_err(|error| format!("could not run Python oracle {display}: {error}"))?)
-    }
-
-    fn rust(&self, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-        Ok(Command::new(env!("CARGO_BIN_EXE_graphify"))
-            .args(arguments)
-            .current_dir(&self.rust_project)
-            .env("HOME", &self.rust_home)
-            .env("USERPROFILE", &self.rust_home)
+            .current_dir(&self.project)
+            .env("HOME", &self.home)
+            .env("USERPROFILE", &self.home)
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("CODEX_HOME")
             .output()?)
     }
+}
 
-    fn assert_output(
-        &self,
-        context: &str,
-        rust: &Output,
-        python: &Output,
-    ) -> Result<(), Box<dyn Error>> {
-        assert_eq!(rust.status.code(), python.status.code(), "{context}");
-        assert_eq!(
-            self.normalize(&String::from_utf8(rust.stdout.clone())?),
-            self.normalize(&String::from_utf8(python.stdout.clone())?),
-            "stdout mismatch for {context}"
-        );
-        assert_eq!(
-            self.normalize(&String::from_utf8(rust.stderr.clone())?),
-            self.normalize(&String::from_utf8(python.stderr.clone())?),
-            "stderr mismatch for {context}"
-        );
-        Ok(())
-    }
+fn assert_success(context: &str, output: &Output) {
+    assert!(
+        output.status.success(),
+        "{context}: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
-    fn assert_command(&self, arguments: &[&str]) -> Result<(), Box<dyn Error>> {
-        let python = self.python(arguments)?;
-        let rust = self.rust(arguments)?;
-        self.assert_output(&arguments.join(" "), &rust, &python)
-    }
-
-    fn assert_trees(&self, context: &str) -> Result<(), Box<dyn Error>> {
-        assert_eq!(
-            self.normalized_tree(&self.rust_home)?,
-            self.normalized_tree(&self.python_home)?,
-            "home artifact mismatch for {context}"
-        );
-        assert_eq!(
-            self.normalized_tree(&self.rust_project)?,
-            self.normalized_tree(&self.python_project)?,
-            "project artifact mismatch for {context}"
-        );
-        Ok(())
-    }
-
-    fn normalized_tree(&self, root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, Box<dyn Error>> {
-        Ok(directory_tree(root)?
-            .into_iter()
-            .map(|(path, contents)| {
-                let contents = String::from_utf8(contents)
-                    .map(|value| self.normalize(&value).into_bytes())
-                    .unwrap_or_else(|error| error.into_bytes());
-                (path, contents)
-            })
-            .collect())
-    }
-
-    fn normalize(&self, value: &str) -> String {
-        let mut value = value.to_owned();
-        for (path, replacement) in [
-            (&self.rust_project, "$PROJECT"),
-            (&self.python_project, "$PROJECT"),
-            (&self.rust_home, "$HOME"),
-            (&self.python_home, "$HOME"),
-        ] {
-            if let Ok(path) = fs::canonicalize(path) {
-                value = value.replace(&path.display().to_string(), replacement);
-            }
-            value = value.replace(&path.display().to_string(), replacement);
+fn assert_native_tree(root: &Path) -> Result<(), Box<dyn Error>> {
+    for (path, bytes) in directory_tree(root)? {
+        let Ok(text) = String::from_utf8(bytes) else {
+            continue;
+        };
+        assert_native(&text);
+        if path.ends_with("SKILL.md") {
+            assert!(
+                text.starts_with("---\nname: compass\n"),
+                "{} is not a Compass skill",
+                path.display()
+            );
         }
-        value
     }
+    Ok(())
+}
+
+fn assert_native(value: &str) {
+    let normalized = value.replace(env!("CARGO_BIN_EXE_compass"), "compass");
+    let lowercase = normalized.to_ascii_lowercase();
+    assert!(
+        !lowercase.contains("graphify"),
+        "installed content contains Graphify: {normalized}"
+    );
+    assert!(
+        !lowercase.contains("python -m"),
+        "installed content contains a Python module command: {normalized}"
+    );
+}
+
+fn tree_contains_compass_skill(root: &Path) -> Result<bool, Box<dyn Error>> {
+    Ok(directory_tree(root)?.into_iter().any(|(path, bytes)| {
+        path.ends_with("SKILL.md")
+            && String::from_utf8(bytes).is_ok_and(|text| text.starts_with("---\nname: compass\n"))
+    }))
 }
 
 fn directory_tree(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, Box<dyn Error>> {

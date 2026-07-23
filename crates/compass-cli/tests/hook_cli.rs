@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -45,7 +47,7 @@ fn run_graphify(
     cwd: &Path,
     args: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python_executable(repo) {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -75,7 +77,7 @@ fn graphify_hook_lifecycle_matches_python_oracle() -> Result<(), Box<dyn Error>>
     if !python_exe.is_file() {
         return Ok(());
     }
-    let native_exe = Path::new(env!("CARGO_BIN_EXE_graphify"));
+    let native_exe = support::compat_executable();
 
     for args in [
         ["hook", "status"],
@@ -107,7 +109,7 @@ fn native_hooks_are_self_contained_safe_and_preserve_user_content() -> Result<()
     std::fs::write(&existing, "#!/bin/sh\necho user-hook\n")?;
 
     let repo = repository_root();
-    let native_exe = Path::new(env!("CARGO_BIN_EXE_graphify"));
+    let native_exe = support::compat_executable();
     let installed = run_graphify(native_exe, &repo, root, &["hook", "install"])?;
     assert!(installed.status.success());
 
@@ -153,7 +155,7 @@ fn oversized_existing_hook_is_rejected_without_overwrite() -> Result<(), Box<dyn
 
     let repo = repository_root();
     let output = run_graphify(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         root,
         &["hook", "install"],
@@ -210,7 +212,7 @@ fn native_hook_refresh_honors_recorded_scan_root() -> Result<(), Box<dyn Error>>
         source_root.to_string_lossy().as_bytes(),
     )?;
 
-    let output = Command::new(env!("CARGO_BIN_EXE_graphify"))
+    let output = support::compat_command()
         .args(["hook-refresh", "."])
         .current_dir(root)
         .env("HOME", root)
@@ -242,7 +244,7 @@ fn windows_style_hook_path_fails_without_creating_junk() -> Result<(), Box<dyn E
 
     let repo = repository_root();
     let output = run_graphify(
-        Path::new(env!("CARGO_BIN_EXE_graphify")),
+        support::compat_executable(),
         &repo,
         root,
         &["hook", "install"],

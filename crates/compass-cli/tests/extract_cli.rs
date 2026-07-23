@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,7 +57,7 @@ fn run_python(arguments: &[&str], home: &Path) -> Result<Output, Box<dyn Error>>
 }
 
 fn run_rust(arguments: &[&str], home: &Path) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_graphify"));
+    let mut command = support::compat_command();
     command
         .arg("extract")
         .args(arguments)
@@ -66,8 +68,25 @@ fn run_rust(arguments: &[&str], home: &Path) -> Result<Output, Box<dyn Error>> {
 
 fn assert_same_output(expected: &Output, actual: &Output) {
     assert_eq!(actual.status.code(), expected.status.code());
-    assert_eq!(actual.stdout, expected.stdout, "stdout mismatch");
-    assert_eq!(actual.stderr, expected.stderr, "stderr mismatch");
+    assert_eq!(
+        normalize_native_names(&actual.stdout),
+        expected.stdout,
+        "stdout mismatch"
+    );
+    assert_eq!(
+        normalize_native_names(&actual.stderr),
+        expected.stderr,
+        "stderr mismatch"
+    );
+}
+
+fn normalize_native_names(bytes: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(bytes)
+        .replace("compass-out", "graphify-out")
+        .replace(".compass_", ".graphify_")
+        .replace("/compass", "/graphify")
+        .replace("compass.mdc", "graphify.mdc")
+        .into_bytes()
 }
 
 fn remove_output(root: &Path) -> Result<(), Box<dyn Error>> {
@@ -80,6 +99,10 @@ fn remove_output(root: &Path) -> Result<(), Box<dyn Error>> {
 
 fn artifact(root: &Path, name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     Ok(fs::read(root.join("graphify-out").join(name))?)
+}
+
+fn native_artifact(root: &Path, name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    artifact(root, &name.replace(".graphify_", ".compass_"))
 }
 
 fn graph_without_definition_hashes(bytes: &[u8]) -> Result<Value, Box<dyn Error>> {
@@ -116,7 +139,7 @@ fn graphify_help_matches_python() -> Result<(), Box<dyn Error>> {
     command_environment(&mut python, home.path());
     let expected = python.output()?;
 
-    let mut rust = Command::new(env!("CARGO_BIN_EXE_graphify"));
+    let mut rust = support::compat_command();
     rust.arg("--help").current_dir(&repository);
     command_environment(&mut rust, home.path());
     assert_same_output(&expected, &rust.output()?);
@@ -127,7 +150,7 @@ fn graphify_help_matches_python() -> Result<(), Box<dyn Error>> {
             .current_dir(&repository)
             .env("PYTHONPATH", &repository);
         command_environment(&mut python, home.path());
-        let mut rust = Command::new(env!("CARGO_BIN_EXE_graphify"));
+        let mut rust = support::compat_command();
         rust.arg(argument).current_dir(&repository);
         command_environment(&mut rust, home.path());
         assert_same_output(&python.output()?, &rust.output()?);
@@ -160,7 +183,7 @@ fn cold_force_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
         let actual = run_rust(&arguments, home.path())?;
         assert_same_output(&expected, &actual);
         for (name, expected) in names.into_iter().zip(expected_artifacts) {
-            let actual = artifact(directory.path(), name)?;
+            let actual = native_artifact(directory.path(), name)?;
             if name == "graph.json" {
                 assert_eq!(
                     graph_without_definition_hashes(&actual)?,

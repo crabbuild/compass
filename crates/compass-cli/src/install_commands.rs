@@ -7,7 +7,9 @@ use serde_json::{Map, Value, json};
 
 use crate::{Frontend, Outcome};
 
-const COMPAT_VERSION: &str = "0.9.20";
+const SKILL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const SKILL_ASSET: &str = "compass-skill/SKILL.md";
+const REFERENCE_BUNDLE: &str = "compass-skill";
 const PLATFORM_NAMES: &[&str] = &[
     "claude",
     "codex",
@@ -66,9 +68,7 @@ include!(concat!(env!("OUT_DIR"), "/install_assets.rs"));
 #[derive(Clone, Copy)]
 struct Platform {
     name: &'static str,
-    skill_file: &'static str,
     skill_destination: &'static str,
-    references: Option<&'static str>,
 }
 
 pub(crate) fn is_direct_command(command: &str) -> bool {
@@ -127,7 +127,7 @@ pub(crate) fn command_install(frontend: Frontend, args: &[String]) -> Outcome {
     if strict && !project {
         let mut outcome = install_platform(selected, false, Path::new("."), false, prefix);
         outcome.stderr = format!(
-            "note: --strict applies to the project PreToolUse hook; run `{prefix} install --project --strict` or `graphify claude install --strict`."
+            "note: --strict applies to the project PreToolUse hook; run `{prefix} install --project --strict` or `compass claude install --strict`."
         );
         return outcome;
     }
@@ -219,7 +219,7 @@ fn uninstall_direct(name: &str, project: bool, root: &Path, prefix: &str) -> Out
             if !project =>
         {
             let mut lines = Vec::new();
-            strip_section_file(&root.join("AGENTS.md"), "## graphify", &mut lines);
+            strip_section_file(&root.join("AGENTS.md"), "## compass", &mut lines);
             if name == "codex" {
                 remove_json_hooks(&root.join(".codex/hooks.json"), "PreToolUse", &mut lines);
             } else if name == "opencode" {
@@ -271,7 +271,7 @@ fn command_prefix(frontend: Frontend) -> &'static str {
 
 fn install_help(prefix: &str) -> String {
     format!(
-        "Usage: {prefix} install [--project] [--strict] [--platform P|P]\nPlatforms: {}, gemini, cursor\n  --strict  block the first raw file read per session until one `graphify query` runs (Claude Code project hook only; needs --project)",
+        "Usage: {prefix} install [--project] [--strict] [--platform P|P]\nPlatforms: {}, gemini, cursor\n  --strict  block the first raw file read per session until one `compass query` runs (Claude Code project hook only; needs --project)",
         PLATFORM_NAMES.join(", ")
     )
 }
@@ -281,138 +281,44 @@ fn platform(name: &str) -> Option<Platform> {
         .iter()
         .copied()
         .find(|candidate| *candidate == name)?;
-    let value = match name {
-        "claude" => Platform::new(
-            name,
-            "skill.md",
-            ".claude/skills/graphify/SKILL.md",
-            Some("claude"),
-        ),
-        "windows" => Platform::new(
-            name,
-            "skill-windows.md",
-            ".claude/skills/graphify/SKILL.md",
-            Some("windows"),
-        ),
-        "codex" => Platform::new(
-            name,
-            "skill-codex.md",
-            ".codex/skills/graphify/SKILL.md",
-            Some("codex"),
-        ),
-        "opencode" => Platform::new(
-            name,
-            "skill-opencode.md",
-            ".config/opencode/skills/graphify/SKILL.md",
-            Some("opencode"),
-        ),
-        "kilo" => Platform::new(
-            name,
-            "skill-kilo.md",
-            ".config/kilo/skills/graphify/SKILL.md",
-            Some("kilo"),
-        ),
-        "aider" => Platform::new(name, "skill-aider.md", ".aider/graphify/SKILL.md", None),
-        "copilot" => Platform::new(
-            name,
-            "skill-copilot.md",
-            ".copilot/skills/graphify/SKILL.md",
-            Some("copilot"),
-        ),
-        "claw" | "hermes" => Platform::new(
-            name,
-            "skill-claw.md",
-            ".openclaw/skills/graphify/SKILL.md",
-            Some("claw"),
-        ),
-        "droid" => Platform::new(
-            name,
-            "skill-droid.md",
-            ".factory/skills/graphify/SKILL.md",
-            Some("droid"),
-        ),
-        "trae" | "trae-cn" => Platform::new(
-            name,
-            "skill-trae.md",
-            ".trae/skills/graphify/SKILL.md",
-            Some("trae"),
-        ),
-        "kiro" => Platform::new(
-            name,
-            "skill-kiro.md",
-            ".kiro/skills/graphify/SKILL.md",
-            Some("kiro"),
-        ),
-        "pi" => Platform::new(
-            name,
-            "skill-pi.md",
-            ".pi/agent/skills/graphify/SKILL.md",
-            Some("pi"),
-        ),
-        "codebuddy" | "antigravity" => Platform::new(
-            name,
-            "skill.md",
-            ".agents/skills/graphify/SKILL.md",
-            Some("claude"),
-        ),
-        "antigravity-windows" => Platform::new(
-            name,
-            "skill-windows.md",
-            ".agents/skills/graphify/SKILL.md",
-            Some("windows"),
-        ),
-        "kimi" => Platform::new(
-            name,
-            "skill.md",
-            ".kimi/skills/graphify/SKILL.md",
-            Some("claude"),
-        ),
-        "amp" => Platform::new(
-            name,
-            "skill-amp.md",
-            ".agents/skills/graphify/SKILL.md",
-            Some("amp"),
-        ),
-        "agents" => Platform::new(
-            name,
-            "skill-agents.md",
-            ".agents/skills/graphify/SKILL.md",
-            Some("agents"),
-        ),
-        "devin" => Platform::new(
-            name,
-            "skill-devin.md",
-            ".config/devin/skills/graphify/SKILL.md",
-            None,
-        ),
+    let destination = match name {
+        "claude" | "windows" => ".claude/skills/compass/SKILL.md",
+        "codex" => ".codex/skills/compass/SKILL.md",
+        "opencode" => ".config/opencode/skills/compass/SKILL.md",
+        "kilo" => ".config/kilo/skills/compass/SKILL.md",
+        "aider" => ".aider/compass/SKILL.md",
+        "copilot" => ".copilot/skills/compass/SKILL.md",
+        "claw" | "hermes" => ".openclaw/skills/compass/SKILL.md",
+        "droid" => ".factory/skills/compass/SKILL.md",
+        "trae" | "trae-cn" => ".trae/skills/compass/SKILL.md",
+        "kiro" => ".kiro/skills/compass/SKILL.md",
+        "pi" => ".pi/agent/skills/compass/SKILL.md",
+        "codebuddy" | "antigravity" | "antigravity-windows" | "amp" | "agents" => {
+            ".agents/skills/compass/SKILL.md"
+        }
+        "kimi" => ".kimi/skills/compass/SKILL.md",
+        "devin" => ".config/devin/skills/compass/SKILL.md",
         _ => return None,
     };
-    Some(value.with_specific_destination())
+    Some(Platform::new(name, destination).with_specific_destination())
 }
 
 impl Platform {
-    const fn new(
-        name: &'static str,
-        skill_file: &'static str,
-        skill_destination: &'static str,
-        references: Option<&'static str>,
-    ) -> Self {
+    const fn new(name: &'static str, skill_destination: &'static str) -> Self {
         Self {
             name,
-            skill_file,
             skill_destination,
-            references,
         }
     }
 
     fn with_specific_destination(mut self) -> Self {
         self.skill_destination = match self.name {
-            "opencode" => ".config/opencode/skills/graphify/SKILL.md",
-            "hermes" => ".hermes/skills/graphify/SKILL.md",
-            "trae-cn" => ".trae-cn/skills/graphify/SKILL.md",
-            "codebuddy" => ".codebuddy/skills/graphify/SKILL.md",
-            "antigravity" | "antigravity-windows" => ".agents/skills/graphify/SKILL.md",
-            "amp" | "agents" => ".agents/skills/graphify/SKILL.md",
+            "opencode" => ".config/opencode/skills/compass/SKILL.md",
+            "hermes" => ".hermes/skills/compass/SKILL.md",
+            "trae-cn" => ".trae-cn/skills/compass/SKILL.md",
+            "codebuddy" => ".codebuddy/skills/compass/SKILL.md",
+            "antigravity" | "antigravity-windows" => ".agents/skills/compass/SKILL.md",
+            "amp" | "agents" => ".agents/skills/compass/SKILL.md",
             _ => self.skill_destination,
         };
         self
@@ -468,8 +374,7 @@ fn install_platform(
                             .to_owned(),
                     );
                     lines.push(
-                        "one `graphify query` runs (toggle with GRAPHIFY_HOOK_STRICT=0)."
-                            .to_owned(),
+                        "one `compass query` runs (toggle with COMPASS_HOOK_STRICT=0).".to_owned(),
                     );
                 }
                 hint_paths.push(root.join("CLAUDE.md"));
@@ -483,19 +388,18 @@ fn install_platform(
             }
             "kiro" => {
                 if let Err(error) = write_owned(
-                    root.join(".kiro/steering/graphify.md"),
-                    asset_text("always_on/kiro-steering.md").unwrap_or_default(),
+                    root.join(".kiro/steering/compass.md"),
+                    asset_text("compass-integrations/kiro-steering.md").unwrap_or_default(),
                 ) {
                     return Outcome::failure(error);
                 }
-                lines.push(
-                    "  .kiro/steering/graphify.md  ->  always-on steering written".to_owned(),
-                );
+                lines
+                    .push("  .kiro/steering/compass.md  ->  always-on steering written".to_owned());
                 lines.push(String::new());
                 lines.push(
                     "Kiro will now read the knowledge graph before every conversation.".to_owned(),
                 );
-                lines.push("Use /graphify to build or update the graph.".to_owned());
+                lines.push("Use /compass to build or update the graph.".to_owned());
             }
             "kilo" => {
                 if let Err(error) = install_kilo_command(&mut lines) {
@@ -515,11 +419,11 @@ fn install_platform(
             }
             "devin" => {
                 if let Err(error) =
-                    write_owned(root.join(".windsurf/rules/graphify.md"), DEVIN_RULES)
+                    write_owned(root.join(".windsurf/rules/compass.md"), DEVIN_RULES)
                 {
                     return Outcome::failure(error);
                 }
-                lines.push("  rules written  ->  .windsurf/rules/graphify.md".to_owned());
+                lines.push("  rules written  ->  .windsurf/rules/compass.md".to_owned());
                 hint_paths.push(root.join(".windsurf"));
             }
             "antigravity" | "antigravity-windows" => {
@@ -567,14 +471,14 @@ fn install_claude_direct(root: &Path, strict: bool) -> Outcome {
     lines.push("codebase questions and rebuild it after code changes.".to_owned());
     if strict {
         lines.push("Strict mode: the first raw file read per session is blocked until".to_owned());
-        lines.push("one `graphify query` runs (toggle with GRAPHIFY_HOOK_STRICT=0).".to_owned());
+        lines.push("one `compass query` runs (toggle with COMPASS_HOOK_STRICT=0).".to_owned());
     }
     Outcome::success(lines.join("\n"))
 }
 
 fn uninstall_claude_direct(root: &Path) -> Outcome {
     let mut lines = Vec::new();
-    strip_section_file(&root.join("CLAUDE.md"), "## graphify", &mut lines);
+    strip_section_file(&root.join("CLAUDE.md"), "## compass", &mut lines);
     remove_json_hooks(
         &root.join(".claude/settings.json"),
         "PreToolUse",
@@ -604,13 +508,13 @@ fn install_codebuddy_direct(root: &Path) -> Outcome {
     let markdown = root.join("CODEBUDDY.md");
     if let Err(error) = update_section(
         &markdown,
-        "## graphify",
-        asset_text("always_on/claude-md.md").unwrap_or_default(),
+        "## compass",
+        asset_text("compass-integrations/claude-md.md").unwrap_or_default(),
     ) {
         return Outcome::failure(error);
     }
     lines.push(format!(
-        "graphify section written to {}",
+        "compass section written to {}",
         absolute_display(&markdown)
     ));
     if let Err(error) = install_codebuddy_hook(root) {
@@ -628,7 +532,7 @@ fn uninstall_codebuddy_direct(root: &Path, project: bool) -> Outcome {
     if let Some(config) = platform("codebuddy") {
         remove_skill(config, project, root, &mut lines);
     }
-    strip_section_file(&root.join("CODEBUDDY.md"), "## graphify", &mut lines);
+    strip_section_file(&root.join("CODEBUDDY.md"), "## compass", &mut lines);
     remove_json_hooks(
         &root.join(".codebuddy/settings.json"),
         "PreToolUse",
@@ -652,7 +556,7 @@ fn uninstall_agents_with_global_skill(name: &str, root: &Path) -> Outcome {
     if removed {
         lines.push("skill removed".to_owned());
     }
-    strip_section_file(&root.join("AGENTS.md"), "## graphify", &mut lines);
+    strip_section_file(&root.join("AGENTS.md"), "## compass", &mut lines);
     Outcome::success(if lines.is_empty() {
         "No AGENTS.md found in current directory - nothing to do".to_owned()
     } else {
@@ -678,21 +582,22 @@ fn uninstall_global_skill_with_summary(name: &str, root: &Path) -> Outcome {
 
 fn uninstall_kilo_direct(root: &Path) -> Outcome {
     let mut lines = Vec::new();
-    strip_section_file(&root.join("AGENTS.md"), "## graphify", &mut lines);
+    strip_section_file(&root.join("AGENTS.md"), "## compass", &mut lines);
     remove_kilo(root, &mut lines);
     if let Some(home) = home_directory() {
-        let command = home.join(".config/kilo/command/graphify.md");
-        let skill = home.join(".config/kilo/skills/graphify/SKILL.md");
+        let command = home.join(".config/kilo/command/compass.md");
+        let skill = home.join(".config/kilo/skills/compass/SKILL.md");
         let mut removed = Vec::new();
         if command.exists() {
             let _ = fs::remove_file(&command);
             removed.push(format!("command removed: {}", command.display()));
         }
-        if skill.exists() {
+        if is_managed_skill(&skill) {
             let _ = fs::remove_file(&skill);
             removed.push(format!("skill removed: {}", skill.display()));
+            let _ = fs::remove_file(skill.with_file_name(".compass_version"));
+            let _ = fs::remove_dir_all(skill.with_file_name("references"));
         }
-        let _ = fs::remove_file(skill.with_file_name(".compass_version"));
         remove_empty_ancestors(&skill.with_file_name("placeholder"), &home);
         if removed.is_empty() {
             lines.push("nothing to remove".to_owned());
@@ -709,17 +614,17 @@ fn uninstall_kiro_direct(root: &Path) -> Outcome {
     };
     let mut lines = Vec::new();
     let skill = skill_destination(config, true, root).ok();
-    let removed_skill = skill.as_ref().is_some_and(|path| path.exists());
+    let removed_skill = skill.as_ref().is_some_and(|path| is_managed_skill(path));
     remove_skill(config, true, root, &mut lines);
-    let steering = root.join(".kiro/steering/graphify.md");
+    let steering = root.join(".kiro/steering/compass.md");
     let removed_steering = steering.exists();
     let _ = fs::remove_file(&steering);
     let mut removed = Vec::new();
     if removed_skill {
-        removed.push(".kiro/skills/graphify/SKILL.md");
+        removed.push(".kiro/skills/compass/SKILL.md");
     }
     if removed_steering {
-        removed.push(".kiro/steering/graphify.md");
+        removed.push(".kiro/steering/compass.md");
     }
     lines.push(format!(
         "Removed: {}",
@@ -734,34 +639,33 @@ fn uninstall_kiro_direct(root: &Path) -> Outcome {
 
 fn uninstall_antigravity(root: &Path, project: bool) -> Outcome {
     let mut lines = Vec::new();
-    let rule = root.join(".agents/rules/graphify.md");
+    let rule = root.join(".agents/rules/compass.md");
     if rule.exists() {
         let _ = fs::remove_file(&rule);
         lines.push(format!(
-            "graphify rule removed from {}",
+            "compass rule removed from {}",
             absolute_display(&rule)
         ));
     } else {
-        lines.push("No graphify Antigravity rule found - nothing to do".to_owned());
+        lines.push("No compass Antigravity rule found - nothing to do".to_owned());
     }
-    let workflow = root.join(".agents/workflows/graphify.md");
+    let workflow = root.join(".agents/workflows/compass.md");
     if workflow.exists() {
         let _ = fs::remove_file(&workflow);
         lines.push(format!(
-            "graphify workflow removed from {}",
+            "compass workflow removed from {}",
             absolute_display(&workflow)
         ));
     }
     if let Some(config) = platform("antigravity")
         && let Ok(skill) = skill_destination(config, project, root)
+        && is_managed_skill(&skill)
     {
-        if skill.exists() {
-            let _ = fs::remove_file(&skill);
-            lines.push(format!(
-                "graphify skill removed from {}",
-                display_path(&skill, project, root)
-            ));
-        }
+        let _ = fs::remove_file(&skill);
+        lines.push(format!(
+            "compass skill removed from {}",
+            display_path(&skill, project, root)
+        ));
         let _ = fs::remove_file(skill.with_file_name(".compass_version"));
         let _ = fs::remove_dir_all(skill.with_file_name("references"));
     }
@@ -818,8 +722,8 @@ fn install_antigravity_direct(root: &Path, prefix: &str) -> Outcome {
         return Outcome::failure(error);
     }
     outcome.stdout.push_str(&format!("\n{}", lines.join("\n")));
-    outcome.stdout.push_str("\n\nAntigravity will now check the knowledge graph before answering\ncodebase questions. Run /graphify first to build the graph.");
-    outcome.stdout.push_str("\n\nTo enable full MCP architecture navigation, add this to ~/.gemini/antigravity/mcp_config.json:\n  \"graphify\": {\n    \"command\": \"uv\",\n    \"args\": [\"run\", \"--with\", \"graphifyy\", \"--with\", \"mcp\", \"-m\", \"graphify.serve\", \"${workspace.path}/compass-out/graph.json\"]\n  }");
+    outcome.stdout.push_str("\n\nAntigravity will now check the knowledge graph before answering\ncodebase questions. Run /compass first to build the graph.");
+    outcome.stdout.push_str("\n\nTo enable full MCP architecture navigation, add this to ~/.gemini/antigravity/mcp_config.json:\n  \"compass\": {\n    \"command\": \"compass\",\n    \"args\": [\"serve\", \"${workspace.path}/compass-out/graph.json\"]\n  }");
     outcome
 }
 
@@ -833,15 +737,15 @@ fn install_kiro_direct(root: &Path) -> Outcome {
     };
     let mut lines = skill.messages;
     if let Err(error) = write_owned(
-        root.join(".kiro/steering/graphify.md"),
-        asset_text("always_on/kiro-steering.md").unwrap_or_default(),
+        root.join(".kiro/steering/compass.md"),
+        asset_text("compass-integrations/kiro-steering.md").unwrap_or_default(),
     ) {
         return Outcome::failure(error);
     }
-    lines.push("  .kiro/steering/graphify.md  ->  always-on steering written".to_owned());
+    lines.push("  .kiro/steering/compass.md  ->  always-on steering written".to_owned());
     lines.push(String::new());
     lines.push("Kiro will now read the knowledge graph before every conversation.".to_owned());
-    lines.push("Use /graphify to build or update the graph.".to_owned());
+    lines.push("Use /compass to build or update the graph.".to_owned());
     Outcome::success(lines.join("\n"))
 }
 
@@ -849,7 +753,7 @@ fn append_done(lines: &mut Vec<String>) {
     lines.push(String::new());
     lines.push("Done. Open your AI coding assistant and type:".to_owned());
     lines.push(String::new());
-    lines.push("  /graphify .".to_owned());
+    lines.push("  /compass .".to_owned());
     lines.push(String::new());
 }
 
@@ -876,12 +780,32 @@ struct SkillInstall {
     messages: Vec<String>,
 }
 
+fn require_owned_or_absent(destination: &Path) -> Result<(), String> {
+    if !destination.exists() {
+        return Ok(());
+    }
+    if is_managed_skill(destination) {
+        Ok(())
+    } else {
+        Err(format!(
+            "error: {} exists but is not managed by Compass",
+            destination.display()
+        ))
+    }
+}
+
+fn is_managed_skill(path: &Path) -> bool {
+    path.parent()
+        .is_some_and(|parent| parent.join(".compass_version").is_file())
+}
+
 fn install_skill(
     config: Platform,
     project: bool,
     project_dir: &Path,
 ) -> Result<SkillInstall, String> {
     let destination = skill_destination(config, project, project_dir)?;
+    require_owned_or_absent(&destination)?;
     let parent = destination
         .parent()
         .ok_or_else(|| "error: invalid skill destination".to_owned())?;
@@ -889,23 +813,18 @@ fn install_skill(
         .map_err(|error| format!("error: could not create {}: {error}", parent.display()))?;
     let mut messages = Vec::new();
     let refs_destination = parent.join("references");
-    if let Some(bundle) = config.references {
-        install_asset_tree(&format!("skills/{bundle}/references/"), &refs_destination)?;
-        messages.push(format!(
-            "  references       ->  {}",
-            display_path(&refs_destination, project, project_dir)
-        ));
-    } else {
-        remove_dir_if_exists(&refs_destination)?;
-    }
-    let body = asset_text(config.skill_file).ok_or_else(|| {
-        format!(
-            "error: {} not found in package - reinstall graphify",
-            config.skill_file
-        )
-    })?;
+    install_asset_tree(
+        &format!("{REFERENCE_BUNDLE}/references/"),
+        &refs_destination,
+    )?;
+    messages.push(format!(
+        "  references       ->  {}",
+        display_path(&refs_destination, project, project_dir)
+    ));
+    let body = asset_text(SKILL_ASSET)
+        .ok_or_else(|| format!("error: {SKILL_ASSET} not found in package - reinstall compass"))?;
     write_owned(destination.clone(), body)?;
-    write_owned(parent.join(".compass_version"), COMPAT_VERSION)?;
+    write_owned(parent.join(".compass_version"), SKILL_VERSION)?;
     messages.push(format!(
         "  skill installed  ->  {}",
         display_path(&destination, project, project_dir)
@@ -923,8 +842,8 @@ fn skill_destination(
 ) -> Result<PathBuf, String> {
     if project {
         return Ok(project_dir.join(match config.name {
-            "opencode" => ".opencode/skills/graphify/SKILL.md",
-            "devin" => ".devin/skills/graphify/SKILL.md",
+            "opencode" => ".opencode/skills/compass/SKILL.md",
+            "devin" => ".devin/skills/compass/SKILL.md",
             _ => config.skill_destination,
         }));
     }
@@ -933,31 +852,26 @@ fn skill_destination(
     if matches!(config.name, "claude" | "windows")
         && let Some(directory) = env::var_os("CLAUDE_CONFIG_DIR")
     {
-        return Ok(PathBuf::from(directory).join("skills/graphify/SKILL.md"));
+        return Ok(PathBuf::from(directory).join("skills/compass/SKILL.md"));
     }
     Ok(match config.name {
-        "opencode" => home.join(".config/opencode/skills/graphify/SKILL.md"),
+        "opencode" => home.join(".config/opencode/skills/compass/SKILL.md"),
         "hermes" if cfg!(windows) => env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join("AppData/Local"))
-            .join("hermes/skills/graphify/SKILL.md"),
-        "devin" => home.join(".config/devin/skills/graphify/SKILL.md"),
-        "amp" => home.join(".config/agents/skills/graphify/SKILL.md"),
-        "agents" => home.join(".agents/skills/graphify/SKILL.md"),
+            .join("hermes/skills/compass/SKILL.md"),
+        "devin" => home.join(".config/devin/skills/compass/SKILL.md"),
+        "amp" => home.join(".config/agents/skills/compass/SKILL.md"),
+        "agents" => home.join(".agents/skills/compass/SKILL.md"),
         "antigravity" | "antigravity-windows" => {
-            home.join(".gemini/config/skills/graphify/SKILL.md")
+            home.join(".gemini/config/skills/compass/SKILL.md")
         }
         _ => home.join(config.skill_destination),
     })
 }
 
 fn install_gemini(project: bool, project_dir: &Path) -> Outcome {
-    let config = Platform::new(
-        "gemini",
-        "skill.md",
-        ".gemini/skills/graphify/SKILL.md",
-        Some("claude"),
-    );
+    let config = Platform::new("gemini", ".gemini/skills/compass/SKILL.md");
     let skill = match install_skill(config, project, project_dir) {
         Ok(value) => value,
         Err(error) => return Outcome::failure(error),
@@ -966,13 +880,13 @@ fn install_gemini(project: bool, project_dir: &Path) -> Outcome {
     let target = project_dir.join("GEMINI.md");
     if let Err(error) = update_section(
         &target,
-        "## graphify",
-        asset_text("always_on/gemini-md.md").unwrap_or_default(),
+        "## compass",
+        asset_text("compass-integrations/gemini-md.md").unwrap_or_default(),
     ) {
         return Outcome::failure(error);
     }
     lines.push(format!(
-        "graphify section written to {}",
+        "compass section written to {}",
         absolute_display(&target)
     ));
     if let Err(error) = install_gemini_hook(project_dir) {
@@ -991,12 +905,12 @@ fn install_gemini(project: bool, project_dir: &Path) -> Outcome {
 }
 
 fn install_cursor(project_dir: &Path, project_hint: bool) -> Outcome {
-    let path = project_dir.join(".cursor/rules/graphify.mdc");
+    let path = project_dir.join(".cursor/rules/compass.mdc");
     if let Err(error) = write_owned(path.clone(), CURSOR_RULE) {
         return Outcome::failure(error);
     }
     let mut output = format!(
-        "graphify rule written at {}\n\nCursor will now always include the knowledge graph context.\nRun /graphify . first to build the graph if you haven't already.",
+        "compass rule written at {}\n\nCursor will now always include the knowledge graph context.\nRun /compass . first to build the graph if you haven't already.",
         absolute_display(&path)
     );
     if project_hint {
@@ -1009,13 +923,7 @@ fn install_vscode(project_dir: &Path) -> Outcome {
     let Some(home) = home_directory() else {
         return Outcome::failure("error: could not determine user home directory".to_owned());
     };
-    let config = Platform::new(
-        "vscode",
-        "skill-vscode.md",
-        ".copilot/skills/graphify/SKILL.md",
-        Some("vscode"),
-    );
-    let skill = match install_skill_at(config, home.join(".copilot/skills/graphify/SKILL.md")) {
+    let skill = match install_skill_at(home.join(".copilot/skills/compass/SKILL.md")) {
         Ok(value) => value,
         Err(error) => return Outcome::failure(error),
     };
@@ -1023,8 +931,8 @@ fn install_vscode(project_dir: &Path) -> Outcome {
     let instructions = project_dir.join(".github/copilot-instructions.md");
     if let Err(error) = update_section(
         &instructions,
-        "## graphify",
-        asset_text("always_on/vscode-instructions.md").unwrap_or_default(),
+        "## compass",
+        asset_text("compass-integrations/vscode-instructions.md").unwrap_or_default(),
     ) {
         return Outcome::failure(error);
     }
@@ -1034,29 +942,27 @@ fn install_vscode(project_dir: &Path) -> Outcome {
     ));
     lines.push(String::new());
     lines.push(
-        "VS Code Copilot Chat configured. Type /graphify in the chat panel to build the graph."
+        "VS Code Copilot Chat configured. Type /compass in the chat panel to build the graph."
             .to_owned(),
     );
-    lines.push("Note: for GitHub Copilot CLI (terminal), use: graphify copilot install".to_owned());
+    lines.push("Note: for GitHub Copilot CLI (terminal), use: compass copilot install".to_owned());
     Outcome::success(lines.join("\n"))
 }
 
-fn install_skill_at(config: Platform, destination: PathBuf) -> Result<SkillInstall, String> {
+fn install_skill_at(destination: PathBuf) -> Result<SkillInstall, String> {
+    require_owned_or_absent(&destination)?;
     let parent = destination
         .parent()
         .ok_or_else(|| "error: invalid skill destination".to_owned())?;
     fs::create_dir_all(parent).map_err(|error| format!("error: {error}"))?;
     let mut messages = Vec::new();
-    if let Some(bundle) = config.references {
-        let refs = parent.join("references");
-        install_asset_tree(&format!("skills/{bundle}/references/"), &refs)?;
-        messages.push(format!("  references       ->  {}", refs.display()));
-    }
-    write_owned(
-        destination.clone(),
-        asset_text(config.skill_file).unwrap_or_default(),
-    )?;
-    write_owned(parent.join(".compass_version"), COMPAT_VERSION)?;
+    let refs = parent.join("references");
+    install_asset_tree(&format!("{REFERENCE_BUNDLE}/references/"), &refs)?;
+    messages.push(format!("  references       ->  {}", refs.display()));
+    let body = asset_text(SKILL_ASSET)
+        .ok_or_else(|| format!("error: {SKILL_ASSET} not found in package - reinstall compass"))?;
+    write_owned(destination.clone(), body)?;
+    write_owned(parent.join(".compass_version"), SKILL_VERSION)?;
     messages.push(format!("  skill installed  ->  {}", destination.display()));
     Ok(SkillInstall {
         path: destination,
@@ -1066,7 +972,7 @@ fn install_skill_at(config: Platform, destination: PathBuf) -> Result<SkillInsta
 
 fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &str) -> Outcome {
     if name == "codebuddy" && project {
-        return uninstall_codebuddy_direct(project_dir, false);
+        return uninstall_codebuddy_direct(project_dir, true);
     }
     if name == "kiro" && project {
         return uninstall_kiro_direct(project_dir);
@@ -1076,9 +982,9 @@ fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &s
     }
     if name == "cursor" {
         return remove_owned_file(
-            project_dir.join(".cursor/rules/graphify.mdc"),
-            "No graphify Cursor rule found - nothing to do",
-            "graphify Cursor rule removed",
+            project_dir.join(".cursor/rules/compass.mdc"),
+            "No compass Cursor rule found - nothing to do",
+            "compass Cursor rule removed",
         );
     }
     if name == "vscode" {
@@ -1086,15 +992,9 @@ fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &s
     }
     if name == "gemini" {
         let mut lines = Vec::new();
-        if let Some(config) = Some(Platform::new(
-            "gemini",
-            "skill.md",
-            ".gemini/skills/graphify/SKILL.md",
-            Some("claude"),
-        )) {
-            remove_skill(config, project, project_dir, &mut lines);
-        }
-        strip_section_file(&project_dir.join("GEMINI.md"), "## graphify", &mut lines);
+        let config = Platform::new("gemini", ".gemini/skills/compass/SKILL.md");
+        remove_skill(config, project, project_dir, &mut lines);
+        strip_section_file(&project_dir.join("GEMINI.md"), "## compass", &mut lines);
         remove_json_hooks(
             &project_dir.join(".gemini/settings.json"),
             "BeforeTool",
@@ -1111,7 +1011,7 @@ fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &s
         match name {
             "claude" | "windows" => {
                 remove_registration(&project_dir.join(".claude/CLAUDE.md"), &mut lines);
-                strip_section_file(&project_dir.join("CLAUDE.md"), "## graphify", &mut lines);
+                strip_section_file(&project_dir.join("CLAUDE.md"), "## compass", &mut lines);
                 remove_json_hooks(
                     &project_dir.join(".claude/settings.json"),
                     "PreToolUse",
@@ -1125,7 +1025,7 @@ fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &s
             }
             "codex" | "opencode" | "aider" | "amp" | "claw" | "droid" | "trae" | "trae-cn"
             | "hermes" => {
-                strip_section_file(&project_dir.join("AGENTS.md"), "## graphify", &mut lines);
+                strip_section_file(&project_dir.join("AGENTS.md"), "## compass", &mut lines);
                 if name == "codex" {
                     remove_json_hooks(
                         &project_dir.join(".codex/hooks.json"),
@@ -1136,16 +1036,16 @@ fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &s
                     remove_opencode(project_dir, &mut lines);
                 }
             }
-            "kiro" => remove_file(&project_dir.join(".kiro/steering/graphify.md"), &mut lines),
+            "kiro" => remove_file(&project_dir.join(".kiro/steering/compass.md"), &mut lines),
             "devin" => remove_labeled_file(
-                &project_dir.join(".windsurf/rules/graphify.md"),
-                "  rules removed  ->  .windsurf/rules/graphify.md",
+                &project_dir.join(".windsurf/rules/compass.md"),
+                "  rules removed  ->  .windsurf/rules/compass.md",
                 &mut lines,
             ),
             "antigravity" | "antigravity-windows" => {
-                remove_file(&project_dir.join(".agents/rules/graphify.md"), &mut lines);
+                remove_file(&project_dir.join(".agents/rules/compass.md"), &mut lines);
                 remove_file(
-                    &project_dir.join(".agents/workflows/graphify.md"),
+                    &project_dir.join(".agents/workflows/compass.md"),
                     &mut lines,
                 );
             }
@@ -1161,9 +1061,9 @@ fn uninstall_platform(name: &str, project: bool, project_dir: &Path, _prefix: &s
 fn uninstall_all(project: bool, purge: bool, project_dir: &Path, prefix: &str) -> Outcome {
     let mut lines = vec![
         if project {
-            "Uninstalling project-scoped graphify files...".to_owned()
+            "Uninstalling project-scoped compass files...".to_owned()
         } else {
-            "Uninstalling graphify from all detected platforms...".to_owned()
+            "Uninstalling compass from all detected platforms...".to_owned()
         },
         String::new(),
     ];
@@ -1195,11 +1095,11 @@ fn install_agents(root: &Path, name: &str, lines: &mut Vec<String>) -> Result<()
     let path = root.join("AGENTS.md");
     update_section(
         &path,
-        "## graphify",
-        asset_text("always_on/agents-md.md").unwrap_or_default(),
+        "## compass",
+        asset_text("compass-integrations/agents-md.md").unwrap_or_default(),
     )?;
     lines.push(format!(
-        "graphify section written to {}",
+        "compass section written to {}",
         absolute_display(&path)
     ));
     match name {
@@ -1229,7 +1129,7 @@ fn install_agents(root: &Path, name: &str, lines: &mut Vec<String>) -> Result<()
 
 fn register_claude_skill(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
     let path = root.join(".claude/CLAUDE.md");
-    let registration = "# graphify\n- **graphify** (`.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`\nWhen the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.\n";
+    let registration = "# compass\n- **compass** (`.claude/skills/compass/SKILL.md`) - any input to knowledge graph. Trigger: `/compass`\nWhen the user types `/compass`, use the installed compass skill or instructions before doing anything else.\n";
     append_registration(&path, registration)?;
     lines.push("  CLAUDE.md        ->  created at .claude/CLAUDE.md".to_owned());
     Ok(())
@@ -1239,7 +1139,7 @@ fn register_global_claude(lines: &mut Vec<String>) -> Result<(), String> {
     let home = home_directory()
         .ok_or_else(|| "error: could not determine user home directory".to_owned())?;
     let path = home.join(".claude/CLAUDE.md");
-    let registration = "# graphify\n- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`\nWhen the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.\n";
+    let registration = "# compass\n- **compass** (`~/.claude/skills/compass/SKILL.md`) - any input to knowledge graph. Trigger: `/compass`\nWhen the user types `/compass`, use the installed compass skill or instructions before doing anything else.\n";
     append_registration(&path, registration)?;
     lines.push(format!(
         "  CLAUDE.md        ->  created at {}",
@@ -1252,7 +1152,7 @@ fn register_codebuddy(lines: &mut Vec<String>) -> Result<(), String> {
     let home = home_directory()
         .ok_or_else(|| "error: could not determine user home directory".to_owned())?;
     let path = home.join(".codebuddy/CODEBUDDY.md");
-    let registration = "# graphify\n- **graphify** (`~/.codebuddy/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`\nWhen the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.\n";
+    let registration = "# compass\n- **compass** (`~/.codebuddy/skills/compass/SKILL.md`) - any input to knowledge graph. Trigger: `/compass`\nWhen the user types `/compass`, use the installed compass skill or instructions before doing anything else.\n";
     append_registration(&path, registration)?;
     lines.push(format!(
         "  CODEBUDDY.md     ->  created at {}",
@@ -1269,11 +1169,11 @@ fn install_markdown_and_claude_hook(
     let path = root.join("CLAUDE.md");
     update_section(
         &path,
-        "## graphify",
-        asset_text("always_on/claude-md.md").unwrap_or_default(),
+        "## compass",
+        asset_text("compass-integrations/claude-md.md").unwrap_or_default(),
     )?;
     lines.push(format!(
-        "graphify section written to {}",
+        "compass section written to {}",
         absolute_display(&path)
     ));
     install_claude_hook(root, strict)?;
@@ -1294,9 +1194,9 @@ fn install_claude_hook(root: &Path, strict: bool) -> Result<(), String> {
         .unwrap_or_default();
     let mut values = existing
         .into_iter()
-        .filter(|value| !value.to_string().contains("graphify"))
+        .filter(|value| !value.to_string().contains("compass"))
         .collect::<Vec<_>>();
-    let executable = graphify_executable();
+    let executable = compass_executable();
     values.push(json!({"matcher":"Bash|Grep","hooks":[{"type":"command","command":format!("{executable} hook-guard search")}]}));
     let read = format!(
         "{executable} hook-guard read{}",
@@ -1317,9 +1217,9 @@ fn install_codebuddy_hook(root: &Path) -> Result<(), String> {
         .unwrap_or_default();
     let mut values = existing
         .into_iter()
-        .filter(|value| !value.to_string().contains("graphify"))
+        .filter(|value| !value.to_string().contains("compass"))
         .collect::<Vec<_>>();
-    let executable = graphify_executable();
+    let executable = compass_executable();
     values.push(json!({"matcher":"Bash|Grep","hooks":[{"type":"command","command":format!("{executable} hook-guard search")}]}));
     values.push(json!({"matcher":"Read|Glob","hooks":[{"type":"command","command":format!("{executable} hook-guard read")}]}));
     hooks.insert("PreToolUse".to_owned(), Value::Array(values));
@@ -1336,9 +1236,9 @@ fn install_gemini_hook(root: &Path) -> Result<(), String> {
         .unwrap_or_default();
     let mut values = existing
         .into_iter()
-        .filter(|value| !value.to_string().contains("graphify"))
+        .filter(|value| !value.to_string().contains("compass"))
         .collect::<Vec<_>>();
-    values.push(json!({"matcher":"read_file|list_directory","hooks":[{"type":"command","command":format!("{} hook-guard gemini", graphify_executable())}]}));
+    values.push(json!({"matcher":"read_file|list_directory","hooks":[{"type":"command","command":format!("{} hook-guard gemini", compass_executable())}]}));
     hooks.insert("BeforeTool".to_owned(), Value::Array(values));
     write_json_object(path, &document)
 }
@@ -1353,9 +1253,9 @@ fn install_codex_hook(root: &Path, lines: &mut Vec<String>) -> Result<(), String
         .unwrap_or_default();
     let mut values = existing
         .into_iter()
-        .filter(|value| !value.to_string().contains("graphify"))
+        .filter(|value| !value.to_string().contains("compass"))
         .collect::<Vec<_>>();
-    let executable = graphify_executable();
+    let executable = compass_executable();
     values.push(json!({"matcher":"Bash","hooks":[{"type":"command","command":format!("{executable} hook-check")}]}));
     hooks.insert("PreToolUse".to_owned(), Value::Array(values));
     write_json_object(path, &document)?;
@@ -1366,12 +1266,12 @@ fn install_codex_hook(root: &Path, lines: &mut Vec<String>) -> Result<(), String
 }
 
 fn install_opencode(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
-    let plugin = root.join(".opencode/plugins/graphify.js");
+    let plugin = root.join(".opencode/plugins/compass.js");
     write_owned(plugin, OPENCODE_PLUGIN)?;
-    lines.push("  .opencode/plugins/graphify.js  ->  tool.execute.before hook written".to_owned());
+    lines.push("  .opencode/plugins/compass.js  ->  tool.execute.before hook written".to_owned());
     let config = root.join(".opencode/opencode.json");
     let mut document = load_json_object(&config);
-    let entry = ".opencode/plugins/graphify.js";
+    let entry = ".opencode/plugins/compass.js";
     let plugins = document
         .entry("plugin".to_owned())
         .or_insert_with(|| Value::Array(Vec::new()));
@@ -1390,9 +1290,9 @@ fn install_opencode(root: &Path, lines: &mut Vec<String>) -> Result<(), String> 
 }
 
 fn install_kilo_plugin(root: &Path, lines: &mut Vec<String>) -> Result<(), String> {
-    let plugin = root.join(".kilo/plugins/graphify.js");
+    let plugin = root.join(".kilo/plugins/compass.js");
     write_owned(plugin.clone(), KILO_PLUGIN)?;
-    lines.push("  .kilo/plugins/graphify.js  ->  tool.execute.before hook written".to_owned());
+    lines.push("  .kilo/plugins/compass.js  ->  tool.execute.before hook written".to_owned());
     let config = root.join(".kilo/kilo.json");
     let mut document = load_json_object(&config);
     let plugins = document
@@ -1424,23 +1324,26 @@ fn finalize_antigravity(root: &Path, skill: &Path, lines: &mut Vec<String>) -> R
         write_owned(
             skill.to_path_buf(),
             &format!(
-                "---\nname: graphify-manager\ndescription: Rebuild the code graph or perform manual CLI queries when MCP server is offline.\n---\n\n{body}"
+                "---\nname: compass-manager\ndescription: Rebuild the code graph or perform manual CLI queries when MCP server is offline.\n---\n\n{body}"
             ),
         )?;
     }
-    let rules = root.join(".agents/rules/graphify.md");
+    let rules = root.join(".agents/rules/compass.md");
     write_owned(
         rules.clone(),
-        asset_text("always_on/antigravity-rules.md").unwrap_or_default(),
+        asset_text("compass-integrations/antigravity-rules.md").unwrap_or_default(),
     )?;
     lines.push(format!(
-        "graphify rule written to {}",
+        "compass rule written to {}",
         absolute_display(&rules)
     ));
-    let workflow = root.join(".agents/workflows/graphify.md");
-    write_owned(workflow.clone(), ANTIGRAVITY_WORKFLOW)?;
+    let workflow = root.join(".agents/workflows/compass.md");
+    write_owned(
+        workflow.clone(),
+        asset_text("compass-integrations/antigravity-workflow.md").unwrap_or_default(),
+    )?;
     lines.push(format!(
-        "graphify workflow written to {}",
+        "compass workflow written to {}",
         absolute_display(&workflow)
     ));
     Ok(())
@@ -1449,10 +1352,10 @@ fn finalize_antigravity(root: &Path, skill: &Path, lines: &mut Vec<String>) -> R
 fn install_kilo_command(lines: &mut Vec<String>) -> Result<(), String> {
     let home = home_directory()
         .ok_or_else(|| "error: could not determine user home directory".to_owned())?;
-    let path = home.join(".config/kilo/command/graphify.md");
+    let path = home.join(".config/kilo/command/compass.md");
     write_owned(
         path.clone(),
-        asset_text("command-kilo.md").unwrap_or_default(),
+        asset_text("compass-integrations/kilo-command.md").unwrap_or_default(),
     )?;
     lines.push(format!("  command installed ->  {}", path.display()));
     Ok(())
@@ -1463,6 +1366,9 @@ fn remove_skill(config: Platform, project: bool, project_dir: &Path, lines: &mut
         return;
     };
     let parent = path.parent().map(Path::to_path_buf);
+    if !is_managed_skill(&path) {
+        return;
+    }
     if path.exists() && fs::remove_file(&path).is_ok() {
         lines.push(format!(
             "  skill removed    ->  {}",
@@ -1479,20 +1385,20 @@ fn remove_skill(config: Platform, project: bool, project_dir: &Path, lines: &mut
 fn uninstall_vscode(project_dir: &Path) -> Outcome {
     let mut lines = Vec::new();
     if let Some(home) = home_directory() {
-        let path = home.join(".copilot/skills/graphify/SKILL.md");
-        if path.exists() && fs::remove_file(&path).is_ok() {
+        let path = home.join(".copilot/skills/compass/SKILL.md");
+        if is_managed_skill(&path) && fs::remove_file(&path).is_ok() {
             lines.push(format!("  skill removed    ->  {}", path.display()));
-        }
-        if let Some(parent) = path.parent() {
-            let _ = fs::remove_file(parent.join(".compass_version"));
-            let _ = fs::remove_dir_all(parent.join("references"));
+            if let Some(parent) = path.parent() {
+                let _ = fs::remove_file(parent.join(".compass_version"));
+                let _ = fs::remove_dir_all(parent.join("references"));
+            }
         }
     }
     let instructions = project_dir.join(".github/copilot-instructions.md");
     if let Ok(content) = fs::read_to_string(&instructions)
-        && content.lines().any(|line| line.trim() == "## graphify")
+        && content.lines().any(|line| line.trim() == "## compass")
     {
-        let clean = strip_heading_section(&content, "## graphify");
+        let clean = strip_heading_section(&content, "## compass");
         if clean.trim().is_empty() {
             if fs::remove_file(&instructions).is_ok() {
                 lines.push(
@@ -1501,23 +1407,22 @@ fn uninstall_vscode(project_dir: &Path) -> Outcome {
                 );
             }
         } else if write_owned(instructions, &clean).is_ok() {
-            lines
-                .push("  graphify section removed from .github/copilot-instructions.md".to_owned());
+            lines.push("  compass section removed from .github/copilot-instructions.md".to_owned());
         }
     }
     Outcome::success(lines.join("\n"))
 }
 
 fn remove_opencode(root: &Path, lines: &mut Vec<String>) {
-    let plugin = root.join(".opencode/plugins/graphify.js");
+    let plugin = root.join(".opencode/plugins/compass.js");
     if plugin.exists() && fs::remove_file(&plugin).is_ok() {
-        lines.push("  .opencode/plugins/graphify.js  ->  removed".to_owned());
+        lines.push("  .opencode/plugins/compass.js  ->  removed".to_owned());
     }
     let path = root.join(".opencode/opencode.json");
     let mut document = load_json_object(&path);
     if let Some(plugins) = document.get_mut("plugin").and_then(Value::as_array_mut) {
         let before = plugins.len();
-        plugins.retain(|value| value.as_str() != Some(".opencode/plugins/graphify.js"));
+        plugins.retain(|value| value.as_str() != Some(".opencode/plugins/compass.js"));
         let changed = plugins.len() != before;
         let empty = plugins.is_empty();
         if empty {
@@ -1530,9 +1435,9 @@ fn remove_opencode(root: &Path, lines: &mut Vec<String>) {
 }
 
 fn remove_kilo(root: &Path, lines: &mut Vec<String>) {
-    let plugin = root.join(".kilo/plugins/graphify.js");
+    let plugin = root.join(".kilo/plugins/compass.js");
     if plugin.exists() && fs::remove_file(&plugin).is_ok() {
-        lines.push("  .kilo/plugins/graphify.js  ->  removed".to_owned());
+        lines.push("  .kilo/plugins/compass.js  ->  removed".to_owned());
     }
     let path = root.join(".kilo/kilo.json");
     let mut document = load_json_object(&path);
@@ -1541,7 +1446,7 @@ fn remove_kilo(root: &Path, lines: &mut Vec<String>) {
         plugins.retain(|value| {
             !value
                 .as_str()
-                .is_some_and(|entry| entry.contains("/.kilo/plugins/graphify.js"))
+                .is_some_and(|entry| entry.contains("/.kilo/plugins/compass.js"))
         });
         let changed = plugins.len() != before;
         let empty = plugins.is_empty();
@@ -1566,7 +1471,7 @@ fn remove_json_hooks(path: &Path, event: &str, lines: &mut Vec<String>) {
         return;
     };
     let before = values.len();
-    values.retain(|value| !value.to_string().contains("graphify"));
+    values.retain(|value| !value.to_string().contains("compass"));
     if values.len() != before && write_json_object(path.to_path_buf(), &document).is_ok() {
         lines.push(format!(
             "  {}  ->  {event} hook removed",
@@ -1582,7 +1487,7 @@ fn remove_registration(path: &Path, lines: &mut Vec<String>) {
     let Ok(content) = fs::read_to_string(path) else {
         return;
     };
-    let clean = strip_heading_section(&content, "# graphify");
+    let clean = strip_heading_section(&content, "# compass");
     if clean.trim().is_empty() {
         if fs::remove_file(path).is_ok() {
             lines.push(format!(
@@ -1592,7 +1497,7 @@ fn remove_registration(path: &Path, lines: &mut Vec<String>) {
         }
     } else if write_owned(path.to_path_buf(), &clean).is_ok() {
         lines.push(format!(
-            "  CLAUDE.md        ->  graphify skill registration removed from {}",
+            "  CLAUDE.md        ->  compass skill registration removed from {}",
             lexical_path(path).display()
         ));
     }
@@ -1621,7 +1526,7 @@ fn strip_section_file(path: &Path, marker: &str, lines: &mut Vec<String>) {
         }
     } else if write_owned(path.to_path_buf(), &clean).is_ok() {
         lines.push(format!(
-            "graphify section removed from {}",
+            "compass section removed from {}",
             absolute_display(path)
         ));
     }
@@ -1654,7 +1559,7 @@ fn remove_labeled_file(path: &Path, label: &str, lines: &mut Vec<String>) {
 
 fn append_registration(path: &Path, registration: &str) -> Result<(), String> {
     let current = fs::read_to_string(path).unwrap_or_default();
-    if current.contains("graphify") {
+    if current.contains("compass") {
         return Ok(());
     }
     let output = if current.trim().is_empty() {
@@ -1809,11 +1714,11 @@ fn object_child<'a>(
         .ok_or_else(|| format!("error: could not create JSON object '{name}'"))
 }
 
-fn graphify_executable() -> String {
-    executable_on_path("graphify")
+fn compass_executable() -> String {
+    executable_on_path("compass")
         .or_else(|| env::current_exe().ok())
         .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|| "graphify".to_owned())
+        .unwrap_or_else(|| "compass".to_owned())
 }
 
 fn executable_on_path(name: &str) -> Option<PathBuf> {
@@ -1914,11 +1819,10 @@ fn capitalize(value: &str) -> String {
     })
 }
 
-const ANTIGRAVITY_WORKFLOW: &str = "---\nname: graphify\ndescription: Turn any folder of files into a navigable knowledge graph\n---\n\n# Workflow: graphify\n\nFollow the graphify skill installed at ~/.gemini/config/skills/graphify/SKILL.md to run the full pipeline.\n\nIf no path argument is given, use `.` (current directory).\n";
-const DEVIN_RULES: &str = "## graphify\n\nThis project has a graphify knowledge graph at compass-out/.\n\nRules:\n- For codebase or architecture questions, when `compass-out/graph.json` exists, first run `graphify query \"<question>\"` (or `graphify path \"<A>\" \"<B>\"` / `graphify explain \"<concept>\"`). These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output.\n- If compass-out/wiki/index.md exists, navigate it instead of reading raw files\n- Read compass-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context\n- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)\n";
-const CURSOR_RULE: &str = "---\ndescription: graphify knowledge graph context\nalwaysApply: true\n---\n\nThis project has a graphify knowledge graph at compass-out/.\n\n**MANDATORY: Before using Read, Grep, Glob, or Bash to explore the codebase, you MUST run graphify first:**\n- `graphify query \"<question>\"` — scoped subgraph for any codebase or architecture question\n- `graphify path \"<A>\" \"<B>\"` — dependency path between two symbols\n- `graphify explain \"<concept>\"` — all nodes related to a concept\n\nThis applies to YOU and to every subagent you spawn. Include this rule explicitly in every subagent prompt that involves code exploration. Do not skip graphify because files are \"already known\" or because you are executing a plan — the graph surfaces cross-file dependencies and INFERRED edges that grep and Read cannot find.\n\nOnly use Read/Grep/Glob directly when:\n1. graphify has already oriented you and you need to modify or debug specific lines\n2. `compass-out/graph.json` does not exist yet\n\n- If `compass-out/wiki/index.md` exists, navigate it instead of reading raw files\n- Read `compass-out/GRAPH_REPORT.md` only for broad architecture review when query/path/explain do not surface enough context\n- After modifying code files, run `graphify update .` to keep the graph current (AST-only, no API cost)\n";
-const OPENCODE_PLUGIN: &str = "// graphify OpenCode plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\n//\n// IMPORTANT: keep the reminder string free of backticks and $(...) constructs.\n// The hook prepends `echo \"<reminder>\" && <cmd>` to the user's bash command;\n// backticks inside the double-quoted echo trigger bash command substitution,\n// which both corrupts tool output and silently executes the very graphify\n// command we are only suggesting. Plain words render fine in opencode's TUI.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const GraphifyPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a statement\n        // separator, breaking the first bash command of the session (#1646).\n        output.args.command =\n          'echo \"[graphify] knowledge graph at compass-out/. For focused questions, run graphify query with your question (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
-const KILO_PLUGIN: &str = "// graphify Kilo plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const GraphifyPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // Separate with ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a\n        // statement separator (\"not a valid statement separator\"), which broke\n        // the first bash command in every OpenCode session on Windows (#1646).\n        // ';' works in PowerShell 5.1, Bash, and POSIX shells alike.\n        output.args.command =\n          'echo \"[graphify] Knowledge graph available. Read compass-out/GRAPH_REPORT.md for god nodes and architecture context before searching files.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
+const DEVIN_RULES: &str = "## compass\n\nThis project has a compass knowledge graph at compass-out/.\n\nRules:\n- For codebase or architecture questions, when `compass-out/graph.json` exists, first run `compass query \"<question>\"` (or `compass path \"<A>\" \"<B>\"` / `compass explain \"<concept>\"`). These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output.\n- If compass-out/wiki/index.md exists, navigate it instead of reading raw files\n- Read compass-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context\n- After modifying code files in this session, run `compass update .` to keep the graph current (AST-only, no API cost)\n";
+const CURSOR_RULE: &str = "---\ndescription: compass knowledge graph context\nalwaysApply: true\n---\n\nThis project has a compass knowledge graph at compass-out/.\n\n**MANDATORY: Before using Read, Grep, Glob, or Bash to explore the codebase, you MUST run compass first:**\n- `compass query \"<question>\"` — scoped subgraph for any codebase or architecture question\n- `compass path \"<A>\" \"<B>\"` — dependency path between two symbols\n- `compass explain \"<concept>\"` — all nodes related to a concept\n\nThis applies to YOU and to every subagent you spawn. Include this rule explicitly in every subagent prompt that involves code exploration. Do not skip compass because files are \"already known\" or because you are executing a plan — the graph surfaces cross-file dependencies and INFERRED edges that grep and Read cannot find.\n\nOnly use Read/Grep/Glob directly when:\n1. compass has already oriented you and you need to modify or debug specific lines\n2. `compass-out/graph.json` does not exist yet\n\n- If `compass-out/wiki/index.md` exists, navigate it instead of reading raw files\n- Read `compass-out/GRAPH_REPORT.md` only for broad architecture review when query/path/explain do not surface enough context\n- After modifying code files, run `compass update .` to keep the graph current (AST-only, no API cost)\n";
+const OPENCODE_PLUGIN: &str = "// compass OpenCode plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\n//\n// IMPORTANT: keep the reminder string free of backticks and $(...) constructs.\n// The hook prepends `echo \"<reminder>\" && <cmd>` to the user's bash command;\n// backticks inside the double-quoted echo trigger bash command substitution,\n// which both corrupts tool output and silently executes the very compass\n// command we are only suggesting. Plain words render fine in opencode's TUI.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const CompassPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a statement\n        // separator, breaking the first bash command of the session (#1646).\n        output.args.command =\n          'echo \"[compass] knowledge graph at compass-out/. For focused questions, run compass query with your question (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
+const KILO_PLUGIN: &str = "// compass Kilo plugin\n// Injects a knowledge graph reminder before bash tool calls when the graph exists.\nimport { existsSync } from \"fs\";\nimport { join } from \"path\";\n\nexport const CompassPlugin = async ({ directory }) => {\n  let reminded = false;\n\n  return {\n    \"tool.execute.before\": async (input, output) => {\n      if (reminded) return;\n      if (!existsSync(join(directory, \"compass-out\", \"graph.json\"))) return;\n\n      if (input.tool === \"bash\") {\n        // Separate with ';' not '&&' — Windows PowerShell 5.1 rejects '&&' as a\n        // statement separator (\"not a valid statement separator\"), which broke\n        // the first bash command in every OpenCode session on Windows (#1646).\n        // ';' works in PowerShell 5.1, Bash, and POSIX shells alike.\n        output.args.command =\n          'echo \"[compass] Knowledge graph available. Read compass-out/GRAPH_REPORT.md for god nodes and architecture context before searching files.\" ; ' +\n          output.args.command;\n        reminded = true;\n      }\n    },\n  };\n};\n";
 
 #[cfg(test)]
 mod tests {
@@ -1934,25 +1838,33 @@ mod tests {
 
     #[test]
     fn section_replacement_preserves_surrounding_user_content() {
-        let input = "# User\n\n## graphify\nold\n\n## Keep\nvalue\n";
+        let input = "# User\n\n## compass\nold\n\n## Keep\nvalue\n";
         assert_eq!(
-            replace_or_append_section(input, "## graphify", "## graphify\nnew\n"),
-            "# User\n\n## graphify\nnew\n\n## Keep\nvalue\n"
+            replace_or_append_section(input, "## compass", "## compass\nnew\n"),
+            "# User\n\n## compass\nnew\n\n## Keep\nvalue\n"
         );
     }
 
     #[test]
-    fn packaged_reference_bundles_are_nonempty() {
-        for bundle in [
-            "agents", "amp", "claude", "claw", "codex", "copilot", "droid", "kilo", "kiro",
-            "opencode", "pi", "trae", "vscode", "windows",
+    fn canonical_compass_skill_package_is_native() {
+        let body = asset_text(SKILL_ASSET).unwrap_or_default();
+        assert!(body.starts_with("---\nname: compass\n"));
+        assert!(body.contains("references/query.md"));
+        assert!(body.contains("compass query"));
+        for forbidden in [
+            "graphify",
+            "graphifyy",
+            "GRAPHIFY_",
+            "graphify-out",
+            "python -m",
         ] {
-            assert!(EMBEDDED_ASSETS.iter().any(|asset| {
-                asset
-                    .path
-                    .starts_with(&format!("skills/{bundle}/references/"))
-            }));
+            assert!(!body.contains(forbidden), "stale token {forbidden}");
         }
+        assert!(
+            EMBEDDED_ASSETS
+                .iter()
+                .any(|asset| asset.path.starts_with("compass-skill/references/"))
+        );
     }
 
     #[test]
@@ -2024,7 +1936,7 @@ mod tests {
         let root = directory.path();
         write(
             &root.join(".claude/settings.json"),
-            r#"{"hooks":{"PreToolUse":[{"command":"keep"},{"command":"graphify old"}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"command":"keep"},{"command":"compass old"}]}}"#,
         )?;
         install_claude_hook(root, true)?;
         let claude = load_json_object(&root.join(".claude/settings.json"));
@@ -2067,12 +1979,12 @@ mod tests {
         let mut lines = Vec::new();
         install_opencode(root, &mut lines)?;
         install_kilo_plugin(root, &mut lines)?;
-        assert!(root.join(".opencode/plugins/graphify.js").is_file());
-        assert!(root.join(".kilo/plugins/graphify.js").is_file());
+        assert!(root.join(".opencode/plugins/compass.js").is_file());
+        assert!(root.join(".kilo/plugins/compass.js").is_file());
         remove_opencode(root, &mut lines);
         remove_kilo(root, &mut lines);
-        assert!(!root.join(".opencode/plugins/graphify.js").exists());
-        assert!(!root.join(".kilo/plugins/graphify.js").exists());
+        assert!(!root.join(".opencode/plugins/compass.js").exists());
+        assert!(!root.join(".kilo/plugins/compass.js").exists());
         assert!(lines.iter().any(|line| line.contains("deregistered")));
         Ok(())
     }
@@ -2085,18 +1997,18 @@ mod tests {
         let mut lines = Vec::new();
 
         let registration = root.join("CLAUDE.md");
-        append_registration(&registration, "# graphify\nowned\n")?;
-        append_registration(&registration, "# graphify\nduplicate\n")?;
+        append_registration(&registration, "# compass\nowned\n")?;
+        append_registration(&registration, "# compass\nduplicate\n")?;
         remove_registration(&registration, &mut lines);
         assert!(!registration.exists());
 
         let agents = root.join("AGENTS.md");
-        write(&agents, "# User\n\n## graphify\nowned\n\n## Keep\nvalue\n")?;
-        strip_section_file(&agents, "## graphify", &mut lines);
+        write(&agents, "# User\n\n## compass\nowned\n\n## Keep\nvalue\n")?;
+        strip_section_file(&agents, "## compass", &mut lines);
         assert_eq!(fs::read_to_string(&agents)?, "# User\n\n## Keep\nvalue\n\n");
         let untouched = root.join("untouched.md");
         write(&untouched, "# User\n")?;
-        strip_section_file(&untouched, "## graphify", &mut lines);
+        strip_section_file(&untouched, "## compass", &mut lines);
         assert_eq!(fs::read_to_string(&untouched)?, "# User\n");
 
         let labeled = root.join("owned.md");
@@ -2117,7 +2029,7 @@ mod tests {
         let hooks = root.join("hooks.json");
         write(
             &hooks,
-            r#"{"hooks":{"PreToolUse":[{"command":"keep"},{"command":"graphify hook"}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"command":"keep"},{"command":"compass hook"}]}}"#,
         )?;
         let mut lines = Vec::new();
         remove_json_hooks(&hooks, "PreToolUse", &mut lines);
@@ -2147,7 +2059,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let destination = directory.path().join("references");
-        assert!(install_asset_tree("skills/codex/references/", &destination).is_ok());
+        assert!(install_asset_tree("compass-skill/references/", &destination).is_ok());
         assert!(destination.is_dir());
         assert!(install_asset_tree("missing-prefix/", &destination).is_err());
 
@@ -2172,7 +2084,7 @@ mod tests {
             display_path(&directory.path().join("x"), true, directory.path()),
             "x"
         );
-        assert_eq!(capitalize("graphify"), "Graphify");
+        assert_eq!(capitalize("compass"), "Compass");
         assert_eq!(capitalize(""), "");
         Ok(())
     }
@@ -2185,12 +2097,12 @@ mod tests {
         write(&skill, "# Body\n")?;
         let mut lines = Vec::new();
         finalize_antigravity(directory.path(), &skill, &mut lines)?;
-        assert!(fs::read_to_string(&skill)?.starts_with("---\nname: graphify-manager"));
-        assert!(directory.path().join(".agents/rules/graphify.md").is_file());
+        assert!(fs::read_to_string(&skill)?.starts_with("---\nname: compass-manager"));
+        assert!(directory.path().join(".agents/rules/compass.md").is_file());
         assert!(
             directory
                 .path()
-                .join(".agents/workflows/graphify.md")
+                .join(".agents/workflows/compass.md")
                 .is_file()
         );
         finalize_antigravity(directory.path(), &skill, &mut lines)?;

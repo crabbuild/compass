@@ -82,3 +82,43 @@ fn compass_cli_exposes_only_the_compass_binary() -> Result<(), Box<dyn Error>> {
     assert_eq!(binaries, ["compass"]);
     Ok(())
 }
+
+#[test]
+fn install_help_is_compass_native() -> Result<(), Box<dyn Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["install", "--help"])
+        .output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("compass install"));
+    assert!(!stdout.to_ascii_lowercase().contains("graphify"));
+    Ok(())
+}
+
+#[test]
+fn installation_managed_commands_have_compass_native_help() -> Result<(), Box<dyn Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .arg("--help")
+        .output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("hook-check"));
+    assert!(stdout.contains("hook-guard"));
+
+    for command in ["hook-check", "hook-guard"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+            .args([command, "--help"])
+            .output()?;
+        assert!(output.status.success(), "{command} --help failed");
+        let help = String::from_utf8(output.stdout)?;
+        assert!(
+            help.contains(&format!("compass {command}")),
+            "{command} has no dedicated Compass help: {help}"
+        );
+        assert!(
+            !help.to_ascii_lowercase().contains("graphify"),
+            "{command} help contains retired branding: {help}"
+        );
+    }
+    Ok(())
+}

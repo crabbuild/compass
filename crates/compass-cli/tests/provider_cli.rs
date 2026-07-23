@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -32,7 +34,7 @@ fn run_python(repo: &Path, home: &Path, arguments: &[&str]) -> Result<Output, Bo
 }
 
 fn run_native(repo: &Path, home: &Path, arguments: &[&str]) -> Result<Output, Box<dyn Error>> {
-    Ok(Command::new(env!("CARGO_BIN_EXE_graphify"))
+    Ok(support::compat_command()
         .args(arguments)
         .current_dir(repo)
         .env("HOME", home)

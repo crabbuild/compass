@@ -63,8 +63,11 @@ fn root_help_groups_every_public_command_with_descriptions() {
         let line = outcome
             .stdout
             .lines()
-            .find(|line| line.trim_start().starts_with(command))
-            .unwrap_or_else(|| panic!("missing command {command}"));
+            .find(|line| line.trim_start().starts_with(command));
+        assert!(line.is_some(), "missing command {command}");
+        let Some(line) = line else {
+            continue;
+        };
         assert_ne!(line.trim(), command, "missing summary for {command}");
     }
 }

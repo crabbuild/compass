@@ -6,27 +6,41 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> ExitCode {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    let style = compass_cli::HelpStyle::detect(
-        io::stdout().is_terminal(),
-        std::env::var_os("NO_COLOR").as_deref(),
-        std::env::var_os("TERM").as_deref(),
-    );
-    if let Some(outcome) = compass_cli::compass_help_request(&arguments, style) {
-        return ExitCode::from(compass_cli::write_outcome(
-            &outcome,
-            &mut io::stdout(),
-            &mut io::stderr(),
-        ));
+    let compatibility = std::env::var_os("COMPASS_INTERNAL_GRAPHIFY_COMPAT").is_some();
+    if !compatibility {
+        let style = compass_cli::HelpStyle::detect(
+            io::stdout().is_terminal(),
+            std::env::var_os("NO_COLOR").as_deref(),
+            std::env::var_os("TERM").as_deref(),
+        );
+        if let Some(outcome) = compass_cli::compass_help_request(&arguments, style) {
+            return ExitCode::from(compass_cli::write_outcome(
+                &outcome,
+                &mut io::stdout(),
+                &mut io::stderr(),
+            ));
+        }
     }
     if arguments.first().and_then(|value| value.to_str()) == Some("diff") {
         return ExitCode::from(compass_cli::run_diff(
-            compass_cli::Frontend::Compass,
+            if compatibility {
+                compass_cli::Frontend::Graphify
+            } else {
+                compass_cli::Frontend::Compass
+            },
             &arguments[1..],
             &mut io::stdout(),
             &mut io::stderr(),
         ));
     }
     if arguments.first().and_then(|value| value.to_str()) == Some("watch") {
+        if compatibility {
+            return ExitCode::from(compass_cli::run_graphify_watch(
+                &arguments[1..],
+                &mut io::stdout(),
+                &mut io::stderr(),
+            ));
+        }
         return ExitCode::from(compass_cli::run_watch(
             &arguments[1..],
             &mut io::stdout(),
@@ -41,7 +55,14 @@ fn main() -> ExitCode {
             &mut io::stderr(),
         ));
     }
-    let outcome = compass_cli::run(compass_cli::Frontend::Compass, arguments);
+    let outcome = compass_cli::run(
+        if compatibility {
+            compass_cli::Frontend::Graphify
+        } else {
+            compass_cli::Frontend::Compass
+        },
+        arguments,
+    );
     ExitCode::from(compass_cli::write_outcome(
         &outcome,
         &mut io::stdout(),

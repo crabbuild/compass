@@ -1,9 +1,11 @@
 #![cfg(unix)]
 
+mod support;
+
 use std::error::Error;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn repository_root() -> PathBuf {
     if let Some(root) = std::env::var_os("GRAPHIFY_REPO_ROOT") {
@@ -22,7 +24,7 @@ fn run(
     path: &str,
 ) -> Result<Output, Box<dyn Error>> {
     let python = repository.join(".venv/bin/python");
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repository);

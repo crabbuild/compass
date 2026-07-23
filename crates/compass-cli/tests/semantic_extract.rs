@@ -114,7 +114,7 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
         .map_err(|_| "provider thread panicked")?
         .map_err(|error| format!("provider failed: {error}"))?;
 
-    let output = corpus.path().join("graphify-out");
+    let output = corpus.path().join("compass-out");
     let graph: Value = serde_json::from_slice(&fs::read(output.join("graph.json"))?)?;
     assert!(graph["nodes"].as_array().is_some_and(|nodes| {
         nodes
@@ -122,13 +122,13 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
             .any(|node| node["id"] == "guide_domain_rule" && node["_origin"] == "semantic")
     }));
     let analysis: Value =
-        serde_json::from_slice(&fs::read(output.join(".graphify_analysis.json"))?)?;
+        serde_json::from_slice(&fs::read(output.join(".compass_analysis.json"))?)?;
     assert_eq!(
         analysis["tokens"],
         serde_json::json!({"input":17,"output":9})
     );
     let marker: Value =
-        serde_json::from_slice(&fs::read(output.join(".graphify_semantic_marker"))?)?;
+        serde_json::from_slice(&fs::read(output.join(".compass_semantic_marker"))?)?;
     assert_eq!(marker["output_tokens"], 9);
     let manifest: Value = serde_json::from_slice(&fs::read(output.join("manifest.json"))?)?;
     assert!(

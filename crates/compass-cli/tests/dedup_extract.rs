@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
 
+mod support;
+
 const BACKEND_ENVIRONMENT: &[&str] = &[
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
@@ -101,7 +103,7 @@ fn dedup_llm_resolves_ambiguous_semantic_entities() -> Result<(), Box<dyn Error>
         Ok(())
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+    let output = support::compat_command()
         .args([
             "extract",
             corpus.path().to_str().ok_or("non-UTF-8 corpus path")?,

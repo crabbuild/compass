@@ -1,3 +1,5 @@
+mod support;
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -28,7 +30,7 @@ fn run(
     cwd: &Path,
     args: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
-    let mut command = Command::new(executable);
+    let mut command = support::command(executable);
     if executable == python_executable(repo) {
         command.args(["-m", "graphify"]);
         command.env("PYTHONPATH", repo);
@@ -68,7 +70,7 @@ fn offline_neo4j_and_falkordb_exports_match_python_exactly() -> Result<(), Box<d
     seed(directory.path())?;
     let repo = repository_root();
     let python = python_executable(&repo);
-    let native = Path::new(env!("CARGO_BIN_EXE_graphify"));
+    let native = support::compat_executable();
     for format in ["neo4j", "falkordb"] {
         let arguments = ["export", format];
         let expected = run(&python, &repo, directory.path(), &arguments)?;
@@ -91,8 +93,7 @@ fn offline_neo4j_and_falkordb_exports_match_python_exactly() -> Result<(), Box<d
 fn live_push_validation_is_safe_and_namespaced() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     seed(directory.path())?;
-    let native = env!("CARGO_BIN_EXE_graphify");
-    let missing = Command::new(native)
+    let missing = support::compat_command()
         .args(["export", "neo4j", "--push", "bolt://127.0.0.1:1"])
         .current_dir(directory.path())
         .env_remove("NEO4J_PASSWORD")
@@ -103,7 +104,7 @@ fn live_push_validation_is_safe_and_namespaced() -> Result<(), Box<dyn Error>> {
         "error: --password required for --push\n"
     );
 
-    let failed = Command::new(native)
+    let failed = support::compat_command()
         .args([
             "export",
             "neo4j",
