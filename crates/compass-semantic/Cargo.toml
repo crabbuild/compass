@@ -22,8 +22,8 @@ sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
-compass-files = { path = "../compass-files", version = "0.1.1" }
-compass-media = { path = "../compass-media", version = "0.1.1" }
+compass-files = { path = "../compass-files", version = "0.1.2" }
+compass-media = { path = "../compass-media", version = "0.1.2" }
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true

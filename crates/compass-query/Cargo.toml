@@ -16,12 +16,12 @@ regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-compass-cypher = { path = "../compass-cypher", version = "0.1.1" }
-compass-model = { path = "../compass-model", version = "0.1.1" }
+compass-cypher = { path = "../compass-cypher", version = "0.1.2" }
+compass-model = { path = "../compass-model", version = "0.1.2" }
 unicode-normalization.workspace = true
 
 [dev-dependencies]
-compass-graphdb = { path = "../compass-graphdb", version = "0.1.1" }
+compass-graphdb = { path = "../compass-graphdb", version = "0.1.2" }
 
 [lints]
 workspace = true

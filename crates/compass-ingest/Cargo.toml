@@ -16,8 +16,8 @@ regex.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
-compass-files = { path = "../compass-files", version = "0.1.1" }
-compass-transcribe = { path = "../compass-transcribe", version = "0.1.1", default-features = false }
+compass-files = { path = "../compass-files", version = "0.1.2" }
+compass-transcribe = { path = "../compass-transcribe", version = "0.1.2", default-features = false }
 ureq.workspace = true
 url.workspace = true
 

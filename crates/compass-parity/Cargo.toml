@@ -16,20 +16,20 @@ publish = false
 serde_json.workspace = true
 tempfile.workspace = true
 time.workspace = true
-compass-cli = { version = "0.1.1", path = "../compass-cli" }
-compass-core = { version = "0.1.1", path = "../compass-core" }
-compass-files = { version = "0.1.1", path = "../compass-files" }
-compass-graph = { version = "0.1.1", path = "../compass-graph" }
-compass-languages = { version = "0.1.1", path = "../compass-languages" }
-compass-media = { version = "0.1.1", path = "../compass-media" }
-compass-mcp = { version = "0.1.1", path = "../compass-mcp" }
-compass-model = { version = "0.1.1", path = "../compass-model" }
-compass-output = { version = "0.1.1", path = "../compass-output" }
-compass-query = { version = "0.1.1", path = "../compass-query" }
-compass-reflect = { version = "0.1.1", path = "../compass-reflect" }
-compass-resolve = { version = "0.1.1", path = "../compass-resolve" }
-compass-semantic = { version = "0.1.1", path = "../compass-semantic" }
-compass-transcribe = { version = "0.1.1", path = "../compass-transcribe" }
+compass-cli = { version = "0.1.2", path = "../compass-cli" }
+compass-core = { version = "0.1.2", path = "../compass-core" }
+compass-files = { version = "0.1.2", path = "../compass-files" }
+compass-graph = { version = "0.1.2", path = "../compass-graph" }
+compass-languages = { version = "0.1.2", path = "../compass-languages" }
+compass-media = { version = "0.1.2", path = "../compass-media" }
+compass-mcp = { version = "0.1.2", path = "../compass-mcp" }
+compass-model = { version = "0.1.2", path = "../compass-model" }
+compass-output = { version = "0.1.2", path = "../compass-output" }
+compass-query = { version = "0.1.2", path = "../compass-query" }
+compass-reflect = { version = "0.1.2", path = "../compass-reflect" }
+compass-resolve = { version = "0.1.2", path = "../compass-resolve" }
+compass-semantic = { version = "0.1.2", path = "../compass-semantic" }
+compass-transcribe = { version = "0.1.2", path = "../compass-transcribe" }
 
 [lints]
 workspace = true
