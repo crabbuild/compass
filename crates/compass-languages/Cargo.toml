@@ -22,8 +22,8 @@ sha1.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-compass-files = { path = "../compass-files", version = "0.1.0" }
-compass-model = { path = "../compass-model", version = "0.1.0" }
+compass-files = { path = "../compass-files", version = "0.1.1" }
+compass-model = { path = "../compass-model", version = "0.1.1" }
 tree-sitter.workspace = true
 tree-sitter-dm.workspace = true
 tree-sitter-language-pack.workspace = true

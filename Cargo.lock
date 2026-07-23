@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "compass-cargo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-model",
  "glob",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "compass-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-cargo",
  "compass-core",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "compass-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-files",
  "compass-google-workspace",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "compass-cypher"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-model",
  "regex",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "compass-files"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "md-5 0.10.6",
  "rayon",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "compass-global"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-files",
  "compass-model",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "compass-google-workspace"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-media",
  "serde_json",
@@ -1051,7 +1051,7 @@ dependencies = [
 
 [[package]]
 name = "compass-graph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-languages",
  "compass-model",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "compass-graphdb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-model",
  "rustls",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "compass-history"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "atomicwrites",
  "compass-files",
@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "compass-ingest"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-files",
  "compass-transcribe",
@@ -1113,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "compass-languages"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-files",
  "compass-model",
@@ -1138,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "compass-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "compass-core",
@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "compass-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxidize-pdf",
  "roxmltree",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "compass-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rmp-serde",
  "serde",
@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "compass-output"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-cypher",
  "compass-files",
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "compass-parity"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-cli",
  "compass-core",
@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "compass-postgres"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-languages",
  "rustls",
@@ -1237,7 +1237,7 @@ dependencies = [
 
 [[package]]
 name = "compass-prs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-model",
  "regex",
@@ -1250,7 +1250,7 @@ dependencies = [
 
 [[package]]
 name = "compass-query"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-cypher",
  "compass-graphdb",
@@ -1264,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "compass-reflect"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-files",
  "compass-model",
@@ -1279,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "compass-resolve"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-languages",
  "compass-model",
@@ -1291,7 +1291,7 @@ dependencies = [
 
 [[package]]
 name = "compass-semantic"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aws-config",
  "aws-sdk-bedrockruntime",
@@ -1313,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "compass-transcribe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compass-whisper",
  "rubato",
@@ -1348,7 +1348,7 @@ dependencies = [
 
 [[package]]
 name = "compass-whisper"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "candle-core",

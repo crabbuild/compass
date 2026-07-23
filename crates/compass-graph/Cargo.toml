@@ -18,8 +18,8 @@ sha1.workspace = true
 sha2.workspace = true
 strsim.workspace = true
 thiserror.workspace = true
-compass-languages = { path = "../compass-languages", version = "0.1.0" }
-compass-model = { path = "../compass-model", version = "0.1.0" }
+compass-languages = { path = "../compass-languages", version = "0.1.1" }
+compass-model = { path = "../compass-model", version = "0.1.1" }
 rayon.workspace = true
 unicode-casefold.workspace = true
 unicode-normalization.workspace = true

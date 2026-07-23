@@ -16,7 +16,7 @@ regex.workspace = true
 serde_json.workspace = true
 time.workspace = true
 thiserror.workspace = true
-compass-model = { path = "../compass-model", version = "0.1.0" }
+compass-model = { path = "../compass-model", version = "0.1.1" }
 wait-timeout.workspace = true
 
 [dev-dependencies]
