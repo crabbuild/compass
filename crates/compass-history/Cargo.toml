@@ -21,6 +21,8 @@ sha2.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
 compass-files = { path = "../compass-files", version = "0.1.1" }
+compass-analysis = { path = "../compass-analysis", version = "0.1.1" }
+compass-ir = { path = "../compass-ir", version = "0.1.1" }
 compass-model = { path = "../compass-model", version = "0.1.1" }
 
 [target.'cfg(windows)'.dependencies]

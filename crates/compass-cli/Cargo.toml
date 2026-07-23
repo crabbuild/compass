@@ -28,6 +28,9 @@ tempfile.workspace = true
 time.workspace = true
 tokio.workspace = true
 compass-core = { path = "../compass-core", version = "0.1.1" }
+compass-analysis = { path = "../compass-analysis", version = "0.1.1" }
+compass-ir = { path = "../compass-ir", version = "0.1.1" }
+compass-program = { path = "../compass-program", version = "0.1.1" }
 compass-cypher = { path = "../compass-cypher", version = "0.1.1" }
 compass-cargo = { path = "../compass-cargo", version = "0.1.1" }
 compass-files = { path = "../compass-files", version = "0.1.1" }

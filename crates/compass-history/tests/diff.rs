@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
+use compass_analysis::{AnalysisBundle, analyze};
 use compass_history::{
     ChangeKind, ChangeSink, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, GraphChange,
     HistoryError, HistoryStore, PublishRequest, RecordKind, Repository,
 };
+use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
 use serde_json::{Value, json};
 
@@ -70,6 +72,7 @@ fn request(
             .parse::<ExtractionFingerprint>()?,
         artifacts: GraphArtifacts {
             document,
+            program: None,
             analysis: Some(json!({"score": score})),
             labels: None,
             manifest: None,
@@ -83,6 +86,22 @@ fn request(
             failed_chunks: 0,
         },
         make_preferred: false,
+    })
+}
+
+fn program(input: &[u8]) -> Result<AnalysisBundle, compass_analysis::AnalysisError> {
+    analyze(ProgramBundle {
+        schema: compass_ir::PROGRAM_SCHEMA.to_owned(),
+        providers: vec![ProviderDescriptor {
+            id: "scip:fixture".to_owned(),
+            kind: ProviderKind::Artifact,
+            version: "scip/1".to_owned(),
+            scope: "repository".to_owned(),
+            input_digest: hex_sha256(input),
+            configuration_digest: hex_sha256(b"manifest"),
+        }],
+        evidence: Vec::new(),
+        modules: Vec::new(),
     })
 }
 
@@ -190,5 +209,35 @@ fn identity_changes_are_remove_add_equal_roots_are_empty_and_sink_errors_stop()
     let mut failing = FailingSink(0);
     assert!(history.diff(&old.id, &new.id, &mut failing).is_err());
     assert_eq!(failing.0, 1);
+    Ok(())
+}
+
+#[test]
+fn full_diff_includes_program_facts_while_topology_diff_skips_them()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    let mut old_request = request('e', vec![json!({"id":"a"})], vec![], vec![], 1)?;
+    old_request.artifacts.program = Some(program(b"old")?);
+    let old = history.publish(old_request)?;
+    let mut new_request = request('f', vec![json!({"id":"a"})], vec![], vec![], 1)?;
+    new_request.artifacts.program = Some(program(b"new")?);
+    let new = history.publish(new_request)?;
+
+    let mut full = VecSink::default();
+    history.diff(&old.id, &new.id, &mut full)?;
+    assert!(
+        full.0
+            .iter()
+            .any(|change| change.record == RecordKind::ProgramFact)
+    );
+    let mut topology = VecSink::default();
+    history.diff_records(
+        &old.id,
+        &new.id,
+        &[RecordKind::Node, RecordKind::Edge],
+        &mut topology,
+    )?;
+    assert!(topology.0.is_empty());
     Ok(())
 }

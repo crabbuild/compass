@@ -7,6 +7,8 @@ whether a Compass capability is covered by the installed skill. Run
 ## Read and navigate
 
 - `compass query`: natural-language graph traversal or deterministic CompassQL.
+- `compass program`: inspect canonical Program IR functions, coverage, callers,
+  and call evidence, or run CompassQL over its read-only graph projection.
 - `compass path`: shortest known graph route between two matched nodes.
 - `compass explain`: one matched node plus its local neighborhood.
 - `compass affected`: downstream review candidates, optionally filtered by

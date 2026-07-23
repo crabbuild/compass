@@ -29,6 +29,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
     let analysis = json!({"communities":{"0":["a","b"]}});
     let labels = json!({"0":"Core"});
     let manifest = json!({"src/lib.rs":{"ast_hash":"abc"}});
+    let program = br#"{"schema":"compass.program","schema_version":1}"#;
     let marker = json!({"schema":"compass.history.completion","schema_version":1});
     let sidecars = BTreeMap::from([("semantic/facts.bin".to_owned(), vec![0, 1, 255])]);
     let requests = [
@@ -45,6 +46,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         &destination,
         &HistoryBundleInput {
             document: &document,
+            program: Some(program),
             analysis: Some(&analysis),
             labels: Some(&labels),
             manifest: Some(&manifest),
@@ -78,11 +80,13 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         std::fs::read(destination.join("semantic/facts.bin"))?,
         vec![0, 1, 255]
     );
+    assert_eq!(std::fs::read(destination.join("program.json"))?, program);
     assert!(
         publish_history_bundle(
             &destination,
             &HistoryBundleInput {
                 document: &document,
+                program: None,
                 analysis: None,
                 labels: None,
                 manifest: None,
@@ -111,6 +115,7 @@ fn unknown_renderer_fails_without_creating_destination() -> Result<(), Box<dyn s
             &destination,
             &HistoryBundleInput {
                 document: &document,
+                program: None,
                 analysis: None,
                 labels: None,
                 manifest: None,

@@ -292,9 +292,9 @@ fn execute_diff(
     Ok(DiffExecution {
         warning: (resolved.profile_mismatch && diff_options.output != DiffOutput::Json).then(|| {
             format!(
-                "warning: comparing realizations with different extraction fingerprints ({} != {}); results may reflect profile differences",
-                resolved.old.version.extraction_fingerprint,
-                resolved.new.version.extraction_fingerprint
+                "warning: comparing realizations with different build profiles ({} != {}); results may reflect profile differences",
+                resolved.old.version.profile_digest,
+                resolved.new.version.profile_digest
             )
         }),
     })
@@ -349,16 +349,18 @@ fn resolve_comparable_pair(
             (history, old, new)
         }
     };
-    let profile_mismatch = old.version.extraction_fingerprint != new.version.extraction_fingerprint;
+    let old_profile = normalized_profile_for_comparison(&old.version.build_profile)?;
+    let new_profile = normalized_profile_for_comparison(&new.version.build_profile)?;
+    let profile_mismatch = old_profile != new_profile;
     if profile_mismatch && !allow_profile_mismatch {
         return Err(format!(
-            "realizations are not semantically comparable\n\nOLD {} ({}) fingerprint: {}\nNEW {} ({}) fingerprint: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}\n\nOr inspect intentionally:\n  compass diff {} {} --allow-profile-mismatch",
+            "realizations are not semantically comparable\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}\n\nOr inspect intentionally:\n  compass diff {} {} --allow-profile-mismatch",
             old.version.git_commit,
             old.id,
-            old.version.extraction_fingerprint,
+            old.version.profile_digest,
             new.version.git_commit,
             new.id,
-            new.version.extraction_fingerprint,
+            new.version.profile_digest,
             new.version.git_commit,
             old.version.git_commit,
             old.version.git_commit,
@@ -371,6 +373,39 @@ fn resolve_comparable_pair(
         new,
         profile_mismatch,
     })
+}
+
+fn normalized_profile_for_comparison(profile: &BuildProfile) -> Result<BuildProfile, String> {
+    let mut normalized = profile.clone();
+    for (key, value) in [
+        (
+            "program_provider_policy",
+            "offline-artifacts-first".to_owned(),
+        ),
+        (
+            "program_ir_schema",
+            compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
+        ),
+        (
+            "program_merger_version",
+            compass_program::MERGER_VERSION.to_string(),
+        ),
+        (
+            "program_analysis_schema",
+            compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
+        ),
+        (
+            "program_analyzer_version",
+            compass_analysis::ANALYZER_VERSION.to_string(),
+        ),
+    ] {
+        if normalized.value(key).is_none() {
+            normalized
+                .insert(key, &value)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(normalized)
 }
 
 fn select_existing(
@@ -644,7 +679,7 @@ const CATEGORY_ORDER: [ChangeCategory; 5] = [
 ];
 
 struct TextSink {
-    counts: [[u64; 15]; 5],
+    counts: [[u64; 21]; 5],
     examples: Vec<Vec<String>>,
     details: Vec<File>,
     output: DiffOutput,
@@ -661,8 +696,8 @@ impl TextSink {
             details.push(tempfile::tempfile().map_err(output_error)?);
         }
         Ok(Self {
-            counts: [[0; 15]; 5],
-            examples: (0..75).map(|_| Vec::new()).collect(),
+            counts: [[0; 21]; 5],
+            examples: (0..105).map(|_| Vec::new()).collect(),
             details,
             output: options.output,
             topology_only: options.topology_only,
@@ -722,7 +757,7 @@ impl TextSink {
                     if !self.expanded(category)
                         && matches!(category, ChangeCategory::Semantic | ChangeCategory::Textual)
                     {
-                        for example in &self.examples[category.index() * 15 + index] {
+                        for example in &self.examples[category.index() * 21 + index] {
                             writeln!(writer, "    {example}").map_err(output_error)?;
                         }
                     }
@@ -762,7 +797,7 @@ impl ChangeSink for TextSink {
         let index = summary_index(change.record, change.change);
         self.counts[category.index()][index] =
             self.counts[category.index()][index].saturating_add(1);
-        let examples = &mut self.examples[category.index() * 15 + index];
+        let examples = &mut self.examples[category.index() * 21 + index];
         if examples.len() < 20 {
             examples.push(change.key.join("/"));
         }
@@ -862,12 +897,14 @@ impl ChangeSink for JsonSink<'_> {
     }
 }
 
-const RECORD_ORDER: [RecordKind; 5] = [
+const RECORD_ORDER: [RecordKind; 7] = [
     RecordKind::Node,
     RecordKind::Edge,
     RecordKind::Hyperedge,
     RecordKind::Analysis,
     RecordKind::Metadata,
+    RecordKind::ProgramFact,
+    RecordKind::ProgramSummary,
 ];
 const CHANGE_ORDER: [ChangeKind; 3] = [ChangeKind::Added, ChangeKind::Removed, ChangeKind::Changed];
 
@@ -878,6 +915,8 @@ fn summary_index(record: RecordKind, change: ChangeKind) -> usize {
         RecordKind::Hyperedge => 2,
         RecordKind::Analysis => 3,
         RecordKind::Metadata => 4,
+        RecordKind::ProgramFact => 5,
+        RecordKind::ProgramSummary => 6,
     };
     let change = match change {
         ChangeKind::Added => 0,
@@ -889,7 +928,9 @@ fn summary_index(record: RecordKind, change: ChangeKind) -> usize {
 
 fn classify_change(change: &GraphChange) -> ChangeCategory {
     match change.record {
-        RecordKind::Analysis => return ChangeCategory::Analysis,
+        RecordKind::Analysis | RecordKind::ProgramFact | RecordKind::ProgramSummary => {
+            return ChangeCategory::Analysis;
+        }
         RecordKind::Metadata => return ChangeCategory::Metadata,
         RecordKind::Node | RecordKind::Edge | RecordKind::Hyperedge => {}
     }
@@ -988,6 +1029,10 @@ fn record_name(record: RecordKind, count: u64) -> &'static str {
         (RecordKind::Analysis, false) => "analysis records",
         (RecordKind::Metadata, true) => "metadata record",
         (RecordKind::Metadata, false) => "metadata records",
+        (RecordKind::ProgramFact, true) => "program fact",
+        (RecordKind::ProgramFact, false) => "program facts",
+        (RecordKind::ProgramSummary, true) => "program summary",
+        (RecordKind::ProgramSummary, false) => "program summaries",
     }
 }
 
@@ -1167,12 +1212,14 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 }
             } else if let Some(value) = preferred {
                 let mut prefix = format!(
-                    "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nvalidation: valid",
+                    "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nprogram facts: {}\nprogram summaries: {}\nvalidation: valid",
                     config.profile_digest.as_deref().unwrap_or("none"),
                     value.id,
                     value.version.extraction_fingerprint,
                     value.version.node_count,
-                    value.version.edge_count
+                    value.version.edge_count,
+                    value.version.program_fact_count,
+                    value.version.program_summary_count
                 );
                 if let Some(job) = newest_job(&repository, &commit).map_err(runtime)?
                     && matches!(job.state, JobState::Failed | JobState::Incomplete)
@@ -1252,12 +1299,14 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 serde_json::to_string(&value.version).map_err(runtime)
             } else {
                 Ok(format!(
-                    "realization: {}\ncommit: {}\nfingerprint: {}\nnodes: {}\nedges: {}",
+                    "realization: {}\ncommit: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nprogram facts: {}\nprogram summaries: {}",
                     value.id,
                     value.version.git_commit,
                     value.version.extraction_fingerprint,
                     value.version.node_count,
-                    value.version.edge_count
+                    value.version.edge_count,
+                    value.version.program_fact_count,
+                    value.version.program_summary_count
                 ))
             }
         }
@@ -1341,10 +1390,18 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                     "semantic_files_completed": artifacts.completion.semantic_files_completed,
                     "failed_chunks": artifacts.completion.failed_chunks
                 });
+                let program = artifacts
+                    .artifacts
+                    .program
+                    .as_ref()
+                    .map(compass_analysis::AnalysisBundle::canonical_bytes)
+                    .transpose()
+                    .map_err(runtime)?;
                 compass_output::publish_history_bundle(
                     &output,
                     &compass_output::HistoryBundleInput {
                         document: &artifacts.artifacts.document,
+                        program: program.as_deref(),
                         analysis: artifacts.artifacts.analysis.as_ref(),
                         labels: artifacts.artifacts.labels.as_ref(),
                         manifest: artifacts.artifacts.manifest.as_ref(),
@@ -1710,12 +1767,14 @@ fn execute_build(
             "hyperedges": published.version.hyperedge_count,
             "analysis_records": published.version.analysis_count,
             "metadata_records": published.version.metadata_count,
+            "program_fact_records": published.version.program_fact_count,
+            "program_summary_records": published.version.program_summary_count,
             "preferred": published.preferred
         })
         .to_string())
     } else {
         Ok(format!(
-            "commit: {}\nrealization: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nhyperedges: {}\nanalysis records: {}\nmetadata records: {}\npreferred: {}",
+            "commit: {}\nrealization: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nhyperedges: {}\nanalysis records: {}\nmetadata records: {}\nprogram fact records: {}\nprogram summary records: {}\npreferred: {}",
             published.version.git_commit,
             published.id,
             published.version.extraction_fingerprint,
@@ -1724,6 +1783,8 @@ fn execute_build(
             published.version.hyperedge_count,
             published.version.analysis_count,
             published.version.metadata_count,
+            published.version.program_fact_count,
+            published.version.program_summary_count,
             published.preferred
         ))
     }

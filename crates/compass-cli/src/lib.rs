@@ -9,6 +9,7 @@ mod ingest_commands;
 mod install_commands;
 mod integration_commands;
 mod label_commands;
+mod program_commands;
 mod provider_commands;
 mod prs_commands;
 mod query_commands;
@@ -172,6 +173,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => history_commands::command_diff(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
+        "program" => program_commands::command(frontend, &args),
         "path" => command_path(frontend, &args),
         "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
@@ -612,6 +614,11 @@ fn write_watch_status(
             );
             let _result = writeln!(
                 stdout,
+                "[compass watch] {}",
+                format_program_analysis(&result)
+            );
+            let _result = writeln!(
+                stdout,
                 "[compass watch] graph artifacts updated in {}",
                 result.output_dir.display()
             );
@@ -686,6 +693,14 @@ fn parse_watch_options(
     args: &[String],
 ) -> Result<Option<WatchOptions>, String> {
     if frontend == Frontend::Graphify {
+        if args.iter().any(|argument| {
+            argument == "--program-artifact" || argument.starts_with("--program-artifact=")
+        }) {
+            return Err(
+                "error: --program-artifact is unsupported in Graphify compatibility mode"
+                    .to_owned(),
+            );
+        }
         let root = args
             .first()
             .map_or_else(|| PathBuf::from("."), PathBuf::from);
@@ -704,6 +719,7 @@ fn parse_watch_options(
     let mut no_viz = false;
     let mut gitignore = true;
     let mut excludes = Vec::new();
+    let mut program_artifacts = Vec::new();
     let mut force_polling = false;
     let mut index = 0;
     while index < args.len() {
@@ -732,6 +748,20 @@ fn parse_watch_options(
                 index += 1;
             }
             value if value.starts_with("--exclude=") => excludes.push(value[10..].to_owned()),
+            "--program-artifact" if index + 1 < args.len() => {
+                program_artifacts.push(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            "--program-artifact" => {
+                return Err("error: --program-artifact requires a path".to_owned());
+            }
+            value if value.starts_with("--program-artifact=") => {
+                let path = &value[19..];
+                if path.is_empty() {
+                    return Err("error: --program-artifact requires a path".to_owned());
+                }
+                program_artifacts.push(PathBuf::from(path));
+            }
             value if value.starts_with('-') => {
                 return Err(format!("error: unknown watch option: {value}"));
             }
@@ -752,6 +782,8 @@ fn parse_watch_options(
     options.build.no_viz = no_viz;
     options.build.gitignore = gitignore;
     options.build.extra_excludes = excludes;
+    options.build.program_analysis = true;
+    options.build.program_artifacts = program_artifacts;
     Ok(Some(options))
 }
 
@@ -1390,6 +1422,15 @@ fn format_graphify_update(result: &BuildResult, watch_path: &Path, no_cluster: b
 }
 
 fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
+    if frontend == Frontend::Graphify
+        && args.iter().any(|argument| {
+            argument == "--program-artifact" || argument.starts_with("--program-artifact=")
+        })
+    {
+        return Outcome::failure(
+            "error: --program-artifact is unsupported in Graphify compatibility mode".to_owned(),
+        );
+    }
     if frontend == Frontend::Graphify && extract && args.is_empty() {
         return Outcome::failure(
             "Usage: graphify extract <path> [--backend gemini|kimi|claude|openai|deepseek|ollama] [--model M] [--mode deep] [--out DIR] [--google-workspace] [--no-cluster] [--no-gitignore] [--max-workers N] [--token-budget N] [--max-concurrency N] [--api-timeout S] [--postgres DSN] [--cargo] [--allow-partial] [--timing]"
@@ -1436,6 +1477,7 @@ fn command_build_with_validation(
     let mut timing = false;
     let mut dedup_llm = false;
     let mut excludes = Vec::new();
+    let mut program_artifacts = Vec::new();
     let mut resolution = 1.0;
     let mut exclude_hubs = None;
     let mut index = 0;
@@ -1552,6 +1594,22 @@ fn command_build_with_validation(
                 index += 1;
             }
             value if value.starts_with("--exclude=") => excludes.push(value[10..].to_owned()),
+            "--program-artifact" if frontend == Frontend::Compass && index + 1 < args.len() => {
+                program_artifacts.push(PathBuf::from(&args[index + 1]));
+                index += 1;
+            }
+            "--program-artifact" if frontend == Frontend::Compass => {
+                return Outcome::failure("error: --program-artifact requires a path".to_owned());
+            }
+            value if frontend == Frontend::Compass && value.starts_with("--program-artifact=") => {
+                let path = &value[19..];
+                if path.is_empty() {
+                    return Outcome::failure(
+                        "error: --program-artifact requires a path".to_owned(),
+                    );
+                }
+                program_artifacts.push(PathBuf::from(path));
+            }
             "--resolution" if index + 1 < args.len() => {
                 resolution = match parse_positive_f64(&args[index + 1], "--resolution") {
                     Ok(value) => value,
@@ -1602,7 +1660,7 @@ fn command_build_with_validation(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--no-cluster] [--force] [--no-viz]".to_owned()
+                    "Usage: compass update [path] [--program-artifact PATH] [--no-cluster] [--force] [--no-viz]".to_owned()
                 });
             }
             value if frontend == Frontend::Graphify && extract && value.starts_with('-') => {}
@@ -1661,6 +1719,8 @@ fn command_build_with_validation(
     };
     options.google_workspace =
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
+    options.program_analysis = frontend == Frontend::Compass;
+    options.program_artifacts = program_artifacts;
     apply_max_workers_override(&mut options, max_workers);
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let extract_incremental = extract
@@ -1915,6 +1975,8 @@ fn command_build_with_validation(
                 result.communities,
                 result.output_dir.display()
             );
+            output.push('\n');
+            output.push_str(&format_program_analysis(&result));
             if !notes.is_empty() {
                 output.push('\n');
                 output.push_str(&notes.join("\n"));
@@ -2776,7 +2838,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program-artifact PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -3696,8 +3758,23 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 }
 
 fn watch_help() -> String {
-    "Usage: compass watch [PATH] [--debounce SECONDS] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
+    "Usage: compass watch [PATH] [--program-artifact PATH] [--debounce SECONDS] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
         .to_owned()
+}
+
+fn format_program_analysis(result: &BuildResult) -> String {
+    format!(
+        "Program analysis: {} syntax analyzed, {} syntax reused, {} artifacts loaded, {} artifacts reused, {} artifact documents analyzed, {} artifact documents reused, {} modules, {} summaries, {} conflicts",
+        result.program_syntax_analyzed,
+        result.program_syntax_reused,
+        result.program_artifacts_loaded,
+        result.program_artifacts_reused,
+        result.program_artifact_documents_analyzed,
+        result.program_artifact_documents_reused,
+        result.program_modules,
+        result.program_summaries,
+        result.program_conflicts
+    )
 }
 
 fn graphify_help() -> String {
@@ -3735,6 +3812,15 @@ mod mcp_option_tests {
             communities: 1,
             html_written,
             outputs_changed,
+            program_modules: 0,
+            program_summaries: 0,
+            program_syntax_analyzed: 0,
+            program_syntax_reused: 0,
+            program_artifacts_loaded: 0,
+            program_artifacts_reused: 0,
+            program_artifact_documents_analyzed: 0,
+            program_artifact_documents_reused: 0,
+            program_conflicts: 0,
             timings: BuildTimings::default(),
         }
     }

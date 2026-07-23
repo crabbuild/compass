@@ -928,6 +928,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-analysis"
+version = "0.1.1"
+dependencies = [
+ "compass-ir",
+ "serde",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "compass-cargo"
 version = "0.1.1"
 dependencies = [
@@ -943,6 +953,7 @@ dependencies = [
 name = "compass-cli"
 version = "0.1.1"
 dependencies = [
+ "compass-analysis",
  "compass-cargo",
  "compass-core",
  "compass-cypher",
@@ -953,10 +964,12 @@ dependencies = [
  "compass-graphdb",
  "compass-history",
  "compass-ingest",
+ "compass-ir",
  "compass-mcp",
  "compass-model",
  "compass-output",
  "compass-postgres",
+ "compass-program",
  "compass-prs",
  "compass-query",
  "compass-reflect",
@@ -976,18 +989,23 @@ dependencies = [
 name = "compass-core"
 version = "0.1.1"
 dependencies = [
+ "compass-analysis",
  "compass-files",
  "compass-google-workspace",
  "compass-graph",
  "compass-history",
+ "compass-ir",
  "compass-languages",
  "compass-model",
  "compass-output",
+ "compass-program",
  "compass-reflect",
  "compass-resolve",
  "notify",
  "num_cpus",
+ "protobuf",
  "rayon",
+ "scip",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1084,7 +1102,9 @@ name = "compass-history"
 version = "0.1.1"
 dependencies = [
  "atomicwrites",
+ "compass-analysis",
  "compass-files",
+ "compass-ir",
  "compass-model",
  "prolly-map",
  "prolly-store-sqlite",
@@ -1112,11 +1132,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-ir"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "compass-languages"
 version = "0.1.1"
 dependencies = [
  "compass-files",
+ "compass-ir",
  "compass-model",
+ "compass-program",
  "compass-tree-sitter-language-pack",
  "flate2",
  "regex",
@@ -1233,6 +1265,20 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
+]
+
+[[package]]
+name = "compass-program"
+version = "0.1.1"
+dependencies = [
+ "base64",
+ "compass-ir",
+ "protobuf",
+ "scip",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -3221,6 +3267,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "pulp"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3768,6 +3834,15 @@ dependencies = [
  "quote",
  "serde_derive_internals",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "scip"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26a72133c2d6fd45c9a3a343bcb3db2faa30f68f0919bfa3370ca85add5460c3"
+dependencies = [
+ "protobuf",
 ]
 
 [[package]]

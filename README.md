@@ -245,6 +245,39 @@ inspect the smallest useful source set
 See [Assistant setup](docs/guides/assistant-setup.md) for supported platforms,
 scope, strict mode, upgrades, and uninstall.
 
+### Inspect program behavior with evidence
+
+Native `update`, `extract`, and `watch` builds also write `program.json`, a
+language-neutral Program IR containing functions, conservative basic blocks,
+operations, call candidates, capability coverage, provenance, and derived
+summaries. The offline-first pipeline combines Tree-sitter syntax evidence for
+Rust and TypeScript-family languages with any SCIP indexes already on disk.
+Compass does not invoke an indexer, compiler, language server, model, or network
+service to build this artifact.
+
+Schema `http://crab.build/compass/v1` reports each capability as `complete`,
+`partial`, `indeterminate`, or `failed`, with machine-readable reasons for
+every non-complete state. Unresolved calls are retained as uncertainty and are
+never treated as proof that no downstream target exists.
+
+Inspect or query the current artifact without custom JSON scripts:
+
+```bash
+compass program summary
+compass program coverage
+compass program functions --language rust --name build
+compass program show <symbol-id>
+compass program callers <symbol-id>
+compass program explain-call src/lib.rs:240
+compass program query \
+  "MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 20"
+```
+
+Supply additional offline evidence with repeatable
+`--program-artifact path/to/index.scip` options. Decoded indexes are cached by
+artifact digest, while freshness and normalization are invalidated per indexed
+document.
+
 ## Structural and semantic modes
 
 Choose the smallest mode that answers your question:

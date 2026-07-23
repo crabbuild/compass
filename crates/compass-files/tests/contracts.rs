@@ -776,3 +776,56 @@ fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
     guard.commit()?;
     Ok(())
 }
+
+#[test]
+fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let cache = Cache::new(directory.path(), None)?;
+    let syntax = CacheKind::ProgramSyntax {
+        ir_schema: 1,
+        provider_version: "tree-sitter-rust/1".to_owned(),
+    };
+    let artifact = CacheKind::ProgramArtifact {
+        ir_schema: 1,
+        decoder_version: "scip/1".to_owned(),
+    };
+    cache.save_program(
+        &syntax,
+        "src/a.rs:aaaaaaaa",
+        &json!({"source_file":"src/a.rs"}),
+    )?;
+    cache.save_program(
+        &syntax,
+        "src/b.rs:aaaaaaaa",
+        &json!({"source_file":"src/b.rs"}),
+    )?;
+    cache.save_program(&artifact, "index.scip:bbbbbbbb", &json!({"kind":"scip"}))?;
+
+    let first: serde_json::Value = cache
+        .load_program(&syntax, "src/a.rs:aaaaaaaa")?
+        .ok_or("missing first syntax entry")?;
+    let second: serde_json::Value = cache
+        .load_program(&syntax, "src/b.rs:aaaaaaaa")?
+        .ok_or("missing second syntax entry")?;
+    assert_eq!(first["source_file"], "src/a.rs");
+    assert_eq!(second["source_file"], "src/b.rs");
+    assert!(
+        cache
+            .load_program::<serde_json::Value>(&artifact, "src/a.rs:aaaaaaaa")?
+            .is_none()
+    );
+
+    let live = ["src/a.rs:aaaaaaaa".to_owned()].into_iter().collect();
+    assert_eq!(cache.prune_program(&syntax, &live)?, 1);
+    assert!(
+        cache
+            .load_program::<serde_json::Value>(&syntax, "src/b.rs:aaaaaaaa")?
+            .is_none()
+    );
+    assert!(
+        cache
+            .load_program::<serde_json::Value>(&artifact, "index.scip:bbbbbbbb")?
+            .is_some()
+    );
+    Ok(())
+}

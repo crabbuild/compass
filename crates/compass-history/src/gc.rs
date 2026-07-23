@@ -8,18 +8,28 @@ use sha2::{Digest, Sha256};
 
 use crate::config::now_millis;
 use crate::durable::remove_file_durable;
-use crate::store::{STORE_FORMAT_ROOT, reject_directory, reject_symlink, version_root_name};
+use crate::store::{STORE_FORMAT_ROOT, reject_directory, reject_symlink};
 use crate::{HistoryError, HistoryQueue, HistoryStore, JobState, RealizationId};
 
 const GC_SCHEMA_VERSION: u32 = 1;
 const TERMINAL_JOB_RETENTION_MILLIS: u64 = 30 * 24 * 60 * 60 * 1_000;
 const TEMP_RETENTION_MILLIS: u64 = 24 * 60 * 60 * 1_000;
-const REALIZATION_ROOT_KINDS: [&[u8]; 6] = [
+const LEGACY_REALIZATION_ROOT_KINDS: [&[u8]; 6] = [
     b"nodes",
     b"edges",
     b"hyperedges",
     b"analysis",
     b"metadata",
+    b"manifest",
+];
+const REALIZATION_ROOT_KINDS: [&[u8]; 8] = [
+    b"nodes",
+    b"edges",
+    b"hyperedges",
+    b"analysis",
+    b"metadata",
+    b"program-facts",
+    b"program-summaries",
     b"manifest",
 ];
 
@@ -73,7 +83,8 @@ impl HistoryStore {
             ));
         }
 
-        let root_names = roots_for_realizations(&plan.prunable_realization_ids);
+        let roots = self.prolly.store().list_roots()?;
+        let root_names = roots_for_realizations(&plan.prunable_realization_ids, &roots)?;
         if !root_names.is_empty() {
             let transaction = self.prolly.begin_transaction()?;
             for name in &root_names {
@@ -134,7 +145,7 @@ impl HistoryStore {
             .map(|version| version.id)
             .collect::<Vec<_>>();
         prunable_realizations.sort_by_key(RealizationId::as_hex);
-        let roots_to_remove = roots_for_realizations(&prunable_realizations);
+        let roots_to_remove = roots_for_realizations(&prunable_realizations, &roots)?;
         let removed = roots_to_remove.iter().collect::<BTreeSet<_>>();
         let retained_names = roots
             .iter()
@@ -378,10 +389,14 @@ fn validate_root_listing(
         .iter()
         .map(|kind| kind.to_vec())
         .collect::<BTreeSet<_>>();
+    let legacy_expected = LEGACY_REALIZATION_ROOT_KINDS
+        .iter()
+        .map(|kind| kind.to_vec())
+        .collect::<BTreeSet<_>>();
     for (id, kinds) in realization_roots {
-        if kinds != expected {
+        if kinds != expected && kinds != legacy_expected {
             return Err(HistoryError::CorruptHistory(format!(
-                "realization {id} does not have exactly six catalog roots"
+                "realization {id} does not have a complete schema-2 or schema-3 root set"
             )));
         }
     }
@@ -390,14 +405,32 @@ fn validate_root_listing(
     Ok(preferred_commits)
 }
 
-fn roots_for_realizations(ids: &[RealizationId]) -> Vec<Vec<u8>> {
-    ids.iter()
-        .flat_map(|id| {
-            REALIZATION_ROOT_KINDS
-                .iter()
-                .map(move |kind| version_root_name(id, kind))
-        })
-        .collect()
+fn roots_for_realizations(
+    ids: &[RealizationId],
+    roots: &[prolly::NamedRootManifest],
+) -> Result<Vec<Vec<u8>>, HistoryError> {
+    let ids = ids
+        .iter()
+        .map(RealizationId::as_hex)
+        .collect::<BTreeSet<_>>();
+    let mut selected = Vec::new();
+    for root in roots {
+        if root.name == STORE_FORMAT_ROOT {
+            continue;
+        }
+        let segments = prolly::decode_segments(&root.name).map_err(|error| {
+            HistoryError::CorruptHistory(format!("malformed named root: {error}"))
+        })?;
+        if let [compass, version, kind, id, _] = segments.as_slice()
+            && compass == b"compass"
+            && version == b"v1"
+            && kind == b"version"
+            && std::str::from_utf8(id).is_ok_and(|id| ids.contains(id))
+        {
+            selected.push(root.name.clone());
+        }
+    }
+    Ok(selected)
 }
 
 fn digest_roots(roots: &[prolly::NamedRootManifest]) -> Result<String, HistoryError> {

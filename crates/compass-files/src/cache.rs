@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use rayon::prelude::*;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::{FileError, StatHashIndex, io_error, write_json_atomic};
 
@@ -13,6 +15,19 @@ pub enum CacheKind {
     Ast,
     Semantic,
     SemanticMode(String),
+    ProgramSyntax {
+        ir_schema: u32,
+        provider_version: String,
+    },
+    ProgramArtifact {
+        ir_schema: u32,
+        decoder_version: String,
+    },
+    ProgramMerge {
+        ir_schema: u32,
+        merger_version: u32,
+        analyzer_version: u32,
+    },
 }
 
 impl CacheKind {
@@ -21,6 +36,25 @@ impl CacheKind {
             Self::Ast => "ast".to_owned(),
             Self::Semantic => "semantic".to_owned(),
             Self::SemanticMode(mode) => format!("semantic-{mode}"),
+            Self::ProgramSyntax {
+                ir_schema,
+                provider_version,
+            } => format!(
+                "program-syntax/ir{ir_schema}/p{}",
+                logical_key_hash(provider_version)
+            ),
+            Self::ProgramArtifact {
+                ir_schema,
+                decoder_version,
+            } => format!(
+                "program-artifact/ir{ir_schema}/d{}",
+                logical_key_hash(decoder_version)
+            ),
+            Self::ProgramMerge {
+                ir_schema,
+                merger_version,
+                analyzer_version,
+            } => format!("program-merge/ir{ir_schema}/m{merger_version}/a{analyzer_version}"),
         }
     }
 }
@@ -161,6 +195,58 @@ impl Cache {
         })
     }
 
+    /// Load a Program IR cache value by a caller-owned logical input key.
+    ///
+    /// Program values remain repository-relative and are never rewritten with
+    /// the checkout root.
+    pub fn load_program<T: DeserializeOwned>(
+        &self,
+        kind: &CacheKind,
+        logical_key: &str,
+    ) -> Result<Option<T>, FileError> {
+        ensure_program_kind(kind)?;
+        let entry = self
+            .directory(kind, None)
+            .join(format!("{}.json", logical_key_hash(logical_key)));
+        let bytes = match fs::read(entry) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Ok(None),
+        };
+        Ok(serde_json::from_slice(&bytes).ok())
+    }
+
+    /// Atomically save a repository-relative Program IR cache value.
+    pub fn save_program<T: Serialize>(
+        &self,
+        kind: &CacheKind,
+        logical_key: &str,
+        value: &T,
+    ) -> Result<(), FileError> {
+        ensure_program_kind(kind)?;
+        let directory = self.directory(kind, None);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        write_json_atomic(
+            directory.join(format!("{}.json", logical_key_hash(logical_key))),
+            value,
+            false,
+        )
+    }
+
+    /// Remove entries outside a successfully completed provider's live set.
+    pub fn prune_program(
+        &self,
+        kind: &CacheKind,
+        live_logical_keys: &BTreeSet<String>,
+    ) -> Result<usize, FileError> {
+        ensure_program_kind(kind)?;
+        let hashes = live_logical_keys
+            .iter()
+            .map(|key| logical_key_hash(key))
+            .collect::<BTreeSet<_>>();
+        Ok(prune_json(&self.directory(kind, None), &hashes))
+    }
+
     pub fn flush(&mut self) -> Result<(), FileError> {
         self.hashes.flush()
     }
@@ -168,36 +254,13 @@ impl Cache {
     pub fn cached_files(&self) -> BTreeSet<String> {
         let base = self.cache_root.join(&self.output_name).join("cache");
         let mut hashes = BTreeSet::new();
-        if let Ok(entries) = fs::read_dir(&base) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file()
-                    && path.extension().is_some_and(|ext| ext == "json")
-                    && let Some(stem) = path.file_stem().and_then(|value| value.to_str())
-                {
-                    hashes.insert(stem.to_owned());
-                }
-            }
-        }
-        for kind in ["ast", "semantic", "semantic-deep"] {
-            collect_json_stems(&base.join(kind), &mut hashes);
-        }
+        collect_json_stems(&base, &mut hashes);
         hashes
     }
 
     pub fn clear(&self) {
         let base = self.cache_root.join(&self.output_name).join("cache");
-        if let Ok(entries) = fs::read_dir(&base) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-                    let _ = fs::remove_file(path);
-                }
-            }
-        }
-        for kind in ["ast", "semantic", "semantic-deep"] {
-            clear_json(&base.join(kind));
-        }
+        clear_json(&base);
     }
 
     pub fn prune_semantic(&self, live_hashes: &BTreeSet<String>) -> usize {
@@ -253,6 +316,30 @@ impl Drop for Cache {
     fn drop(&mut self) {
         let _ = self.flush();
     }
+}
+
+fn ensure_program_kind(kind: &CacheKind) -> Result<(), FileError> {
+    if matches!(
+        kind,
+        CacheKind::ProgramSyntax { .. }
+            | CacheKind::ProgramArtifact { .. }
+            | CacheKind::ProgramMerge { .. }
+    ) {
+        Ok(())
+    } else {
+        Err(FileError::InvalidCacheKind(format!("{kind:?}")))
+    }
+}
+
+fn logical_key_hash(value: &str) -> String {
+    use std::fmt::Write;
+
+    let digest = Sha256::digest(value.as_bytes());
+    let mut output = String::with_capacity(64);
+    for byte in digest {
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
 }
 
 fn collect_json_stems(directory: &Path, output: &mut BTreeSet<String>) {

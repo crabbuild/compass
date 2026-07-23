@@ -20,6 +20,9 @@ pub enum HistoryError {
     /// JSON artifact data was malformed.
     #[error("artifact JSON failed: {0}")]
     Json(#[from] serde_json::Error),
+    /// Program IR or its derived summaries were malformed.
+    #[error("program analysis failed: {0}")]
+    Program(#[from] compass_analysis::AnalysisError),
     /// A filesystem operation failed.
     #[error("history I/O failed at {path}: {source}")]
     Io {
@@ -96,6 +99,7 @@ impl HistoryError {
     pub fn is_catalog_corruption(&self) -> bool {
         match self {
             Self::Graph(_)
+            | Self::Program(_)
             | Self::Json(_)
             | Self::Canonical(_)
             | Self::InvalidKey(_)

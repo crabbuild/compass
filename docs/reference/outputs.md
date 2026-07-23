@@ -21,6 +21,7 @@ Default:
 ```text
 compass-out/
 ├── graph.json
+├── program.json
 ├── GRAPH_REPORT.md
 ├── graph.html
 ├── manifest.json
@@ -35,6 +36,7 @@ compass-out/
 | Artifact | Authority | Consumer use |
 | --- | --- | --- |
 | `graph.json` | machine-readable graph snapshot | queries, integrations, export |
+| `program.json` | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
@@ -135,6 +137,24 @@ Do not:
 - treat it as a durable historical graph.
 
 A forced/cold build can regenerate current output.
+
+## `program.json`
+
+`program.json` is the canonical, language-neutral Program IR produced by native
+`update`, `extract`, and `watch` builds. Its public schema identifier is:
+
+```text
+http://crab.build/compass/v1
+```
+
+The artifact records providers, evidence, modules, functions, operations,
+resolved and unresolved calls, capability coverage, and derived summaries.
+Coverage is explicitly `complete`, `partial`, `indeterminate`, or `failed`;
+consumers must preserve non-complete reasons and must not interpret unresolved
+calls as proof that no target exists.
+
+Use `compass program` for read-only inspection and CompassQL projection.
+Reject unknown schema identifiers rather than guessing compatibility.
 
 ## Query text
 

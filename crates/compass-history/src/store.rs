@@ -46,6 +46,8 @@ pub struct PreparedPublication {
     hyperedges: Tree,
     analysis: Tree,
     metadata: Tree,
+    program_facts: Tree,
+    program_summaries: Tree,
     manifest: Tree,
     preferred_name: Vec<u8>,
     observed_preferred: Option<Tree>,
@@ -168,11 +170,15 @@ impl HistoryStore {
         let hyperedge_count = count(partitioned.hyperedges.len())?;
         let analysis_count = count(partitioned.analysis.len())?;
         let metadata_count = count(partitioned.metadata.len())?;
+        let program_fact_count = count(partitioned.program_facts.len())?;
+        let program_summary_count = count(partitioned.program_summaries.len())?;
         let nodes = self.build_tree(partitioned.nodes)?;
         let edges = self.build_tree(partitioned.edges)?;
         let hyperedges = self.build_tree(partitioned.hyperedges)?;
         let analysis = self.build_tree(partitioned.analysis)?;
         let metadata = self.build_tree(partitioned.metadata)?;
+        let program_facts = self.build_tree(partitioned.program_facts)?;
+        let program_summaries = self.build_tree(partitioned.program_summaries)?;
         let profile_digest = hex(&request.profile.digest()?);
         let version = GraphVersion {
             schema_version: crate::HISTORY_SCHEMA_VERSION,
@@ -186,11 +192,15 @@ impl HistoryStore {
             hyperedges_root: StoredTree::from_tree(&hyperedges),
             analysis_root: StoredTree::from_tree(&analysis),
             metadata_root: StoredTree::from_tree(&metadata),
+            program_facts_root: StoredTree::from_tree(&program_facts),
+            program_summaries_root: StoredTree::from_tree(&program_summaries),
             node_count,
             edge_count,
             hyperedge_count,
             analysis_count,
             metadata_count,
+            program_fact_count,
+            program_summary_count,
         };
         let id = RealizationId::for_version(&version)?;
         let manifest = self.build_tree(vec![(
@@ -208,6 +218,8 @@ impl HistoryStore {
                 hyperedges: &hyperedges,
                 analysis: &analysis,
                 metadata: &metadata,
+                program_facts: &program_facts,
+                program_summaries: &program_summaries,
             },
         )?;
 
@@ -219,6 +231,8 @@ impl HistoryStore {
             hyperedges,
             analysis,
             metadata,
+            program_facts,
+            program_summaries,
             manifest,
             preferred_name,
             observed_preferred,
@@ -241,6 +255,8 @@ impl HistoryStore {
             hyperedges,
             analysis,
             metadata,
+            program_facts,
+            program_summaries,
             manifest,
             preferred_name,
             observed_preferred,
@@ -250,12 +266,14 @@ impl HistoryStore {
 
         self.publish_catalog_roots(
             &id,
-            [
+            &[
                 (b"nodes".as_slice(), &nodes),
                 (b"edges".as_slice(), &edges),
                 (b"hyperedges".as_slice(), &hyperedges),
                 (b"analysis".as_slice(), &analysis),
                 (b"metadata".as_slice(), &metadata),
+                (b"program-facts".as_slice(), &program_facts),
+                (b"program-summaries".as_slice(), &program_summaries),
                 (b"manifest".as_slice(), &manifest),
             ],
         )?;
@@ -544,6 +562,9 @@ impl HistoryStore {
         let hyperedges = self.load_realization_root(id, b"hyperedges")?;
         let analysis = self.load_realization_root(id, b"analysis")?;
         let metadata = self.load_realization_root(id, b"metadata")?;
+        let program_facts = self.load_program_root(id, &published.version, b"program-facts")?;
+        let program_summaries =
+            self.load_program_root(id, &published.version, b"program-summaries")?;
         validate_trees(
             &self.prolly,
             id,
@@ -554,6 +575,8 @@ impl HistoryStore {
                 hyperedges: &hyperedges,
                 analysis: &analysis,
                 metadata: &metadata,
+                program_facts: &program_facts,
+                program_summaries: &program_summaries,
             },
         )
     }
@@ -573,12 +596,23 @@ impl HistoryStore {
         _guard: &ActivityGuard,
     ) -> Result<crate::CompletedGraphArtifacts, HistoryError> {
         self.validate_without_activity(id)?;
+        let published = self.get_without_activity(id)?;
         let partitioned = crate::PartitionedGraph {
             nodes: self.read_tree(&self.load_realization_root(id, b"nodes")?)?,
             edges: self.read_tree(&self.load_realization_root(id, b"edges")?)?,
             hyperedges: self.read_tree(&self.load_realization_root(id, b"hyperedges")?)?,
             analysis: self.read_tree(&self.load_realization_root(id, b"analysis")?)?,
             metadata: self.read_tree(&self.load_realization_root(id, b"metadata")?)?,
+            program_facts: self.read_tree(&self.load_program_root(
+                id,
+                &published.version,
+                b"program-facts",
+            )?)?,
+            program_summaries: self.read_tree(&self.load_program_root(
+                id,
+                &published.version,
+                b"program-summaries",
+            )?)?,
         };
         crate::CompletedGraphArtifacts::reconstruct(&partitioned)
     }
@@ -596,17 +630,22 @@ impl HistoryStore {
         self.get_without_activity(first)?;
         self.get_without_activity(second)?;
         let roots = |id: &RealizationId| -> Result<Vec<Tree>, HistoryError> {
-            [
+            let published = self.get_without_activity(id)?;
+            let mut kinds = vec![
                 b"nodes".as_slice(),
                 b"edges".as_slice(),
                 b"hyperedges".as_slice(),
                 b"analysis".as_slice(),
                 b"metadata".as_slice(),
                 b"manifest".as_slice(),
-            ]
-            .into_iter()
-            .map(|kind| self.load_realization_root(id, kind))
-            .collect()
+            ];
+            if published.version.schema_version >= 3 {
+                kinds.extend([b"program-facts".as_slice(), b"program-summaries".as_slice()]);
+            }
+            kinds
+                .into_iter()
+                .map(|kind| self.load_realization_root(id, kind))
+                .collect()
         };
         let first_roots = roots(first)?;
         let second_roots = roots(second)?;
@@ -665,19 +704,41 @@ impl HistoryStore {
                     b"hyperedges" => "hyperedges",
                     b"analysis" => "analysis",
                     b"metadata" => "metadata",
+                    b"program-facts" => "program-facts",
+                    b"program-summaries" => "program-summaries",
                     _ => "unknown",
                 };
                 HistoryError::InvalidRealization(vec![crate::ValidationProblem::MissingRoot(kind)])
             })
     }
 
+    fn load_program_root(
+        &self,
+        id: &RealizationId,
+        version: &GraphVersion,
+        kind: &'static [u8],
+    ) -> Result<Tree, HistoryError> {
+        if version.schema_version == 2 {
+            return Ok(match kind {
+                b"program-facts" => version.program_facts_root.to_tree(),
+                b"program-summaries" => version.program_summaries_root.to_tree(),
+                _ => {
+                    return Err(HistoryError::CorruptHistory(
+                        "invalid program root kind".to_owned(),
+                    ));
+                }
+            });
+        }
+        self.load_realization_root(id, kind)
+    }
+
     fn publish_catalog_roots(
         &self,
         id: &RealizationId,
-        roots: [(&[u8], &Tree); 6],
+        roots: &[(&[u8], &Tree)],
     ) -> Result<(), HistoryError> {
         let transaction = self.prolly.begin_transaction()?;
-        for &(kind, tree) in &roots {
+        for &(kind, tree) in roots {
             let name = version_root_name(id, kind);
             match transaction.load_named_root(&name)? {
                 Some(existing) if existing == *tree => {}
@@ -693,7 +754,7 @@ impl HistoryStore {
         match transaction.commit()? {
             TransactionUpdate::Applied { .. } => Ok(()),
             TransactionUpdate::Conflict(_) => {
-                for &(kind, expected) in &roots {
+                for &(kind, expected) in roots {
                     let actual = self.prolly.load_named_root(&version_root_name(id, kind))?;
                     if actual.as_ref() != Some(expected) {
                         return Err(HistoryError::CorruptHistory(format!(
@@ -716,7 +777,7 @@ impl HistoryStore {
             HistoryError::CorruptHistory("manifest tree has no manifest record".to_owned())
         })?;
         let version: GraphVersion = serde_json::from_slice(&bytes)?;
-        if version.schema_version != crate::HISTORY_SCHEMA_VERSION {
+        if !matches!(version.schema_version, 2 | crate::HISTORY_SCHEMA_VERSION) {
             return Err(HistoryError::CorruptHistory(format!(
                 "unsupported realization schema {}",
                 version.schema_version
@@ -763,13 +824,23 @@ impl HistoryStore {
         id: &RealizationId,
         version: &GraphVersion,
     ) -> Result<(), HistoryError> {
-        for (kind, expected) in [
+        let mut expected_roots = vec![
             (b"nodes".as_slice(), &version.nodes_root),
             (b"edges".as_slice(), &version.edges_root),
             (b"hyperedges".as_slice(), &version.hyperedges_root),
             (b"analysis".as_slice(), &version.analysis_root),
             (b"metadata".as_slice(), &version.metadata_root),
-        ] {
+        ];
+        if version.schema_version >= 3 {
+            expected_roots.extend([
+                (b"program-facts".as_slice(), &version.program_facts_root),
+                (
+                    b"program-summaries".as_slice(),
+                    &version.program_summaries_root,
+                ),
+            ]);
+        }
+        for (kind, expected) in expected_roots {
             let actual = self
                 .prolly
                 .load_named_root(&version_root_name(id, kind))?

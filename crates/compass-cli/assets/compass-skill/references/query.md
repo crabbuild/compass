@@ -82,6 +82,26 @@ and memory limits enabled; raise one only when the bounded query demonstrably
 needs it. The REPL and stdin modes are interactive/input transports, not extra
 query capabilities.
 
+## Query Program IR
+
+Use `compass program` when the question concerns normalized functions, call
+evidence, or capability completeness rather than graph topology:
+
+```bash
+compass program coverage
+compass program show <symbol-id>
+compass program explain-call src/lib.rs:240
+compass program query \
+  "MATCH (f) WHERE f.kind = 'program_function' RETURN f.symbol_id, f.coverage"
+```
+
+The Program IR CompassQL projection is offline and read-only. Check the
+capability state before using a result as change-impact evidence: `partial`,
+`indeterminate`, and `failed` results require qualification or stronger
+evidence. Function nodes expose `call_resolution_state` and
+`impact_eligible`; only resolved targets create `CALLS` edges, and an
+unresolved call never proves that no downstream target exists.
+
 ## Evidence discipline
 
 Query output is scoped evidence, not a generated narrative. Verify material

@@ -41,6 +41,44 @@ pub(super) fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
     }
 }
 
+pub(super) fn command_cql_on_graph(args: &[String], graph: &compass_model::Graph) -> Outcome {
+    if args.iter().any(|argument| {
+        argument == "--graph"
+            || argument == "--at"
+            || argument.starts_with("--graph=")
+            || argument.starts_with("--at=")
+    }) {
+        return Outcome::failure_with_code(
+            "error: compass program query uses the Program IR projection; --graph and --at are not valid"
+                .to_owned(),
+            2,
+        );
+    }
+    let mut normalized = vec!["--cql".to_owned()];
+    normalized.extend_from_slice(args);
+    let request = match parse_request(
+        &normalized,
+        GraphSelection::File(PathBuf::from("compass-out/program.json")),
+    ) {
+        Ok(request) => request,
+        Err(error) => return Outcome::failure_with_code(error.message, error.code),
+    };
+    if matches!(request.source, SourceSelection::Repl) {
+        return Outcome::failure_with_code(
+            "error: compass program query does not support --repl".to_owned(),
+            2,
+        );
+    }
+    let (source_name, source) = match read_source(&request.source) {
+        Ok(source) => source,
+        Err(error) => return Outcome::failure_with_code(error.message, error.code),
+    };
+    match run_source_with_graph(&request, &source_name, &source, graph) {
+        Ok(output) => Outcome::success(output),
+        Err(error) => Outcome::failure_with_code(error.message, error.code),
+    }
+}
+
 #[derive(Clone, Copy)]
 enum OutputFormat {
     Table,

@@ -132,6 +132,20 @@ pub fn watch_local_graph(
             path: root.clone(),
             source,
         })?;
+    let program_paths = program_watch_paths(&root, &options.build);
+    for parent in program_paths
+        .iter()
+        .filter(|path| !path.starts_with(&root))
+        .filter_map(|path| path.parent())
+        .collect::<BTreeSet<_>>()
+    {
+        watcher
+            .watch(parent, RecursiveMode::NonRecursive)
+            .map_err(|source| WatchError::Start {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
     emit(WatchStatus::Watching {
         root: root.clone(),
         debounce: options.debounce,
@@ -143,7 +157,7 @@ pub fn watch_local_graph(
         let timeout = next_timeout(last_change, options.debounce, options.poll_interval);
         match receiver.recv_timeout(timeout) {
             Ok(Ok(event)) => {
-                if collect_event(&event, &filter, &mut pending) {
+                if collect_event(&event, &filter, &program_paths, &mut pending) {
                     last_change = Some(Instant::now());
                 }
             }
@@ -157,7 +171,7 @@ pub fn watch_local_graph(
             if paths.is_empty() {
                 continue;
             }
-            process_batch(options, &root, paths, &mut emit)?;
+            process_batch(options, &root, &program_paths, paths, &mut emit)?;
         }
     }
     emit(WatchStatus::Stopped);
@@ -170,7 +184,12 @@ fn next_timeout(last: Option<Instant>, debounce: Duration, poll: Duration) -> Du
     })
 }
 
-fn collect_event(event: &Event, filter: &WatchPathFilter, pending: &mut BTreeSet<PathBuf>) -> bool {
+fn collect_event(
+    event: &Event,
+    filter: &WatchPathFilter,
+    program_paths: &BTreeSet<PathBuf>,
+    pending: &mut BTreeSet<PathBuf>,
+) -> bool {
     if matches!(event.kind, EventKind::Access(_)) {
         return false;
     }
@@ -179,7 +198,7 @@ fn collect_event(event: &Event, filter: &WatchPathFilter, pending: &mut BTreeSet
         event
             .paths
             .iter()
-            .filter(|path| filter.allows(path))
+            .filter(|path| filter.allows(path) || program_paths.contains(*path))
             .cloned(),
     );
     pending.len() != before
@@ -188,12 +207,13 @@ fn collect_event(event: &Event, filter: &WatchPathFilter, pending: &mut BTreeSet
 fn process_batch(
     options: &WatchOptions,
     root: &Path,
+    program_paths: &BTreeSet<PathBuf>,
     paths: Vec<PathBuf>,
     emit: &mut impl FnMut(WatchStatus),
 ) -> Result<(), WatchError> {
     let deterministic = paths
         .iter()
-        .filter(|path| is_deterministic(path, options.graphify_compatibility))
+        .filter(|path| is_deterministic(path, options.graphify_compatibility, program_paths))
         .count();
     let semantic = paths.len().saturating_sub(deterministic);
     emit(WatchStatus::Batch {
@@ -217,13 +237,43 @@ fn process_batch(
     Ok(())
 }
 
-fn is_deterministic(path: &Path, graphify_compatibility: bool) -> bool {
-    classify_file(path).is_some_and(|kind| {
-        kind == FileType::Code
-            || (!graphify_compatibility
-                && kind == FileType::Document
-                && Registry::resolve(path).is_some())
-    })
+fn is_deterministic(
+    path: &Path,
+    graphify_compatibility: bool,
+    program_paths: &BTreeSet<PathBuf>,
+) -> bool {
+    program_paths.contains(path)
+        || classify_file(path).is_some_and(|kind| {
+            kind == FileType::Code
+                || (!graphify_compatibility
+                    && kind == FileType::Document
+                    && Registry::resolve(path).is_some())
+        })
+}
+
+fn program_watch_paths(root: &Path, options: &BuildOptions) -> BTreeSet<PathBuf> {
+    if !options.program_analysis {
+        return BTreeSet::new();
+    }
+    let mut artifacts = vec![root.join("index.scip")];
+    artifacts.extend(options.program_artifacts.iter().map(|path| {
+        if path.is_absolute() {
+            path.clone()
+        } else {
+            root.join(path)
+        }
+    }));
+    artifacts
+        .into_iter()
+        .flat_map(|artifact| {
+            let mut companion_name = artifact
+                .file_name()
+                .map_or_else(std::ffi::OsString::new, std::ffi::OsString::from);
+            companion_name.push(".compass-manifest.json");
+            let companion = artifact.with_file_name(companion_name);
+            [artifact, companion]
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -231,6 +281,10 @@ mod tests {
     use std::error::Error;
     use std::sync::{Arc, Mutex};
     use std::thread;
+
+    use compass_ir::hex_sha256;
+    use protobuf::{EnumOrUnknown, Message, MessageField};
+    use scip::types::{Index, Metadata, TextEncoding, ToolInfo};
 
     use super::*;
 
@@ -332,5 +386,154 @@ mod tests {
             )
         }));
         Ok(())
+    }
+
+    #[test]
+    fn watch_rebuilds_for_external_scip_and_companion_manifest_changes()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("root");
+        let artifacts = directory.path().join("artifacts");
+        fs::create_dir_all(root.join("src"))?;
+        fs::create_dir(&artifacts)?;
+        fs::write(root.join("src/lib.rs"), "pub fn run() {}\n")?;
+        let artifact = artifacts.join("index.scip");
+        write_watch_scip(&artifact, "1.0", false)?;
+
+        let mut initial = BuildOptions::new(&root);
+        initial.no_cluster = true;
+        initial.no_viz = true;
+        initial.program_analysis = true;
+        initial.program_artifacts = vec![artifact.clone()];
+        build_local_graph(&initial)?;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let thread_stop = Arc::clone(&stop);
+        let thread_statuses = Arc::clone(&statuses);
+        let mut options = WatchOptions::new(&root);
+        options.build = initial;
+        options.debounce = Duration::from_millis(100);
+        options.poll_interval = Duration::from_millis(50);
+        options.force_polling = true;
+        let handle = thread::spawn(move || {
+            watch_local_graph(&options, &thread_stop, |status| {
+                if let Ok(mut values) = thread_statuses.lock() {
+                    values.push(status);
+                }
+            })
+        });
+
+        wait_for_status(&statuses, |status| {
+            matches!(status, WatchStatus::Watching { .. })
+        })?;
+        thread::sleep(Duration::from_millis(150));
+        write_watch_scip(&artifact, "2.0", false)?;
+        wait_for_rebuild_count(&statuses, 1)?;
+
+        let companion = watch_companion_path(&artifact);
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&companion)?)?;
+        fs::write(&companion, serde_json::to_string_pretty(&value)?)?;
+        wait_for_rebuild_count(&statuses, 2)?;
+
+        stop.store(true, Ordering::Release);
+        handle.join().map_err(|_| "watch thread panicked")??;
+        let statuses = statuses.lock().map_err(|_| "status mutex poisoned")?;
+        assert!(
+            statuses
+                .iter()
+                .filter(|status| matches!(
+                    status,
+                    WatchStatus::Batch {
+                        deterministic,
+                        semantic: 0,
+                        ..
+                    } if *deterministic > 0
+                ))
+                .count()
+                >= 2,
+            "watch statuses: {statuses:?}"
+        );
+        Ok(())
+    }
+
+    fn write_watch_scip(
+        artifact: &Path,
+        version: &str,
+        pretty_manifest: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut tool = ToolInfo::new();
+        tool.name = "watch-fixture".to_owned();
+        tool.version = version.to_owned();
+        let mut metadata = Metadata::new();
+        metadata.tool_info = MessageField::some(tool);
+        metadata.text_document_encoding = EnumOrUnknown::new(TextEncoding::UTF8);
+        let mut index = Index::new();
+        index.metadata = MessageField::some(metadata);
+        let bytes = index.write_to_bytes()?;
+        fs::write(artifact, &bytes)?;
+        let manifest = serde_json::json!({
+            "schema": "compass.scip-manifest/1",
+            "index_sha256": hex_sha256(&bytes),
+            "documents": {},
+        });
+        fs::write(
+            watch_companion_path(artifact),
+            if pretty_manifest {
+                serde_json::to_string_pretty(&manifest)?
+            } else {
+                serde_json::to_string(&manifest)?
+            },
+        )?;
+        Ok(())
+    }
+
+    fn watch_companion_path(artifact: &Path) -> PathBuf {
+        let mut name = artifact
+            .file_name()
+            .map_or_else(std::ffi::OsString::new, std::ffi::OsString::from);
+        name.push(".compass-manifest.json");
+        artifact.with_file_name(name)
+    }
+
+    fn wait_for_status(
+        statuses: &Arc<Mutex<Vec<WatchStatus>>>,
+        predicate: impl Fn(&WatchStatus) -> bool,
+    ) -> Result<(), Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < deadline {
+            if statuses
+                .lock()
+                .is_ok_and(|values| values.iter().any(&predicate))
+            {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err(format!("timed out waiting for watch status: {:?}", statuses.lock()).into())
+    }
+
+    fn wait_for_rebuild_count(
+        statuses: &Arc<Mutex<Vec<WatchStatus>>>,
+        expected: usize,
+    ) -> Result<(), Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < deadline {
+            if statuses.lock().is_ok_and(|values| {
+                values
+                    .iter()
+                    .filter(|status| matches!(status, WatchStatus::Rebuilt(_)))
+                    .count()
+                    >= expected
+            }) {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err(format!(
+            "timed out waiting for {expected} rebuilds: {:?}",
+            statuses.lock()
+        )
+        .into())
     }
 }

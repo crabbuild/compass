@@ -30,6 +30,8 @@ pub struct ValidationReport {
     pub hyperedges: u64,
     pub analysis_records: u64,
     pub metadata_records: u64,
+    pub program_fact_records: u64,
+    pub program_summary_records: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -75,6 +77,8 @@ pub(crate) struct RealizationTrees<'a> {
     pub hyperedges: &'a Tree,
     pub analysis: &'a Tree,
     pub metadata: &'a Tree,
+    pub program_facts: &'a Tree,
+    pub program_summaries: &'a Tree,
 }
 
 pub(crate) fn validate_trees(
@@ -123,6 +127,20 @@ pub(crate) fn validate_trees(
         &mut total_bytes,
         &mut problems,
     )?;
+    let program_facts = scan_tree(
+        manager,
+        trees.program_facts,
+        "program facts",
+        &mut total_bytes,
+        &mut problems,
+    )?;
+    let program_summaries = scan_tree(
+        manager,
+        trees.program_summaries,
+        "program summaries",
+        &mut total_bytes,
+        &mut problems,
+    )?;
     for (kind, expected, actual) in [
         ("nodes", version.node_count, nodes.len() as u64),
         ("edges", version.edge_count, edges.len() as u64),
@@ -133,6 +151,16 @@ pub(crate) fn validate_trees(
         ),
         ("analysis", version.analysis_count, analysis.len() as u64),
         ("metadata", version.metadata_count, metadata.len() as u64),
+        (
+            "program facts",
+            version.program_fact_count,
+            program_facts.len() as u64,
+        ),
+        (
+            "program summaries",
+            version.program_summary_count,
+            program_summaries.len() as u64,
+        ),
     ] {
         if expected != actual {
             problems.push(ValidationProblem::Count {
@@ -148,6 +176,8 @@ pub(crate) fn validate_trees(
         hyperedges,
         analysis,
         metadata,
+        program_facts,
+        program_summaries,
     };
     match GraphArtifacts::reconstruct(&partitioned) {
         Ok(artifacts) => {
@@ -162,6 +192,8 @@ pub(crate) fn validate_trees(
             hyperedges: version.hyperedge_count,
             analysis_records: version.analysis_count,
             metadata_records: version.metadata_count,
+            program_fact_records: version.program_fact_count,
+            program_summary_records: version.program_summary_count,
         })
     } else {
         Err(HistoryError::InvalidRealization(problems))

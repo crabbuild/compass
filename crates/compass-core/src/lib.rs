@@ -5,6 +5,7 @@ mod diagnostics;
 mod history;
 mod merge;
 mod pipeline;
+mod program;
 mod raw_guard;
 mod watch;
 

@@ -1,0 +1,47 @@
+{
+  "schema": "compass.program-ir-qualification/1",
+  "cases": [
+    {
+      "name": "matching_manifest",
+      "test": "compass-program/tests/scip.rs::official_scip_normalizes_evidence_without_absolute_metadata",
+      "freshness": "verified",
+      "expected": "semantic evidence merged"
+    },
+    {
+      "name": "raw_index",
+      "test": "compass-program/tests/scip.rs::raw_stale_and_unsafe_scip_are_explicit",
+      "freshness": "unverified",
+      "expected": "evidence retained with unverified freshness"
+    },
+    {
+      "name": "stale_manifest",
+      "test": "compass-core/tests/program_pipeline.rs::scip_cache_tracks_artifact_manifest_and_source_freshness",
+      "freshness": "stale",
+      "expected": "stale document evidence excluded"
+    },
+    {
+      "name": "conflicting_targets",
+      "test": "compass-program/tests/merge.rs::merge_preserves_conflicting_targets",
+      "freshness": "verified",
+      "expected": "both targets and provider_conflict retained"
+    },
+    {
+      "name": "utf16_positions",
+      "test": "compass-program/src/scip.rs::converts_utf8_utf16_and_utf32_positions",
+      "freshness": "verified",
+      "expected": "source anchors use UTF-8 byte offsets"
+    },
+    {
+      "name": "malformed",
+      "test": "compass-program/tests/scip.rs::malformed_and_resource_limited_indexes_fail_closed",
+      "freshness": "unknown",
+      "expected": "typed malformed-artifact failure"
+    },
+    {
+      "name": "oversized",
+      "test": "compass-program/tests/scip.rs::malformed_and_resource_limited_indexes_fail_closed",
+      "freshness": "unknown",
+      "expected": "typed resource-limit failure"
+    }
+  ]
+}

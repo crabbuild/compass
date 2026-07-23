@@ -140,6 +140,20 @@ impl ExtractionFingerprintInput {
         Ok(())
     }
 
+    /// Record the exact canonical Program IR provider manifest without paths
+    /// or other operational artifact metadata.
+    pub fn insert_program_provider_manifest(
+        &mut self,
+        providers: &[compass_ir::ProviderDescriptor],
+    ) -> Result<(), HistoryError> {
+        let mut providers = providers.to_vec();
+        providers.sort();
+        providers.dedup();
+        let bytes = compass_ir::canonical_json_bytes(&providers)
+            .map_err(|error| HistoryError::Canonical(error.to_string()))?;
+        self.insert("program_provider_manifest", &hex(&Sha256::digest(bytes)))
+    }
+
     /// Return canonical bytes used as the digest input.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, HistoryError> {
         canonical_map_bytes(&self.values)

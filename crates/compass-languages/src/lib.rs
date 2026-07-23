@@ -26,6 +26,7 @@ mod pascal;
 mod pascal_forms;
 mod php;
 mod powershell;
+mod program;
 mod registry;
 mod rust_lang;
 mod scip;
@@ -39,6 +40,7 @@ mod zig;
 
 pub use facts::{Extraction, RawCall};
 pub use ids::{file_stem, make_id, normalize_id};
+pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};
 
@@ -52,6 +54,8 @@ pub enum ExtractError {
     MissingGrammar { language: String, detail: String },
     #[error("parser returned no syntax tree for {0}")]
     ParseCancelled(PathBuf),
+    #[error("invalid program evidence for {path}: {detail}")]
+    InvalidProgramEvidence { path: PathBuf, detail: String },
     #[error(transparent)]
     File(#[from] compass_files::FileError),
 }

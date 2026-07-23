@@ -7,7 +7,10 @@ use compass_history::{
     ExtractionFingerprintInput, GraphArtifacts, HistoryError, HistoryStore, PublishRequest,
     PublishedVersion, RealizationId, Repository, WorktreeGuard,
 };
+use compass_languages::Registry;
 use sha2::{Digest, Sha256};
+
+use crate::program::current_provider_manifest;
 
 /// Build boundary used by both production extraction and deterministic materialization tests.
 pub trait CompleteGraphBuilder {
@@ -152,7 +155,7 @@ fn run_materialization(
         store,
         &request.repository,
         &request.commit,
-        &fingerprint,
+        &request.profile,
         activity,
     )?;
     observer.entered(MaterializeStage::Building)?;
@@ -222,7 +225,7 @@ fn compatible_seed(
     store: &HistoryStore,
     repository: &Repository,
     target: &CommitId,
-    fingerprint: &ExtractionFingerprint,
+    profile: &BuildProfile,
     activity: &compass_history::ActivityGuard,
 ) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
     for ancestor in repository.first_parent_ancestors(target)? {
@@ -234,7 +237,10 @@ fn compatible_seed(
         let Some(preferred) = preferred else {
             continue;
         };
-        if preferred.version.extraction_fingerprint != fingerprint.as_hex() {
+        // The provider manifest is commit-specific and therefore belongs in the
+        // realization fingerprint, but it must not disable incremental seeding.
+        // The builder revalidates the seed against the exact target checkout.
+        if &preferred.version.build_profile != profile {
             continue;
         }
         match store.validate_with_activity(&preferred.id, activity) {
@@ -262,7 +268,47 @@ fn resolve_fingerprint(
         "commit_configuration_digest",
         &configuration_digest(checkout, profile_gitignore(profile))?,
     )?;
+    input.insert_program_provider_manifest(&program_provider_manifest(checkout, profile)?)?;
     input.digest().map_err(Into::into)
+}
+
+fn program_provider_manifest(
+    checkout: &Path,
+    profile: &BuildProfile,
+) -> Result<Vec<compass_ir::ProviderDescriptor>, MaterializeError> {
+    let detection = detect(
+        checkout,
+        &DetectOptions {
+            gitignore: profile_gitignore(profile),
+            ignore_policy: IgnorePolicy::HistoricalCommit,
+            extra_excludes: profile_excludes(profile),
+            output_name: "compass-out".to_owned(),
+            ..DetectOptions::default()
+        },
+    )?;
+    let mut sources = detection
+        .files
+        .get("code")
+        .into_iter()
+        .flatten()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    sources.extend(
+        detection
+            .files
+            .get("document")
+            .into_iter()
+            .flatten()
+            .map(PathBuf::from)
+            .filter(|path| Registry::resolve(path).is_some()),
+    );
+    let mut options = crate::BuildOptions::new(checkout);
+    options.gitignore = profile_gitignore(profile);
+    options.ignore_policy = IgnorePolicy::HistoricalCommit;
+    options.extra_excludes = profile_excludes(profile);
+    options.program_analysis = true;
+    current_provider_manifest(checkout, &sources, &options)
+        .map_err(|error| MaterializeError::Builder(error.to_string()))
 }
 
 fn configuration_digest(
