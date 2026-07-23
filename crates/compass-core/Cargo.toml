@@ -12,6 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+compass-analysis = { path = "../compass-analysis", version = "0.1.0" }
+compass-ir = { path = "../compass-ir", version = "0.1.0" }
+compass-program = { path = "../compass-program", version = "0.1.0" }
 rayon.workspace = true
 notify.workspace = true
 num_cpus.workspace = true
@@ -34,4 +37,6 @@ compass-resolve = { path = "../compass-resolve", version = "0.1.0" }
 workspace = true
 
 [dev-dependencies]
+protobuf.workspace = true
+scip.workspace = true
 tempfile.workspace = true

@@ -76,9 +76,11 @@ pub fn merge_evidence(batches: Vec<EvidenceBatch>) -> Result<ProgramBundle, Merg
     }
 
     facts.sort_by(|left, right| {
-        left.anchor
-            .cmp(&right.anchor)
-            .then_with(|| left.evidence_id.as_bytes().cmp(right.evidence_id.as_bytes()))
+        left.anchor.cmp(&right.anchor).then_with(|| {
+            left.evidence_id
+                .as_bytes()
+                .cmp(right.evidence_id.as_bytes())
+        })
     });
     facts.dedup();
 
@@ -140,9 +142,7 @@ pub fn merge_evidence(batches: Vec<EvidenceBatch>) -> Result<ProgramBundle, Merg
     Ok(bundle)
 }
 
-fn canonical_batches(
-    batches: Vec<EvidenceBatch>,
-) -> Result<Vec<EvidenceBatch>, MergeError> {
+fn canonical_batches(batches: Vec<EvidenceBatch>) -> Result<Vec<EvidenceBatch>, MergeError> {
     let mut by_provider = BTreeMap::<String, EvidenceBatch>::new();
     for batch in batches {
         let canonical = batch.canonicalized();
@@ -189,10 +189,7 @@ fn validate_batch(batch: &EvidenceBatch) -> Result<(), MergeError> {
     Ok(())
 }
 
-fn validate_scope(
-    descriptor: &ProviderDescriptor,
-    path: &str,
-) -> Result<(), MergeError> {
+fn validate_scope(descriptor: &ProviderDescriptor, path: &str) -> Result<(), MergeError> {
     let path = normalize_source_path(path)?;
     if descriptor.kind == ProviderKind::Syntax && descriptor.scope != path {
         return Err(MergeError::Scope {
@@ -209,9 +206,7 @@ fn attach_fact(module: &mut ModuleIr, fact: &EvidenceFact) -> bool {
     };
     let function = &mut module.functions[function_index];
     let attached = match &fact.kind {
-        FactKind::CallResolution { target } => {
-            attach_call_resolution(function, fact, target)
-        }
+        FactKind::CallResolution { target } => attach_call_resolution(function, fact, target),
         FactKind::TypeResolution { spelling, target } => {
             attach_type_resolution(function, fact, spelling, target)
         }
@@ -264,12 +259,7 @@ fn call_candidates(
                     };
                     let exact = callee_anchor == fact;
                     (exact || contains(callee_anchor, fact) || contains(fact, callee_anchor))
-                        .then_some((
-                            block_index,
-                            operation_index,
-                            span_len(callee_anchor),
-                            exact,
-                        ))
+                        .then_some((block_index, operation_index, span_len(callee_anchor), exact))
                 })
         })
         .collect()
@@ -353,9 +343,7 @@ fn unique_smallest(candidates: Vec<(usize, u64)>) -> Option<usize> {
     smallest.next().is_none().then_some(selected)
 }
 
-fn unique_smallest_indexed(
-    candidates: Vec<((usize, usize), u64)>,
-) -> Option<(usize, usize)> {
+fn unique_smallest_indexed(candidates: Vec<((usize, usize), u64)>) -> Option<(usize, usize)> {
     let minimum = candidates.iter().map(|(_, span)| *span).min()?;
     let mut smallest = candidates
         .into_iter()
@@ -387,10 +375,7 @@ fn merge_coverage(target: &mut Coverage, incoming: Coverage) {
 fn combined_state(left: &CoverageState, right: &CoverageState) -> CoverageState {
     match (left, right) {
         (CoverageState::Complete, _) | (_, CoverageState::Complete) => CoverageState::Complete,
-        (
-            CoverageState::Partial { reasons: left },
-            CoverageState::Partial { reasons: right },
-        )
+        (CoverageState::Partial { reasons: left }, CoverageState::Partial { reasons: right })
         | (
             CoverageState::Partial { reasons: left },
             CoverageState::Unavailable { reasons: right },

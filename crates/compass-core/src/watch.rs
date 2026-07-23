@@ -132,6 +132,20 @@ pub fn watch_local_graph(
             path: root.clone(),
             source,
         })?;
+    let program_paths = program_watch_paths(&root, &options.build);
+    for parent in program_paths
+        .iter()
+        .filter(|path| !path.starts_with(&root))
+        .filter_map(|path| path.parent())
+        .collect::<BTreeSet<_>>()
+    {
+        watcher
+            .watch(parent, RecursiveMode::NonRecursive)
+            .map_err(|source| WatchError::Start {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
     emit(WatchStatus::Watching {
         root: root.clone(),
         debounce: options.debounce,
@@ -143,7 +157,7 @@ pub fn watch_local_graph(
         let timeout = next_timeout(last_change, options.debounce, options.poll_interval);
         match receiver.recv_timeout(timeout) {
             Ok(Ok(event)) => {
-                if collect_event(&event, &filter, &mut pending) {
+                if collect_event(&event, &filter, &program_paths, &mut pending) {
                     last_change = Some(Instant::now());
                 }
             }
@@ -157,7 +171,7 @@ pub fn watch_local_graph(
             if paths.is_empty() {
                 continue;
             }
-            process_batch(options, &root, paths, &mut emit)?;
+            process_batch(options, &root, &program_paths, paths, &mut emit)?;
         }
     }
     emit(WatchStatus::Stopped);
@@ -170,7 +184,12 @@ fn next_timeout(last: Option<Instant>, debounce: Duration, poll: Duration) -> Du
     })
 }
 
-fn collect_event(event: &Event, filter: &WatchPathFilter, pending: &mut BTreeSet<PathBuf>) -> bool {
+fn collect_event(
+    event: &Event,
+    filter: &WatchPathFilter,
+    program_paths: &BTreeSet<PathBuf>,
+    pending: &mut BTreeSet<PathBuf>,
+) -> bool {
     if matches!(event.kind, EventKind::Access(_)) {
         return false;
     }
@@ -179,7 +198,7 @@ fn collect_event(event: &Event, filter: &WatchPathFilter, pending: &mut BTreeSet
         event
             .paths
             .iter()
-            .filter(|path| filter.allows(path))
+            .filter(|path| filter.allows(path) || program_paths.contains(*path))
             .cloned(),
     );
     pending.len() != before
@@ -188,12 +207,13 @@ fn collect_event(event: &Event, filter: &WatchPathFilter, pending: &mut BTreeSet
 fn process_batch(
     options: &WatchOptions,
     root: &Path,
+    program_paths: &BTreeSet<PathBuf>,
     paths: Vec<PathBuf>,
     emit: &mut impl FnMut(WatchStatus),
 ) -> Result<(), WatchError> {
     let deterministic = paths
         .iter()
-        .filter(|path| is_deterministic(path, options.graphify_compatibility))
+        .filter(|path| is_deterministic(path, options.graphify_compatibility, program_paths))
         .count();
     let semantic = paths.len().saturating_sub(deterministic);
     emit(WatchStatus::Batch {
@@ -217,13 +237,43 @@ fn process_batch(
     Ok(())
 }
 
-fn is_deterministic(path: &Path, graphify_compatibility: bool) -> bool {
-    classify_file(path).is_some_and(|kind| {
-        kind == FileType::Code
-            || (!graphify_compatibility
-                && kind == FileType::Document
-                && Registry::resolve(path).is_some())
-    })
+fn is_deterministic(
+    path: &Path,
+    graphify_compatibility: bool,
+    program_paths: &BTreeSet<PathBuf>,
+) -> bool {
+    program_paths.contains(path)
+        || classify_file(path).is_some_and(|kind| {
+            kind == FileType::Code
+                || (!graphify_compatibility
+                    && kind == FileType::Document
+                    && Registry::resolve(path).is_some())
+        })
+}
+
+fn program_watch_paths(root: &Path, options: &BuildOptions) -> BTreeSet<PathBuf> {
+    if !options.program_analysis {
+        return BTreeSet::new();
+    }
+    let mut artifacts = vec![root.join("index.scip")];
+    artifacts.extend(options.program_artifacts.iter().map(|path| {
+        if path.is_absolute() {
+            path.clone()
+        } else {
+            root.join(path)
+        }
+    }));
+    artifacts
+        .into_iter()
+        .flat_map(|artifact| {
+            let mut companion_name = artifact
+                .file_name()
+                .map_or_else(std::ffi::OsString::new, std::ffi::OsString::from);
+            companion_name.push(".compass-manifest.json");
+            let companion = artifact.with_file_name(companion_name);
+            [artifact, companion]
+        })
+        .collect()
 }
 
 #[cfg(test)]

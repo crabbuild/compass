@@ -49,9 +49,7 @@ pub fn analyze(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError> 
     for module in &program.modules {
         for function in &module.functions {
             if !symbols.insert(function.symbol_id.clone()) {
-                return Err(AnalysisError::DuplicateFunction(
-                    function.symbol_id.clone(),
-                ));
+                return Err(AnalysisError::DuplicateFunction(function.symbol_id.clone()));
             }
             let summary = summarize(function)?;
             for target in &summary.resolved_calls {
@@ -197,9 +195,7 @@ pub(crate) fn summarize(
     })
 }
 
-pub(crate) fn semantic_digest(
-    function: &compass_ir::FunctionIr,
-) -> Result<String, AnalysisError> {
+pub(crate) fn semantic_digest(function: &compass_ir::FunctionIr) -> Result<String, AnalysisError> {
     let operations = function
         .blocks
         .iter()

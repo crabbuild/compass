@@ -88,16 +88,10 @@ pub trait ArtifactProvider {
 }
 
 pub trait ProjectAnalyzer {
-    fn descriptor(
-        &self,
-        repository_digest: &str,
-        build_context_digest: &str,
-    ) -> ProviderDescriptor;
+    fn descriptor(&self, repository_digest: &str, build_context_digest: &str)
+    -> ProviderDescriptor;
 
-    fn analyze_project(
-        &self,
-        input: ProjectInput<'_>,
-    ) -> Result<EvidenceBatch, ProviderError>;
+    fn analyze_project(&self, input: ProjectInput<'_>) -> Result<EvidenceBatch, ProviderError>;
 }
 
 #[derive(Debug, thiserror::Error)]

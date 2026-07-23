@@ -1,9 +1,7 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{
-    CoverageState, FunctionIr, IrError, ModuleIr, OperationKind, ProgramBundle, TypeRef,
-};
+use crate::{CoverageState, FunctionIr, IrError, ModuleIr, OperationKind, ProgramBundle, TypeRef};
 
 impl ProgramBundle {
     pub fn canonicalized(&self) -> Self {

@@ -71,17 +71,18 @@ impl EvidenceBatch {
                 .cmp(right.source_file.as_bytes())
         });
         batch.facts.sort_by(|left, right| {
-            left.anchor
-                .cmp(&right.anchor)
-                .then_with(|| left.evidence_id.as_bytes().cmp(right.evidence_id.as_bytes()))
+            left.anchor.cmp(&right.anchor).then_with(|| {
+                left.evidence_id
+                    .as_bytes()
+                    .cmp(right.evidence_id.as_bytes())
+            })
         });
         batch.facts.dedup();
         for coverage in batch.coverage.values_mut() {
             for state in coverage.values_mut() {
                 match state {
                     CoverageState::Complete => {}
-                    CoverageState::Partial { reasons }
-                    | CoverageState::Unavailable { reasons } => {
+                    CoverageState::Partial { reasons } | CoverageState::Unavailable { reasons } => {
                         reasons.sort();
                         reasons.dedup();
                     }
@@ -116,8 +117,10 @@ pub fn evidence_id(
         fact_kind,
         fact_payload,
     );
-    canonical_json_bytes(&value)
-        .map_or_else(|_| hex_sha256(b"invalid-evidence"), |bytes| hex_sha256(&bytes))
+    canonical_json_bytes(&value).map_or_else(
+        |_| hex_sha256(b"invalid-evidence"),
+        |bytes| hex_sha256(&bytes),
+    )
 }
 
 pub fn evidence_record(

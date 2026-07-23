@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use compass_ir::{
     Capability, Coverage, CoverageState, ProviderDescriptor, ProviderKind, SourceAnchor,
+    canonical_json_bytes, hex_sha256,
 };
 use scip::types::{
     Document, Metadata, Occurrence, PositionEncoding, Relationship, SymbolInformation, SymbolRole,
@@ -22,13 +23,19 @@ pub struct OfficialScipProvider;
 
 impl ArtifactProvider for OfficialScipProvider {
     fn descriptor(&self, input: &ArtifactInput<'_>) -> ProviderDescriptor {
+        let manifest = manifest_digest(input.manifest);
+        let configuration_digest = canonical_json_bytes(&(&manifest, input.source_digests))
+            .map_or_else(
+                |_| hex_sha256(b"invalid-scip-configuration"),
+                |bytes| hex_sha256(&bytes),
+            );
         ProviderDescriptor {
             id: format!("scip:{}", input.input_digest),
             kind: ProviderKind::Artifact,
             version: format!("scip/{SCIP_PROVIDER_VERSION}"),
             scope: "repository".to_owned(),
             input_digest: input.input_digest.to_owned(),
-            configuration_digest: manifest_digest(input.manifest),
+            configuration_digest,
         }
     }
 
@@ -37,12 +44,7 @@ impl ArtifactProvider for OfficialScipProvider {
         input: ArtifactInput<'_>,
         reader: &mut dyn ArtifactReader,
     ) -> Result<EvidenceBatch, ProviderError> {
-        verify_reader(
-            reader,
-            input.byte_len,
-            input.input_digest,
-            input.limits,
-        )?;
+        verify_reader(reader, input.byte_len, input.input_digest, input.limits)?;
         if let Some(manifest) = input.manifest {
             validate_manifest(manifest, input.input_digest)?;
         }
@@ -67,10 +69,9 @@ impl ArtifactProvider for OfficialScipProvider {
             }
             let freshness = freshness(&input, &path)?;
             if freshness == Freshness::Stale {
-                batch.coverage.insert(
-                    path,
-                    coverage_for_document(Freshness::Stale),
-                );
+                batch
+                    .coverage
+                    .insert(path, coverage_for_document(Freshness::Stale));
                 return Ok(());
             }
             normalize_document(&input, &metadata, &document, &path, freshness, &mut batch)
@@ -311,9 +312,7 @@ fn position_encoding(
         }
         Ok(PositionEncoding::UnspecifiedPositionEncoding) => {
             match metadata.text_document_encoding.enum_value() {
-                Ok(TextEncoding::UTF16) => {
-                    Ok(PositionEncoding::UTF16CodeUnitOffsetFromLineStart)
-                }
+                Ok(TextEncoding::UTF16) => Ok(PositionEncoding::UTF16CodeUnitOffsetFromLineStart),
                 Ok(TextEncoding::UTF8 | TextEncoding::UnspecifiedTextEncoding) => {
                     Ok(PositionEncoding::UTF8CodeUnitOffsetFromLineStart)
                 }
@@ -355,9 +354,7 @@ fn occurrence_anchor(
             }
             None => match occurrence.range.as_slice() {
                 [line, start, end] => (*line, *start, *line, *end),
-                [start_line, start, end_line, end] => {
-                    (*start_line, *start, *end_line, *end)
-                }
+                [start_line, start, end_line, end] => (*start_line, *start, *end_line, *end),
                 _ => {
                     return Err(ProviderError::MalformedArtifact(format!(
                         "invalid SCIP occurrence range in {path}"
@@ -447,19 +444,14 @@ fn encoded_character_offset(
     requested: usize,
     utf16: bool,
 ) -> Result<usize, ProviderError> {
-    let text = std::str::from_utf8(line).map_err(|_| {
-        ProviderError::MalformedArtifact("source is not valid UTF-8".to_owned())
-    })?;
+    let text = std::str::from_utf8(line)
+        .map_err(|_| ProviderError::MalformedArtifact("source is not valid UTF-8".to_owned()))?;
     let mut units = 0;
     for (byte, character) in text.char_indices() {
         if units == requested {
             return Ok(byte);
         }
-        units += if utf16 {
-            character.len_utf16()
-        } else {
-            1
-        };
+        units += if utf16 { character.len_utf16() } else { 1 };
         if units > requested {
             return Err(ProviderError::MalformedArtifact(
                 "SCIP character splits an encoded code point".to_owned(),
@@ -550,11 +542,7 @@ fn coverage_for_document(freshness: Freshness) -> Coverage {
     coverage
 }
 
-fn add_coverage_reason(
-    coverage: &mut Coverage,
-    capability: Capability,
-    reason: &str,
-) {
+fn add_coverage_reason(coverage: &mut Coverage, capability: Capability, reason: &str) {
     coverage
         .entry(capability)
         .and_modify(|state| match state {

@@ -100,10 +100,12 @@ fn canonical_bytes_ignore_set_order() -> Result<(), IrError> {
     second.modules[0].evidence.push(C.to_owned());
     assert_eq!(first.canonical_bytes()?, second.canonical_bytes()?);
     assert_eq!(first.digest()?, second.digest()?);
-    assert!(first
-        .canonical_bytes()?
-        .windows(compass_ir::PROGRAM_SCHEMA.len())
-        .any(|window| window == compass_ir::PROGRAM_SCHEMA.as_bytes()));
+    assert!(
+        first
+            .canonical_bytes()?
+            .windows(compass_ir::PROGRAM_SCHEMA.len())
+            .any(|window| window == compass_ir::PROGRAM_SCHEMA.as_bytes())
+    );
     Ok(())
 }
 
@@ -115,7 +117,10 @@ fn validation_rejects_absolute_paths_and_unknown_evidence() {
 
     let mut unknown = bundle();
     unknown.modules[0].evidence = vec![A.to_owned()];
-    assert!(matches!(unknown.validate(), Err(IrError::UnknownEvidence(_))));
+    assert!(matches!(
+        unknown.validate(),
+        Err(IrError::UnknownEvidence(_))
+    ));
 }
 
 #[test]

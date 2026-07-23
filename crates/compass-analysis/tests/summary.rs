@@ -117,7 +117,10 @@ fn summaries_capture_behavior_and_reverse_calls() -> Result<(), Box<dyn std::err
     assert_eq!(bundle.summaries[0].writes, ["state"]);
     assert_eq!(bundle.summaries[0].effects, ["await"]);
     assert_eq!(bundle.reverse_calls["work"], ["run"]);
-    assert_eq!(bundle.canonical_bytes()?, bundle.canonicalized().canonical_bytes()?);
+    assert_eq!(
+        bundle.canonical_bytes()?,
+        bundle.canonicalized().canonical_bytes()?
+    );
     Ok(())
 }
 
@@ -125,6 +128,9 @@ fn summaries_capture_behavior_and_reverse_calls() -> Result<(), Box<dyn std::err
 fn invalidation_tracks_changed_callers() -> Result<(), Box<dyn std::error::Error>> {
     let previous = analyze(program(Some("work"), b"first"))?;
     let current = program(Some("work"), b"second");
-    assert_eq!(affected_summaries(&previous, &current)?, ["run".to_owned()].into());
+    assert_eq!(
+        affected_summaries(&previous, &current)?,
+        ["run".to_owned()].into()
+    );
     Ok(())
 }

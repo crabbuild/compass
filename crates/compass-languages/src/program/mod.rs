@@ -5,8 +5,7 @@ use std::path::Path;
 
 use compass_ir::{ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_program::{
-    EvidenceBatch, FileInput, ProviderError, SyntaxProvider, merge_evidence,
-    normalize_source_path,
+    EvidenceBatch, FileInput, ProviderError, SyntaxProvider, merge_evidence, normalize_source_path,
 };
 
 use crate::{Engine, ExtractorKind, Registry};
@@ -21,10 +20,7 @@ pub struct TreeSitterSyntaxProvider {
 impl SyntaxProvider for TreeSitterSyntaxProvider {
     fn descriptor(&self, input: &FileInput<'_>) -> ProviderDescriptor {
         let source_digest = hex_sha256(input.source);
-        let provider_key = format!(
-            "{}:{}:{source_digest}",
-            input.language, input.source_file
-        );
+        let provider_key = format!("{}:{}:{source_digest}", input.language, input.source_file);
         ProviderDescriptor {
             id: format!("tree-sitter:{}", hex_sha256(provider_key.as_bytes())),
             kind: ProviderKind::Syntax,
@@ -32,11 +28,7 @@ impl SyntaxProvider for TreeSitterSyntaxProvider {
             scope: input.source_file.to_owned(),
             input_digest: source_digest,
             configuration_digest: hex_sha256(
-                format!(
-                    "{}:{TREE_SITTER_PROGRAM_PROVIDER_VERSION}",
-                    input.language
-                )
-                .as_bytes(),
+                format!("{}:{TREE_SITTER_PROGRAM_PROVIDER_VERSION}", input.language).as_bytes(),
             ),
         }
     }

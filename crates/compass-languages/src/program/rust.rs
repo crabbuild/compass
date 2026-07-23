@@ -111,10 +111,7 @@ impl<'a> Collector<'a> {
                 "graph_identity_collision",
             );
         }
-        let display_name = owner.map_or_else(
-            || name.to_owned(),
-            |owner| format!("{owner}.{name}"),
-        );
+        let display_name = owner.map_or_else(|| name.to_owned(), |owner| format!("{owner}.{name}"));
         let signature = signature_bytes(self.input.source, node);
         let symbol = symbol_id(self.input.source_file, owner, name, signature);
         let function_anchor = anchor(self.input.source_file, node);
@@ -177,7 +174,8 @@ impl<'a> Collector<'a> {
     }
 
     fn finish(mut self) -> EvidenceBatch {
-        self.functions.sort_by_key(|function| function.anchor.start_byte);
+        self.functions
+            .sort_by_key(|function| function.anchor.start_byte);
         let source_digest = hex_sha256(self.input.source);
         let coverage = function_coverage(&self.coverage_reasons);
         let evidence_ids = self
@@ -323,11 +321,7 @@ fn collect_operations(
                     operations,
                 );
             } else {
-                add_reason(
-                    reasons,
-                    Capability::Effects,
-                    "macro_expansion_unavailable",
-                );
+                add_reason(reasons, Capability::Effects, "macro_expansion_unavailable");
             }
         }
         "try_expression" => add_reason(
@@ -336,11 +330,7 @@ fn collect_operations(
             "question_mark_control_flow",
         ),
         "if_expression" | "match_expression" | "loop_expression" | "while_expression"
-        | "for_expression" => add_reason(
-            reasons,
-            Capability::ControlFlow,
-            "branch_sensitive_cfg",
-        ),
+        | "for_expression" => add_reason(reasons, Capability::ControlFlow, "branch_sensitive_cfg"),
         _ => {}
     }
     let mut cursor = node.walk();
@@ -469,19 +459,25 @@ fn function_coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
         Capability::Effects,
     ] {
         let reasons = reasons.get(&capability).cloned().unwrap_or_else(|| {
-            vec![match capability {
-                Capability::SymbolIdentity => "compiler_symbol_identity_unavailable",
-                Capability::References => "compiler_references_unavailable",
-                Capability::CallResolution => "compiler_call_resolution_unavailable",
-                Capability::ControlFlow => "branch_complete_cfg_unavailable",
-                Capability::Effects => "interprocedural_effects_unavailable",
-                _ => "unavailable",
-            }
-            .to_owned()]
+            vec![
+                match capability {
+                    Capability::SymbolIdentity => "compiler_symbol_identity_unavailable",
+                    Capability::References => "compiler_references_unavailable",
+                    Capability::CallResolution => "compiler_call_resolution_unavailable",
+                    Capability::ControlFlow => "branch_complete_cfg_unavailable",
+                    Capability::Effects => "interprocedural_effects_unavailable",
+                    _ => "unavailable",
+                }
+                .to_owned(),
+            ]
         });
         coverage.insert(capability, CoverageState::Partial { reasons });
     }
-    for capability in [Capability::Types, Capability::DataFlow, Capability::Contracts] {
+    for capability in [
+        Capability::Types,
+        Capability::DataFlow,
+        Capability::Contracts,
+    ] {
         let reason = match capability {
             Capability::Types => "compiler_types_unavailable",
             Capability::DataFlow => "data_flow_unavailable",
@@ -512,7 +508,9 @@ fn add_reason(
 fn impl_owner(source: &[u8], node: Node<'_>) -> Option<String> {
     let type_node = node.child_by_field_name("type")?;
     let owner = text(source, type_node);
-    let trait_name = node.child_by_field_name("trait").map(|node| text(source, node));
+    let trait_name = node
+        .child_by_field_name("trait")
+        .map(|node| text(source, node));
     Some(trait_name.map_or_else(
         || owner.to_owned(),
         |trait_name| format!("<{owner} as {trait_name}>"),
@@ -535,7 +533,14 @@ fn graph_node_id(path: &str, owner: Option<&str>, name: &str) -> String {
 }
 
 fn symbol_id(path: &str, owner: Option<&str>, name: &str, signature: &[u8]) -> String {
-    hex_sha256(format!("{path}\0{}\0{name}\0{}", owner.unwrap_or_default(), hex_sha256(signature)).as_bytes())
+    hex_sha256(
+        format!(
+            "{path}\0{}\0{name}\0{}",
+            owner.unwrap_or_default(),
+            hex_sha256(signature)
+        )
+        .as_bytes(),
+    )
 }
 
 fn signature_bytes<'a>(source: &'a [u8], node: Node<'_>) -> &'a [u8] {
@@ -560,7 +565,8 @@ fn rightmost_identifier(node: Node<'_>) -> Option<Node<'_>> {
 
 fn child_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
-    node.children(&mut cursor).find(|child| child.kind() == kind)
+    node.children(&mut cursor)
+        .find(|child| child.kind() == kind)
 }
 
 fn anchor(path: &str, node: Node<'_>) -> SourceAnchor {

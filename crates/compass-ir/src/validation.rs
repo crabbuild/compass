@@ -164,7 +164,14 @@ fn validate_function(
         let duplicate = function
             .blocks
             .iter()
-            .find(|block| function.blocks.iter().filter(|item| item.id == block.id).count() > 1)
+            .find(|block| {
+                function
+                    .blocks
+                    .iter()
+                    .filter(|item| item.id == block.id)
+                    .count()
+                    > 1
+            })
             .map_or(0, |block| block.id);
         return Err(IrError::DuplicateBlock {
             symbol: function.symbol_id.clone(),

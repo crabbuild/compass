@@ -186,10 +186,7 @@ impl ProjectAnalyzer for FakeProject {
         }
     }
 
-    fn analyze_project(
-        &self,
-        input: ProjectInput<'_>,
-    ) -> Result<EvidenceBatch, ProviderError> {
+    fn analyze_project(&self, input: ProjectInput<'_>) -> Result<EvidenceBatch, ProviderError> {
         Ok(EvidenceBatch {
             descriptor: self.descriptor(input.repository_digest, input.build_context_digest),
             evidence: Vec::new(),

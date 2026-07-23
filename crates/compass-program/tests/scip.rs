@@ -4,8 +4,7 @@ use std::io::Cursor;
 
 use compass_ir::{Capability, CoverageState, hex_sha256};
 use compass_program::{
-    ArtifactInput, ArtifactLimits, ArtifactProvider, OfficialScipProvider,
-    parse_artifact_manifest,
+    ArtifactInput, ArtifactLimits, ArtifactProvider, OfficialScipProvider, parse_artifact_manifest,
 };
 use protobuf::{EnumOrUnknown, Message, MessageField};
 use scip::types::{
@@ -47,8 +46,7 @@ fn fixture(path: &str, source: &str, range: Vec<i32>) -> Result<Vec<u8>, protobu
 }
 
 #[test]
-fn official_scip_normalizes_evidence_without_absolute_metadata()
--> Result<(), Box<dyn Error>> {
+fn official_scip_normalizes_evidence_without_absolute_metadata() -> Result<(), Box<dyn Error>> {
     let source = "fn work() {}\nfn run() { work(); }\n";
     let bytes = fixture("src/lib.rs", source, vec![0, 3, 7])?;
     let digest = hex_sha256(&bytes);
@@ -58,8 +56,7 @@ fn official_scip_normalizes_evidence_without_absolute_metadata()
     );
     let manifest = parse_artifact_manifest(manifest_bytes.as_bytes(), &digest)?;
     let source_digests = BTreeMap::from([("src/lib.rs".to_owned(), source_digest)]);
-    let source_texts =
-        BTreeMap::from([("src/lib.rs".to_owned(), source.as_bytes().to_vec())]);
+    let source_texts = BTreeMap::from([("src/lib.rs".to_owned(), source.as_bytes().to_vec())]);
     let mut reader = Cursor::new(bytes.clone());
     let batch = OfficialScipProvider.analyze_artifact(
         ArtifactInput {
@@ -74,8 +71,7 @@ fn official_scip_normalizes_evidence_without_absolute_metadata()
         &mut reader,
     )?;
     assert!(batch.facts.iter().any(|fact| {
-        fact.capability == Capability::Definitions
-            && fact.anchor.source_file == "src/lib.rs"
+        fact.capability == Capability::Definitions && fact.anchor.source_file == "src/lib.rs"
     }));
     assert!(!serde_json::to_string(&batch)?.contains("/absolute/"));
     assert!(matches!(
@@ -91,12 +87,8 @@ fn raw_stale_and_unsafe_scip_are_explicit() -> Result<(), Box<dyn Error>> {
     let source = "fn work() {}\nfn run() { work(); }\n";
     let bytes = fixture("src/lib.rs", source, vec![0, 3, 7])?;
     let digest = hex_sha256(&bytes);
-    let source_digests = BTreeMap::from([(
-        "src/lib.rs".to_owned(),
-        hex_sha256(source.as_bytes()),
-    )]);
-    let source_texts =
-        BTreeMap::from([("src/lib.rs".to_owned(), source.as_bytes().to_vec())]);
+    let source_digests = BTreeMap::from([("src/lib.rs".to_owned(), hex_sha256(source.as_bytes()))]);
+    let source_texts = BTreeMap::from([("src/lib.rs".to_owned(), source.as_bytes().to_vec())]);
     let mut reader = Cursor::new(bytes.clone());
     let raw = OfficialScipProvider.analyze_artifact(
         ArtifactInput {

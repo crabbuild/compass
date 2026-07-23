@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 const BACKUP_ARTIFACTS: &[&str] = &[
     "graph.json",
+    "program.json",
     "GRAPH_REPORT.md",
     ".compass_labels.json",
     ".compass_analysis.json",
@@ -110,6 +111,7 @@ mod tests {
     {
         let directory = tempfile::tempdir()?;
         fs::write(directory.path().join("graph.json"), "graph")?;
+        fs::write(directory.path().join("program.json"), "program")?;
         fs::write(directory.path().join("GRAPH_REPORT.md"), "report")?;
         fs::write(
             directory.path().join(".compass_labels.json"),
@@ -120,10 +122,11 @@ mod tests {
             first
                 .message
                 .as_deref()
-                .is_some_and(|message| message.contains("3 files"))
+                .is_some_and(|message| message.contains("4 files"))
         );
         let backup = first.path.ok_or("backup path missing")?;
         assert_eq!(fs::read_to_string(backup.join("graph.json"))?, "graph");
+        assert_eq!(fs::read_to_string(backup.join("program.json"))?, "program");
         let second = backup_if_protected(directory.path());
         assert!(second.message.is_none());
         Ok(())

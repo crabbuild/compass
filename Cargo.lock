@@ -986,18 +986,23 @@ dependencies = [
 name = "compass-core"
 version = "0.1.0"
 dependencies = [
+ "compass-analysis",
  "compass-files",
  "compass-google-workspace",
  "compass-graph",
  "compass-history",
+ "compass-ir",
  "compass-languages",
  "compass-model",
  "compass-output",
+ "compass-program",
  "compass-reflect",
  "compass-resolve",
  "notify",
  "num_cpus",
+ "protobuf",
  "rayon",
+ "scip",
  "serde",
  "serde_json",
  "sha2 0.10.9",

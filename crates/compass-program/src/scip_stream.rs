@@ -37,7 +37,9 @@ pub(crate) fn verify_reader(
                 "artifact ended during digest verification".to_owned(),
             ));
         }
-        digest.write_all(&buffer[..count]).map_err(ProviderError::Io)?;
+        digest
+            .write_all(&buffer[..count])
+            .map_err(ProviderError::Io)?;
         remaining = remaining.saturating_sub(count as u64);
     }
     let actual_digest = hex_digest(digest.finalize().as_slice());
@@ -57,17 +59,11 @@ pub(crate) fn read_metadata(
     reader.seek(SeekFrom::Start(0))?;
     let mut input = CodedInputStream::new(reader);
     let mut metadata = None;
-    while let Some(tag) = input
-        .read_raw_tag_or_eof()
-        .map_err(protobuf_error)?
-    {
+    while let Some(tag) = input.read_raw_tag_or_eof().map_err(protobuf_error)? {
         match tag {
             10 => {
-                let bytes = read_message_bytes(
-                    &mut input,
-                    limits.max_metadata_bytes,
-                    "SCIP metadata",
-                )?;
+                let bytes =
+                    read_message_bytes(&mut input, limits.max_metadata_bytes, "SCIP metadata")?;
                 if metadata.is_some() {
                     return Err(ProviderError::MalformedArtifact(
                         "SCIP index has duplicate metadata".to_owned(),
@@ -90,17 +86,11 @@ pub(crate) fn visit_documents(
     reader.seek(SeekFrom::Start(0))?;
     let mut input = CodedInputStream::new(reader);
     let mut records = 0_u64;
-    while let Some(tag) = input
-        .read_raw_tag_or_eof()
-        .map_err(protobuf_error)?
-    {
+    while let Some(tag) = input.read_raw_tag_or_eof().map_err(protobuf_error)? {
         match tag {
             18 => {
-                let bytes = read_message_bytes(
-                    &mut input,
-                    limits.max_document_bytes,
-                    "SCIP document",
-                )?;
+                let bytes =
+                    read_message_bytes(&mut input, limits.max_document_bytes, "SCIP document")?;
                 let document = Document::parse_from_bytes(&bytes).map_err(protobuf_error)?;
                 let document_records = u64::try_from(document.occurrences.len())
                     .unwrap_or(u64::MAX)

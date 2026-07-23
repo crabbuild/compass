@@ -54,9 +54,7 @@ impl CacheKind {
                 ir_schema,
                 merger_version,
                 analyzer_version,
-            } => format!(
-                "program-merge/ir{ir_schema}/m{merger_version}/a{analyzer_version}"
-            ),
+            } => format!("program-merge/ir{ir_schema}/m{merger_version}/a{analyzer_version}"),
         }
     }
 }

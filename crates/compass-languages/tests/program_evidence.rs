@@ -43,9 +43,11 @@ async fn load(state: &mut State) {
     assert!(operations.iter().any(|operation| {
         matches!(&operation.kind, OperationKind::Write { path } if path == "state.value")
     }));
-    assert!(operations
-        .iter()
-        .any(|operation| matches!(operation.kind, OperationKind::Await)));
+    assert!(
+        operations
+            .iter()
+            .any(|operation| matches!(operation.kind, OperationKind::Await))
+    );
     assert!(matches!(
         load.coverage.get(&Capability::ControlFlow),
         Some(CoverageState::Partial { reasons })

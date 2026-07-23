@@ -83,14 +83,19 @@ impl<'a> Collector<'a> {
         } else {
             owner.map(str::to_owned)
         };
-        if let Some((name, signature_node)) = function_name(self.input.source, node, next_owner.as_deref()) {
+        if let Some((name, signature_node)) =
+            function_name(self.input.source, node, next_owner.as_deref())
+        {
             let symbol = symbol_id(
                 self.input.source_file,
                 &name,
                 signature_bytes(self.input.source, signature_node),
             );
             let short = name.rsplit('.').next().unwrap_or(&name);
-            self.definitions.entry(short.to_owned()).or_default().push(symbol);
+            self.definitions
+                .entry(short.to_owned())
+                .or_default()
+                .push(symbol);
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -164,14 +169,16 @@ impl<'a> Collector<'a> {
                 function.child_by_field_name("parameters"),
                 &definition.id,
             ),
-            return_type: function.child_by_field_name("return_type").map(|node| TypeRef {
-                spelling: text(self.input.source, node)
-                    .trim_start_matches(':')
-                    .trim()
-                    .to_owned(),
-                resolved_symbol: None,
-                evidence: vec![definition.id.clone()],
-            }),
+            return_type: function
+                .child_by_field_name("return_type")
+                .map(|node| TypeRef {
+                    spelling: text(self.input.source, node)
+                        .trim_start_matches(':')
+                        .trim()
+                        .to_owned(),
+                    resolved_symbol: None,
+                    evidence: vec![definition.id.clone()],
+                }),
             blocks: vec![BasicBlock {
                 id: 0,
                 operations,
@@ -184,7 +191,8 @@ impl<'a> Collector<'a> {
     }
 
     fn finish(mut self) -> EvidenceBatch {
-        self.functions.sort_by_key(|function| function.anchor.start_byte);
+        self.functions
+            .sort_by_key(|function| function.anchor.start_byte);
         let coverage = coverage(&self.reasons);
         let evidence_ids = self
             .evidence
@@ -261,7 +269,10 @@ fn collect_operations(
 ) {
     match node.kind() {
         "call_expression" | "new_expression" => {
-            if let Some(function) = node.child_by_field_name("function").or_else(|| node.child_by_field_name("constructor")) {
+            if let Some(function) = node
+                .child_by_field_name("function")
+                .or_else(|| node.child_by_field_name("constructor"))
+            {
                 let callee_node = rightmost_identifier(function).unwrap_or(function);
                 let callee = text(input.source, callee_node);
                 let callee_anchor = anchor(input.source_file, callee_node);
@@ -295,11 +306,7 @@ fn collect_operations(
                     resolved_symbols.push(candidates[0].clone());
                 }
                 if matches!(callee, "eval" | "Function") {
-                    add_reason(
-                        reasons,
-                        Capability::Effects,
-                        "eval_or_function_constructor",
-                    );
+                    add_reason(reasons, Capability::Effects, "eval_or_function_constructor");
                 }
                 operations.push(Operation {
                     ordinal: 0,
@@ -380,7 +387,11 @@ fn push_path(
         provider_id,
         Some(input.source_file),
         capability,
-        format!("{} {} {path}", input.language, if write { "write" } else { "read" }),
+        format!(
+            "{} {} {path}",
+            input.language,
+            if write { "write" } else { "read" }
+        ),
         Some(&anchor(input.source_file, node)),
         if write { "write" } else { "read" },
         path,
@@ -496,7 +507,11 @@ fn coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
             },
         );
     }
-    for capability in [Capability::Types, Capability::DataFlow, Capability::Contracts] {
+    for capability in [
+        Capability::Types,
+        Capability::DataFlow,
+        Capability::Contracts,
+    ] {
         let reason = match capability {
             Capability::Types => "compiler_types_unavailable",
             Capability::DataFlow => "data_flow_unavailable",

@@ -23,6 +23,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::program::{ProgramBuild, build_program, load_current_program, write_program};
 use crate::raw_guard::enforce_incomplete_raw_guard;
 
 #[derive(Clone, Debug)]
@@ -39,6 +40,12 @@ pub struct BuildOptions {
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub google_workspace: bool,
+    /// Enable deterministic Program IR analysis and `program.json` output.
+    pub program_analysis: bool,
+    /// Explicit offline program evidence artifacts, in addition to `index.scip`.
+    pub program_artifacts: Vec<PathBuf>,
+    /// Resource limits for offline program artifacts.
+    pub program_artifact_limits: compass_program::ArtifactLimits,
     /// Maximum number of worker threads used by the deterministic AST stages.
     /// `None` uses the host CPU count in a build-local Rayon pool.
     pub max_workers: Option<usize>,
@@ -73,6 +80,9 @@ impl BuildOptions {
             resolution: 1.0,
             exclude_hubs: None,
             google_workspace: false,
+            program_analysis: false,
+            program_artifacts: Vec::new(),
+            program_artifact_limits: compass_program::ArtifactLimits::default(),
             // Large builds use a local host-sized pool. Keeping this unset also
             // lets CLI callers provide an explicit memory/throughput bound.
             max_workers: None,
@@ -96,6 +106,13 @@ pub struct BuildResult {
     pub communities: usize,
     pub html_written: bool,
     pub outputs_changed: bool,
+    pub program_modules: usize,
+    pub program_summaries: usize,
+    pub program_syntax_analyzed: usize,
+    pub program_syntax_reused: usize,
+    pub program_artifacts_loaded: usize,
+    pub program_artifacts_reused: usize,
+    pub program_conflicts: usize,
     pub timings: BuildTimings,
 }
 
@@ -168,6 +185,16 @@ pub enum CoreError {
     IncompleteSemanticShrink { existing: usize, new: usize },
     #[error("semantic extraction was incomplete and the existing graph is unreadable: {0}")]
     IncompleteSemanticExisting(PathBuf),
+    #[error(transparent)]
+    ProgramProvider(#[from] compass_program::ProviderError),
+    #[error(transparent)]
+    ProgramMerge(#[from] compass_program::MergeError),
+    #[error(transparent)]
+    ProgramAnalysis(#[from] compass_analysis::AnalysisError),
+    #[error(transparent)]
+    ProgramIr(#[from] compass_ir::IrError),
+    #[error("invalid Program IR input: {0}")]
+    InvalidProgramInput(String),
 }
 
 /// Run the complete deterministic local graph pipeline without invoking Python,
@@ -327,11 +354,22 @@ fn build_graph_inner(
             }),
     );
 
+    let manifest_unchanged = options.purpose == BuildPurpose::Update
+        && !options.force
+        && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
+    let unchanged_program = if options.program_analysis
+        && semantic.is_none()
+        && supplemental.is_empty()
+        && manifest_unchanged
+    {
+        load_current_program(&root, &sources, options, &output_dir)?
+    } else {
+        None
+    };
     if semantic.is_none()
         && supplemental.is_empty()
-        && options.purpose == BuildPurpose::Update
-        && !options.force
-        && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast)
+        && manifest_unchanged
+        && (!options.program_analysis || unchanged_program.is_some())
         && let Some(document) = unchanged_output_document(options, &output_dir)
     {
         if options.no_viz {
@@ -358,12 +396,29 @@ fn build_graph_inner(
             communities,
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
+            program_modules: program_modules(unchanged_program.as_ref()),
+            program_summaries: program_summaries(unchanged_program.as_ref()),
+            program_syntax_analyzed: 0,
+            program_syntax_reused: unchanged_program
+                .as_ref()
+                .map_or(0, |program| program.syntax_reused),
+            program_artifacts_loaded: 0,
+            program_artifacts_reused: unchanged_program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_reused),
+            program_conflicts: unchanged_program
+                .as_ref()
+                .map_or(0, |program| program.conflicts),
             timings,
         });
     }
 
     let cache_root = (output_root != root).then_some(output_root.as_path());
     let mut cache = Cache::new(&root, cache_root)?;
+    let program = options
+        .program_analysis
+        .then(|| build_program(&root, &sources, options, &cache))
+        .transpose()?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
     if !options.force {
@@ -564,6 +619,7 @@ fn build_graph_inner(
             &root,
             semantic,
         )?;
+        write_program_output(&output_dir, program.as_ref())?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -578,6 +634,19 @@ fn build_graph_inner(
             communities: 0,
             html_written: false,
             outputs_changed: false,
+            program_modules: program_modules(program.as_ref()),
+            program_summaries: program_summaries(program.as_ref()),
+            program_syntax_analyzed: program
+                .as_ref()
+                .map_or(0, |program| program.syntax_analyzed),
+            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+            program_artifacts_loaded: program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_loaded),
+            program_artifacts_reused: program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_reused),
+            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
             timings,
         });
     }
@@ -609,6 +678,7 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
+        write_program_output(&output_dir, program.as_ref())?;
         guard.commit()?;
         timings.write = stage_started.elapsed();
         return Ok(BuildResult {
@@ -624,6 +694,19 @@ fn build_graph_inner(
             communities: 0,
             html_written: false,
             outputs_changed: true,
+            program_modules: program_modules(program.as_ref()),
+            program_summaries: program_summaries(program.as_ref()),
+            program_syntax_analyzed: program
+                .as_ref()
+                .map_or(0, |program| program.syntax_analyzed),
+            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+            program_artifacts_loaded: program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_loaded),
+            program_artifacts_reused: program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_reused),
+            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
             timings,
         });
     }
@@ -671,6 +754,7 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
+        write_program_output(&output_dir, program.as_ref())?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -685,6 +769,19 @@ fn build_graph_inner(
             communities,
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
+            program_modules: program_modules(program.as_ref()),
+            program_summaries: program_summaries(program.as_ref()),
+            program_syntax_analyzed: program
+                .as_ref()
+                .map_or(0, |program| program.syntax_analyzed),
+            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+            program_artifacts_loaded: program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_loaded),
+            program_artifacts_reused: program
+                .as_ref()
+                .map_or(0, |program| program.artifacts_reused),
+            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
             timings,
         });
     }
@@ -834,6 +931,7 @@ fn build_graph_inner(
         semantic,
     )?;
     timings.export = stage_started.elapsed();
+    write_program_output(&output_dir, program.as_ref())?;
     guard.commit()?;
     Ok(BuildResult {
         root,
@@ -848,8 +946,39 @@ fn build_graph_inner(
         communities: communities.len(),
         html_written,
         outputs_changed: true,
+        program_modules: program_modules(program.as_ref()),
+        program_summaries: program_summaries(program.as_ref()),
+        program_syntax_analyzed: program
+            .as_ref()
+            .map_or(0, |program| program.syntax_analyzed),
+        program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+        program_artifacts_loaded: program
+            .as_ref()
+            .map_or(0, |program| program.artifacts_loaded),
+        program_artifacts_reused: program
+            .as_ref()
+            .map_or(0, |program| program.artifacts_reused),
+        program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
         timings,
     })
+}
+
+fn write_program_output(
+    output_dir: &Path,
+    program: Option<&ProgramBuild>,
+) -> Result<(), CoreError> {
+    if let Some(program) = program {
+        write_program(output_dir, &program.analysis)?;
+    }
+    Ok(())
+}
+
+fn program_modules(program: Option<&ProgramBuild>) -> usize {
+    program.map_or(0, |program| program.analysis.program.modules.len())
+}
+
+fn program_summaries(program: Option<&ProgramBuild>) -> usize {
+    program.map_or(0, |program| program.analysis.summaries.len())
 }
 
 #[cfg(target_os = "macos")]
