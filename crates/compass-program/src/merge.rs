@@ -225,11 +225,9 @@ fn attach_fact(module: &mut ModuleIr, fact: &EvidenceFact) -> bool {
             .evidence
             .sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         function.evidence.dedup();
-        merge_fact_coverage(&mut function.coverage, fact);
         module.evidence.push(fact.evidence_id.clone());
         module.evidence.sort();
         module.evidence.dedup();
-        merge_fact_coverage(&mut module.coverage, fact);
     }
     attached
 }
@@ -375,12 +373,6 @@ fn contains(outer: &SourceAnchor, inner: &SourceAnchor) -> bool {
     outer.source_file == inner.source_file
         && outer.start_byte <= inner.start_byte
         && outer.end_byte >= inner.end_byte
-}
-
-fn merge_fact_coverage(coverage: &mut Coverage, fact: &EvidenceFact) {
-    coverage
-        .entry(fact.capability.clone())
-        .or_insert(CoverageState::Complete);
 }
 
 fn merge_coverage(target: &mut Coverage, incoming: Coverage) {

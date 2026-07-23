@@ -46,6 +46,7 @@ pub struct ArtifactInput<'a> {
     pub byte_len: u64,
     pub manifest: Option<&'a ArtifactManifest>,
     pub source_digests: &'a BTreeMap<String, String>,
+    pub source_texts: &'a BTreeMap<String, Vec<u8>>,
     pub limits: ArtifactLimits,
 }
 
