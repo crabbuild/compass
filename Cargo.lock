@@ -953,6 +953,7 @@ dependencies = [
 name = "compass-cli"
 version = "0.1.0"
 dependencies = [
+ "compass-analysis",
  "compass-cargo",
  "compass-core",
  "compass-cypher",
@@ -963,10 +964,12 @@ dependencies = [
  "compass-graphdb",
  "compass-history",
  "compass-ingest",
+ "compass-ir",
  "compass-mcp",
  "compass-model",
  "compass-output",
  "compass-postgres",
+ "compass-program",
  "compass-prs",
  "compass-query",
  "compass-reflect",
@@ -1099,7 +1102,9 @@ name = "compass-history"
 version = "0.1.0"
 dependencies = [
  "atomicwrites",
+ "compass-analysis",
  "compass-files",
+ "compass-ir",
  "compass-model",
  "prolly-map",
  "prolly-store-sqlite",

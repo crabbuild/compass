@@ -1,10 +1,12 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use compass_analysis::analyze;
 use compass_history::{
     CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryConfig, HistoryQueue,
     HistoryStore, JobRequest, JobState, PublishRequest, Repository,
 };
+use compass_ir::ProgramBundle;
 use compass_model::GraphDocument;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -257,6 +259,7 @@ fn worker_reconciles_catalog_and_preferred_crash_windows() -> Result<(), Box<dyn
             .parse::<ExtractionFingerprint>()?,
         artifacts: GraphArtifacts {
             document,
+            program: None,
             analysis: None,
             labels: None,
             manifest: None,
@@ -362,6 +365,12 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
             "links":[],
             "built_at_commit":commit
         }))?;
+        let program = analyze(ProgramBundle {
+            schema: compass_ir::PROGRAM_SCHEMA.to_owned(),
+            providers: Vec::new(),
+            evidence: Vec::new(),
+            modules: Vec::new(),
+        })?;
         Ok(history.publish(PublishRequest {
             commit: commit.clone(),
             parents: repository.parents(&commit)?,
@@ -371,6 +380,7 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
                 .parse::<ExtractionFingerprint>()?,
             artifacts: GraphArtifacts {
                 document,
+                program: Some(program),
                 analysis: Some(json!({"communities":{"0":["a"]}})),
                 labels: Some(json!({"0":"Core"})),
                 manifest: Some(json!({"README.md":{"ast_hash":"abc"}})),
@@ -508,6 +518,16 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
         std::fs::read(bundle.join("semantic/facts.bin"))?,
         vec![0, 1, 255]
     );
+    let expected_program = analyze(ProgramBundle {
+        schema: compass_ir::PROGRAM_SCHEMA.to_owned(),
+        providers: Vec::new(),
+        evidence: Vec::new(),
+        modules: Vec::new(),
+    })?;
+    assert_eq!(
+        std::fs::read(bundle.join("program.json"))?,
+        expected_program.canonical_bytes()?
+    );
     let existing_bundle = run(
         compass,
         directory.path(),
@@ -580,6 +600,7 @@ fn gc_requires_explicit_confirmation_for_non_preferred_realizations()
                 .parse::<ExtractionFingerprint>()?,
             artifacts: GraphArtifacts {
                 document,
+                program: None,
                 analysis: None,
                 labels: None,
                 manifest: None,
@@ -749,6 +770,7 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
             .parse::<ExtractionFingerprint>()?,
         artifacts: GraphArtifacts {
             document: old_document,
+            program: None,
             analysis: Some(json!({"communities":{"0":["a","b"]}})),
             labels: None,
             manifest: None,
@@ -763,7 +785,6 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
         },
         make_preferred: true,
     })?;
-
     std::fs::write(directory.path().join("README.md"), "new\n")?;
     git(directory.path(), &["add", "README.md"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
@@ -784,6 +805,7 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     }))?;
     let new_artifacts = GraphArtifacts {
         document: new_document,
+        program: None,
         analysis: Some(json!({"communities":{"0":["b"],"1":["a","c"]}})),
         labels: None,
         manifest: None,
@@ -871,10 +893,12 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
     assert_eq!(String::from_utf8_lossy(&empty.stdout), "no graph changes\n");
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
-    history.publish(PublishRequest {
+    let mut incompatible_profile = compass_history::BuildProfile::default();
+    incompatible_profile.insert("compass_version", "incompatible")?;
+    let incompatible = history.publish(PublishRequest {
         commit: new_commit,
         parents: repository.parents(&repository.resolve("HEAD")?)?,
-        profile: compass_history::BuildProfile::default(),
+        profile: incompatible_profile,
         fingerprint: std::iter::repeat_n('d', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -888,6 +912,11 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
         },
         make_preferred: true,
     })?;
+    let head = repository.resolve("HEAD")?;
+    let current = history
+        .preferred(&head)?
+        .ok_or("missing current preferred realization")?;
+    assert!(history.compare_and_set_preferred(&head, Some(&current.id), &incompatible.id)?);
     drop(history);
     let mismatch = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
     assert_eq!(mismatch.status.code(), Some(1));
@@ -951,6 +980,7 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
                 .parse::<ExtractionFingerprint>()?,
             artifacts: GraphArtifacts {
                 document,
+                program: None,
                 analysis: None,
                 labels: None,
                 manifest: None,

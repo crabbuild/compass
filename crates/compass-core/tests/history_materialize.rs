@@ -74,6 +74,7 @@ impl CompleteGraphBuilder for RecordingBuilder {
         Ok(CompletedGraphArtifacts {
             artifacts: GraphArtifacts {
                 document,
+                program: None,
                 analysis: None,
                 labels: None,
                 manifest: Some(json!({"service.rs":{"ast_hash":"fixture"}})),
@@ -235,6 +236,7 @@ fn semantic_manifest_must_cover_each_exact_commit_source() -> Result<(), Box<dyn
             Ok(CompletedGraphArtifacts {
                 artifacts: GraphArtifacts {
                     document,
+                    program: None,
                     analysis: None,
                     labels: None,
                     manifest: Some(json!({
@@ -408,6 +410,7 @@ fn exact_tree_validation_rejects_commit_inventory_and_manifest_mismatches()
             Ok(CompletedGraphArtifacts {
                 artifacts: GraphArtifacts {
                     document,
+                    program: None,
                     analysis: None,
                     labels: None,
                     manifest: Some(manifest),

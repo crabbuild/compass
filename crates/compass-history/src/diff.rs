@@ -13,6 +13,8 @@ pub enum RecordKind {
     Hyperedge,
     Analysis,
     Metadata,
+    ProgramFact,
+    ProgramSummary,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -55,6 +57,8 @@ impl HistoryStore {
                 RecordKind::Hyperedge,
                 RecordKind::Analysis,
                 RecordKind::Metadata,
+                RecordKind::ProgramFact,
+                RecordKind::ProgramSummary,
             ],
             sink,
         )
@@ -100,6 +104,16 @@ impl HistoryStore {
                 RecordKind::Metadata,
                 &old.version.metadata_root,
                 &new.version.metadata_root,
+            ),
+            (
+                RecordKind::ProgramFact,
+                &old.version.program_facts_root,
+                &new.version.program_facts_root,
+            ),
+            (
+                RecordKind::ProgramSummary,
+                &old.version.program_summaries_root,
+                &new.version.program_summaries_root,
             ),
         ] {
             if records.contains(&kind) {
@@ -159,7 +173,10 @@ fn display_key(record: RecordKind, key: &[u8]) -> Result<Vec<String>, HistoryErr
         RecordKind::Node => Some(NODE_KIND),
         RecordKind::Edge => Some(EDGE_KIND),
         RecordKind::Hyperedge => Some(HYPEREDGE_KIND),
-        RecordKind::Analysis | RecordKind::Metadata => None,
+        RecordKind::Analysis
+        | RecordKind::Metadata
+        | RecordKind::ProgramFact
+        | RecordKind::ProgramSummary => None,
     } {
         if segments.first().map(Vec::as_slice) != Some(KEY_SCHEMA_V1)
             || segments.get(1).map(Vec::as_slice) != Some(kind)

@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path};
 
+use compass_analysis::{AnalysisBundle, FunctionSummary};
 use compass_files::{write_bytes_atomic, write_json_atomic};
+use compass_ir::{EvidenceRecord, ModuleIr, ProgramBundle, ProviderDescriptor};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,7 @@ const MOVED_NODE_FIELDS: [&str; 3] = ["community", "community_name", "norm_label
 #[derive(Clone, Debug, PartialEq)]
 pub struct GraphArtifacts {
     pub document: GraphDocument,
+    pub program: Option<AnalysisBundle>,
     pub analysis: Option<Value>,
     pub labels: Option<Value>,
     pub manifest: Option<Value>,
@@ -46,6 +49,15 @@ pub struct PartitionedGraph {
     pub hyperedges: Vec<(Vec<u8>, Vec<u8>)>,
     pub analysis: Vec<(Vec<u8>, Vec<u8>)>,
     pub metadata: Vec<(Vec<u8>, Vec<u8>)>,
+    pub program_facts: Vec<(Vec<u8>, Vec<u8>)>,
+    pub program_summaries: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct ProgramHeader {
+    program_schema: String,
+    analysis_schema_version: u32,
+    analyzer_version: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +151,7 @@ impl GraphArtifacts {
             document: GraphDocument::load_for_recluster_compatibility(
                 &output_dir.join("graph.json"),
             )?,
+            program: read_optional_program(&output_dir.join("program.json"))?,
             analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
             labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
             manifest: read_optional_json(&output_dir.join("manifest.json"))?,
@@ -159,6 +172,54 @@ impl GraphArtifacts {
         let mut node_keys = BTreeSet::new();
         let mut edge_keys = BTreeSet::new();
         let mut hyperedge_keys = BTreeSet::new();
+
+        if let Some(program) = &self.program {
+            program.validate()?;
+            partitioned.program_facts.push((
+                program_key("header", "analysis"),
+                encode_record(
+                    "compass.program.header",
+                    &serde_json::to_value(ProgramHeader {
+                        program_schema: program.program.schema.clone(),
+                        analysis_schema_version: program.analysis_schema_version,
+                        analyzer_version: program.analyzer_version,
+                    })?,
+                )?,
+            ));
+            for provider in &program.program.providers {
+                partitioned.program_facts.push((
+                    program_key("provider", &provider.id),
+                    encode_record("compass.program.provider", &serde_json::to_value(provider)?)?,
+                ));
+            }
+            for evidence in &program.program.evidence {
+                partitioned.program_facts.push((
+                    program_key("evidence", &evidence.id),
+                    encode_record("compass.program.evidence", &serde_json::to_value(evidence)?)?,
+                ));
+            }
+            for module in &program.program.modules {
+                partitioned.program_facts.push((
+                    program_key("module", &module.source_file),
+                    encode_record("compass.program.module", &serde_json::to_value(module)?)?,
+                ));
+            }
+            for summary in &program.summaries {
+                partitioned.program_summaries.push((
+                    program_key("summary", &summary.symbol_id),
+                    encode_record("compass.program.summary", &serde_json::to_value(summary)?)?,
+                ));
+            }
+            for (target, callers) in &program.reverse_calls {
+                partitioned.program_summaries.push((
+                    program_key("reverse-call", target),
+                    encode_record(
+                        "compass.program.reverse-call",
+                        &serde_json::to_value(callers)?,
+                    )?,
+                ));
+            }
+        }
 
         for (rank, node) in self.document.nodes.iter().enumerate() {
             let mut stored = node.clone();
@@ -347,11 +408,15 @@ impl GraphArtifacts {
         sort_unique(&mut partitioned.hyperedges, "hyperedge")?;
         sort_unique(&mut partitioned.analysis, "analysis")?;
         sort_unique(&mut partitioned.metadata, "metadata")?;
+        sort_unique(&mut partitioned.program_facts, "program fact")?;
+        sort_unique(&mut partitioned.program_summaries, "program summary")?;
         Ok(partitioned)
     }
 
     /// Reconstruct the exact supported graph structure and authoritative sidecars.
     pub fn reconstruct(partitioned: &PartitionedGraph) -> Result<Self, HistoryError> {
+        let program =
+            reconstruct_program(&partitioned.program_facts, &partitioned.program_summaries)?;
         let mut nodes = decode_map::<NodeRecord>(&partitioned.nodes, "compass.node")?;
         let mut edges = decode_map::<EdgeRecord>(&partitioned.edges, "compass.edge")?;
         let mut hyperedges = decode_value_map(&partitioned.hyperedges, "compass.hyperedge")?;
@@ -501,6 +566,7 @@ impl GraphArtifacts {
                 extras: header.extras,
                 used_legacy_edges_key: header.used_legacy_edges_key,
             },
+            program,
             analysis,
             labels,
             manifest,
@@ -536,6 +602,9 @@ impl GraphArtifacts {
             .map_err(|source| crate::error::io_error(output_dir, source))?;
         validate_sidecar_paths(&self.authoritative_sidecars)?;
         write_json_atomic(output_dir.join("graph.json"), &self.document, false)?;
+        if let Some(program) = &self.program {
+            write_bytes_atomic(output_dir.join("program.json"), &program.canonical_bytes()?)?;
+        }
         if let Some(value) = &self.analysis {
             write_json_atomic(output_dir.join(".compass_analysis.json"), value, false)?;
         }
@@ -633,6 +702,13 @@ fn artifact_registry(
         "application/json",
         &graph_bytes,
     )];
+    if let Some(program) = &artifacts.program {
+        registry.push(authoritative_entry(
+            "program.json",
+            "application/json",
+            &program.canonical_bytes()?,
+        ));
+    }
     for (path, value) in [
         (".compass_analysis.json", artifacts.analysis.as_ref()),
         (".compass_labels.json", artifacts.labels.as_ref()),
@@ -726,7 +802,11 @@ fn completion_from_partition(
 fn is_builtin_artifact(path: &str) -> bool {
     matches!(
         path,
-        "graph.json" | ".compass_analysis.json" | ".compass_labels.json" | "manifest.json"
+        "graph.json"
+            | "program.json"
+            | ".compass_analysis.json"
+            | ".compass_labels.json"
+            | "manifest.json"
     )
 }
 
@@ -902,6 +982,132 @@ fn metadata_key(parts: &[&[u8]]) -> Vec<u8> {
         .finish()
 }
 
+fn program_key(kind: &str, identity: &str) -> Vec<u8> {
+    KeyBuilder::new().push_str(kind).push_str(identity).finish()
+}
+
+fn reconstruct_program(
+    facts: &[(Vec<u8>, Vec<u8>)],
+    summaries: &[(Vec<u8>, Vec<u8>)],
+) -> Result<Option<AnalysisBundle>, HistoryError> {
+    if facts.is_empty() && summaries.is_empty() {
+        return Ok(None);
+    }
+    let mut header = None;
+    let mut providers = Vec::<ProviderDescriptor>::new();
+    let mut evidence = Vec::<EvidenceRecord>::new();
+    let mut modules = Vec::<ModuleIr>::new();
+    for (key, bytes) in facts {
+        let segments = decode_segments(key)
+            .map_err(|error| HistoryError::InvalidArtifacts(error.to_string()))?;
+        let [kind, identity] = segments.as_slice() else {
+            return Err(HistoryError::InvalidArtifacts(
+                "invalid program fact key".to_owned(),
+            ));
+        };
+        let identity = std::str::from_utf8(identity)
+            .map_err(|error| HistoryError::InvalidArtifacts(error.to_string()))?;
+        match kind.as_slice() {
+            b"header" if identity == "analysis" => {
+                if header
+                    .replace(decode_typed(bytes, "compass.program.header")?)
+                    .is_some()
+                {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "duplicate program header".to_owned(),
+                    ));
+                }
+            }
+            b"provider" => {
+                let value: ProviderDescriptor = decode_typed(bytes, "compass.program.provider")?;
+                if value.id != identity {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "program provider key does not match its ID".to_owned(),
+                    ));
+                }
+                providers.push(value);
+            }
+            b"evidence" => {
+                let value: EvidenceRecord = decode_typed(bytes, "compass.program.evidence")?;
+                if value.id != identity {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "program evidence key does not match its ID".to_owned(),
+                    ));
+                }
+                evidence.push(value);
+            }
+            b"module" => {
+                let value: ModuleIr = decode_typed(bytes, "compass.program.module")?;
+                if value.source_file != identity {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "program module key does not match its source".to_owned(),
+                    ));
+                }
+                modules.push(value);
+            }
+            _ => {
+                return Err(HistoryError::InvalidArtifacts(
+                    "unknown program fact key".to_owned(),
+                ));
+            }
+        }
+    }
+    let header: ProgramHeader = header
+        .ok_or_else(|| HistoryError::InvalidArtifacts("missing program header".to_owned()))?;
+    let mut function_summaries = Vec::<FunctionSummary>::new();
+    let mut reverse_calls = BTreeMap::<String, Vec<String>>::new();
+    for (key, bytes) in summaries {
+        let segments = decode_segments(key)
+            .map_err(|error| HistoryError::InvalidArtifacts(error.to_string()))?;
+        let [kind, identity] = segments.as_slice() else {
+            return Err(HistoryError::InvalidArtifacts(
+                "invalid program summary key".to_owned(),
+            ));
+        };
+        let identity = std::str::from_utf8(identity)
+            .map_err(|error| HistoryError::InvalidArtifacts(error.to_string()))?;
+        match kind.as_slice() {
+            b"summary" => {
+                let value: FunctionSummary = decode_typed(bytes, "compass.program.summary")?;
+                if value.symbol_id != identity {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "program summary key does not match its symbol".to_owned(),
+                    ));
+                }
+                function_summaries.push(value);
+            }
+            b"reverse-call" => {
+                let callers = decode_typed(bytes, "compass.program.reverse-call")?;
+                if reverse_calls.insert(identity.to_owned(), callers).is_some() {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "duplicate reverse-call target".to_owned(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(HistoryError::InvalidArtifacts(
+                    "unknown program summary key".to_owned(),
+                ));
+            }
+        }
+    }
+    let bundle = AnalysisBundle {
+        analysis_schema_version: header.analysis_schema_version,
+        analyzer_version: header.analyzer_version,
+        program: ProgramBundle {
+            schema: header.program_schema,
+            providers,
+            evidence,
+            modules,
+        },
+        summaries: function_summaries,
+        reverse_calls,
+    }
+    .canonicalized();
+    bundle.validate()?;
+    Ok(Some(bundle))
+}
+
 fn metadata_rank_key(kind: &str, rank: usize) -> Result<Vec<u8>, HistoryError> {
     let rank = u64::try_from(rank)
         .map_err(|_| HistoryError::InvalidArtifacts("record rank exceeds u64".to_owned()))?;
@@ -1050,6 +1256,22 @@ fn read_optional_json(path: &Path) -> Result<Option<Value>, HistoryError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(crate::error::io_error(path, source)),
     }
+}
+
+fn read_optional_program(path: &Path) -> Result<Option<AnalysisBundle>, HistoryError> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(crate::error::io_error(path, source)),
+    };
+    let program: AnalysisBundle = serde_json::from_slice(&bytes)?;
+    let canonical = program.canonical_bytes()?;
+    if canonical != bytes {
+        return Err(HistoryError::InvalidArtifacts(
+            "program.json is not canonical".to_owned(),
+        ));
+    }
+    Ok(Some(program))
 }
 
 #[cfg(test)]

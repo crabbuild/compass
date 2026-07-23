@@ -75,6 +75,7 @@ fn request(
         profile: compass_history::BuildProfile::default(),
         artifacts: GraphArtifacts {
             document: graph(commit.as_str(), changed)?,
+            program: None,
             analysis: Some(json!({"communities": 16, "fixture": true})),
             labels: None,
             manifest: None,

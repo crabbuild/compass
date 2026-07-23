@@ -281,6 +281,55 @@ pub(crate) fn load_current_program(
     }))
 }
 
+pub(crate) fn current_provider_manifest(
+    root: &Path,
+    sources: &[PathBuf],
+    options: &BuildOptions,
+) -> Result<Vec<ProviderDescriptor>, CoreError> {
+    let inputs = read_sources(root, sources)?;
+    let source_digests = inputs
+        .iter()
+        .map(|input| (input.source_file.clone(), input.digest.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let source_texts = inputs
+        .iter()
+        .map(|input| (input.source_file.clone(), input.bytes.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let syntax_provider = TreeSitterSyntaxProvider::default();
+    let mut providers = inputs
+        .iter()
+        .filter(|input| supports_program_syntax(&input.source_file))
+        .map(|input| {
+            syntax_provider.descriptor(&compass_program::FileInput {
+                source_file: &input.source_file,
+                language: &input.language,
+                source: &input.bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+    for artifact in discover_artifacts(root, options)? {
+        let manifest = load_manifest(&artifact.path, &artifact.digest)?;
+        providers.push(
+            OfficialScipProvider.descriptor(&ArtifactInput {
+                logical_name: artifact
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("index.scip"),
+                input_digest: &artifact.digest,
+                byte_len: artifact.byte_len,
+                manifest: manifest.as_ref(),
+                source_digests: &source_digests,
+                source_texts: &source_texts,
+                limits: options.program_artifact_limits,
+            }),
+        );
+    }
+    providers.sort();
+    providers.dedup();
+    Ok(providers)
+}
+
 pub(crate) fn write_program(
     output_dir: &Path,
     analysis: &compass_analysis::AnalysisBundle,

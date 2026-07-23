@@ -3,14 +3,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
+use compass_analysis::{AnalysisBundle, analyze};
 use compass_history::{
-    CommitId, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryStore,
-    PublishRequest, Repository,
+    CommitId, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, GraphVersion,
+    HistoryStore, PublishRequest, RealizationId, Repository, canonical_json_bytes,
 };
+use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
 use prolly::{Config, KeyBuilder, Prolly};
 use prolly_store_sqlite::SqliteStore;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 struct Fixture {
     _directory: tempfile::TempDir,
@@ -74,6 +77,7 @@ fn request(
             .parse::<ExtractionFingerprint>()?,
         artifacts: GraphArtifacts {
             document,
+            program: None,
             analysis: Some(json!({"score": u8::from(extra_node)})),
             labels: None,
             manifest: Some(json!({"complete": true})),
@@ -87,6 +91,22 @@ fn request(
             failed_chunks: 0,
         },
         make_preferred: true,
+    })
+}
+
+fn program(input: &[u8]) -> Result<AnalysisBundle, compass_analysis::AnalysisError> {
+    analyze(ProgramBundle {
+        schema: compass_ir::PROGRAM_SCHEMA.to_owned(),
+        providers: vec![ProviderDescriptor {
+            id: "scip:fixture".to_owned(),
+            kind: ProviderKind::Artifact,
+            version: "scip/1".to_owned(),
+            scope: "repository".to_owned(),
+            input_digest: hex_sha256(input),
+            configuration_digest: hex_sha256(b"manifest"),
+        }],
+        evidence: Vec::new(),
+        modules: Vec::new(),
     })
 }
 
@@ -123,6 +143,34 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
 }
 
 #[test]
+fn schema_two_manifests_deserialize_with_identity_preserving_empty_program_trees()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let published = HistoryStore::create(&repository)?.publish(request('9', false)?)?;
+    let mut legacy = serde_json::to_value(&published.version)?;
+    let object = legacy.as_object_mut().ok_or("version is not an object")?;
+    object.insert("schema_version".to_owned(), json!(2));
+    for field in [
+        "program_facts_root",
+        "program_summaries_root",
+        "program_fact_count",
+        "program_summary_count",
+    ] {
+        object.remove(field);
+    }
+    let expected = format!("{:x}", Sha256::digest(canonical_json_bytes(&legacy)?));
+    let parsed: GraphVersion = serde_json::from_value(legacy)?;
+    assert_eq!(parsed.schema_version, 2);
+    assert!(parsed.program_facts_root.root.is_none());
+    assert!(parsed.program_summaries_root.root.is_none());
+    assert_eq!(parsed.program_fact_count, 0);
+    assert_eq!(parsed.program_summary_count, 0);
+    assert_eq!(RealizationId::for_version(&parsed)?.as_hex(), expected);
+    Ok(())
+}
+
+#[test]
 fn multiple_realizations_remain_addressable_and_preference_uses_cas()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::new()?;
@@ -153,6 +201,46 @@ fn multiple_realizations_remain_addressable_and_preference_uses_cas()
         first.id
     );
     assert!(history.get(&second.id).is_ok());
+    Ok(())
+}
+
+#[test]
+fn program_provider_identity_and_subtree_sharing_are_content_addressed()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+    let mut first_request = request('a', false)?;
+    first_request.artifacts.program = Some(program(b"first")?);
+    let first = history.publish(first_request.clone())?;
+
+    let mut provider_changed = first_request.clone();
+    provider_changed.artifacts.program = Some(program(b"second")?);
+    let changed = history.publish(provider_changed)?;
+    assert_ne!(changed.id, first.id);
+    assert_ne!(
+        changed.version.program_facts_root,
+        first.version.program_facts_root
+    );
+
+    let mut graph_changed = first_request;
+    graph_changed
+        .artifacts
+        .document
+        .nodes
+        .push(serde_json::from_value(json!({"id":"b","label":"B"}))?);
+    let shared = history.publish(graph_changed)?;
+    assert_ne!(shared.version.nodes_root, first.version.nodes_root);
+    assert_eq!(
+        shared.version.program_facts_root,
+        first.version.program_facts_root
+    );
+    assert_eq!(
+        shared.version.program_summaries_root,
+        first.version.program_summaries_root
+    );
+    let encoded = serde_json::to_string(&shared.version)?;
+    assert!(!encoded.contains(&fixture.path.to_string_lossy().into_owned()));
     Ok(())
 }
 

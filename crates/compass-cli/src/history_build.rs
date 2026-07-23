@@ -39,7 +39,8 @@ impl HistoryBuildOptions {
         self.profile.clone()
     }
 
-    pub(crate) fn from_profile(profile: BuildProfile) -> Result<Self, HistoryError> {
+    pub(crate) fn from_profile(mut profile: BuildProfile) -> Result<Self, HistoryError> {
+        upgrade_legacy_program_profile(&mut profile)?;
         validate_persisted_profile(&profile)?;
         let gitignore = profile.value("gitignore") != Some("false");
         let excludes = profile
@@ -136,6 +137,26 @@ impl HistoryBuildOptions {
             ("extractor_version", "compass-languages/v1".to_owned()),
             ("resolver_version", "compass-resolve/v1".to_owned()),
             ("pipeline_version", "compass-core/v1".to_owned()),
+            (
+                "program_provider_policy",
+                "offline-artifacts-first".to_owned(),
+            ),
+            (
+                "program_ir_schema",
+                compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
+            ),
+            (
+                "program_merger_version",
+                compass_program::MERGER_VERSION.to_string(),
+            ),
+            (
+                "program_analysis_schema",
+                compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
+            ),
+            (
+                "program_analyzer_version",
+                compass_analysis::ANALYZER_VERSION.to_string(),
+            ),
             ("enabled_features", "workspace-default".to_owned()),
             ("direction", "native-source-semantics".to_owned()),
             ("cluster_algorithm", "seeded-louvain/v1".to_owned()),
@@ -256,6 +277,36 @@ impl HistoryBuildOptions {
     }
 }
 
+fn upgrade_legacy_program_profile(profile: &mut BuildProfile) -> Result<(), HistoryError> {
+    for (key, value) in [
+        (
+            "program_provider_policy",
+            "offline-artifacts-first".to_owned(),
+        ),
+        (
+            "program_ir_schema",
+            compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
+        ),
+        (
+            "program_merger_version",
+            compass_program::MERGER_VERSION.to_string(),
+        ),
+        (
+            "program_analysis_schema",
+            compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
+        ),
+        (
+            "program_analyzer_version",
+            compass_analysis::ANALYZER_VERSION.to_string(),
+        ),
+    ] {
+        if profile.value(key).is_none() {
+            profile.insert(key, &value)?;
+        }
+    }
+    Ok(())
+}
+
 fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError> {
     for (key, _) in profile.entries() {
         if !matches!(
@@ -265,6 +316,11 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 | "extractor_version"
                 | "resolver_version"
                 | "pipeline_version"
+                | "program_provider_policy"
+                | "program_ir_schema"
+                | "program_merger_version"
+                | "program_analysis_schema"
+                | "program_analyzer_version"
                 | "enabled_features"
                 | "direction"
                 | "cluster_algorithm"
@@ -297,12 +353,31 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
         ("extractor_version", "compass-languages/v1"),
         ("resolver_version", "compass-resolve/v1"),
         ("pipeline_version", "compass-core/v1"),
+        ("program_provider_policy", "offline-artifacts-first"),
         ("enabled_features", "workspace-default"),
         ("direction", "native-source-semantics"),
         ("cluster_algorithm", "seeded-louvain/v1"),
         ("cluster_seed", "42"),
     ] {
         if profile.value(key) != Some(expected) {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "persisted {key} is incompatible with {expected}"
+            )));
+        }
+    }
+    for (key, expected) in [
+        ("program_ir_schema", compass_ir::PROGRAM_SCHEMA_VERSION),
+        ("program_merger_version", compass_program::MERGER_VERSION),
+        (
+            "program_analysis_schema",
+            compass_analysis::ANALYSIS_SCHEMA_VERSION,
+        ),
+        (
+            "program_analyzer_version",
+            compass_analysis::ANALYZER_VERSION,
+        ),
+    ] {
+        if profile.value(key).and_then(|value| value.parse().ok()) != Some(expected) {
             return Err(HistoryError::InvalidFingerprint(format!(
                 "persisted {key} is incompatible with {expected}"
             )));

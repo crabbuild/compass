@@ -1,7 +1,13 @@
 use std::collections::BTreeMap;
 
+use compass_analysis::{AnalysisBundle, analyze};
 use compass_history::{
     ArtifactClass, ArtifactRegistryEntry, CompletionEvidence, GraphArtifacts, canonical_json_bytes,
+};
+use compass_ir::{
+    BasicBlock, Capability, CoverageState, EvidenceRecord, FunctionIr, ModuleIr, Operation,
+    OperationKind, ProgramBundle, ProviderDescriptor, ProviderKind, SourceAnchor, Terminator,
+    hex_sha256,
 };
 use compass_model::GraphDocument;
 use serde_json::json;
@@ -15,6 +21,71 @@ fn completion() -> CompletionEvidence {
         semantic_files_completed: 1,
         failed_chunks: 0,
     }
+}
+
+fn program_fixture(input: &[u8]) -> Result<AnalysisBundle, compass_analysis::AnalysisError> {
+    let source = "src/lib.rs";
+    let evidence_id = "e".repeat(64);
+    let anchor = SourceAnchor {
+        source_file: source.to_owned(),
+        start_byte: 0,
+        end_byte: 24,
+    };
+    let coverage = BTreeMap::from([(Capability::Syntax, CoverageState::Complete)]);
+    analyze(ProgramBundle {
+        schema: compass_ir::PROGRAM_SCHEMA.to_owned(),
+        providers: vec![ProviderDescriptor {
+            id: "syntax:fixture".to_owned(),
+            kind: ProviderKind::Syntax,
+            version: "1".to_owned(),
+            scope: source.to_owned(),
+            input_digest: hex_sha256(input),
+            configuration_digest: hex_sha256(b"fixture-config"),
+        }],
+        evidence: vec![EvidenceRecord {
+            id: evidence_id.clone(),
+            provider_id: "syntax:fixture".to_owned(),
+            source_file: Some(source.to_owned()),
+            capability: Capability::CallResolution,
+            detail: "fixture call".to_owned(),
+        }],
+        modules: vec![ModuleIr {
+            source_file: source.to_owned(),
+            language: "rust".to_owned(),
+            source_digest: hex_sha256(input),
+            graph_node_id: None,
+            functions: vec![FunctionIr {
+                symbol_id: "run".to_owned(),
+                name: "run".to_owned(),
+                graph_node_id: None,
+                signature_digest: hex_sha256(b"fn run()"),
+                body_digest: hex_sha256(input),
+                anchor: anchor.clone(),
+                parameters: Vec::new(),
+                return_type: None,
+                blocks: vec![BasicBlock {
+                    id: 0,
+                    operations: vec![Operation {
+                        ordinal: 0,
+                        anchor: anchor.clone(),
+                        evidence: vec![evidence_id.clone()],
+                        kind: OperationKind::Call {
+                            callee: "work".to_owned(),
+                            callee_anchor: anchor,
+                            resolved_symbols: vec!["work".to_owned()],
+                            receiver_type: None,
+                        },
+                    }],
+                    terminator: Terminator::Return { value: None },
+                    evidence: Vec::new(),
+                }],
+                coverage: coverage.clone(),
+                evidence: vec![evidence_id.clone()],
+            }],
+            coverage,
+            evidence: vec![evidence_id],
+        }],
+    })
 }
 
 #[test]
@@ -43,6 +114,7 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
     }))?;
     let artifacts = GraphArtifacts {
         document: document.clone(),
+        program: Some(program_fixture(b"first")?),
         analysis: Some(json!({"communities":{"1":["a","b"]}})),
         labels: Some(json!({"1":"Core"})),
         manifest: Some(json!({"a.py":{"ast_hash":"abc","semantic_hash":"abc","mtime":1.0}})),
@@ -55,6 +127,8 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
     let restored = GraphArtifacts::reconstruct(&partitioned)?;
     assert_eq!(restored, artifacts);
     assert_eq!(restored.document, document);
+    assert_eq!(partitioned.program_facts.len(), 4);
+    assert_eq!(partitioned.program_summaries.len(), 2);
     Ok(())
 }
 
@@ -73,6 +147,7 @@ fn legacy_unicode_and_empty_hyperedge_placement_round_trip()
     assert!(document.used_legacy_edges_key);
     let artifacts = GraphArtifacts {
         document,
+        program: None,
         analysis: None,
         labels: None,
         manifest: None,
@@ -112,6 +187,7 @@ fn simple_duplicate_edges_and_explicit_hyperedge_ids_are_rejected()
     ] {
         let artifacts = GraphArtifacts {
             document: serde_json::from_value(document)?,
+            program: None,
             analysis: None,
             labels: None,
             manifest: None,
@@ -131,6 +207,7 @@ fn operational_provenance_does_not_change_partition_identity()
     }))?;
     let first = GraphArtifacts {
         document: document.clone(),
+        program: None,
         analysis: None,
         labels: None,
         manifest: None,
@@ -138,6 +215,7 @@ fn operational_provenance_does_not_change_partition_identity()
     };
     let second = GraphArtifacts {
         document,
+        program: None,
         analysis: None,
         labels: None,
         manifest: None,
@@ -161,6 +239,7 @@ fn completed_seed_writes_normalized_marker_and_opaque_sidecars()
     let completed = compass_history::CompletedGraphArtifacts {
         artifacts: GraphArtifacts {
             document: serde_json::from_value(json!({"nodes": [], "links": []}))?,
+            program: None,
             analysis: None,
             labels: None,
             manifest: None,
@@ -193,12 +272,21 @@ fn seed_round_trip_includes_every_optional_authoritative_json_file()
     let directory = tempfile::tempdir()?;
     let artifacts = GraphArtifacts {
         document: serde_json::from_value(json!({"nodes": [], "links": []}))?,
+        program: Some(program_fixture(b"seed")?),
         analysis: Some(json!({"score": 1})),
         labels: Some(json!({"0": "Core"})),
         manifest: Some(json!({"fixture.rs": {"ast_hash": "abc"}})),
         authoritative_sidecars: BTreeMap::new(),
     };
     artifacts.write_seed(directory.path(), &completion())?;
+    assert_eq!(
+        std::fs::read(directory.path().join("program.json"))?,
+        artifacts
+            .program
+            .as_ref()
+            .ok_or("missing fixture program")?
+            .canonical_bytes()?
+    );
     let loaded = compass_history::CompletedGraphArtifacts::load(directory.path(), completion())?;
     assert_eq!(loaded.artifacts, artifacts);
     assert_eq!(loaded.partition()?, artifacts.partition(&completion())?);
@@ -211,6 +299,7 @@ fn incomplete_completion_and_unsafe_sidecar_paths_are_rejected()
     let document: GraphDocument = serde_json::from_value(json!({"nodes": [], "links": []}))?;
     let artifacts = GraphArtifacts {
         document,
+        program: None,
         analysis: None,
         labels: None,
         manifest: None,
@@ -313,6 +402,7 @@ fn reconstruction_rejects_missing_and_malformed_typed_records()
     }))?;
     let artifacts = GraphArtifacts {
         document,
+        program: None,
         analysis: Some(json!({"score": 1})),
         labels: None,
         manifest: None,

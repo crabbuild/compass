@@ -69,6 +69,7 @@ fn request(fingerprint: char, label: &str) -> Result<PublishRequest, Box<dyn std
             .parse::<ExtractionFingerprint>()?,
         artifacts: GraphArtifacts {
             document,
+            program: None,
             analysis: None,
             labels: None,
             manifest: None,
@@ -98,9 +99,9 @@ fn pruning_is_explicit_checked_and_retains_the_store_format()
         plan.prunable_realization_ids.as_slice(),
         std::slice::from_ref(&first.id)
     );
-    assert_eq!(plan.prunable_named_roots.len(), 6);
+    assert_eq!(plan.prunable_named_roots.len(), 8);
     let swept = history.sweep_gc(plan)?;
-    assert_eq!(swept.deleted_named_roots, 6);
+    assert_eq!(swept.deleted_named_roots, 8);
     assert!(history.get(&first.id).is_err());
     assert!(history.get(&second.id).is_ok());
     drop(history);
@@ -239,7 +240,7 @@ fn gc_rejects_incomplete_realization_root_sets() -> Result<(), Box<dyn std::erro
         Ok(_) => return Err("incomplete roots unexpectedly accepted".into()),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("exactly six"));
+    assert!(error.to_string().contains("complete schema-2 or schema-3"));
     Ok(())
 }
 

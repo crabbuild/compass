@@ -26,6 +26,7 @@ pub struct DerivedArtifactRequest {
 
 pub struct HistoryBundleInput<'a> {
     pub document: &'a GraphDocument,
+    pub program: Option<&'a [u8]>,
     pub analysis: Option<&'a Value>,
     pub labels: Option<&'a Value>,
     pub manifest: Option<&'a Value>,
@@ -62,6 +63,9 @@ pub fn publish_history_bundle(
 
 fn build_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), OutputError> {
     write_json_atomic(staging.join("graph.json"), input.document, false)?;
+    if let Some(program) = input.program {
+        write_bytes_atomic(staging.join("program.json"), program)?;
+    }
     if let Some(value) = input.analysis {
         write_json_atomic(staging.join(".compass_analysis.json"), value, false)?;
     }
@@ -201,6 +205,15 @@ fn validate_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<()
         return Err(OutputError::InvalidHistoryBundle(
             "graph.json changed during bundle rendering".to_owned(),
         ));
+    }
+    if let Some(expected) = input.program {
+        let actual = fs::read(staging.join("program.json"))
+            .map_err(|source| io(staging.join("program.json"), source))?;
+        if actual != expected {
+            return Err(OutputError::InvalidHistoryBundle(
+                "program.json changed during bundle rendering".to_owned(),
+            ));
+        }
     }
     for request in input.derived {
         if !staging.join(&request.relative_path).is_file() {
