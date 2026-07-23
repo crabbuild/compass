@@ -1,7 +1,9 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
+use rayon::prelude::*;
 use serde_json::Value;
 
 use crate::{FileError, StatHashIndex, io_error, write_json_atomic};
@@ -31,6 +33,14 @@ pub struct Cache {
     output_name: String,
     extractor_version: String,
     hashes: StatHashIndex,
+    session_hashes: HashMap<PathBuf, SessionHash>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionHash {
+    size: u64,
+    modified: Option<SystemTime>,
+    value: String,
 }
 
 impl Cache {
@@ -46,6 +56,7 @@ impl Cache {
             output_name,
             extractor_version: "0.9.20".to_owned(),
             hashes,
+            session_hashes: HashMap::new(),
         };
         cache.cleanup_stale_ast();
         Ok(cache)
@@ -78,7 +89,7 @@ impl Cache {
         allow_legacy: bool,
         allow_partial: bool,
     ) -> Result<Option<Value>, FileError> {
-        let hash = self.hashes.hash(path, &self.root)?;
+        let hash = self.content_hash(path)?;
         let mut entry = self
             .directory(kind, prompt_fingerprint)
             .join(format!("{hash}.json"));
@@ -118,10 +129,36 @@ impl Cache {
         }
         let mut on_disk = value.clone();
         relativize_source_files(&mut on_disk, &self.root);
-        let hash = self.hashes.hash(path, &self.root)?;
+        let hash = self.content_hash(path)?;
         let directory = self.directory(kind, prompt_fingerprint);
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
         write_json_atomic(directory.join(format!("{hash}.json")), &on_disk, false)
+    }
+
+    /// Persist a group of cache entries concurrently while retaining the same
+    /// content-addressed, atomic on-disk format as [`Self::save`].
+    pub fn save_batch(
+        &mut self,
+        entries: &[(PathBuf, Value)],
+        kind: &CacheKind,
+        prompt_fingerprint: Option<&str>,
+    ) -> Result<(), FileError> {
+        let directory = self.directory(kind, prompt_fingerprint);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        let mut jobs = Vec::with_capacity(entries.len());
+        for (path, value) in entries {
+            if !path.is_file() {
+                continue;
+            }
+            let hash = self.content_hash(path)?;
+            jobs.push((directory.join(format!("{hash}.json")), value));
+        }
+        let root = &self.root;
+        jobs.into_par_iter().try_for_each(|(destination, value)| {
+            let mut on_disk = value.clone();
+            relativize_source_files(&mut on_disk, root);
+            write_json_atomic(destination, &on_disk, false)
+        })
     }
 
     pub fn flush(&mut self) -> Result<(), FileError> {
@@ -188,6 +225,27 @@ impl Cache {
                 let _ = fs::remove_file(path);
             }
         }
+    }
+
+    fn content_hash(&mut self, path: &Path) -> Result<String, FileError> {
+        let metadata = fs::metadata(path).map_err(|source| io_error(path, source))?;
+        let modified = metadata.modified().ok();
+        if let Some(cached) = self.session_hashes.get(path)
+            && cached.size == metadata.len()
+            && cached.modified == modified
+        {
+            return Ok(cached.value.clone());
+        }
+        let value = self.hashes.hash(path, &self.root)?;
+        self.session_hashes.insert(
+            path.to_path_buf(),
+            SessionHash {
+                size: metadata.len(),
+                modified,
+                value: value.clone(),
+            },
+        );
+        Ok(value)
     }
 }
 

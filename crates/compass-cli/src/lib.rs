@@ -4225,11 +4225,11 @@ mod mcp_option_tests {
     }
 
     #[test]
-    fn absent_worker_override_preserves_memory_bounded_default() {
+    fn absent_worker_override_preserves_host_sized_default() {
         let mut options = BuildOptions::new(".");
-        assert_eq!(options.max_workers, Some(1));
+        assert_eq!(options.max_workers, None);
         apply_max_workers_override(&mut options, None);
-        assert_eq!(options.max_workers, Some(1));
+        assert_eq!(options.max_workers, None);
         apply_max_workers_override(&mut options, Some(4));
         assert_eq!(options.max_workers, Some(4));
     }

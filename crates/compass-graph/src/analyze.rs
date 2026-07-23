@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use rayon::prelude::*;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::cluster::{Communities, PythonRandom, cohesion_score};
+use crate::cluster::{Communities, PythonRandom};
 
 const BUILTIN_NOISE_LABELS: &[&str] = &[
     "str",
@@ -193,6 +194,7 @@ pub fn suggest_questions(
 ) -> Vec<SuggestedQuestion> {
     let graph = AnalysisGraph::new(document);
     let node_community = invert_communities(communities);
+    let cohesion = community_cohesion_scores(&graph, communities, &node_community);
     let mut questions = Vec::new();
     for edge in &graph.edges {
         if edge_string(edge.record, "confidence") != "AMBIGUOUS" {
@@ -337,7 +339,7 @@ pub fn suggest_questions(
         });
     }
     for (community, members) in communities {
-        let score = cohesion_score(document, members);
+        let score = cohesion.get(community).copied().unwrap_or(1.0);
         if score < 0.15 && members.len() >= 5 {
             let label = community_labels
                 .get(community)
@@ -795,18 +797,17 @@ fn node_betweenness(graph: &AnalysisGraph<'_>, sampled: bool) -> Vec<f64> {
     } else {
         (0..graph.len()).collect()
     };
+    // Each Brandes traversal is independent. Collecting from an indexed parallel
+    // iterator retains source order, and the sequential merge below retains the
+    // exact floating-point accumulation order of the previous implementation.
+    let source_scores = sources
+        .par_iter()
+        .map(|source| single_source_node_betweenness(graph, *source))
+        .collect::<Vec<_>>();
     let mut scores = vec![0.0; graph.len()];
-    for source in &sources {
-        let (mut stack, predecessors, paths) = shortest_paths(graph, *source);
-        let mut dependency = vec![0.0; graph.len()];
-        while let Some(node) = stack.pop() {
-            let coefficient = (1.0 + dependency[node]) / paths[node];
-            for predecessor in &predecessors[node] {
-                dependency[*predecessor] += paths[*predecessor] * coefficient;
-            }
-            if node != *source {
-                scores[node] += dependency[node];
-            }
+    for source_score in source_scores {
+        for (score, contribution) in scores.iter_mut().zip(source_score) {
+            *score += contribution;
         }
     }
     let n = graph.len();
@@ -831,6 +832,22 @@ fn node_betweenness(graph: &AnalysisGraph<'_>, sampled: bool) -> Vec<f64> {
             for score in &mut scores {
                 *score *= scale;
             }
+        }
+    }
+    scores
+}
+
+fn single_source_node_betweenness(graph: &AnalysisGraph<'_>, source: usize) -> Vec<f64> {
+    let (mut stack, predecessors, paths) = shortest_paths(graph, source);
+    let mut dependency = vec![0.0; graph.len()];
+    let mut scores = vec![0.0; graph.len()];
+    while let Some(node) = stack.pop() {
+        let coefficient = (1.0 + dependency[node]) / paths[node];
+        for predecessor in &predecessors[node] {
+            dependency[*predecessor] += paths[*predecessor] * coefficient;
+        }
+        if node != source {
+            scores[node] = dependency[node];
         }
     }
     scores
@@ -930,6 +947,7 @@ struct AnalysisGraph<'a> {
     positions: HashMap<&'a str, usize>,
     edges: Vec<AnalysisEdge<'a>>,
     adjacency: Vec<Vec<usize>>,
+    degrees: Vec<usize>,
     directed: bool,
 }
 
@@ -944,6 +962,7 @@ impl<'a> AnalysisGraph<'a> {
         let mut edges = Vec::<AnalysisEdge<'a>>::new();
         let mut edge_positions = HashMap::<(usize, usize), usize>::new();
         let mut adjacency = vec![Vec::new(); nodes.len()];
+        let mut degrees = vec![0; nodes.len()];
         for record in &document.links {
             let (Some(left), Some(right)) = (
                 positions.get(record.source.as_str()),
@@ -966,6 +985,8 @@ impl<'a> AnalysisGraph<'a> {
                 right: *right,
                 record,
             });
+            degrees[*left] += 1;
+            degrees[*right] += 1;
             adjacency[*left].push(*right);
             if !document.directed && left != right {
                 adjacency[*right].push(*left);
@@ -976,6 +997,7 @@ impl<'a> AnalysisGraph<'a> {
             positions,
             edges,
             adjacency,
+            degrees,
             directed: document.directed,
         }
     }
@@ -983,17 +1005,7 @@ impl<'a> AnalysisGraph<'a> {
         self.nodes.len()
     }
     fn degree(&self, node: usize) -> usize {
-        if self.directed {
-            self.edges
-                .iter()
-                .map(|edge| usize::from(edge.left == node) + usize::from(edge.right == node))
-                .sum()
-        } else {
-            self.adjacency[node]
-                .iter()
-                .map(|neighbor| if *neighbor == node { 2 } else { 1 })
-                .sum()
-        }
+        self.degrees[node]
     }
     fn is_file_node(&self, node: usize) -> bool {
         let record = self.nodes[node];
@@ -1058,6 +1070,35 @@ fn invert_communities(communities: &Communities) -> HashMap<String, usize> {
     communities
         .iter()
         .flat_map(|(community, nodes)| nodes.iter().map(move |node| (node.clone(), *community)))
+        .collect()
+}
+
+fn community_cohesion_scores(
+    graph: &AnalysisGraph<'_>,
+    communities: &Communities,
+    node_community: &HashMap<String, usize>,
+) -> HashMap<usize, f64> {
+    let mut internal_edges = HashMap::<usize, usize>::new();
+    for edge in &graph.edges {
+        let left = node_community.get(&graph.nodes[edge.left].id);
+        if let Some(community) = left
+            && node_community.get(&graph.nodes[edge.right].id) == Some(community)
+        {
+            *internal_edges.entry(*community).or_default() += 1;
+        }
+    }
+    communities
+        .iter()
+        .map(|(community, members)| {
+            let count = members.len();
+            let possible = count.saturating_mul(count.saturating_sub(1)) / 2;
+            let score = if possible == 0 {
+                1.0
+            } else {
+                internal_edges.get(community).copied().unwrap_or_default() as f64 / possible as f64
+            };
+            (*community, score)
+        })
         .collect()
 }
 fn is_concept_node(node: &NodeRecord) -> bool {

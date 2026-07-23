@@ -11,7 +11,7 @@ pub fn resolve_language_calls(extractions: &[Extraction], merged: &mut Extractio
 
 pub(crate) struct LanguageCallFacts {
     tables: TypeTables,
-    calls: Vec<RawCall>,
+    pub(crate) calls: Vec<RawCall>,
 }
 
 pub(crate) fn collect_language_call_facts(extractions: &[Extraction]) -> LanguageCallFacts {
@@ -22,6 +22,17 @@ pub(crate) fn collect_language_call_facts(extractions: &[Extraction]) -> Languag
             .flat_map(|extraction| extraction.raw_calls.iter().flatten().cloned())
             .collect(),
     }
+}
+
+pub(crate) fn collect_language_call_facts_owned(
+    extractions: &mut [Extraction],
+) -> LanguageCallFacts {
+    let tables = TypeTables::new(extractions);
+    let calls = extractions
+        .iter_mut()
+        .flat_map(|extraction| extraction.raw_calls.take().into_iter().flatten())
+        .collect();
+    LanguageCallFacts { tables, calls }
 }
 
 pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut Extraction) {

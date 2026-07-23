@@ -128,3 +128,41 @@ fn cross_language_phantoms_are_dropped_while_supported_families_survive()
     );
     Ok(())
 }
+
+#[test]
+fn networkx_edge_order_preserves_node_and_incident_edge_order() -> Result<(), Box<dyn Error>> {
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes": [
+            {"id":"c","label":"C"},
+            {"id":"a","label":"A"},
+            {"id":"b","label":"B"}
+        ],
+        "edges": [
+            {"source":"b","target":"c","relation":"calls"},
+            {"source":"c","target":"c","relation":"calls"},
+            {"source":"a","target":"c","relation":"calls"},
+            {"source":"a","target":"b","relation":"calls"}
+        ]
+    }))?;
+
+    let undirected = build_from_extraction(&extraction, false, None);
+    assert_eq!(
+        undirected
+            .links
+            .iter()
+            .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+            .collect::<Vec<_>>(),
+        [("c", "a"), ("c", "b"), ("c", "c"), ("a", "b")]
+    );
+
+    let directed = build_from_extraction(&extraction, true, None);
+    assert_eq!(
+        directed
+            .links
+            .iter()
+            .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+            .collect::<Vec<_>>(),
+        [("c", "c"), ("a", "b"), ("a", "c"), ("b", "c")]
+    );
+    Ok(())
+}

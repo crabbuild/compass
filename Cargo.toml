@@ -59,6 +59,7 @@ sha1 = "0.10"
 md-5 = "0.10"
 mimalloc = { version = "0.1.52", default-features = false }
 notify = "8.2.0"
+num_cpus = "1.17"
 prolly-map = "=0.5.0"
 prolly-store-sqlite = "=0.3.0"
 oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compression"] }

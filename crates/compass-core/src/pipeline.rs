@@ -40,7 +40,7 @@ pub struct BuildOptions {
     pub exclude_hubs: Option<f64>,
     pub google_workspace: bool,
     /// Maximum number of worker threads used by the deterministic AST stages.
-    /// `None` uses Rayon's process-wide default, matching the library default.
+    /// `None` uses the host CPU count in a build-local Rayon pool.
     pub max_workers: Option<usize>,
     /// Override the commit recorded in update artifacts.
     ///
@@ -73,13 +73,9 @@ impl BuildOptions {
             resolution: 1.0,
             exclude_hubs: None,
             google_workspace: false,
-            // Parser instances retain grammar tables, so unbounded host-wide
-            // parallelism can cost more memory than throughput on large
-            // multilingual repositories. One retained parser still clears the
-            // cold-build latency gate while leaving repeatable headroom below
-            // the Python oracle's peak on highly multilingual builds. Library
-            // callers can explicitly choose another bound when appropriate.
-            max_workers: Some(1),
+            // Large builds use a local host-sized pool. Keeping this unset also
+            // lets CLI callers provide an explicit memory/throughput bound.
+            max_workers: None,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
         }
@@ -387,12 +383,11 @@ fn build_graph_inner(
     } else {
         missing.clone_from(&sources);
     }
-    let worker_pool = if (missing.len() >= 256 || sources.len() >= 256)
-        && let Some(max_workers) = options.max_workers
-    {
+    let worker_count = options.max_workers.unwrap_or_else(default_ast_workers);
+    let worker_pool = if missing.len() >= 256 || sources.len() >= 256 {
         Some(
             rayon::ThreadPoolBuilder::new()
-                .num_threads(max_workers)
+                .num_threads(worker_count)
                 .thread_name(|index| format!("compass-ast-{index}"))
                 .build()
                 .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
@@ -402,27 +397,33 @@ fn build_graph_inner(
     };
     // A Rayon worker pool costs more resident memory than it saves time on
     // small multilingual projects, where parser-table page residency dominates.
-    // Stay sequential below the measured crossover; larger corpora retain the
-    // parallel pipeline that drives aggregate throughput.
+    // Stay sequential below the measured crossover. Larger corpora use an
+    // explicit local pool so an embedding application's global Rayon settings
+    // cannot silently serialize cold extraction.
+    let extract_source =
+        |engine: &mut Engine, path: &PathBuf| -> Result<_, compass_languages::ExtractError> {
+            let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let extraction = engine.extract_source(path, &bytes)?;
+            let source = (
+                path.to_string_lossy().into_owned(),
+                String::from_utf8_lossy(&bytes).into_owned(),
+            );
+            Ok((path.clone(), extraction, source))
+        };
     let fresh = if missing.len() < 256 {
         let mut engine = Engine::default();
         missing
             .iter()
-            .map(|path| {
-                engine
-                    .extract(path)
-                    .map(|extraction| (path.clone(), extraction))
-            })
+            .map(|path| extract_source(&mut engine, path))
             .collect::<Result<Vec<_>, _>>()?
     } else {
         let extract = || {
             missing
                 .par_iter()
-                .map_init(Engine::default, |engine, path| {
-                    engine
-                        .extract(path)
-                        .map(|extraction| (path.clone(), extraction))
-                })
+                .map_init(Engine::default, extract_source)
                 .collect::<Result<Vec<_>, _>>()
         };
         if let Some(pool) = &worker_pool {
@@ -431,19 +432,33 @@ fn build_graph_inner(
             extract()?
         }
     };
+    const CACHE_BATCH_SIZE: usize = 128;
+    for batch in fresh.chunks(CACHE_BATCH_SIZE) {
+        let entries = batch
+            .par_iter()
+            .filter(|(_, extraction, _)| !extraction.nodes.is_empty())
+            .map(|(path, extraction, _)| {
+                serde_json::to_value(extraction)
+                    .map(|value| (path.clone(), value))
+                    .map_err(|source| CoreError::SerializeExtraction {
+                        path: path.clone(),
+                        source,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        cache.save_batch(&entries, &CacheKind::Ast, None)?;
+    }
     let mut empty_files = Vec::new();
-    for (path, extraction) in fresh {
+    let fresh_paths = fresh
+        .iter()
+        .map(|(path, _, _)| path.clone())
+        .collect::<HashSet<_>>();
+    let mut fresh_source_text = HashMap::with_capacity(fresh.len());
+    for (path, extraction, (source_path, source)) in fresh {
         if extraction.nodes.is_empty() {
             empty_files.push(path.clone());
-        } else {
-            let value = serde_json::to_value(&extraction).map_err(|source| {
-                CoreError::SerializeExtraction {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            cache.save(&path, &value, &CacheKind::Ast, None)?;
         }
+        fresh_source_text.insert(source_path, source);
         extractions.insert(path, extraction);
     }
     cache.flush()?;
@@ -466,13 +481,20 @@ fn build_graph_inner(
             )
         })
     };
-    let source_text = if sources.len() < 256 {
-        sources.iter().filter_map(read_source).collect()
-    } else if let Some(pool) = &worker_pool {
-        pool.install(|| sources.par_iter().filter_map(read_source).collect())
-    } else {
-        sources.par_iter().filter_map(read_source).collect()
+    let read_cached_source = |path: &PathBuf| {
+        (!fresh_paths.contains(path))
+            .then(|| read_source(path))
+            .flatten()
     };
+    let cached_source_text: HashMap<_, _> = if sources.len() < 256 {
+        sources.iter().filter_map(read_cached_source).collect()
+    } else if let Some(pool) = &worker_pool {
+        pool.install(|| sources.par_iter().filter_map(read_cached_source).collect())
+    } else {
+        sources.par_iter().filter_map(read_cached_source).collect()
+    };
+    fresh_source_text.extend(cached_source_text);
+    let source_text = fresh_source_text;
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
     drop(source_text);
     finalize_ast_extraction(&mut resolved, &root, &ast_id_remap);
@@ -830,6 +852,16 @@ fn build_graph_inner(
     })
 }
 
+#[cfg(target_os = "macos")]
+fn default_ast_workers() -> usize {
+    num_cpus::get().max(num_cpus::get_physical())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_ast_workers() -> usize {
+    num_cpus::get()
+}
+
 fn semantic_layer_is_empty(layer: &SemanticLayer) -> bool {
     layer.refreshed_files.is_empty()
         && layer.partial_files.is_empty()
@@ -864,6 +896,7 @@ fn finalize_ast_extraction(
 ) {
     apply_ast_id_remap(extraction, ast_id_remap);
     let mut external_id_remap = HashMap::new();
+    let mut canonical_sources = HashMap::<String, PathBuf>::new();
     for node in &mut extraction.nodes {
         let Some(source) = node
             .attributes
@@ -874,8 +907,13 @@ fn finalize_ast_extraction(
             continue;
         };
         let source_path = Path::new(&source);
-        if !source_path.is_absolute() || rooted_source_identity(source_path, root).starts_with(root)
-        {
+        if !source_path.is_absolute() {
+            continue;
+        }
+        let canonical = canonical_sources
+            .entry(source.clone())
+            .or_insert_with(|| rooted_source_identity(source_path, root));
+        if canonical.starts_with(root) {
             continue;
         }
         let portable = portable_out_of_root_source(source_path, root);
@@ -903,7 +941,7 @@ fn finalize_ast_extraction(
         }
     }
     for node in &mut extraction.nodes {
-        normalize_source_attribute(&mut node.attributes, root);
+        normalize_source_attribute_cached(&mut node.attributes, root, &mut canonical_sources);
         node.attributes.remove("origin_file");
         node.attributes.remove("_callable");
         node.attributes.insert(
@@ -912,12 +950,39 @@ fn finalize_ast_extraction(
         );
     }
     for edge in &mut extraction.edges {
-        normalize_source_attribute(&mut edge.attributes, root);
+        normalize_source_attribute_cached(&mut edge.attributes, root, &mut canonical_sources);
         edge.attributes.insert(
             "_origin".to_owned(),
             serde_json::Value::String("ast".to_owned()),
         );
     }
+}
+
+fn normalize_source_attribute_cached(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    root: &Path,
+    canonical_sources: &mut HashMap<String, PathBuf>,
+) {
+    let Some(source) = attributes
+        .get("source_file")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return;
+    };
+    let path = Path::new(source);
+    if !path.is_absolute() {
+        return;
+    }
+    let canonical_path = canonical_sources
+        .entry(source.to_owned())
+        .or_insert_with(|| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+    let Ok(relative) = canonical_path.strip_prefix(root) else {
+        return;
+    };
+    attributes.insert(
+        "source_file".to_owned(),
+        serde_json::Value::String(relative.to_string_lossy().replace('\\', "/")),
+    );
 }
 
 fn portable_out_of_root_source(path: &Path, root: &Path) -> String {
