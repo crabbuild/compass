@@ -1136,7 +1136,9 @@ name = "compass-languages"
 version = "0.1.0"
 dependencies = [
  "compass-files",
+ "compass-ir",
  "compass-model",
+ "compass-program",
  "compass-tree-sitter-language-pack",
  "flate2",
  "regex",

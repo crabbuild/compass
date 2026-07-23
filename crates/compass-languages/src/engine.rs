@@ -247,7 +247,7 @@ impl Engine {
         Ok(crate::dm::extract_source(path, &source, tree.root_node()))
     }
 
-    fn parse(
+    pub(crate) fn parse(
         &mut self,
         path: &Path,
         spec: LanguageSpec,
