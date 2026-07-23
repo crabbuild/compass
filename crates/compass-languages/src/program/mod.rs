@@ -10,7 +10,7 @@ use compass_program::{
 
 use crate::{Engine, ExtractorKind, Registry};
 
-pub const TREE_SITTER_PROGRAM_PROVIDER_VERSION: u32 = 1;
+pub const TREE_SITTER_PROGRAM_PROVIDER_VERSION: u32 = 2;
 
 #[derive(Default)]
 pub struct TreeSitterSyntaxProvider {

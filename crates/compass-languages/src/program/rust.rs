@@ -23,6 +23,8 @@ struct Collector<'a> {
     descriptor: ProviderDescriptor,
     input: &'a FileInput<'a>,
     definitions: HashMap<String, Vec<String>>,
+    definition_occurrences: HashMap<String, u32>,
+    function_occurrences: HashMap<String, u32>,
     functions: Vec<FunctionIr>,
     evidence: Vec<compass_ir::EvidenceRecord>,
     coverage_reasons: BTreeMap<Capability, Vec<String>>,
@@ -34,6 +36,8 @@ impl<'a> Collector<'a> {
             descriptor,
             input,
             definitions: HashMap::new(),
+            definition_occurrences: HashMap::new(),
+            function_occurrences: HashMap::new(),
             functions: Vec::new(),
             evidence: Vec::new(),
             coverage_reasons: BTreeMap::new(),
@@ -53,12 +57,13 @@ impl<'a> Collector<'a> {
             "function_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = text(self.input.source, name_node);
-                    let symbol = symbol_id(
+                    let base = symbol_id(
                         self.input.source_file,
                         owner,
                         name,
                         signature_bytes(self.input.source, node),
                     );
+                    let symbol = unique_symbol_id(base, &mut self.definition_occurrences);
                     self.definitions
                         .entry(name.to_owned())
                         .or_default()
@@ -113,7 +118,8 @@ impl<'a> Collector<'a> {
         }
         let display_name = owner.map_or_else(|| name.to_owned(), |owner| format!("{owner}.{name}"));
         let signature = signature_bytes(self.input.source, node);
-        let symbol = symbol_id(self.input.source_file, owner, name, signature);
+        let base = symbol_id(self.input.source_file, owner, name, signature);
+        let symbol = unique_symbol_id(base, &mut self.function_occurrences);
         let function_anchor = anchor(self.input.source_file, node);
         let definition = evidence_record(
             &self.descriptor.id,
@@ -541,6 +547,17 @@ fn symbol_id(path: &str, owner: Option<&str>, name: &str, signature: &[u8]) -> S
         )
         .as_bytes(),
     )
+}
+
+fn unique_symbol_id(base: String, occurrences: &mut HashMap<String, u32>) -> String {
+    let occurrence = occurrences.entry(base.clone()).or_default();
+    let symbol = if *occurrence == 0 {
+        base.clone()
+    } else {
+        hex_sha256(format!("{base}\0{occurrence}").as_bytes())
+    };
+    *occurrence = occurrence.saturating_add(1);
+    symbol
 }
 
 fn signature_bytes<'a>(source: &'a [u8], node: Node<'_>) -> &'a [u8] {

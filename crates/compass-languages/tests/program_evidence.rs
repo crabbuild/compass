@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 
 use compass_ir::{Capability, CoverageState, OperationKind};
@@ -87,5 +88,43 @@ fn typescript_family_and_unsupported_languages_dispatch() -> Result<(), Box<dyn 
             })?
             .is_none()
     );
+    Ok(())
+}
+
+#[test]
+fn repeated_signatures_in_distinct_lexical_scopes_have_unique_syntax_symbols()
+-> Result<(), Box<dyn Error>> {
+    for (path, language, source) in [
+        (
+            "src/lib.rs",
+            "rust",
+            b"mod left { fn same() {} }\nmod right { fn same() {} }\n".as_slice(),
+        ),
+        (
+            "src/app.ts",
+            "typescript",
+            b"namespace Left { function same() {} }\nnamespace Right { function same() {} }\n"
+                .as_slice(),
+        ),
+    ] {
+        let batch = TreeSitterSyntaxProvider::default()
+            .analyze_file(FileInput {
+                source_file: path,
+                language,
+                source,
+            })?
+            .ok_or("missing syntax batch")?;
+        let functions = &batch.modules[0].functions;
+        assert_eq!(functions.len(), 2);
+        assert_eq!(
+            functions
+                .iter()
+                .map(|function| function.symbol_id.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            functions.len()
+        );
+        compass_program::merge_evidence(vec![batch])?.validate()?;
+    }
     Ok(())
 }

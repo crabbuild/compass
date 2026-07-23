@@ -23,6 +23,8 @@ struct Collector<'a> {
     descriptor: ProviderDescriptor,
     input: &'a FileInput<'a>,
     definitions: HashMap<String, Vec<String>>,
+    definition_occurrences: HashMap<String, u32>,
+    function_occurrences: HashMap<String, u32>,
     functions: Vec<FunctionIr>,
     evidence: Vec<compass_ir::EvidenceRecord>,
     reasons: BTreeMap<Capability, Vec<String>>,
@@ -34,6 +36,8 @@ impl<'a> Collector<'a> {
             descriptor,
             input,
             definitions: HashMap::new(),
+            definition_occurrences: HashMap::new(),
+            function_occurrences: HashMap::new(),
             functions: Vec::new(),
             evidence: Vec::new(),
             reasons: BTreeMap::new(),
@@ -86,11 +90,12 @@ impl<'a> Collector<'a> {
         if let Some((name, signature_node)) =
             function_name(self.input.source, node, next_owner.as_deref())
         {
-            let symbol = symbol_id(
+            let base = symbol_id(
                 self.input.source_file,
                 &name,
                 signature_bytes(self.input.source, signature_node),
             );
+            let symbol = unique_symbol_id(base, &mut self.definition_occurrences);
             let short = name.rsplit('.').next().unwrap_or(&name);
             self.definitions
                 .entry(short.to_owned())
@@ -127,7 +132,8 @@ impl<'a> Collector<'a> {
             return;
         };
         let signature = signature_bytes(self.input.source, function);
-        let symbol = symbol_id(self.input.source_file, &name, signature);
+        let base = symbol_id(self.input.source_file, &name, signature);
+        let symbol = unique_symbol_id(base, &mut self.function_occurrences);
         let name_anchor = function
             .child_by_field_name("name")
             .or_else(|| container.child_by_field_name("name"))
@@ -541,6 +547,17 @@ fn add_reason(
 
 fn symbol_id(path: &str, name: &str, signature: &[u8]) -> String {
     hex_sha256(format!("{path}\0{name}\0{}", hex_sha256(signature)).as_bytes())
+}
+
+fn unique_symbol_id(base: String, occurrences: &mut HashMap<String, u32>) -> String {
+    let occurrence = occurrences.entry(base.clone()).or_default();
+    let symbol = if *occurrence == 0 {
+        base.clone()
+    } else {
+        hex_sha256(format!("{base}\0{occurrence}").as_bytes())
+    };
+    *occurrence = occurrence.saturating_add(1);
+    symbol
 }
 
 fn signature_bytes<'a>(source: &'a [u8], node: Node<'_>) -> &'a [u8] {
