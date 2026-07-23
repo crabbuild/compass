@@ -1,9 +1,8 @@
 # Program IR Evidence Foundation Implementation Plan
 
-> Historical note: this plan describes the original `compass.program/1`
-> foundation. Current output uses `compass.program/2` with complete, partial,
-> indeterminate, and failed coverage states while retaining schema-1 read
-> compatibility. Current artifact status also reports decoded artifacts and
+> Current output uses the first public Program IR schema,
+> `http://crab.build/compass/v1`, with complete, partial, indeterminate, and
+> failed coverage states. Artifact status reports decoded artifacts and
 > per-document analysis/reuse separately.
 
 > **For implementers:** execute this plan task by task with
@@ -77,7 +76,7 @@ not implement branch-complete CFGs, interprocedural fixed-point data flow,
 native compiler integrations, runtime overlays, semantic impact, repository
 federation, or agent APIs.
 
-The first artifact schema is `compass.program/1`. It contains:
+The first artifact schema is `http://crab.build/compass/v1`. It contains:
 
 - the exact provider manifest used for the build;
 - evidence provenance and capability-specific coverage;
@@ -85,7 +84,7 @@ The first artifact schema is `compass.program/1`. It contains:
 - deterministic function summaries and reverse-call dependencies.
 
 The foundation deliberately reports syntax-only limitations. A Tree-sitter
-provider may report complete syntax extraction and partial or unavailable type,
+provider may report complete syntax extraction and partial or indeterminate type,
 call-resolution, CFG, data-flow, effect, and contract coverage at the same time.
 
 ## Dependency direction and file ownership
@@ -135,7 +134,7 @@ change during implementation.
 
 ```rust
 // compass-ir
-pub const PROGRAM_SCHEMA: &str = "compass.program/1";
+pub const PROGRAM_SCHEMA: &str = "http://crab.build/compass/v1";
 pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
 
 pub type EvidenceId = String;
@@ -169,7 +168,8 @@ pub enum Capability {
 pub enum CoverageState {
     Complete,
     Partial { reasons: Vec<String> },
-    Unavailable { reasons: Vec<String> },
+    Indeterminate { reasons: Vec<String> },
+    Failed { reasons: Vec<String> },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -311,7 +311,7 @@ and evidence IDs. Assert:
 
 - `canonical_bytes()` are identical;
 - `digest()` is identical;
-- canonical output contains `compass.program/1`;
+- canonical output contains `http://crab.build/compass/v1`;
 - absolute paths and unknown evidence IDs fail validation;
 - duplicate provider IDs and duplicate evidence IDs fail validation;
 - an operation may be syntax-complete while call resolution is partial;
@@ -665,7 +665,7 @@ Assert:
 - unsupported Go returns `None`;
 - exact operation and callee spans slice the expected source bytes;
 - syntax, definitions, and lexical effects have syntax evidence IDs;
-- types and call resolution are partial or unavailable rather than invented;
+- types and call resolution are partial or indeterminate rather than invented;
 - a uniquely resolvable same-module call may carry a conservative local target;
 - traits, imports, virtual calls, dynamic access, macros, decorators, JSX, and
   branch-sensitive CFGs add exact capability reasons;

@@ -141,7 +141,10 @@ fn validation_rejects_duplicate_provider_and_evidence_ids() {
 }
 
 #[test]
-fn schema_two_uses_four_states_and_schema_one_remains_readable() {
+fn public_v1_schema_uses_the_four_coverage_states() {
+    assert_eq!(compass_ir::PROGRAM_SCHEMA, "http://crab.build/compass/v1");
+    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 1);
+
     let mut current = bundle();
     current.modules[0].coverage.insert(
         Capability::Types,
@@ -157,34 +160,9 @@ fn schema_two_uses_four_states_and_schema_one_remains_readable() {
     );
     assert!(current.validate().is_ok());
 
-    current.modules[0].coverage.insert(
-        Capability::DataFlow,
-        CoverageState::Unavailable {
-            reasons: vec!["legacy_only".to_owned()],
-        },
-    );
-    assert!(matches!(
-        current.validate(),
-        Err(IrError::InvalidCoverage { .. })
-    ));
-
-    let mut legacy = bundle();
-    legacy.schema = compass_ir::PROGRAM_SCHEMA_V1.to_owned();
-    legacy.modules[0].coverage.insert(
-        Capability::DataFlow,
-        CoverageState::Unavailable {
-            reasons: vec!["legacy_unavailable".to_owned()],
-        },
-    );
-    assert!(legacy.validate().is_ok());
-    legacy.modules[0].coverage.insert(
-        Capability::Contracts,
-        CoverageState::Failed {
-            reasons: vec!["not_supported_in_schema_one".to_owned()],
-        },
-    );
-    assert!(matches!(
-        legacy.validate(),
-        Err(IrError::InvalidCoverage { .. })
-    ));
+    for pre_release_schema in ["compass.program/1", "compass.program/2"] {
+        let mut pre_release = bundle();
+        pre_release.schema = pre_release_schema.to_owned();
+        assert!(matches!(pre_release.validate(), Err(IrError::Schema(_))));
+    }
 }

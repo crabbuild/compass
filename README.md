@@ -255,10 +255,10 @@ Rust and TypeScript-family languages with any SCIP indexes already on disk.
 Compass does not invoke an indexer, compiler, language server, model, or network
 service to build this artifact.
 
-Schema `compass.program/2` reports each capability as `complete`, `partial`,
-`indeterminate`, or `failed`, with machine-readable reasons for every
-non-complete state. Schema 1 remains readable. Unresolved calls are retained as
-uncertainty and are never treated as proof that no downstream target exists.
+Schema `http://crab.build/compass/v1` reports each capability as `complete`,
+`partial`, `indeterminate`, or `failed`, with machine-readable reasons for
+every non-complete state. Unresolved calls are retained as uncertainty and are
+never treated as proof that no downstream target exists.
 
 Inspect or query the current artifact without custom JSON scripts:
 

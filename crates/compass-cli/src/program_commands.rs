@@ -279,7 +279,6 @@ fn coverage_parts(state: &CoverageState) -> (&'static str, &[String]) {
         CoverageState::Partial { reasons } => ("partial", reasons),
         CoverageState::Indeterminate { reasons } => ("indeterminate", reasons),
         CoverageState::Failed { reasons } => ("failed", reasons),
-        CoverageState::Unavailable { reasons } => ("unavailable", reasons),
     }
 }
 

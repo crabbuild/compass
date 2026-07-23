@@ -636,10 +636,11 @@ providers. Their evidence is deliberately conservative: unsupported compiler
 semantics remain partial or indeterminate. Official SCIP protobuf is decoded
 in-process with bounded streaming, path validation, freshness reporting, and an
 optional digest-binding companion manifest. Compass does not invoke an indexer
-or language server. Program schema 2 implements the four-state completeness
-contract above while retaining read compatibility with schema 1. Decoded SCIP
-documents are cached by immutable artifact digest, and freshness normalization
-is invalidated per indexed document rather than per repository.
+or language server. The first public Program IR schema,
+`http://crab.build/compass/v1`, implements the four-state completeness contract
+above. Decoded SCIP documents are cached by immutable artifact digest, and
+freshness normalization is invalidated per indexed document rather than per
+repository.
 
 The read-only `compass program` surface provides summaries, coverage,
 function inspection, callers, source-byte call explanations, and CompassQL over

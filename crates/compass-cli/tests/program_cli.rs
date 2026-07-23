@@ -120,7 +120,7 @@ fn program_commands_inspect_explain_and_query_canonical_ir() -> Result<(), Box<d
     assert_eq!(summary.code, 0, "{}", summary.stderr);
     let summary_json: serde_json::Value = serde_json::from_str(&summary.stdout)?;
     assert_eq!(summary_json["functions"], 2);
-    assert_eq!(summary_json["schema"], "compass.program/2");
+    assert_eq!(summary_json["schema"], "http://crab.build/compass/v1");
 
     let functions = run(
         Frontend::Compass,

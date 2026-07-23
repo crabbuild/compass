@@ -381,13 +381,9 @@ fn combined_state(left: &CoverageState, right: &CoverageState) -> CoverageState 
         || matches!(right, CoverageState::Partial { .. })
     {
         CoverageState::Partial { reasons }
-    } else if matches!(
-        left,
-        CoverageState::Indeterminate { .. } | CoverageState::Unavailable { .. }
-    ) || matches!(
-        right,
-        CoverageState::Indeterminate { .. } | CoverageState::Unavailable { .. }
-    ) {
+    } else if matches!(left, CoverageState::Indeterminate { .. })
+        || matches!(right, CoverageState::Indeterminate { .. })
+    {
         CoverageState::Indeterminate { reasons }
     } else {
         CoverageState::Failed { reasons }
@@ -399,8 +395,7 @@ fn state_reasons(state: &CoverageState) -> &[String] {
         CoverageState::Complete => &[],
         CoverageState::Partial { reasons }
         | CoverageState::Indeterminate { reasons }
-        | CoverageState::Failed { reasons }
-        | CoverageState::Unavailable { reasons } => reasons,
+        | CoverageState::Failed { reasons } => reasons,
     }
 }
 
@@ -415,8 +410,7 @@ fn mark_partial(coverage: &mut Coverage, capability: Capability, reason: &str) {
                 CoverageState::Complete => partial.clone(),
                 CoverageState::Partial { reasons }
                 | CoverageState::Indeterminate { reasons }
-                | CoverageState::Failed { reasons }
-                | CoverageState::Unavailable { reasons } => CoverageState::Partial {
+                | CoverageState::Failed { reasons } => CoverageState::Partial {
                     reasons: union_reasons(reasons, &[reason.to_owned()]),
                 },
             };

@@ -84,8 +84,7 @@ impl EvidenceBatch {
                     CoverageState::Complete => {}
                     CoverageState::Partial { reasons }
                     | CoverageState::Indeterminate { reasons }
-                    | CoverageState::Failed { reasons }
-                    | CoverageState::Unavailable { reasons } => {
+                    | CoverageState::Failed { reasons } => {
                         reasons.sort();
                         reasons.dedup();
                     }

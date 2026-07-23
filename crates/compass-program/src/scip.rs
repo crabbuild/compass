@@ -651,8 +651,7 @@ fn add_coverage_reason(coverage: &mut Coverage, capability: Capability, reason: 
             }
             CoverageState::Partial { reasons }
             | CoverageState::Indeterminate { reasons }
-            | CoverageState::Failed { reasons }
-            | CoverageState::Unavailable { reasons } => {
+            | CoverageState::Failed { reasons } => {
                 reasons.push(reason.to_owned());
             }
         })

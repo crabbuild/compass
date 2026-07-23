@@ -12,9 +12,7 @@ pub use model::{
 };
 pub use validation::IrError;
 
-/// Legacy Program IR schema accepted when reading immutable history.
-pub const PROGRAM_SCHEMA_V1: &str = "compass.program/1";
 /// Stable serialized Program IR schema identifier.
-pub const PROGRAM_SCHEMA: &str = "compass.program/2";
+pub const PROGRAM_SCHEMA: &str = "http://crab.build/compass/v1";
 /// Numeric Program IR schema version used by caches and history.
-pub const PROGRAM_SCHEMA_VERSION: u32 = 2;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 1;

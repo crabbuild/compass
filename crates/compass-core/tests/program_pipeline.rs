@@ -186,7 +186,10 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     assert_eq!(cold.program_syntax_reused, 0);
     let cold_bytes = fs::read(&output)?;
     let document: serde_json::Value = serde_json::from_slice(&cold_bytes)?;
-    assert_eq!(document["program"]["schema"], "compass.program/2");
+    assert_eq!(
+        document["program"]["schema"],
+        "http://crab.build/compass/v1"
+    );
     assert_eq!(document["analysis_schema_version"], 1);
 
     let warm = build_local_graph(&options)?;

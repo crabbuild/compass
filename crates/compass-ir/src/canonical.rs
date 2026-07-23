@@ -127,8 +127,7 @@ fn canonicalize_coverage(coverage: &mut crate::Coverage) {
             CoverageState::Complete => {}
             CoverageState::Partial { reasons }
             | CoverageState::Indeterminate { reasons }
-            | CoverageState::Failed { reasons }
-            | CoverageState::Unavailable { reasons } => {
+            | CoverageState::Failed { reasons } => {
                 sort_dedup(reasons);
             }
         }
