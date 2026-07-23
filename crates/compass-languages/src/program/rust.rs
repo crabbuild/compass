@@ -220,7 +220,12 @@ fn collect_operations(
         "call_expression" => {
             if let Some(function) = node.child_by_field_name("function") {
                 let callee_node = rightmost_identifier(function).unwrap_or(function);
-                let callee = text(input.source, callee_node);
+                let raw_callee = text(input.source, callee_node);
+                let callee = if raw_callee.is_empty() || raw_callee == "_" {
+                    "<dynamic>"
+                } else {
+                    raw_callee
+                };
                 let call_anchor = anchor(input.source_file, node);
                 let callee_anchor = anchor(input.source_file, callee_node);
                 let syntax = evidence_record(
@@ -285,10 +290,12 @@ fn collect_operations(
             }
         }
         "field_expression" => {
-            if node
-                .parent()
-                .is_none_or(|parent| parent.kind() != "assignment_expression")
-            {
+            if node.parent().is_none_or(|parent| {
+                !matches!(
+                    parent.kind(),
+                    "assignment_expression" | "call_expression" | "field_expression"
+                )
+            }) {
                 push_path_operation(
                     input,
                     provider_id,
@@ -492,7 +499,7 @@ fn function_coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
         };
         coverage.insert(
             capability,
-            CoverageState::Unavailable {
+            CoverageState::Indeterminate {
                 reasons: vec![reason.to_owned()],
             },
         );
@@ -574,10 +581,22 @@ fn rightmost_identifier(node: Node<'_>) -> Option<Node<'_>> {
     ) {
         return Some(node);
     }
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .filter_map(rightmost_identifier)
-        .last()
+    match node.kind() {
+        "field_expression" => node
+            .child_by_field_name("field")
+            .and_then(rightmost_identifier),
+        "scoped_identifier" | "generic_function" => node
+            .child_by_field_name("name")
+            .or_else(|| node.child_by_field_name("function"))
+            .and_then(rightmost_identifier),
+        "parenthesized_expression" => {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .next()
+                .and_then(rightmost_identifier)
+        }
+        _ => None,
+    }
 }
 
 fn child_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {

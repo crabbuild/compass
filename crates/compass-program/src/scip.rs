@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use base64::Engine;
 use compass_ir::{
     Capability, Coverage, CoverageState, ProviderDescriptor, ProviderKind, SourceAnchor,
     canonical_json_bytes, hex_sha256,
 };
+use protobuf::Message;
 use scip::types::{
     Document, Metadata, Occurrence, PositionEncoding, Relationship, SymbolInformation, SymbolRole,
     TextEncoding, occurrence,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::manifest::{manifest_digest, validate_manifest};
 use crate::scip_stream::{read_metadata, verify_reader, visit_documents};
@@ -18,17 +21,139 @@ use crate::{
 
 pub const SCIP_PROVIDER_VERSION: u32 = 1;
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DecodedScipDocument {
+    pub path: String,
+    pub protobuf_base64: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DecodedScipArtifact {
+    pub metadata_protobuf_base64: String,
+    pub documents: Vec<DecodedScipDocument>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OfficialScipProvider;
+
+impl OfficialScipProvider {
+    pub fn decode_artifact(
+        &self,
+        input: ArtifactInput<'_>,
+        reader: &mut dyn ArtifactReader,
+    ) -> Result<DecodedScipArtifact, ProviderError> {
+        verify_reader(reader, input.byte_len, input.input_digest, input.limits)?;
+        if let Some(manifest) = input.manifest {
+            validate_manifest(manifest, input.input_digest)?;
+        }
+        let metadata = read_metadata(reader, input.limits)?;
+        validate_metadata(&metadata)?;
+        let metadata_protobuf_base64 = base64::engine::general_purpose::STANDARD
+            .encode(metadata.write_to_bytes().map_err(protobuf_error)?);
+        let mut paths = BTreeSet::new();
+        let mut documents = Vec::new();
+        visit_documents(reader, input.limits, |document| {
+            let path = normalize_source_path(&document.relative_path)?;
+            if !paths.insert(path.clone()) {
+                return Err(ProviderError::InvalidInput(format!(
+                    "duplicate normalized SCIP document path {path}"
+                )));
+            }
+            documents.push(DecodedScipDocument {
+                path,
+                protobuf_base64: base64::engine::general_purpose::STANDARD
+                    .encode(document.write_to_bytes().map_err(protobuf_error)?),
+            });
+            Ok(())
+        })?;
+        documents.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
+        Ok(DecodedScipArtifact {
+            metadata_protobuf_base64,
+            documents,
+        })
+    }
+
+    pub fn normalize_decoded(
+        &self,
+        input: ArtifactInput<'_>,
+        decoded: &DecodedScipArtifact,
+    ) -> Result<EvidenceBatch, ProviderError> {
+        if let Some(manifest) = input.manifest {
+            validate_manifest(manifest, input.input_digest)?;
+        }
+        let metadata_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&decoded.metadata_protobuf_base64)
+            .map_err(|error| ProviderError::MalformedArtifact(error.to_string()))?;
+        if metadata_bytes.len() as u64 > input.limits.max_metadata_bytes {
+            return Err(ProviderError::ResourceLimit(
+                "cached SCIP metadata exceeds configured limit".to_owned(),
+            ));
+        }
+        let metadata = Metadata::parse_from_bytes(&metadata_bytes).map_err(protobuf_error)?;
+        validate_metadata(&metadata)?;
+        let mut batch = EvidenceBatch {
+            descriptor: self.descriptor(&input),
+            evidence: Vec::new(),
+            modules: Vec::new(),
+            facts: Vec::new(),
+            coverage: BTreeMap::new(),
+        };
+        add_tool_evidence(&metadata, &mut batch);
+        let mut paths = BTreeSet::new();
+        for cached in &decoded.documents {
+            let path = normalize_source_path(&cached.path)?;
+            if !paths.insert(path.clone()) {
+                return Err(ProviderError::InvalidInput(format!(
+                    "duplicate normalized SCIP document path {path}"
+                )));
+            }
+            let document_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&cached.protobuf_base64)
+                .map_err(|error| ProviderError::MalformedArtifact(error.to_string()))?;
+            if document_bytes.len() as u64 > input.limits.max_document_bytes {
+                return Err(ProviderError::ResourceLimit(format!(
+                    "cached SCIP document {path} exceeds configured limit"
+                )));
+            }
+            let document = Document::parse_from_bytes(&document_bytes).map_err(protobuf_error)?;
+            if normalize_source_path(&document.relative_path)? != path {
+                return Err(ProviderError::MalformedArtifact(format!(
+                    "cached SCIP document path mismatch for {path}"
+                )));
+            }
+            let freshness = freshness(&input, &path)?;
+            if freshness == Freshness::Stale {
+                batch
+                    .coverage
+                    .insert(path, coverage_for_document(Freshness::Stale));
+                continue;
+            }
+            normalize_document(&input, &metadata, &document, &path, freshness, &mut batch)?;
+        }
+        Ok(batch.canonicalized())
+    }
+}
 
 impl ArtifactProvider for OfficialScipProvider {
     fn descriptor(&self, input: &ArtifactInput<'_>) -> ProviderDescriptor {
         let manifest = manifest_digest(input.manifest);
-        let configuration_digest = canonical_json_bytes(&(&manifest, input.source_digests))
-            .map_or_else(
-                |_| hex_sha256(b"invalid-scip-configuration"),
-                |bytes| hex_sha256(&bytes),
-            );
+        let bound_sources = input
+            .manifest
+            .map(|manifest| {
+                manifest
+                    .documents
+                    .keys()
+                    .filter_map(|path| {
+                        let path = normalize_source_path(path).ok()?;
+                        Some((path.clone(), input.source_digests.get(&path).cloned()))
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        let configuration_digest = canonical_json_bytes(&(&manifest, &bound_sources)).map_or_else(
+            |_| hex_sha256(b"invalid-scip-configuration"),
+            |bytes| hex_sha256(&bytes),
+        );
         ProviderDescriptor {
             id: format!("scip:{}", input.input_digest),
             kind: ProviderKind::Artifact,
@@ -44,39 +169,8 @@ impl ArtifactProvider for OfficialScipProvider {
         input: ArtifactInput<'_>,
         reader: &mut dyn ArtifactReader,
     ) -> Result<EvidenceBatch, ProviderError> {
-        verify_reader(reader, input.byte_len, input.input_digest, input.limits)?;
-        if let Some(manifest) = input.manifest {
-            validate_manifest(manifest, input.input_digest)?;
-        }
-        let metadata = read_metadata(reader, input.limits)?;
-        validate_metadata(&metadata)?;
-        let descriptor = self.descriptor(&input);
-        let mut batch = EvidenceBatch {
-            descriptor,
-            evidence: Vec::new(),
-            modules: Vec::new(),
-            facts: Vec::new(),
-            coverage: BTreeMap::new(),
-        };
-        add_tool_evidence(&metadata, &mut batch);
-        let mut paths = BTreeSet::new();
-        visit_documents(reader, input.limits, |document| {
-            let path = normalize_source_path(&document.relative_path)?;
-            if !paths.insert(path.clone()) {
-                return Err(ProviderError::InvalidInput(format!(
-                    "duplicate normalized SCIP document path {path}"
-                )));
-            }
-            let freshness = freshness(&input, &path)?;
-            if freshness == Freshness::Stale {
-                batch
-                    .coverage
-                    .insert(path, coverage_for_document(Freshness::Stale));
-                return Ok(());
-            }
-            normalize_document(&input, &metadata, &document, &path, freshness, &mut batch)
-        })?;
-        Ok(batch.canonicalized())
+        let decoded = self.decode_artifact(input, reader)?;
+        self.normalize_decoded(input, &decoded)
     }
 }
 
@@ -117,11 +211,15 @@ fn normalize_document(
     freshness: Freshness,
     batch: &mut EvidenceBatch,
 ) -> Result<(), ProviderError> {
-    let source = input
-        .source_texts
-        .get(path)
-        .map(Vec::as_slice)
-        .or_else(|| (!document.text.is_empty()).then_some(document.text.as_bytes()));
+    let source = match freshness {
+        Freshness::Verified => input
+            .source_texts
+            .get(path)
+            .map(Vec::as_slice)
+            .or_else(|| (!document.text.is_empty()).then_some(document.text.as_bytes())),
+        Freshness::Unverified => (!document.text.is_empty()).then_some(document.text.as_bytes()),
+        Freshness::Stale => None,
+    };
     let Some(source) = source else {
         let mut coverage = coverage_for_document(freshness);
         add_coverage_reason(
@@ -551,13 +649,20 @@ fn add_coverage_reason(coverage: &mut Coverage, capability: Capability, reason: 
                     reasons: vec![reason.to_owned()],
                 };
             }
-            CoverageState::Partial { reasons } | CoverageState::Unavailable { reasons } => {
+            CoverageState::Partial { reasons }
+            | CoverageState::Indeterminate { reasons }
+            | CoverageState::Failed { reasons }
+            | CoverageState::Unavailable { reasons } => {
                 reasons.push(reason.to_owned());
             }
         })
         .or_insert_with(|| CoverageState::Partial {
             reasons: vec![reason.to_owned()],
         });
+}
+
+fn protobuf_error(error: protobuf::Error) -> ProviderError {
+    ProviderError::MalformedArtifact(error.to_string())
 }
 
 #[cfg(test)]

@@ -1271,6 +1271,7 @@ dependencies = [
 name = "compass-program"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "compass-ir",
  "protobuf",
  "scip",

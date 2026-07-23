@@ -9,6 +9,7 @@ mod ingest_commands;
 mod install_commands;
 mod integration_commands;
 mod label_commands;
+mod program_commands;
 mod provider_commands;
 mod prs_commands;
 mod query_commands;
@@ -172,6 +173,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => history_commands::command_diff(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
+        "program" => program_commands::command(frontend, &args),
         "path" => command_path(frontend, &args),
         "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
@@ -3762,11 +3764,13 @@ fn watch_help() -> String {
 
 fn format_program_analysis(result: &BuildResult) -> String {
     format!(
-        "Program analysis: {} syntax analyzed, {} syntax reused, {} artifacts loaded, {} artifacts reused, {} modules, {} summaries, {} conflicts",
+        "Program analysis: {} syntax analyzed, {} syntax reused, {} artifacts loaded, {} artifacts reused, {} artifact documents analyzed, {} artifact documents reused, {} modules, {} summaries, {} conflicts",
         result.program_syntax_analyzed,
         result.program_syntax_reused,
         result.program_artifacts_loaded,
         result.program_artifacts_reused,
+        result.program_artifact_documents_analyzed,
+        result.program_artifact_documents_reused,
         result.program_modules,
         result.program_summaries,
         result.program_conflicts
@@ -3814,6 +3818,8 @@ mod mcp_option_tests {
             program_syntax_reused: 0,
             program_artifacts_loaded: 0,
             program_artifacts_reused: 0,
+            program_artifact_documents_analyzed: 0,
+            program_artifact_documents_reused: 0,
             program_conflicts: 0,
             timings: BuildTimings::default(),
         }

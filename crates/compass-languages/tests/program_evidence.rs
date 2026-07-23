@@ -128,3 +128,53 @@ fn repeated_signatures_in_distinct_lexical_scopes_have_unique_syntax_symbols()
     }
     Ok(())
 }
+
+#[test]
+fn typescript_functions_cross_link_to_graph_nodes_and_rust_calls_have_real_callees()
+-> Result<(), Box<dyn Error>> {
+    let source = b"class Worker { run() { return work(); } }\nfunction top() { return work(); }\n";
+    let batch = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/app.ts",
+            language: "typescript",
+            source,
+        })?
+        .ok_or("missing TypeScript batch")?;
+    let worker = batch.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "Worker.run")
+        .ok_or("missing Worker.run")?;
+    let worker_id =
+        compass_languages::make_id(&[&compass_languages::make_id(&["src/app", "Worker"]), "run"]);
+    assert_eq!(worker.graph_node_id.as_deref(), Some(worker_id.as_str()));
+    let top = batch.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "top")
+        .ok_or("missing top")?;
+    let top_id = compass_languages::make_id(&["src/app", "top"]);
+    assert_eq!(top.graph_node_id.as_deref(), Some(top_id.as_str()));
+
+    let rust = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/lib.rs",
+            language: "rust",
+            source: b"fn run(xs: Vec<i32>) { xs.iter().map(|_| work()).collect::<Vec<_>>(); }",
+        })?
+        .ok_or("missing Rust batch")?;
+    let callees = rust.modules[0]
+        .functions
+        .iter()
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.operations)
+        .filter_map(|operation| match &operation.kind {
+            OperationKind::Call { callee, .. } => Some(callee.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!callees.contains(&"_"), "callees: {callees:?}");
+    assert!(callees.contains(&"map"), "callees: {callees:?}");
+    assert!(callees.contains(&"collect"), "callees: {callees:?}");
+    Ok(())
+}

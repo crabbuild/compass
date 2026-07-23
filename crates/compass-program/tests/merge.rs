@@ -44,7 +44,7 @@ fn syntax_batch() -> EvidenceBatch {
     coverage.insert(Capability::Syntax, CoverageState::Complete);
     coverage.insert(
         Capability::CallResolution,
-        CoverageState::Unavailable {
+        CoverageState::Indeterminate {
             reasons: vec!["compiler_semantics_unavailable".to_owned()],
         },
     );

@@ -33,8 +33,19 @@ pub enum Capability {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CoverageState {
     Complete,
-    Partial { reasons: Vec<String> },
-    Unavailable { reasons: Vec<String> },
+    Partial {
+        reasons: Vec<String>,
+    },
+    Indeterminate {
+        reasons: Vec<String>,
+    },
+    Failed {
+        reasons: Vec<String>,
+    },
+    /// Accepted only in legacy `compass.program/1` documents.
+    Unavailable {
+        reasons: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

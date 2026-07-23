@@ -139,3 +139,52 @@ fn validation_rejects_duplicate_provider_and_evidence_ids() {
         Err(IrError::DuplicateEvidence(_))
     ));
 }
+
+#[test]
+fn schema_two_uses_four_states_and_schema_one_remains_readable() {
+    let mut current = bundle();
+    current.modules[0].coverage.insert(
+        Capability::Types,
+        CoverageState::Indeterminate {
+            reasons: vec!["type_evidence_insufficient".to_owned()],
+        },
+    );
+    current.modules[0].coverage.insert(
+        Capability::Contracts,
+        CoverageState::Failed {
+            reasons: vec!["contract_analyzer_failed".to_owned()],
+        },
+    );
+    assert!(current.validate().is_ok());
+
+    current.modules[0].coverage.insert(
+        Capability::DataFlow,
+        CoverageState::Unavailable {
+            reasons: vec!["legacy_only".to_owned()],
+        },
+    );
+    assert!(matches!(
+        current.validate(),
+        Err(IrError::InvalidCoverage { .. })
+    ));
+
+    let mut legacy = bundle();
+    legacy.schema = compass_ir::PROGRAM_SCHEMA_V1.to_owned();
+    legacy.modules[0].coverage.insert(
+        Capability::DataFlow,
+        CoverageState::Unavailable {
+            reasons: vec!["legacy_unavailable".to_owned()],
+        },
+    );
+    assert!(legacy.validate().is_ok());
+    legacy.modules[0].coverage.insert(
+        Capability::Contracts,
+        CoverageState::Failed {
+            reasons: vec!["not_supported_in_schema_one".to_owned()],
+        },
+    );
+    assert!(matches!(
+        legacy.validate(),
+        Err(IrError::InvalidCoverage { .. })
+    ));
+}

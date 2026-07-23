@@ -82,7 +82,10 @@ impl EvidenceBatch {
             for state in coverage.values_mut() {
                 match state {
                     CoverageState::Complete => {}
-                    CoverageState::Partial { reasons } | CoverageState::Unavailable { reasons } => {
+                    CoverageState::Partial { reasons }
+                    | CoverageState::Indeterminate { reasons }
+                    | CoverageState::Failed { reasons }
+                    | CoverageState::Unavailable { reasons } => {
                         reasons.sort();
                         reasons.dedup();
                     }

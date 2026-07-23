@@ -1,5 +1,11 @@
 # Program IR Evidence Foundation Implementation Plan
 
+> Historical note: this plan describes the original `compass.program/1`
+> foundation. Current output uses `compass.program/2` with complete, partial,
+> indeterminate, and failed coverage states while retaining schema-1 read
+> compatibility. Current artifact status also reports decoded artifacts and
+> per-document analysis/reuse separately.
+
 > **For implementers:** execute this plan task by task with
 > `superpowers:executing-plans`. Use red-green-refactor for every task and run
 > the stated verification before each commit.
@@ -1051,7 +1057,7 @@ with a clear unsupported-option error rather than silently ignoring it.
 Print one native line:
 
 ```text
-Program analysis: <syntax_analyzed> syntax analyzed, <syntax_reused> syntax reused, <artifacts_loaded> artifacts loaded, <artifacts_reused> artifacts reused, <modules> modules, <summaries> summaries, <conflicts> conflicts
+Program analysis: <syntax_analyzed> syntax analyzed, <syntax_reused> syntax reused, <artifacts_loaded> artifacts loaded, <artifacts_reused> artifacts reused, <artifact_documents_analyzed> artifact documents analyzed, <artifact_documents_reused> artifact documents reused, <modules> modules, <summaries> summaries, <conflicts> conflicts
 ```
 
 Do not change compatibility output.

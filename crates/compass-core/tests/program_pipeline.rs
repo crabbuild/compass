@@ -10,6 +10,8 @@ use scip::types::{
     TextEncoding, ToolInfo,
 };
 
+type ScipFixtureDocument<'a> = (&'a str, &'a str, &'a str, Vec<i32>, Vec<i32>, &'a str);
+
 fn program_options(root: &Path) -> BuildOptions {
     let mut options = BuildOptions::new(root);
     options.no_cluster = true;
@@ -34,6 +36,28 @@ fn scip_fixture(
     metadata.tool_info = MessageField::some(tool);
     metadata.project_root = "file:///absolute/checkout".to_owned();
     metadata.text_document_encoding = EnumOrUnknown::new(TextEncoding::UTF8);
+    let document = scip_document(
+        path,
+        language,
+        source,
+        definition_range,
+        reference_range,
+        symbol,
+    );
+    let mut index = Index::new();
+    index.metadata = MessageField::some(metadata);
+    index.documents = vec![document];
+    index.write_to_bytes()
+}
+
+fn scip_document(
+    path: &str,
+    language: &str,
+    source: &str,
+    definition_range: Vec<i32>,
+    reference_range: Vec<i32>,
+    symbol: &str,
+) -> Document {
     let mut definition = Occurrence::new();
     definition.range = definition_range;
     definition.symbol = symbol.to_owned();
@@ -52,10 +76,7 @@ fn scip_fixture(
     document.text = source.to_owned();
     document.position_encoding =
         EnumOrUnknown::new(PositionEncoding::UTF8CodeUnitOffsetFromLineStart);
-    let mut index = Index::new();
-    index.metadata = MessageField::some(metadata);
-    index.documents = vec![document];
-    index.write_to_bytes()
+    document
 }
 
 fn write_scip(
@@ -89,6 +110,61 @@ fn write_scip(
     Ok(())
 }
 
+fn write_multi_scip(
+    artifact: &Path,
+    documents: &[ScipFixtureDocument<'_>],
+) -> Result<(), Box<dyn Error>> {
+    let mut tool = ToolInfo::new();
+    tool.name = "fixture-indexer".to_owned();
+    tool.version = "1.0".to_owned();
+    let mut metadata = Metadata::new();
+    metadata.tool_info = MessageField::some(tool);
+    metadata.project_root = "file:///absolute/checkout".to_owned();
+    metadata.text_document_encoding = EnumOrUnknown::new(TextEncoding::UTF8);
+    let mut index = Index::new();
+    index.metadata = MessageField::some(metadata);
+    index.documents = documents
+        .iter()
+        .map(|(path, language, source, definition, reference, symbol)| {
+            scip_document(
+                path,
+                language,
+                source,
+                definition.clone(),
+                reference.clone(),
+                symbol,
+            )
+        })
+        .collect();
+    let bytes = index.write_to_bytes()?;
+    fs::write(artifact, &bytes)?;
+    let companion = artifact.with_file_name(format!(
+        "{}.compass-manifest.json",
+        artifact
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("non-UTF-8 artifact name")?
+    ));
+    let manifest_documents = documents
+        .iter()
+        .map(|(path, _, source, _, _, _)| {
+            (
+                path.to_string(),
+                serde_json::Value::String(hex_sha256(source.as_bytes())),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    fs::write(
+        companion,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": "compass.scip-manifest/1",
+            "index_sha256": hex_sha256(&bytes),
+            "documents": manifest_documents,
+        }))?,
+    )?;
+    Ok(())
+}
+
 #[test]
 fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
 -> Result<(), Box<dyn Error>> {
@@ -110,7 +186,7 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     assert_eq!(cold.program_syntax_reused, 0);
     let cold_bytes = fs::read(&output)?;
     let document: serde_json::Value = serde_json::from_slice(&cold_bytes)?;
-    assert_eq!(document["program"]["schema"], "compass.program/1");
+    assert_eq!(document["program"]["schema"], "compass.program/2");
     assert_eq!(document["analysis_schema_version"], 1);
 
     let warm = build_local_graph(&options)?;
@@ -176,6 +252,8 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     fs::create_dir(directory.path().join("src"))?;
     let source = directory.path().join("src/app.ts");
     fs::write(&source, source_text)?;
+    let unrelated = directory.path().join("src/unrelated.ts");
+    fs::write(&unrelated, "export const unrelated = 1;\n")?;
     let artifact = directory.path().join("index.scip");
     write_scip(
         &artifact,
@@ -189,18 +267,29 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     let options = program_options(directory.path());
 
     let cold = build_local_graph(&options)?;
-    assert_eq!(cold.program_syntax_analyzed, 1);
+    assert_eq!(cold.program_syntax_analyzed, 2);
     assert_eq!(cold.program_artifacts_loaded, 1);
     assert_eq!(cold.program_artifacts_reused, 0);
+    assert_eq!(cold.program_artifact_documents_analyzed, 1);
+    assert_eq!(cold.program_artifact_documents_reused, 0);
     let program_path = cold.output_dir.join("program.json");
     let first = fs::read(&program_path)?;
     assert!(String::from_utf8_lossy(&first).contains("npm fixture"));
 
     let warm = build_local_graph(&options)?;
-    assert_eq!(warm.program_syntax_reused, 1);
+    assert_eq!(warm.program_syntax_reused, 2);
     assert_eq!(warm.program_artifacts_loaded, 0);
     assert_eq!(warm.program_artifacts_reused, 1);
+    assert_eq!(warm.program_artifact_documents_analyzed, 0);
+    assert_eq!(warm.program_artifact_documents_reused, 0);
     assert_eq!(fs::read(&program_path)?, first);
+
+    fs::write(&unrelated, "export const unrelated = 2;\n")?;
+    let unrelated_changed = build_local_graph(&options)?;
+    assert_eq!(unrelated_changed.program_artifacts_loaded, 0);
+    assert_eq!(unrelated_changed.program_artifacts_reused, 1);
+    assert_eq!(unrelated_changed.program_artifact_documents_analyzed, 0);
+    assert_eq!(unrelated_changed.program_artifact_documents_reused, 1);
 
     write_scip(
         &artifact,
@@ -212,8 +301,10 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
         true,
     )?;
     let artifact_changed = build_local_graph(&options)?;
-    assert_eq!(artifact_changed.program_syntax_reused, 1);
+    assert_eq!(artifact_changed.program_syntax_reused, 2);
     assert_eq!(artifact_changed.program_artifacts_loaded, 1);
+    assert_eq!(artifact_changed.program_artifact_documents_analyzed, 1);
+    assert_eq!(artifact_changed.program_artifact_documents_reused, 0);
     let second = fs::read(&program_path)?;
     assert_ne!(second, first);
     assert!(String::from_utf8_lossy(&second).contains("fixture 2.0"));
@@ -222,13 +313,72 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     fs::write(&source, changed_source)?;
     let stale = build_local_graph(&options)?;
     assert_eq!(stale.program_syntax_analyzed, 1);
-    assert_eq!(stale.program_artifacts_loaded, 1);
+    assert_eq!(stale.program_artifacts_loaded, 0);
+    assert_eq!(stale.program_artifacts_reused, 1);
+    assert_eq!(stale.program_artifact_documents_analyzed, 1);
+    assert_eq!(stale.program_artifact_documents_reused, 0);
     let stale_bytes = fs::read(&program_path)?;
     assert!(!String::from_utf8_lossy(&stale_bytes).contains("fixture 2.0"));
 
     fs::remove_file(source)?;
     let deleted = build_local_graph(&options)?;
-    assert_eq!(deleted.program_modules, 0);
+    assert_eq!(deleted.program_modules, 1);
+    assert!(!String::from_utf8_lossy(&fs::read(&program_path)?).contains("src/app.ts"));
+    Ok(())
+}
+
+#[test]
+fn scip_cache_renormalizes_only_the_changed_document() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir(directory.path().join("src"))?;
+    let source_a = "function alpha() {}\nfunction useA() { alpha(); }\n";
+    let source_b = "function beta() {}\nfunction useB() { beta(); }\n";
+    fs::write(directory.path().join("src/a.ts"), source_a)?;
+    fs::write(directory.path().join("src/b.ts"), source_b)?;
+    let artifact = directory.path().join("index.scip");
+    write_multi_scip(
+        &artifact,
+        &[
+            (
+                "src/a.ts",
+                "typescript",
+                source_a,
+                vec![0, 9, 14],
+                vec![1, 18, 23],
+                "typescript npm fixture 1.0 alpha().",
+            ),
+            (
+                "src/b.ts",
+                "typescript",
+                source_b,
+                vec![0, 9, 13],
+                vec![1, 18, 22],
+                "typescript npm fixture 1.0 beta().",
+            ),
+        ],
+    )?;
+    let options = program_options(directory.path());
+
+    let cold = build_local_graph(&options)?;
+    assert_eq!(cold.program_artifacts_loaded, 1);
+    assert_eq!(cold.program_artifact_documents_analyzed, 2);
+    assert_eq!(cold.program_artifact_documents_reused, 0);
+
+    let warm = build_local_graph(&options)?;
+    assert_eq!(warm.program_artifacts_loaded, 0);
+    assert_eq!(warm.program_artifacts_reused, 1);
+    assert_eq!(warm.program_artifact_documents_analyzed, 0);
+    assert_eq!(warm.program_artifact_documents_reused, 0);
+
+    fs::write(
+        directory.path().join("src/a.ts"),
+        "function alpha() {}\nfunction useA() { alpha(); alpha(); }\n",
+    )?;
+    let changed = build_local_graph(&options)?;
+    assert_eq!(changed.program_artifacts_loaded, 0);
+    assert_eq!(changed.program_artifacts_reused, 1);
+    assert_eq!(changed.program_artifact_documents_analyzed, 1);
+    assert_eq!(changed.program_artifact_documents_reused, 1);
     Ok(())
 }
 

@@ -58,7 +58,9 @@ cmp "$SECOND_ROOT/compass-out/program.json" "$QUALIFY_TMP/program.cold.json"
 
 echo "[program-ir] artifact-only invalidation, freshness, malformed input, and atomic output"
 cargo test -p compass-core --test program_pipeline scip_cache_tracks_artifact_manifest_and_source_freshness
+cargo test -p compass-core --test program_pipeline scip_cache_renormalizes_only_the_changed_document
 cargo test -p compass-core --test program_pipeline malformed_discovered_scip_and_obstructed_output_fail_closed
+cargo test -p compass-core watch_rebuilds_for_external_scip_and_companion_manifest_changes
 cargo test -p compass-program --test scip
 cargo test -p compass-program --test merge merge_preserves_conflicting_targets
 

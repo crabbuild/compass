@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 use compass_ir::{
     BasicBlock, Capability, Coverage, CoverageState, FunctionIr, ModuleIr, Operation,
@@ -25,6 +26,7 @@ struct Collector<'a> {
     definitions: HashMap<String, Vec<String>>,
     definition_occurrences: HashMap<String, u32>,
     function_occurrences: HashMap<String, u32>,
+    graph_id_occurrences: HashMap<String, u32>,
     functions: Vec<FunctionIr>,
     evidence: Vec<compass_ir::EvidenceRecord>,
     reasons: BTreeMap<Capability, Vec<String>>,
@@ -38,6 +40,7 @@ impl<'a> Collector<'a> {
             definitions: HashMap::new(),
             definition_occurrences: HashMap::new(),
             function_occurrences: HashMap::new(),
+            graph_id_occurrences: HashMap::new(),
             functions: Vec::new(),
             evidence: Vec::new(),
             reasons: BTreeMap::new(),
@@ -101,6 +104,10 @@ impl<'a> Collector<'a> {
                 .entry(short.to_owned())
                 .or_default()
                 .push(symbol);
+            *self
+                .graph_id_occurrences
+                .entry(graph_node_id(self.input.source_file, &name))
+                .or_default() += 1;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -134,6 +141,18 @@ impl<'a> Collector<'a> {
         let signature = signature_bytes(self.input.source, function);
         let base = symbol_id(self.input.source_file, &name, signature);
         let symbol = unique_symbol_id(base, &mut self.function_occurrences);
+        let graph_node_id = graph_node_id(self.input.source_file, &name);
+        if self
+            .graph_id_occurrences
+            .get(&graph_node_id)
+            .is_some_and(|occurrences| *occurrences > 1)
+        {
+            add_reason(
+                &mut self.reasons,
+                Capability::SymbolIdentity,
+                "graph_identity_collision",
+            );
+        }
         let name_anchor = function
             .child_by_field_name("name")
             .or_else(|| container.child_by_field_name("name"))
@@ -166,7 +185,7 @@ impl<'a> Collector<'a> {
         self.functions.push(FunctionIr {
             symbol_id: symbol,
             name,
-            graph_node_id: None,
+            graph_node_id: Some(graph_node_id),
             signature_digest: hex_sha256(signature),
             body_digest: hex_sha256(slice(self.input.source, body)),
             anchor: anchor(self.input.source_file, container),
@@ -280,7 +299,12 @@ fn collect_operations(
                 .or_else(|| node.child_by_field_name("constructor"))
             {
                 let callee_node = rightmost_identifier(function).unwrap_or(function);
-                let callee = text(input.source, callee_node);
+                let raw_callee = text(input.source, callee_node);
+                let callee = if raw_callee.is_empty() || raw_callee == "_" {
+                    "<dynamic>"
+                } else {
+                    raw_callee
+                };
                 let callee_anchor = anchor(input.source_file, callee_node);
                 let record = evidence_record(
                     provider_id,
@@ -334,7 +358,10 @@ fn collect_operations(
         }
         "member_expression" => {
             if node.parent().is_none_or(|parent| {
-                parent.kind() != "assignment_expression" && parent.kind() != "call_expression"
+                !matches!(
+                    parent.kind(),
+                    "assignment_expression" | "call_expression" | "member_expression"
+                )
             }) {
                 push_path(input, provider_id, node, false, evidence, operations);
             }
@@ -526,7 +553,7 @@ fn coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
         };
         coverage.insert(
             capability,
-            CoverageState::Unavailable {
+            CoverageState::Indeterminate {
                 reasons: vec![reason.to_owned()],
             },
         );
@@ -547,6 +574,17 @@ fn add_reason(
 
 fn symbol_id(path: &str, name: &str, signature: &[u8]) -> String {
     hex_sha256(format!("{path}\0{name}\0{}", hex_sha256(signature)).as_bytes())
+}
+
+fn graph_node_id(path: &str, name: &str) -> String {
+    let stem = crate::file_stem(Path::new(path));
+    name.rsplit_once('.').map_or_else(
+        || crate::make_id(&[&stem, name]),
+        |(owner, method)| {
+            let parent = crate::make_id(&[&stem, owner]);
+            crate::make_id(&[&parent, method])
+        },
+    )
 }
 
 fn unique_symbol_id(base: String, occurrences: &mut HashMap<String, u32>) -> String {
@@ -574,10 +612,18 @@ fn rightmost_identifier(node: Node<'_>) -> Option<Node<'_>> {
     ) {
         return Some(node);
     }
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .filter_map(rightmost_identifier)
-        .last()
+    match node.kind() {
+        "member_expression" => node
+            .child_by_field_name("property")
+            .and_then(rightmost_identifier),
+        "parenthesized_expression" => {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .next()
+                .and_then(rightmost_identifier)
+        }
+        _ => None,
+    }
 }
 
 fn anchor(path: &str, node: Node<'_>) -> SourceAnchor {

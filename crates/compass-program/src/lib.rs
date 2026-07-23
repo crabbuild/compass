@@ -18,4 +18,6 @@ pub use provider::{
     ArtifactInput, ArtifactLimits, ArtifactManifest, ArtifactProvider, ArtifactReader, FileInput,
     ProjectAnalyzer, ProjectFile, ProjectInput, ProviderError, SyntaxProvider,
 };
-pub use scip::{OfficialScipProvider, SCIP_PROVIDER_VERSION};
+pub use scip::{
+    DecodedScipArtifact, DecodedScipDocument, OfficialScipProvider, SCIP_PROVIDER_VERSION,
+};

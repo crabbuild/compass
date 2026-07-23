@@ -112,6 +112,8 @@ pub struct BuildResult {
     pub program_syntax_reused: usize,
     pub program_artifacts_loaded: usize,
     pub program_artifacts_reused: usize,
+    pub program_artifact_documents_analyzed: usize,
+    pub program_artifact_documents_reused: usize,
     pub program_conflicts: usize,
     pub timings: BuildTimings,
 }
@@ -406,6 +408,10 @@ fn build_graph_inner(
             program_artifacts_reused: unchanged_program
                 .as_ref()
                 .map_or(0, |program| program.artifacts_reused),
+            program_artifact_documents_analyzed: 0,
+            program_artifact_documents_reused: unchanged_program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_reused),
             program_conflicts: unchanged_program
                 .as_ref()
                 .map_or(0, |program| program.conflicts),
@@ -646,6 +652,12 @@ fn build_graph_inner(
             program_artifacts_reused: program
                 .as_ref()
                 .map_or(0, |program| program.artifacts_reused),
+            program_artifact_documents_analyzed: program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_analyzed),
+            program_artifact_documents_reused: program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_reused),
             program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
             timings,
         });
@@ -706,6 +718,12 @@ fn build_graph_inner(
             program_artifacts_reused: program
                 .as_ref()
                 .map_or(0, |program| program.artifacts_reused),
+            program_artifact_documents_analyzed: program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_analyzed),
+            program_artifact_documents_reused: program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_reused),
             program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
             timings,
         });
@@ -781,6 +799,12 @@ fn build_graph_inner(
             program_artifacts_reused: program
                 .as_ref()
                 .map_or(0, |program| program.artifacts_reused),
+            program_artifact_documents_analyzed: program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_analyzed),
+            program_artifact_documents_reused: program
+                .as_ref()
+                .map_or(0, |program| program.artifact_documents_reused),
             program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
             timings,
         });
@@ -958,6 +982,12 @@ fn build_graph_inner(
         program_artifacts_reused: program
             .as_ref()
             .map_or(0, |program| program.artifacts_reused),
+        program_artifact_documents_analyzed: program
+            .as_ref()
+            .map_or(0, |program| program.artifact_documents_analyzed),
+        program_artifact_documents_reused: program
+            .as_ref()
+            .map_or(0, |program| program.artifact_documents_reused),
         program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
         timings,
     })

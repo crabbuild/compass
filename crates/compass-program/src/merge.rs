@@ -373,25 +373,34 @@ fn merge_coverage(target: &mut Coverage, incoming: Coverage) {
 }
 
 fn combined_state(left: &CoverageState, right: &CoverageState) -> CoverageState {
-    match (left, right) {
-        (CoverageState::Complete, _) | (_, CoverageState::Complete) => CoverageState::Complete,
-        (CoverageState::Partial { reasons: left }, CoverageState::Partial { reasons: right })
-        | (
-            CoverageState::Partial { reasons: left },
-            CoverageState::Unavailable { reasons: right },
-        )
-        | (
-            CoverageState::Unavailable { reasons: left },
-            CoverageState::Partial { reasons: right },
-        ) => CoverageState::Partial {
-            reasons: union_reasons(left, right),
-        },
-        (
-            CoverageState::Unavailable { reasons: left },
-            CoverageState::Unavailable { reasons: right },
-        ) => CoverageState::Unavailable {
-            reasons: union_reasons(left, right),
-        },
+    if matches!(left, CoverageState::Complete) || matches!(right, CoverageState::Complete) {
+        return CoverageState::Complete;
+    }
+    let reasons = union_reasons(state_reasons(left), state_reasons(right));
+    if matches!(left, CoverageState::Partial { .. })
+        || matches!(right, CoverageState::Partial { .. })
+    {
+        CoverageState::Partial { reasons }
+    } else if matches!(
+        left,
+        CoverageState::Indeterminate { .. } | CoverageState::Unavailable { .. }
+    ) || matches!(
+        right,
+        CoverageState::Indeterminate { .. } | CoverageState::Unavailable { .. }
+    ) {
+        CoverageState::Indeterminate { reasons }
+    } else {
+        CoverageState::Failed { reasons }
+    }
+}
+
+fn state_reasons(state: &CoverageState) -> &[String] {
+    match state {
+        CoverageState::Complete => &[],
+        CoverageState::Partial { reasons }
+        | CoverageState::Indeterminate { reasons }
+        | CoverageState::Failed { reasons }
+        | CoverageState::Unavailable { reasons } => reasons,
     }
 }
 
@@ -404,11 +413,12 @@ fn mark_partial(coverage: &mut Coverage, capability: Capability, reason: &str) {
         .and_modify(|state| {
             *state = match state {
                 CoverageState::Complete => partial.clone(),
-                CoverageState::Partial { reasons } | CoverageState::Unavailable { reasons } => {
-                    CoverageState::Partial {
-                        reasons: union_reasons(reasons, &[reason.to_owned()]),
-                    }
-                }
+                CoverageState::Partial { reasons }
+                | CoverageState::Indeterminate { reasons }
+                | CoverageState::Failed { reasons }
+                | CoverageState::Unavailable { reasons } => CoverageState::Partial {
+                    reasons: union_reasons(reasons, &[reason.to_owned()]),
+                },
             };
         })
         .or_insert(partial);

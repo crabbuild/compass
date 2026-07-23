@@ -314,8 +314,19 @@ Tree-sitter provides syntax, stable source spans, declarations, lexical
 operations, and conservative source-level control flow. It does not claim
 compiler-resolved types, dynamic dispatch, macro expansion, or complete data
 flow. Those capabilities require stronger evidence such as SCIP or later
-compiler-backed project analyzers. Every capability in `program.json` reports
-its own `complete`, `partial`, `indeterminate`, or `failed` coverage state.
+compiler-backed project analyzers. Schema `compass.program/2` reports every
+capability as `complete`, `partial`, `indeterminate`, or `failed`:
+
+- `complete` means the declared scope has all required evidence;
+- `partial` means useful evidence exists but named gaps remain;
+- `indeterminate` means available evidence cannot establish or reject a claim;
+- `failed` means a named analyzer or evidence pass could not produce a valid
+  result.
+
+Every non-complete state carries machine-readable reasons. Historical
+`compass.program/1` artifacts remain readable; their legacy `unavailable` state
+is not emitted by schema 2. Hard input corruption remains fail-closed and never
+replaces the previous valid `program.json`.
 
 Compass automatically discovers `index.scip`. Supply other offline indexes
 explicitly with a repeatable option:
@@ -332,6 +343,42 @@ document path to its exact source SHA-256. Stale documents are excluded while
 valid syntax evidence remains available. Compass decodes supplied artifacts
 itself; it does not invoke an indexer, compiler, language server, model, or
 network service.
+
+Decoded SCIP metadata and documents are cached by immutable artifact digest.
+Freshness and normalization are cached independently per indexed document, so
+an unrelated repository edit does not reload the index and a bound source edit
+renormalizes only that document.
+
+Inspect the current artifact without custom JSON scripts:
+
+```bash
+compass program summary
+compass program coverage
+compass program functions --language rust --name build
+compass program show <symbol-id>
+compass program callers <symbol-id>
+compass program explain-call src/lib.rs:240
+```
+
+`show` accepts a full symbol ID, a unique symbol-ID prefix, an exact function
+name, or an exact `graph_node_id`. `explain-call` uses a repository-relative
+path and UTF-8 source byte offset. All inspection commands accept
+`--program PATH` and `--format text|json`.
+
+Program IR also has a read-only CompassQL projection:
+
+```bash
+compass program query \
+  "MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 20"
+```
+
+The projection exposes program modules, functions, operations, providers,
+evidence, resolved calls, graph-node cross-links, coverage, and source anchors.
+Function rows include `call_resolution_state` and `impact_eligible`.
+`impact_eligible` is true only when call resolution is complete and the
+function has no unresolved calls. `CALLS` edges contain resolved targets only;
+an unresolved call is never converted into proof that no downstream target
+exists.
 
 Run the deterministic, incremental, history, malformed-input, and
 cross-checkout qualification matrix with:

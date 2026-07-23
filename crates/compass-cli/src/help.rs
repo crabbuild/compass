@@ -85,7 +85,14 @@ const GROUPS: &[Group] = &[
     },
     Group {
         title: "Explore",
-        commands: &["query", "path", "explain", "affected", "benchmark"],
+        commands: &[
+            "query",
+            "program",
+            "path",
+            "explain",
+            "affected",
+            "benchmark",
+        ],
     },
     Group {
         title: "History",
@@ -192,6 +199,12 @@ const PAGES: &[Page] = &[
             "compass query --cql --repl"
         ],
         "Arguments:\n  <QUESTION>                      Natural-language graph question\n  <QUERY>                         Inline CompassQL query\n\nOptions:\n  --dfs                           Use depth-first traversal\n  --context <VALUE>               Add query context\n  --budget <N>                    Limit returned context\n  --graph <PATH>                  Read a graph JSON file\n  --at <REV>                      Query an immutable Git revision; conflicts with --graph\n  --cql                           Use CompassQL mode\n  --file <PATH>                   Read CompassQL from a file\n  --stdin                         Read CompassQL from standard input\n  --repl                          Start the interactive CompassQL shell\n  --param <NAME=VALUE>            Bind a parameter; repeatable\n  --params-file <PATH>            Read parameters from JSON\n  --format <table|json|jsonl>     Result format [default: table]\n  --output <PATH>                 Write results to a file\n  --timeout-ms <N>                Execution timeout [default: 5000]\n  --max-rows <N>                  Row limit [default: 10000]\n  --max-path-depth <N>            Path-depth limit [default: 32]\n  --max-expanded-relationships <N> Relationship expansion limit [default: 5000000]\n  --max-memory-bytes <N>          Memory limit [default: 268435456]\n\nExamples:\n  compass query \"authentication flow\"\n  compass query \"payment service\" --at HEAD~10\n  compass query --cql \"MATCH (n) RETURN n LIMIT 10\" --format json\n  compass query --cql --file report.cql --params-file params.json\n\nTips:\n  Use `compass path` when you know both endpoints of the relationship to trace."
+    ),
+    page!(
+        "program",
+        "Inspect and query canonical Program IR",
+        ["compass program <COMMAND> [OPTIONS]"],
+        "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
     ),
     page!(
         "path",
@@ -958,7 +971,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 34);
+        assert_eq!(roots.len(), 35);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

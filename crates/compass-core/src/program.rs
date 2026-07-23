@@ -5,11 +5,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use compass_files::{Cache, CacheKind, FileError, write_bytes_atomic};
-use compass_ir::{EvidenceRecord, ProviderDescriptor, canonical_json_bytes, hex_sha256};
+use compass_ir::{ProviderDescriptor, canonical_json_bytes, hex_sha256};
 use compass_languages::{Registry, TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 use compass_program::{
-    ArtifactInput, ArtifactProvider, EvidenceBatch, OfficialScipProvider, SyntaxProvider,
-    merge_evidence, parse_artifact_manifest,
+    ArtifactInput, ArtifactProvider, DecodedScipArtifact, DecodedScipDocument, EvidenceBatch,
+    OfficialScipProvider, SyntaxProvider, merge_evidence, parse_artifact_manifest,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,8 @@ pub(crate) struct ProgramBuild {
     pub syntax_reused: usize,
     pub artifacts_loaded: usize,
     pub artifacts_reused: usize,
+    pub artifact_documents_analyzed: usize,
+    pub artifact_documents_reused: usize,
     pub conflicts: usize,
 }
 
@@ -40,9 +42,21 @@ struct SourceInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ArtifactCacheHeader {
-    descriptor: ProviderDescriptor,
-    global_evidence: Vec<EvidenceRecord>,
+    metadata_protobuf_base64: String,
     documents: Vec<String>,
+}
+
+struct ArtifactCacheContext<'a> {
+    cache: &'a Cache,
+    kind: &'a CacheKind,
+    artifact_digest: &'a str,
+    live: &'a mut BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct DocumentCacheStats {
+    analyzed: usize,
+    reused: usize,
 }
 
 pub(crate) fn build_program(
@@ -101,58 +115,99 @@ pub(crate) fn build_program(
     let mut live_artifact_keys = BTreeSet::new();
     let mut artifacts_loaded = 0;
     let mut artifacts_reused = 0;
+    let mut artifact_documents_analyzed = 0;
+    let mut artifact_documents_reused = 0;
     for artifact in artifacts {
         let manifest = load_manifest(&artifact.path, &artifact.digest)?;
-        let cache_digest =
-            artifact_cache_digest(&artifact.digest, manifest.as_ref(), &source_digests)?;
-        let header_key = format!("{cache_digest}:header");
-        let cached = if !options.force {
-            load_artifact_cache(
-                cache,
-                &artifact_kind,
-                &cache_digest,
-                &header_key,
-                &mut live_artifact_keys,
+        let logical_name = artifact
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("index.scip");
+        let input = ArtifactInput {
+            logical_name,
+            input_digest: &artifact.digest,
+            byte_len: artifact.byte_len,
+            manifest: manifest.as_ref(),
+            source_digests: &source_digests,
+            source_texts: &source_texts,
+            limits: options.program_artifact_limits,
+        };
+        let header_key = format!("{}:decoded:header", artifact.digest);
+        let header = if !options.force {
+            cache.load_program::<ArtifactCacheHeader>(&artifact_kind, &header_key)?
+        } else {
+            None
+        };
+        let header_was_reused = header.is_some();
+        if header_was_reused {
+            artifacts_reused += 1;
+        }
+        let mut document_stats = DocumentCacheStats::default();
+        let mut batch = if let Some(cached_header) = &header {
+            assemble_decoded_artifact(
+                &mut ArtifactCacheContext {
+                    cache,
+                    kind: &artifact_kind,
+                    artifact_digest: &artifact.digest,
+                    live: &mut live_artifact_keys,
+                },
+                input,
+                cached_header,
+                None,
+                &mut document_stats,
             )?
         } else {
             None
         };
-        let batch = if let Some(batch) = cached {
-            artifacts_reused += 1;
-            batch
-        } else {
-            let mut reader = File::open(&artifact.path).map_err(|source| FileError::Io {
-                path: artifact.path.clone(),
-                source,
-            })?;
-            let logical_name = artifact
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("index.scip");
-            let batch = OfficialScipProvider.analyze_artifact(
-                ArtifactInput {
-                    logical_name,
-                    input_digest: &artifact.digest,
-                    byte_len: artifact.byte_len,
-                    manifest: manifest.as_ref(),
-                    source_digests: &source_digests,
-                    source_texts: &source_texts,
-                    limits: options.program_artifact_limits,
-                },
-                &mut reader,
-            )?;
-            save_artifact_cache(
+        if batch.is_some() {
+            artifact_documents_analyzed += document_stats.analyzed;
+            artifact_documents_reused += document_stats.reused;
+        }
+        if batch.is_none() {
+            if header_was_reused {
+                artifacts_reused -= 1;
+            }
+            document_stats = DocumentCacheStats::default();
+            let decoded = decode_artifact_file(&artifact, input)?;
+            save_decoded_artifact(
                 cache,
                 &artifact_kind,
-                &cache_digest,
+                &artifact.digest,
                 &header_key,
-                &batch,
+                &decoded,
                 &mut live_artifact_keys,
             )?;
+            let fresh_header = ArtifactCacheHeader {
+                metadata_protobuf_base64: decoded.metadata_protobuf_base64.clone(),
+                documents: decoded
+                    .documents
+                    .iter()
+                    .map(|document| document.path.clone())
+                    .collect(),
+            };
+            batch = assemble_decoded_artifact(
+                &mut ArtifactCacheContext {
+                    cache,
+                    kind: &artifact_kind,
+                    artifact_digest: &artifact.digest,
+                    live: &mut live_artifact_keys,
+                },
+                input,
+                &fresh_header,
+                Some(&decoded),
+                &mut document_stats,
+            )?;
+            artifact_documents_analyzed += document_stats.analyzed;
+            artifact_documents_reused += document_stats.reused;
             artifacts_loaded += 1;
-            batch
-        };
+        }
+        let batch = batch.ok_or_else(|| {
+            CoreError::InvalidProgramInput(format!(
+                "SCIP decoded cache could not be reconstructed for {}",
+                artifact.path.display()
+            ))
+        })?;
         batches.push(batch);
     }
     cache.prune_program(&artifact_kind, &live_artifact_keys)?;
@@ -186,6 +241,8 @@ pub(crate) fn build_program(
         syntax_reused,
         artifacts_loaded,
         artifacts_reused,
+        artifact_documents_analyzed,
+        artifact_documents_reused,
         conflicts,
     })
 }
@@ -277,6 +334,8 @@ pub(crate) fn load_current_program(
         syntax_reused: supported.len(),
         artifacts_loaded: 0,
         artifacts_reused: artifacts.len(),
+        artifact_documents_analyzed: 0,
+        artifact_documents_reused: 0,
         conflicts,
     }))
 }
@@ -549,106 +608,143 @@ fn load_manifest(
     Ok(Some(parse_artifact_manifest(&bytes, digest)?))
 }
 
-fn load_artifact_cache(
-    cache: &Cache,
-    kind: &CacheKind,
-    digest: &str,
-    header_key: &str,
-    live: &mut BTreeSet<String>,
-) -> Result<Option<EvidenceBatch>, CoreError> {
-    let Some(header) = cache.load_program::<ArtifactCacheHeader>(kind, header_key)? else {
-        return Ok(None);
-    };
-    let mut batch = EvidenceBatch {
-        descriptor: header.descriptor.clone(),
-        evidence: header.global_evidence,
-        modules: Vec::new(),
-        facts: Vec::new(),
-        coverage: BTreeMap::new(),
-    };
-    let mut keys = vec![header_key.to_owned()];
-    for document in header.documents {
-        let key = format!("{digest}:document:{document}");
-        let Some(shard) = cache.load_program::<EvidenceBatch>(kind, &key)? else {
-            return Ok(None);
-        };
-        if shard.descriptor != header.descriptor {
-            return Ok(None);
-        }
-        keys.push(key);
-        batch.evidence.extend(shard.evidence);
-        batch.facts.extend(shard.facts);
-        batch.coverage.extend(shard.coverage);
-    }
-    if merge_evidence(vec![batch.clone()]).is_err() {
-        return Ok(None);
-    }
-    live.extend(keys);
-    Ok(Some(batch.canonicalized()))
+fn decode_artifact_file(
+    artifact: &ArtifactFile,
+    input: ArtifactInput<'_>,
+) -> Result<DecodedScipArtifact, CoreError> {
+    let mut reader = File::open(&artifact.path).map_err(|source| FileError::Io {
+        path: artifact.path.clone(),
+        source,
+    })?;
+    Ok(OfficialScipProvider.decode_artifact(input, &mut reader)?)
 }
 
-fn save_artifact_cache(
+fn save_decoded_artifact(
     cache: &Cache,
     kind: &CacheKind,
-    digest: &str,
+    artifact_digest: &str,
     header_key: &str,
-    batch: &EvidenceBatch,
+    decoded: &DecodedScipArtifact,
     live: &mut BTreeSet<String>,
 ) -> Result<(), CoreError> {
-    let mut documents = batch.coverage.keys().cloned().collect::<BTreeSet<_>>();
-    documents.extend(
-        batch
-            .evidence
-            .iter()
-            .filter_map(|record| record.source_file.clone()),
-    );
-    documents.extend(
-        batch
-            .facts
-            .iter()
-            .map(|fact| fact.anchor.source_file.clone()),
-    );
-    let documents = documents.into_iter().collect::<Vec<_>>();
     let header = ArtifactCacheHeader {
-        descriptor: batch.descriptor.clone(),
-        global_evidence: batch
-            .evidence
+        metadata_protobuf_base64: decoded.metadata_protobuf_base64.clone(),
+        documents: decoded
+            .documents
             .iter()
-            .filter(|record| record.source_file.is_none())
-            .cloned()
+            .map(|document| document.path.clone())
             .collect(),
-        documents: documents.clone(),
     };
     cache.save_program(kind, header_key, &header)?;
     live.insert(header_key.to_owned());
-    for document in documents {
-        let key = format!("{digest}:document:{document}");
-        let shard = EvidenceBatch {
-            descriptor: batch.descriptor.clone(),
-            evidence: batch
-                .evidence
-                .iter()
-                .filter(|record| record.source_file.as_deref() == Some(document.as_str()))
-                .cloned()
-                .collect(),
-            modules: Vec::new(),
-            facts: batch
-                .facts
-                .iter()
-                .filter(|fact| fact.anchor.source_file == document)
-                .cloned()
-                .collect(),
-            coverage: batch
-                .coverage
-                .get(&document)
-                .cloned()
-                .map(|coverage| BTreeMap::from([(document.clone(), coverage)]))
-                .unwrap_or_default(),
-        };
-        cache.save_program(kind, &key, &shard)?;
+    for document in &decoded.documents {
+        let key = raw_document_key(artifact_digest, &document.path);
+        cache.save_program(kind, &key, document)?;
         live.insert(key);
     }
     Ok(())
+}
+
+fn assemble_decoded_artifact(
+    context: &mut ArtifactCacheContext<'_>,
+    input: ArtifactInput<'_>,
+    header: &ArtifactCacheHeader,
+    decoded: Option<&DecodedScipArtifact>,
+    stats: &mut DocumentCacheStats,
+) -> Result<Option<EvidenceBatch>, CoreError> {
+    let descriptor = OfficialScipProvider.descriptor(&input);
+    let mut batch = OfficialScipProvider.normalize_decoded(
+        input,
+        &DecodedScipArtifact {
+            metadata_protobuf_base64: header.metadata_protobuf_base64.clone(),
+            documents: Vec::new(),
+        },
+    )?;
+    let header_key = format!("{}:decoded:header", context.artifact_digest);
+    context.live.insert(header_key);
+    let decoded_documents = decoded
+        .map(|artifact| {
+            artifact
+                .documents
+                .iter()
+                .map(|document| (document.path.as_str(), document))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    for document in &header.documents {
+        let raw_key = raw_document_key(context.artifact_digest, document);
+        context.live.insert(raw_key.clone());
+        let normalized_key = normalized_document_key(context.artifact_digest, document, input)?;
+        let mut shard = context
+            .cache
+            .load_program::<EvidenceBatch>(context.kind, &normalized_key)?;
+        if shard
+            .as_ref()
+            .is_some_and(|cached| cached.descriptor.id != descriptor.id)
+        {
+            shard = None;
+        }
+        let mut shard = if let Some(shard) = shard {
+            stats.reused += 1;
+            shard
+        } else {
+            let raw = if let Some(document) = decoded_documents.get(document.as_str()) {
+                (*document).clone()
+            } else {
+                let Some(document) = context
+                    .cache
+                    .load_program::<DecodedScipDocument>(context.kind, &raw_key)?
+                else {
+                    return Ok(None);
+                };
+                document
+            };
+            let decoded = DecodedScipArtifact {
+                metadata_protobuf_base64: header.metadata_protobuf_base64.clone(),
+                documents: vec![raw],
+            };
+            let normalized = OfficialScipProvider.normalize_decoded(input, &decoded)?;
+            context
+                .cache
+                .save_program(context.kind, &normalized_key, &normalized)?;
+            stats.analyzed += 1;
+            normalized
+        };
+        shard.descriptor = descriptor.clone();
+        batch.evidence.extend(shard.evidence);
+        batch.facts.extend(shard.facts);
+        batch.coverage.extend(shard.coverage);
+        context.live.insert(normalized_key);
+    }
+    batch.descriptor = descriptor;
+    Ok(Some(batch.canonicalized()))
+}
+
+fn raw_document_key(artifact_digest: &str, document: &str) -> String {
+    format!("{artifact_digest}:decoded:document:{document}")
+}
+
+fn normalized_document_key(
+    artifact_digest: &str,
+    document: &str,
+    input: ArtifactInput<'_>,
+) -> Result<String, CoreError> {
+    let expected = input.manifest.and_then(|manifest| {
+        manifest.documents.iter().find_map(|(path, digest)| {
+            compass_program::normalize_source_path(path)
+                .ok()
+                .filter(|path| path == document)
+                .map(|_| digest.as_str())
+        })
+    });
+    let actual = expected.and_then(|_| input.source_digests.get(document).map(String::as_str));
+    let digest = hex_sha256(&canonical_json_bytes(&(
+        artifact_digest,
+        document,
+        expected,
+        actual,
+    ))?);
+    Ok(format!("{artifact_digest}:normalized:{digest}"))
 }
 
 fn provider_manifest_digest(batches: &[EvidenceBatch]) -> Result<String, CoreError> {
@@ -658,18 +754,6 @@ fn provider_manifest_digest(batches: &[EvidenceBatch]) -> Result<String, CoreErr
         .collect::<Result<Vec<_>, _>>()?;
     batch_digests.sort();
     Ok(hex_sha256(&canonical_json_bytes(&batch_digests)?))
-}
-
-fn artifact_cache_digest(
-    artifact_digest: &str,
-    manifest: Option<&compass_program::ArtifactManifest>,
-    source_digests: &BTreeMap<String, String>,
-) -> Result<String, CoreError> {
-    Ok(hex_sha256(&canonical_json_bytes(&(
-        artifact_digest,
-        manifest,
-        source_digests,
-    ))?))
 }
 
 fn count_conflicts(analysis: &compass_analysis::AnalysisBundle) -> usize {

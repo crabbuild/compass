@@ -49,7 +49,8 @@ pub enum IrError {
 
 impl ProgramBundle {
     pub fn validate(&self) -> Result<(), IrError> {
-        if self.schema != crate::PROGRAM_SCHEMA {
+        let legacy = self.schema == crate::PROGRAM_SCHEMA_V1;
+        if !legacy && self.schema != crate::PROGRAM_SCHEMA {
             return Err(IrError::Schema(self.schema.clone()));
         }
         let mut provider_ids = BTreeSet::new();
@@ -97,7 +98,7 @@ impl ProgramBundle {
             if !modules.insert(module.source_file.clone()) {
                 return Err(IrError::DuplicateModule(module.source_file.clone()));
             }
-            validate_module(module, &evidence_capabilities, &mut functions)?;
+            validate_module(module, &evidence_capabilities, &mut functions, legacy)?;
         }
         Ok(())
     }
@@ -107,6 +108,7 @@ fn validate_module(
     module: &ModuleIr,
     evidence: &BTreeMap<String, Capability>,
     functions: &mut BTreeSet<String>,
+    legacy: bool,
 ) -> Result<(), IrError> {
     validate_path(&module.source_file)?;
     if module.language.is_empty() || !is_lower_hex_digest(&module.source_digest) {
@@ -115,13 +117,13 @@ fn validate_module(
             module.source_file
         )));
     }
-    validate_coverage(&module.coverage)?;
+    validate_coverage(&module.coverage, legacy)?;
     validate_evidence(&module.evidence, evidence)?;
     for function in &module.functions {
         if !functions.insert(function.symbol_id.clone()) {
             return Err(IrError::DuplicateFunction(function.symbol_id.clone()));
         }
-        validate_function(function, &module.source_file, evidence)?;
+        validate_function(function, &module.source_file, evidence, legacy)?;
     }
     Ok(())
 }
@@ -130,6 +132,7 @@ fn validate_function(
     function: &FunctionIr,
     source_file: &str,
     evidence: &BTreeMap<String, Capability>,
+    legacy: bool,
 ) -> Result<(), IrError> {
     if function.symbol_id.is_empty()
         || function.name.is_empty()
@@ -143,7 +146,7 @@ fn validate_function(
     }
     validate_anchor(&function.anchor, source_file)?;
     validate_evidence(&function.evidence, evidence)?;
-    validate_coverage(&function.coverage)?;
+    validate_coverage(&function.coverage, legacy)?;
     for parameter in &function.parameters {
         validate_anchor(&parameter.anchor, source_file)?;
         validate_evidence(&parameter.evidence, evidence)?;
@@ -254,16 +257,36 @@ fn terminator_targets(terminator: &Terminator) -> Vec<u32> {
     }
 }
 
-fn validate_coverage(coverage: &Coverage) -> Result<(), IrError> {
+fn validate_coverage(coverage: &Coverage, legacy: bool) -> Result<(), IrError> {
     for (capability, state) in coverage {
+        if legacy
+            && matches!(
+                state,
+                CoverageState::Indeterminate { .. } | CoverageState::Failed { .. }
+            )
+        {
+            return Err(IrError::InvalidCoverage {
+                capability: capability.clone(),
+                detail: "schema 1 does not support indeterminate or failed coverage".to_owned(),
+            });
+        }
+        if !legacy && matches!(state, CoverageState::Unavailable { .. }) {
+            return Err(IrError::InvalidCoverage {
+                capability: capability.clone(),
+                detail: "schema 2 uses indeterminate instead of unavailable".to_owned(),
+            });
+        }
         let reasons = match state {
             CoverageState::Complete => continue,
-            CoverageState::Partial { reasons } | CoverageState::Unavailable { reasons } => reasons,
+            CoverageState::Partial { reasons }
+            | CoverageState::Indeterminate { reasons }
+            | CoverageState::Failed { reasons }
+            | CoverageState::Unavailable { reasons } => reasons,
         };
         if reasons.is_empty() || reasons.iter().any(String::is_empty) {
             return Err(IrError::InvalidCoverage {
                 capability: capability.clone(),
-                detail: "partial and unavailable coverage require reasons".to_owned(),
+                detail: "non-complete coverage requires reasons".to_owned(),
             });
         }
     }
