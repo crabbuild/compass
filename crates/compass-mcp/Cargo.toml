@@ -19,11 +19,11 @@ time.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tower-http.workspace = true
-compass-core = { path = "../compass-core", version = "0.1.0" }
-compass-graph = { path = "../compass-graph", version = "0.1.0" }
-compass-model = { path = "../compass-model", version = "0.1.0" }
-compass-prs = { path = "../compass-prs", version = "0.1.0" }
-compass-query = { path = "../compass-query", version = "0.1.0" }
+compass-core = { path = "../compass-core", version = "0.1.1" }
+compass-graph = { path = "../compass-graph", version = "0.1.1" }
+compass-model = { path = "../compass-model", version = "0.1.1" }
+compass-prs = { path = "../compass-prs", version = "0.1.1" }
+compass-query = { path = "../compass-query", version = "0.1.1" }
 
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client"] }
