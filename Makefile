@@ -1,5 +1,5 @@
 # ┌──────────────────────────────────────────────────────────────┐
-# │  Compass — native local-first knowledge graph engine        │
+# │  Compass — native local-first knowledge graph engine         │
 # │  Makefile: build · test · install · release · dev · ci       │
 # └──────────────────────────────────────────────────────────────┘
 
