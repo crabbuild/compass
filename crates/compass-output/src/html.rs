@@ -62,6 +62,7 @@ pub fn html_document(
                 node_limit: None,
                 learning_overlay: options.learning_overlay,
             },
+            Some((document, communities)),
         );
         return Ok(Some(HtmlRender {
             nodes: meta.nodes.len(),
@@ -71,7 +72,7 @@ pub fn html_document(
         }));
     }
     Ok(Some(HtmlRender {
-        html: render(document, communities, output_path.as_ref(), options),
+        html: render(document, communities, output_path.as_ref(), options, None),
         aggregated: false,
         nodes: document.nodes.len(),
         edges: document.links.len(),
@@ -109,7 +110,76 @@ fn render(
     communities: &Communities,
     output_path: &Path,
     options: &HtmlOptions<'_>,
+    drilldown: Option<(&GraphDocument, &Communities)>,
 ) -> String {
+    let nodes = node_values(document, communities, options);
+    let edges = document.links.iter().map(edge_value).collect::<Vec<_>>();
+    let mut legend = Vec::new();
+    if let Some(labels) = options.community_labels {
+        for community in labels.keys() {
+            let count = options.member_counts.map_or_else(
+                || communities.get(community).map(Vec::len).unwrap_or_default(),
+                |counts| {
+                    counts.get(community).copied().unwrap_or_else(|| {
+                        communities.get(community).map(Vec::len).unwrap_or_default()
+                    })
+                },
+            );
+            let mut item = Map::new();
+            item.insert("cid".into(), Value::from(*community));
+            item.insert(
+                "color".into(),
+                Value::String(COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()].into()),
+            );
+            item.insert(
+                "label".into(),
+                Value::String(html_escape(&sanitize_label(&community_name(
+                    *community,
+                    options.community_labels,
+                )))),
+            );
+            item.insert("count".into(), Value::from(count));
+            legend.push(Value::Object(item));
+        }
+    }
+    let hyperedges = document
+        .graph
+        .get("hyperedges")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let details = drilldown.map_or_else(
+        || Value::Object(Map::new()),
+        |(source, source_communities)| community_details(source, source_communities, options),
+    );
+    let nodes_json = js_safe(&python_json_compact(&Value::Array(nodes)));
+    let edges_json = js_safe(&python_json_compact(&Value::Array(edges)));
+    let legend_json = js_safe(&python_json_compact(&Value::Array(legend)));
+    let hyperedges_json = js_safe(&python_json_compact(&hyperedges));
+    let details_json = js_safe(&python_json_compact(&details));
+    let title = html_escape(&sanitize_label(&output_path.to_string_lossy()));
+    let stats = format!(
+        "{} nodes &middot; {} edges &middot; {} communities",
+        document.nodes.len(),
+        document.links.len(),
+        communities.len()
+    );
+    page(
+        &title,
+        &stats,
+        &nodes_json,
+        &edges_json,
+        &legend_json,
+        &hyperedges_json,
+        &details_json,
+        drilldown.is_some(),
+    )
+}
+
+fn node_values(
+    document: &GraphDocument,
+    communities: &Communities,
+    options: &HtmlOptions<'_>,
+) -> Vec<Value> {
     let node_community = communities
         .iter()
         .flat_map(|(community, members)| {
@@ -153,7 +223,6 @@ fn render(
             "font".into(),
             serde_json::json!({"size": font_size, "color": "#ffffff"}),
         );
-        output.insert("title".into(), Value::String(html_escape(&label)));
         output.insert("community".into(), Value::from(community));
         output.insert(
             "community_name".into(),
@@ -173,6 +242,61 @@ fn render(
                 .cloned()
                 .unwrap_or_else(|| Value::String(String::new())),
         );
+        let source_location = sanitize_label(&node.string("source_location"));
+        let symbol_kind = sanitize_label(&node.string("symbol_kind"));
+        let language = sanitize_label(&node.string("language"));
+        let signature = sanitize_metadata(&node.string("signature"), 500);
+        let (location_start, location_end) = source_line_range(&source_location);
+        let line_start = node
+            .attributes
+            .get("line_start")
+            .and_then(Value::as_u64)
+            .or(location_start);
+        let line_end = node
+            .attributes
+            .get("line_end")
+            .and_then(Value::as_u64)
+            .or(location_end)
+            .or(line_start);
+        let display_kind = if symbol_kind.is_empty() {
+            sanitize_label(&node.string("file_type"))
+        } else {
+            symbol_kind
+        };
+        output.insert(
+            "source_location".into(),
+            Value::String(source_location.clone()),
+        );
+        output.insert("symbol_kind".into(), Value::String(display_kind.clone()));
+        output.insert("language".into(), Value::String(language.clone()));
+        output.insert(
+            "line_start".into(),
+            line_start.map_or(Value::Null, Value::from),
+        );
+        output.insert("line_end".into(), line_end.map_or(Value::Null, Value::from));
+        output.insert("signature".into(), Value::String(signature.clone()));
+        if let Some(counts) = options.member_counts {
+            output.insert("is_community".into(), Value::Bool(true));
+            output.insert(
+                "member_count".into(),
+                Value::from(counts.get(&community).copied().unwrap_or_default()),
+            );
+        }
+        output.insert(
+            "tooltip_html".into(),
+            Value::String(node_tooltip(
+                &label,
+                &display_kind,
+                &language,
+                &node.string("source_file"),
+                line_start,
+                line_end,
+                &signature,
+                options
+                    .member_counts
+                    .and_then(|counts| counts.get(&community).copied()),
+            )),
+        );
         output.insert("degree".into(), Value::from(degree));
         if let Some(entry) = options
             .learning_overlay
@@ -182,61 +306,131 @@ fn render(
         {
             add_learning_fields(&mut output, entry, &label, color);
         }
+        output.remove("title");
         nodes.push(Value::Object(output));
     }
+    nodes
+}
 
-    let edges = document.links.iter().map(edge_value).collect::<Vec<_>>();
-    let mut legend = Vec::new();
-    if let Some(labels) = options.community_labels {
-        for community in labels.keys() {
-            let count = options.member_counts.map_or_else(
-                || communities.get(community).map(Vec::len).unwrap_or_default(),
-                |counts| {
-                    counts.get(community).copied().unwrap_or_else(|| {
-                        communities.get(community).map(Vec::len).unwrap_or_default()
-                    })
-                },
-            );
-            let mut item = Map::new();
-            item.insert("cid".into(), Value::from(*community));
-            item.insert(
-                "color".into(),
-                Value::String(COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()].into()),
-            );
-            item.insert(
-                "label".into(),
-                Value::String(html_escape(&sanitize_label(&community_name(
-                    *community,
-                    options.community_labels,
-                )))),
-            );
-            item.insert("count".into(), Value::from(count));
-            legend.push(Value::Object(item));
+fn community_details(
+    document: &GraphDocument,
+    communities: &Communities,
+    options: &HtmlOptions<'_>,
+) -> Value {
+    let detail_options = HtmlOptions {
+        community_labels: options.community_labels,
+        member_counts: None,
+        node_limit: None,
+        learning_overlay: options.learning_overlay,
+    };
+    let mut grouped_nodes = BTreeMap::<usize, Vec<Value>>::new();
+    for node in node_values(document, communities, &detail_options) {
+        let community = node
+            .get("community")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize;
+        grouped_nodes.entry(community).or_default().push(node);
+    }
+    let node_community = communities
+        .iter()
+        .flat_map(|(community, members)| {
+            members
+                .iter()
+                .map(move |member| (member.as_str(), *community))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut grouped_edges = BTreeMap::<usize, Vec<Value>>::new();
+    for edge in &document.links {
+        let (Some(source), Some(target)) = (
+            node_community.get(edge.source.as_str()),
+            node_community.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        if source == target {
+            grouped_edges
+                .entry(*source)
+                .or_default()
+                .push(edge_value(edge));
         }
     }
-    let hyperedges = document
-        .graph
-        .get("hyperedges")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new()));
-    let nodes_json = js_safe(&python_json_compact(&Value::Array(nodes)));
-    let edges_json = js_safe(&python_json_compact(&Value::Array(edges)));
-    let legend_json = js_safe(&python_json_compact(&Value::Array(legend)));
-    let hyperedges_json = js_safe(&python_json_compact(&hyperedges));
-    let title = html_escape(&sanitize_label(&output_path.to_string_lossy()));
-    let stats = format!(
-        "{} nodes &middot; {} edges &middot; {} communities",
-        document.nodes.len(),
-        document.links.len(),
-        communities.len()
-    );
-    page(
-        &title,
-        &stats,
-        &nodes_json,
-        &edges_json,
-        &legend_json,
-        &hyperedges_json,
+    Value::Object(
+        grouped_nodes
+            .into_iter()
+            .map(|(community, nodes)| {
+                let edges = grouped_edges.remove(&community).unwrap_or_default();
+                (
+                    community.to_string(),
+                    serde_json::json!({
+                        "community": community,
+                        "name": community_name(community, options.community_labels),
+                        "nodes": nodes,
+                        "edges": edges,
+                    }),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn source_line_range(location: &str) -> (Option<u64>, Option<u64>) {
+    let Some(location) = location.strip_prefix('L') else {
+        return (None, None);
+    };
+    let (start, end) = location
+        .split_once('-')
+        .map_or((location, None), |(start, end)| (start, Some(end)));
+    (start.parse().ok(), end.and_then(|end| end.parse().ok()))
+}
+
+fn node_tooltip(
+    label: &str,
+    symbol_kind: &str,
+    language: &str,
+    source_file: &str,
+    line_start: Option<u64>,
+    line_end: Option<u64>,
+    signature: &str,
+    member_count: Option<usize>,
+) -> String {
+    let kind = if symbol_kind.is_empty() {
+        "symbol"
+    } else {
+        symbol_kind
+    };
+    let mut rows = Vec::new();
+    if let Some(count) = member_count {
+        rows.push(format!(
+            "<span>{count} symbols · double-click to explore</span>"
+        ));
+    } else {
+        if !language.is_empty() {
+            rows.push(format!("<span>Language: {}</span>", html_escape(language)));
+        }
+        if !source_file.is_empty() {
+            rows.push(format!(
+                "<span class=\"hover-source\">{}</span>",
+                html_escape(&sanitize_metadata(source_file, 320))
+            ));
+        }
+        if let Some(start) = line_start {
+            let range = line_end
+                .filter(|end| *end != start)
+                .map_or_else(|| start.to_string(), |end| format!("{start}–{end}"));
+            rows.push(format!("<span>Lines: {range}</span>"));
+        }
+        if !signature.is_empty() {
+            rows.push(format!(
+                "<code>{}</code>",
+                html_escape(&sanitize_metadata(signature, 320))
+            ));
+        }
+    }
+    format!(
+        "<div class=\"node-hover-card\"><div><strong>{}</strong><b>{}</b></div>{}</div>",
+        html_escape(label),
+        html_escape(&kind.to_uppercase()),
+        rows.join("")
     )
 }
 
@@ -342,10 +536,13 @@ fn aggregate(
         .keys()
         .map(|community| NodeRecord {
             id: community.to_string(),
-            attributes: Map::from_iter([(
-                "label".into(),
-                Value::String(community_name(*community, options.community_labels)),
-            )]),
+            attributes: Map::from_iter([
+                (
+                    "label".into(),
+                    Value::String(community_name(*community, options.community_labels)),
+                ),
+                ("symbol_kind".into(), Value::String("community".to_owned())),
+            ]),
         })
         .collect::<Vec<_>>();
     let mut counts = Vec::<((usize, usize), usize)>::new();
@@ -496,10 +693,13 @@ fn community_name(community: usize, labels: Option<&BTreeMap<usize, String>>) ->
         .unwrap_or_else(|| format!("Community {community}"))
 }
 fn sanitize_label(value: &str) -> String {
+    sanitize_metadata(value, 256)
+}
+fn sanitize_metadata(value: &str, limit: usize) -> String {
     value
         .chars()
         .filter(|character| !((*character as u32) < 0x20 || *character == '\u{7f}'))
-        .take(256)
+        .take(limit)
         .collect()
 }
 fn html_escape(value: &str) -> String {
@@ -625,6 +825,8 @@ fn page(
     edges: &str,
     legend: &str,
     hyperedges: &str,
+    details: &str,
+    aggregated: bool,
 ) -> String {
     format!(
         r##"<!DOCTYPE html>
@@ -781,6 +983,70 @@ button {{ min-height: 40px; }}
   color: var(--text);
   background: var(--focus-soft);
   border-color: var(--line);
+}}
+.tool-button[hidden] {{ display: none; }}
+#node-tooltip,
+.vis-tooltip {{
+  max-width: 430px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 12px !important;
+  background: #111c2a !important;
+  color: var(--muted) !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .42) !important;
+  font-family: inherit !important;
+}}
+#node-tooltip {{
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+}}
+#node-tooltip[hidden] {{ display: none; }}
+.node-hover-card {{
+  display: grid;
+  gap: 7px;
+  padding: 13px 15px;
+  font-size: 12px;
+  line-height: 1.35;
+}}
+.node-hover-card > div {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}}
+.node-hover-card strong {{
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+}}
+.node-hover-card b,
+.symbol-badge {{
+  display: inline-flex;
+  width: max-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(89, 161, 79, .2);
+  color: #8de384;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .07em;
+}}
+.node-hover-card span,
+.node-hover-card code {{
+  display: block;
+}}
+.node-hover-card .hover-source {{
+  color: var(--focus);
+}}
+.node-hover-card code {{
+  max-width: 395px;
+  overflow: hidden;
+  color: #cbd8e8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }}
 #sidebar {{
   position: relative;
@@ -975,6 +1241,32 @@ button {{ min-height: 40px; }}
   text-overflow: ellipsis;
   white-space: nowrap;
 }}
+.signature-block {{
+  margin-bottom: 15px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(5, 11, 20, .42);
+  color: #cad8e9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}}
+.inspector-actions {{
+  display: flex;
+  gap: 7px;
+  margin-bottom: 14px;
+}}
+.inspector-action {{
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--focus-soft);
+  color: var(--text);
+  cursor: pointer;
+}}
+.inspector-action:hover {{ border-color: var(--line-strong); }}
 .neighbors-heading {{
   justify-content: space-between;
   margin: 3px 0 7px;
@@ -1128,12 +1420,17 @@ button {{ min-height: 40px; }}
 <body>
 <main id="workspace">
   <div id="graph" role="region" aria-label="Interactive Compass knowledge graph"></div>
+  <div id="node-tooltip" role="tooltip" hidden></div>
   <div id="graph-toolbar" class="glass-panel" role="toolbar" aria-label="Graph controls">
     <div id="viewer-status" data-state="running" role="status" aria-live="polite">
       <span class="status-dot" aria-hidden="true"></span>
       <span id="viewer-status-text">Layout settling</span>
     </div>
     <div class="toolbar-actions">
+      <button id="back-overview" class="tool-button" type="button" aria-label="Back to community overview" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        <span class="button-label">Communities</span>
+      </button>
       <button id="physics-toggle" class="tool-button is-active" type="button" aria-label="Pause layout" aria-pressed="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
         <span class="button-label">Pause layout</span>
@@ -1167,7 +1464,7 @@ button {{ min-height: 40px; }}
     <div id="search-results" role="listbox" aria-label="Matching nodes"></div>
   </div>
   <section id="info-panel" aria-labelledby="info-title">
-    <div class="section-heading"><h2 id="info-title">Inspector</h2><span>Node details</span></div>
+    <div class="section-heading"><h2 id="info-title">Inspector</h2><span id="info-mode">Node details</span></div>
     <div id="info-content"><span class="empty">Select a node to inspect its relationships</span></div>
   </section>
   <section id="legend-wrap" aria-labelledby="communities-title">
@@ -1181,6 +1478,16 @@ button {{ min-height: 40px; }}
 const RAW_NODES = {nodes};
 const RAW_EDGES = {edges};
 const LEGEND = {legend};
+const COMMUNITY_DETAILS = {details};
+const IS_AGGREGATED = {aggregated};
+const SEARCH_NODES = IS_AGGREGATED
+  ? [
+      ...RAW_NODES,
+      ...Object.values(COMMUNITY_DETAILS).flatMap(detail => detail.nodes),
+    ]
+  : RAW_NODES;
+let ACTIVE_NODES = RAW_NODES;
+let ACTIVE_EDGES = RAW_EDGES;
 function esc(value) {{
   return String(value)
     .replace(/&/g, '&amp;')
@@ -1190,7 +1497,8 @@ function esc(value) {{
     .replace(/'/g, '&#39;');
 }}
 
-const nodesDS = new vis.DataSet(RAW_NODES.map(node => ({{
+function decorateNode(node) {{
+  return {{
   ...node,
   _baseColor: node.color,
   _baseFont: node.font,
@@ -1198,10 +1506,22 @@ const nodesDS = new vis.DataSet(RAW_NODES.map(node => ({{
   _community: node.community,
   _community_name: node.community_name,
   _source_file: node.source_file,
+  _source_location: node.source_location,
   _file_type: node.file_type,
+  _symbol_kind: node.symbol_kind,
+  _language: node.language,
+  _line_start: node.line_start,
+  _line_end: node.line_end,
+  _signature: node.signature,
+  _is_community: node.is_community,
+  _member_count: node.member_count,
+  _tooltip_html: node.tooltip_html,
   _degree: node.degree,
-}})));
-const edgesDS = new vis.DataSet(RAW_EDGES.map((edge, index) => ({{
+  }};
+}}
+
+function decorateEdge(edge, index) {{
+  return {{
   id: index,
   from: edge.from,
   to: edge.to,
@@ -1213,7 +1533,11 @@ const edgesDS = new vis.DataSet(RAW_EDGES.map((edge, index) => ({{
   _baseColor: edge.color,
   _baseWidth: edge.width,
   arrows: {{ to: {{ enabled: true, scaleFactor: .5 }} }},
-}})));
+  }};
+}}
+
+const nodesDS = new vis.DataSet(RAW_NODES.map(decorateNode));
+const edgesDS = new vis.DataSet(RAW_EDGES.map(decorateEdge));
 const container = document.getElementById('graph');
 const network = new vis.Network(container, {{ nodes: nodesDS, edges: edgesDS }}, {{
   physics: {{
@@ -1246,14 +1570,45 @@ const viewerState = {{
   focusedNodeId: null,
   forceLabels: false,
   initialView: null,
+  activeCommunity: null,
 }};
 const physicsToggle = document.getElementById('physics-toggle');
 const labelsToggle = document.getElementById('labels-toggle');
 const viewerStatus = document.getElementById('viewer-status');
 const viewerStatusText = document.getElementById('viewer-status-text');
+const backOverview = document.getElementById('back-overview');
+const statsEl = document.getElementById('stats');
+const overviewStats = statsEl.innerHTML;
+const nodeTooltip = document.getElementById('node-tooltip');
 
 function setViewerStatus(text) {{
   viewerStatusText.textContent = text;
+}}
+
+function hideNodeTooltip() {{
+  nodeTooltip.hidden = true;
+  nodeTooltip.replaceChildren();
+}}
+
+function showNodeTooltip(id) {{
+  const node = nodesDS.get(id);
+  const position = network.getPositions([id])[id];
+  if (!node?._tooltip_html || !position) return;
+  const point = network.canvasToDOM(position);
+  nodeTooltip.innerHTML = node._tooltip_html;
+  nodeTooltip.hidden = false;
+  requestAnimationFrame(() => {{
+    const left = Math.min(
+      container.clientWidth - nodeTooltip.offsetWidth - 12,
+      Math.max(12, point.x + 18)
+    );
+    const top = Math.min(
+      container.clientHeight - nodeTooltip.offsetHeight - 12,
+      Math.max(88, point.y - nodeTooltip.offsetHeight / 2)
+    );
+    nodeTooltip.style.left = `${{left}}px`;
+    nodeTooltip.style.top = `${{top}}px`;
+  }});
 }}
 
 function setPhysicsRunning(running) {{
@@ -1307,8 +1662,16 @@ function clearFocus() {{
   }})));
   document.getElementById('info-content').innerHTML =
     '<span class="empty">Select a node to inspect its relationships</span>';
+  document.getElementById('info-mode').textContent = 'Node details';
   viewerStatus.dataset.state = viewerState.physicsRunning ? 'running' : 'paused';
   setViewerStatus(viewerState.physicsRunning ? 'Layout settling' : 'Layout paused');
+}}
+
+function sourceRange(node) {{
+  if (!node._line_start) return node._source_location || '';
+  return node._line_end && node._line_end !== node._line_start
+    ? `${{node._line_start}}–${{node._line_end}}`
+    : String(node._line_start);
 }}
 
 function showInfo(id) {{
@@ -1320,20 +1683,38 @@ function showInfo(id) {{
     const color = neighbor ? neighbor._baseColor.background : '#334155';
     return `<button class="neighbor-link" type="button" style="border-left-color:${{esc(color)}}" data-nid="${{esc(nid)}}">${{esc(neighbor ? neighbor.label : nid)}}</button>`;
   }}).join('');
+  const kind = node._symbol_kind || node._file_type || 'symbol';
+  const range = sourceRange(node);
+  const location = node._source_file
+    ? `${{node._source_file}}${{range ? `:${{range}}` : ''}}`
+    : '';
+  const signature = node._signature
+    ? `<div class="signature-block">${{esc(node._signature)}}</div>`
+    : '';
+  const actions = node._is_community
+    ? `<div class="inspector-actions"><button class="inspector-action explore-community" type="button" data-community="${{esc(node._community)}}">Explore ${{node._member_count || 0}} symbols</button></div>`
+    : location
+      ? `<div class="inspector-actions"><button class="inspector-action copy-location" type="button" data-location="${{esc(location)}}">Copy file location</button></div>`
+      : '';
   document.getElementById('info-content').innerHTML = `
     <div class="node-identity">
       <span class="node-swatch" style="--node-color:${{esc(node._baseColor.background)}}"></span>
-      <div><strong>${{esc(node.label)}}</strong><span>${{esc(node._file_type || 'Unknown type')}}</span></div>
+      <div><strong>${{esc(node.label)}}</strong><span class="symbol-badge">${{esc(kind.toUpperCase())}}</span></div>
     </div>
     <dl class="metadata-grid">
       <div><dt>Community</dt><dd>${{esc(node._community_name)}}</dd></div>
       <div><dt>Degree</dt><dd>${{node._degree}}</dd></div>
+      ${{node._language ? `<div><dt>Language</dt><dd>${{esc(node._language)}}</dd></div>` : ''}}
+      ${{range ? `<div><dt>Lines</dt><dd>${{esc(range)}}</dd></div>` : ''}}
       <div class="metadata-wide"><dt>Source</dt><dd title="${{esc(node._source_file || 'Not recorded')}}">${{esc(node._source_file || 'Not recorded')}}</dd></div>
     </dl>
+    ${{signature}}
+    ${{actions}}
     ${{neighborIds.length
       ? `<div class="neighbors-heading"><span>Connected nodes</span><strong>${{neighborIds.length}}</strong></div><div id="neighbors-list">${{neighborItems}}</div>`
       : '<span class="empty">No connected nodes</span>'}}
   `;
+  document.getElementById('info-mode').textContent = 'Pinned';
 }}
 
 function focusNode(id) {{
@@ -1352,9 +1733,71 @@ function focusNode(id) {{
   setViewerStatus(`Inspecting ${{node.label}}`);
 }}
 
+function replaceGraph(nodes, edges) {{
+  clearFocus();
+  ACTIVE_NODES = nodes;
+  ACTIVE_EDGES = edges;
+  nodesDS.clear();
+  edgesDS.clear();
+  nodesDS.add(nodes.map(decorateNode));
+  edgesDS.add(edges.map(decorateEdge));
+  if (viewerState.forceLabels) {{
+    nodesDS.update(nodes.map(node => ({{
+      id: node.id,
+      font: {{ ...node.font, size: 12 }},
+    }})));
+  }}
+  setPhysicsRunning(true);
+  network.once('stabilizationIterationsDone', () => {{
+    setPhysicsRunning(false);
+    network.fit({{ animation: false }});
+  }});
+  network.stabilize(180);
+}}
+
+function enterCommunity(community, focusId = null) {{
+  const key = String(community);
+  const detail = COMMUNITY_DETAILS[key];
+  if (!detail) return;
+  viewerState.activeCommunity = Number(community);
+  backOverview.hidden = false;
+  document.getElementById('communities-title').textContent = detail.name;
+  statsEl.textContent = `${{detail.nodes.length}} symbols · ${{detail.edges.length}} internal edges`;
+  replaceGraph(detail.nodes, detail.edges);
+  setViewerStatus(`Exploring ${{detail.name}}`);
+  if (focusId !== null) requestAnimationFrame(() => focusNode(focusId));
+}}
+
+function exitCommunity() {{
+  if (viewerState.activeCommunity === null) return;
+  viewerState.activeCommunity = null;
+  backOverview.hidden = true;
+  document.getElementById('communities-title').textContent = 'Communities';
+  statsEl.innerHTML = overviewStats;
+  replaceGraph(RAW_NODES, RAW_EDGES);
+  setViewerStatus('Community overview');
+}}
+
+async function copyText(value) {{
+  if (navigator.clipboard?.writeText) {{
+    await navigator.clipboard.writeText(value);
+    return;
+  }}
+  const field = document.createElement('textarea');
+  field.value = value;
+  field.setAttribute('readonly', '');
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.appendChild(field);
+  field.select();
+  document.execCommand('copy');
+  field.remove();
+}}
+
 physicsToggle.addEventListener('click', () => {{
   setPhysicsRunning(!viewerState.physicsRunning);
 }});
+backOverview.addEventListener('click', exitCommunity);
 document.getElementById('fit-graph').addEventListener('click', () => {{
   network.fit({{
     animation: reduceMotion ? false : {{ duration: 280, easingFunction: 'easeInOutQuad' }},
@@ -1377,7 +1820,7 @@ labelsToggle.addEventListener('click', () => {{
   labelsToggle.setAttribute('aria-pressed', String(viewerState.forceLabels));
   labelsToggle.querySelector('.button-label').textContent =
     viewerState.forceLabels ? 'Hide labels' : 'Show labels';
-  nodesDS.update(RAW_NODES.map(node => ({{
+  nodesDS.update(ACTIVE_NODES.map(node => ({{
     id: node.id,
     font: {{ ...node.font, size: viewerState.forceLabels ? 12 : node.font.size }},
   }})));
@@ -1391,12 +1834,33 @@ network.once('stabilizationIterationsDone', () => {{
   }};
 }});
 network.on('click', params => {{
+  hideNodeTooltip();
   if (params.nodes.length) focusNode(params.nodes[0]);
   else clearFocus();
 }});
-document.addEventListener('click', event => {{
+network.on('hoverNode', params => showNodeTooltip(params.node));
+network.on('blurNode', hideNodeTooltip);
+network.on('dragStart', hideNodeTooltip);
+network.on('zoom', hideNodeTooltip);
+network.on('doubleClick', params => {{
+  if (!IS_AGGREGATED || !params.nodes.length) return;
+  const node = nodesDS.get(params.nodes[0]);
+  if (node?._is_community) enterCommunity(node._community);
+}});
+document.addEventListener('click', async event => {{
   const link = event.target.closest('.neighbor-link');
   if (link && link.dataset.nid !== undefined) focusNode(link.dataset.nid);
+  const explore = event.target.closest('.explore-community');
+  if (explore?.dataset.community !== undefined) enterCommunity(explore.dataset.community);
+  const copy = event.target.closest('.copy-location');
+  if (copy?.dataset.location) {{
+    try {{
+      await copyText(copy.dataset.location);
+      copy.textContent = 'Copied';
+    }} catch {{
+      copy.textContent = 'Copy failed';
+    }}
+  }}
 }});
 
 const results = document.getElementById('search-results');
@@ -1413,7 +1877,12 @@ function closeSearchResults() {{
 }}
 
 function chooseSearchResult(node) {{
-  focusNode(node.id);
+  if (IS_AGGREGATED && !node.is_community
+      && viewerState.activeCommunity !== Number(node.community)) {{
+    enterCommunity(node.community, node.id);
+  }} else {{
+    focusNode(node.id);
+  }}
   search.value = '';
   closeSearchResults();
   search.focus();
@@ -1427,7 +1896,9 @@ function renderSearchResults() {{
     option.className = 'search-item';
     option.setAttribute('role', 'option');
     option.setAttribute('aria-selected', String(index === activeSearchIndex));
-    option.textContent = node.label;
+    option.textContent = node.source_file
+      ? `${{node.label}} — ${{node.source_file}}`
+      : node.label;
     option.style.borderLeftColor = node.color.background;
     option.addEventListener('click', () => chooseSearchResult(node));
     results.appendChild(option);
@@ -1447,7 +1918,11 @@ function renderSearchResults() {{
 search.addEventListener('input', () => {{
   const query = search.value.toLowerCase().trim();
   searchMatches = query
-    ? RAW_NODES.filter(node => node.label.toLowerCase().includes(query)).slice(0, 20)
+    ? SEARCH_NODES.filter(node =>
+        `${{node.label}} ${{node.source_file || ''}} ${{node.signature || ''}}`
+          .toLowerCase()
+          .includes(query)
+      ).slice(0, 20)
     : [];
   activeSearchIndex = searchMatches.length ? 0 : -1;
   renderSearchResults();
@@ -1484,7 +1959,7 @@ const hiddenCommunities = new Set();
 const selectAll = document.getElementById('select-all-cb');
 
 function updateVisibility() {{
-  nodesDS.update(RAW_NODES.map(node => ({{
+  nodesDS.update(ACTIVE_NODES.map(node => ({{
     id: node.id,
     hidden: hiddenCommunities.has(node.community),
   }})));
@@ -1547,6 +2022,7 @@ LEGEND.forEach(community => {{
 <script>
 const hyperedges = {hyperedges};
 network.on('afterDrawing', ctx => {{
+  if (viewerState.activeCommunity !== null) return;
   hyperedges.forEach(hyperedge => {{
     const positions = hyperedge.nodes
       .map(id => network.getPositions([id])[id])
@@ -1682,7 +2158,13 @@ mod tests {
     fn explicit_limit_builds_community_meta_graph() -> Result<(), Box<dyn Error>> {
         let graph: GraphDocument = serde_json::from_value(json!({
             "nodes":[
-                {"id":"a","label":"A"},{"id":"b","label":"B"},
+                {
+                    "id":"a","label":"A()","source_file":"src/a.py",
+                    "source_location":"L4","line_start":4,"line_end":8,
+                    "symbol_kind":"function","language":"python",
+                    "signature":"def A(value)"
+                },
+                {"id":"b","label":"B"},
                 {"id":"c","label":"C"},{"id":"d","label":"D"}
             ],
             "links":[
@@ -1708,6 +2190,20 @@ mod tests {
         assert!(rendered.aggregated);
         assert_eq!((rendered.nodes, rendered.edges), (2, 1));
         assert!(rendered.html.contains("2 cross-community edges"));
+        for marker in [
+            "const COMMUNITY_DETAILS =",
+            "const IS_AGGREGATED = true",
+            "function enterCommunity(community, focusId = null)",
+            "id=\"back-overview\"",
+            "\"symbol_kind\": \"function\"",
+            "\"language\": \"python\"",
+            "\"line_start\": 4",
+            "\"line_end\": 8",
+            "\"signature\": \"def A(value)\"",
+            "class=\\\"node-hover-card\\\"",
+        ] {
+            assert!(rendered.html.contains(marker), "missing {marker}");
+        }
         Ok(())
     }
 
