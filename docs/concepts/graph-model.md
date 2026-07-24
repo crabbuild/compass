@@ -166,6 +166,11 @@ barrel.ts --RE_EXPORTS----> module.ts
 Those edges share endpoints but carry different meanings. A consumer that
 collapses them into a single untyped connection loses information.
 
+Compass promotes graph JSON to `multigraph: true` automatically whenever the
+emitted links contain repeated endpoint pairs. Direction is part of the pair
+in directed graphs, so reciprocal `A -> B` and `B -> A` links alone do not
+trigger promotion. In undirected graphs they do; repeated self-loops always do.
+
 Some human renderers list the neighboring node once while preserving the
 parallel-edge contribution to degree. Exact CompassQL patterns and graph JSON
 can inspect distinct relationships.

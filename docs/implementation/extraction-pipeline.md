@@ -278,7 +278,10 @@ and edge inclusion, and records five equivalent query samples.
 Parity is set inclusion. Every Graphify node ID, observable shared-node field,
 and `(source, target, relation)` edge must exist in Compass. Compass-only facts,
 including Perl and extensionless executable scripts, are reported but do not
-fail the gate. Derived community assignments are not compared.
+fail the gate. Compass-owned semantic evidence such as symbol kind, language,
+source line bounds, signatures, and definition hashes is excluded from exact
+Python-oracle metadata comparisons; shared attributes and topology remain
+checked. Derived community assignments are not compared.
 
 Extractor semantics use a versioned AST cache namespace. The C declarator and
 positional-document corrections advance that namespace to `v0.9.21`, so the

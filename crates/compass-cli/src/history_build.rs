@@ -7,8 +7,8 @@ use std::thread;
 use compass_core::{CompleteGraphBuilder, MaterializeError};
 use compass_files::{DetectOptions, IgnorePolicy, Manifest, detect};
 use compass_history::{
-    BuildProfile, CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts, HistoryError,
-    MAX_DIAGNOSTIC_BYTES,
+    BuildProfile, CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts,
+    HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
 };
 
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ impl HistoryBuildOptions {
     }
 
     pub(crate) fn from_profile(mut profile: BuildProfile) -> Result<Self, HistoryError> {
-        upgrade_legacy_program_profile(&mut profile)?;
+        upgrade_persisted_profile(&mut profile)?;
         validate_persisted_profile(&profile)?;
         let gitignore = profile.value("gitignore") != Some("false");
         let excludes = profile
@@ -136,7 +136,7 @@ impl HistoryBuildOptions {
         let mut profile = BuildProfile::default();
         for (key, value) in [
             ("compass_version", env!("CARGO_PKG_VERSION").to_owned()),
-            ("graph_schema", "networkx-node-link/v1".to_owned()),
+            ("graph_schema", HISTORY_GRAPH_SCHEMA.to_owned()),
             ("extractor_version", "compass-languages/v1".to_owned()),
             ("resolver_version", "compass-resolve/v1".to_owned()),
             ("pipeline_version", "compass-core/v1".to_owned()),
@@ -280,7 +280,10 @@ impl HistoryBuildOptions {
     }
 }
 
-fn upgrade_legacy_program_profile(profile: &mut BuildProfile) -> Result<(), HistoryError> {
+fn upgrade_persisted_profile(profile: &mut BuildProfile) -> Result<(), HistoryError> {
+    if profile.value("graph_schema") == Some("networkx-node-link/v1") {
+        profile.insert("graph_schema", HISTORY_GRAPH_SCHEMA)?;
+    }
     for (key, value) in [
         (
             "program_provider_policy",
@@ -352,7 +355,7 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
     }
     for (key, expected) in [
         ("compass_version", env!("CARGO_PKG_VERSION")),
-        ("graph_schema", "networkx-node-link/v1"),
+        ("graph_schema", HISTORY_GRAPH_SCHEMA),
         ("extractor_version", "compass-languages/v1"),
         ("resolver_version", "compass-resolve/v1"),
         ("pipeline_version", "compass-core/v1"),
@@ -1091,6 +1094,10 @@ mod tests {
         assert_eq!(parsed.revision, "HEAD");
         assert_eq!(parsed.format, "json");
         assert_eq!(parsed.options.profile().value("token_budget"), Some("4096"));
+        assert_eq!(
+            parsed.options.profile().value("graph_schema"),
+            Some(HISTORY_GRAPH_SCHEMA)
+        );
         let inherited = parse_build_command(
             "build",
             &[
@@ -1145,6 +1152,24 @@ mod tests {
                 &["HEAD".to_owned(), "--replace-corrupt".to_owned()]
             )
             .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn persisted_v1_profile_is_migrated_to_force_v2_realization() -> Result<(), HistoryError> {
+        let mut profile =
+            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])
+                .map_err(HistoryError::InvalidFingerprint)?
+                .options
+                .profile();
+        profile.insert("graph_schema", "networkx-node-link/v1")?;
+
+        let options = HistoryBuildOptions::from_profile(profile)?;
+
+        assert_eq!(
+            options.profile().value("graph_schema"),
+            Some(HISTORY_GRAPH_SCHEMA)
         );
         Ok(())
     }

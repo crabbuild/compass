@@ -1490,7 +1490,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             serde_json::from_slice(&fs::read(rust_output.join("compass-out/graph.json"))?)?;
         let python: Value =
             serde_json::from_slice(&fs::read(python_output.join("graphify-out/graph.json"))?)?;
-        strip_definition_hashes(&mut rust);
+        normalize_compass_superset_metadata(&mut rust);
         assert_eq!(rust, python);
         Ok(())
     }
@@ -1550,7 +1550,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
                 .ok_or_else(|| format!("Python artifact missing: {python_artifact}"))?;
             if python_artifact.ends_with(".json") || python_artifact == "manifest.json" {
                 let mut rust_json = serde_json::from_slice::<Value>(rust_bytes)?;
-                strip_definition_hashes(&mut rust_json);
+                normalize_compass_superset_metadata(&mut rust_json);
                 assert_eq!(
                     rust_json,
                     serde_json::from_slice::<Value>(python_bytes)?,
@@ -1578,11 +1578,13 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
                 .clone(),
         )?;
         for name in ["RAW_NODES", "RAW_EDGES", "LEGEND"] {
-            assert_eq!(
-                embedded_json(&rust_html, name)?,
-                embedded_json(&python_html, name)?,
-                "graph.html {name}"
-            );
+            let mut rust_value = embedded_json(&rust_html, name)?;
+            let mut python_value = embedded_json(&python_html, name)?;
+            if name == "RAW_NODES" {
+                normalize_visualization_superset_metadata(&mut rust_value);
+                normalize_visualization_superset_metadata(&mut python_value);
+            }
+            assert_eq!(rust_value, python_value, "graph.html {name}");
         }
         Ok(())
     }
@@ -3654,11 +3656,13 @@ hydrate();
         );
         let python = fs::read_to_string(&output_path)?;
         for name in ["RAW_NODES", "RAW_EDGES", "LEGEND"] {
-            assert_eq!(
-                embedded_json(&rust, name)?,
-                embedded_json(&python, name)?,
-                "{name}"
-            );
+            let mut rust_value = embedded_json(&rust, name)?;
+            let mut python_value = embedded_json(&python, name)?;
+            if name == "RAW_NODES" {
+                normalize_visualization_superset_metadata(&mut rust_value);
+                normalize_visualization_superset_metadata(&mut python_value);
+            }
+            assert_eq!(rust_value, python_value, "{name}");
         }
         for security_contract in [
             "vis-network@9.1.6/standalone/umd/vis-network.min.js",
@@ -4066,7 +4070,7 @@ hydrate();
     fn compare_graph_build(source: &Path) -> Result<(), Box<dyn Error>> {
         let repo = repository_root();
         let extraction: compass_languages::Extraction = serde_json::from_slice(&fs::read(source)?)?;
-        let rust = serde_json::to_value(build_from_extraction(&extraction, false, None))?;
+        let rust = build_from_extraction(&extraction, false, None);
         let output = Command::new(python_executable(&repo))
             .args([
                 "-c",
@@ -4081,9 +4085,64 @@ hydrate();
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        assert_eq!(rust, python, "graph build: {}", source.display());
+        let python: compass_model::GraphDocument = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(
+            rust.directed,
+            python.directed,
+            "directed: {}",
+            source.display()
+        );
+        assert_eq!(
+            rust.graph,
+            python.graph,
+            "graph metadata: {}",
+            source.display()
+        );
+        assert_eq!(rust.nodes, python.nodes, "nodes: {}", source.display());
+        assert_eq!(rust.extras, python.extras, "extras: {}", source.display());
+        for edge in &python.links {
+            assert!(
+                rust.links.contains(edge),
+                "missing Python edge {edge:?}: {}",
+                source.display()
+            );
+        }
+        assert_eq!(
+            rust.multigraph,
+            has_parallel_endpoint_pairs(&rust),
+            "multigraph metadata: {}",
+            source.display()
+        );
+        if rust.links.len() == python.links.len() {
+            assert_eq!(rust.links, python.links, "links: {}", source.display());
+            assert_eq!(
+                rust.multigraph,
+                python.multigraph,
+                "multigraph: {}",
+                source.display()
+            );
+        } else {
+            assert!(
+                rust.links.len() > python.links.len(),
+                "Compass dropped Python edges: {}",
+                source.display()
+            );
+        }
         Ok(())
+    }
+
+    fn has_parallel_endpoint_pairs(document: &compass_model::GraphDocument) -> bool {
+        let mut pairs = std::collections::BTreeSet::new();
+        document.links.iter().any(|edge| {
+            let source = edge.source.as_str();
+            let target = edge.target.as_str();
+            let pair = if document.directed || source <= target {
+                (source, target)
+            } else {
+                (target, source)
+            };
+            !pairs.insert(pair)
+        })
     }
 
     fn compare_extraction_path(
@@ -4108,19 +4167,54 @@ hydrate();
             String::from_utf8_lossy(&output.stderr)
         );
         let python: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        strip_definition_hashes(&mut rust);
+        normalize_compass_superset_metadata(&mut rust);
         assert_eq!(rust, python, "fixture: {}", source.display());
         Ok(rust)
     }
 
-    fn strip_definition_hashes(value: &mut Value) {
+    fn normalize_compass_superset_metadata(value: &mut Value) {
+        const COMPASS_ONLY_NODE_FIELDS: &[&str] = &[
+            "implementation_hash",
+            "language",
+            "line_end",
+            "line_start",
+            "signature",
+            "signature_hash",
+            "source_hash",
+            "symbol_kind",
+        ];
         if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) {
             for node in nodes {
                 if let Some(attributes) = node.as_object_mut() {
-                    attributes.remove("signature_hash");
-                    attributes.remove("implementation_hash");
-                    attributes.remove("source_hash");
+                    for field in COMPASS_ONLY_NODE_FIELDS {
+                        attributes.remove(*field);
+                    }
                 }
+            }
+        }
+    }
+
+    fn normalize_visualization_superset_metadata(value: &mut Value) {
+        const COMPASS_ONLY_VISUALIZATION_FIELDS: &[&str] = &[
+            "language",
+            "line_end",
+            "line_start",
+            "signature",
+            "source_location",
+            "symbol_kind",
+            "tooltip_html",
+        ];
+        let Some(nodes) = value.as_array_mut() else {
+            return;
+        };
+        for node in nodes {
+            if let Some(attributes) = node.as_object_mut() {
+                for field in COMPASS_ONLY_VISUALIZATION_FIELDS {
+                    attributes.remove(*field);
+                }
+                // Compass replaces Graphify's plain-text hover title with the
+                // structured, escaped `tooltip_html` field above.
+                attributes.remove("title");
             }
         }
     }

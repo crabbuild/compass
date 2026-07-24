@@ -89,6 +89,11 @@ extensible.
 
 Source/target IDs must be indexable. Attributes are extensible.
 
+Compass sets `multigraph` from the emitted links. It is `true` when two links
+share an endpoint pair (ordered for directed graphs, unordered for undirected
+graphs), including repeated self-loops. Consumers do not need to request this
+promotion.
+
 ### Consumer requirements
 
 - preserve unknown attributes;

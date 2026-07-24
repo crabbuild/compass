@@ -37,6 +37,12 @@ A **realization** is more specific than a commit. The same commit can have a
 code-only realization and one or more semantic realizations with different
 provider/model configuration.
 
+History graph schema `networkx-node-link/v2` records automatic multigraph
+promotion. On upgrade, Compass migrates a stored v1 build profile to v2. The
+fingerprint therefore no longer matches a v1 realization, and the next
+requested build rematerializes that commit instead of reusing stale graph
+metadata.
+
 ## 1. Inspect the command contract
 
 Run:
