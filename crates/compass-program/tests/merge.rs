@@ -62,6 +62,9 @@ fn syntax_batch() -> EvidenceBatch {
                 graph_node_id: None,
                 signature_digest: hex_sha256(b"fn run()"),
                 body_digest: hex_sha256(b"{ work(); }"),
+                visibility: compass_ir::Visibility::Public,
+                execution_mode: compass_ir::ExecutionMode::Sync,
+                is_test: false,
                 anchor: SourceAnchor {
                     source_file: "src/lib.rs".to_owned(),
                     start_byte: 0,

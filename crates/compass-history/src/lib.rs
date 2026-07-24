@@ -24,7 +24,9 @@ pub use diff::{ChangeKind, ChangeSink, GraphChange, RecordKind};
 pub use error::HistoryError;
 pub use fingerprint::{BuildProfile, ExtractionFingerprint, ExtractionFingerprintInput};
 pub use gc::{GcPlan, GcSweep};
-pub use git::{GitTargetLimitation, Repository, WorktreeGuard};
+pub use git::{
+    GitTargetLimitation, Repository, SourceFileDelta, SourceFileStatus, SourceHunk, WorktreeGuard,
+};
 pub use jobs::{ClaimedJob, HistoryQueue, JobRecord, JobRequest, JobState};
 pub use keys::{edge_key, hyperedge_key, node_key};
 pub use leases::{LEASE_DURATION_MILLIS, LEASE_HEARTBEAT_MILLIS, LeaseGuard};
@@ -34,7 +36,9 @@ pub use model::{
     GraphVersion, HISTORY_SCHEMA_VERSION, PublishRequest, PublishedVersion, RealizationId,
     StoredTree, StructuralSharing,
 };
-pub use store::{CorruptPreferredToken, HistoryStore, PreparedPublication};
+pub use store::{
+    CorruptPreferredToken, HistoryRecord, HistoryRecordKey, HistoryStore, PreparedPublication,
+};
 pub use validate::{
     MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH, MAX_KEY_BYTES,
     MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, ValidationProblem, ValidationReport,

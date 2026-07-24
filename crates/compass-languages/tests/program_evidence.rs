@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 
-use compass_ir::{Capability, CoverageState, OperationKind};
+use compass_ir::{
+    Capability, CoverageState, ExecutionMode, OperationKind, ParameterKind, Visibility,
+};
 use compass_languages::TreeSitterSyntaxProvider;
 use compass_program::{FileInput, SyntaxProvider};
 
@@ -176,5 +178,63 @@ fn typescript_functions_cross_link_to_graph_nodes_and_rust_calls_have_real_calle
     assert!(!callees.contains(&"_"), "callees: {callees:?}");
     assert!(callees.contains(&"map"), "callees: {callees:?}");
     assert!(callees.contains(&"collect"), "callees: {callees:?}");
+    Ok(())
+}
+
+#[test]
+fn syntax_providers_emit_callable_contracts() -> Result<(), Box<dyn Error>> {
+    let rust = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/lib.rs",
+            language: "rust",
+            source: b"pub async fn fetch(&self, id: u64) {}",
+        })?
+        .ok_or("missing Rust batch")?;
+    let function = &rust.modules[0].functions[0];
+    assert_eq!(function.visibility, Visibility::Public);
+    assert_eq!(function.execution_mode, ExecutionMode::Async);
+    assert_eq!(function.parameters[0].kind, ParameterKind::Receiver);
+
+    let typescript = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/app.ts",
+            language: "typescript",
+            source: b"export async function load(id: string, limit = 20, ...tags: string[]) {}",
+        })?
+        .ok_or("missing TypeScript batch")?;
+    let function = &typescript.modules[0].functions[0];
+    assert_eq!(function.visibility, Visibility::Public);
+    assert_eq!(function.execution_mode, ExecutionMode::Async);
+    assert!(function.parameters[0].required);
+    assert!(!function.parameters[1].required);
+    assert!(function.parameters[1].default_digest.is_some());
+    assert_eq!(
+        function.parameters[2].kind,
+        ParameterKind::VariadicPositional
+    );
+
+    let python = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/app.py",
+            language: "python",
+            source: b"async def fetch(self, account_id: str, /, limit: int = 20, *, trace: bool = False, **options):\n    return client.load(account_id)\n",
+        })?
+        .ok_or("missing Python batch")?;
+    let function = &python.modules[0].functions[0];
+    assert_eq!(function.execution_mode, ExecutionMode::Async);
+    assert_eq!(function.parameters[0].kind, ParameterKind::PositionalOnly);
+    assert_eq!(function.parameters[1].kind, ParameterKind::PositionalOnly);
+    assert!(!function.parameters[2].required);
+    assert_eq!(function.parameters[3].kind, ParameterKind::KeywordOnly);
+    assert_eq!(function.parameters[4].kind, ParameterKind::VariadicKeyword);
+
+    let rust_test = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/lib.rs",
+            language: "rust",
+            source: b"#[test]\nfn validates_contract() {}",
+        })?
+        .ok_or("missing Rust test batch")?;
+    assert!(rust_test.modules[0].functions[0].is_test);
     Ok(())
 }

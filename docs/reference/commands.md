@@ -230,13 +230,26 @@ Runs the native graph-query benchmark surface.
 compass history enable [build-profile options]
 compass history disable
 compass history status [REV] [--format text|json]
-compass history build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]
+compass history build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]
 compass history rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]
 compass history list [REV] [--format text|json]
 compass history show REALIZATION [--format text|json]
 compass history prefer REV REALIZATION [--format text|json]
 compass history export REV --format graph-json|compass-out --output PATH
 compass history gc [--prune-non-preferred] [--yes] [--format text|json]
+```
+
+`history build REV --all` resolves `REV` once, then builds every locally
+reachable commit (including merged branches) in oldest-first topological order.
+Add `--first-parent` to limit the batch to the ref's first-parent lineage.
+The selected build profile is fixed for the whole batch. Validated preferred
+realizations with that profile are skipped, so rerunning the command resumes
+without rebuilding completed commits. Compass continues after individual
+commit failures, emits a complete final report, and exits `1` if any failed.
+
+```bash
+compass history build main --all --code-only
+compass history build main --all --first-parent
 ```
 
 Build-profile options include:
@@ -253,17 +266,17 @@ Build-profile options include:
 
 ```text
 compass diff OLD NEW
-  [--detailed]
   [--format text|json]
-  [--topology-only]
-  [--include-locations]
-  [--include-analysis]
-  [--include-metadata]
+  [--all]
+  [--explain FINDING_ID]
   [--fingerprint SHA]
-  [--allow-profile-mismatch]
 ```
 
-`--detailed` is a human format and cannot be combined with JSON.
+The default output is an actionable PR-review summary: likely breaks, behavior
+changes, affected callers/modules, and test evidence. Routine symbol churn is
+collapsed; `--all` expands it. `--explain` prints the evidence and reasoning
+for one finding. Diff requires comparable build profiles; rebuild the newer
+revision with `--profile-from OLD` when needed.
 
 ## Service
 

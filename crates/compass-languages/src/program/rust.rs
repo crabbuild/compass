@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use compass_ir::{
-    BasicBlock, Capability, Coverage, CoverageState, FunctionIr, ModuleIr, Operation,
-    OperationKind, ParameterIr, ProviderDescriptor, SourceAnchor, Terminator, TypeRef, hex_sha256,
+    BasicBlock, Capability, Coverage, CoverageState, ExecutionMode, FunctionIr, ModuleIr,
+    Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor, SourceAnchor,
+    Terminator, TypeRef, Visibility, hex_sha256,
 };
 use compass_program::{EvidenceBatch, FileInput, evidence_record};
 use tree_sitter::Node;
@@ -165,6 +166,9 @@ impl<'a> Collector<'a> {
             graph_node_id: Some(graph_node_id(self.input.source_file, owner, name)),
             signature_digest: hex_sha256(signature),
             body_digest: hex_sha256(slice(self.input.source, body)),
+            visibility: rust_visibility(signature),
+            execution_mode: rust_execution_mode(signature),
+            is_test: rust_test_attribute(self.input.source, node),
             anchor: function_anchor,
             parameters,
             return_type,
@@ -205,6 +209,36 @@ impl<'a> Collector<'a> {
             coverage: BTreeMap::from([(self.input.source_file.to_owned(), coverage)]),
         }
     }
+}
+
+fn rust_test_attribute(source: &[u8], node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    if node.children(&mut cursor).any(|child| {
+        child.kind() == "attribute_item"
+            && text(source, child)
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>()
+                == "#[test]"
+    }) {
+        return true;
+    }
+    let mut sibling = node.prev_named_sibling();
+    while let Some(candidate) = sibling {
+        if candidate.kind() != "attribute_item" {
+            break;
+        }
+        if text(source, candidate)
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>()
+            == "#[test]"
+        {
+            return true;
+        }
+        sibling = candidate.prev_named_sibling();
+    }
+    false
 }
 
 fn collect_operations(
@@ -452,6 +486,13 @@ fn parameters(
         });
         output.push(ParameterIr {
             name: text(input.source, name_node).to_owned(),
+            kind: if parameter.kind() == "self_parameter" {
+                ParameterKind::Receiver
+            } else {
+                ParameterKind::PositionalOrKeyword
+            },
+            required: true,
+            default_digest: None,
             type_ref,
             anchor: anchor(input.source_file, parameter),
             evidence: vec![evidence_id.to_owned()],
@@ -460,10 +501,35 @@ fn parameters(
     output
 }
 
+fn rust_visibility(signature: &[u8]) -> Visibility {
+    let signature = std::str::from_utf8(signature).unwrap_or_default();
+    if signature
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .any(|token| token == "pub")
+    {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    }
+}
+
+fn rust_execution_mode(signature: &[u8]) -> ExecutionMode {
+    let signature = std::str::from_utf8(signature).unwrap_or_default();
+    if signature
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .any(|token| token == "async")
+    {
+        ExecutionMode::Async
+    } else {
+        ExecutionMode::Sync
+    }
+}
+
 fn function_coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
     let mut coverage = Coverage::new();
     coverage.insert(Capability::Syntax, CoverageState::Complete);
     coverage.insert(Capability::Definitions, CoverageState::Complete);
+    coverage.insert(Capability::Contracts, CoverageState::Complete);
     for capability in [
         Capability::SymbolIdentity,
         Capability::References,
@@ -486,15 +552,10 @@ fn function_coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
         });
         coverage.insert(capability, CoverageState::Partial { reasons });
     }
-    for capability in [
-        Capability::Types,
-        Capability::DataFlow,
-        Capability::Contracts,
-    ] {
+    for capability in [Capability::Types, Capability::DataFlow] {
         let reason = match capability {
             Capability::Types => "compiler_types_unavailable",
             Capability::DataFlow => "data_flow_unavailable",
-            Capability::Contracts => "contract_analysis_unavailable",
             _ => "unavailable",
         };
         coverage.insert(

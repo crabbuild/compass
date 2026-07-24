@@ -257,8 +257,8 @@ const PAGES: &[Page] = &[
     page!(
         "history build",
         "Materialize an immutable graph for a Git revision",
-        ["compass history build <REV> [BUILD_PROFILE_OPTIONS] [OPTIONS]"],
-        "Arguments:\n  <REV>                    Git revision to materialize\n\nOptions:\n  --profile-from <SOURCE>  Reuse a profile from a revision or realization\n  --format <text|json>      Output format [default: text]\n  --backend <NAME>          Pin a semantic provider\n  --model <MODEL>           Pin the provider model\n  --mode <deep>             Use deep semantic extraction\n  --cargo                   Include Cargo metadata\n  --dedup-llm               Enable model-assisted deduplication\n  --token-budget <N>        Semantic token budget\n  --resolution <NUMBER>     Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>   Hub-exclusion threshold\n  --no-gitignore            Ignore committed .gitignore rules\n  --exclude <PATTERN>       Exclusion glob; repeatable\n\nExamples:\n  compass history build HEAD\n  compass history build v1.2.0 --profile-from HEAD --format json\n\nNotes:\n  --profile-from conflicts with build-profile options."
+        ["compass history build <REV> [--all [--first-parent]] [BUILD_PROFILE_OPTIONS] [OPTIONS]"],
+        "Arguments:\n  <REV>                    Git revision to materialize\n\nOptions:\n  --all                     Build every commit reachable from REV\n  --first-parent            With --all, build only the first-parent lineage\n  --profile-from <SOURCE>  Reuse a profile from a revision or realization\n  --format <text|json>      Output format [default: text]\n  --backend <NAME>          Pin a semantic provider\n  --model <MODEL>           Pin the provider model\n  --mode <deep>             Use deep semantic extraction\n  --cargo                   Include Cargo metadata\n  --dedup-llm               Enable model-assisted deduplication\n  --token-budget <N>        Semantic token budget\n  --resolution <NUMBER>     Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>   Hub-exclusion threshold\n  --no-gitignore            Ignore committed .gitignore rules\n  --exclude <PATTERN>       Exclusion glob; repeatable\n\nExamples:\n  compass history build HEAD\n  compass history build main --all\n  compass history build main --all --first-parent --code-only\n  compass history build v1.2.0 --profile-from HEAD --format json\n\nNotes:\n  --profile-from conflicts with build-profile options. Bulk builds run oldest-first, continue after individual failures, and resume by skipping validated matching realizations."
     ),
     page!(
         "history rebuild",
@@ -298,9 +298,9 @@ const PAGES: &[Page] = &[
     ),
     page!(
         "diff",
-        "Compare knowledge graphs from two Git revisions",
+        "Review semantic changes between two Git revisions",
         ["compass diff <OLD> <NEW> [OPTIONS]"],
-        "Arguments:\n  <OLD>                         Base Git revision\n  <NEW>                         Target Git revision\n\nOptions:\n  --detailed                    Include node and relationship details\n  --format <text|json>          Output format [default: text]\n  --topology-only               Compare only graph topology\n  --include-locations           Include source-location changes\n  --include-analysis            Include analysis artifact changes\n  --include-metadata            Include graph metadata changes\n  --fingerprint <SHA256>        Select one extraction fingerprint\n  --allow-profile-mismatch      Compare different extraction profiles\n\nExamples:\n  compass diff v1.2.0 HEAD\n  compass diff HEAD~1 HEAD --detailed --include-locations\n  compass diff main feature --format json --allow-profile-mismatch\n\nNotes:\n  --fingerprint conflicts with --allow-profile-mismatch; --detailed conflicts with JSON output."
+        "Arguments:\n  <OLD>                         Base Git revision\n  <NEW>                         Target Git revision\n\nOptions:\n  --format <text|json>          Output format [default: text]\n  --all                         Include routine symbol churn\n  --explain <FINDING_ID>        Expand one semantic finding\n  --fingerprint <SHA256>        Select one extraction fingerprint\n\nExamples:\n  compass diff v1.2.0 HEAD\n  compass diff HEAD~1 HEAD --format json\n  compass diff main feature --all\n\nNotes:\n  Findings report callable breaks, behavior, dependencies, affected consumers, and evidence limitations."
     ),
     page!(
         "tree",

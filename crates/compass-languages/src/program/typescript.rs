@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use compass_ir::{
-    BasicBlock, Capability, Coverage, CoverageState, FunctionIr, ModuleIr, Operation,
-    OperationKind, ParameterIr, ProviderDescriptor, SourceAnchor, Terminator, TypeRef, hex_sha256,
+    BasicBlock, Capability, Coverage, CoverageState, ExecutionMode, FunctionIr, ModuleIr,
+    Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor, SourceAnchor,
+    Terminator, TypeRef, Visibility, hex_sha256,
 };
 use compass_program::{EvidenceBatch, FileInput, evidence_record};
 use tree_sitter::Node;
@@ -182,12 +183,16 @@ impl<'a> Collector<'a> {
             operation.ordinal = u32::try_from(ordinal).unwrap_or(u32::MAX);
         }
         let coverage = coverage(&self.reasons);
+        let visibility = js_visibility(&name, self.input.source, container, signature);
         self.functions.push(FunctionIr {
             symbol_id: symbol,
             name,
             graph_node_id: Some(graph_node_id),
             signature_digest: hex_sha256(signature),
             body_digest: hex_sha256(slice(self.input.source, body)),
+            visibility,
+            execution_mode: js_execution_mode(signature),
+            is_test: is_test_path(self.input.source_file),
             anchor: anchor(self.input.source_file, container),
             parameters: parameters(
                 self.input,
@@ -240,6 +245,15 @@ impl<'a> Collector<'a> {
             coverage: BTreeMap::from([(self.input.source_file.to_owned(), coverage)]),
         }
     }
+}
+
+fn is_test_path(source_file: &str) -> bool {
+    let path = source_file.replace('\\', "/").to_ascii_lowercase();
+    let name = path.rsplit('/').next().unwrap_or(&path);
+    path.starts_with("tests/")
+        || path.contains("/tests/")
+        || name.contains(".test.")
+        || name.contains(".spec.")
 }
 
 fn function_parts<'tree>(
@@ -490,12 +504,29 @@ fn parameters(
         ) {
             continue;
         }
-        let name_node = parameter
+        let pattern = parameter
             .child_by_field_name("pattern")
             .or_else(|| parameter.child_by_field_name("name"))
             .unwrap_or(parameter);
+        let name_node = leftmost_identifier(pattern).unwrap_or(pattern);
+        let default = parameter
+            .child_by_field_name("value")
+            .or_else(|| pattern.child_by_field_name("right"));
+        let rest = parameter.kind() == "rest_pattern"
+            || pattern.kind() == "rest_pattern"
+            || child_kind(parameter, "rest_pattern").is_some();
+        let kind = if rest {
+            ParameterKind::VariadicPositional
+        } else {
+            ParameterKind::PositionalOrKeyword
+        };
         output.push(ParameterIr {
             name: text(input.source, name_node).to_owned(),
+            kind,
+            required: parameter.kind() != "optional_parameter"
+                && kind != ParameterKind::VariadicPositional
+                && default.is_none(),
+            default_digest: default.map(|node| hex_sha256(slice(input.source, node))),
             type_ref: parameter.child_by_field_name("type").map(|node| TypeRef {
                 spelling: text(input.source, node)
                     .trim_start_matches(':')
@@ -511,10 +542,72 @@ fn parameters(
     output
 }
 
+fn leftmost_identifier(node: Node<'_>) -> Option<Node<'_>> {
+    if matches!(
+        node.kind(),
+        "identifier" | "property_identifier" | "private_property_identifier"
+    ) {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find_map(leftmost_identifier)
+}
+
+fn child_kind<'tree>(node: Node<'tree>, expected: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| child.kind() == expected)
+}
+
+fn js_visibility(name: &str, source: &[u8], container: Node<'_>, signature: &[u8]) -> Visibility {
+    let signature = std::str::from_utf8(signature).unwrap_or_default();
+    let tokens = signature
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .collect::<Vec<_>>();
+    if tokens.contains(&"private")
+        || name
+            .rsplit('.')
+            .next()
+            .is_some_and(|name| name.starts_with('#'))
+    {
+        Visibility::Private
+    } else if tokens.contains(&"protected") {
+        Visibility::Protected
+    } else if tokens.contains(&"export")
+        || container
+            .parent()
+            .is_some_and(|parent| parent.kind() == "export_statement")
+        || container
+            .parent()
+            .is_some_and(|parent| text(source, parent).trim_start().starts_with("export "))
+        || name.contains('.')
+    {
+        Visibility::Public
+    } else {
+        Visibility::Internal
+    }
+}
+
+fn js_execution_mode(signature: &[u8]) -> ExecutionMode {
+    let signature = std::str::from_utf8(signature).unwrap_or_default();
+    let async_function = signature
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .any(|token| token == "async");
+    let generator = signature.contains("function*") || signature.contains("function *");
+    match (async_function, generator) {
+        (true, true) => ExecutionMode::AsyncGenerator,
+        (true, false) => ExecutionMode::Async,
+        (false, true) => ExecutionMode::Generator,
+        (false, false) => ExecutionMode::Sync,
+    }
+}
+
 fn coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
     let mut coverage = Coverage::new();
     coverage.insert(Capability::Syntax, CoverageState::Complete);
     coverage.insert(Capability::Definitions, CoverageState::Complete);
+    coverage.insert(Capability::Contracts, CoverageState::Complete);
     for capability in [
         Capability::SymbolIdentity,
         Capability::References,
@@ -540,15 +633,10 @@ fn coverage(reasons: &BTreeMap<Capability, Vec<String>>) -> Coverage {
             },
         );
     }
-    for capability in [
-        Capability::Types,
-        Capability::DataFlow,
-        Capability::Contracts,
-    ] {
+    for capability in [Capability::Types, Capability::DataFlow] {
         let reason = match capability {
             Capability::Types => "compiler_types_unavailable",
             Capability::DataFlow => "data_flow_unavailable",
-            Capability::Contracts => "contract_analysis_unavailable",
             _ => "unavailable",
         };
         coverage.insert(

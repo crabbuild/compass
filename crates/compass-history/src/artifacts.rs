@@ -4,7 +4,7 @@ use std::path::{Component, Path};
 
 use compass_analysis::{AnalysisBundle, FunctionSummary};
 use compass_files::{write_bytes_atomic, write_json_atomic};
-use compass_ir::{EvidenceRecord, ModuleIr, ProgramBundle, ProviderDescriptor};
+use compass_ir::{EvidenceRecord, FunctionIr, ModuleIr, ProgramBundle, ProviderDescriptor};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
 use serde::{Deserialize, Serialize};
@@ -203,6 +203,15 @@ impl GraphArtifacts {
                     program_key("module", &module.source_file),
                     encode_record("compass.program.module", &serde_json::to_value(module)?)?,
                 ));
+                for function in &module.functions {
+                    partitioned.program_facts.push((
+                        program_key("function", &function.symbol_id),
+                        encode_record(
+                            "compass.program.function",
+                            &serde_json::to_value(function)?,
+                        )?,
+                    ));
+                }
             }
             for summary in &program.summaries {
                 partitioned.program_summaries.push((
@@ -263,11 +272,14 @@ impl GraphArtifacts {
                 &canonical,
                 &mut edge_occurrences,
             )?;
+            let (source, target) = edge_identity_endpoints(edge);
+            // Compass keeps a legacy undirected NetworkX header while its
+            // persisted link endpoints retain the true semantic direction.
             let key = edge_key(
-                &edge.source,
-                &edge.target,
+                source,
+                target,
                 &edge.string("relation"),
-                self.document.directed,
+                true,
                 discriminator.as_deref(),
             );
             if !edge_keys.insert(key.clone()) {
@@ -679,6 +691,18 @@ fn edge_discriminator(
     Ok(Some(discriminator))
 }
 
+fn edge_identity_endpoints(edge: &EdgeRecord) -> (&str, &str) {
+    if let (Some(source), Some(target)) = (
+        edge.attributes.get("_src").and_then(Value::as_str),
+        edge.attributes.get("_tgt").and_then(Value::as_str),
+    ) && ((source == edge.source && target == edge.target)
+        || (source == edge.target && target == edge.source))
+    {
+        return (source, target);
+    }
+    (&edge.source, &edge.target)
+}
+
 fn add_optional_analysis(
     partitioned: &mut PartitionedGraph,
     path: &str,
@@ -982,7 +1006,7 @@ fn metadata_key(parts: &[&[u8]]) -> Vec<u8> {
         .finish()
 }
 
-fn program_key(kind: &str, identity: &str) -> Vec<u8> {
+pub(crate) fn program_key(kind: &str, identity: &str) -> Vec<u8> {
     KeyBuilder::new().push_str(kind).push_str(identity).finish()
 }
 
@@ -997,6 +1021,7 @@ fn reconstruct_program(
     let mut providers = Vec::<ProviderDescriptor>::new();
     let mut evidence = Vec::<EvidenceRecord>::new();
     let mut modules = Vec::<ModuleIr>::new();
+    let mut indexed_functions = BTreeMap::<String, FunctionIr>::new();
     for (key, bytes) in facts {
         let segments = decode_segments(key)
             .map_err(|error| HistoryError::InvalidArtifacts(error.to_string()))?;
@@ -1045,6 +1070,22 @@ fn reconstruct_program(
                 }
                 modules.push(value);
             }
+            b"function" => {
+                let value: FunctionIr = decode_typed(bytes, "compass.program.function")?;
+                if value.symbol_id != identity {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "program function key does not match its symbol".to_owned(),
+                    ));
+                }
+                if indexed_functions
+                    .insert(identity.to_owned(), value)
+                    .is_some()
+                {
+                    return Err(HistoryError::InvalidArtifacts(
+                        "duplicate indexed program function".to_owned(),
+                    ));
+                }
+            }
             _ => {
                 return Err(HistoryError::InvalidArtifacts(
                     "unknown program fact key".to_owned(),
@@ -1054,6 +1095,16 @@ fn reconstruct_program(
     }
     let header: ProgramHeader = header
         .ok_or_else(|| HistoryError::InvalidArtifacts("missing program header".to_owned()))?;
+    let module_functions = modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .map(|function| (function.symbol_id.clone(), function.clone()))
+        .collect::<BTreeMap<_, _>>();
+    if indexed_functions != module_functions {
+        return Err(HistoryError::InvalidArtifacts(
+            "indexed program functions do not match module contents".to_owned(),
+        ));
+    }
     let mut function_summaries = Vec::<FunctionSummary>::new();
     let mut reverse_calls = BTreeMap::<String, Vec<String>>::new();
     for (key, bytes) in summaries {
@@ -1127,7 +1178,7 @@ fn decode_record(bytes: &[u8], schema: &str) -> Result<Value, HistoryError> {
     serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
 }
 
-fn decode_typed<T: for<'de> Deserialize<'de>>(
+pub(crate) fn decode_typed<T: for<'de> Deserialize<'de>>(
     bytes: &[u8],
     schema: &str,
 ) -> Result<T, HistoryError> {

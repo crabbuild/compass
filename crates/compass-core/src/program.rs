@@ -440,8 +440,12 @@ fn read_sources(root: &Path, sources: &[PathBuf]) -> Result<Vec<SourceInput>, Co
 }
 
 fn supports_program_syntax(source_file: &str) -> bool {
-    Registry::resolve(Path::new(source_file))
-        .is_some_and(|spec| matches!(spec.name, "rust" | "typescript" | "tsx" | "javascript"))
+    Registry::resolve(Path::new(source_file)).is_some_and(|spec| {
+        matches!(
+            spec.name,
+            "python" | "rust" | "typescript" | "tsx" | "javascript"
+        )
+    })
 }
 
 fn analyze_syntax(

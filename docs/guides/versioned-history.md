@@ -109,6 +109,27 @@ compass history build v1.2.0
 compass history build HEAD~20
 ```
 
+Build the entire locally reachable history from a ref with one command:
+
+```bash
+compass history build main --all --code-only
+```
+
+By default this includes commits from merged branches. To build only the
+first-parent lineage:
+
+```bash
+compass history build main --all --first-parent
+```
+
+Compass resolves the ref and build profile once, orders commits
+parent-before-child, and processes them sequentially. A rerun validates and
+skips preferred realizations that already match the selected profile. Failures
+are recorded per commit without stopping later commits; the final report is
+still produced and the command exits `1` if any commit failed. Progress is
+written to stderr, while `--format json` writes one stable summary object to
+stdout.
+
 The revision is resolved to a full commit SHA. Materialization runs in a
 detached, protected, offline worktree:
 
@@ -134,6 +155,12 @@ For automation:
 
 ```bash
 compass history list HEAD --format json
+```
+
+After a bulk build, omit the revision to verify all stored realizations:
+
+```bash
+compass history list --format json
 ```
 
 Inspect one realization:
@@ -188,10 +215,10 @@ Human-readable summary:
 compass diff v1.2.0 HEAD
 ```
 
-Detailed human output:
+Expand routine symbol churn:
 
 ```bash
-compass diff v1.2.0 HEAD --detailed
+compass diff v1.2.0 HEAD --all
 ```
 
 Machine-readable output:
@@ -200,32 +227,37 @@ Machine-readable output:
 compass diff v1.2.0 HEAD --format json
 ```
 
-Topology-only comparison:
+Explain one finding:
 
 ```bash
-compass diff HEAD~1 HEAD --topology-only
+compass diff v1.2.0 HEAD --explain sd1-...
 ```
 
-The diff command supports explicit inclusion options for locations, analysis,
-and metadata. Use `compass diff --help` for the exact current surface.
+The default report is ranked for PR review: likely breaks, behavior changes,
+affected callers/modules, and test evidence come first. Routine symbol churn
+is collapsed. Its five core concepts are contract changes, behavior changes,
+dependency changes, affected consumers, and verification evidence. JSON uses
+schema `compass.semantic_diff.report/1`; deterministic `sd1-...` finding IDs
+make `--explain` and automation stable when the underlying semantic evidence
+does not change.
+
+Semantic diff requires Program IR v2 evidence. Rebuild older realizations with
+the current Compass binary before comparing them. Static test mapping may
+recommend resolved test callers, but `partial` or `unknown` evidence never
+claims safety or a test gap. AI-generated summaries and hosted PR delivery are
+outside this deterministic MVP.
 
 ### Profile compatibility
 
-Normal diffs require semantically comparable extraction fingerprints. If they
+Normal diffs require semantically comparable build profiles. If they
 differ, Compass explains how to build a comparable realization:
 
 ```bash
 compass history build NEW_REV --profile-from OLD_REV_OR_REALIZATION
 ```
 
-`--allow-profile-mismatch` is an explicit inspection escape hatch. It does not
-make unlike profiles equivalent.
-
-### Reverse symmetry
-
-A qualified diff should be deterministic and reverse-symmetric: additions from
-A to B correspond to removals from B to A. The real-repository qualification
-script exercises this contract.
+There is no profile-mismatch override: unlike profiles do not produce a
+semantic report.
 
 ## 7. Export a realization
 

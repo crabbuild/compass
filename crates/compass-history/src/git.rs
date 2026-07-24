@@ -5,6 +5,30 @@ use std::process::Command;
 
 use crate::{CommitId, HistoryError};
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum SourceFileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SourceHunk {
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SourceFileDelta {
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
+    pub status: SourceFileStatus,
+    pub hunks: Vec<SourceHunk>,
+}
+
 /// Canonical paths that identify a Git repository and its shared common directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -130,6 +154,68 @@ impl Repository {
             .collect()
     }
 
+    /// Return exact file statuses and zero-context source hunks without fetching or checking out.
+    pub fn source_delta(
+        &self,
+        old: &CommitId,
+        new: &CommitId,
+    ) -> Result<Vec<SourceFileDelta>, HistoryError> {
+        let status = git_output(
+            &self.root,
+            &[
+                "diff",
+                "--name-status",
+                "-z",
+                "--find-renames=50%",
+                old.as_str(),
+                new.as_str(),
+                "--",
+            ],
+        )?;
+        let mut deltas = parse_name_status(&status)?;
+        let patch = git_output(
+            &self.root,
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--find-renames=50%",
+                "--unified=0",
+                "--no-color",
+                old.as_str(),
+                new.as_str(),
+                "--",
+            ],
+        )?;
+        attach_hunks(&patch, &mut deltas)?;
+        deltas.sort();
+        Ok(deltas)
+    }
+
+    /// Return every commit reachable from `tip` in parent-before-child order.
+    pub fn reachable_commits(
+        &self,
+        tip: &CommitId,
+        first_parent: bool,
+    ) -> Result<Vec<CommitId>, HistoryError> {
+        let mut arguments = vec!["rev-list", "--reverse", "--topo-order"];
+        if first_parent {
+            arguments.push("--first-parent");
+        }
+        arguments.push("--end-of-options");
+        arguments.push(tip.as_str());
+        let output = git_output(&self.root, &arguments)?;
+        std::str::from_utf8(&output)
+            .map_err(|error| HistoryError::Git(format!("Git returned non-UTF-8 history: {error}")))?
+            .lines()
+            .map(|value| {
+                value.parse().map_err(|_| {
+                    HistoryError::Git(format!("Git returned invalid reachable commit ID {value}"))
+                })
+            })
+            .collect()
+    }
+
     /// Inspect committed-tree and repository filter limitations without creating a worktree.
     pub fn target_limitations(
         &self,
@@ -236,6 +322,158 @@ impl Repository {
         guard.limitations = target_limitations(&guard.path)?;
         Ok(guard)
     }
+}
+
+fn parse_name_status(bytes: &[u8]) -> Result<Vec<SourceFileDelta>, HistoryError> {
+    let fields = bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    let mut output = Vec::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let status = std::str::from_utf8(fields[index])
+            .map_err(|error| HistoryError::Git(format!("non-UTF-8 diff status: {error}")))?;
+        index += 1;
+        let code = status
+            .as_bytes()
+            .first()
+            .copied()
+            .ok_or_else(|| HistoryError::Git("empty diff status".to_owned()))?;
+        let path = |field: &[u8]| -> Result<String, HistoryError> {
+            let value = std::str::from_utf8(field)
+                .map_err(|error| HistoryError::Git(format!("non-UTF-8 source path: {error}")))?;
+            validate_source_path(value)?;
+            Ok(value.replace('\\', "/"))
+        };
+        let delta = match code {
+            b'A' | b'M' | b'D' => {
+                let value = fields
+                    .get(index)
+                    .ok_or_else(|| HistoryError::Git("diff status has no path".to_owned()))?;
+                index += 1;
+                let value = path(value)?;
+                SourceFileDelta {
+                    old_path: (code != b'A').then(|| value.clone()),
+                    new_path: (code != b'D').then_some(value),
+                    status: match code {
+                        b'A' => SourceFileStatus::Added,
+                        b'D' => SourceFileStatus::Deleted,
+                        _ => SourceFileStatus::Modified,
+                    },
+                    hunks: Vec::new(),
+                }
+            }
+            b'R' => {
+                let old = fields
+                    .get(index)
+                    .ok_or_else(|| HistoryError::Git("rename has no old path".to_owned()))?;
+                let new = fields
+                    .get(index + 1)
+                    .ok_or_else(|| HistoryError::Git("rename has no new path".to_owned()))?;
+                index += 2;
+                SourceFileDelta {
+                    old_path: Some(path(old)?),
+                    new_path: Some(path(new)?),
+                    status: SourceFileStatus::Renamed,
+                    hunks: Vec::new(),
+                }
+            }
+            b'C' => {
+                return Err(HistoryError::Git(
+                    "copy detection is not part of semantic source delta".to_owned(),
+                ));
+            }
+            _ => {
+                return Err(HistoryError::Git(format!(
+                    "unsupported source diff status {status}"
+                )));
+            }
+        };
+        output.push(delta);
+    }
+    Ok(output)
+}
+
+fn validate_source_path(value: &str) -> Result<(), HistoryError> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(HistoryError::Git(format!(
+            "unsafe source delta path {value:?}"
+        )));
+    }
+    Ok(())
+}
+
+fn attach_hunks(bytes: &[u8], deltas: &mut [SourceFileDelta]) -> Result<(), HistoryError> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|error| HistoryError::Git(format!("non-UTF-8 source patch: {error}")))?;
+    let mut file_index = None;
+    let mut files_seen = 0_usize;
+    for line in text.lines() {
+        if line.starts_with("diff --git ") {
+            if files_seen >= deltas.len() {
+                return Err(HistoryError::Git(
+                    "source patch has more files than status output".to_owned(),
+                ));
+            }
+            file_index = Some(files_seen);
+            files_seen += 1;
+        } else if line.starts_with("@@ ") {
+            let index = file_index
+                .ok_or_else(|| HistoryError::Git("source hunk has no file".to_owned()))?;
+            deltas[index].hunks.push(parse_hunk_header(line)?);
+        }
+    }
+    if files_seen != deltas.len() {
+        return Err(HistoryError::Git(format!(
+            "source patch described {files_seen} files but status described {}",
+            deltas.len()
+        )));
+    }
+    for delta in deltas {
+        delta.hunks.sort();
+        delta.hunks.dedup();
+    }
+    Ok(())
+}
+
+fn parse_hunk_header(line: &str) -> Result<SourceHunk, HistoryError> {
+    let body = line
+        .strip_prefix("@@ -")
+        .and_then(|line| line.split_once(" @@").map(|(body, _)| body))
+        .ok_or_else(|| HistoryError::Git(format!("malformed source hunk {line:?}")))?;
+    let (old, new) = body
+        .split_once(" +")
+        .ok_or_else(|| HistoryError::Git(format!("malformed source hunk {line:?}")))?;
+    let parse_range = |value: &str| -> Result<(u32, u32), HistoryError> {
+        let (start, lines) = value.split_once(',').unwrap_or((value, "1"));
+        let start = start
+            .parse()
+            .map_err(|_| HistoryError::Git(format!("invalid hunk start {start:?}")))?;
+        let lines = lines
+            .parse()
+            .map_err(|_| HistoryError::Git(format!("invalid hunk length {lines:?}")))?;
+        Ok((start, lines))
+    };
+    let (old_start, old_lines) = parse_range(old)?;
+    let (new_start, new_lines) = parse_range(new)?;
+    Ok(SourceHunk {
+        old_start,
+        old_lines,
+        new_start,
+        new_lines,
+    })
 }
 
 impl WorktreeGuard {

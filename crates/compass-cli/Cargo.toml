@@ -23,6 +23,7 @@ ctrlc.workspace = true
 glob.workspace = true
 mimalloc.workspace = true
 regex.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 time.workspace = true
@@ -48,6 +49,7 @@ compass-prs = { path = "../compass-prs", version = "0.1.3" }
 compass-query = { path = "../compass-query", version = "0.1.3" }
 compass-reflect = { path = "../compass-reflect", version = "0.1.3" }
 compass-semantic = { path = "../compass-semantic", version = "0.1.3" }
+compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.1.3" }
 url.workspace = true
 
 [lints]

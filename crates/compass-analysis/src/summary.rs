@@ -210,6 +210,7 @@ pub(crate) fn semantic_digest(function: &compass_ir::FunctionIr) -> Result<Strin
         &function.symbol_id,
         &function.signature_digest,
         &function.body_digest,
+        function.is_test,
         operations,
         &function.coverage,
     ))?))

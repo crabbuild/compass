@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use compass_history::{CommitId, GitTargetLimitation, HistoryError, Repository};
+use compass_history::{
+    CommitId, GitTargetLimitation, HistoryError, Repository, SourceFileStatus, SourceHunk,
+};
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("git")
@@ -60,6 +62,55 @@ fn resolve_parents_unknown_revisions_and_linked_worktrees() -> Result<(), Box<dy
 }
 
 #[test]
+fn reachable_commits_are_parent_first_and_can_follow_only_first_parents()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("root"), "root")?;
+    git(directory.path(), &["add", "root"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "root"])?;
+    let repository = Repository::discover(directory.path())?;
+    let root = repository.resolve("HEAD")?;
+
+    git(directory.path(), &["checkout", "--quiet", "-b", "side"])?;
+    std::fs::write(directory.path().join("side"), "side")?;
+    git(directory.path(), &["add", "side"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "side"])?;
+    let side = repository.resolve("HEAD")?;
+
+    git(directory.path(), &["checkout", "--quiet", "-"])?;
+    std::fs::write(directory.path().join("main"), "main")?;
+    git(directory.path(), &["add", "main"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "main"])?;
+    let main = repository.resolve("HEAD")?;
+    git(
+        directory.path(),
+        &["merge", "--quiet", "--no-ff", "side", "-m", "merge"],
+    )?;
+    let tip = repository.resolve("HEAD")?;
+
+    let all = repository.reachable_commits(&tip, false)?;
+    assert_eq!(all.last(), Some(&tip));
+    assert!(all.contains(&side));
+    for (parent, child) in [(&root, &side), (&root, &main), (&side, &tip), (&main, &tip)] {
+        assert!(
+            all.iter().position(|commit| commit == parent)
+                < all.iter().position(|commit| commit == child)
+        );
+    }
+
+    let first_parent = repository.reachable_commits(&tip, true)?;
+    assert_eq!(first_parent, vec![root, main, tip]);
+    assert!(!first_parent.contains(&side));
+    Ok(())
+}
+
+#[test]
 fn sha256_repository_ids_are_accepted_when_git_supports_them()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -79,13 +130,15 @@ fn sha256_repository_ids_are_accepted_when_git_supports_them()
     std::fs::write(directory.path().join("one"), "one")?;
     git(directory.path(), &["add", "one"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "one"])?;
-    assert_eq!(
-        Repository::discover(directory.path())?
-            .resolve("HEAD")?
-            .as_str()
-            .len(),
-        64
-    );
+    std::fs::write(directory.path().join("two"), "two")?;
+    git(directory.path(), &["add", "two"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "two"])?;
+    let repository = Repository::discover(directory.path())?;
+    let head = repository.resolve("HEAD")?;
+    assert_eq!(head.as_str().len(), 64);
+    let reachable = repository.reachable_commits(&head, false)?;
+    assert_eq!(reachable.len(), 2);
+    assert!(reachable.iter().all(|commit| commit.as_str().len() == 64));
     Ok(())
 }
 
@@ -203,6 +256,60 @@ fn detached_worktree_fails_for_a_missing_object_without_fetching()
         Err(HistoryError::Git(_))
     ));
     assert!(!fetch_head.exists());
+    Ok(())
+}
+
+#[test]
+fn source_delta_reports_statuses_renames_and_zero_context_hunks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("edit.rs"), "one\ntwo\nthree\n")?;
+    std::fs::write(directory.path().join("rename me.rs"), "rename\n")?;
+    std::fs::write(directory.path().join("delete.rs"), "delete\n")?;
+    git(directory.path(), &["add", "."])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
+    let repository = Repository::discover(directory.path())?;
+    let old = repository.resolve("HEAD")?;
+
+    std::fs::write(directory.path().join("edit.rs"), "one\nchanged\nthree\n")?;
+    std::fs::rename(
+        directory.path().join("rename me.rs"),
+        directory.path().join("renamed.rs"),
+    )?;
+    std::fs::remove_file(directory.path().join("delete.rs"))?;
+    std::fs::write(directory.path().join("added.rs"), "added\n")?;
+    git(directory.path(), &["add", "-A"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
+    let new = repository.resolve("HEAD")?;
+
+    let deltas = repository.source_delta(&old, &new)?;
+    assert_eq!(deltas.len(), 4);
+    let edit = deltas
+        .iter()
+        .find(|delta| delta.new_path.as_deref() == Some("edit.rs"))
+        .ok_or("missing edit")?;
+    assert_eq!(edit.status, SourceFileStatus::Modified);
+    assert_eq!(
+        edit.hunks,
+        vec![SourceHunk {
+            old_start: 2,
+            old_lines: 1,
+            new_start: 2,
+            new_lines: 1,
+        }]
+    );
+    let renamed = deltas
+        .iter()
+        .find(|delta| delta.status == SourceFileStatus::Renamed)
+        .ok_or("missing rename")?;
+    assert_eq!(renamed.old_path.as_deref(), Some("rename me.rs"));
+    assert_eq!(renamed.new_path.as_deref(), Some("renamed.rs"));
     Ok(())
 }
 

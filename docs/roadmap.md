@@ -80,9 +80,10 @@ graph realizations for exact Git commits:
 
 ```bash
 compass history enable --code-only
-compass history build HEAD
+compass history build main
+compass history build HEAD --profile-from main
 compass query "authentication" --at HEAD~20
-compass diff HEAD~1 HEAD --topology-only
+compass diff main HEAD
 ```
 
 The SQLite-backed Prolly store supports immutable realizations, extraction

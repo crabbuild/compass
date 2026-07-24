@@ -6,6 +6,39 @@ pub type EvidenceId = String;
 pub type SymbolId = String;
 pub type Coverage = BTreeMap<Capability, CoverageState>;
 
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Public,
+    Protected,
+    Internal,
+    Private,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    Sync,
+    Async,
+    Generator,
+    AsyncGenerator,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterKind {
+    Receiver,
+    PositionalOnly,
+    PositionalOrKeyword,
+    KeywordOnly,
+    VariadicPositional,
+    VariadicKeyword,
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -106,6 +139,9 @@ pub struct FunctionIr {
     pub graph_node_id: Option<String>,
     pub signature_digest: String,
     pub body_digest: String,
+    pub visibility: Visibility,
+    pub execution_mode: ExecutionMode,
+    pub is_test: bool,
     pub anchor: SourceAnchor,
     #[serde(default)]
     pub parameters: Vec<ParameterIr>,
@@ -121,6 +157,10 @@ pub struct FunctionIr {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ParameterIr {
     pub name: String,
+    pub kind: ParameterKind,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_ref: Option<TypeRef>,
     pub anchor: SourceAnchor,

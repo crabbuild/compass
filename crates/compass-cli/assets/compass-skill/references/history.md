@@ -9,12 +9,24 @@ or differences between revisions.
 compass history enable
 compass history enable --code-only
 compass history build HEAD
+compass history build main --all --code-only
 compass history status
 ```
 
 History stores immutable realizations outside normal Git history. Enabling eager
 history records a repository build profile and installs managed enqueueing
 hooks. `--code-only` is the explicit local no-model profile.
+
+Use `history build REF --all` to build every locally reachable commit in one
+oldest-first batch. Add `--first-parent` to exclude merged branch histories.
+The batch continues after commit failures and exits nonzero after printing its
+complete report. Rerunning resumes safely by validating and skipping preferred
+realizations that already match the selected profile:
+
+```bash
+compass history build main --all --first-parent --code-only --format json
+compass history list --format json
+```
 
 Explicit historical queries can materialize a missing revision even when eager
 history is disabled:
@@ -32,8 +44,9 @@ offline worktree. Report the resolved revision when answering.
 
 ```bash
 compass diff v1.2.0 HEAD
-compass diff HEAD~1 HEAD --detailed
-compass diff HEAD~1 HEAD --topology-only
+compass diff HEAD~1 HEAD --all
+compass diff HEAD~1 HEAD --format json
+compass diff HEAD~1 HEAD --explain sd1-...
 compass history list HEAD --format json
 compass history show HEAD
 compass history export HEAD --format compass-out --output historical-output
