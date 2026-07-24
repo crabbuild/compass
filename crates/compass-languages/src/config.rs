@@ -145,6 +145,20 @@ pub(crate) fn generic_config(spec: LanguageSpec) -> GenericConfig {
             "object",
             &["name"],
         ),
+        "perl" => config(
+            &[],
+            &["subroutine_declaration_statement"],
+            &["use_statement", "require_expression"],
+            &[
+                "function_call_expression",
+                "ambiguous_function_call_expression",
+            ],
+            "function",
+            &[],
+            "",
+            "",
+            &["bareword", "function", "package"],
+        ),
         "lua" => config(
             &[],
             &["function_declaration"],

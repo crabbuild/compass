@@ -108,7 +108,23 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
     assert!(!filter.allows(&root.join("model.generated.rs")));
     assert!(!filter.allows(&root.join(".hidden/main.rs")));
     assert!(!filter.allows(&root.join("compass-out/graph.json")));
+    assert!(!filter.allows(&root.join("graphify-out/graph.json")));
     assert!(!filter.allows(&root.join("README.unknown")));
+    Ok(())
+}
+
+#[test]
+fn detection_ignores_graphify_generated_output() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    fs::create_dir(root.join("graphify-out"))?;
+    fs::write(root.join("graphify-out/graph.json"), "{}\n")?;
+    fs::write(root.join("graphify-out/.graphify_labels.json"), "{}\n")?;
+
+    let detection = compass_files::detect(root, &DetectOptions::default())?;
+    assert_eq!(detection.files["code"].len(), 1);
+    assert!(detection.files["code"][0].ends_with("main.rs"));
     Ok(())
 }
 
@@ -148,6 +164,8 @@ fn classification_exercises_manifests_shebangs_media_papers_and_asset_exclusions
         ("pyproject.toml", "[project]\n", Some(FileType::Code)),
         ("view.blade.php", "<div />\n", Some(FileType::Code)),
         ("main.rs", "fn main() {}\n", Some(FileType::Code)),
+        ("script.pl", "sub main {}\n", Some(FileType::Code)),
+        ("Module.pm", "package Module;\n", Some(FileType::Code)),
         ("photo.PNG", "image", Some(FileType::Image)),
         ("clip.MP4", "video", Some(FileType::Video)),
         ("notes.md", "ordinary notes", Some(FileType::Document)),
@@ -204,7 +222,7 @@ fn detector_covers_nested_ignores_memory_sensitive_files_and_large_corpus_warnin
     fs::write(root.join(".env.local"), "TOKEN=nope\n")?;
     fs::write(root.join("song.mp3"), b"audio")?;
 
-    let memory = root.join("graphify-out/memory/nested");
+    let memory = root.join("compass-out/memory/nested");
     fs::create_dir_all(&memory)?;
     fs::write(memory.join("remember.md"), "# Durable memory\n")?;
 

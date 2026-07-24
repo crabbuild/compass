@@ -82,6 +82,7 @@ impl Registry {
             "kt" | "kts" => spec("kotlin", "kotlin", ExtractorKind::Generic),
             "scala" => spec("scala", "scala", ExtractorKind::Generic),
             "php" => spec("php", "php", ExtractorKind::Generic),
+            "pl" | "pm" => spec("perl", "perl", ExtractorKind::Generic),
             "swift" => spec("swift", "swift", ExtractorKind::Generic),
             "lua" | "luau" | "toc" => spec("lua", "lua", ExtractorKind::Generic),
             "zig" => spec("zig", "zig", ExtractorKind::Generic),
@@ -152,8 +153,8 @@ impl Registry {
         &[
             "py", "ts", "tsx", "js", "go", "rs", "java", "c", "cpp", "rb", "cs", "kt", "scala",
             "php", "swift", "lua", "zig", "ps1", "ex", "m", "jl", "f90", "vue", "svelte", "astro",
-            "dart", "v", "sql", "md", "pas", "dfm", "sh", "json", "tf", "dm", "sln", "csproj",
-            "xaml", "razor", "cls",
+            "dart", "v", "sql", "pl", "pm", "md", "pas", "dfm", "sh", "json", "tf", "dm", "sln",
+            "csproj", "xaml", "razor", "cls",
         ]
     }
 }
@@ -179,6 +180,7 @@ fn shebang_spec(path: &Path) -> Option<LanguageSpec> {
         }
         "node" | "nodejs" => Some(spec("javascript", "javascript", ExtractorKind::Generic)),
         "ruby" => Some(spec("ruby", "ruby", ExtractorKind::Generic)),
+        "perl" | "perl5" | "perl6" => Some(spec("perl", "perl", ExtractorKind::Generic)),
         "lua" => Some(spec("lua", "lua", ExtractorKind::Generic)),
         "php" => Some(spec("php", "php", ExtractorKind::Generic)),
         "julia" => Some(spec("julia", "julia", ExtractorKind::Generic)),
