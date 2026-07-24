@@ -18,11 +18,11 @@ sha1.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
-compass-files = { path = "../compass-files", version = "0.1.3" }
-compass-cypher = { path = "../compass-cypher", version = "0.1.3" }
-compass-graph = { path = "../compass-graph", version = "0.1.3" }
-compass-model = { path = "../compass-model", version = "0.1.3" }
-compass-query = { path = "../compass-query", version = "0.1.3" }
+compass-files = { path = "../compass-files", version = "0.1.4" }
+compass-cypher = { path = "../compass-cypher", version = "0.1.4" }
+compass-graph = { path = "../compass-graph", version = "0.1.4" }
+compass-model = { path = "../compass-model", version = "0.1.4" }
+compass-query = { path = "../compass-query", version = "0.1.4" }
 unicode-normalization.workspace = true
 
 [dev-dependencies]
