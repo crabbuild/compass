@@ -19,7 +19,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -66,7 +66,7 @@ pub(crate) fn load_graph_at(
         .map_err(|error| error.to_string())
 }
 
-fn resolve_or_materialize(
+pub(crate) fn resolve_or_materialize(
     repository: &Repository,
     commit: CommitId,
     options: &HistoryBuildOptions,
@@ -986,6 +986,29 @@ fn execute_build(
     } else {
         parsed.options
     };
+    if parsed.all {
+        let commits = repository
+            .reachable_commits(&commit, parsed.first_parent)
+            .map_err(runtime)?;
+        let batch = crate::history_batch::execute(
+            repository,
+            &parsed.revision,
+            commit,
+            commits,
+            &options,
+            parsed.first_parent,
+            &parsed.format,
+        )
+        .map_err(runtime)?;
+        return if batch.failed {
+            Err(report_failure(
+                batch.stdout,
+                "one or more history builds failed",
+            ))
+        } else {
+            Ok(batch.stdout)
+        };
+    }
     let profile_rebuild = if parsed.profile_from.is_some() {
         match HistoryStore::open_existing(repository).map_err(runtime)? {
             Some(history) => history

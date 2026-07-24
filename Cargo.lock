@@ -979,6 +979,7 @@ dependencies = [
  "glob",
  "mimalloc",
  "regex",
+ "serde",
  "serde_json",
  "tempfile",
  "time",

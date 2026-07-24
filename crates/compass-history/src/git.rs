@@ -192,6 +192,30 @@ impl Repository {
         Ok(deltas)
     }
 
+    /// Return every commit reachable from `tip` in parent-before-child order.
+    pub fn reachable_commits(
+        &self,
+        tip: &CommitId,
+        first_parent: bool,
+    ) -> Result<Vec<CommitId>, HistoryError> {
+        let mut arguments = vec!["rev-list", "--reverse", "--topo-order"];
+        if first_parent {
+            arguments.push("--first-parent");
+        }
+        arguments.push("--end-of-options");
+        arguments.push(tip.as_str());
+        let output = git_output(&self.root, &arguments)?;
+        std::str::from_utf8(&output)
+            .map_err(|error| HistoryError::Git(format!("Git returned non-UTF-8 history: {error}")))?
+            .lines()
+            .map(|value| {
+                value.parse().map_err(|_| {
+                    HistoryError::Git(format!("Git returned invalid reachable commit ID {value}"))
+                })
+            })
+            .collect()
+    }
+
     /// Inspect committed-tree and repository filter limitations without creating a worktree.
     pub fn target_limitations(
         &self,

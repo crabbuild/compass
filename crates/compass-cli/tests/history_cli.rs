@@ -55,6 +55,19 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("compass history build HEAD"));
     assert!(help.contains("compass help history <command>"));
+    let build_help = run(compass, directory.path(), &["help", "history", "build"])?;
+    assert!(build_help.status.success());
+    let build_help = String::from_utf8_lossy(&build_help.stdout);
+    assert!(build_help.contains("--all"));
+    assert!(build_help.contains("--first-parent"));
+    for arguments in [
+        vec!["history", "build", "HEAD", "--first-parent"],
+        vec!["history", "build", "HEAD", "--all=true"],
+        vec!["history", "rebuild", "HEAD", "--all"],
+    ] {
+        let invalid = run(compass, directory.path(), &arguments)?;
+        assert_eq!(invalid.status.code(), Some(2), "{arguments:?}");
+    }
     let status = run(compass, directory.path(), &["history", "status", "HEAD"])?;
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("no store"));
@@ -1510,6 +1523,210 @@ fn provider_failure_leaves_no_preferred_realization() -> Result<(), Box<dyn std:
     )?;
     assert!(status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("preferred: none"));
+    Ok(())
+}
+
+#[test]
+fn bulk_history_build_resumes_rebuilds_profiles_and_scopes_merge_history()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("root.rs"), "pub struct Root;\n")?;
+    git(directory.path(), &["add", "root.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "root"])?;
+
+    git(directory.path(), &["checkout", "--quiet", "-b", "feature"])?;
+    std::fs::write(
+        directory.path().join("feature.rs"),
+        "pub struct FeatureHistory;\n",
+    )?;
+    git(directory.path(), &["add", "feature.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "feature"])?;
+    let repository = Repository::discover(directory.path())?;
+    let feature = repository.resolve("HEAD")?;
+
+    git(directory.path(), &["checkout", "--quiet", "-"])?;
+    std::fs::write(
+        directory.path().join("main.rs"),
+        "pub struct MainHistory;\n",
+    )?;
+    git(directory.path(), &["add", "main.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "main"])?;
+    git(
+        directory.path(),
+        &["merge", "--quiet", "--no-ff", "feature", "-m", "merge"],
+    )?;
+    let tip = repository.resolve("HEAD")?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    assert!(
+        run(
+            compass,
+            directory.path(),
+            &["history", "enable", "--code-only"],
+        )?
+        .status
+        .success()
+    );
+    assert!(
+        run(compass, directory.path(), &["history", "disable"])?
+            .status
+            .success()
+    );
+    let first = run(
+        compass,
+        directory.path(),
+        &["history", "build", "HEAD", "--all", "--format=json"],
+    )?;
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(String::from_utf8_lossy(&first.stderr).contains("[4/4]"));
+    let first: serde_json::Value = serde_json::from_slice(&first.stdout)?;
+    assert_eq!(first["schema_version"], 1);
+    assert_eq!(first["ref"], "HEAD");
+    assert_eq!(first["tip"], tip.as_str());
+    assert_eq!(first["scope"], "reachable");
+    assert_eq!(first["counts"]["total"], 4);
+    assert_eq!(first["counts"]["built"], 4);
+    assert_eq!(first["counts"]["failed"], 0);
+    assert_eq!(first["results"][3]["commit"], tip.as_str());
+    assert!(
+        first["results"]
+            .as_array()
+            .ok_or("results")?
+            .iter()
+            .any(|result| result["commit"] == feature.as_str())
+    );
+
+    let resumed = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "build",
+            "HEAD",
+            "--all",
+            "--code-only",
+            "--format=json",
+        ],
+    )?;
+    assert!(resumed.status.success());
+    let resumed: serde_json::Value = serde_json::from_slice(&resumed.stdout)?;
+    assert_eq!(resumed["counts"]["skipped"], 4);
+
+    let rebuilt = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "build",
+            "HEAD",
+            "--all",
+            "--code-only",
+            "--resolution=2",
+            "--format=json",
+        ],
+    )?;
+    assert!(
+        rebuilt.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let rebuilt: serde_json::Value = serde_json::from_slice(&rebuilt.stdout)?;
+    assert_eq!(rebuilt["counts"]["rebuilt"], 4);
+
+    let first_parent = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "build",
+            "HEAD",
+            "--all",
+            "--first-parent",
+            "--code-only",
+            "--resolution=2",
+            "--format=json",
+        ],
+    )?;
+    assert!(first_parent.status.success());
+    let first_parent: serde_json::Value = serde_json::from_slice(&first_parent.stdout)?;
+    assert_eq!(first_parent["scope"], "first_parent");
+    assert_eq!(first_parent["counts"]["total"], 3);
+    assert_eq!(first_parent["counts"]["skipped"], 3);
+    assert!(
+        first_parent["results"]
+            .as_array()
+            .ok_or("results")?
+            .iter()
+            .all(|result| result["commit"] != feature.as_str())
+    );
+    Ok(())
+}
+
+#[test]
+fn bulk_history_build_continues_after_failure_and_returns_complete_report()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "pub struct First;\n")?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "code"])?;
+    std::fs::write(directory.path().join("document.md"), "# Semantic fixture\n")?;
+    git(directory.path(), &["add", "document.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "semantic"])?;
+    std::fs::remove_file(directory.path().join("document.md"))?;
+    std::fs::write(directory.path().join("service.rs"), "pub struct Last;\n")?;
+    git(directory.path(), &["add", "-A"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "code again"])?;
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_compass"));
+    command
+        .args([
+            "history",
+            "build",
+            "HEAD",
+            "--all",
+            "--backend",
+            "openai",
+            "--model",
+            "history-test-model",
+            "--format=json",
+        ])
+        .current_dir(directory.path());
+    for key in [
+        "OPENAI_API_KEY",
+        "OPENAI_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ] {
+        command.env_remove(key);
+    }
+    let output = command.output()?;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("[3/3]"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("one or more history builds failed"));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["counts"]["total"], 3);
+    assert_eq!(report["counts"]["built"], 2);
+    assert_eq!(report["counts"]["failed"], 1);
+    assert_eq!(report["results"][0]["status"], "built");
+    assert_eq!(report["results"][1]["status"], "failed");
+    assert!(report["results"][1]["diagnostic"].as_str().is_some());
+    assert_eq!(report["results"][2]["status"], "built");
     Ok(())
 }
 

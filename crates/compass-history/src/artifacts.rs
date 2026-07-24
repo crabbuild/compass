@@ -272,11 +272,14 @@ impl GraphArtifacts {
                 &canonical,
                 &mut edge_occurrences,
             )?;
+            let (source, target) = edge_identity_endpoints(edge);
+            // Compass keeps a legacy undirected NetworkX header while its
+            // persisted link endpoints retain the true semantic direction.
             let key = edge_key(
-                &edge.source,
-                &edge.target,
+                source,
+                target,
                 &edge.string("relation"),
-                self.document.directed,
+                true,
                 discriminator.as_deref(),
             );
             if !edge_keys.insert(key.clone()) {
@@ -686,6 +689,18 @@ fn edge_discriminator(
     discriminator.extend(Sha256::digest(canonical));
     discriminator.extend(rank.to_be_bytes());
     Ok(Some(discriminator))
+}
+
+fn edge_identity_endpoints(edge: &EdgeRecord) -> (&str, &str) {
+    if let (Some(source), Some(target)) = (
+        edge.attributes.get("_src").and_then(Value::as_str),
+        edge.attributes.get("_tgt").and_then(Value::as_str),
+    ) && ((source == edge.source && target == edge.target)
+        || (source == edge.target && target == edge.source))
+    {
+        return (source, target);
+    }
+    (&edge.source, &edge.target)
 }
 
 fn add_optional_analysis(

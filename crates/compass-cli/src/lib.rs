@@ -2,6 +2,7 @@
 
 mod dedup_commands;
 mod help;
+mod history_batch;
 mod history_build;
 mod history_commands;
 mod hook_commands;
@@ -59,7 +60,7 @@ pub use help::HelpStyle;
 static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
-fn process_cancellation() -> Result<&'static AtomicBool, String> {
+pub(crate) fn process_cancellation() -> Result<&'static AtomicBool, String> {
     let installed = SIGNAL_HANDLER.get_or_init(|| {
         ctrlc::set_handler(|| PROCESS_CANCELLED.store(true, Ordering::Release))
             .map_err(|error| error.to_string())

@@ -1,4 +1,7 @@
-complete -c compass -f -n '__fish_use_subcommand' -a 'update extract watch serve cluster-only query path explain affected tree export benchmark diagnose merge-graphs'
+complete -c compass -f -n '__fish_use_subcommand' -a 'update extract watch serve cluster-only query path explain affected tree export benchmark diagnose merge-graphs history'
+complete -c compass -f -n '__fish_seen_subcommand_from history; and not __fish_seen_subcommand_from enable disable status build rebuild list show prefer export gc' -a 'enable disable status build rebuild list show prefer export gc'
+complete -c compass -n '__fish_seen_subcommand_from history; and __fish_seen_subcommand_from build' -l all -d 'Build every commit reachable from REF'
+complete -c compass -n '__fish_seen_subcommand_from history; and __fish_seen_subcommand_from build' -l first-parent -d 'Build only the first-parent lineage'
 complete -c compass -f -n '__fish_seen_subcommand_from export' -a 'html callflow-html obsidian wiki svg graphml'
 complete -c compass -f -n '__fish_seen_subcommand_from diagnose' -a multigraph
 complete -c compass -l help -d 'Show help'

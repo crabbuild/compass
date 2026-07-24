@@ -202,6 +202,40 @@ fn simple_duplicate_edges_and_explicit_hyperedge_ids_are_rejected()
 }
 
 #[test]
+fn undirected_reciprocal_edges_use_persisted_true_directions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": false,
+        "multigraph": false,
+        "nodes": [{"id":"a"},{"id":"b"}],
+        "links": [
+            {
+                "source":"a",
+                "target":"b",
+                "relation":"calls"
+            },
+            {
+                "source":"b",
+                "target":"a",
+                "relation":"calls"
+            }
+        ]
+    }))?;
+    let artifacts = GraphArtifacts {
+        document,
+        program: None,
+        analysis: None,
+        labels: None,
+        manifest: None,
+        authoritative_sidecars: BTreeMap::new(),
+    };
+    let partitioned = artifacts.partition(&completion())?;
+    assert_eq!(partitioned.edges.len(), 2);
+    assert_eq!(GraphArtifacts::reconstruct(&partitioned)?, artifacts);
+    Ok(())
+}
+
+#[test]
 fn operational_provenance_does_not_change_partition_identity()
 -> Result<(), Box<dyn std::error::Error>> {
     let document: GraphDocument = serde_json::from_value(json!({

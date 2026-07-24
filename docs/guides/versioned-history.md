@@ -109,6 +109,27 @@ compass history build v1.2.0
 compass history build HEAD~20
 ```
 
+Build the entire locally reachable history from a ref with one command:
+
+```bash
+compass history build main --all --code-only
+```
+
+By default this includes commits from merged branches. To build only the
+first-parent lineage:
+
+```bash
+compass history build main --all --first-parent
+```
+
+Compass resolves the ref and build profile once, orders commits
+parent-before-child, and processes them sequentially. A rerun validates and
+skips preferred realizations that already match the selected profile. Failures
+are recorded per commit without stopping later commits; the final report is
+still produced and the command exits `1` if any commit failed. Progress is
+written to stderr, while `--format json` writes one stable summary object to
+stdout.
+
 The revision is resolved to a full commit SHA. Materialization runs in a
 detached, protected, offline worktree:
 
@@ -134,6 +155,12 @@ For automation:
 
 ```bash
 compass history list HEAD --format json
+```
+
+After a bulk build, omit the revision to verify all stored realizations:
+
+```bash
+compass history list --format json
 ```
 
 Inspect one realization:
