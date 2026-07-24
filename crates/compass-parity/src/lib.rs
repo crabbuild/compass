@@ -20,7 +20,7 @@ mod tests {
         deduplicate_entities, find_import_cycles, god_nodes, graph_diff, label_communities_by_hub,
         score_communities, suggest_questions, surprising_connections,
     };
-    use compass_languages::Engine;
+    use compass_languages::{Engine, Registry};
     use compass_mcp::GraphifyMcp;
     use compass_media::{docx_to_markdown, extract_pdf_text, xlsx_to_markdown};
     use compass_output::{
@@ -2229,6 +2229,40 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
     }
 
     #[test]
+    fn compass_registry_covers_graphify_dispatch_surface() -> Result<(), Box<dyn Error>> {
+        let repo = repository_root();
+        let output = Command::new(python_executable(&repo))
+            .args([
+                "-c",
+                "import json; from graphify.extract import _DISPATCH; print(json.dumps(sorted(_DISPATCH)))",
+            ])
+            .current_dir(&repo)
+            .env("PYTHONPATH", &repo)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let extensions: Vec<String> = serde_json::from_slice(&output.stdout)?;
+        let directory = tempfile::tempdir()?;
+        for extension in extensions {
+            let path = directory.path().join(format!("sample{extension}"));
+            let source = if extension.eq_ignore_ascii_case(".m") {
+                "@implementation Compass\n@end\n"
+            } else {
+                ""
+            };
+            fs::write(&path, source)?;
+            assert!(
+                Registry::resolve(&path).is_some(),
+                "Compass registry is missing Graphify dispatch extension {extension}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn python_rationale_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         let source = directory.path().join("rationale.py");
@@ -2569,6 +2603,19 @@ output "instance_id" { value = aws_instance.web.id }
     }
 
     #[test]
+    fn r_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
+        compare_extraction("sample.r", "extract_r")?;
+        let directory = tempfile::tempdir()?;
+        let invalid_utf8 = directory.path().join("legacy.r");
+        fs::write(
+            &invalid_utf8,
+            b"# legacy annotation: \xff\nrun <- function(value) value\n",
+        )?;
+        compare_extraction_path(&invalid_utf8, "extract_r")?;
+        Ok(())
+    }
+
+    #[test]
     fn pascal_source_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.pas", "extract_pascal")?;
         compare_extraction("sample_scoped_calls.pas", "extract_pascal")?;
@@ -2832,6 +2879,13 @@ hydrate();
             "#!/usr/bin/node\nfunction serve() { console.log('ok') }\nserve()\n",
         )?;
         compare_extraction_path(&node, "extract_js")?;
+
+        let rscript = directory.path().join("analyze");
+        fs::write(
+            &rscript,
+            "#!/usr/bin/env Rscript\nrun <- function(values) {\n  mean(values)\n}\n",
+        )?;
+        compare_extraction_path(&rscript, "extract_r")?;
         Ok(())
     }
 

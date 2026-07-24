@@ -99,6 +99,11 @@ impl Registry {
             "dart" => spec("dart", "dart", ExtractorKind::Generic),
             "v" | "sv" | "svh" => spec("verilog", "verilog", ExtractorKind::Generic),
             "sql" => spec("sql", "sql", ExtractorKind::Generic),
+            "r" => LanguageSpec {
+                name: "r",
+                grammar: None,
+                kind: ExtractorKind::Generic,
+            },
             "md" | "mdx" | "qmd" | "skill" => LanguageSpec {
                 name: "markdown",
                 grammar: None,
@@ -152,7 +157,7 @@ impl Registry {
         &[
             "py", "ts", "tsx", "js", "go", "rs", "java", "c", "cpp", "rb", "cs", "kt", "scala",
             "php", "swift", "lua", "zig", "ps1", "ex", "m", "jl", "f90", "vue", "svelte", "astro",
-            "dart", "v", "sql", "md", "pas", "dfm", "sh", "json", "tf", "dm", "sln", "csproj",
+            "dart", "v", "sql", "r", "md", "pas", "dfm", "sh", "json", "tf", "dm", "sln", "csproj",
             "xaml", "razor", "cls",
         ]
     }
@@ -182,6 +187,11 @@ fn shebang_spec(path: &Path) -> Option<LanguageSpec> {
         "lua" => Some(spec("lua", "lua", ExtractorKind::Generic)),
         "php" => Some(spec("php", "php", ExtractorKind::Generic)),
         "julia" => Some(spec("julia", "julia", ExtractorKind::Generic)),
+        "Rscript" => Some(LanguageSpec {
+            name: "r",
+            grammar: None,
+            kind: ExtractorKind::Generic,
+        }),
         _ => None,
     }
 }
