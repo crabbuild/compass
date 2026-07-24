@@ -1225,12 +1225,25 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn function_name(&self, node: Node<'tree>) -> Option<String> {
+        if self.language == "c" {
+            return self
+                .c_function_name(node)
+                .or_else(|| self.declaration_name(node));
+        }
         self.declaration_name(node).or_else(|| {
             node.child_by_field_name("declarator")
                 .and_then(first_identifier)
                 .and_then(|name| self.node_text(name))
                 .map(clean_name)
         })
+    }
+
+    fn c_function_name(&self, node: Node<'tree>) -> Option<String> {
+        let declarator = node.child_by_field_name("declarator")?;
+        let name = c_declarator_name(declarator)?;
+        self.node_text(name)
+            .map(clean_name)
+            .filter(|name| !name.is_empty())
     }
 
     fn call_name(&self, node: Node<'tree>) -> Option<CallName> {
@@ -2733,6 +2746,22 @@ fn first_identifier(node: Node<'_>) -> Option<Node<'_>> {
     .find_map(|kind| first_descendant(node, kind))
 }
 
+fn c_declarator_name(node: Node<'_>) -> Option<Node<'_>> {
+    if node.kind() == "identifier" {
+        return Some(node);
+    }
+    if let Some(declarator) = node.child_by_field_name("declarator") {
+        return c_declarator_name(declarator);
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(name) = c_declarator_name(child) {
+            return Some(name);
+        }
+    }
+    None
+}
+
 fn last_identifier(node: Node<'_>) -> Option<Node<'_>> {
     let mut result = None;
     let mut cursor = node.walk();
@@ -3032,6 +3061,33 @@ fn resolve_js_import_path(path: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod rationale_tests {
     use super::*;
+
+    #[test]
+    fn c_function_declarators_prefer_callable_names_over_types()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("declarators.c");
+        fs::write(
+            &source,
+            "SQLITE_PRIVATE char *sqlite3CompileOptions(void) { return 0; }\n\
+             SQLITE_PRIVATE sqlite3_int64 sqlite3StatusValue(int op) { return op; }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let labels = extraction
+            .nodes
+            .iter()
+            .map(NodeRecord::label)
+            .collect::<HashSet<_>>();
+
+        for expected in ["sqlite3CompileOptions()", "sqlite3StatusValue()"] {
+            assert!(labels.contains(expected), "missing {expected}");
+        }
+        for invalid in ["char()", "sqlite3_int64()"] {
+            assert!(!labels.contains(invalid), "unexpected {invalid}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn definition_hashes_separate_signature_implementation_and_source_changes()

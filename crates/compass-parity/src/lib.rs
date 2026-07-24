@@ -2315,6 +2315,19 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
     }
 
     #[test]
+    fn macro_heavy_c_declarators_match_graphify() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("declarators.c");
+        fs::write(
+            &source,
+            "SQLITE_PRIVATE char *sqlite3CompileOptions(void) { return 0; }\n\
+             SQLITE_PRIVATE sqlite3_int64 sqlite3StatusValue(int op) { return op; }\n",
+        )?;
+        compare_extraction_path(&source, "extract_c")?;
+        Ok(())
+    }
+
+    #[test]
     fn ruby_ast_extraction_matches_exactly() -> Result<(), Box<dyn Error>> {
         compare_extraction("sample.rb", "extract_ruby")
     }
@@ -2500,6 +2513,20 @@ output "instance_id" { value = aws_instance.web.id }
         ] {
             compare_extraction_path(&repo.join("tests/fixtures").join(fixture), "extract_cpp")?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn nested_cpp_declarators_match_graphify() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("declarators.cpp");
+        fs::write(
+            &source,
+            "int DBImpl::Compact() { return 1; }\n\
+             DBImpl::~DBImpl() {}\n\
+             bool DBImpl::operator==(const DBImpl&) const { return true; }\n",
+        )?;
+        compare_extraction_path(&source, "extract_cpp")?;
         Ok(())
     }
 
