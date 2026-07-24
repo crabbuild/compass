@@ -122,6 +122,7 @@ impl Engine {
             "zig" => return Ok(crate::zig::extract(path, source)),
             "verilog" => return Ok(crate::verilog::extract(path, source)),
             "sql" => return Ok(crate::sql::extract(path, source)),
+            "r" => return Ok(crate::r::extract(path, source)),
             "pascal" => return Ok(crate::pascal::extract(path, source)),
             "apex" => return Ok(crate::apex::extract(path, source)),
             "dart" => return Ok(crate::dart::extract(path, source)),

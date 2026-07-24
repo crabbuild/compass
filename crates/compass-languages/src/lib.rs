@@ -27,6 +27,7 @@ mod pascal_forms;
 mod php;
 mod powershell;
 mod program;
+mod r;
 mod registry;
 mod rust_lang;
 mod scip;
