@@ -81,15 +81,16 @@ impl Engine {
             &generic_config(spec),
             language,
         );
-        attach_definition_hashes(
+        if language == "python" {
+            add_python_rationale(path, source, tree.root_node(), &mut extraction);
+        }
+        attach_definition_metadata(
             &mut extraction,
             source,
             tree.root_node(),
             &generic_config(spec),
+            language,
         );
-        if language == "python" {
-            add_python_rationale(path, source, tree.root_node(), &mut extraction);
-        }
         Ok(extraction)
     }
 
@@ -112,21 +113,27 @@ impl Engine {
         source: &[u8],
     ) -> Result<Extraction, ExtractError> {
         if spec.name == "groovy" {
-            return Ok(crate::groovy::extract(path, source));
+            let mut extraction = crate::groovy::extract(path, source);
+            attach_basic_symbol_metadata(&mut extraction, source, spec.name);
+            return Ok(extraction);
         }
         // These extractors are intentionally source-driven and do not consume a
         // tree-sitter root. Avoid initializing and touching their large static
         // grammar tables only to discard the tree; this materially lowers cold
         // multilingual startup RSS and latency while preserving identical facts.
-        match spec.name {
-            "zig" => return Ok(crate::zig::extract(path, source)),
-            "verilog" => return Ok(crate::verilog::extract(path, source)),
-            "sql" => return Ok(crate::sql::extract(path, source)),
-            "r" => return Ok(crate::r::extract(path, source)),
-            "pascal" => return Ok(crate::pascal::extract(path, source)),
-            "apex" => return Ok(crate::apex::extract(path, source)),
-            "dart" => return Ok(crate::dart::extract(path, source)),
-            _ => {}
+        let source_driven = match spec.name {
+            "zig" => Some(crate::zig::extract(path, source)),
+            "verilog" => Some(crate::verilog::extract(path, source)),
+            "sql" => Some(crate::sql::extract(path, source)),
+            "r" => Some(crate::r::extract(path, source)),
+            "pascal" => Some(crate::pascal::extract(path, source)),
+            "apex" => Some(crate::apex::extract(path, source)),
+            "dart" => Some(crate::dart::extract(path, source)),
+            _ => None,
+        };
+        if let Some(mut extraction) = source_driven {
+            attach_basic_symbol_metadata(&mut extraction, source, spec.name);
+            return Ok(extraction);
         }
         let mut masked = Vec::new();
         let source = if spec.name == "objc" {
@@ -154,10 +161,10 @@ impl Engine {
             "fortran" => crate::fortran::extract(path, source, root),
             _ => extract_tree(path, source, root, &config, spec.name),
         };
-        attach_definition_hashes(&mut extraction, source, root, &config);
         if spec.name == "python" {
             add_python_rationale(path, source, root, &mut extraction);
         }
+        attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
         Ok(extraction)
     }
 
@@ -352,15 +359,17 @@ fn extract_tree(
     state.extraction
 }
 
-fn attach_definition_hashes(
+fn attach_definition_metadata(
     extraction: &mut Extraction,
     source: &[u8],
     root: Node<'_>,
     config: &GenericConfig,
+    language: &str,
 ) {
+    attach_basic_symbol_metadata(extraction, source, language);
     let mut candidates = HashMap::<usize, Vec<usize>>::new();
     for (index, node) in extraction.nodes.iter().enumerate() {
-        if node.attributes.get("_callable").and_then(Value::as_bool) != Some(true) {
+        if node.string("file_type") != "code" || node.string("source_file").is_empty() {
             continue;
         }
         let Some(line) = node
@@ -380,24 +389,52 @@ fn attach_definition_hashes(
         let Some(indices) = candidates.get_mut(&at_line) else {
             continue;
         };
-        let Some(index) = indices.first().copied() else {
-            continue;
-        };
-        indices.remove(0);
-        let body = definition.child_by_field_name("body").or_else(|| {
-            let mut cursor = definition.walk();
-            definition.children(&mut cursor).find(|child| {
-                matches!(
-                    child.kind(),
-                    "body" | "block" | "compound_statement" | "class_body" | "declaration_list"
-                )
+        let name = definition_name(definition, source);
+        let matched = name.as_deref().and_then(|name| {
+            indices.iter().position(|index| {
+                normalize_symbol_label(extraction.nodes[*index].label())
+                    == clean_name(name.to_owned())
             })
         });
+        let fallback = indices.iter().position(|index| {
+            extraction.nodes[*index]
+                .attributes
+                .get("_callable")
+                .and_then(Value::as_bool)
+                == Some(true)
+        });
+        let Some(position) = matched.or(fallback).or((indices.len() == 1).then_some(0)) else {
+            continue;
+        };
+        let index = indices.remove(position);
+        let body = definition_body(definition);
         let signature_hash = ast_hash(definition, source, body.map(|body| body.id()));
         let source_hash = source
             .get(definition.start_byte()..definition.end_byte())
             .map(normalized_source_hash);
+        let is_nested = extraction.nodes[index].label().starts_with('.');
+        let symbol_kind = symbol_kind(
+            definition.kind(),
+            config.class_types.contains(&definition.kind()),
+            is_nested,
+        );
         let attributes = &mut extraction.nodes[index].attributes;
+        attributes.insert(
+            "symbol_kind".to_owned(),
+            Value::String(symbol_kind.to_owned()),
+        );
+        attributes.insert("language".to_owned(), Value::String(language.to_owned()));
+        attributes.insert(
+            "line_start".to_owned(),
+            Value::from(definition.start_position().row + 1),
+        );
+        attributes.insert(
+            "line_end".to_owned(),
+            Value::from(definition.end_position().row + 1),
+        );
+        if let Some(signature) = readable_signature(definition, body, source) {
+            attributes.insert("signature".to_owned(), Value::String(signature));
+        }
         attributes.insert("signature_hash".to_owned(), Value::String(signature_hash));
         if let Some(body) = body {
             attributes.insert(
@@ -409,6 +446,149 @@ fn attach_definition_hashes(
             attributes.insert("source_hash".to_owned(), Value::String(source_hash));
         }
     }
+}
+
+fn attach_basic_symbol_metadata(extraction: &mut Extraction, source: &[u8], language: &str) {
+    let source_lines = source.iter().filter(|byte| **byte == b'\n').count() + 1;
+    for node in &mut extraction.nodes {
+        let source_file = node.string("source_file");
+        if source_file.is_empty() {
+            continue;
+        }
+        let line_start = node
+            .attributes
+            .get("source_location")
+            .and_then(Value::as_str)
+            .and_then(source_line)
+            .unwrap_or(1);
+        let file_name = Path::new(&source_file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let is_file = node.label() == file_name;
+        let fallback_kind = if is_file {
+            "file".to_owned()
+        } else if node.label().ends_with("()") {
+            if node.label().starts_with('.') {
+                "method".to_owned()
+            } else {
+                "function".to_owned()
+            }
+        } else {
+            node.attributes
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("symbol")
+                .to_owned()
+        };
+        node.attributes
+            .entry("symbol_kind".to_owned())
+            .or_insert_with(|| Value::String(fallback_kind));
+        node.attributes
+            .entry("language".to_owned())
+            .or_insert_with(|| Value::String(language.to_owned()));
+        node.attributes
+            .entry("line_start".to_owned())
+            .or_insert_with(|| Value::from(line_start));
+        node.attributes
+            .entry("line_end".to_owned())
+            .or_insert_with(|| Value::from(if is_file { source_lines } else { line_start }));
+    }
+}
+
+fn definition_body(node: Node<'_>) -> Option<Node<'_>> {
+    node.child_by_field_name("body").or_else(|| {
+        let mut cursor = node.walk();
+        node.children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "body" | "block" | "compound_statement" | "class_body" | "declaration_list"
+            )
+        })
+    })
+}
+
+fn definition_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if let Some(name) = node.child_by_field_name("name") {
+        return Some(source_node_text(name, source));
+    }
+    let mut declarator = node.child_by_field_name("declarator");
+    while let Some(candidate) = declarator {
+        if matches!(
+            candidate.kind(),
+            "identifier" | "field_identifier" | "type_identifier" | "operator_name"
+        ) {
+            return Some(source_node_text(candidate, source));
+        }
+        declarator = candidate
+            .child_by_field_name("declarator")
+            .or_else(|| candidate.child_by_field_name("name"));
+    }
+    None
+}
+
+fn normalize_symbol_label(label: &str) -> String {
+    clean_name(
+        label
+            .trim_start_matches('.')
+            .trim_end_matches("()")
+            .trim()
+            .to_owned(),
+    )
+}
+
+fn symbol_kind(kind: &str, is_class: bool, is_nested: bool) -> &'static str {
+    if is_class {
+        if kind.contains("interface") {
+            "interface"
+        } else if kind.contains("enum") {
+            "enum"
+        } else if kind.contains("struct") {
+            "struct"
+        } else if kind.contains("record") {
+            "record"
+        } else if kind.contains("protocol") {
+            "protocol"
+        } else if kind.contains("module") || kind.contains("object") {
+            "module"
+        } else if kind.contains("type_alias") {
+            "type"
+        } else {
+            "class"
+        }
+    } else if kind.contains("constructor") || kind.contains("init_declaration") {
+        "constructor"
+    } else if kind.contains("deinit") {
+        "destructor"
+    } else if kind.contains("method") || is_nested {
+        "method"
+    } else {
+        "function"
+    }
+}
+
+fn readable_signature(node: Node<'_>, body: Option<Node<'_>>, source: &[u8]) -> Option<String> {
+    let end = body.map_or(node.end_byte(), |body| body.start_byte());
+    let raw = source.get(node.start_byte()..end)?;
+    let compact = String::from_utf8_lossy(raw)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let compact = compact
+        .trim()
+        .trim_end_matches(['{', ':', ';'])
+        .trim()
+        .to_owned();
+    if compact.is_empty() {
+        return None;
+    }
+    let mut chars = compact.chars();
+    let signature = chars.by_ref().take(500).collect::<String>();
+    Some(if chars.next().is_some() {
+        format!("{signature}…")
+    } else {
+        signature
+    })
 }
 
 fn source_line(location: &str) -> Option<usize> {
@@ -1225,12 +1405,25 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn function_name(&self, node: Node<'tree>) -> Option<String> {
+        if self.language == "c" {
+            return self
+                .c_function_name(node)
+                .or_else(|| self.declaration_name(node));
+        }
         self.declaration_name(node).or_else(|| {
             node.child_by_field_name("declarator")
                 .and_then(first_identifier)
                 .and_then(|name| self.node_text(name))
                 .map(clean_name)
         })
+    }
+
+    fn c_function_name(&self, node: Node<'tree>) -> Option<String> {
+        let declarator = node.child_by_field_name("declarator")?;
+        let name = c_declarator_name(declarator)?;
+        self.node_text(name)
+            .map(clean_name)
+            .filter(|name| !name.is_empty())
     }
 
     fn call_name(&self, node: Node<'tree>) -> Option<CallName> {
@@ -1349,6 +1542,25 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             && matches!(node.kind(), "import_statement" | "export_statement")
         {
             self.add_js_import(node);
+            return;
+        }
+        if self.language == "c"
+            && let Some(path) = node.child_by_field_name("path")
+            && path.kind() != "system_lib_string"
+            && let Some(raw) = self.node_text(path)
+            && let clean = raw.trim_matches(['<', '>', '\'', '"', ' '])
+            && !clean.is_empty()
+            && let Some(parent) = Path::new(&self.source_file).parent()
+            && let Ok(resolved) = fs::canonicalize(parent.join(clean))
+            && resolved.is_file()
+        {
+            self.add_edge(
+                &self.file_id.clone(),
+                &make_id(&[&resolved.to_string_lossy()]),
+                "imports",
+                line(node),
+                Some("import"),
+            );
             return;
         }
         let target = quoted_value(&text)
@@ -2112,13 +2324,30 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             collect_c_type_names(return_type, self.source, &mut names);
             self.add_c_type_references(function_id, &names, "return_type", line(node));
         }
-        let mut parameters = Vec::new();
-        collect_nodes_of_kind(node, "parameter_declaration", &mut parameters);
-        for parameter in parameters {
-            if let Some(type_node) = parameter.child_by_field_name("type") {
-                let mut names = Vec::new();
-                collect_c_type_names(type_node, self.source, &mut names);
-                self.add_c_type_references(function_id, &names, "parameter_type", line(node));
+        let mut declarator = node.child_by_field_name("declarator");
+        while declarator.is_some_and(|candidate| {
+            matches!(
+                candidate.kind(),
+                "pointer_declarator" | "reference_declarator"
+            )
+        }) {
+            declarator =
+                declarator.and_then(|candidate| candidate.child_by_field_name("declarator"));
+        }
+        if let Some(parameters) = declarator
+            .filter(|candidate| candidate.kind() == "function_declarator")
+            .and_then(|candidate| candidate.child_by_field_name("parameters"))
+        {
+            let mut cursor = parameters.walk();
+            for parameter in parameters
+                .children(&mut cursor)
+                .filter(|candidate| candidate.kind() == "parameter_declaration")
+            {
+                if let Some(type_node) = parameter.child_by_field_name("type") {
+                    let mut names = Vec::new();
+                    collect_c_type_names(type_node, self.source, &mut names);
+                    self.add_c_type_references(function_id, &names, "parameter_type", line(node));
+                }
             }
         }
     }
@@ -2733,6 +2962,22 @@ fn first_identifier(node: Node<'_>) -> Option<Node<'_>> {
     .find_map(|kind| first_descendant(node, kind))
 }
 
+fn c_declarator_name(node: Node<'_>) -> Option<Node<'_>> {
+    if node.kind() == "identifier" {
+        return Some(node);
+    }
+    if let Some(declarator) = node.child_by_field_name("declarator") {
+        return c_declarator_name(declarator);
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(name) = c_declarator_name(child) {
+            return Some(name);
+        }
+    }
+    None
+}
+
 fn last_identifier(node: Node<'_>) -> Option<Node<'_>> {
     let mut result = None;
     let mut cursor = node.walk();
@@ -3032,6 +3277,87 @@ fn resolve_js_import_path(path: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod rationale_tests {
     use super::*;
+
+    #[test]
+    fn c_function_declarators_prefer_callable_names_over_types()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("declarators.c");
+        fs::write(
+            &source,
+            "SQLITE_PRIVATE char *sqlite3CompileOptions(void) { return 0; }\n\
+             SQLITE_PRIVATE sqlite3_int64 sqlite3StatusValue(int op) { return op; }\n\
+             int valueFromExpr(void) { int (*callback)(op *); return callback != 0; }\n\
+             int acceptsOp(Op *value) { return value != 0; }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let labels = extraction
+            .nodes
+            .iter()
+            .map(NodeRecord::label)
+            .collect::<HashSet<_>>();
+
+        for expected in ["sqlite3CompileOptions()", "sqlite3StatusValue()"] {
+            assert!(labels.contains(expected), "missing {expected}");
+        }
+        for invalid in ["char()", "sqlite3_int64()"] {
+            assert!(!labels.contains(invalid), "unexpected {invalid}");
+        }
+        assert!(labels.contains("Op"));
+        assert!(!labels.contains("op"));
+        Ok(())
+    }
+
+    #[test]
+    fn c_quoted_include_targets_the_existing_header_file() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let header = directory.path().join("shm_lock.h");
+        let source = directory.path().join("shm_lock.c");
+        fs::write(&header, "int lock(void);\n")?;
+        fs::write(
+            &source,
+            "#include \"shm_lock.h\"\nint main(void) { return lock(); }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let expected = make_id(&[&fs::canonicalize(header)?.to_string_lossy()]);
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.target == expected
+                && edge.attributes.get("relation").and_then(Value::as_str) == Some("imports")
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn definitions_include_display_metadata() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("fixture.py");
+        fs::write(
+            &source,
+            "def reveal(t, hold_val=\"1\", start_val=\"0\"):\n\
+             \x20   value = t + hold_val\n\
+             \x20   return value + start_val\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let node = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "reveal()")
+            .ok_or("missing reveal function")?;
+
+        assert_eq!(node.string("symbol_kind"), "function");
+        assert_eq!(node.string("language"), "python");
+        assert_eq!(node.attributes.get("line_start"), Some(&Value::from(1)));
+        assert_eq!(node.attributes.get("line_end"), Some(&Value::from(3)));
+        assert_eq!(
+            node.string("signature"),
+            "def reveal(t, hold_val=\"1\", start_val=\"0\")"
+        );
+        Ok(())
+    }
 
     #[test]
     fn definition_hashes_separate_signature_implementation_and_source_changes()

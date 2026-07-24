@@ -166,3 +166,58 @@ fn networkx_edge_order_preserves_node_and_incident_edge_order() -> Result<(), Bo
     );
     Ok(())
 }
+
+#[test]
+fn distinct_relations_between_the_same_nodes_are_preserved() -> Result<(), Box<dyn Error>> {
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes": [
+            {"id":"caller","label":"caller()","file_type":"code","source_file":"main.c"},
+            {"id":"target","label":"Target","file_type":"code","source_file":"main.c"}
+        ],
+        "edges": [
+            {"source":"caller","target":"target","relation":"calls"},
+            {"source":"caller","target":"target","relation":"references"}
+        ]
+    }))?;
+
+    let document = build_from_extraction(&extraction, false, None);
+    let relations = document
+        .links
+        .iter()
+        .map(|edge| edge.string("relation"))
+        .collect::<Vec<_>>();
+    assert_eq!(relations, ["calls", "references"]);
+    Ok(())
+}
+
+#[test]
+fn opposite_direction_relations_are_preserved_in_undirected_documents() -> Result<(), Box<dyn Error>>
+{
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes": [
+            {"id":"a","label":"A","file_type":"code","source_file":"main.go"},
+            {"id":"b","label":"B","file_type":"code","source_file":"main.go"}
+        ],
+        "edges": [
+            {"source":"a","target":"b","relation":"calls"},
+            {"source":"b","target":"a","relation":"calls"}
+        ]
+    }))?;
+
+    let document = build_from_extraction(&extraction, false, None);
+    let true_directions = document
+        .links
+        .iter()
+        .map(|edge| {
+            (
+                edge.attributes.get("_src").and_then(|value| value.as_str()),
+                edge.attributes.get("_tgt").and_then(|value| value.as_str()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        true_directions,
+        [(Some("a"), Some("b")), (Some("b"), Some("a"))]
+    );
+    Ok(())
+}

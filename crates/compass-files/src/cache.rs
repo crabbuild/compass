@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{FileError, StatHashIndex, io_error, write_json_atomic};
 
+const AST_EXTRACTOR_VERSION: &str = "0.9.21";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheKind {
     Ast,
@@ -88,7 +90,7 @@ impl Cache {
             root,
             cache_root,
             output_name,
-            extractor_version: "0.9.20".to_owned(),
+            extractor_version: AST_EXTRACTOR_VERSION.to_owned(),
             hashes,
             session_hashes: HashMap::new(),
         };

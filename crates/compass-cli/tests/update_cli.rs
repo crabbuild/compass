@@ -178,6 +178,7 @@ fn output_files(root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
                     .replace(".compass_", ".graphify_"),
             )
         })
+        .filter(|path| path != Path::new(".graphify_output_stats.json"))
         .collect::<Vec<_>>();
     files.sort();
     Ok(files)
@@ -197,6 +198,11 @@ fn normalize_json(value: &mut serde_json::Value, fixture: &Fixture) {
             object.remove("signature_hash");
             object.remove("implementation_hash");
             object.remove("source_hash");
+            object.remove("symbol_kind");
+            object.remove("language");
+            object.remove("line_start");
+            object.remove("line_end");
+            object.remove("signature");
             for value in object.values_mut() {
                 normalize_json(value, fixture);
             }

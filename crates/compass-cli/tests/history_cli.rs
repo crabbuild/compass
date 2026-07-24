@@ -137,6 +137,120 @@ fn enable_disable_are_explicit_idempotent_and_invalid_profiles_roll_back()
 }
 
 #[test]
+fn explicit_build_uses_the_enabled_repository_profile_when_no_profile_options_are_given()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct ProfiledService;\n",
+    )?;
+    std::fs::write(
+        directory.path().join("README.md"),
+        "A semantic document that requires code-only profile reuse.\n",
+    )?;
+    git(directory.path(), &["add", "service.rs", "README.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    assert!(
+        run(
+            compass,
+            directory.path(),
+            &["history", "enable", "--code-only"],
+        )?
+        .status
+        .success()
+    );
+    let built = run(
+        compass,
+        directory.path(),
+        &["history", "build", "HEAD", "--format=json"],
+    )?;
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
+    let preferred = history
+        .preferred(&repository.resolve("HEAD")?)?
+        .ok_or("missing preferred realization")?;
+    assert_eq!(
+        preferred.version.build_profile.value("code_only"),
+        Some("true")
+    );
+    Ok(())
+}
+
+#[test]
+fn lazy_materialization_uses_the_retained_profile_after_eager_history_is_disabled()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct DisabledProfileService;\n",
+    )?;
+    std::fs::write(
+        directory.path().join("README.md"),
+        "A semantic document that requires the retained code-only profile.\n",
+    )?;
+    git(directory.path(), &["add", "service.rs", "README.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    assert!(
+        run(
+            compass,
+            directory.path(),
+            &["history", "enable", "--code-only"],
+        )?
+        .status
+        .success()
+    );
+    assert!(
+        run(compass, directory.path(), &["history", "disable"])?
+            .status
+            .success()
+    );
+    let query = run(
+        compass,
+        directory.path(),
+        &["query", "DisabledProfileService", "--at", "HEAD"],
+    )?;
+    assert!(
+        query.status.success(),
+        "{}",
+        String::from_utf8_lossy(&query.stderr)
+    );
+    assert!(String::from_utf8_lossy(&query.stdout).contains("DisabledProfileService"));
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
+    let preferred = history
+        .preferred(&repository.resolve("HEAD")?)?
+        .ok_or("missing preferred realization")?;
+    assert_eq!(
+        preferred.version.build_profile.value("code_only"),
+        Some("true")
+    );
+    Ok(())
+}
+
+#[test]
 fn worker_drains_fifo_after_an_earlier_job_fails() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     git(directory.path(), &["init", "--quiet"])?;

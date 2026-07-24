@@ -478,6 +478,11 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     let root = directory.path().join("root");
     let cache_root = directory.path().join("cache-root");
     fs::create_dir_all(&root)?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v0.9.20"))?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v0.9.20/stale.json"),
+        "{}",
+    )?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/vold"))?;
     fs::write(
         cache_root.join("compass-out/cache/ast/vold/stale.json"),
@@ -495,6 +500,14 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     )?;
     let source = root.join("main.md");
     fs::write(&source, "---\ntitle: ignored\n---\nbody\n")?;
+
+    let default_cache = Cache::new(&root, Some(&cache_root))?;
+    assert!(
+        default_cache
+            .directory(&CacheKind::Ast, None)
+            .ends_with("ast/v0.9.21")
+    );
+    assert!(!cache_root.join("compass-out/cache/ast/v0.9.20").exists());
 
     let mut cache = Cache::new(&root, Some(&cache_root))?.with_extractor_version("current");
     assert!(

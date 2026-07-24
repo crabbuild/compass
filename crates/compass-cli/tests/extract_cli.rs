@@ -105,14 +105,23 @@ fn native_artifact(root: &Path, name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     artifact(root, &name.replace(".graphify_", ".compass_"))
 }
 
-fn graph_without_definition_hashes(bytes: &[u8]) -> Result<Value, Box<dyn Error>> {
+fn graph_without_native_metadata(bytes: &[u8]) -> Result<Value, Box<dyn Error>> {
     let mut graph: Value = serde_json::from_slice(bytes)?;
     if let Some(nodes) = graph.get_mut("nodes").and_then(Value::as_array_mut) {
         for node in nodes {
             if let Some(attributes) = node.as_object_mut() {
-                attributes.remove("signature_hash");
-                attributes.remove("implementation_hash");
-                attributes.remove("source_hash");
+                for key in [
+                    "signature_hash",
+                    "implementation_hash",
+                    "source_hash",
+                    "symbol_kind",
+                    "language",
+                    "line_start",
+                    "line_end",
+                    "signature",
+                ] {
+                    attributes.remove(key);
+                }
             }
         }
     }
@@ -186,9 +195,9 @@ fn cold_force_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
             let actual = native_artifact(directory.path(), name)?;
             if name == "graph.json" {
                 assert_eq!(
-                    graph_without_definition_hashes(&actual)?,
-                    graph_without_definition_hashes(&expected)?,
-                    "{name} mismatch outside definition hashes"
+                    graph_without_native_metadata(&actual)?,
+                    graph_without_native_metadata(&expected)?,
+                    "{name} mismatch outside native metadata"
                 );
             } else {
                 assert_eq!(actual, expected, "{name} mismatch");
@@ -213,7 +222,7 @@ fn warm_clustered_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
         assert!(run_python(&arguments, home.path())?.status.success());
         let expected = run_python(&arguments, home.path())?;
         let expected_graph =
-            graph_without_definition_hashes(&artifact(directory.path(), "graph.json")?)?;
+            graph_without_native_metadata(&artifact(directory.path(), "graph.json")?)?;
         let expected_manifest = artifact(directory.path(), "manifest.json")?;
         remove_output(directory.path())?;
 
@@ -221,7 +230,7 @@ fn warm_clustered_and_raw_extract_match_python() -> Result<(), Box<dyn Error>> {
         let actual = run_rust(&arguments, home.path())?;
         assert_same_output(&expected, &actual);
         let actual_graph =
-            graph_without_definition_hashes(&artifact(directory.path(), "graph.json")?)?;
+            graph_without_native_metadata(&artifact(directory.path(), "graph.json")?)?;
         assert_eq!(actual_graph, expected_graph);
         assert_eq!(
             artifact(directory.path(), "manifest.json")?,

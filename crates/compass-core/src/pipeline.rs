@@ -20,7 +20,7 @@ use compass_output::{
 };
 use compass_resolve::{merge_decl_def_classes, resolve_owned_with_root};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::program::{ProgramBuild, build_program, load_current_program, write_program};
@@ -62,6 +62,17 @@ pub enum BuildPurpose {
     #[default]
     Update,
     Extract,
+}
+
+const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct OutputStats {
+    graph_bytes: u64,
+    nodes: usize,
+    edges: usize,
+    communities: usize,
+    clustered: bool,
 }
 
 impl BuildOptions {
@@ -373,18 +384,12 @@ fn build_graph_inner(
         && supplemental.is_empty()
         && manifest_unchanged
         && (!options.program_analysis || unchanged_program.is_some())
-        && let Some(document) = unchanged_output_document(options, &output_dir)
+        && let Some(stats) = unchanged_output_stats(options, &output_dir)
     {
         if options.no_viz {
             remove_if_exists(&output_dir.join("graph.html"))?;
         }
         remove_if_exists(&output_dir.join("needs_update"))?;
-        let communities = document
-            .nodes
-            .iter()
-            .filter_map(|node| node.attributes.get("community")?.as_u64())
-            .collect::<HashSet<_>>()
-            .len();
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -394,9 +399,9 @@ fn build_graph_inner(
             files_extracted: 0,
             files_cached: sources.len(),
             empty_files: Vec::new(),
-            nodes: document.nodes.len(),
-            edges: document.links.len(),
-            communities,
+            nodes: stats.nodes,
+            edges: stats.edges,
+            communities: stats.communities,
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
             program_modules: program_modules(unchanged_program.as_ref()),
@@ -675,6 +680,7 @@ fn build_graph_inner(
             options.purpose,
             tokens,
         )?;
+        save_output_stats(&output_dir, nodes.len(), edges.len(), 0, false)?;
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
@@ -957,6 +963,13 @@ fn build_graph_inner(
     )?;
     timings.export = stage_started.elapsed();
     write_program_output(&output_dir, program.as_ref())?;
+    save_output_stats(
+        &output_dir,
+        document.nodes.len(),
+        document.links.len(),
+        communities.len(),
+        true,
+    )?;
     guard.commit()?;
     Ok(BuildResult {
         root,
@@ -1311,7 +1324,7 @@ fn collect_ast_id_remap(
         {
             continue;
         }
-        if node.id == make_id(&[source]) || node.id == old_prefix {
+        if node.id == make_id(&[source]) {
             id_remap.insert(node.id.clone(), new_prefix);
         } else if let Some(suffix) = node.id.strip_prefix(&format!("{old_prefix}_")) {
             id_remap.insert(node.id.clone(), format!("{new_prefix}_{suffix}"));
@@ -1848,17 +1861,44 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
     .all(|name| output_dir.join(name).is_file())
 }
 
-fn unchanged_output_document(options: &BuildOptions, output_dir: &Path) -> Option<GraphDocument> {
+fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<OutputStats> {
     let graph_path = output_dir.join("graph.json");
+    let graph_bytes = fs::metadata(&graph_path).ok()?.len();
+    let saved = fs::read(output_dir.join(OUTPUT_STATS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OutputStats>(&bytes).ok());
+    if let Some(stats) = saved.filter(|stats| stats.graph_bytes == graph_bytes) {
+        if options.no_cluster == stats.clustered
+            || !output_dir.join(".compass_root").is_file()
+            || (!options.no_cluster
+                && (options.resolution != 1.0
+                    || options.exclude_hubs.is_some()
+                    || !update_artifacts_complete(output_dir)))
+            || (!options.no_viz && !output_dir.join("graph.html").is_file() && stats.nodes <= 5_000)
+        {
+            return None;
+        }
+        return Some(stats);
+    }
+
     let bytes = fs::read(&graph_path).ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    let is_clustered = value.get("directed").is_some() && value.get("multigraph").is_some();
+    let header = &bytes[..bytes.len().min(512)];
+    let has_key = |key: &[u8]| header.windows(key.len()).any(|window| window == key);
+    let is_clustered = has_key(b"\"directed\"") && has_key(b"\"multigraph\"");
     if options.no_cluster == is_clustered || !output_dir.join(".compass_root").is_file() {
         return None;
     }
-    let document: GraphDocument = serde_json::from_value(value).ok()?;
+    let document: GraphDocument = serde_json::from_slice(&bytes).ok()?;
     if options.no_cluster {
-        return Some(document);
+        let stats = OutputStats {
+            graph_bytes,
+            nodes: document.nodes.len(),
+            edges: document.links.len(),
+            communities: 0,
+            clustered: false,
+        };
+        let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
+        return Some(stats);
     }
     if options.resolution != 1.0
         || options.exclude_hubs.is_some()
@@ -1870,7 +1910,47 @@ fn unchanged_output_document(options: &BuildOptions, output_dir: &Path) -> Optio
     {
         return None;
     }
-    Some(document)
+    let stats = OutputStats {
+        graph_bytes,
+        nodes: document.nodes.len(),
+        edges: document.links.len(),
+        communities: document
+            .nodes
+            .iter()
+            .filter_map(|node| node.attributes.get("community")?.as_u64())
+            .collect::<HashSet<_>>()
+            .len(),
+        clustered: true,
+    };
+    let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
+    Some(stats)
+}
+
+fn save_output_stats(
+    output_dir: &Path,
+    nodes: usize,
+    edges: usize,
+    communities: usize,
+    clustered: bool,
+) -> Result<(), CoreError> {
+    let graph_bytes = fs::metadata(output_dir.join("graph.json"))
+        .map_err(|source| compass_files::FileError::Io {
+            path: output_dir.join("graph.json"),
+            source,
+        })?
+        .len();
+    write_json_atomic(
+        output_dir.join(OUTPUT_STATS_FILE),
+        &OutputStats {
+            graph_bytes,
+            nodes,
+            edges,
+            communities,
+            clustered,
+        },
+        true,
+    )?;
+    Ok(())
 }
 
 fn canonical_node(node: &NodeRecord) -> String {
@@ -1993,6 +2073,51 @@ mod tests {
     use serde_json::{Map, Value};
 
     use super::*;
+
+    #[test]
+    fn ast_id_remap_does_not_conflate_prefix_named_symbol_with_file() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("internal/timeformattype_string.go");
+        fs::create_dir_all(source.parent().ok_or("source path has no parent")?)?;
+        fs::write(&source, "package internal\n\nfunc _() {}\n")?;
+        let source_text = source.to_string_lossy().into_owned();
+        let file_id = make_id(&[&source_text]);
+        let prefix_symbol_id = make_id(&[&file_stem(&source)]);
+        let mut extraction = Extraction {
+            nodes: vec![
+                NodeRecord {
+                    id: file_id,
+                    attributes: Map::from_iter([(
+                        "source_file".to_owned(),
+                        Value::String(source_text.clone()),
+                    )]),
+                },
+                NodeRecord {
+                    id: prefix_symbol_id.clone(),
+                    attributes: Map::from_iter([(
+                        "source_file".to_owned(),
+                        Value::String(source_text),
+                    )]),
+                },
+            ],
+            ..Extraction::default()
+        };
+        let (live_id_remap, live_sources) =
+            ast_source_identity_maps(std::slice::from_ref(&source), root);
+        let id_remap = collect_ast_id_remap(
+            std::slice::from_ref(&extraction),
+            root,
+            &live_id_remap,
+            &live_sources,
+        );
+        apply_ast_id_remap(&mut extraction, &id_remap);
+
+        assert_eq!(extraction.nodes[0].id, "internal_timeformattype_string");
+        assert_eq!(extraction.nodes[1].id, prefix_symbol_id);
+        Ok(())
+    }
 
     #[test]
     fn out_of_root_ast_sources_get_portable_ext_ids() -> Result<(), Box<dyn Error>> {

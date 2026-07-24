@@ -91,7 +91,7 @@ pub fn deduplicate_entities_with_tiebreaker(
     let mut exact_merges = 0;
     let mut by_norm = HashMap::<String, Vec<&NodeRecord>>::new();
     for node in &unique_nodes {
-        if is_code(node) {
+        if !is_entity_merge_candidate(node) {
             continue;
         }
         let key = normalize_label(node.label());
@@ -119,7 +119,7 @@ pub fn deduplicate_entities_with_tiebreaker(
     let mut candidates = Vec::<&NodeRecord>::new();
     let mut seen_norms = HashSet::new();
     for node in &unique_nodes {
-        if is_code(node) {
+        if !is_entity_merge_candidate(node) {
             continue;
         }
         let key = normalize_label(node.label());
@@ -554,6 +554,17 @@ fn is_code(node: &NodeRecord) -> bool {
     string_attribute(node, "file_type").as_deref() == Some("code")
 }
 
+fn is_positional(node: &NodeRecord) -> bool {
+    matches!(
+        string_attribute(node, "file_type").as_deref(),
+        Some("document" | "rationale")
+    )
+}
+
+fn is_entity_merge_candidate(node: &NodeRecord) -> bool {
+    !is_code(node) && !is_positional(node)
+}
+
 fn source_file(node: &NodeRecord) -> String {
     string_attribute(node, "source_file").unwrap_or_default()
 }
@@ -745,6 +756,21 @@ mod tests {
         }
     }
 
+    fn positional_node(
+        id: &str,
+        label: &str,
+        source_file: &str,
+        source_location: &str,
+        file_type: &str,
+    ) -> NodeRecord {
+        let mut node = node(id, label, source_file);
+        node.attributes
+            .insert("source_location".to_owned(), json!(source_location));
+        node.attributes
+            .insert("file_type".to_owned(), json!(file_type));
+        node
+    }
+
     #[test]
     fn exact_and_fuzzy_merges_rewire_edges() -> Result<(), DedupError> {
         let nodes = vec![
@@ -794,6 +820,62 @@ mod tests {
         ];
         let result = deduplicate_entities(&nodes, &[], &HashMap::new())?;
         assert_eq!(result.nodes.len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_positional_nodes_in_one_file_remain_distinct() -> Result<(), DedupError> {
+        let nodes = vec![
+            positional_node(
+                "release_notes_heading_l10",
+                "Fixed",
+                "RELEASE_NOTES.md",
+                "L10",
+                "document",
+            ),
+            positional_node(
+                "release_notes_heading_l40",
+                "Fixed",
+                "RELEASE_NOTES.md",
+                "L40",
+                "document",
+            ),
+            positional_node(
+                "decision_l12",
+                "Preserve compatibility",
+                "ADR.md",
+                "L12",
+                "rationale",
+            ),
+            positional_node(
+                "decision_l60",
+                "Preserve compatibility",
+                "ADR.md",
+                "L60",
+                "rationale",
+            ),
+        ];
+
+        let result = deduplicate_entities(&nodes, &[], &HashMap::new())?;
+
+        assert_eq!(result.nodes.len(), 4);
+        assert_eq!(result.stats.removed, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn literal_positional_id_collisions_still_collapse() -> Result<(), DedupError> {
+        let node = positional_node(
+            "release_notes_heading_l10",
+            "Fixed",
+            "RELEASE_NOTES.md",
+            "L10",
+            "document",
+        );
+
+        let result = deduplicate_entities(&[node.clone(), node], &[], &HashMap::new())?;
+
+        assert_eq!(result.nodes.len(), 1);
         Ok(())
     }
 

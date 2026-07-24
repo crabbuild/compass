@@ -260,6 +260,31 @@ Cases to test:
 Performance qualification compares cold, warm unchanged, single-file change,
 rename, and delete cases against the frozen oracle.
 
+### Graphify superset qualification
+
+Use the large Podman checkout to verify Graphify compatibility and release
+performance together:
+
+```bash
+PODMAN_ROOT=/Volumes/Workspace/Github/podman \
+  bash scripts/qualify_graphify_superset.sh
+```
+
+The script validates the checkout before deleting anything. It removes only
+`$PODMAN_ROOT/compass-out` and `$PODMAN_ROOT/graphify-out`, builds release
+Compass, records three cold and warm builds for each tool, checks Graphify node
+and edge inclusion, and records five equivalent query samples.
+
+Parity is set inclusion. Every Graphify node ID, observable shared-node field,
+and `(source, target, relation)` edge must exist in Compass. Compass-only facts,
+including Perl and extensionless executable scripts, are reported but do not
+fail the gate. Derived community assignments are not compared.
+
+Extractor semantics use a versioned AST cache namespace. The C declarator and
+positional-document corrections advance that namespace to `v0.9.21`, so the
+first update after upgrading refreshes AST facts. Later unchanged updates return
+to the normal warm path.
+
 ## Watch mode
 
 `compass-core::watch_local_graph` combines compatible watch filtering,
