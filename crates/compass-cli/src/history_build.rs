@@ -25,6 +25,8 @@ pub(crate) struct HistoryBuildOptions {
 pub(crate) struct ParsedBuildCommand {
     pub(crate) revision: String,
     pub(crate) format: String,
+    pub(crate) all: bool,
+    pub(crate) first_parent: bool,
     pub(crate) replace_corrupt: bool,
     pub(crate) profile_from: Option<String>,
     pub(crate) use_repository_profile: bool,
@@ -622,6 +624,8 @@ pub(crate) fn parse_build_command(
     let mut values = HistoryBuildValues::default();
     let mut revision = None;
     let mut format = None;
+    let mut all = false;
+    let mut first_parent = false;
     let mut replace_corrupt = false;
     let mut profile_from = None;
     let mut seen = std::collections::BTreeSet::new();
@@ -645,7 +649,8 @@ pub(crate) fn parse_build_command(
             .split_once('=')
             .map_or((argument, None), |(name, value)| (name, Some(value)));
         match name {
-            "--cargo" | "--code-only" | "--dedup-llm" | "--no-gitignore" | "--replace-corrupt" => {
+            "--cargo" | "--code-only" | "--dedup-llm" | "--no-gitignore" | "--replace-corrupt"
+            | "--all" | "--first-parent" => {
                 if inline.is_some() {
                     return Err(format!("{name} does not accept a value"));
                 }
@@ -658,6 +663,8 @@ pub(crate) fn parse_build_command(
                     "--dedup-llm" => values.dedup_llm = true,
                     "--no-gitignore" => values.gitignore = false,
                     "--replace-corrupt" => replace_corrupt = true,
+                    "--all" => all = true,
+                    "--first-parent" => first_parent = true,
                     _ => unreachable!(),
                 }
             }
@@ -709,10 +716,16 @@ pub(crate) fn parse_build_command(
     if profile_from.is_some() && command != "build" {
         return Err("--profile-from is only valid for history build".to_owned());
     }
+    if all && command != "build" {
+        return Err("--all is only valid for history build".to_owned());
+    }
+    if first_parent && !all {
+        return Err("--first-parent requires --all".to_owned());
+    }
     let direct_profile_option = seen.iter().any(|option| {
         !matches!(
             option.as_str(),
-            "--format" | "--profile-from" | "--replace-corrupt"
+            "--format" | "--profile-from" | "--replace-corrupt" | "--all" | "--first-parent"
         )
     }) || !values.excludes.is_empty();
     if profile_from.is_some() && direct_profile_option {
@@ -722,6 +735,8 @@ pub(crate) fn parse_build_command(
     Ok(ParsedBuildCommand {
         revision,
         format,
+        all,
+        first_parent,
         replace_corrupt,
         profile_from,
         use_repository_profile: !direct_profile_option,
@@ -1213,6 +1228,36 @@ mod tests {
         assert!(parse_enable_options(&["--format=json".to_owned()]).is_err());
         assert!(parse_enable_options(&["--replace-corrupt".to_owned()]).is_err());
         assert!(parse_enable_options(&["--cargo".to_owned()]).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn build_parser_scopes_bulk_history_flags() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = parse_build_command(
+            "build",
+            &[
+                "main".to_owned(),
+                "--all".to_owned(),
+                "--first-parent".to_owned(),
+            ],
+        )?;
+        assert!(parsed.all);
+        assert!(parsed.first_parent);
+        assert!(parsed.use_repository_profile);
+
+        for (command, arguments) in [
+            ("build", vec!["main", "--first-parent"]),
+            ("build", vec!["main", "--all=true"]),
+            ("build", vec!["main", "--all", "--all"]),
+            ("build", vec!["main", "--all", "--first-parent=value"]),
+            ("rebuild", vec!["main", "--all"]),
+        ] {
+            let arguments = arguments.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            assert!(
+                parse_build_command(command, &arguments).is_err(),
+                "unexpectedly accepted history {command} {arguments:?}"
+            );
+        }
         Ok(())
     }
 

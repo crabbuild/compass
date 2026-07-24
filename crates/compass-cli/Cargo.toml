@@ -23,6 +23,7 @@ ctrlc.workspace = true
 glob.workspace = true
 mimalloc.workspace = true
 regex.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 time.workspace = true
