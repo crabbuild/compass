@@ -17,7 +17,7 @@ pub use dedup::{
     deduplicate_entities_with_tiebreaker,
 };
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
@@ -185,9 +185,10 @@ pub fn build_from_extraction(
         graph.insert("hyperedges".to_owned(), Value::Array(hyperedges));
     }
     let links = networkx_edge_order(&nodes, &links, directed);
+    let multigraph = has_parallel_edges(&links, directed);
     GraphDocument {
         directed,
-        multigraph: false,
+        multigraph,
         graph,
         nodes,
         links,
@@ -674,6 +675,20 @@ fn edge_language_family(extension: &str) -> Option<&'static str> {
 
 fn edge_key(source: &str, target: &str, relation: &str) -> (String, String, String) {
     (source.to_owned(), target.to_owned(), relation.to_owned())
+}
+
+fn has_parallel_edges(links: &[EdgeRecord], directed: bool) -> bool {
+    let mut endpoints = HashSet::new();
+    links.iter().any(|edge| {
+        let source = edge.source.as_str();
+        let target = edge.target.as_str();
+        let key = if directed || source <= target {
+            (source, target)
+        } else {
+            (target, source)
+        };
+        !endpoints.insert(key)
+    })
 }
 
 fn canonical_hyperedges(

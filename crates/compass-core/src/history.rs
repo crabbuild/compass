@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use compass_files::{DetectOptions, IgnorePolicy, detect};
 use compass_history::{
     BuildProfile, CommitId, CompletedGraphArtifacts, CorruptPreferredToken, ExtractionFingerprint,
-    ExtractionFingerprintInput, GraphArtifacts, HistoryError, HistoryStore, PublishRequest,
-    PublishedVersion, RealizationId, Repository, WorktreeGuard,
+    ExtractionFingerprintInput, GraphArtifacts, HISTORY_GRAPH_SCHEMA, HistoryError, HistoryStore,
+    PublishRequest, PublishedVersion, RealizationId, Repository, WorktreeGuard,
 };
 use compass_languages::Registry;
 use sha2::{Digest, Sha256};
@@ -265,7 +265,7 @@ fn resolve_fingerprint(
     checkout: &Path,
 ) -> Result<ExtractionFingerprint, MaterializeError> {
     let mut input =
-        ExtractionFingerprintInput::new(env!("CARGO_PKG_VERSION"), "networkx-node-link/v1");
+        ExtractionFingerprintInput::new(env!("CARGO_PKG_VERSION"), HISTORY_GRAPH_SCHEMA);
     input.insert("definition_hash_version", "tree-sitter-ast/v1")?;
     input.insert("build_profile_digest", &hex(&profile.digest()?))?;
     input.insert(

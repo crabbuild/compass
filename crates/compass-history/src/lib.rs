@@ -43,3 +43,6 @@ pub use validate::{
     MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH, MAX_KEY_BYTES,
     MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, ValidationProblem, ValidationReport,
 };
+
+/// Current node-link graph schema included in history build profiles and fingerprints.
+pub const HISTORY_GRAPH_SCHEMA: &str = "networkx-node-link/v2";

@@ -146,6 +146,7 @@ fn networkx_edge_order_preserves_node_and_incident_edge_order() -> Result<(), Bo
     }))?;
 
     let undirected = build_from_extraction(&extraction, false, None);
+    assert!(!undirected.multigraph);
     assert_eq!(
         undirected
             .links
@@ -156,6 +157,7 @@ fn networkx_edge_order_preserves_node_and_incident_edge_order() -> Result<(), Bo
     );
 
     let directed = build_from_extraction(&extraction, true, None);
+    assert!(!directed.multigraph);
     assert_eq!(
         directed
             .links
@@ -181,6 +183,7 @@ fn distinct_relations_between_the_same_nodes_are_preserved() -> Result<(), Box<d
     }))?;
 
     let document = build_from_extraction(&extraction, false, None);
+    assert!(document.multigraph);
     let relations = document
         .links
         .iter()
@@ -205,6 +208,7 @@ fn opposite_direction_relations_are_preserved_in_undirected_documents() -> Resul
     }))?;
 
     let document = build_from_extraction(&extraction, false, None);
+    assert!(document.multigraph);
     let true_directions = document
         .links
         .iter()
@@ -219,5 +223,31 @@ fn opposite_direction_relations_are_preserved_in_undirected_documents() -> Resul
         true_directions,
         [(Some("a"), Some("b")), (Some("b"), Some("a"))]
     );
+    Ok(())
+}
+
+#[test]
+fn directed_reciprocals_and_self_loops_promote_only_for_parallel_endpoints()
+-> Result<(), Box<dyn Error>> {
+    let reciprocal: Extraction = serde_json::from_value(json!({
+        "nodes": [{"id":"a","label":"A"}, {"id":"b","label":"B"}],
+        "edges": [
+            {"source":"a","target":"b","relation":"calls"},
+            {"source":"b","target":"a","relation":"calls"},
+            {"source":"a","target":"a","relation":"references"}
+        ]
+    }))?;
+    let directed = build_from_extraction(&reciprocal, true, None);
+    assert!(!directed.multigraph);
+
+    let parallel_self_loops: Extraction = serde_json::from_value(json!({
+        "nodes": [{"id":"a","label":"A"}],
+        "edges": [
+            {"source":"a","target":"a","relation":"calls"},
+            {"source":"a","target":"a","relation":"references"}
+        ]
+    }))?;
+    let directed = build_from_extraction(&parallel_self_loops, true, None);
+    assert!(directed.multigraph);
     Ok(())
 }
