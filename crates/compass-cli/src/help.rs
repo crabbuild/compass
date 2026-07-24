@@ -298,9 +298,9 @@ const PAGES: &[Page] = &[
     ),
     page!(
         "diff",
-        "Compare knowledge graphs from two Git revisions",
+        "Review semantic changes between two Git revisions",
         ["compass diff <OLD> <NEW> [OPTIONS]"],
-        "Arguments:\n  <OLD>                         Base Git revision\n  <NEW>                         Target Git revision\n\nOptions:\n  --detailed                    Include node and relationship details\n  --format <text|json>          Output format [default: text]\n  --topology-only               Compare only graph topology\n  --include-locations           Include source-location changes\n  --include-analysis            Include analysis artifact changes\n  --include-metadata            Include graph metadata changes\n  --fingerprint <SHA256>        Select one extraction fingerprint\n  --allow-profile-mismatch      Compare different extraction profiles\n\nExamples:\n  compass diff v1.2.0 HEAD\n  compass diff HEAD~1 HEAD --detailed --include-locations\n  compass diff main feature --format json --allow-profile-mismatch\n\nNotes:\n  --fingerprint conflicts with --allow-profile-mismatch; --detailed conflicts with JSON output."
+        "Arguments:\n  <OLD>                         Base Git revision\n  <NEW>                         Target Git revision\n\nOptions:\n  --format <text|json>          Output format [default: text]\n  --all                         Include routine symbol churn\n  --explain <FINDING_ID>        Expand one semantic finding\n  --fingerprint <SHA256>        Select one extraction fingerprint\n\nExamples:\n  compass diff v1.2.0 HEAD\n  compass diff HEAD~1 HEAD --format json\n  compass diff main feature --all\n\nNotes:\n  Findings report callable breaks, behavior, dependencies, affected consumers, and evidence limitations."
     ),
     page!(
         "tree",

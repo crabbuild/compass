@@ -48,6 +48,7 @@ compass-prs = { path = "../compass-prs", version = "0.1.2" }
 compass-query = { path = "../compass-query", version = "0.1.2" }
 compass-reflect = { path = "../compass-reflect", version = "0.1.2" }
 compass-semantic = { path = "../compass-semantic", version = "0.1.2" }
+compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.1.2" }
 url.workspace = true
 
 [lints]

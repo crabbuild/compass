@@ -60,6 +60,9 @@ fn program_fixture(input: &[u8]) -> Result<AnalysisBundle, compass_analysis::Ana
                 graph_node_id: None,
                 signature_digest: hex_sha256(b"fn run()"),
                 body_digest: hex_sha256(input),
+                visibility: compass_ir::Visibility::Public,
+                execution_mode: compass_ir::ExecutionMode::Sync,
+                is_test: false,
                 anchor: anchor.clone(),
                 parameters: Vec::new(),
                 return_type: None,
@@ -127,7 +130,7 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
     let restored = GraphArtifacts::reconstruct(&partitioned)?;
     assert_eq!(restored, artifacts);
     assert_eq!(restored.document, document);
-    assert_eq!(partitioned.program_facts.len(), 4);
+    assert_eq!(partitioned.program_facts.len(), 5);
     assert_eq!(partitioned.program_summaries.len(), 2);
     Ok(())
 }

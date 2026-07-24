@@ -535,8 +535,8 @@ fn build_graph_inner(
         .filter_map(|path| extractions.remove(path))
         .collect::<Vec<_>>();
     merge_decl_def_classes(&mut ordered);
-    let (live_id_remap, live_sources) = ast_source_identity_maps(&sources, &root);
-    let ast_id_remap = collect_ast_id_remap(&ordered, &root, &live_id_remap, &live_sources);
+    let live_id_remap = ast_source_identity_map(&sources, &root);
+    let ast_id_remap = collect_ast_id_remap(&ordered, &root, &live_id_remap);
     for extraction in &mut ordered {
         apply_ast_id_remap(extraction, &ast_id_remap);
     }
@@ -1249,12 +1249,8 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
     }
 }
 
-fn ast_source_identity_maps(
-    sources: &[PathBuf],
-    root: &Path,
-) -> (HashMap<String, String>, HashSet<PathBuf>) {
+fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> HashMap<String, String> {
     let mut aliases = HashMap::new();
-    let mut identities = HashSet::new();
     for source in sources {
         let identity = rooted_source_identity(source, root);
         let relative = identity
@@ -1270,22 +1266,48 @@ fn ast_source_identity_maps(
                 aliases.insert(legacy, portable.clone());
             }
         }
-        identities.insert(identity);
     }
-    (aliases, identities)
+    aliases
 }
 
 fn collect_ast_id_remap(
     extractions: &[Extraction],
     root: &Path,
     live_id_remap: &HashMap<String, String>,
-    live_sources: &HashSet<PathBuf>,
 ) -> HashMap<String, String> {
     // Python first rewrites every exact ID derived from a file that is really
     // present in the detected corpus. This also catches references emitted by
     // another extractor (for example an .lpk unit pointing at sample.pas), but
     // deliberately leaves IDs for absent project references untouched.
     let mut id_remap = live_id_remap.clone();
+    let node_ids = extractions
+        .iter()
+        .flat_map(|extraction| extraction.nodes.iter())
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let root_prefix = make_id(&[&root.to_string_lossy()]);
+    let root_marker = format!("{root_prefix}_");
+    let mut remap_rooted_id = |id: &str| {
+        // A rooted endpoint without a node is an unresolved file reference.
+        // Root-prefixed IDs that do have nodes may instead be symbols whose
+        // file-derived prefix happens to match the checkout path.
+        if node_ids.contains(id) {
+            return;
+        }
+        if let Some(relative) = id.strip_prefix(&root_marker)
+            && !relative.is_empty()
+        {
+            id_remap
+                .entry(id.to_owned())
+                .or_insert_with(|| relative.to_owned());
+        }
+    };
+    for extraction in extractions {
+        for edge in &extraction.edges {
+            remap_rooted_id(&edge.source);
+            remap_rooted_id(&edge.target);
+        }
+    }
     for node in extractions
         .iter()
         .flat_map(|extraction| extraction.nodes.iter())
@@ -1303,14 +1325,7 @@ fn collect_ast_id_remap(
             continue;
         };
         let source_path = Path::new(source);
-        if !live_sources.contains(&rooted_source_identity(source_path, root)) {
-            continue;
-        }
-        let absolute = if source_path.is_absolute() {
-            source_path.to_path_buf()
-        } else {
-            root.join(source_path)
-        };
+        let absolute = rooted_source_identity(source_path, root);
         let Ok(relative) = absolute.strip_prefix(root) else {
             continue;
         };
@@ -2102,20 +2117,21 @@ mod tests {
                     )]),
                 },
             ],
+            edges: vec![EdgeRecord {
+                source: "caller".to_owned(),
+                target: prefix_symbol_id.clone(),
+                attributes: Map::new(),
+            }],
             ..Extraction::default()
         };
-        let (live_id_remap, live_sources) =
-            ast_source_identity_maps(std::slice::from_ref(&source), root);
-        let id_remap = collect_ast_id_remap(
-            std::slice::from_ref(&extraction),
-            root,
-            &live_id_remap,
-            &live_sources,
-        );
+        let live_id_remap = ast_source_identity_map(std::slice::from_ref(&source), root);
+        let id_remap =
+            collect_ast_id_remap(std::slice::from_ref(&extraction), root, &live_id_remap);
         apply_ast_id_remap(&mut extraction, &id_remap);
 
         assert_eq!(extraction.nodes[0].id, "internal_timeformattype_string");
         assert_eq!(extraction.nodes[1].id, prefix_symbol_id);
+        assert_eq!(extraction.edges[0].target, extraction.nodes[1].id);
         Ok(())
     }
 
@@ -2154,6 +2170,77 @@ mod tests {
         );
         assert_eq!(extraction.edges[0].target, "ext_core_core_csproj");
         assert_eq!(extraction.edges[0].source, source_id);
+        Ok(())
+    }
+
+    #[test]
+    fn astro_import_identities_do_not_include_checkout_root() -> Result<(), Box<dyn Error>> {
+        let first = tempfile::tempdir()?;
+        let second = tempfile::tempdir()?;
+        let build = |root: &Path| -> Result<GraphDocument, Box<dyn Error>> {
+            let source = root.join("src");
+            fs::create_dir_all(&source)?;
+            fs::create_dir_all(root.join(".hidden"))?;
+            fs::write(
+                source.join("Page.astro"),
+                "---\nimport Layout from '../.hidden/Layout.astro';\n---\n<Layout />\n",
+            )?;
+            fs::write(root.join(".hidden/Layout.astro"), "<slot />\n")?;
+            let mut options = BuildOptions::new(root);
+            options.no_viz = true;
+            build_local_graph(&options)?;
+            Ok(GraphDocument::load(
+                &root.join("compass-out").join("graph.json"),
+            )?)
+        };
+        let first_graph = build(first.path())?;
+        let second_graph = build(second.path())?;
+        let identities = |document: &GraphDocument| {
+            let mut nodes = document
+                .nodes
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<Vec<_>>();
+            let mut edges = document
+                .links
+                .iter()
+                .map(|edge| {
+                    (
+                        edge.source.clone(),
+                        edge.target.clone(),
+                        edge.string("relation"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            nodes.sort();
+            edges.sort();
+            (nodes, edges)
+        };
+        assert_eq!(identities(&first_graph), identities(&second_graph));
+        let encoded = first_graph
+            .nodes
+            .iter()
+            .chain(&second_graph.nodes)
+            .flat_map(|node| [node.id.clone(), node.string("source_file")])
+            .chain(
+                first_graph
+                    .links
+                    .iter()
+                    .chain(&second_graph.links)
+                    .flat_map(|edge| {
+                        [
+                            edge.source.clone(),
+                            edge.target.clone(),
+                            edge.string("source_file"),
+                        ]
+                    }),
+            )
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!encoded.contains(&make_id(&[&first.path().to_string_lossy()])));
+        assert!(!encoded.contains(&make_id(&[&second.path().to_string_lossy()])));
+        assert!(!encoded.contains(&first.path().to_string_lossy().to_string()));
+        assert!(!encoded.contains(&second.path().to_string_lossy().to_string()));
         Ok(())
     }
 

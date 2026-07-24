@@ -21,18 +21,6 @@ fn main() -> ExitCode {
             ));
         }
     }
-    if arguments.first().and_then(|value| value.to_str()) == Some("diff") {
-        return ExitCode::from(compass_cli::run_diff(
-            if compatibility {
-                compass_cli::Frontend::Graphify
-            } else {
-                compass_cli::Frontend::Compass
-            },
-            &arguments[1..],
-            &mut io::stdout(),
-            &mut io::stderr(),
-        ));
-    }
     if arguments.first().and_then(|value| value.to_str()) == Some("watch") {
         if compatibility {
             return ExitCode::from(compass_cli::run_graphify_watch(

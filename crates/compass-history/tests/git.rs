@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use compass_history::{CommitId, GitTargetLimitation, HistoryError, Repository};
+use compass_history::{
+    CommitId, GitTargetLimitation, HistoryError, Repository, SourceFileStatus, SourceHunk,
+};
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("git")
@@ -203,6 +205,60 @@ fn detached_worktree_fails_for_a_missing_object_without_fetching()
         Err(HistoryError::Git(_))
     ));
     assert!(!fetch_head.exists());
+    Ok(())
+}
+
+#[test]
+fn source_delta_reports_statuses_renames_and_zero_context_hunks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("edit.rs"), "one\ntwo\nthree\n")?;
+    std::fs::write(directory.path().join("rename me.rs"), "rename\n")?;
+    std::fs::write(directory.path().join("delete.rs"), "delete\n")?;
+    git(directory.path(), &["add", "."])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
+    let repository = Repository::discover(directory.path())?;
+    let old = repository.resolve("HEAD")?;
+
+    std::fs::write(directory.path().join("edit.rs"), "one\nchanged\nthree\n")?;
+    std::fs::rename(
+        directory.path().join("rename me.rs"),
+        directory.path().join("renamed.rs"),
+    )?;
+    std::fs::remove_file(directory.path().join("delete.rs"))?;
+    std::fs::write(directory.path().join("added.rs"), "added\n")?;
+    git(directory.path(), &["add", "-A"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
+    let new = repository.resolve("HEAD")?;
+
+    let deltas = repository.source_delta(&old, &new)?;
+    assert_eq!(deltas.len(), 4);
+    let edit = deltas
+        .iter()
+        .find(|delta| delta.new_path.as_deref() == Some("edit.rs"))
+        .ok_or("missing edit")?;
+    assert_eq!(edit.status, SourceFileStatus::Modified);
+    assert_eq!(
+        edit.hunks,
+        vec![SourceHunk {
+            old_start: 2,
+            old_lines: 1,
+            new_start: 2,
+            new_lines: 1,
+        }]
+    );
+    let renamed = deltas
+        .iter()
+        .find(|delta| delta.status == SourceFileStatus::Renamed)
+        .ok_or("missing rename")?;
+    assert_eq!(renamed.old_path.as_deref(), Some("rename me.rs"));
+    assert_eq!(renamed.new_path.as_deref(), Some("renamed.rs"));
     Ok(())
 }
 

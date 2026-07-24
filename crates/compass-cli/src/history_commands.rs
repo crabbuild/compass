@@ -1,16 +1,12 @@
-use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
-
 use compass_core::LoadedGraph;
 use compass_core::{
     MaterializeError, MaterializeObserver, MaterializeRequest, MaterializeStage,
     materialize_history_with_observer,
 };
 use compass_history::{
-    ArtifactClass, BuildProfile, ChangeKind, ChangeSink, ClaimedJob, CommitId,
-    ExtractionFingerprint, GitTargetLimitation, GraphChange, HistoryConfig, HistoryError,
-    HistoryQueue, HistoryStore, JobRequest, JobState, PublishedVersion, RealizationId, RecordKind,
-    Repository,
+    ArtifactClass, BuildProfile, ClaimedJob, CommitId, ExtractionFingerprint, GitTargetLimitation,
+    HistoryConfig, HistoryError, HistoryQueue, HistoryStore, JobRequest, JobState,
+    PublishedVersion, RealizationId, Repository,
 };
 
 use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
@@ -46,18 +42,6 @@ pub(crate) fn command_worker(_frontend: Frontend, args: &[String]) -> Outcome {
         );
     }
     outcome(run_worker().map(|()| String::new()))
-}
-
-pub(crate) fn diff_help(frontend: Frontend) -> String {
-    let prefix = match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    };
-    format!(
-        "Usage: {prefix} diff OLD NEW [--detailed] [--format text|json] [--topology-only] \
-[--include-locations] [--include-analysis] [--include-metadata] [--fingerprint SHA] \
-[--allow-profile-mismatch]"
-    )
 }
 
 pub(crate) fn load_graph_at(
@@ -176,51 +160,6 @@ fn configured_build_options(repository: &Repository) -> Result<HistoryBuildOptio
     HistoryBuildOptions::defaults().map_err(|error| error.to_string())
 }
 
-pub(crate) fn command_diff(frontend: Frontend, args: &[String]) -> Outcome {
-    let mut bytes = Vec::new();
-    let mut result = command_diff_to_writer(frontend, args, &mut bytes);
-    if result.code != 0 {
-        return result;
-    }
-    match String::from_utf8(bytes) {
-        Ok(stdout) => {
-            result.stdout = stdout;
-            result
-        }
-        Err(error) => Outcome::failure(format!("error: diff output was not UTF-8: {error}")),
-    }
-}
-
-pub(crate) fn command_diff_to_writer(
-    frontend: Frontend,
-    args: &[String],
-    writer: &mut dyn Write,
-) -> Outcome {
-    if args
-        .iter()
-        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
-    {
-        return match writeln!(writer, "{}", diff_help(frontend)) {
-            Ok(()) => Outcome::success_exact(String::new()),
-            Err(error) => outcome(Err(runtime(output_error(error)))),
-        };
-    }
-    match execute_diff(frontend, args, writer) {
-        Ok(execution) => Outcome {
-            code: 0,
-            stdout: String::new(),
-            stderr: execution.warning.unwrap_or_default(),
-            stdout_trailing_newline: false,
-            stderr_trailing_newline: true,
-        },
-        Err(error) => outcome(Err(error)),
-    }
-}
-
-struct DiffExecution {
-    warning: Option<String>,
-}
-
 fn outcome(result: Result<String, CommandFailure>) -> Outcome {
     match result {
         Ok(text) => Outcome::success(text),
@@ -242,75 +181,17 @@ fn outcome(result: Result<String, CommandFailure>) -> Outcome {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DiffOutput {
-    Summary,
-    Detailed,
-    Json,
+pub(crate) struct ResolvedDiff {
+    pub history: HistoryStore,
+    pub old: PublishedVersion,
+    pub new: PublishedVersion,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct DiffOptions {
-    output: DiffOutput,
-    topology_only: bool,
-    include_locations: bool,
-    include_analysis: bool,
-    include_metadata: bool,
-    fingerprint: Option<String>,
-    allow_profile_mismatch: bool,
-}
-
-fn execute_diff(
-    _frontend: Frontend,
-    args: &[String],
-    writer: &mut dyn Write,
-) -> Result<DiffExecution, CommandFailure> {
-    let (revisions, diff_options) = parse_diff(args).map_err(usage)?;
-    let repository =
-        Repository::discover(&std::env::current_dir().map_err(runtime)?).map_err(runtime)?;
-    let old_commit = repository.resolve(&revisions[0]).map_err(runtime)?;
-    let new_commit = repository.resolve(&revisions[1]).map_err(runtime)?;
-    let resolved = resolve_comparable_pair(
-        &repository,
-        old_commit,
-        new_commit,
-        diff_options.fingerprint.as_deref(),
-        diff_options.allow_profile_mismatch,
-    )
-    .map_err(runtime)?;
-    render_diff(
-        &resolved.history,
-        &resolved.old,
-        &resolved.new,
-        resolved.profile_mismatch,
-        &diff_options,
-        writer,
-    )
-    .map_err(runtime)?;
-    Ok(DiffExecution {
-        warning: (resolved.profile_mismatch && diff_options.output != DiffOutput::Json).then(|| {
-            format!(
-                "warning: comparing realizations with different build profiles ({} != {}); results may reflect profile differences",
-                resolved.old.version.profile_digest,
-                resolved.new.version.profile_digest
-            )
-        }),
-    })
-}
-
-struct ResolvedDiff {
-    history: HistoryStore,
-    old: PublishedVersion,
-    new: PublishedVersion,
-    profile_mismatch: bool,
-}
-
-fn resolve_comparable_pair(
+pub(crate) fn resolve_comparable_pair(
     repository: &Repository,
     old_commit: CommitId,
     new_commit: CommitId,
     required_fingerprint: Option<&str>,
-    allow_profile_mismatch: bool,
 ) -> Result<ResolvedDiff, String> {
     let existing = HistoryStore::open_existing(repository).map_err(|error| error.to_string())?;
     let old = select_existing(existing.as_ref(), &old_commit, required_fingerprint)?;
@@ -318,7 +199,6 @@ fn resolve_comparable_pair(
     if required_fingerprint.is_some() && (old.is_none() || new.is_none()) {
         return Err("the requested fingerprint is not materialized at both commits".to_owned());
     }
-
     let (history, old, new) = match (old, new) {
         (Some(old), Some(new)) => (
             existing.ok_or_else(|| "history store disappeared".to_owned())?,
@@ -341,7 +221,8 @@ fn resolve_comparable_pair(
         }
         (None, None) => {
             let options = configured_build_options(repository)?;
-            let (_, old) = resolve_or_materialize(repository, old_commit, &options, false, false)?;
+            let (_, old) =
+                resolve_or_materialize(repository, old_commit.clone(), &options, false, false)?;
             let (history, new) =
                 resolve_or_materialize(repository, new_commit, &options, false, false)?;
             (history, old, new)
@@ -349,10 +230,9 @@ fn resolve_comparable_pair(
     };
     let old_profile = normalized_profile_for_comparison(&old.version.build_profile)?;
     let new_profile = normalized_profile_for_comparison(&new.version.build_profile)?;
-    let profile_mismatch = old_profile != new_profile;
-    if profile_mismatch && !allow_profile_mismatch {
+    if old_profile != new_profile {
         return Err(format!(
-            "realizations are not semantically comparable\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}\n\nOr inspect intentionally:\n  compass diff {} {} --allow-profile-mismatch",
+            "realizations are not semantically comparable\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}",
             old.version.git_commit,
             old.id,
             old.version.profile_digest,
@@ -361,16 +241,9 @@ fn resolve_comparable_pair(
             new.version.profile_digest,
             new.version.git_commit,
             old.version.git_commit,
-            old.version.git_commit,
-            new.version.git_commit,
         ));
     }
-    Ok(ResolvedDiff {
-        history,
-        old,
-        new,
-        profile_mismatch,
-    })
+    Ok(ResolvedDiff { history, old, new })
 }
 
 fn normalized_profile_for_comparison(profile: &BuildProfile) -> Result<BuildProfile, String> {
@@ -414,7 +287,7 @@ fn select_existing(
     let Some(history) = history else {
         return Ok(None);
     };
-    let selected = if let Some(fingerprint) = required_fingerprint {
+    if let Some(fingerprint) = required_fingerprint {
         let mut matches = history
             .list(Some(commit))
             .map_err(|error| error.to_string())?
@@ -426,634 +299,9 @@ fn select_existing(
                 "multiple realizations at {commit} have fingerprint {fingerprint}"
             ));
         }
-        matches.pop()
+        Ok(matches.pop())
     } else {
-        history
-            .preferred(commit)
-            .map_err(|error| error.to_string())?
-    };
-    // Publication validates the complete immutable realization before making
-    // it visible, while `preferred`/`list` authenticate the manifest and its
-    // direct roots. The diff traversal then verifies every Prolly node it
-    // actually reads. Re-scanning and reconstructing all five trees here made
-    // even a topology-only diff pay the full graph-validation cost twice and
-    // defeated structural sharing.
-    Ok(selected)
-}
-
-fn parse_diff(args: &[String]) -> Result<(Vec<String>, DiffOptions), String> {
-    let mut revisions = Vec::new();
-    let mut format = None;
-    let mut detailed = false;
-    let mut topology_only = false;
-    let mut include_locations = false;
-    let mut include_analysis = false;
-    let mut include_metadata = false;
-    let mut fingerprint = None;
-    let mut allow_profile_mismatch = false;
-    let mut options = true;
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--" if options => options = false,
-            "--detailed" if options => {
-                if detailed {
-                    return Err("duplicate --detailed".to_owned());
-                }
-                detailed = true;
-            }
-            "--topology-only" if options => {
-                if topology_only {
-                    return Err("duplicate --topology-only".to_owned());
-                }
-                topology_only = true;
-            }
-            "--include-locations" if options => {
-                if include_locations {
-                    return Err("duplicate --include-locations".to_owned());
-                }
-                include_locations = true;
-            }
-            "--include-analysis" if options => {
-                if include_analysis {
-                    return Err("duplicate --include-analysis".to_owned());
-                }
-                include_analysis = true;
-            }
-            "--include-metadata" if options => {
-                if include_metadata {
-                    return Err("duplicate --include-metadata".to_owned());
-                }
-                include_metadata = true;
-            }
-            "--allow-profile-mismatch" if options => {
-                if allow_profile_mismatch {
-                    return Err("duplicate --allow-profile-mismatch".to_owned());
-                }
-                allow_profile_mismatch = true;
-            }
-            "--fingerprint" if options => {
-                index += 1;
-                let value = args.get(index).ok_or("--fingerprint requires a value")?;
-                if fingerprint.replace(value.clone()).is_some() {
-                    return Err("duplicate --fingerprint".to_owned());
-                }
-            }
-            value if options && value.starts_with("--fingerprint=") => {
-                let value = &value[14..];
-                if value.is_empty() {
-                    return Err("--fingerprint requires a value".to_owned());
-                }
-                if fingerprint.replace(value.to_owned()).is_some() {
-                    return Err("duplicate --fingerprint".to_owned());
-                }
-            }
-            "--format" if options => {
-                index += 1;
-                let value = args.get(index).ok_or("--format requires a value")?;
-                if format.replace(value.clone()).is_some() {
-                    return Err("duplicate --format".to_owned());
-                }
-            }
-            value if options && value.starts_with("--format=") => {
-                let value = &value[9..];
-                if value.is_empty() {
-                    return Err("--format requires a value".to_owned());
-                }
-                if format.replace(value.to_owned()).is_some() {
-                    return Err("duplicate --format".to_owned());
-                }
-            }
-            value if options && value.starts_with('-') => {
-                return Err(format!("unknown option {value}"));
-            }
-            value => revisions.push(value.to_owned()),
-        }
-        index += 1;
-    }
-    if revisions.len() != 2 {
-        return Err("diff requires exactly OLD and NEW revisions".to_owned());
-    }
-    let format = format.unwrap_or_else(|| "text".to_owned());
-    if !matches!(format.as_str(), "text" | "json") {
-        return Err("--format must be text or json".to_owned());
-    }
-    if detailed && format == "json" {
-        return Err("--detailed cannot be combined with --format json".to_owned());
-    }
-    if let Some(value) = &fingerprint {
-        value
-            .parse::<ExtractionFingerprint>()
-            .map_err(|_| "--fingerprint must be a lowercase SHA-256 digest".to_owned())?;
-    }
-    if fingerprint.is_some() && allow_profile_mismatch {
-        return Err("--fingerprint cannot be combined with --allow-profile-mismatch".to_owned());
-    }
-    Ok((
-        revisions,
-        DiffOptions {
-            output: if format == "json" {
-                DiffOutput::Json
-            } else if detailed {
-                DiffOutput::Detailed
-            } else {
-                DiffOutput::Summary
-            },
-            topology_only,
-            include_locations,
-            include_analysis,
-            include_metadata,
-            fingerprint,
-            allow_profile_mismatch,
-        },
-    ))
-}
-
-fn render_diff(
-    history: &HistoryStore,
-    old: &PublishedVersion,
-    new: &PublishedVersion,
-    profile_mismatch: bool,
-    options: &DiffOptions,
-    writer: &mut dyn Write,
-) -> Result<(), HistoryError> {
-    match options.output {
-        DiffOutput::Summary | DiffOutput::Detailed => {
-            let mut sink = TextSink::new(options)?;
-            stream_diff(history, old, new, options.topology_only, &mut sink)?;
-            sink.finish(writer)
-        }
-        DiffOutput::Json => {
-            writer
-                .write_all(b"{\"schema_version\":2,\"comparison\":")
-                .map_err(output_error)?;
-            serde_json::to_writer(
-                &mut *writer,
-                &serde_json::json!({
-                    "old_commit": old.version.git_commit,
-                    "new_commit": new.version.git_commit,
-                    "old_realization": old.id,
-                    "new_realization": new.id,
-                    "old_fingerprint": old.version.extraction_fingerprint,
-                    "new_fingerprint": new.version.extraction_fingerprint,
-                    "profile_mismatch": profile_mismatch,
-                }),
-            )
-            .map_err(json_output_error)?;
-            writer.write_all(b",\"changes\":[").map_err(output_error)?;
-            let mut sink = JsonSink::new(writer, options.topology_only);
-            stream_diff(history, old, new, options.topology_only, &mut sink)?;
-            sink.finish()
-        }
-    }
-}
-
-fn stream_diff(
-    history: &HistoryStore,
-    old: &PublishedVersion,
-    new: &PublishedVersion,
-    topology_only: bool,
-    sink: &mut dyn ChangeSink,
-) -> Result<(), HistoryError> {
-    if topology_only {
-        history.diff_records(
-            &old.id,
-            &new.id,
-            &[RecordKind::Node, RecordKind::Edge],
-            sink,
-        )
-    } else {
-        history.diff(&old.id, &new.id, sink)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ChangeCategory {
-    Semantic,
-    Textual,
-    Location,
-    Analysis,
-    Metadata,
-}
-
-impl ChangeCategory {
-    fn index(self) -> usize {
-        match self {
-            Self::Semantic => 0,
-            Self::Textual => 1,
-            Self::Location => 2,
-            Self::Analysis => 3,
-            Self::Metadata => 4,
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Semantic => "semantic",
-            Self::Textual => "textual",
-            Self::Location => "location",
-            Self::Analysis => "analysis",
-            Self::Metadata => "metadata",
-        }
-    }
-
-    fn heading(self) -> &'static str {
-        match self {
-            Self::Semantic => "Semantic graph changes",
-            Self::Textual => "Textual changes",
-            Self::Location => "Location changes",
-            Self::Analysis => "Analysis changes",
-            Self::Metadata => "Metadata changes",
-        }
-    }
-}
-
-const CATEGORY_ORDER: [ChangeCategory; 5] = [
-    ChangeCategory::Semantic,
-    ChangeCategory::Textual,
-    ChangeCategory::Analysis,
-    ChangeCategory::Location,
-    ChangeCategory::Metadata,
-];
-
-struct TextSink {
-    counts: [[u64; 21]; 5],
-    examples: Vec<Vec<String>>,
-    details: Vec<File>,
-    output: DiffOutput,
-    topology_only: bool,
-    include_locations: bool,
-    include_analysis: bool,
-    include_metadata: bool,
-}
-
-impl TextSink {
-    fn new(options: &DiffOptions) -> Result<Self, HistoryError> {
-        let mut details = Vec::with_capacity(5);
-        for _ in 0..5 {
-            details.push(tempfile::tempfile().map_err(output_error)?);
-        }
-        Ok(Self {
-            counts: [[0; 21]; 5],
-            examples: (0..105).map(|_| Vec::new()).collect(),
-            details,
-            output: options.output,
-            topology_only: options.topology_only,
-            include_locations: options.include_locations,
-            include_analysis: options.include_analysis,
-            include_metadata: options.include_metadata,
-        })
-    }
-
-    fn expanded(&self, category: ChangeCategory) -> bool {
-        match category {
-            ChangeCategory::Semantic | ChangeCategory::Textual => {
-                self.output == DiffOutput::Detailed
-            }
-            ChangeCategory::Location => self.include_locations,
-            ChangeCategory::Analysis => self.include_analysis,
-            ChangeCategory::Metadata => self.include_metadata,
-        }
-    }
-
-    fn finish(&mut self, writer: &mut dyn Write) -> Result<(), HistoryError> {
-        let total = self.counts.iter().flatten().copied().sum::<u64>();
-        if total == 0 {
-            let message = if self.topology_only {
-                b"no topology changes\n".as_slice()
-            } else {
-                b"no graph changes\n".as_slice()
-            };
-            return writer.write_all(message).map_err(output_error);
-        }
-        let mut first_section = true;
-        for category in CATEGORY_ORDER {
-            let category_counts = &self.counts[category.index()];
-            let category_total = category_counts.iter().copied().sum::<u64>();
-            if category_total == 0 {
-                continue;
-            }
-            if !first_section {
-                writer.write_all(b"\n").map_err(output_error)?;
-            }
-            first_section = false;
-            writeln!(writer, "{}", category.heading()).map_err(output_error)?;
-            for record in RECORD_ORDER {
-                for change in CHANGE_ORDER {
-                    let index = summary_index(record, change);
-                    let count = category_counts[index];
-                    if count == 0 {
-                        continue;
-                    }
-                    writeln!(
-                        writer,
-                        "  {count} {} {}",
-                        record_name(record, count),
-                        change_name(change)
-                    )
-                    .map_err(output_error)?;
-                    if !self.expanded(category)
-                        && matches!(category, ChangeCategory::Semantic | ChangeCategory::Textual)
-                    {
-                        for example in &self.examples[category.index() * 21 + index] {
-                            writeln!(writer, "    {example}").map_err(output_error)?;
-                        }
-                    }
-                }
-            }
-            if self.expanded(category) {
-                let detail = &mut self.details[category.index()];
-                detail.seek(SeekFrom::Start(0)).map_err(output_error)?;
-                std::io::copy(detail, writer).map_err(output_error)?;
-            } else if matches!(
-                category,
-                ChangeCategory::Location | ChangeCategory::Analysis | ChangeCategory::Metadata
-            ) {
-                writeln!(
-                    writer,
-                    "  (collapsed; use --include-{} to expand)",
-                    match category {
-                        ChangeCategory::Location => "locations",
-                        ChangeCategory::Analysis => "analysis",
-                        ChangeCategory::Metadata => "metadata",
-                        _ => unreachable!(),
-                    }
-                )
-                .map_err(output_error)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl ChangeSink for TextSink {
-    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        if topology_excluded(&change, self.topology_only) {
-            return Ok(());
-        }
-        let category = classify_change(&change);
-        let index = summary_index(change.record, change.change);
-        self.counts[category.index()][index] =
-            self.counts[category.index()][index].saturating_add(1);
-        let examples = &mut self.examples[category.index() * 21 + index];
-        if examples.len() < 20 {
-            examples.push(change.key.join("/"));
-        }
-        if self.expanded(category) {
-            write_change_line(&mut self.details[category.index()], &change)?;
-        }
-        Ok(())
-    }
-}
-
-fn write_change_line(writer: &mut dyn Write, change: &GraphChange) -> Result<(), HistoryError> {
-    write!(
-        writer,
-        "  {} {} {}",
-        record_name(change.record, 1),
-        change_name(change.change),
-        change.key.join("/")
-    )
-    .map_err(output_error)?;
-    if let Some(old) = &change.old {
-        writer.write_all(b"\told=").map_err(output_error)?;
-        serde_json::to_writer(&mut *writer, old).map_err(json_output_error)?;
-    }
-    if let Some(new) = &change.new {
-        writer.write_all(b"\tnew=").map_err(output_error)?;
-        serde_json::to_writer(&mut *writer, new).map_err(json_output_error)?;
-    }
-    writer.write_all(b"\n").map_err(output_error)
-}
-
-struct JsonSink<'a> {
-    writer: &'a mut dyn Write,
-    topology_only: bool,
-    first: bool,
-    summary: [u64; 5],
-}
-
-impl<'a> JsonSink<'a> {
-    fn new(writer: &'a mut dyn Write, topology_only: bool) -> Self {
-        Self {
-            writer,
-            topology_only,
-            first: true,
-            summary: [0; 5],
-        }
-    }
-
-    fn finish(&mut self) -> Result<(), HistoryError> {
-        writeln!(
-            self.writer,
-            "],\"summary\":{{\"semantic\":{},\"textual\":{},\"location\":{},\"analysis\":{},\"metadata\":{}}}}}",
-            self.summary[ChangeCategory::Semantic.index()],
-            self.summary[ChangeCategory::Textual.index()],
-            self.summary[ChangeCategory::Location.index()],
-            self.summary[ChangeCategory::Analysis.index()],
-            self.summary[ChangeCategory::Metadata.index()],
-        )
-        .map_err(output_error)
-    }
-}
-
-impl ChangeSink for JsonSink<'_> {
-    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
-        if topology_excluded(&change, self.topology_only) {
-            return Ok(());
-        }
-        let category = classify_change(&change);
-        self.summary[category.index()] = self.summary[category.index()].saturating_add(1);
-        if self.first {
-            self.first = false;
-        } else {
-            self.writer.write_all(b",").map_err(output_error)?;
-        }
-        self.writer
-            .write_all(b"{\"category\":")
-            .map_err(output_error)?;
-        serde_json::to_writer(&mut *self.writer, category.name()).map_err(json_output_error)?;
-        self.writer
-            .write_all(b",\"record\":")
-            .map_err(output_error)?;
-        serde_json::to_writer(&mut *self.writer, &change.record).map_err(json_output_error)?;
-        self.writer
-            .write_all(b",\"change\":")
-            .map_err(output_error)?;
-        serde_json::to_writer(&mut *self.writer, &change.change).map_err(json_output_error)?;
-        self.writer.write_all(b",\"key\":").map_err(output_error)?;
-        serde_json::to_writer(&mut *self.writer, &change.key).map_err(json_output_error)?;
-        if let Some(old) = &change.old {
-            self.writer.write_all(b",\"old\":").map_err(output_error)?;
-            serde_json::to_writer(&mut *self.writer, old).map_err(json_output_error)?;
-        }
-        if let Some(new) = &change.new {
-            self.writer.write_all(b",\"new\":").map_err(output_error)?;
-            serde_json::to_writer(&mut *self.writer, new).map_err(json_output_error)?;
-        }
-        self.writer.write_all(b"}").map_err(output_error)
-    }
-}
-
-const RECORD_ORDER: [RecordKind; 7] = [
-    RecordKind::Node,
-    RecordKind::Edge,
-    RecordKind::Hyperedge,
-    RecordKind::Analysis,
-    RecordKind::Metadata,
-    RecordKind::ProgramFact,
-    RecordKind::ProgramSummary,
-];
-const CHANGE_ORDER: [ChangeKind; 3] = [ChangeKind::Added, ChangeKind::Removed, ChangeKind::Changed];
-
-fn summary_index(record: RecordKind, change: ChangeKind) -> usize {
-    let record = match record {
-        RecordKind::Node => 0,
-        RecordKind::Edge => 1,
-        RecordKind::Hyperedge => 2,
-        RecordKind::Analysis => 3,
-        RecordKind::Metadata => 4,
-        RecordKind::ProgramFact => 5,
-        RecordKind::ProgramSummary => 6,
-    };
-    let change = match change {
-        ChangeKind::Added => 0,
-        ChangeKind::Removed => 1,
-        ChangeKind::Changed => 2,
-    };
-    record * 3 + change
-}
-
-fn classify_change(change: &GraphChange) -> ChangeCategory {
-    match change.record {
-        RecordKind::Analysis | RecordKind::ProgramFact | RecordKind::ProgramSummary => {
-            return ChangeCategory::Analysis;
-        }
-        RecordKind::Metadata => return ChangeCategory::Metadata,
-        RecordKind::Node | RecordKind::Edge | RecordKind::Hyperedge => {}
-    }
-    if change.change != ChangeKind::Changed {
-        return ChangeCategory::Semantic;
-    }
-    let (Some(old), Some(new)) = (&change.old, &change.new) else {
-        return ChangeCategory::Semantic;
-    };
-    if equal_without_location(old, new) {
-        return ChangeCategory::Location;
-    }
-    if exact_source_only_changed(old, new) {
-        return ChangeCategory::Textual;
-    }
-    ChangeCategory::Semantic
-}
-
-fn equal_without_location(old: &serde_json::Value, new: &serde_json::Value) -> bool {
-    stripped(old, StripMode::Location) == stripped(new, StripMode::Location)
-}
-
-fn exact_source_only_changed(old: &serde_json::Value, new: &serde_json::Value) -> bool {
-    let old_source = old.get("source_hash");
-    let new_source = new.get("source_hash");
-    if old_source.is_none() || new_source.is_none() || old_source == new_source {
-        return false;
-    }
-    if old.get("signature_hash") != new.get("signature_hash")
-        || old.get("implementation_hash") != new.get("implementation_hash")
-    {
-        return false;
-    }
-    stripped(old, StripMode::LocationAndSourceHash)
-        == stripped(new, StripMode::LocationAndSourceHash)
-}
-
-#[derive(Clone, Copy)]
-enum StripMode {
-    Location,
-    LocationAndSourceHash,
-}
-
-fn stripped(value: &serde_json::Value, mode: StripMode) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => serde_json::Value::Object(
-            map.iter()
-                .filter(|(key, _)| {
-                    !location_field(key)
-                        && !(matches!(mode, StripMode::LocationAndSourceHash)
-                            && key.as_str() == "source_hash")
-                })
-                .map(|(key, value)| (key.clone(), stripped(value, mode)))
-                .collect(),
-        ),
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.iter().map(|value| stripped(value, mode)).collect())
-        }
-        value => value.clone(),
-    }
-}
-
-fn location_field(key: &str) -> bool {
-    matches!(
-        key,
-        "source_file"
-            | "source_location"
-            | "location"
-            | "span"
-            | "line"
-            | "column"
-            | "start_line"
-            | "start_column"
-            | "end_line"
-            | "end_column"
-            | "start_position"
-            | "end_position"
-    )
-}
-
-fn topology_excluded(change: &GraphChange, topology_only: bool) -> bool {
-    topology_only
-        && (change.change == ChangeKind::Changed
-            || !matches!(change.record, RecordKind::Node | RecordKind::Edge))
-}
-
-fn record_name(record: RecordKind, count: u64) -> &'static str {
-    match (record, count == 1) {
-        (RecordKind::Node, true) => "node",
-        (RecordKind::Node, false) => "nodes",
-        (RecordKind::Edge, true) => "edge",
-        (RecordKind::Edge, false) => "edges",
-        (RecordKind::Hyperedge, true) => "hyperedge",
-        (RecordKind::Hyperedge, false) => "hyperedges",
-        (RecordKind::Analysis, true) => "analysis record",
-        (RecordKind::Analysis, false) => "analysis records",
-        (RecordKind::Metadata, true) => "metadata record",
-        (RecordKind::Metadata, false) => "metadata records",
-        (RecordKind::ProgramFact, true) => "program fact",
-        (RecordKind::ProgramFact, false) => "program facts",
-        (RecordKind::ProgramSummary, true) => "program summary",
-        (RecordKind::ProgramSummary, false) => "program summaries",
-    }
-}
-
-fn change_name(change: ChangeKind) -> &'static str {
-    match change {
-        ChangeKind::Added => "added",
-        ChangeKind::Removed => "removed",
-        ChangeKind::Changed => "changed",
-    }
-}
-
-fn output_error(source: std::io::Error) -> HistoryError {
-    HistoryError::Io {
-        path: std::path::PathBuf::from("<stdout>"),
-        source,
-    }
-}
-
-fn json_output_error(source: serde_json::Error) -> HistoryError {
-    if source.is_io() {
-        output_error(std::io::Error::other(source))
-    } else {
-        HistoryError::Json(source)
+        history.preferred(commit).map_err(|error| error.to_string())
     }
 }
 
@@ -1901,26 +1149,7 @@ fn report_failure(stdout: String, e: impl ToString) -> CommandFailure {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Write};
-
-    use serde_json::json;
-
     use super::*;
-
-    fn change(
-        record: RecordKind,
-        kind: ChangeKind,
-        old: Option<serde_json::Value>,
-        new: Option<serde_json::Value>,
-    ) -> GraphChange {
-        GraphChange {
-            record,
-            change: kind,
-            key: vec![format!("{record:?}"), format!("{kind:?}")],
-            old,
-            new,
-        }
-    }
 
     #[test]
     fn common_options_support_equals_end_marker_and_reject_duplicates() {
@@ -1941,7 +1170,7 @@ mod tests {
             parse(&[
                 "--format=json".to_owned(),
                 "--format".to_owned(),
-                "text".to_owned()
+                "text".to_owned(),
             ])
             .is_err()
         );
@@ -1949,135 +1178,13 @@ mod tests {
     }
 
     #[test]
-    fn diff_options_are_total_and_mutually_exclusive() {
-        let parsed = parse_diff(&[
-            "old".to_owned(),
-            "new".to_owned(),
-            "--topology-only".to_owned(),
-            "--format=json".to_owned(),
-        ]);
-        let Ok((revisions, options)) = parsed else {
-            assert!(parsed.is_ok());
-            return;
-        };
-        assert_eq!(revisions, ["old", "new"]);
-        assert_eq!(options.output, DiffOutput::Json);
-        assert!(options.topology_only);
-        let fingerprint = "a".repeat(64);
-        let parsed = parse_diff(&[
-            "old".to_owned(),
-            "new".to_owned(),
-            "--include-locations".to_owned(),
-            "--include-analysis".to_owned(),
-            "--include-metadata".to_owned(),
-            format!("--fingerprint={fingerprint}"),
-        ]);
-        let Ok(parsed) = parsed else {
-            assert!(parsed.is_ok());
-            return;
-        };
-        assert!(parsed.1.include_locations);
-        assert!(parsed.1.include_analysis);
-        assert!(parsed.1.include_metadata);
-        assert_eq!(parsed.1.fingerprint.as_deref(), Some(fingerprint.as_str()));
-        assert!(
-            parse_diff(&[
-                "old".to_owned(),
-                "new".to_owned(),
-                format!("--fingerprint={fingerprint}"),
-                "--allow-profile-mismatch".to_owned(),
-            ])
-            .is_err()
-        );
-        assert!(
-            parse_diff(&[
-                "old".to_owned(),
-                "new".to_owned(),
-                "--detailed".to_owned(),
-                "--format=json".to_owned(),
-            ])
-            .is_err()
-        );
-        assert!(parse_diff(&["old".to_owned()]).is_err());
-        assert!(
-            parse_diff(&[
-                "old".to_owned(),
-                "new".to_owned(),
-                "--format=yaml".to_owned(),
-            ])
-            .is_err()
-        );
-        for arguments in [
-            vec!["old", "new", "--detailed", "--detailed"],
-            vec!["old", "new", "--topology-only", "--topology-only"],
-            vec!["old", "new", "--format"],
-            vec!["old", "new", "--format="],
-            vec!["old", "new", "--format=text", "--format", "json"],
-            vec!["old", "new", "--unknown"],
-        ] {
-            assert!(
-                parse_diff(&arguments.into_iter().map(str::to_owned).collect::<Vec<_>>()).is_err()
-            );
-        }
-        let parsed = parse_diff(&["--".to_owned(), "-old".to_owned(), "-new".to_owned()]);
-        assert_eq!(
-            parsed.map(|value| value.0),
-            Ok(vec!["-old".to_owned(), "-new".to_owned()])
-        );
-    }
-
-    #[test]
-    fn graph_changes_are_classified_by_meaning_before_location_churn() {
-        let location = change(
-            RecordKind::Node,
-            ChangeKind::Changed,
-            Some(json!({"id":"n","implementation_hash":"a","source_location":"L1"})),
-            Some(json!({"id":"n","implementation_hash":"a","source_location":"L9"})),
-        );
-        assert_eq!(classify_change(&location), ChangeCategory::Location);
-
-        let textual = change(
-            RecordKind::Node,
-            ChangeKind::Changed,
-            Some(json!({
-                "id":"n","signature_hash":"s","implementation_hash":"i",
-                "source_hash":"old","source_location":"L1"
-            })),
-            Some(json!({
-                "id":"n","signature_hash":"s","implementation_hash":"i",
-                "source_hash":"new","source_location":"L2"
-            })),
-        );
-        assert_eq!(classify_change(&textual), ChangeCategory::Textual);
-
-        let semantic = change(
-            RecordKind::Node,
-            ChangeKind::Changed,
-            Some(json!({"id":"n","implementation_hash":"old","source_hash":"old"})),
-            Some(json!({"id":"n","implementation_hash":"new","source_hash":"new"})),
-        );
-        assert_eq!(classify_change(&semantic), ChangeCategory::Semantic);
-        assert_eq!(
-            classify_change(&change(
-                RecordKind::Analysis,
-                ChangeKind::Added,
-                None,
-                Some(json!({"community":1})),
-            )),
-            ChangeCategory::Analysis
-        );
-    }
-
-    #[test]
     fn help_failures_and_common_argument_boundaries_are_total() {
         assert!(help(Frontend::Compass).starts_with("Usage: compass history"));
-        assert!(diff_help(Frontend::Compass).starts_with("Usage: compass diff"));
         assert_eq!(command(Frontend::Compass, &[]).code, 0);
         assert_eq!(
             command_worker(Frontend::Compass, &["extra".to_owned()]).code,
             2
         );
-
         let reported = outcome(Err(report_failure("partial".to_owned(), "failed")));
         assert_eq!(reported.code, 1);
         assert_eq!(reported.stdout, "partial");
@@ -2085,207 +1192,10 @@ mod tests {
         assert_eq!(outcome(Err(usage("bad"))).code, 2);
         assert_eq!(outcome(Err(runtime("bad"))).code, 1);
         assert_eq!(outcome(Ok("ok".to_owned())).stdout, "ok");
-
         assert!(exact(&["one".to_owned()], 1, "bad").is_ok());
         assert!(exact(&[], 1, "bad").is_err());
         assert!(one_or_zero(&[], "status").is_ok());
         assert!(one_or_zero(&["one".to_owned()], "status").is_ok());
         assert!(one_or_zero(&["one".to_owned(), "two".to_owned()], "status").is_err());
-
-        for arguments in [
-            vec!["--format"],
-            vec!["--output"],
-            vec!["--format="],
-            vec!["--output="],
-            vec!["--output=a", "--output", "b"],
-        ] {
-            assert!(parse(&arguments.into_iter().map(str::to_owned).collect::<Vec<_>>()).is_err());
-        }
-    }
-
-    #[test]
-    fn diff_renderers_cover_every_record_change_and_topology_filter()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let records = [
-            RecordKind::Node,
-            RecordKind::Edge,
-            RecordKind::Hyperedge,
-            RecordKind::Analysis,
-            RecordKind::Metadata,
-        ];
-        let changes = [ChangeKind::Added, ChangeKind::Removed, ChangeKind::Changed];
-        let summary_options = DiffOptions {
-            output: DiffOutput::Summary,
-            topology_only: false,
-            include_locations: false,
-            include_analysis: false,
-            include_metadata: false,
-            fingerprint: None,
-            allow_profile_mismatch: false,
-        };
-        let mut summary = TextSink::new(&summary_options)?;
-        for record in records {
-            for kind in changes {
-                summary.change(change(record, kind, None, None))?;
-            }
-        }
-        for index in 0..25 {
-            summary.change(GraphChange {
-                record: RecordKind::Node,
-                change: ChangeKind::Added,
-                key: vec![format!("node-{index}")],
-                old: None,
-                new: None,
-            })?;
-        }
-        let mut rendered = Vec::new();
-        summary.finish(&mut rendered)?;
-        let rendered = String::from_utf8(rendered)?;
-        assert!(rendered.contains("26 nodes added"));
-        assert!(rendered.contains("analysis record"));
-        assert!(rendered.contains("metadata record"));
-
-        for record in records {
-            assert!(!record_name(record, 1).is_empty());
-            assert!(!record_name(record, 2).is_empty());
-        }
-        for kind in changes {
-            assert!(!change_name(kind).is_empty());
-        }
-
-        let mut empty = Vec::new();
-        let topology_options = DiffOptions {
-            topology_only: true,
-            ..summary_options.clone()
-        };
-        TextSink::new(&topology_options)?.finish(&mut empty)?;
-        assert_eq!(empty, b"no topology changes\n");
-        let mut topology = TextSink::new(&topology_options)?;
-        topology.change(change(
-            RecordKind::Analysis,
-            ChangeKind::Changed,
-            None,
-            None,
-        ))?;
-        let mut filtered = Vec::new();
-        topology.finish(&mut filtered)?;
-        assert_eq!(filtered, b"no topology changes\n");
-
-        let mut detailed_bytes = Vec::new();
-        let detailed_options = DiffOptions {
-            output: DiffOutput::Detailed,
-            ..summary_options.clone()
-        };
-        let mut detailed = TextSink::new(&detailed_options)?;
-        detailed.change(change(
-            RecordKind::Edge,
-            ChangeKind::Changed,
-            Some(json!({"confidence": 0.5})),
-            Some(json!({"confidence": 0.9})),
-        ))?;
-        detailed.change(change(RecordKind::Node, ChangeKind::Added, None, None))?;
-        detailed.finish(&mut detailed_bytes)?;
-        assert!(String::from_utf8(detailed_bytes)?.contains("old="));
-
-        let mut no_details = Vec::new();
-        TextSink::new(&topology_options)?.finish(&mut no_details)?;
-        assert_eq!(no_details, b"no topology changes\n");
-
-        let mut json_bytes = b"{\"changes\":[".to_vec();
-        let mut json_sink = JsonSink::new(&mut json_bytes, true);
-        json_sink.change(change(
-            RecordKind::Metadata,
-            ChangeKind::Changed,
-            None,
-            None,
-        ))?;
-        json_sink.change(change(RecordKind::Node, ChangeKind::Added, None, None))?;
-        json_sink.change(change(RecordKind::Edge, ChangeKind::Removed, None, None))?;
-        json_sink.finish()?;
-        let decoded: serde_json::Value = serde_json::from_slice(&json_bytes)?;
-        assert_eq!(
-            decoded
-                .get("changes")
-                .and_then(serde_json::Value::as_array)
-                .map(Vec::len),
-            Some(2)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn history_labels_and_non_io_json_errors_are_stable() {
-        assert_eq!(
-            render_limitation(GitTargetLimitation::LfsPointer("a".to_owned())),
-            "lfs-pointer:a"
-        );
-        assert_eq!(
-            render_limitation(GitTargetLimitation::Gitlink("b".to_owned())),
-            "gitlink:b"
-        );
-        assert_eq!(
-            render_limitation(GitTargetLimitation::UnsupportedFilter("crypt".to_owned())),
-            "unsupported-filter:crypt"
-        );
-        for (state, name) in [
-            (JobState::Queued, "queued"),
-            (JobState::Building, "building"),
-            (JobState::Validating, "validating"),
-            (JobState::Published, "published"),
-            (JobState::Failed, "failed"),
-            (JobState::Incomplete, "incomplete"),
-        ] {
-            assert_eq!(job_state_name(state), name);
-        }
-        let parsed = serde_json::from_str::<serde_json::Value>("{");
-        assert!(parsed.is_err());
-        if let Err(syntax) = parsed {
-            assert!(matches!(json_output_error(syntax), HistoryError::Json(_)));
-        }
-    }
-
-    #[test]
-    fn json_diff_sink_handles_short_writes_and_propagates_broken_pipes()
-    -> Result<(), Box<dyn std::error::Error>> {
-        struct ShortWriter(Vec<u8>);
-        impl Write for ShortWriter {
-            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                let length = bytes.len().min(1);
-                self.0.extend_from_slice(&bytes[..length]);
-                Ok(length)
-            }
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        struct BrokenWriter;
-        impl Write for BrokenWriter {
-            fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
-                Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
-            }
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        let change = GraphChange {
-            record: RecordKind::Edge,
-            change: ChangeKind::Changed,
-            key: vec!["edge".to_owned()],
-            old: Some(json!({"confidence":0.5})),
-            new: Some(json!({"confidence":0.9})),
-        };
-
-        let mut short = ShortWriter(Vec::new());
-        short.write_all(b"{\"changes\":[")?;
-        let mut sink = JsonSink::new(&mut short, false);
-        sink.change(change.clone())?;
-        sink.finish()?;
-        let parsed: serde_json::Value = serde_json::from_slice(&short.0)?;
-        assert_eq!(parsed["changes"].as_array().map(Vec::len), Some(1));
-
-        let mut broken = BrokenWriter;
-        let mut sink = JsonSink::new(&mut broken, false);
-        assert!(sink.change(change).is_err());
-        Ok(())
     }
 }

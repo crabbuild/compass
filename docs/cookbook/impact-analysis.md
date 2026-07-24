@@ -102,31 +102,35 @@ compass query --cql \
 Parameter parsing accepts JSON scalars; quote a string explicitly when shell
 content could be mistaken for another JSON type.
 
-## Recipe 4: compare topology across commits
+## Recipe 4: review semantic changes across commits
 
 ### Problem
 
-You need to see structural additions/removals without report noise.
+You need an actionable account of what may break, what behavior changed, and
+which callers or modules are affected.
 
 ### Commands
 
 ```bash
 compass history build HEAD~1 --code-only
 compass history build HEAD --profile-from HEAD~1
-compass diff HEAD~1 HEAD --topology-only
+compass diff HEAD~1 HEAD
 ```
 
 For automation:
 
 ```bash
-compass diff HEAD~1 HEAD --topology-only --format json \
-  > target/topology-diff.json
+compass diff HEAD~1 HEAD --format json \
+  > target/semantic-diff.json
 ```
 
 ### Interpret
 
 The profile-from step makes extraction semantics comparable. Added/removed
-edges show static topology change; they do not prove runtime traffic changed.
+parameters, dependency changes, behavior summaries, and affected callers are
+static evidence. They do not prove runtime behavior. Test gaps are reported
+only when test-mapping evidence is sufficient; otherwise verification is
+marked partial or unavailable.
 
 ## Recipe 5: PR review checklist
 

@@ -974,6 +974,7 @@ dependencies = [
  "compass-query",
  "compass-reflect",
  "compass-semantic",
+ "compass-semantic-diff",
  "ctrlc",
  "glob",
  "mimalloc",
@@ -1355,6 +1356,22 @@ dependencies = [
  "ureq",
  "url",
  "wait-timeout",
+]
+
+[[package]]
+name = "compass-semantic-diff"
+version = "0.1.2"
+dependencies = [
+ "compass-analysis",
+ "compass-history",
+ "compass-ir",
+ "compass-languages",
+ "compass-model",
+ "compass-program",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

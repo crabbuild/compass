@@ -253,17 +253,17 @@ Build-profile options include:
 
 ```text
 compass diff OLD NEW
-  [--detailed]
   [--format text|json]
-  [--topology-only]
-  [--include-locations]
-  [--include-analysis]
-  [--include-metadata]
+  [--all]
+  [--explain FINDING_ID]
   [--fingerprint SHA]
-  [--allow-profile-mismatch]
 ```
 
-`--detailed` is a human format and cannot be combined with JSON.
+The default output is an actionable PR-review summary: likely breaks, behavior
+changes, affected callers/modules, and test evidence. Routine symbol churn is
+collapsed; `--all` expands it. `--explain` prints the evidence and reasoning
+for one finding. Diff requires comparable build profiles; rebuild the newer
+revision with `--profile-from OLD` when needed.
 
 ## Service
 

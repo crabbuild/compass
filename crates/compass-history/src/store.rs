@@ -16,6 +16,24 @@ use crate::{
     canonical_json_bytes,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HistoryRecordKey<'a> {
+    Node(&'a str),
+    ProgramModule(&'a str),
+    ProgramFunction(&'a str),
+    ProgramSummary(&'a str),
+    ReverseCallers(&'a str),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryRecord {
+    Node(compass_model::NodeRecord),
+    ProgramModule(compass_ir::ModuleIr),
+    ProgramFunction(compass_ir::FunctionIr),
+    ProgramSummary(compass_analysis::FunctionSummary),
+    ReverseCallers(Vec<String>),
+}
+
 pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
 const STORE_FORMAT_KEY: &[u8] = b"format";
 const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"history_schema":1,"typed_keys":1}"#;
@@ -119,6 +137,69 @@ impl HistoryStore {
     /// Acquire the shared activity lock.
     pub fn activity(&self) -> Result<ActivityGuard, HistoryError> {
         ActivityGuard::acquire(&self.lock_path, false)
+    }
+
+    /// Read one typed semantic record without reconstructing its containing artifact tree.
+    pub fn read_record(
+        &self,
+        realization: &RealizationId,
+        key: HistoryRecordKey<'_>,
+    ) -> Result<Option<HistoryRecord>, HistoryError> {
+        let activity = self.activity()?;
+        let published = self.get_with_activity(realization, &activity)?;
+        let (tree, encoded_key, schema) = match key {
+            HistoryRecordKey::Node(id) => (
+                published.version.nodes_root.to_tree(),
+                crate::node_key(id),
+                "compass.node",
+            ),
+            HistoryRecordKey::ProgramModule(source_file) => (
+                self.load_program_root(realization, &published.version, b"program-facts")?,
+                crate::artifacts::program_key("module", source_file),
+                "compass.program.module",
+            ),
+            HistoryRecordKey::ProgramFunction(symbol_id) => (
+                self.load_program_root(realization, &published.version, b"program-facts")?,
+                crate::artifacts::program_key("function", symbol_id),
+                "compass.program.function",
+            ),
+            HistoryRecordKey::ProgramSummary(symbol_id) => (
+                self.load_program_root(realization, &published.version, b"program-summaries")?,
+                crate::artifacts::program_key("summary", symbol_id),
+                "compass.program.summary",
+            ),
+            HistoryRecordKey::ReverseCallers(symbol_id) => (
+                self.load_program_root(realization, &published.version, b"program-summaries")?,
+                crate::artifacts::program_key("reverse-call", symbol_id),
+                "compass.program.reverse-call",
+            ),
+        };
+        let Some(bytes) = self.prolly.get(&tree, &encoded_key)? else {
+            return Ok(None);
+        };
+        if bytes.len() > crate::MAX_RECORD_VALUE_BYTES {
+            return Err(HistoryError::CorruptHistory(
+                "history record exceeds byte limit".to_owned(),
+            ));
+        }
+        let record = match key {
+            HistoryRecordKey::Node(_) => {
+                HistoryRecord::Node(crate::artifacts::decode_typed(&bytes, schema)?)
+            }
+            HistoryRecordKey::ProgramModule(_) => {
+                HistoryRecord::ProgramModule(crate::artifacts::decode_typed(&bytes, schema)?)
+            }
+            HistoryRecordKey::ProgramFunction(_) => {
+                HistoryRecord::ProgramFunction(crate::artifacts::decode_typed(&bytes, schema)?)
+            }
+            HistoryRecordKey::ProgramSummary(_) => {
+                HistoryRecord::ProgramSummary(crate::artifacts::decode_typed(&bytes, schema)?)
+            }
+            HistoryRecordKey::ReverseCallers(_) => {
+                HistoryRecord::ReverseCallers(crate::artifacts::decode_typed(&bytes, schema)?)
+            }
+        };
+        Ok(Some(record))
     }
 
     /// Acquire the exclusive maintenance lock.
@@ -487,11 +568,15 @@ impl HistoryStore {
                 HistoryError::CorruptHistory("preferred pointer is absent".to_owned())
             })?;
         match self.validated_manifest_pointer(&manifest) {
-            Ok(_) => {
-                return Err(HistoryError::CorruptHistory(
-                    "preferred pointer is valid and cannot use corrupt recovery".to_owned(),
-                ));
-            }
+            Ok(published) => match self.validate_without_activity(&published.id) {
+                Ok(_) => {
+                    return Err(HistoryError::CorruptHistory(
+                        "preferred realization is valid and cannot use corrupt recovery".to_owned(),
+                    ));
+                }
+                Err(error) if error.is_catalog_corruption() => {}
+                Err(error) => return Err(error),
+            },
             Err(error) if error.is_catalog_corruption() => {}
             Err(error) => return Err(error),
         }

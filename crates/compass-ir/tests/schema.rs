@@ -53,6 +53,9 @@ fn bundle() -> ProgramBundle {
                 graph_node_id: None,
                 signature_digest: B.to_owned(),
                 body_digest: C.to_owned(),
+                visibility: compass_ir::Visibility::Public,
+                execution_mode: compass_ir::ExecutionMode::Sync,
+                is_test: false,
                 anchor: anchor.clone(),
                 parameters: Vec::new(),
                 return_type: None,
@@ -141,9 +144,9 @@ fn validation_rejects_duplicate_provider_and_evidence_ids() {
 }
 
 #[test]
-fn public_v1_schema_uses_the_four_coverage_states() {
+fn public_v2_schema_uses_the_four_coverage_states() {
     assert_eq!(compass_ir::PROGRAM_SCHEMA, "http://crab.build/compass/v1");
-    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 1);
+    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 2);
 
     let mut current = bundle();
     current.modules[0].coverage.insert(

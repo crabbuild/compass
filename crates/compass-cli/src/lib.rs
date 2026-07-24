@@ -15,6 +15,8 @@ mod prs_commands;
 mod query_commands;
 mod result_commands;
 mod semantic_commands;
+mod semantic_diff_commands;
+mod semantic_diff_render;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -171,7 +173,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
-        "diff" => history_commands::command_diff(frontend, &args),
+        "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
         "program" => program_commands::command(frontend, &args),
         "path" => command_path(frontend, &args),
@@ -236,25 +238,6 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
 #[must_use]
 pub fn compass_help_request(arguments: &[OsString], style: HelpStyle) -> Option<Outcome> {
     help::request_os(arguments, style)
-}
-
-/// Run the graph-history diff command with direct streaming output.
-pub fn run_diff(
-    frontend: Frontend,
-    arguments: &[OsString],
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> u8 {
-    let arguments = arguments
-        .iter()
-        .map(|argument| argument.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let outcome = history_commands::command_diff_to_writer(frontend, &arguments, stdout);
-    if write_output(stderr, &outcome.stderr, outcome.stderr_trailing_newline).is_err() {
-        1
-    } else {
-        outcome.code
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

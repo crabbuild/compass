@@ -1,3 +1,4 @@
+mod python;
 mod rust;
 mod typescript;
 
@@ -10,7 +11,7 @@ use compass_program::{
 
 use crate::{Engine, ExtractorKind, Registry};
 
-pub const TREE_SITTER_PROGRAM_PROVIDER_VERSION: u32 = 2;
+pub const TREE_SITTER_PROGRAM_PROVIDER_VERSION: u32 = 3;
 
 #[derive(Default)]
 pub struct TreeSitterSyntaxProvider {
@@ -43,7 +44,10 @@ impl SyntaxProvider for TreeSitterSyntaxProvider {
             return Ok(None);
         };
         if spec.kind != ExtractorKind::Generic
-            || !matches!(spec.name, "rust" | "typescript" | "tsx" | "javascript")
+            || !matches!(
+                spec.name,
+                "python" | "rust" | "typescript" | "tsx" | "javascript"
+            )
         {
             return Ok(None);
         }
@@ -58,6 +62,7 @@ impl SyntaxProvider for TreeSitterSyntaxProvider {
             .parse(path, spec, input.source)
             .map_err(|error| ProviderError::InvalidInput(error.to_string()))?;
         let batch = match spec.name {
+            "python" => python::extract(descriptor, &normalized, tree.root_node()),
             "rust" => rust::extract(descriptor, &normalized, tree.root_node()),
             "typescript" | "tsx" | "javascript" => {
                 typescript::extract(descriptor, &normalized, tree.root_node())

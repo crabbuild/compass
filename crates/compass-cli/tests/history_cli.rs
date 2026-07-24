@@ -847,7 +847,7 @@ fn completed_outcomes_handle_short_and_broken_writers() {
 }
 
 #[test]
-fn diff_supports_summary_details_streaming_json_and_topology_filtering()
+fn diff_emits_semantic_text_json_and_rejects_removed_flags()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     git(directory.path(), &["init", "--quiet"])?;
@@ -951,7 +951,7 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
         "{}",
         String::from_utf8_lossy(&summary.stderr)
     );
-    assert!(String::from_utf8_lossy(&summary.stdout).contains("1 node added"));
+    assert!(String::from_utf8_lossy(&summary.stdout).contains("Semantic review:"));
 
     let json_output = run(
         compass,
@@ -960,52 +960,29 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     )?;
     assert!(json_output.status.success());
     let envelope: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
-    assert_eq!(envelope["schema_version"], 2);
-    assert_eq!(envelope["comparison"]["profile_mismatch"], false);
-    let changes = envelope["changes"].as_array().ok_or("missing changes")?;
-    assert!(changes.iter().any(|change| change["record"] == "edge"));
-    assert!(
-        changes
-            .iter()
-            .any(|change| { change["record"] == "edge" && change["change"] == "changed" })
-    );
-    let order = |record: &str| match record {
-        "node" => 0,
-        "edge" => 1,
-        "hyperedge" => 2,
-        "analysis" => 3,
-        "metadata" => 4,
-        _ => 5,
-    };
-    assert!(changes.windows(2).all(|pair| {
-        order(pair[0]["record"].as_str().unwrap_or_default())
-            <= order(pair[1]["record"].as_str().unwrap_or_default())
-    }));
-
-    let topology = run(
-        compass,
-        directory.path(),
-        &["diff", "HEAD~1", "HEAD", "--format=json", "--topology-only"],
-    )?;
-    let topology_envelope: serde_json::Value = serde_json::from_slice(&topology.stdout)?;
-    let topology_changes = topology_envelope["changes"]
-        .as_array()
-        .ok_or("missing topology changes")?;
-    assert!(topology_changes.iter().all(|change| {
-        matches!(change["record"].as_str(), Some("node" | "edge"))
-            && matches!(change["change"].as_str(), Some("added" | "removed"))
-    }));
-
-    let detailed = run(
-        compass,
-        directory.path(),
-        &["diff", "HEAD~1", "HEAD", "--detailed"],
-    )?;
-    assert!(detailed.status.success());
-    assert!(String::from_utf8_lossy(&detailed.stdout).contains("edge changed"));
+    assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
+    assert!(envelope["findings"].is_array());
+    assert!(envelope.get("changes").is_none());
+    for removed in [
+        "--detailed",
+        "--topology-only",
+        "--include-locations",
+        "--include-analysis",
+        "--include-metadata",
+        "--allow-profile-mismatch",
+        "--summarize",
+    ] {
+        let rejected = run(
+            compass,
+            directory.path(),
+            &["diff", "HEAD~1", "HEAD", removed],
+        )?;
+        assert_eq!(rejected.status.code(), Some(2), "{removed}");
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("unknown option"));
+    }
 
     let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
-    assert_eq!(String::from_utf8_lossy(&empty.stdout), "no graph changes\n");
+    assert!(String::from_utf8_lossy(&empty.stdout).contains("0 likely breaks"));
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
     let mut incompatible_profile = compass_history::BuildProfile::default();
     incompatible_profile.insert("compass_version", "incompatible")?;
@@ -1035,20 +1012,6 @@ fn diff_supports_summary_details_streaming_json_and_topology_filtering()
     let mismatch = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
     assert_eq!(mismatch.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&mismatch.stderr).contains("not semantically comparable"));
-    let allowed = run(
-        compass,
-        directory.path(),
-        &[
-            "diff",
-            "HEAD~1",
-            "HEAD",
-            "--format=json",
-            "--allow-profile-mismatch",
-        ],
-    )?;
-    assert!(allowed.status.success());
-    let allowed: serde_json::Value = serde_json::from_slice(&allowed.stdout)?;
-    assert_eq!(allowed["comparison"]["profile_mismatch"], true);
     Ok(())
 }
 
@@ -1282,8 +1245,8 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
         String::from_utf8_lossy(&diff.stderr)
     );
     let envelope: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
-    assert_eq!(envelope["schema_version"], 2);
-    assert!(envelope["changes"].is_array());
+    assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
+    assert!(envelope["findings"].is_array());
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
     let versions = history.list(None)?;
@@ -1349,6 +1312,80 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
         ],
     )?;
     assert!(old.status.success());
+    Ok(())
+}
+
+#[test]
+fn semantic_diff_end_to_end_languages() -> Result<(), Box<dyn std::error::Error>> {
+    let compass = env!("CARGO_BIN_EXE_compass");
+    for (file, old_source, new_source) in [
+        (
+            "service.rs",
+            "pub fn load(id: u64) -> u64 { id }\n",
+            "pub async fn load(id: u64, mode: u8) -> u64 { save(id).await; id + u64::from(mode) }\n",
+        ),
+        (
+            "service.ts",
+            "export function load(id: number): number { return id; }\n",
+            "export async function load(id: number, mode: number): Promise<number> { await save(id); return id + mode; }\n",
+        ),
+        (
+            "service.py",
+            "def load(id: int) -> int:\n    return id\n",
+            "async def load(id: int, mode: int) -> int:\n    await save(id)\n    return id + mode\n",
+        ),
+    ] {
+        let directory = tempfile::tempdir()?;
+        git(directory.path(), &["init", "--quiet"])?;
+        git(directory.path(), &["config", "user.name", "Compass Test"])?;
+        git(
+            directory.path(),
+            &["config", "user.email", "compass@example.invalid"],
+        )?;
+        std::fs::write(directory.path().join(file), old_source)?;
+        git(directory.path(), &["add", file])?;
+        git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
+        std::fs::write(directory.path().join(file), new_source)?;
+        git(directory.path(), &["add", file])?;
+        git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
+
+        let enabled = run(
+            compass,
+            directory.path(),
+            &["history", "enable", "--code-only"],
+        )?;
+        assert!(enabled.status.success());
+        let diff = run(
+            compass,
+            directory.path(),
+            &["diff", "HEAD~1", "HEAD", "--format=json"],
+        )?;
+        assert!(
+            diff.status.success(),
+            "{file}: {}",
+            String::from_utf8_lossy(&diff.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
+        assert_eq!(report["schema"], "compass.semantic_diff.report/1");
+        let findings = report["findings"].as_array().ok_or("findings")?;
+        let finding = findings
+            .iter()
+            .find(|finding| {
+                finding["compatibility"] == "proven_break"
+                    && finding["explanation"]
+                        .as_str()
+                        .is_some_and(|value| value.contains("required parameter mode"))
+            })
+            .ok_or_else(|| format!("{file}: missing callable break in {report}"))?;
+        let finding_id = finding["id"].as_str().ok_or("finding ID")?;
+        let explained = run(
+            compass,
+            directory.path(),
+            &["diff", "HEAD~1", "HEAD", "--explain", finding_id],
+        )?;
+        assert!(explained.status.success());
+        assert!(String::from_utf8_lossy(&explained.stdout).contains("What changed:"));
+    }
     Ok(())
 }
 

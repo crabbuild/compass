@@ -32,8 +32,9 @@ offline worktree. Report the resolved revision when answering.
 
 ```bash
 compass diff v1.2.0 HEAD
-compass diff HEAD~1 HEAD --detailed
-compass diff HEAD~1 HEAD --topology-only
+compass diff HEAD~1 HEAD --all
+compass diff HEAD~1 HEAD --format json
+compass diff HEAD~1 HEAD --explain sd1-...
 compass history list HEAD --format json
 compass history show HEAD
 compass history export HEAD --format compass-out --output historical-output

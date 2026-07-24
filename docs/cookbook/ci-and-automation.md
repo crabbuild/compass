@@ -90,8 +90,7 @@ set -eu
 compass history build "$BASE_SHA" --code-only
 compass history build "$HEAD_SHA" --profile-from "$BASE_SHA"
 compass diff "$BASE_SHA" "$HEAD_SHA" \
-  --topology-only \
-  --format json > compass-out/topology-diff.json
+  --format json > compass-out/semantic-diff.json
 ```
 
 Use full commit SHAs supplied by the CI provider. Avoid fetch-on-demand inside

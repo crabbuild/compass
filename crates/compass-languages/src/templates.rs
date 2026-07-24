@@ -428,11 +428,7 @@ fn add_template_import(
     }
     let (target_path, target_id) = if raw.starts_with('.') {
         let joined = lexical_normalize(&path.parent().unwrap_or_else(|| Path::new(".")).join(raw));
-        let resolved = if dynamic {
-            resolve_js_path(&joined)
-        } else {
-            rewrite_js_extension(joined)
-        };
+        let resolved = resolve_template_import(&joined, dynamic);
         let target_id = make_id(&[&resolved.to_string_lossy()]);
         (resolved.to_string_lossy().into_owned(), target_id)
     } else {
@@ -482,6 +478,29 @@ fn rewrite_js_extension(mut path: PathBuf) -> PathBuf {
         _ => false,
     };
     path
+}
+
+fn resolve_template_import(path: &Path, dynamic: bool) -> PathBuf {
+    if path.is_file() {
+        return path.to_path_buf();
+    }
+    let rewritten = rewrite_js_extension(path.to_path_buf());
+    if rewritten.is_file() {
+        return rewritten;
+    }
+    for extension in [
+        "astro", "svelte", "vue", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs",
+    ] {
+        let candidate = path.with_extension(extension);
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    if dynamic {
+        resolve_js_path(path)
+    } else {
+        rewritten
+    }
 }
 
 fn resolve_js_path(path: &Path) -> PathBuf {

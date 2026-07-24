@@ -25,6 +25,7 @@ members = [
     "crates/compass-reflect",
     "crates/compass-resolve",
     "crates/compass-semantic",
+    "crates/compass-semantic-diff",
     "crates/compass-history",
     "crates/compass-transcribe",
     "crates/compass-whisper",

@@ -217,14 +217,17 @@ See the [language contract](docs/COMPASSQL.md) and
 
 ```bash
 compass history enable --code-only
-compass history build HEAD
+compass history build main
+compass history build HEAD --profile-from main
 compass query "authentication" --at HEAD~20
-compass diff HEAD~1 HEAD --topology-only
+compass diff main HEAD
 ```
 
 Historical builds use exact Git commits and immutable extraction
 fingerprints. Current and historical graphs can be queried, compared, and
-exported without putting generated graph data into Git.
+exported without putting generated graph data into Git. Semantic diff leads
+with likely breaks, behavior changes, affected callers/modules, and test
+evidence; use `--all` to expand routine symbol churn.
 
 Read the [versioned history guide](docs/guides/versioned-history.md) and
 [storage design](docs/design/storage-and-history.md).
