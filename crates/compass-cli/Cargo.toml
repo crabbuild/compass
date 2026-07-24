@@ -27,28 +27,28 @@ serde_json.workspace = true
 tempfile.workspace = true
 time.workspace = true
 tokio.workspace = true
-compass-core = { path = "../compass-core", version = "0.1.2" }
-compass-analysis = { path = "../compass-analysis", version = "0.1.2" }
-compass-ir = { path = "../compass-ir", version = "0.1.2" }
-compass-program = { path = "../compass-program", version = "0.1.2" }
-compass-cypher = { path = "../compass-cypher", version = "0.1.2" }
-compass-cargo = { path = "../compass-cargo", version = "0.1.2" }
-compass-files = { path = "../compass-files", version = "0.1.2" }
-compass-graph = { path = "../compass-graph", version = "0.1.2" }
-compass-graphdb = { path = "../compass-graphdb", version = "0.1.2" }
-compass-global = { path = "../compass-global", version = "0.1.2" }
-compass-history = { path = "../compass-history", version = "0.1.2" }
-compass-google-workspace = { path = "../compass-google-workspace", version = "0.1.2" }
-compass-ingest = { path = "../compass-ingest", version = "0.1.2" }
-compass-model = { path = "../compass-model", version = "0.1.2" }
-compass-mcp = { path = "../compass-mcp", version = "0.1.2" }
-compass-output = { path = "../compass-output", version = "0.1.2" }
-compass-postgres = { path = "../compass-postgres", version = "0.1.2" }
-compass-prs = { path = "../compass-prs", version = "0.1.2" }
-compass-query = { path = "../compass-query", version = "0.1.2" }
-compass-reflect = { path = "../compass-reflect", version = "0.1.2" }
-compass-semantic = { path = "../compass-semantic", version = "0.1.2" }
-compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.1.2" }
+compass-core = { path = "../compass-core", version = "0.1.3" }
+compass-analysis = { path = "../compass-analysis", version = "0.1.3" }
+compass-ir = { path = "../compass-ir", version = "0.1.3" }
+compass-program = { path = "../compass-program", version = "0.1.3" }
+compass-cypher = { path = "../compass-cypher", version = "0.1.3" }
+compass-cargo = { path = "../compass-cargo", version = "0.1.3" }
+compass-files = { path = "../compass-files", version = "0.1.3" }
+compass-graph = { path = "../compass-graph", version = "0.1.3" }
+compass-graphdb = { path = "../compass-graphdb", version = "0.1.3" }
+compass-global = { path = "../compass-global", version = "0.1.3" }
+compass-history = { path = "../compass-history", version = "0.1.3" }
+compass-google-workspace = { path = "../compass-google-workspace", version = "0.1.3" }
+compass-ingest = { path = "../compass-ingest", version = "0.1.3" }
+compass-model = { path = "../compass-model", version = "0.1.3" }
+compass-mcp = { path = "../compass-mcp", version = "0.1.3" }
+compass-output = { path = "../compass-output", version = "0.1.3" }
+compass-postgres = { path = "../compass-postgres", version = "0.1.3" }
+compass-prs = { path = "../compass-prs", version = "0.1.3" }
+compass-query = { path = "../compass-query", version = "0.1.3" }
+compass-reflect = { path = "../compass-reflect", version = "0.1.3" }
+compass-semantic = { path = "../compass-semantic", version = "0.1.3" }
+compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.1.3" }
 url.workspace = true
 
 [lints]
