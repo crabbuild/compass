@@ -628,24 +628,954 @@ fn page(
 ) -> String {
     format!(
         r##"<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>graphify - {title}</title>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compass — {title}</title>
 <script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js" integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1" crossorigin="anonymous"></script>
-<style>*{{box-sizing:border-box}}body{{margin:0;background:#0f0f1a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;height:100vh;overflow:hidden}}#graph{{flex:1}}#sidebar{{width:280px;background:#1a1a2e;border-left:1px solid #2a2a4e;display:flex;flex-direction:column;overflow:hidden}}#search-wrap,#info-panel,#legend-wrap,#stats{{padding:12px}}#search{{width:100%;background:#0f0f1a;border:1px solid #3a3a5e;color:#e0e0e0;padding:7px 10px;border-radius:6px}}#search-results,#neighbors-list{{max-height:160px;overflow:auto}}.search-item,.neighbor-link,.legend-item{{padding:4px 6px;cursor:pointer;border-radius:4px;font-size:12px}}.neighbor-link{{display:block;border-left:3px solid #333}}.legend-item{{display:flex;gap:8px;align-items:center}}.legend-dot{{width:12px;height:12px;border-radius:50%}}.dimmed{{opacity:.35}}#legend-wrap{{flex:1;overflow:auto}}#stats{{color:#777}}</style></head>
-<body><div id="graph"></div><div id="sidebar"><div id="search-wrap"><input id="search" placeholder="Search nodes..." autocomplete="off"><div id="search-results"></div></div><div id="info-panel"><h3>Node Info</h3><div id="info-content"><span class="empty">Click a node to inspect it</span></div></div><div id="legend-wrap"><h3>Communities</h3><label><input type="checkbox" id="select-all-cb" checked onchange="toggleAllCommunities(!this.checked)">Select All</label><div id="legend"></div></div><div id="stats">{stats}</div></div>
+<style>
+:root {{
+  --canvas: #08111f;
+  --canvas-deep: #050b14;
+  --panel: #101b2d;
+  --panel-raised: rgba(20, 34, 54, .88);
+  --line: rgba(154, 178, 211, .16);
+  --line-strong: rgba(154, 178, 211, .28);
+  --text: #eef5ff;
+  --muted: #91a4bd;
+  --faint: #60728b;
+  --focus: #76b7ff;
+  --focus-soft: rgba(118, 183, 255, .12);
+  --radius: 14px;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+html, body {{ width: 100%; height: 100%; }}
+body {{
+  display: flex;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}}
+button, input {{ font: inherit; }}
+button {{ min-height: 40px; }}
+.sr-only {{
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}}
+#workspace {{
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}}
+#graph {{
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 45% 42%, rgba(36, 73, 112, .34), transparent 34%),
+    radial-gradient(circle at 76% 75%, rgba(43, 83, 95, .17), transparent 28%),
+    linear-gradient(145deg, var(--canvas) 0%, var(--canvas-deep) 100%);
+}}
+#graph::after {{
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .16;
+  background-image: radial-gradient(rgba(150, 180, 214, .4) .55px, transparent .55px);
+  background-size: 22px 22px;
+}}
+.glass-panel {{
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, .3);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}}
+#graph-toolbar {{
+  position: absolute;
+  z-index: 4;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 8px 10px 8px 16px;
+  border-radius: var(--radius);
+}}
+#viewer-status,
+.toolbar-actions,
+#sidebar-header,
+.node-identity,
+.neighbors-heading,
+.legend-item,
+#legend-controls label {{
+  display: flex;
+  align-items: center;
+}}
+#viewer-status {{
+  min-width: 0;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .015em;
+}}
+#viewer-status-text {{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}}
+.status-dot {{
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--focus);
+  box-shadow: 0 0 0 4px rgba(118, 183, 255, .1);
+}}
+#viewer-status[data-state="running"] .status-dot {{
+  animation: status-pulse 1.6s ease-in-out infinite;
+}}
+@keyframes status-pulse {{
+  50% {{ box-shadow: 0 0 0 8px rgba(118, 183, 255, 0); }}
+}}
+.toolbar-actions {{
+  gap: 6px;
+}}
+.tool-button {{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .16s ease, background .16s ease, border-color .16s ease;
+}}
+.tool-button svg {{
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+}}
+.tool-button:hover,
+.tool-button[aria-pressed="true"],
+.tool-button.is-active {{
+  color: var(--text);
+  background: var(--focus-soft);
+  border-color: var(--line);
+}}
+#sidebar {{
+  position: relative;
+  z-index: 5;
+  width: 340px;
+  flex: 0 0 340px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(180deg, #111e31 0%, var(--panel) 100%);
+  border-left: 1px solid var(--line);
+  box-shadow: -22px 0 60px rgba(0, 0, 0, .18);
+}}
+#sidebar-header {{
+  gap: 11px;
+  min-height: 70px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}}
+.product-mark {{
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: linear-gradient(145deg, #eff8ff, #a8d2ff);
+  color: #09182c;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .48), 0 8px 22px rgba(60, 132, 202, .18);
+  font-size: 15px;
+  font-weight: 800;
+}}
+#sidebar-header strong,
+#sidebar-header span {{
+  display: block;
+}}
+#sidebar-header strong {{
+  font-size: 14px;
+  letter-spacing: .01em;
+}}
+#sidebar-header span {{
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: 11px;
+}}
+#search-wrap {{
+  position: relative;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}}
+.search-field {{
+  position: relative;
+}}
+.search-field svg {{
+  position: absolute;
+  top: 50%;
+  left: 13px;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.8;
+  pointer-events: none;
+}}
+#search {{
+  width: 100%;
+  min-height: 42px;
+  padding: 0 13px 0 38px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: none;
+  background: rgba(5, 11, 20, .64);
+  color: var(--text);
+}}
+#search::placeholder {{ color: var(--faint); }}
+#search-results {{
+  display: none;
+  position: absolute;
+  z-index: 8;
+  top: 62px;
+  left: 16px;
+  right: 16px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: #0d1929;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, .38);
+}}
+.search-item {{
+  min-height: 38px;
+  padding: 10px;
+  overflow: hidden;
+  border-left: 3px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}}
+.search-item:hover,
+.search-item[aria-selected="true"] {{
+  background: var(--focus-soft);
+  color: var(--text);
+}}
+#info-panel {{
+  padding: 18px 16px;
+  border-bottom: 1px solid var(--line);
+}}
+.section-heading {{
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}}
+.section-heading h2,
+#legend-wrap h2 {{
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}}
+.section-heading span {{
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}}
+#info-content {{
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}}
+.node-identity {{
+  gap: 11px;
+  margin-bottom: 15px;
+}}
+.node-identity > div {{
+  min-width: 0;
+}}
+.node-identity strong,
+.node-identity span {{
+  display: block;
+}}
+.node-identity strong {{
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}}
+.node-identity span {{
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 11px;
+}}
+.node-swatch {{
+  width: 10px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  background: var(--node-color);
+}}
+.metadata-grid {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 15px;
+}}
+.metadata-grid > div {{
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(5, 11, 20, .3);
+}}
+.metadata-grid .metadata-wide {{
+  grid-column: 1 / -1;
+}}
+.metadata-grid dt {{
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}}
+.metadata-grid dd {{
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}}
+.neighbors-heading {{
+  justify-content: space-between;
+  margin: 3px 0 7px;
+  color: var(--muted);
+}}
+.neighbors-heading strong {{
+  color: var(--faint);
+  font-size: 10px;
+}}
+#neighbors-list {{
+  max-height: 154px;
+  overflow-y: auto;
+}}
+.neighbor-link {{
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  margin: 3px 0;
+  padding: 8px 9px;
+  overflow: hidden;
+  border: 0;
+  border-left: 3px solid #334155;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}}
+.neighbor-link:hover {{
+  background: rgba(118, 183, 255, .08);
+  color: var(--text);
+}}
+.empty {{
+  display: block;
+  padding: 8px 0;
+  color: var(--faint);
+}}
+#legend-wrap {{
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}}
+#legend-wrap h2 {{
+  margin-bottom: 10px;
+}}
+#legend-controls {{
+  margin-bottom: 8px;
+}}
+#legend-controls label,
+.legend-item {{
+  min-height: 34px;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}}
+.legend-item {{
+  border-radius: 7px;
+}}
+.legend-item:hover {{
+  background: rgba(118, 183, 255, .06);
+  color: var(--text);
+}}
+.legend-item.dimmed {{
+  opacity: .36;
+}}
+.legend-dot {{
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}}
+.legend-label {{
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}}
+.legend-count,
+#stats {{
+  color: var(--faint);
+  font-size: 10px;
+}}
+#stats {{
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+  letter-spacing: .025em;
+}}
+.legend-cb,
+#select-all-cb {{
+  width: 15px;
+  height: 15px;
+  accent-color: var(--focus);
+}}
+.tool-button:focus-visible,
+#search:focus-visible,
+.neighbor-link:focus-visible,
+.legend-item:focus-visible {{
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}}
+@media (max-width: 980px) {{
+  .tool-button .button-label {{ display: none; }}
+  .tool-button {{ padding: 0 11px; }}
+}}
+@media (max-width: 760px) {{
+  body {{ display: block; }}
+  #workspace {{ height: 62vh; min-height: 360px; }}
+  #sidebar {{
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 40vh;
+    min-height: 280px;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -22px 58px rgba(0, 0, 0, .35);
+  }}
+  #sidebar-header {{
+    min-height: 58px;
+    padding: 10px 16px;
+  }}
+  .product-mark {{ width: 32px; height: 32px; }}
+  #graph-toolbar {{ top: 12px; left: 12px; right: 12px; }}
+  .toolbar-actions {{ max-width: 62%; overflow-x: auto; }}
+  #info-panel {{ padding-top: 14px; padding-bottom: 14px; }}
+}}
+@media (max-width: 480px) {{
+  #graph-toolbar {{
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }}
+  .toolbar-actions {{ width: 100%; max-width: none; }}
+}}
+@media (prefers-reduced-motion: reduce) {{
+  *, *::before, *::after {{
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }}
+}}
+</style>
+</head>
+<body>
+<main id="workspace">
+  <div id="graph" role="region" aria-label="Interactive Compass knowledge graph"></div>
+  <div id="graph-toolbar" class="glass-panel" role="toolbar" aria-label="Graph controls">
+    <div id="viewer-status" data-state="running" role="status" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="viewer-status-text">Layout settling</span>
+    </div>
+    <div class="toolbar-actions">
+      <button id="physics-toggle" class="tool-button is-active" type="button" aria-label="Pause layout" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
+        <span class="button-label">Pause layout</span>
+      </button>
+      <button id="fit-graph" class="tool-button" type="button" aria-label="Fit graph in view">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+        <span class="button-label">Fit graph</span>
+      </button>
+      <button id="reset-view" class="tool-button" type="button" aria-label="Reset graph view">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6"/></svg>
+        <span class="button-label">Reset view</span>
+      </button>
+      <button id="labels-toggle" class="tool-button" type="button" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M8 5v14M5 19h6M14 10h6M17 10v9M14 19h6"/></svg>
+        <span class="button-label">Show labels</span>
+      </button>
+    </div>
+  </div>
+</main>
+<aside id="sidebar">
+  <header id="sidebar-header">
+    <div class="product-mark" aria-hidden="true">C</div>
+    <div><strong>Compass</strong><span>Code knowledge map</span></div>
+  </header>
+  <div id="search-wrap" role="search">
+    <label class="sr-only" for="search">Search graph nodes</label>
+    <div class="search-field">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+      <input id="search" type="search" placeholder="Search nodes…" autocomplete="off" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list">
+    </div>
+    <div id="search-results" role="listbox" aria-label="Matching nodes"></div>
+  </div>
+  <section id="info-panel" aria-labelledby="info-title">
+    <div class="section-heading"><h2 id="info-title">Inspector</h2><span>Node details</span></div>
+    <div id="info-content"><span class="empty">Select a node to inspect its relationships</span></div>
+  </section>
+  <section id="legend-wrap" aria-labelledby="communities-title">
+    <h2 id="communities-title">Communities</h2>
+    <div id="legend-controls"><label><input type="checkbox" id="select-all-cb" checked> Select all</label></div>
+    <div id="legend"></div>
+  </section>
+  <div id="stats">{stats}</div>
+</aside>
 <script>
 const RAW_NODES = {nodes};
 const RAW_EDGES = {edges};
 const LEGEND = {legend};
-function esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}}
-const nodesDS=new vis.DataSet(RAW_NODES.map(n=>({{...n,_community:n.community,_community_name:n.community_name,_source_file:n.source_file,_file_type:n.file_type,_degree:n.degree}})));
-const edgesDS=new vis.DataSet(RAW_EDGES.map((e,i)=>({{id:i,from:e.from,to:e.to,label:'',title:e.title,dashes:e.dashes,width:e.width,color:e.color,arrows:{{to:{{enabled:true,scaleFactor:.5}}}}}})));
-const container=document.getElementById('graph');const network=new vis.Network(container,{{nodes:nodesDS,edges:edgesDS}},{{physics:{{solver:'forceAtlas2Based',stabilization:{{iterations:200}}}},interaction:{{hover:true,tooltipDelay:100,hideEdgesOnDrag:true}},nodes:{{shape:'dot'}},edges:{{smooth:{{type:'continuous'}}}}}});
-function showInfo(id){{const n=nodesDS.get(id);if(!n)return;const ids=network.getConnectedNodes(id);const links=ids.map(nid=>{{const nb=nodesDS.get(nid);return `<span class="neighbor-link" data-nid="${{esc(nid)}}">${{esc(nb?nb.label:nid)}}</span>`}}).join('');document.getElementById('info-content').innerHTML=`<b>${{esc(n.label)}}</b><div>Type: ${{esc(n._file_type||'unknown')}}</div><div>Community: ${{esc(n._community_name)}}</div><div>Source: ${{esc(n._source_file||'-')}}</div><div>Degree: ${{n._degree}}</div><div id="neighbors-list">${{links}}</div>`}}
-function focusNode(id){{network.focus(id,{{scale:1.4,animation:true}});network.selectNodes([id]);showInfo(id)}}
-document.addEventListener('click',e=>{{const el=e.target.closest('.neighbor-link');if(el&&el.dataset.nid!==undefined)focusNode(el.dataset.nid)}});network.on('click',p=>{{if(p.nodes.length)showInfo(p.nodes[0])}});
-const results=document.getElementById('search-results'),search=document.getElementById('search');search.addEventListener('input',()=>{{results.innerHTML='';const q=search.value.toLowerCase().trim();RAW_NODES.filter(n=>n.label.toLowerCase().includes(q)).slice(0,20).forEach(n=>{{const el=document.createElement('div');el.className='search-item';el.textContent=n.label;el.onclick=()=>focusNode(n.id);results.appendChild(el)}})}});
-const hiddenCommunities=new Set();function updateVisibility(){{nodesDS.update(RAW_NODES.map(n=>({{id:n.id,hidden:hiddenCommunities.has(n.community)}})))}}function toggleAllCommunities(hide){{LEGEND.forEach(c=>hide?hiddenCommunities.add(c.cid):hiddenCommunities.delete(c.cid));updateVisibility()}}const legendEl=document.getElementById('legend');LEGEND.forEach(c=>{{const el=document.createElement('div');el.className='legend-item';el.innerHTML=`<input type="checkbox" checked><div class="legend-dot" style="background:${{c.color}}"></div><span>${{c.label}}</span><span>${{c.count}}</span>`;el.querySelector('input').onchange=e=>{{e.target.checked?hiddenCommunities.delete(c.cid):hiddenCommunities.add(c.cid);el.classList.toggle('dimmed',!e.target.checked);updateVisibility()}};legendEl.appendChild(el)}});
-</script><script>const hyperedges={hyperedges};network.on('afterDrawing',ctx=>{{hyperedges.forEach(h=>{{const p=h.nodes.map(id=>network.getPositions([id])[id]).filter(Boolean);if(p.length<2)return;const cx=p.reduce((s,x)=>s+x.x,0)/p.length,cy=p.reduce((s,x)=>s+x.y,0)/p.length;ctx.save();ctx.globalAlpha=.12;ctx.fillStyle='#6366f1';ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);p.slice(1).forEach(x=>ctx.lineTo(x.x,x.y));ctx.closePath();ctx.fill();ctx.restore()}})}});</script></body></html>"##
+function esc(value) {{
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}}
+
+const nodesDS = new vis.DataSet(RAW_NODES.map(node => ({{
+  ...node,
+  _baseColor: node.color,
+  _baseFont: node.font,
+  _baseBorderWidth: node.borderWidth || 1.5,
+  _community: node.community,
+  _community_name: node.community_name,
+  _source_file: node.source_file,
+  _file_type: node.file_type,
+  _degree: node.degree,
+}})));
+const edgesDS = new vis.DataSet(RAW_EDGES.map((edge, index) => ({{
+  id: index,
+  from: edge.from,
+  to: edge.to,
+  label: '',
+  title: edge.title,
+  dashes: edge.dashes,
+  width: edge.width,
+  color: edge.color,
+  _baseColor: edge.color,
+  _baseWidth: edge.width,
+  arrows: {{ to: {{ enabled: true, scaleFactor: .5 }} }},
+}})));
+const container = document.getElementById('graph');
+const network = new vis.Network(container, {{ nodes: nodesDS, edges: edgesDS }}, {{
+  physics: {{
+    enabled: true,
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {{
+      gravitationalConstant: -60,
+      centralGravity: .005,
+      springLength: 120,
+      springConstant: .08,
+      damping: .4,
+      avoidOverlap: .8,
+    }},
+    stabilization: {{ iterations: 200, fit: true }},
+  }},
+  interaction: {{
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: false,
+  }},
+  nodes: {{ shape: 'dot', borderWidth: 1.5 }},
+  edges: {{ smooth: {{ type: 'continuous', roundness: .2 }}, selectionWidth: 3 }},
+}});
+
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const viewerState = {{
+  physicsRunning: true,
+  focusedNodeId: null,
+  forceLabels: false,
+  initialView: null,
+}};
+const physicsToggle = document.getElementById('physics-toggle');
+const labelsToggle = document.getElementById('labels-toggle');
+const viewerStatus = document.getElementById('viewer-status');
+const viewerStatusText = document.getElementById('viewer-status-text');
+
+function setViewerStatus(text) {{
+  viewerStatusText.textContent = text;
+}}
+
+function setPhysicsRunning(running) {{
+  viewerState.physicsRunning = running;
+  network.setOptions({{ physics: {{ enabled: running }} }});
+  if (running) network.startSimulation();
+  else network.stopSimulation();
+  const label = running ? 'Pause layout' : 'Resume layout';
+  physicsToggle.querySelector('.button-label').textContent = label;
+  physicsToggle.setAttribute('aria-label', label);
+  physicsToggle.setAttribute('aria-pressed', String(running));
+  physicsToggle.classList.toggle('is-active', running);
+  viewerStatus.dataset.state = running ? 'running' : 'paused';
+  setViewerStatus(running ? 'Layout settling' : 'Layout paused');
+}}
+
+function applyRelationshipSpotlight(id) {{
+  const neighbors = new Set(network.getConnectedNodes(id));
+  const visible = new Set([id, ...neighbors]);
+  nodesDS.update(nodesDS.get().map(node => ({{
+    id: node.id,
+    opacity: visible.has(node.id) ? 1 : .14,
+    borderWidth: node.id === id ? Math.max(4, node._baseBorderWidth) : node._baseBorderWidth,
+    shadow: node.id === id
+      ? {{ enabled: true, color: node._baseColor.background, size: 24, x: 0, y: 0 }}
+      : {{ enabled: false }},
+  }})));
+  edgesDS.update(edgesDS.get().map(edge => {{
+    const connected = edge.from === id || edge.to === id;
+    return {{
+      id: edge.id,
+      color: {{ ...edge._baseColor, opacity: connected ? .9 : .06 }},
+      width: connected ? Math.max(2.5, edge._baseWidth) : edge._baseWidth,
+    }};
+  }}));
+}}
+
+function clearFocus() {{
+  viewerState.focusedNodeId = null;
+  network.unselectAll();
+  nodesDS.update(nodesDS.get().map(node => ({{
+    id: node.id,
+    opacity: 1,
+    borderWidth: node._baseBorderWidth,
+    shadow: {{ enabled: false }},
+  }})));
+  edgesDS.update(edgesDS.get().map(edge => ({{
+    id: edge.id,
+    color: edge._baseColor,
+    width: edge._baseWidth,
+  }})));
+  document.getElementById('info-content').innerHTML =
+    '<span class="empty">Select a node to inspect its relationships</span>';
+  viewerStatus.dataset.state = viewerState.physicsRunning ? 'running' : 'paused';
+  setViewerStatus(viewerState.physicsRunning ? 'Layout settling' : 'Layout paused');
+}}
+
+function showInfo(id) {{
+  const node = nodesDS.get(id);
+  if (!node) return;
+  const neighborIds = network.getConnectedNodes(id);
+  const neighborItems = neighborIds.map(nid => {{
+    const neighbor = nodesDS.get(nid);
+    const color = neighbor ? neighbor._baseColor.background : '#334155';
+    return `<button class="neighbor-link" type="button" style="border-left-color:${{esc(color)}}" data-nid="${{esc(nid)}}">${{esc(neighbor ? neighbor.label : nid)}}</button>`;
+  }}).join('');
+  document.getElementById('info-content').innerHTML = `
+    <div class="node-identity">
+      <span class="node-swatch" style="--node-color:${{esc(node._baseColor.background)}}"></span>
+      <div><strong>${{esc(node.label)}}</strong><span>${{esc(node._file_type || 'Unknown type')}}</span></div>
+    </div>
+    <dl class="metadata-grid">
+      <div><dt>Community</dt><dd>${{esc(node._community_name)}}</dd></div>
+      <div><dt>Degree</dt><dd>${{node._degree}}</dd></div>
+      <div class="metadata-wide"><dt>Source</dt><dd title="${{esc(node._source_file || 'Not recorded')}}">${{esc(node._source_file || 'Not recorded')}}</dd></div>
+    </dl>
+    ${{neighborIds.length
+      ? `<div class="neighbors-heading"><span>Connected nodes</span><strong>${{neighborIds.length}}</strong></div><div id="neighbors-list">${{neighborItems}}</div>`
+      : '<span class="empty">No connected nodes</span>'}}
+  `;
+}}
+
+function focusNode(id) {{
+  const node = nodesDS.get(id);
+  if (!node) return;
+  setPhysicsRunning(false);
+  viewerState.focusedNodeId = id;
+  applyRelationshipSpotlight(id);
+  network.selectNodes([id]);
+  network.focus(id, {{
+    scale: 1.35,
+    animation: reduceMotion ? false : {{ duration: 260, easingFunction: 'easeInOutQuad' }},
+  }});
+  showInfo(id);
+  viewerStatus.dataset.state = 'inspecting';
+  setViewerStatus(`Inspecting ${{node.label}}`);
+}}
+
+physicsToggle.addEventListener('click', () => {{
+  setPhysicsRunning(!viewerState.physicsRunning);
+}});
+document.getElementById('fit-graph').addEventListener('click', () => {{
+  network.fit({{
+    animation: reduceMotion ? false : {{ duration: 280, easingFunction: 'easeInOutQuad' }},
+  }});
+}});
+document.getElementById('reset-view').addEventListener('click', () => {{
+  clearFocus();
+  if (viewerState.initialView) {{
+    network.moveTo({{
+      position: viewerState.initialView.position,
+      scale: viewerState.initialView.scale,
+      animation: reduceMotion ? false : {{ duration: 280, easingFunction: 'easeInOutQuad' }},
+    }});
+  }} else {{
+    network.fit({{ animation: false }});
+  }}
+}});
+labelsToggle.addEventListener('click', () => {{
+  viewerState.forceLabels = !viewerState.forceLabels;
+  labelsToggle.setAttribute('aria-pressed', String(viewerState.forceLabels));
+  labelsToggle.querySelector('.button-label').textContent =
+    viewerState.forceLabels ? 'Hide labels' : 'Show labels';
+  nodesDS.update(RAW_NODES.map(node => ({{
+    id: node.id,
+    font: {{ ...node.font, size: viewerState.forceLabels ? 12 : node.font.size }},
+  }})));
+}});
+
+network.once('stabilizationIterationsDone', () => {{
+  setPhysicsRunning(false);
+  viewerState.initialView = {{
+    position: network.getViewPosition(),
+    scale: network.getScale(),
+  }};
+}});
+network.on('click', params => {{
+  if (params.nodes.length) focusNode(params.nodes[0]);
+  else clearFocus();
+}});
+document.addEventListener('click', event => {{
+  const link = event.target.closest('.neighbor-link');
+  if (link && link.dataset.nid !== undefined) focusNode(link.dataset.nid);
+}});
+
+const results = document.getElementById('search-results');
+const search = document.getElementById('search');
+let searchMatches = [];
+let activeSearchIndex = -1;
+
+function closeSearchResults() {{
+  results.replaceChildren();
+  results.style.display = 'none';
+  search.setAttribute('aria-expanded', 'false');
+  search.removeAttribute('aria-activedescendant');
+  activeSearchIndex = -1;
+}}
+
+function chooseSearchResult(node) {{
+  focusNode(node.id);
+  search.value = '';
+  closeSearchResults();
+  search.focus();
+}}
+
+function renderSearchResults() {{
+  results.replaceChildren();
+  searchMatches.forEach((node, index) => {{
+    const option = document.createElement('div');
+    option.id = `search-option-${{index}}`;
+    option.className = 'search-item';
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(index === activeSearchIndex));
+    option.textContent = node.label;
+    option.style.borderLeftColor = node.color.background;
+    option.addEventListener('click', () => chooseSearchResult(node));
+    results.appendChild(option);
+  }});
+  const open = searchMatches.length > 0;
+  results.style.display = open ? 'block' : 'none';
+  search.setAttribute('aria-expanded', String(open));
+  if (activeSearchIndex >= 0) {{
+    const optionId = `search-option-${{activeSearchIndex}}`;
+    search.setAttribute('aria-activedescendant', optionId);
+    document.getElementById(optionId)?.scrollIntoView({{ block: 'nearest' }});
+  }} else {{
+    search.removeAttribute('aria-activedescendant');
+  }}
+}}
+
+search.addEventListener('input', () => {{
+  const query = search.value.toLowerCase().trim();
+  searchMatches = query
+    ? RAW_NODES.filter(node => node.label.toLowerCase().includes(query)).slice(0, 20)
+    : [];
+  activeSearchIndex = searchMatches.length ? 0 : -1;
+  renderSearchResults();
+}});
+search.addEventListener('keydown', event => {{
+  if (!searchMatches.length && event.key !== 'Escape') return;
+  switch (event.key) {{
+    case 'ArrowDown':
+      event.preventDefault();
+      activeSearchIndex = (activeSearchIndex + 1) % searchMatches.length;
+      renderSearchResults();
+      break;
+    case 'ArrowUp':
+      event.preventDefault();
+      activeSearchIndex = (activeSearchIndex - 1 + searchMatches.length) % searchMatches.length;
+      renderSearchResults();
+      break;
+    case 'Enter':
+      if (activeSearchIndex >= 0) {{
+        event.preventDefault();
+        chooseSearchResult(searchMatches[activeSearchIndex]);
+      }}
+      break;
+    case 'Escape':
+      closeSearchResults();
+      break;
+  }}
+}});
+document.addEventListener('click', event => {{
+  if (!results.contains(event.target) && event.target !== search) closeSearchResults();
+}});
+
+const hiddenCommunities = new Set();
+const selectAll = document.getElementById('select-all-cb');
+
+function updateVisibility() {{
+  nodesDS.update(RAW_NODES.map(node => ({{
+    id: node.id,
+    hidden: hiddenCommunities.has(node.community),
+  }})));
+}}
+
+function updateSelectAllState() {{
+  selectAll.checked = hiddenCommunities.size === 0;
+  selectAll.indeterminate =
+    hiddenCommunities.size > 0 && hiddenCommunities.size < LEGEND.length;
+}}
+
+function toggleAllCommunities(hide) {{
+  LEGEND.forEach(community => {{
+    if (hide) hiddenCommunities.add(community.cid);
+    else hiddenCommunities.delete(community.cid);
+  }});
+  document.querySelectorAll('.legend-cb').forEach(checkbox => {{
+    checkbox.checked = !hide;
+  }});
+  document.querySelectorAll('.legend-item').forEach(item => {{
+    item.classList.toggle('dimmed', hide);
+  }});
+  updateVisibility();
+  updateSelectAllState();
+}}
+
+selectAll.addEventListener('change', () => {{
+  toggleAllCommunities(!selectAll.checked);
+}});
+const legendEl = document.getElementById('legend');
+LEGEND.forEach(community => {{
+  const item = document.createElement('label');
+  item.className = 'legend-item';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'legend-cb';
+  checkbox.checked = true;
+  const dot = document.createElement('span');
+  dot.className = 'legend-dot';
+  dot.style.background = community.color;
+  const label = document.createElement('span');
+  label.className = 'legend-label';
+  // Legend labels are HTML-escaped in Rust before serialization. Assigning the
+  // escaped value as markup decodes entities while keeping source text inert.
+  label.innerHTML = community.label;
+  const count = document.createElement('span');
+  count.className = 'legend-count';
+  count.textContent = community.count;
+  checkbox.addEventListener('change', () => {{
+    if (checkbox.checked) hiddenCommunities.delete(community.cid);
+    else hiddenCommunities.add(community.cid);
+    item.classList.toggle('dimmed', !checkbox.checked);
+    updateVisibility();
+    updateSelectAllState();
+  }});
+  item.append(checkbox, dot, label, count);
+  legendEl.appendChild(item);
+}});
+</script>
+<script>
+const hyperedges = {hyperedges};
+network.on('afterDrawing', ctx => {{
+  hyperedges.forEach(hyperedge => {{
+    const positions = hyperedge.nodes
+      .map(id => network.getPositions([id])[id])
+      .filter(Boolean);
+    if (positions.length < 2) return;
+    const centerX = positions.reduce((sum, point) => sum + point.x, 0) / positions.length;
+    const centerY = positions.reduce((sum, point) => sum + point.y, 0) / positions.length;
+    const expanded = positions.map(point => ({{
+      x: centerX + (point.x - centerX) * 1.15,
+      y: centerY + (point.y - centerY) * 1.15,
+    }}));
+    ctx.save();
+    ctx.globalAlpha = .1;
+    ctx.fillStyle = '#76b7ff';
+    ctx.strokeStyle = '#76b7ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(expanded[0].x, expanded[0].y);
+    expanded.slice(1).forEach(point => ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = .24;
+    ctx.stroke();
+    ctx.restore();
+  }});
+}});
+</script>
+</body>
+</html>"##
     )
 }
 
@@ -674,6 +1604,77 @@ mod tests {
         assert!(rendered.html.contains("<\\/script>"));
         assert!(!rendered.html.contains("onclick=\"focusNode("));
         assert!(rendered.html.contains("data-nid=\"${esc(nid)}\""));
+        Ok(())
+    }
+
+    #[test]
+    fn html_exposes_stable_layout_controls() -> Result<(), Box<dyn Error>> {
+        let graph: GraphDocument = serde_json::from_value(json!({
+            "nodes":[{"id":"a","label":"A"},{"id":"b","label":"B"}],
+            "links":[{"source":"a","target":"b","relation":"calls"}]
+        }))?;
+        let rendered = html_document(
+            &graph,
+            &Communities::new(),
+            "graph.html",
+            &HtmlOptions::default(),
+        )?
+        .ok_or("HTML unexpectedly skipped")?;
+        for marker in [
+            "id=\"graph-toolbar\"",
+            "id=\"physics-toggle\"",
+            "id=\"fit-graph\"",
+            "id=\"reset-view\"",
+            "id=\"labels-toggle\"",
+            "id=\"viewer-status\"",
+            "const viewerState =",
+            "function setPhysicsRunning(running)",
+            "network.stopSimulation()",
+            "network.once('stabilizationIterationsDone'",
+            "function applyRelationshipSpotlight(id)",
+            "function clearFocus()",
+            "function focusNode(id)",
+            "setPhysicsRunning(false);",
+            "applyRelationshipSpotlight(id);",
+            "focusNode(params.nodes[0]);",
+            "else clearFocus();",
+        ] {
+            assert!(rendered.html.contains(marker), "missing {marker}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn html_inspector_is_accessible_and_responsive() -> Result<(), Box<dyn Error>> {
+        let graph: GraphDocument = serde_json::from_value(json!({
+            "nodes":[{"id":"a","label":"A"}],
+            "links":[]
+        }))?;
+        let rendered = html_document(
+            &graph,
+            &Communities::new(),
+            "graph.html",
+            &HtmlOptions::default(),
+        )?
+        .ok_or("HTML unexpectedly skipped")?;
+        for marker in [
+            "<strong>Compass</strong>",
+            "role=\"search\"",
+            "role=\"listbox\"",
+            "aria-controls=\"search-results\"",
+            "search.addEventListener('keydown'",
+            "case 'ArrowDown':",
+            "case 'ArrowUp':",
+            "case 'Enter':",
+            "case 'Escape':",
+            "@media (max-width: 760px)",
+            "@media (prefers-reduced-motion: reduce)",
+            ":focus-visible",
+            "class=\"node-identity\"",
+            "class=\"metadata-grid\"",
+        ] {
+            assert!(rendered.html.contains(marker), "missing {marker}");
+        }
         Ok(())
     }
 
