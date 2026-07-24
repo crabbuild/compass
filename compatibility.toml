@@ -1,0 +1,101 @@
+schema_version = 1
+
+[oracle]
+repository = "Graphify-Labs/graphify"
+release = "v0.9.20"
+release_commit = "edec9eabeceeae6aa2375eddb3835efa1a32c0a3"
+commit = "de0806be7c95d97aa7ff40371a235da899d6edb0"
+lineage = "v8"
+python = "3.12"
+
+[[environment]]
+name = "core"
+extras = ["mcp"]
+
+[[environment]]
+name = "media"
+extras = ["office", "pdf"]
+
+[[normalization]]
+id = "query-equal-degree-order"
+description = "Compare the exact header and complete line multiset; stable node-ID ordering replaces Python hash-set tie ordering."
+
+[[normalization]]
+id = "graph-record-order"
+description = "Compare node and edge records independently of file-walk order while preserving attributes, multiplicity, ranking, and traversal membership."
+
+[[command_family]]
+name = "build"
+entry_points = ["update", "extract", "watch", "cluster-only", "label"]
+evidence = ["compass-parity", "compass-cli/update_cli", "compass-cli/extract_cli", "compass-cli/watch_cli"]
+
+[[command_family]]
+name = "query"
+entry_points = ["query", "path", "explain", "affected", "tree", "benchmark"]
+evidence = ["compass-parity", "compass-query", "compass-cli/compass_product"]
+
+[[command_family]]
+name = "graph-operations"
+entry_points = ["export", "diagnose multigraph", "merge-graphs", "merge-driver", "merge-chunks", "merge-semantic", "cache-check"]
+evidence = ["compass-parity", "compass-output", "compass-cli/compass_product"]
+
+[[command_family]]
+name = "service"
+entry_points = ["serve"]
+evidence = ["compass-parity", "compass-mcp"]
+
+[[command_family]]
+name = "project-workflows"
+entry_points = ["global", "clone", "add", "prs", "hook", "provider", "save-result", "reflect", "check-update", "hook-check", "hook-guard"]
+evidence = ["compass-parity", "compass-cli/integration"]
+
+[[command_family]]
+name = "assistant-setup"
+entry_points = ["install", "uninstall", "platform lifecycle commands"]
+evidence = ["compass-parity", "compass-cli/install"]
+
+[required_evidence]
+test_targets = [
+  "cargo test --workspace --lib --bins --locked",
+  "cargo test -p compass-cli --test compass_product --locked",
+  "cargo test -p compass-parity --locked",
+]
+benchmark_profiles = ["phase1-small", "phase1-medium", "phase1-large"]
+
+[upstream.main]
+repository = "Graphify-Labs/graphify"
+commit = "91f4d120b630ee35c79bf3c75ccd186870a808f9"
+merge_base = "81a43f028ff1d3fd9a0893318272348a38dad660"
+package_version = "0.1.14"
+lineage = "v1"
+role = "capability-audit"
+
+[[capability_audit]]
+key = "confidence-scores"
+status = "compatible"
+evidence = "Compass preserves numeric edge confidence and renders confidence summaries."
+
+[[capability_audit]]
+key = "semantic-similarity"
+status = "compatible"
+evidence = "Compass recognizes and scores semantically_similar_to relationships."
+
+[[capability_audit]]
+key = "hyperedges"
+status = "superseded"
+evidence = "Compass preserves, reports, visualizes, and versions hyperedges."
+
+[[capability_audit]]
+key = "watch-and-hooks"
+status = "superseded"
+evidence = "Compass adds native watch, managed hooks, background refresh, and versioned history."
+
+[[capability_audit]]
+key = "leiden-clustering"
+status = "not-supported"
+evidence = "Compass currently provides deterministic native Louvain clustering."
+
+[[capability_audit]]
+key = "legacy-main-byte-output"
+status = "intentional-divergence"
+evidence = "Graphify main is audited for capabilities and is not the byte-level behavioral oracle."

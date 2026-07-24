@@ -4,16 +4,43 @@ Compass is a native Rust implementation of Graphify. The Rust workspace uses a
 frozen Python Graphify checkout as a development oracle, but releases ship only
 the `compass` executable.
 
+The machine-readable [`compatibility.toml`](compatibility.toml) manifest is the
+authoritative compatibility identity. This ledger explains that contract for
+humans; `scripts/check_compatibility_manifest.py --check` rejects drift between
+the manifest, this document, and CI.
+
 ## Frozen oracle
 
-- Python baseline: Graphify `v0.9.20`
-- Baseline commit: `edec9eabeceeae6aa2375eddb3835efa1a32c0a3`
+- Python release base: Graphify `v0.9.20` at
+  `edec9eabeceeae6aa2375eddb3835efa1a32c0a3`
+- Qualified oracle checkpoint:
+  `de0806be7c95d97aa7ff40371a235da899d6edb0`
 - Oracle runtime: the repository's pinned Python environment
 - Native implementation root: the Compass repository root
 
-There are no committed changes to `graphify/` between the frozen baseline and
-the current implementation checkpoint. A future Python behavior change must be
-added below before it can be called compatible.
+The qualified checkpoint is one commit after the release base. It adds
+deterministic R extraction and its fixture, which the merged R parity suite
+requires. The exact checkpoint, rather than the mutable `v8` branch, is the
+behavioral oracle. Any future Python behavior change must be added below before
+it can be called compatible.
+
+## Upstream lineages
+
+Graphify `origin/main` is tracked as a capability audit, not as the
+byte-compatible behavioral oracle:
+
+- audited main commit:
+  `91f4d120b630ee35c79bf3c75ccd186870a808f9`;
+- main lineage: Graphify v1, package version `0.1.14`;
+- common ancestor with the v8 lineage:
+  `81a43f028ff1d3fd9a0893318272348a38dad660`.
+
+The main and v8 lines diverged after that ancestor. A main-only capability is
+classified in `compatibility.toml` as `compatible`, `superseded`,
+`intentional-divergence`, or `not-supported`. Main capability coverage does not
+change the frozen oracle's byte, graph, traversal, or CLI contracts. Advancing
+either record requires an immutable commit, an audited delta, fixtures, and
+updated evidence in the same change.
 
 ## Compatibility contract
 
@@ -92,6 +119,7 @@ from workspace builds.
 From the Compass repository root, with Graphify checked out as a sibling:
 
 ```bash
+python3 scripts/check_compatibility_manifest.py --check
 cargo fmt --all -- --check
 cargo clippy --workspace --lib --bins --locked -- -D warnings
 cargo test --workspace --lib --bins --locked
@@ -108,13 +136,15 @@ the pinned mutation matrix and retains each result as release evidence.
 
 ## Post-baseline changes
 
-No Python implementation deltas are pending. Add one row per future delta:
-
 | Python commit | Affected contract | Fixture/evidence | Compass status |
 | --- | --- | --- | --- |
-| _none_ | — | — | — |
+| `de0806be7c95d97aa7ff40371a235da899d6edb0` | deterministic `.r` and `Rscript` extraction | `r_extraction_matches_exactly`, `extensionless_shebang_extraction_matches_exactly` | compatible |
 
 An entry is complete only after the native behavior and a differential
 regression fixture land together. An incompatible or intentionally retired
 behavior requires explicit approval and a migration note; silence is not an
 accepted exception.
+
+Main-line capability dispositions are maintained in `compatibility.toml`.
+They are not duplicated in this post-baseline table because they do not advance
+the frozen v8 behavioral contract.
