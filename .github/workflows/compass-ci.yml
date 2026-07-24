@@ -24,11 +24,16 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - name: Verify the compatibility contract
+        run: |
+          python3 -m unittest discover -s scripts/tests -p "test_*.py"
+          python3 scripts/check_compatibility_manifest.py --check
+
       - name: Check out the Graphify compatibility oracle
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: Graphify-Labs/graphify
-          ref: v8
+          ref: de0806be7c95d97aa7ff40371a235da899d6edb0
           path: python-oracle
 
       - name: Install Python oracle
