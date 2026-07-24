@@ -149,6 +149,21 @@ struct WikiGraph<'a> {
     incident: HashMap<&'a str, Vec<&'a EdgeRecord>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EdgeOrientation {
+    Incoming,
+    Outgoing,
+    Undirected,
+    SelfLoop,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Neighbor<'a> {
+    node: &'a str,
+    edge: &'a EdgeRecord,
+    orientation: EdgeOrientation,
+}
+
 impl<'a> WikiGraph<'a> {
     fn new(document: &'a GraphDocument) -> Self {
         let nodes = document
@@ -159,7 +174,7 @@ impl<'a> WikiGraph<'a> {
         let mut incident = HashMap::<&str, Vec<&EdgeRecord>>::new();
         for edge in &document.links {
             incident.entry(edge.source.as_str()).or_default().push(edge);
-            if !document.directed || edge.target != edge.source {
+            if edge.target != edge.source {
                 incident.entry(edge.target.as_str()).or_default().push(edge);
             }
         }
@@ -174,16 +189,38 @@ impl<'a> WikiGraph<'a> {
         self.incident.get(node).map(Vec::len).unwrap_or_default()
     }
 
-    fn neighbors(&self, node: &str) -> Vec<(&'a str, &'a EdgeRecord)> {
+    fn neighbors(&self, node: &str) -> Vec<Neighbor<'a>> {
         self.incident
             .get(node)
             .into_iter()
             .flatten()
             .filter_map(|edge| {
-                if edge.source == node {
-                    Some((edge.target.as_str(), *edge))
-                } else if !self.directed && edge.target == node {
-                    Some((edge.source.as_str(), *edge))
+                if edge.source == node && edge.target == node {
+                    Some(Neighbor {
+                        node: edge.source.as_str(),
+                        edge,
+                        orientation: EdgeOrientation::SelfLoop,
+                    })
+                } else if edge.source == node {
+                    Some(Neighbor {
+                        node: edge.target.as_str(),
+                        edge,
+                        orientation: if self.directed {
+                            EdgeOrientation::Outgoing
+                        } else {
+                            EdgeOrientation::Undirected
+                        },
+                    })
+                } else if edge.target == node {
+                    Some(Neighbor {
+                        node: edge.source.as_str(),
+                        edge,
+                        orientation: if self.directed {
+                            EdgeOrientation::Incoming
+                        } else {
+                            EdgeOrientation::Undirected
+                        },
+                    })
                 } else {
                     None
                 }
@@ -210,9 +247,9 @@ fn community_article(
     let mut cross_order = Vec::<String>::new();
     let mut confidence = HashMap::<String, usize>::new();
     for member in members {
-        for (neighbor, edge) in graph.neighbors(member) {
+        for neighbor in graph.neighbors(member) {
             if let Some(other) = node_community
-                .get(neighbor)
+                .get(neighbor.node)
                 .filter(|other| **other != community)
             {
                 let label = labels
@@ -225,7 +262,7 @@ fn community_article(
                 *cross_counts.entry(label).or_default() += 1;
             }
             *confidence
-                .entry(edge.string("confidence").if_empty("EXTRACTED"))
+                .entry(neighbor.edge.string("confidence").if_empty("EXTRACTED"))
                 .or_default() += 1;
         }
     }
@@ -345,23 +382,29 @@ fn god_node_article(
         ]);
     }
     let mut neighbors = graph.neighbors(&god.id);
-    neighbors.sort_by_key(|(neighbor, _)| std::cmp::Reverse(graph.degree(neighbor)));
+    neighbors.sort_by_key(|neighbor| std::cmp::Reverse(graph.degree(neighbor.node)));
     let mut by_relation = BTreeMap::<String, Vec<String>>::new();
-    for (neighbor, edge) in neighbors {
-        let Some(neighbor_node) = graph.nodes.get(neighbor) else {
+    for neighbor in neighbors {
+        let Some(neighbor_node) = graph.nodes.get(neighbor.node) else {
             continue;
         };
-        let confidence = edge.string("confidence");
+        let confidence = neighbor.edge.string("confidence");
         let suffix = if confidence.is_empty() {
             String::new()
         } else {
             format!(" `{confidence}`")
         };
+        let direction = match neighbor.orientation {
+            EdgeOrientation::Incoming => "← ",
+            EdgeOrientation::Outgoing => "→ ",
+            EdgeOrientation::SelfLoop => "↻ ",
+            EdgeOrientation::Undirected => "",
+        };
         by_relation
-            .entry(edge.string("relation").if_empty("related"))
+            .entry(neighbor.edge.string("relation").if_empty("related"))
             .or_default()
             .push(format!(
-                "{}{suffix}",
+                "{direction}{}{suffix}",
                 markdown_link(neighbor_node.label(), resolver)
             ));
     }
