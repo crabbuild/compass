@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn graphify_subset_with_compass_extras_passes() {
+    fn graphify_subset_with_compass_extras_passes() -> Result<(), String> {
         let graphify = json!({
             "nodes": [
                 {
@@ -260,14 +260,15 @@ mod tests {
             "links": []
         });
 
-        let report = compare(&compass, &graphify).expect("valid graphs");
+        let report = compare(&compass, &graphify)?;
 
         assert!(report.compatible());
         assert_eq!(report.compass_only_nodes, ["perl_extra"]);
+        Ok(())
     }
 
     #[test]
-    fn missing_node_field_and_edge_fail() {
+    fn missing_node_field_and_edge_fail() -> Result<(), String> {
         let graphify = json!({
             "nodes": [
                 {
@@ -300,11 +301,12 @@ mod tests {
             "links": []
         });
 
-        let report = compare(&compass, &graphify).expect("valid graphs");
+        let report = compare(&compass, &graphify)?;
 
         assert!(!report.compatible());
         assert_eq!(report.missing_nodes, ["b"]);
         assert_eq!(report.mismatched_nodes.len(), 1);
         assert_eq!(report.missing_edges.len(), 1);
+        Ok(())
     }
 }

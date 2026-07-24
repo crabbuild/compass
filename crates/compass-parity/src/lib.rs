@@ -1867,7 +1867,7 @@ print(json.dumps({'content': content, 'default': default, 'omitted': omitted}, e
             "nodes": [{"id": "compass", "source_file": source_string}],
             "edges": []
         });
-        let mut cache = Cache::new(&root, None)?;
+        let mut cache = Cache::new(&root, None)?.with_extractor_version("0.9.20");
         cache.save(&source, &cached, &CacheKind::Ast, None)?;
         cache.flush()?;
         let output = Command::new(python_executable(&repo))
