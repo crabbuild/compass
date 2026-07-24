@@ -60,6 +60,55 @@ fn resolve_parents_unknown_revisions_and_linked_worktrees() -> Result<(), Box<dy
 }
 
 #[test]
+fn reachable_commits_are_parent_first_and_can_follow_only_first_parents()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("root"), "root")?;
+    git(directory.path(), &["add", "root"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "root"])?;
+    let repository = Repository::discover(directory.path())?;
+    let root = repository.resolve("HEAD")?;
+
+    git(directory.path(), &["checkout", "--quiet", "-b", "side"])?;
+    std::fs::write(directory.path().join("side"), "side")?;
+    git(directory.path(), &["add", "side"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "side"])?;
+    let side = repository.resolve("HEAD")?;
+
+    git(directory.path(), &["checkout", "--quiet", "-"])?;
+    std::fs::write(directory.path().join("main"), "main")?;
+    git(directory.path(), &["add", "main"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "main"])?;
+    let main = repository.resolve("HEAD")?;
+    git(
+        directory.path(),
+        &["merge", "--quiet", "--no-ff", "side", "-m", "merge"],
+    )?;
+    let tip = repository.resolve("HEAD")?;
+
+    let all = repository.reachable_commits(&tip, false)?;
+    assert_eq!(all.last(), Some(&tip));
+    assert!(all.contains(&side));
+    for (parent, child) in [(&root, &side), (&root, &main), (&side, &tip), (&main, &tip)] {
+        assert!(
+            all.iter().position(|commit| commit == parent)
+                < all.iter().position(|commit| commit == child)
+        );
+    }
+
+    let first_parent = repository.reachable_commits(&tip, true)?;
+    assert_eq!(first_parent, vec![root, main, tip]);
+    assert!(!first_parent.contains(&side));
+    Ok(())
+}
+
+#[test]
 fn sha256_repository_ids_are_accepted_when_git_supports_them()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -79,13 +128,15 @@ fn sha256_repository_ids_are_accepted_when_git_supports_them()
     std::fs::write(directory.path().join("one"), "one")?;
     git(directory.path(), &["add", "one"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "one"])?;
-    assert_eq!(
-        Repository::discover(directory.path())?
-            .resolve("HEAD")?
-            .as_str()
-            .len(),
-        64
-    );
+    std::fs::write(directory.path().join("two"), "two")?;
+    git(directory.path(), &["add", "two"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "two"])?;
+    let repository = Repository::discover(directory.path())?;
+    let head = repository.resolve("HEAD")?;
+    assert_eq!(head.as_str().len(), 64);
+    let reachable = repository.reachable_commits(&head, false)?;
+    assert_eq!(reachable.len(), 2);
+    assert!(reachable.iter().all(|commit| commit.as_str().len() == 64));
     Ok(())
 }
 

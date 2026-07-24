@@ -17,9 +17,33 @@ _compass() {
     'benchmark:measure graph token reduction'
     'diagnose:run graph diagnostics'
     'merge-graphs:merge repository graphs'
+    'history:manage immutable graphs for Git revisions'
   )
   if (( CURRENT == 2 )); then
     _describe 'graph command' commands
+  elif [[ "$words[2]" == history && CURRENT == 3 ]]; then
+    local -a history_commands
+    history_commands=(
+      'enable:enable eager graph history'
+      'disable:disable eager graph history'
+      'status:show history status'
+      'build:materialize immutable graphs'
+      'rebuild:build a new realization'
+      'list:list stored realizations'
+      'show:show one realization'
+      'prefer:select a preferred realization'
+      'export:export a realization'
+      'gc:garbage collect history data'
+    )
+    _describe 'history command' history_commands
+  elif [[ "$words[2]" == history && "$words[3]" == build ]]; then
+    _arguments \
+      '--all[build every commit reachable from REF]' \
+      '--first-parent[build only the first-parent lineage]' \
+      '--profile-from=[reuse a stored profile]:source:' \
+      '--format=[output format]:format:(text json)' \
+      '--code-only[build without model credentials]' \
+      '*:revision:_files'
   else
     _arguments '*:path:_files'
   fi
