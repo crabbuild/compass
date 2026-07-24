@@ -27,6 +27,7 @@ pub(crate) struct ParsedBuildCommand {
     pub(crate) format: String,
     pub(crate) replace_corrupt: bool,
     pub(crate) profile_from: Option<String>,
+    pub(crate) use_repository_profile: bool,
     pub(crate) options: HistoryBuildOptions,
 }
 
@@ -723,6 +724,7 @@ pub(crate) fn parse_build_command(
         format,
         replace_corrupt,
         profile_from,
+        use_repository_profile: !direct_profile_option,
         options,
     })
 }

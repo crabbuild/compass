@@ -143,7 +143,7 @@ pub fn build_from_extraction(
         ))
     });
     let mut links = Vec::<EdgeRecord>::new();
-    let mut edge_positions = HashMap::<(String, String), usize>::new();
+    let mut edge_positions = HashMap::<(String, String, String), usize>::new();
     for mut edge in source_edges {
         if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
             continue;
@@ -169,18 +169,9 @@ pub fn build_from_extraction(
         edge.attributes
             .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
 
-        let key = edge_key(&edge.source, &edge.target, directed);
+        let key = edge_key(&edge.source, &edge.target, relation(&edge));
         if let Some(&position) = edge_positions.get(&key) {
-            let existing = &links[position];
-            let reverse_duplicate = !directed
-                && relation(existing) == relation(&edge)
-                && existing.attributes.get("_src").and_then(Value::as_str)
-                    == Some(edge.target.as_str())
-                && existing.attributes.get("_tgt").and_then(Value::as_str)
-                    == Some(edge.source.as_str());
-            if !reverse_duplicate {
-                links[position].attributes.extend(edge.attributes);
-            }
+            links[position].attributes.extend(edge.attributes);
         } else {
             edge_positions.insert(key, links.len());
             links.push(edge);
@@ -681,12 +672,8 @@ fn edge_language_family(extension: &str) -> Option<&'static str> {
     }
 }
 
-fn edge_key(source: &str, target: &str, directed: bool) -> (String, String) {
-    if directed || source <= target {
-        (source.to_owned(), target.to_owned())
-    } else {
-        (target.to_owned(), source.to_owned())
-    }
+fn edge_key(source: &str, target: &str, relation: &str) -> (String, String, String) {
+    (source.to_owned(), target.to_owned(), relation.to_owned())
 }
 
 fn canonical_hyperedges(

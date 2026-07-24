@@ -1074,6 +1074,15 @@ fn resolve_python_import_guided_with_calls(
             .or_default()
             .push((source, node.id.clone()));
     }
+    let normalized_sources = sources
+        .iter()
+        .map(|(source_file, source)| {
+            (
+                normalize_path(source_file),
+                (source_file.as_str(), source.as_str()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let mut known = extraction
         .edges
         .iter()
@@ -1112,12 +1121,13 @@ fn resolve_python_import_guided_with_calls(
                 None,
                 &normalized_file_nodes,
             );
-            let candidates = python_definition_candidates(
+            let candidates = python_resolved_definition_candidates(
                 Path::new(source_file),
                 root,
                 &imported.module,
                 &imported.imported,
                 &definitions,
+                &normalized_sources,
                 false,
             );
             if candidates.len() == 1 {
@@ -1193,12 +1203,13 @@ fn resolve_python_import_guided_with_calls(
         let Some((module, imported)) = aliases.get(&raw.callee) else {
             continue;
         };
-        let candidates = python_definition_candidates(
+        let candidates = python_resolved_definition_candidates(
             Path::new(&raw.source_file),
             root,
             module,
             imported,
             &definitions,
+            &normalized_sources,
             false,
         );
         if candidates.len() != 1 {
@@ -1319,6 +1330,15 @@ fn resolve_python_class_uses(
                 .push(node.id.clone());
         }
     }
+    let normalized_sources = sources
+        .iter()
+        .map(|(source_file, source)| {
+            (
+                normalize_path(source_file),
+                (source_file.as_str(), source.as_str()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let mut known = extraction
         .edges
         .iter()
@@ -1338,12 +1358,13 @@ fn resolve_python_class_uses(
             continue;
         };
         for imported in python_symbol_imports(source) {
-            let candidates = python_definition_candidates(
+            let candidates = python_resolved_definition_candidates(
                 Path::new(source_file),
                 root,
                 &imported.module,
                 &imported.imported,
                 &definitions,
+                &normalized_sources,
                 true,
             );
             if candidates.len() != 1 {
@@ -1537,6 +1558,102 @@ fn python_definition_candidates(
         }
     }
     output
+}
+
+fn python_resolved_definition_candidates(
+    caller: &Path,
+    root: &Path,
+    module: &str,
+    imported: &str,
+    definitions: &HashMap<String, Vec<(String, String)>>,
+    sources: &HashMap<String, (&str, &str)>,
+    allow_module_tail: bool,
+) -> Vec<String> {
+    let mut caller = caller.to_path_buf();
+    let mut module = module.to_owned();
+    let mut imported = imported.to_owned();
+    let mut seen = HashSet::new();
+    for _ in 0..16 {
+        let direct = python_definition_candidates(
+            &caller,
+            root,
+            &module,
+            &imported,
+            definitions,
+            allow_module_tail,
+        );
+        if !direct.is_empty() {
+            return direct;
+        }
+        let Some((target_source, target_text)) =
+            python_module_source(&caller, root, &module, sources)
+        else {
+            break;
+        };
+        let target_key = normalize_path(target_source);
+        let in_module = definitions
+            .get(&imported)
+            .into_iter()
+            .flatten()
+            .filter(|(source_file, _)| normalize_path(source_file) == target_key)
+            .map(|(_, id)| id.clone())
+            .collect::<Vec<_>>();
+        if !in_module.is_empty() {
+            return in_module;
+        }
+        if Path::new(target_source)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some("__init__.py")
+            || !seen.insert((target_source.to_owned(), imported.clone()))
+        {
+            break;
+        }
+        let Some(reexport) = python_symbol_imports(target_text)
+            .into_iter()
+            .find(|candidate| candidate.local == imported)
+        else {
+            break;
+        };
+        caller = Path::new(target_source).to_path_buf();
+        module = reexport.module;
+        imported = reexport.imported;
+    }
+    Vec::new()
+}
+
+fn python_module_source<'a>(
+    caller: &Path,
+    root: &Path,
+    module: &str,
+    sources: &'a HashMap<String, (&'a str, &'a str)>,
+) -> Option<(&'a str, &'a str)> {
+    let depth = module
+        .len()
+        .saturating_sub(module.trim_start_matches('.').len());
+    let bare = module.trim_start_matches('.');
+    let mut base = if depth == 0 {
+        root.to_path_buf()
+    } else {
+        let mut base = caller
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        for _ in 1..depth {
+            base = base.parent().unwrap_or(&base).to_path_buf();
+        }
+        base
+    };
+    if !bare.is_empty() {
+        base.push(bare.replace('.', "/"));
+    }
+    [base.with_extension("py"), base.join("__init__.py")]
+        .iter()
+        .find_map(|candidate| {
+            sources
+                .get(&normalize_path(&candidate.to_string_lossy()))
+                .copied()
+        })
 }
 
 fn candidate_calls(
@@ -2103,10 +2220,12 @@ mod tests {
     #[test]
     fn python_package_initializers_reexport_imported_symbols() {
         let root = Path::new("/repo");
+        let caller = "/repo/caller.py";
         let init = "/repo/pkg/__init__.py";
         let module = "/repo/pkg/mod.py";
         let mut extraction = Extraction {
             nodes: vec![
+                node("caller", "caller.py", caller, "module"),
                 node("pkg_init", "__init__.py", init, "module"),
                 node("pkg_mod", "mod.py", module, "module"),
                 node("pkg_mod_fn", "fn()", module, "function"),
@@ -2114,6 +2233,7 @@ mod tests {
             ..Extraction::default()
         };
         let sources = HashMap::from([
+            (caller.to_owned(), "from pkg import fn\n".to_owned()),
             (init.to_owned(), "from .mod import fn\n".to_owned()),
             (module.to_owned(), "def fn():\n    return 1\n".to_owned()),
         ]);
@@ -2125,6 +2245,12 @@ mod tests {
                 && edge.target == "pkg_mod"
                 && relation(edge) == "re_exports"
                 && edge.string("context") == "export"
+        }));
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == "caller"
+                && edge.target == "pkg_mod_fn"
+                && relation(edge) == "imports"
+                && edge.string("context") == "import"
         }));
     }
 

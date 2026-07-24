@@ -1544,6 +1544,25 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             self.add_js_import(node);
             return;
         }
+        if self.language == "c"
+            && let Some(path) = node.child_by_field_name("path")
+            && path.kind() != "system_lib_string"
+            && let Some(raw) = self.node_text(path)
+            && let clean = raw.trim_matches(['<', '>', '\'', '"', ' '])
+            && !clean.is_empty()
+            && let Some(parent) = Path::new(&self.source_file).parent()
+            && let Ok(resolved) = fs::canonicalize(parent.join(clean))
+            && resolved.is_file()
+        {
+            self.add_edge(
+                &self.file_id.clone(),
+                &make_id(&[&resolved.to_string_lossy()]),
+                "imports",
+                line(node),
+                Some("import"),
+            );
+            return;
+        }
         let target = quoted_value(&text)
             .or_else(|| angle_value(&text))
             .or_else(|| {
@@ -2305,13 +2324,30 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             collect_c_type_names(return_type, self.source, &mut names);
             self.add_c_type_references(function_id, &names, "return_type", line(node));
         }
-        let mut parameters = Vec::new();
-        collect_nodes_of_kind(node, "parameter_declaration", &mut parameters);
-        for parameter in parameters {
-            if let Some(type_node) = parameter.child_by_field_name("type") {
-                let mut names = Vec::new();
-                collect_c_type_names(type_node, self.source, &mut names);
-                self.add_c_type_references(function_id, &names, "parameter_type", line(node));
+        let mut declarator = node.child_by_field_name("declarator");
+        while declarator.is_some_and(|candidate| {
+            matches!(
+                candidate.kind(),
+                "pointer_declarator" | "reference_declarator"
+            )
+        }) {
+            declarator =
+                declarator.and_then(|candidate| candidate.child_by_field_name("declarator"));
+        }
+        if let Some(parameters) = declarator
+            .filter(|candidate| candidate.kind() == "function_declarator")
+            .and_then(|candidate| candidate.child_by_field_name("parameters"))
+        {
+            let mut cursor = parameters.walk();
+            for parameter in parameters
+                .children(&mut cursor)
+                .filter(|candidate| candidate.kind() == "parameter_declaration")
+            {
+                if let Some(type_node) = parameter.child_by_field_name("type") {
+                    let mut names = Vec::new();
+                    collect_c_type_names(type_node, self.source, &mut names);
+                    self.add_c_type_references(function_id, &names, "parameter_type", line(node));
+                }
             }
         }
     }
@@ -3250,7 +3286,9 @@ mod rationale_tests {
         fs::write(
             &source,
             "SQLITE_PRIVATE char *sqlite3CompileOptions(void) { return 0; }\n\
-             SQLITE_PRIVATE sqlite3_int64 sqlite3StatusValue(int op) { return op; }\n",
+             SQLITE_PRIVATE sqlite3_int64 sqlite3StatusValue(int op) { return op; }\n\
+             int valueFromExpr(void) { int (*callback)(op *); return callback != 0; }\n\
+             int acceptsOp(Op *value) { return value != 0; }\n",
         )?;
 
         let extraction = Engine::default().extract(&source)?;
@@ -3266,6 +3304,29 @@ mod rationale_tests {
         for invalid in ["char()", "sqlite3_int64()"] {
             assert!(!labels.contains(invalid), "unexpected {invalid}");
         }
+        assert!(labels.contains("Op"));
+        assert!(!labels.contains("op"));
+        Ok(())
+    }
+
+    #[test]
+    fn c_quoted_include_targets_the_existing_header_file() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let header = directory.path().join("shm_lock.h");
+        let source = directory.path().join("shm_lock.c");
+        fs::write(&header, "int lock(void);\n")?;
+        fs::write(
+            &source,
+            "#include \"shm_lock.h\"\nint main(void) { return lock(); }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let expected = make_id(&[&fs::canonicalize(header)?.to_string_lossy()]);
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.target == expected
+                && edge.attributes.get("relation").and_then(Value::as_str) == Some("imports")
+        }));
         Ok(())
     }
 
