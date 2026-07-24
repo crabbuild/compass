@@ -342,6 +342,7 @@ fn build_graph_inner(
         .into_iter()
         .flatten()
         .map(PathBuf::from)
+        .filter(|path| Registry::resolve(path).is_some())
         .collect::<Vec<_>>();
     sources.extend(
         detection
@@ -2293,6 +2294,38 @@ mod tests {
         assert!(
             code_positions.iter().max() < document_positions.iter().min(),
             "Python compatibility requires every code extraction to precede deterministic document extraction"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_extensionless_shebang_is_skipped() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        fs::write(
+            directory.path().join("main.py"),
+            "def supported_symbol():\n    return 1\n",
+        )?;
+        fs::write(
+            directory.path().join("vendor-treadmill"),
+            "#!/usr/bin/fish\nfunction unsupported_symbol; echo 1; end\n",
+        )?;
+        let mut options = BuildOptions::new(directory.path());
+        options.no_cluster = true;
+        options.no_viz = true;
+
+        let result = build_local_graph(&options)?;
+        let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.label() == "supported_symbol()")
+        );
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.string("source_file") != "vendor-treadmill")
         );
         Ok(())
     }

@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs;
 
-use compass_languages::{Engine, ExtractError, make_id};
+use compass_languages::{Engine, ExtractError, Registry, make_id};
 
 #[test]
 fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), Box<dyn Error>> {
@@ -13,6 +13,55 @@ fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), 
     let from_file = Engine::default().extract(&path)?;
     let from_memory = Engine::default().extract_source(&path, source)?;
     assert_eq!(from_memory, from_file);
+    Ok(())
+}
+
+#[test]
+fn extensionless_perl_shebang_extracts_subroutines_and_calls() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("buildah-vendor-treadmill");
+    fs::write(
+        &path,
+        r#"#!/usr/bin/perl
+use strict;
+use warnings;
+
+sub helper {
+    return 1;
+}
+
+sub run {
+    helper();
+}
+
+run();
+"#,
+    )?;
+
+    assert_eq!(Registry::resolve(&path).map(|spec| spec.name), Some("perl"));
+    let extraction = Engine::default().extract(&path)?;
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .any(|node| node.label() == "helper()"),
+        "nodes={:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction.nodes.iter().any(|node| node.label() == "run()"),
+        "nodes={:?}",
+        extraction.nodes
+    );
+    let helper_id = make_id(&[&path.to_string_lossy(), "helper"]);
+    let run_id = make_id(&[&path.to_string_lossy(), "run"]);
+    assert!(
+        extraction.edges.iter().any(|edge| {
+            edge.source == run_id && edge.target == helper_id && edge.string("relation") == "calls"
+        }),
+        "edges={:?}",
+        extraction.edges
+    );
     Ok(())
 }
 

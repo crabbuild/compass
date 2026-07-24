@@ -17,9 +17,9 @@ const CODE_EXTENSIONS: &[&str] = &[
     "groovy", "gradle", "cpp", "cc", "cxx", "c", "h", "hpp", "cu", "cuh", "metal", "rb", "rake",
     "swift", "kt", "kts", "cs", "scala", "php", "lua", "luau", "toc", "zig", "ps1", "psm1", "psd1",
     "ex", "exs", "m", "mm", "jl", "vue", "svelte", "astro", "dart", "v", "sv", "svh", "sql", "r",
-    "f", "f90", "f95", "f03", "f08", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm", "lfm", "lpk",
-    "sh", "bash", "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf", "sln", "slnx",
-    "csproj", "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger",
+    "pl", "pm", "f", "f90", "f95", "f03", "f08", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm",
+    "lfm", "lpk", "sh", "bash", "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf",
+    "sln", "slnx", "csproj", "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger",
 ];
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "md", "mdx", "qmd", "skill", "txt", "rst", "html", "yaml", "yml", "docx", "xlsx", "gdoc",
@@ -76,6 +76,7 @@ const SKIP_DIRS: &[&str] = &[
     ".nox",
     ".eggs",
     "compass-out",
+    "graphify-out",
     "coverage",
     "lcov-report",
     "visual-tests",
@@ -249,6 +250,7 @@ impl WatchPathFilter {
             || relative.components().any(|component| {
                 let value = component.as_os_str().to_string_lossy();
                 value.starts_with('.')
+                    || SKIP_DIRS.contains(&value.as_ref())
                     || value == self.output_name
                     || Path::new(&self.output_name)
                         .file_name()
@@ -583,6 +585,8 @@ fn shebang_is_code(path: &Path) -> bool {
                 | "python2"
                 | "ruby"
                 | "perl"
+                | "perl5"
+                | "perl6"
                 | "node"
                 | "nodejs"
                 | "bash"
