@@ -76,6 +76,16 @@ The repository pins Rust 1.97.1 in `rust-toolchain.toml`:
 ```bash
 git clone https://github.com/crabbuild/compass.git
 cd compass
+make install
+```
+
+`make install` prefers an existing `~/.cargo/bin` and otherwise creates
+`~/.local/bin`. Override the destination with
+`make install BINDIR="$HOME/bin"`.
+
+The equivalent direct Cargo command is:
+
+```bash
 cargo install --locked --path crates/compass-cli --bin compass
 ```
 
