@@ -75,6 +75,7 @@ const COMPASS_STATIC_LANGUAGES: &[&str] = &[
     "lua",
     "objc",
     "pascal",
+    "perl",
     "php",
     "powershell",
     "python",

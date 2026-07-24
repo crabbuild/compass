@@ -15,7 +15,7 @@ fn registry_covers_every_python_dispatch_extension() -> Result<(), Box<dyn Error
         "svelte", "astro", "dart", "v", "sv", "svh", "sql", "r", "md", "mdx", "qmd", "skill",
         "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm", "lfm", "lpk", "sh", "bash", "json", "tf",
         "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf", "sln", "slnx", "csproj", "fsproj",
-        "vbproj", "xaml", "razor", "cshtml", "cls", "trigger",
+        "vbproj", "xaml", "razor", "cshtml", "cls", "trigger", "pl", "pm",
     ];
     for extension in ordinary {
         let path = directory.path().join(format!("sample.{extension}"));
@@ -58,6 +58,7 @@ fn every_declared_grammar_is_statically_available() {
         "lua",
         "objc",
         "pascal",
+        "perl",
         "php",
         "powershell",
         "python",
