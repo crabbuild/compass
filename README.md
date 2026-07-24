@@ -155,6 +155,16 @@ Or build from source with the pinned Rust 1.97.1+ toolchain:
 ```bash
 git clone https://github.com/crabbuild/compass.git
 cd compass
+make install
+```
+
+`make install` uses an existing `~/.cargo/bin`, otherwise it creates and uses
+`~/.local/bin`. To choose another location, run
+`make install BINDIR="$HOME/bin"`.
+
+You can also install directly through Cargo:
+
+```bash
 cargo install --locked --path crates/compass-cli --bin compass
 ```
 
