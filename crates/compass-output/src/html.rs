@@ -2147,6 +2147,7 @@ mod tests {
             "id=\"reset-view\"",
             "id=\"labels-toggle\"",
             "id=\"viewer-status\"",
+            "id=\"sidebar\"",
             "const viewerState =",
             "function setPhysicsRunning(running)",
             "network.stopSimulation()",
@@ -2158,6 +2159,7 @@ mod tests {
             "applyRelationshipSpotlight(id);",
             "focusNode(params.nodes[0]);",
             "else clearFocus();",
+            "network.on('doubleClick'",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }

@@ -32,13 +32,25 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
 
 test("file-only graph nodes stay inspectable without source navigation", async ({ page }) => {
   await page.goto("/graph.html");
+  await page.evaluate(() => {
+    window.addEventListener("compass:open-source", ((event: CustomEvent) => {
+      (window as typeof window & { openedSource?: unknown }).openedSource = event.detail;
+    }) as EventListener);
+  });
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("README");
   await page.getByRole("option", { name: /README/i }).click();
   await expect(page.locator(".compass-metadata-grid")).toContainText("README.md");
   await expect(page.getByRole("button", { name: /open source/i })).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await page.locator("canvas").dblclick();
+  expect(await page.evaluate(
+    () => (window as typeof window & { openedSource?: unknown }).openedSource
+  )).toBeUndefined();
 });
 
-test("source bridge dispatches the selected node's exact range", async ({ page }) => {
+test("single-click inspects and double-click opens the selected node's exact range", async ({
+  page
+}) => {
   await page.goto("/graph.html");
   await page.evaluate(() => {
     window.addEventListener("compass:open-source", ((event: CustomEvent) => {
@@ -47,7 +59,13 @@ test("source bridge dispatches the selected node's exact range", async ({ page }
   });
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("run");
   await page.getByRole("option", { name: /^run/i }).click();
-  await page.getByRole("button", { name: /open source/i }).click();
+  await page.waitForTimeout(300);
+  const canvas = page.locator("canvas");
+  await canvas.click();
+  expect(await page.evaluate(
+    () => (window as typeof window & { openedSource?: unknown }).openedSource
+  )).toBeUndefined();
+  await canvas.dblclick();
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource
   )).toEqual({ file: "src/lib.rs", startLine: 1, endLine: 3 });
@@ -59,14 +77,25 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
   const canvas = page.locator("canvas");
   const initialCanvas = await canvas.evaluate((element) => element.toDataURL());
   await page.evaluate(() => {
+    (window as typeof window & { initialNetwork?: Element | null }).initialNetwork =
+      document.querySelector(".vis-network");
+  });
+  await page.getByRole("button", { name: "Show labels" }).click();
+  await page.evaluate(() => {
     document.documentElement.style.setProperty("--vscode-editor-background", "#f8fafc");
     document.documentElement.style.setProperty("--vscode-sideBar-background", "#eef2f7");
     document.documentElement.style.setProperty("--vscode-editor-foreground", "#172033");
     document.documentElement.style.setProperty("--vscode-descriptionForeground", "#334155");
+    document.documentElement.style.setProperty("--vscode-contrastBorder", "#ff00ff");
+    document.body.classList.add("vscode-high-contrast");
   });
   const light = await stage.evaluate((element) => getComputedStyle(element).backgroundImage);
   await expect.poll(() => canvas.evaluate((element) => element.toDataURL()))
     .not.toBe(initialCanvas);
+  expect(await page.evaluate(() => (
+    window as typeof window & { initialNetwork?: Element | null }
+  ).initialNetwork === document.querySelector(".vis-network"))).toBe(true);
+  await expect(page.getByRole("button", { name: "Resume layout" })).toBeVisible();
   await page.evaluate(() => {
     document.documentElement.style.setProperty("--vscode-editor-background", "#08111f");
     document.documentElement.style.setProperty("--vscode-sideBar-background", "#101b2d");

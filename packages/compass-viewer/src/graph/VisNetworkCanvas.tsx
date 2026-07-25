@@ -7,7 +7,7 @@ import {
   useState
 } from "react";
 import { DataSet, Network, type Edge, type Node, type Options } from "vis-network/standalone";
-import type { GraphViewModel } from "../contracts/graph";
+import type { GraphNode, GraphViewModel } from "../contracts/graph";
 import type { GraphHover } from "./NodeHoverCard";
 import { bindGraphNetworkEvents } from "./networkEvents";
 
@@ -63,10 +63,18 @@ const options: Options = {
   }
 };
 
-function nodeColor(model: GraphViewModel, community: number) {
-  const color = model.communities.find((candidate) => candidate.id === community)?.color
+export function graphNodeColor(
+  model: GraphViewModel,
+  node: GraphNode,
+  contrastBorder?: string
+) {
+  const background = node.color?.background
+    ?? model.communities.find((candidate) => candidate.id === node.community)?.color
     ?? "#6688aa";
-  return { background: color, border: color };
+  return {
+    background,
+    border: contrastBorder ?? node.color?.border ?? background
+  };
 }
 
 function cssColor(name: string, fallback: string): string {
@@ -132,19 +140,28 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => cssColor("--vscode-descriptionForeground", "#60728b"),
       [themeRevision]
     );
+    const contrastBorder = useMemo(() => {
+      const highContrast = document.body.classList.contains("vscode-high-contrast")
+        || document.body.classList.contains("vscode-high-contrast-light");
+      return highContrast
+        ? cssColor("--vscode-contrastBorder", "#ffffff")
+        : undefined;
+    }, [themeRevision]);
     const nodeData = useMemo(() => new DataSet<Node>(
       model.nodes.map((node) => ({
         id: node.id,
         label: node.label,
-        color: node.color ?? nodeColor(model, node.community),
+        color: graphNodeColor(model, node),
         size: node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree),
         font: {
-          color: labelColor,
-          face: cssColor("--vscode-font-family", "system-ui"),
-          size: forceLabels || (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+          color: "#eef5ff",
+          face: "system-ui",
+          size: (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
         }
       }))
-    ), [forceLabels, labelColor, maxDegree, model]);
+      // Styling changes are applied in place below so the Network, its paused
+      // physics state, and its saved reset view survive theme and label changes.
+    ), [maxDegree, model]);
     const edgeData = useMemo(() => new DataSet<Edge>(
       model.edges.map((edge) => {
         const appearance = edgeAppearance(edge.confidence);
@@ -155,10 +172,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
           dashes: appearance.dashes,
           width: appearance.width,
-          color: { color: edgeColor, opacity: appearance.opacity }
+          color: { color: "#60728b", opacity: appearance.opacity }
         };
       })
-    ), [edgeColor, model.edges]);
+    ), [model.edges]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -231,7 +248,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         return {
           id: node.id,
           opacity: isVisible ? 1 : 0.14,
-          borderWidth: isFocused ? 4 : 1.5,
+          borderWidth: isFocused ? 4 : contrastBorder ? 2.5 : 1.5,
+          color: graphNodeColor(model, node, contrastBorder),
           shadow: isFocused
             ? {
                 enabled: true,
@@ -268,7 +286,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       } else {
         network.unselectAll();
       }
-    }, [edgeColor, edgeData, focusedNodeId, model.communities, model.edges, model.nodes, nodeData]);
+    }, [
+      contrastBorder,
+      edgeColor,
+      edgeData,
+      focusedNodeId,
+      model,
+      nodeData
+    ]);
 
     useEffect(() => {
       nodeData.update(model.nodes.map((node) => ({
