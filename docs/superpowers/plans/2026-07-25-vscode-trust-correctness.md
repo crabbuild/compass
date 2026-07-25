@@ -4,7 +4,7 @@
 
 **Goal:** Make historical graph browsing trustworthy under asynchronous updates, make revision builds recover cleanly from cancellation and failure, and disclose every UI truncation that can hide graph content.
 
-**Architecture:** The VS Code history webview becomes the authoritative adapter for selected-commit presentation state. Every graph-derived message is commit-scoped and ignored when it does not match the current selection. The extension host reports an explicit build lifecycle keyed by commit and retains graph identities per revision so late loads cannot corrupt community navigation. Viewer components receive controlled state and render recovery/disclosure UI using VS Code theme tokens.
+**Architecture:** The VS Code history webview becomes the authoritative adapter for selected-commit presentation state. Every graph-derived message is commit-scoped and ignored when it does not match the current selection. The extension host reports an explicit build lifecycle keyed by commit, while each accepted graph carries its exact realization and fingerprint back with community requests so late loads cannot corrupt navigation. Viewer components receive controlled state and render recovery/disclosure UI using VS Code theme tokens.
 
 **Tech Stack:** TypeScript, React, VS Code Webview API, existing Compass viewer components, Playwright browser fixtures, VS Code integration tests.
 
@@ -123,7 +123,7 @@ Expected: both packages compile without TypeScript or bundling errors.
 
 **Context:** The current build command has a boolean “building” state and emits a generic error on failure. Profile/source cancellation can leave the UI ambiguous. The host also retains one active historical graph, so a late revision load can make a different visible revision use the wrong community identity.
 
-**Goal:** Make every build terminal path explicit and keep historical graph identity keyed by commit.
+**Goal:** Make every build terminal path explicit and bind community requests to the exact historical graph accepted by the webview.
 
 **Expected outcome:** A build always leaves requesting/running state through success, failure, or cancellation. Failure is actionable, cancellation is neutral, and late loads cannot corrupt community navigation.
 
@@ -172,19 +172,18 @@ In `CommitDetails`:
 
 Operation errors for load, compare, counts, and community actions appear in the same revision context and never as semantic findings.
 
-### Step 4: Replace single active historical graph identity
+### Step 4: Round-trip the accepted historical graph identity
 
-Replace the host’s single `activeGraph` value with a small commit-keyed identity cache containing:
+Include this identity on graph and comparison messages:
 
 ```ts
 {
-  commit: string;
   realization: string;
   fingerprint: string;
 }
 ```
 
-Use the request commit to resolve the identity for community loads. Bound the cache to the existing revision cache scale so browsing many revisions does not retain every full graph.
+Store it beside the selected graph in the adapter and return it with each community request. Validate the community export against that exact realization and fingerprint. This avoids completion-order cache eviction and does not retain duplicate graph models in the host.
 
 ### Step 5: Typecheck and build
 
@@ -408,4 +407,3 @@ PR body sections:
 - Changes: synchronization, build recovery, truncation disclosure.
 - Validation: exact commands and results.
 - Scope boundaries: no CLI limit, serializer, or runtime output-path changes.
-

@@ -63,4 +63,18 @@ describe("CompassProcessManager", () => {
       stderr: "note"
     });
   });
+
+  it("rejects malformed JSONL progress instead of throwing outside the command", async () => {
+    const { child, stdout } = childProcess();
+    const processes = new CompassProcessManager(
+      "compass",
+      vi.fn(() => child) as never
+    );
+    const command = processes.startJsonl("/repo", ["history", "build"], vi.fn());
+
+    stdout.write("{not-json}\n");
+
+    await expect(command.completed).rejects.toBeInstanceOf(Error);
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
 });
