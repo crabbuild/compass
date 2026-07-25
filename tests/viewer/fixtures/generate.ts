@@ -19,19 +19,32 @@ export default async function generate(): Promise<void> {
   const graph = {
     schema: "compass.viewer.graph/1",
     title: "Fixture",
-    stats: { nodes: 3, edges: 2, communities: 2, aggregated: false },
+    stats: { nodes: 4, edges: 3, communities: 2, aggregated: false },
     nodes: [
-      { id: "run", label: "run", community: 0, degree: 2, source: { file: "src/lib.rs", startLine: 1 } },
-      { id: "helper", label: "helper", community: 0, degree: 1, source: { file: "src/lib.rs", startLine: 5 } },
-      { id: "store", label: "Store", community: 1, degree: 1 }
+      {
+        id: "run", label: "run", kind: "function", community: 0, degree: 2,
+        language: "rust", signature: "pub fn run(value: usize)", size: 30,
+        source: { file: "src/lib.rs", startLine: 1, endLine: 3 }
+      },
+      {
+        id: "helper", label: "helper", kind: "function", community: 0, degree: 2,
+        language: "rust", signature: "fn helper()", size: 24,
+        source: { file: "src/lib.rs", startLine: 5, endLine: 7 }
+      },
+      {
+        id: "file-only", label: "README", kind: "document", community: 1, degree: 1,
+        source: { file: "README.md" }
+      },
+      { id: "store", label: "Store", kind: "type", community: 1, degree: 1 }
     ],
     edges: [
       { id: "e1", source: "run", target: "helper", relation: "calls", confidence: "extracted" },
-      { id: "e2", source: "helper", target: "store", relation: "uses", confidence: "inferred" }
+      { id: "e2", source: "helper", target: "store", relation: "uses", confidence: "inferred" },
+      { id: "e3", source: "run", target: "file-only", relation: "documents", confidence: "ambiguous" }
     ],
     communities: [
       { id: 0, label: "Core", color: "#4E79A7", hidden: false },
-      { id: 1, label: "Data", color: "#59A14F", hidden: false }
+      { id: 1, label: "Data", color: "#F28E2B", hidden: false }
     ],
     hyperedges: []
   };

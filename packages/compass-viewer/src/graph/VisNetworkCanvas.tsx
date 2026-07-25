@@ -3,10 +3,13 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
-  useRef
+  useRef,
+  useState
 } from "react";
 import { DataSet, Network, type Edge, type Node, type Options } from "vis-network/standalone";
-import type { GraphViewModel } from "@/contracts/graph";
+import type { GraphViewModel } from "../contracts/graph";
+import type { GraphHover } from "./NodeHoverCard";
+import { bindGraphNetworkEvents } from "./networkEvents";
 
 export type GraphCanvasHandle = {
   fit(): void;
@@ -20,6 +23,8 @@ type Props = {
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
   onFocus(nodeId: string): void;
+  onOpenSource(nodeId: string): void;
+  onHover(change: GraphHover | null): void;
   onClear(): void;
   onStabilized(): void;
 };
@@ -28,31 +33,32 @@ const options: Options = {
   autoResize: true,
   interaction: {
     hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
     navigationButtons: false,
     keyboard: { enabled: true }
   },
   layout: { improvedLayout: true },
   nodes: {
     borderWidth: 1.5,
-    font: { color: "#d7e1ed", face: "system-ui", size: 11 },
-    shape: "dot",
-    size: 11
+    shape: "dot"
   },
   edges: {
-    arrows: { to: { enabled: true, scaleFactor: 0.45 } },
-    color: { color: "#54657a", opacity: 0.72 },
-    smooth: { enabled: true, type: "dynamic", roundness: 0.5 },
-    width: 1
+    arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+    smooth: { enabled: true, type: "continuous", roundness: 0.2 },
+    selectionWidth: 3
   },
   physics: {
     enabled: true,
-    stabilization: { enabled: true, iterations: 220, updateInterval: 20 },
-    barnesHut: {
-      gravitationalConstant: -2600,
-      centralGravity: 0.12,
-      springLength: 105,
-      springConstant: 0.025,
-      damping: 0.22
+    solver: "forceAtlas2Based",
+    stabilization: { enabled: true, iterations: 200, fit: true, updateInterval: 20 },
+    forceAtlas2Based: {
+      gravitationalConstant: -60,
+      centralGravity: 0.005,
+      springLength: 120,
+      springConstant: 0.08,
+      damping: 0.4,
+      avoidOverlap: 0.8
     }
   }
 };
@@ -63,6 +69,40 @@ function nodeColor(model: GraphViewModel, community: number) {
   return { background: color, border: color };
 }
 
+function cssColor(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function edgeAppearance(confidence: string | undefined) {
+  if (confidence === "extracted") return { dashes: false, width: 2, opacity: 0.7 };
+  if (confidence === "ambiguous") return { dashes: [3, 4], width: 2, opacity: 0.62 };
+  return { dashes: true, width: 1, opacity: 0.35 };
+}
+
+function useThemeRevision(): number {
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const refresh = () => setRevision((current) => current + 1);
+    const observer = new MutationObserver(refresh);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"]
+    });
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "style"]
+    });
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    colorScheme.addEventListener("change", refresh);
+    return () => {
+      observer.disconnect();
+      colorScheme.removeEventListener("change", refresh);
+    };
+  }, []);
+  return revision;
+}
+
 export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
   function VisNetworkCanvas({
     model,
@@ -71,32 +111,54 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     forceLabels,
     hiddenCommunities,
     onFocus,
+    onOpenSource,
+    onHover,
     onClear,
     onStabilized
   }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
+    const themeRevision = useThemeRevision();
+    const maxDegree = useMemo(
+      () => Math.max(1, ...model.nodes.map((node) => node.degree ?? 1)),
+      [model.nodes]
+    );
+    const labelColor = useMemo(
+      () => cssColor("--vscode-editor-foreground", "#eef5ff"),
+      [themeRevision]
+    );
+    const edgeColor = useMemo(
+      () => cssColor("--vscode-descriptionForeground", "#60728b"),
+      [themeRevision]
+    );
     const nodeData = useMemo(() => new DataSet<Node>(
       model.nodes.map((node) => ({
         id: node.id,
         label: node.label,
-        title: node.label,
-        group: String(node.community),
         color: node.color ?? nodeColor(model, node.community),
-        value: Math.max(1, node.degree ?? 1)
+        size: node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree),
+        font: {
+          color: labelColor,
+          face: cssColor("--vscode-font-family", "system-ui"),
+          size: forceLabels || (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+        }
       }))
-    ), [model]);
+    ), [forceLabels, labelColor, maxDegree, model]);
     const edgeData = useMemo(() => new DataSet<Edge>(
-      model.edges.map((edge) => ({
-        id: edge.id,
-        from: edge.source,
-        to: edge.target,
-        title: edge.relation,
-        dashes: edge.confidence === "inferred",
-        width: edge.confidence === "ambiguous" ? 2 : 1
-      }))
-    ), [model]);
+      model.edges.map((edge) => {
+        const appearance = edgeAppearance(edge.confidence);
+        return {
+          id: edge.id,
+          from: edge.source,
+          to: edge.target,
+          title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
+          dashes: appearance.dashes,
+          width: appearance.width,
+          color: { color: edgeColor, opacity: appearance.opacity }
+        };
+      })
+    ), [edgeColor, model.edges]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -106,10 +168,11 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         edges: edgeData
       }, options);
       networkRef.current = network;
-      network.on("click", (parameters) => {
-        const selected = parameters.nodes[0];
-        if (selected !== undefined) onFocus(String(selected));
-        else onClear();
+      bindGraphNetworkEvents(network, {
+        onFocus,
+        onOpenSource,
+        onHover,
+        onClear
       });
       network.once("stabilizationIterationsDone", () => {
         initialViewRef.current = {
@@ -122,7 +185,15 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         network.destroy();
         networkRef.current = null;
       };
-    }, [edgeData, nodeData, onClear, onFocus, onStabilized]);
+    }, [
+      edgeData,
+      nodeData,
+      onClear,
+      onFocus,
+      onHover,
+      onOpenSource,
+      onStabilized
+    ]);
 
     useEffect(() => {
       const network = networkRef.current;
@@ -159,48 +230,62 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         const isVisible = !focusedNodeId || isFocused || connected.has(node.id);
         return {
           id: node.id,
-          opacity: isVisible ? 1 : 0.12,
+          opacity: isVisible ? 1 : 0.14,
           borderWidth: isFocused ? 4 : 1.5,
           shadow: isFocused
-            ? { enabled: true, color: "rgba(79,156,249,.65)", size: 20, x: 0, y: 0 }
+            ? {
+                enabled: true,
+                color: node.color?.background
+                  ?? model.communities.find((item) => item.id === node.community)?.color
+                  ?? "#76b7ff",
+                size: 24,
+                x: 0,
+                y: 0
+              }
             : { enabled: false }
         };
       }));
-      edgeData.update(model.edges.map((edge) => ({
-        id: edge.id,
-        color: {
-          color: "#66788e",
-          opacity: !focusedNodeId
-            || edge.source === focusedNodeId
-            || edge.target === focusedNodeId ? 0.9 : 0.08
-        }
-      })));
+      edgeData.update(model.edges.map((edge) => {
+        const appearance = edgeAppearance(edge.confidence);
+        const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
+        return {
+          id: edge.id,
+          color: {
+            color: edgeColor,
+            opacity: !focusedNodeId ? appearance.opacity : connectedEdge ? 0.9 : 0.06
+          },
+          width: connectedEdge ? Math.max(2.5, appearance.width) : appearance.width
+        };
+      }));
       if (focusedNodeId) {
         network.selectNodes([focusedNodeId]);
         network.focus(focusedNodeId, {
-          scale: 1.25,
+          scale: 1.35,
           animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
             ? false
-            : { duration: 240, easingFunction: "easeInOutQuad" }
+            : { duration: 260, easingFunction: "easeInOutQuad" }
         });
       } else {
         network.unselectAll();
       }
-    }, [edgeData, focusedNodeId, model.edges, model.nodes, nodeData]);
+    }, [edgeColor, edgeData, focusedNodeId, model.communities, model.edges, model.nodes, nodeData]);
 
     useEffect(() => {
       nodeData.update(model.nodes.map((node) => ({
         id: node.id,
-        font: { size: forceLabels ? 13 : 11 }
+        font: {
+          color: labelColor,
+          size: forceLabels || (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+        }
       })));
-    }, [forceLabels, model.nodes, nodeData]);
+    }, [forceLabels, labelColor, maxDegree, model.nodes, nodeData]);
 
     useImperativeHandle(ref, () => ({
       fit() {
         networkRef.current?.fit({
           animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
             ? false
-            : { duration: 220, easingFunction: "easeInOutQuad" }
+            : { duration: 280, easingFunction: "easeInOutQuad" }
         });
       },
       reset() {

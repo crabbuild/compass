@@ -13,6 +13,7 @@ export type GraphAction =
   | { type: "setPhysics"; running: boolean }
   | { type: "setLabels"; visible: boolean }
   | { type: "toggleCommunity"; communityId: number }
+  | { type: "setHiddenCommunities"; communityIds: number[] }
   | { type: "search"; query: string };
 
 export const initialGraphState: GraphState = {
@@ -34,7 +35,7 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
     case "clearFocus":
       return { ...state, focusedNodeId: null };
     case "stabilized":
-      return { ...state, physicsRunning: false };
+      return state.physicsRunning ? { ...state, physicsRunning: false } : state;
     case "setPhysics":
       return { ...state, physicsRunning: action.running };
     case "setLabels":
@@ -50,5 +51,7 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
       }
       return { ...state, hiddenCommunities };
     }
+    case "setHiddenCommunities":
+      return { ...state, hiddenCommunities: new Set(action.communityIds) };
   }
 }

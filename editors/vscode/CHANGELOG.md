@@ -3,7 +3,10 @@
 ## 0.1.0
 
 - Guided setup for a separately installed Compass CLI.
-- Current code graph with shared export parity and source navigation.
+- Current code graph with the active Compass HTML export palette and interaction
+  model adapted to VS Code light, dark, and high-contrast themes.
+- Single-click node inspection and double-click source navigation when Compass
+  has an exact file plus line or byte location.
 - Cursor-rooted caller/callee graph with evidence resolution.
 - Architecture flow and natural-language/CompassQL editor tabs.
 - Complete Git evolution timeline, explicit historical builds, exact revision

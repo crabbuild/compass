@@ -22,10 +22,19 @@ CLI Binary**, then reload VS Code.
 
 ## Current graph
 
-Choose **Open Code Graph** to use the exact same versioned graph model and React
-viewer as `compass export html`. Search symbols and files, pause or resume the
-layout, filter communities, inspect connected nodes, and open source directly.
-Graphs above 5,000 nodes use Compass's community overview.
+Choose **Open Code Graph** to use the same versioned graph model as
+`compass export viewer-json`, rendered with the active `compass export html`
+canvas structure, community palette, force layout, evidence styling, hover
+metadata, and inspector concepts. VS Code colors take priority so the canvas
+follows the active light, dark, or high-contrast theme; the Compass export
+palette remains the fallback.
+
+Search symbols and files, pause or resume the layout, fit or reset the view,
+show labels, filter communities, and inspect connected nodes. Single-click a
+node to select it without leaving the graph. Double-click a node to open its
+exact source range when Compass provides a non-empty file plus line or byte
+location. Nodes without that exact location remain inspectable and do not
+trigger navigation. Graphs above 5,000 nodes use Compass's community overview.
 
 ## Calls and architecture
 

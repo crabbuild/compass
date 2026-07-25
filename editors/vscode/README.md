@@ -21,7 +21,10 @@ offers **Select Compass Binary** instead of displaying raw CLI usage output.
 ## Workflows
 
 - Initialize, update, and watch a repository from the Compass activity bar.
-- Explore the current graph and open source from a selected node.
+- Explore the current graph with the active `compass export html` visual
+  language adapted to the current VS Code theme. Single-click a node to inspect
+  it; double-click a node with an exact file and line/byte location to open
+  source.
 - Start a caller/callee graph from the function under the cursor and expand it
   by depth while retaining resolved, inferred, ambiguous, and unresolved calls.
 - Read the broader architecture flow document in a separate editor tab.

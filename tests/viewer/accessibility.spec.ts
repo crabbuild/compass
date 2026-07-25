@@ -19,4 +19,8 @@ test("graph remains usable at 320 CSS pixels and reduced motion", async ({ page 
   await page.goto("/graph.html");
   await expect(page.getByRole("combobox", { name: "Search graph nodes" })).toBeVisible();
   await expect(page.getByRole("toolbar")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Graph inspector" })).toBeVisible();
+  const columns = await page.locator(".compass-workspace")
+    .evaluate((element) => getComputedStyle(element).gridTemplateColumns);
+  expect(columns.split(" ")).toHaveLength(1);
 });

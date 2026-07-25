@@ -63,9 +63,21 @@
   --border: var(--vscode-panel-border, #2c3a4d);
   --input: var(--vscode-input-border, #3b4a5e);
   --ring: var(--vscode-focusBorder, #4f9cf9);
-  --radius: 0.375rem;
-  --compass-canvas: var(--vscode-editor-background, #0d131d);
-  --compass-grid: color-mix(in srgb, var(--foreground) 5%, transparent);
+  --radius: 0.625rem;
+  --compass-canvas: var(--vscode-editor-background, #08111f);
+  --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 82%, #000);
+  --compass-panel: var(--vscode-sideBar-background, #101b2d);
+  --compass-panel-raised: color-mix(
+    in srgb,
+    var(--vscode-menu-background, #142236) 88%,
+    transparent
+  );
+  --compass-line: var(--vscode-panel-border, rgba(154, 178, 211, 0.16));
+  --compass-line-strong: var(--vscode-contrastBorder, rgba(154, 178, 211, 0.3));
+  --compass-focus: var(--vscode-focusBorder, #76b7ff);
+  --compass-focus-soft: color-mix(in srgb, var(--compass-focus) 14%, transparent);
+  --compass-faint: var(--vscode-disabledForeground, #60728b);
+  --compass-grid: color-mix(in srgb, var(--foreground) 16%, transparent);
   --compass-success: var(--vscode-testing-iconPassed, #3fb950);
   --compass-warning: var(--vscode-editorWarning-foreground, #d29922);
 }
@@ -96,97 +108,673 @@ button:not(:disabled),
 
 .compass-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 20rem;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 340px;
   height: 100vh;
-  min-height: 32rem;
-  background:
-    linear-gradient(var(--compass-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--compass-grid) 1px, transparent 1px),
-    var(--compass-canvas);
-  background-size: 32px 32px;
+  min-height: 30rem;
+  overflow: hidden;
+  background: var(--compass-canvas);
 }
 
-.compass-toolbar {
-  grid-column: 1;
-  grid-row: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin: 0.75rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--card) 94%, transparent);
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 22%, transparent);
+.compass-graph-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 45% 42%, color-mix(in srgb, var(--compass-focus) 21%, transparent), transparent 34%),
+    radial-gradient(circle at 76% 75%, color-mix(in srgb, var(--compass-success) 10%, transparent), transparent 28%),
+    linear-gradient(145deg, var(--compass-canvas) 0%, var(--compass-canvas-deep) 100%);
+}
+
+.compass-graph-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image: radial-gradient(var(--compass-grid) 0.55px, transparent 0.55px);
+  background-size: 22px 22px;
 }
 
 .compass-canvas {
-  grid-column: 1;
-  grid-row: 1 / 3;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
 }
 
-.compass-inspector {
-  grid-column: 2;
-  grid-row: 1 / 4;
-  min-width: 0;
-  border-left: 1px solid var(--border);
-  background: var(--card);
+.compass-glass-panel {
+  background: var(--compass-panel-raised);
+  border: 1px solid var(--compass-line);
+  box-shadow: 0 18px 52px color-mix(in srgb, #000 30%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
-.compass-statusbar {
-  grid-column: 1;
-  grid-row: 3;
+.compass-graph-toolbar {
+  position: absolute;
+  z-index: 4;
+  top: 18px;
+  left: 18px;
+  right: 18px;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 1.75rem;
-  padding: 0.25rem 0.75rem;
-  border-top: 1px solid var(--border);
-  background: var(--card);
-  color: var(--muted-foreground);
-  font: 0.75rem/1.2 var(--compass-font-mono);
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 8px 10px 8px 16px;
+  border-radius: 14px;
 }
 
-.compass-status-dot {
-  display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
+.compass-viewer-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  letter-spacing: 0.015em;
+}
+
+.compass-viewer-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-viewer-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--compass-focus);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--compass-focus) 12%, transparent);
+}
+
+.compass-viewer-status[data-state="running"] .compass-viewer-status-dot {
+  animation: compass-status-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes compass-status-pulse {
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--compass-focus) 0%, transparent);
+  }
+}
+
+.compass-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compass-tool-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.compass-tool-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.compass-tool-button:hover,
+.compass-tool-button[aria-pressed="true"] {
+  border-color: var(--compass-line);
+  background: var(--compass-focus-soft);
+  color: var(--foreground);
+}
+
+.compass-tool-button:focus-visible,
+.compass-search-field input:focus-visible,
+.compass-search-item:focus-visible,
+.compass-inspector-action:focus-visible,
+.compass-neighbor-link:focus-visible,
+.compass-community-item:focus-within {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.compass-graph-inspector {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--compass-line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--compass-panel) 92%, var(--compass-focus) 8%) 0%,
+    var(--compass-panel) 100%
+  );
+  box-shadow: -22px 0 60px color-mix(in srgb, #000 18%, transparent);
+}
+
+.compass-inspector-header {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-inspector-header strong,
+.compass-inspector-header small {
+  display: block;
+}
+
+.compass-inspector-header strong {
+  font-size: 14px;
+  letter-spacing: 0.01em;
+}
+
+.compass-inspector-header small {
+  margin-top: 2px;
+  color: var(--compass-faint);
+  font-size: 11px;
+}
+
+.compass-product-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 11px;
+  background: linear-gradient(
+    145deg,
+    var(--vscode-button-foreground, #eff8ff),
+    color-mix(in srgb, var(--compass-focus) 64%, #fff)
+  );
+  color: var(--vscode-button-background, #09182c);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #fff 48%, transparent),
+    0 8px 22px color-mix(in srgb, var(--compass-focus) 18%, transparent);
+}
+
+.compass-product-mark svg {
+  width: 19px;
+  height: 19px;
+}
+
+.compass-inspector-search {
+  position: relative;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-search-field {
+  position: relative;
+}
+
+.compass-search-field svg {
+  position: absolute;
+  top: 50%;
+  left: 13px;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--compass-faint);
+  pointer-events: none;
+}
+
+.compass-search-field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 13px 0 38px;
+  border: 1px solid var(--compass-line);
+  border-radius: 11px;
+  outline: none;
+  background: var(--vscode-input-background, color-mix(in srgb, var(--compass-canvas-deep) 64%, transparent));
+  color: var(--vscode-input-foreground, var(--foreground));
+}
+
+.compass-search-field input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--compass-faint));
+}
+
+.compass-search-results {
+  position: absolute;
+  z-index: 8;
+  top: 62px;
+  left: 16px;
+  right: 16px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 12px;
+  background: var(--vscode-menu-background, var(--compass-panel));
+  box-shadow: 0 18px 38px color-mix(in srgb, #000 38%, transparent);
+}
+
+.compass-search-item {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 10px;
+  overflow: hidden;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+}
+
+.compass-search-item strong,
+.compass-search-item span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-search-item strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.compass-search-item span {
+  color: var(--compass-faint);
+  font: 10px/1.4 var(--compass-font-mono);
+}
+
+.compass-search-item:hover,
+.compass-search-item[aria-selected="true"] {
+  background: var(--vscode-list-activeSelectionBackground, var(--compass-focus-soft));
+  color: var(--vscode-list-activeSelectionForeground, var(--foreground));
+}
+
+.compass-info-panel {
+  max-height: 48%;
+  overflow-y: auto;
+  padding: 18px 16px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-section-heading,
+.compass-neighbors-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.compass-section-heading {
+  margin-bottom: 15px;
+}
+
+.compass-section-heading h2,
+.compass-community-panel h2 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.compass-section-heading span {
+  color: var(--compass-faint);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.compass-info-content {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.compass-node-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 15px;
+}
+
+.compass-node-identity > span:last-child {
+  min-width: 0;
+}
+
+.compass-node-identity strong,
+.compass-node-identity small {
+  display: block;
+}
+
+.compass-node-identity strong {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-node-identity small {
+  width: max-content;
+  margin-top: 3px;
+  padding: 3px 7px;
   border-radius: 999px;
-  background: var(--compass-success);
+  background: color-mix(in srgb, var(--compass-success) 20%, transparent);
+  color: var(--compass-success);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.compass-node-swatch {
+  width: 10px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+}
+
+.compass-metadata-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.compass-metadata-grid > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--compass-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--compass-canvas-deep) 30%, transparent);
+}
+
+.compass-metadata-grid .compass-metadata-wide {
+  grid-column: 1 / -1;
+}
+
+.compass-metadata-grid dt {
+  color: var(--compass-faint);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compass-metadata-grid dd {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-signature-block {
+  display: block;
+  margin-bottom: 15px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--compass-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--compass-canvas-deep) 42%, transparent);
+  color: var(--foreground);
+  font: 11px/1.45 var(--compass-font-mono);
+}
+
+.compass-inspector-action {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 0 10px;
+  border: 1px solid var(--compass-line);
+  border-radius: 9px;
+  background: var(--compass-focus-soft);
+  color: var(--foreground);
+}
+
+.compass-inspector-action span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font: 10px/1.2 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-neighbors-heading {
+  margin: 3px 0 7px;
+}
+
+.compass-neighbors-heading strong {
+  color: var(--compass-faint);
+  font-size: 10px;
+}
+
+.compass-neighbors-list {
+  max-height: 154px;
+  overflow-y: auto;
+}
+
+.compass-neighbor-link {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  margin: 3px 0;
+  padding: 8px 9px;
+  overflow: hidden;
+  border: 0;
+  border-left: 3px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-neighbor-link:hover {
+  background: var(--compass-focus-soft);
+  color: var(--foreground);
+}
+
+.compass-empty {
+  display: block;
+  padding: 8px 0;
+  color: var(--compass-faint);
+  font-size: 12px;
+}
+
+.compass-community-panel {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.compass-community-panel h2 {
+  margin-bottom: 10px;
+}
+
+.compass-community-control,
+.compass-community-item {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.compass-community-item {
+  border-radius: 7px;
+}
+
+.compass-community-item:hover {
+  background: color-mix(in srgb, var(--compass-focus) 6%, transparent);
+  color: var(--foreground);
+}
+
+.compass-community-item[data-hidden="true"] {
+  opacity: 0.36;
+}
+
+.compass-community-item input,
+.compass-community-control input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--compass-focus);
+}
+
+.compass-community-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.compass-community-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-community-item small {
+  color: var(--compass-faint);
+  font-size: 10px;
+}
+
+.compass-graph-stats {
+  padding: 11px 16px;
+  border-top: 1px solid var(--compass-line);
+  color: var(--compass-faint);
+  font-size: 10px;
+  letter-spacing: 0.025em;
+}
+
+.compass-node-hover-card {
+  position: absolute;
+  z-index: 7;
+  top: clamp(86px, var(--compass-hover-y), calc(100% - 10rem));
+  left: clamp(12px, var(--compass-hover-x), calc(100% - min(27rem, 90%) - 12px));
+  display: grid;
+  width: max-content;
+  max-width: min(26rem, calc(100% - 24px));
+  gap: 7px;
+  padding: 13px 15px;
+  overflow: hidden;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 12px;
+  background: var(--vscode-editorHoverWidget-background, var(--compass-panel));
+  color: var(--vscode-editorHoverWidget-foreground, var(--muted-foreground));
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 42%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.compass-hover-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compass-hover-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-hover-heading span {
+  width: max-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--compass-success) 20%, transparent);
+  color: var(--compass-success);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.compass-node-hover-card p,
+.compass-node-hover-card code {
+  display: block;
+}
+
+.compass-hover-source {
+  color: var(--compass-focus);
+}
+
+.compass-node-hover-card code {
+  max-width: 395px;
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.vscode-high-contrast .compass-glass-panel,
+body.vscode-high-contrast .compass-graph-inspector,
+body.vscode-high-contrast-light .compass-glass-panel,
+body.vscode-high-contrast-light .compass-graph-inspector {
+  border-width: 2px;
+  border-color: var(--vscode-contrastBorder, var(--compass-focus));
+}
+
+@media (max-width: 980px) {
+  .compass-tool-button span {
+    display: none;
+  }
+
+  .compass-tool-button {
+    padding: 0 11px;
+  }
 }
 
 @media (max-width: 760px) {
   .compass-workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(18rem, 1fr) minmax(13rem, 42vh) auto;
+    grid-template-rows: minmax(360px, 62vh) minmax(280px, 40vh);
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
   }
 
-  .compass-toolbar {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: start;
-    flex-wrap: wrap;
-  }
-
-  .compass-canvas {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .compass-inspector {
-    grid-column: 1;
-    grid-row: 2;
-    border-top: 1px solid var(--border);
+  .compass-graph-inspector {
+    min-height: 280px;
+    border-top: 1px solid var(--compass-line);
     border-left: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -22px 58px color-mix(in srgb, #000 35%, transparent);
   }
 
-  .compass-statusbar {
-    grid-column: 1;
-    grid-row: 3;
+  .compass-graph-toolbar {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+  }
+
+  .compass-toolbar-actions {
+    max-width: 62%;
+    overflow-x: auto;
+  }
+
+  .compass-info-panel {
+    max-height: none;
   }
 }
 
