@@ -7,7 +7,7 @@ use compass_ir::{
 
 use crate::{EvidenceBatch, EvidenceFact, FactKind, ProviderError, normalize_source_path};
 
-pub const MERGER_VERSION: u32 = 1;
+pub const MERGER_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MergeError {
@@ -102,6 +102,7 @@ pub fn merge_evidence(batches: Vec<EvidenceBatch>) -> Result<ProgramBundle, Merg
             merge_coverage(&mut module.coverage, coverage);
         }
     }
+    resolve_unique_syntax_calls(&mut modules, &mut evidence);
     for module in modules.values_mut() {
         for function in &mut module.functions {
             let mut conflicts = false;
@@ -140,6 +141,96 @@ pub fn merge_evidence(batches: Vec<EvidenceBatch>) -> Result<ProgramBundle, Merg
     .canonicalized();
     bundle.validate()?;
     Ok(bundle)
+}
+
+fn resolve_unique_syntax_calls(
+    modules: &mut BTreeMap<String, ModuleIr>,
+    evidence: &mut BTreeMap<String, EvidenceRecord>,
+) {
+    let mut local = BTreeMap::<String, BTreeMap<String, Vec<String>>>::new();
+    let mut global = BTreeMap::<String, Vec<String>>::new();
+    for (source_file, module) in modules.iter() {
+        for function in &module.functions {
+            let short = function
+                .name
+                .rsplit('.')
+                .next()
+                .unwrap_or(&function.name)
+                .to_owned();
+            local
+                .entry(source_file.clone())
+                .or_default()
+                .entry(short.clone())
+                .or_default()
+                .push(function.symbol_id.clone());
+            global
+                .entry(short)
+                .or_default()
+                .push(function.symbol_id.clone());
+        }
+    }
+    for definitions in local.values_mut() {
+        for symbols in definitions.values_mut() {
+            symbols.sort();
+            symbols.dedup();
+        }
+    }
+    for symbols in global.values_mut() {
+        symbols.sort();
+        symbols.dedup();
+    }
+
+    for (source_file, module) in modules.iter_mut() {
+        for function in &mut module.functions {
+            for operation in function
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.operations)
+            {
+                let OperationKind::Call {
+                    callee,
+                    resolved_symbols,
+                    ..
+                } = &mut operation.kind
+                else {
+                    continue;
+                };
+                if !resolved_symbols.is_empty() {
+                    continue;
+                }
+                let short = callee.rsplit('.').next().unwrap_or(callee);
+                let local_match = local
+                    .get(source_file)
+                    .and_then(|definitions| definitions.get(short))
+                    .filter(|symbols| symbols.len() == 1)
+                    .and_then(|symbols| symbols.first());
+                let global_match = global
+                    .get(short)
+                    .filter(|symbols| symbols.len() == 1)
+                    .and_then(|symbols| symbols.first());
+                if let Some(symbol) = local_match.or(global_match) {
+                    resolved_symbols.push(symbol.clone());
+                    let provider_id = operation
+                        .evidence
+                        .iter()
+                        .find_map(|id| evidence.get(id))
+                        .map(|record| record.provider_id.clone())
+                        .unwrap_or_else(|| "syntax:inferred".to_owned());
+                    let record = crate::evidence_record(
+                        &provider_id,
+                        Some(source_file),
+                        Capability::CallResolution,
+                        format!("unique syntax call {callee} resolved to {symbol}"),
+                        Some(&operation.anchor),
+                        "syntax_call_resolution",
+                        symbol,
+                    );
+                    operation.evidence.push(record.id.clone());
+                    evidence.entry(record.id.clone()).or_insert(record);
+                }
+            }
+        }
+    }
 }
 
 fn canonical_batches(batches: Vec<EvidenceBatch>) -> Result<Vec<EvidenceBatch>, MergeError> {

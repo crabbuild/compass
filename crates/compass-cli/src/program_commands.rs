@@ -675,7 +675,7 @@ fn operation_properties(operation: &Operation) -> (&'static str, String) {
         OperationKind::Read { path } => ("read", path.clone()),
         OperationKind::Write { path } => ("write", path.clone()),
         OperationKind::Await => ("await", "await".to_owned()),
-        OperationKind::Throw { value } => ("throw", value.clone()),
+        OperationKind::Throw { effect } => ("throw", effect.display_name()),
     }
 }
 

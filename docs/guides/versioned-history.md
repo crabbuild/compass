@@ -37,7 +37,7 @@ A **realization** is more specific than a commit. The same commit can have a
 code-only realization and one or more semantic realizations with different
 provider/model configuration.
 
-History graph schema `networkx-node-link/v2` records automatic multigraph
+History graph schema `networkx-node-link/v6` records automatic multigraph
 promotion. On upgrade, Compass migrates a stored v1 build profile to v2. The
 fingerprint therefore no longer matches a v1 realization, and the next
 requested build rematerializes that commit instead of reusing stale graph
@@ -227,6 +227,12 @@ Expand routine symbol churn:
 compass diff v1.2.0 HEAD --all
 ```
 
+Raise the per-section display budget without expanding routine churn:
+
+```bash
+compass diff v1.2.0 HEAD --limit 50
+```
+
 Machine-readable output:
 
 ```bash
@@ -236,18 +242,18 @@ compass diff v1.2.0 HEAD --format json
 Explain one finding:
 
 ```bash
-compass diff v1.2.0 HEAD --explain sd1-...
+compass diff v1.2.0 HEAD --explain sd2-...
 ```
 
 The default report is ranked for PR review: likely breaks, behavior changes,
 affected callers/modules, and test evidence come first. Routine symbol churn
 is collapsed. Its five core concepts are contract changes, behavior changes,
 dependency changes, affected consumers, and verification evidence. JSON uses
-schema `compass.semantic_diff.report/1`; deterministic `sd1-...` finding IDs
+schema `compass.semantic_diff.report/2`; deterministic `sd2-...` finding IDs
 make `--explain` and automation stable when the underlying semantic evidence
 does not change.
 
-Semantic diff requires Program IR v2 evidence. Rebuild older realizations with
+Semantic diff requires Program IR v3 evidence. Rebuild older realizations with
 the current Compass binary before comparing them. Static test mapping may
 recommend resolved test callers, but `partial` or `unknown` evidence never
 claims safety or a test gap. AI-generated summaries and hosted PR delivery are

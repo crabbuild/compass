@@ -195,6 +195,51 @@ pub struct Operation {
     pub kind: OperationKind,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExceptionKind {
+    Rethrow,
+    Exception,
+    Dynamic,
+    Panic,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct ExceptionEffect {
+    pub kind: ExceptionKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
+    #[serde(default)]
+    pub chained: bool,
+}
+
+impl ExceptionEffect {
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        match self.kind {
+            ExceptionKind::Rethrow => "rethrow current exception".to_owned(),
+            ExceptionKind::Panic => self
+                .expression
+                .as_deref()
+                .map_or_else(|| "panic".to_owned(), |value| format!("panic: {value}")),
+            ExceptionKind::Exception => {
+                let name = self.type_name.as_deref().unwrap_or("exception");
+                if self.chained {
+                    format!("{name} (chained)")
+                } else {
+                    name.to_owned()
+                }
+            }
+            ExceptionKind::Dynamic => self.expression.as_deref().map_or_else(
+                || "dynamic exception".to_owned(),
+                |value| format!("dynamic exception: {value}"),
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OperationKind {
@@ -214,7 +259,7 @@ pub enum OperationKind {
     },
     Await,
     Throw {
-        value: String,
+        effect: ExceptionEffect,
     },
 }
 

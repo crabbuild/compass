@@ -820,7 +820,15 @@ fn build_graph_inner(
         });
     }
 
-    let previous = previous_communities(&output_dir.join("graph.json"));
+    // A history realization must depend only on the target commit and build
+    // profile. Incremental seeds may accelerate extraction, but their prior
+    // community numbering is operational state and cannot influence the
+    // content-addressed result.
+    let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
+        HashMap::new()
+    } else {
+        previous_communities(&output_dir.join("graph.json"))
+    };
     let current = cluster(
         &document,
         ClusterOptions {
@@ -1344,6 +1352,38 @@ fn collect_ast_id_remap(
         }
         if node.id == make_id(&[source]) {
             id_remap.insert(node.id.clone(), new_prefix);
+        } else if node.id == old_prefix
+            && node
+                .attributes
+                .get("symbol_kind")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind != "file")
+        {
+            // Permissive grammars can surface punctuation-only constructs
+            // such as a TypeScript `[]` type as symbols. Their normalized
+            // label is empty, so the extractor falls back to the absolute
+            // file-stem ID. Keep the symbol distinct from the file node while
+            // replacing that checkout-root identity with a stable location.
+            let label = node
+                .attributes
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .map(|value| make_id(&[value]))
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "symbol".to_owned());
+            let line = node
+                .attributes
+                .get("line_start")
+                .and_then(serde_json::Value::as_u64)
+                .or_else(|| {
+                    node.attributes
+                        .get("source_location")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|value| value.strip_prefix('L'))
+                        .and_then(|value| value.parse::<u64>().ok())
+                })
+                .unwrap_or_default();
+            id_remap.insert(node.id.clone(), format!("{new_prefix}_{label}_{line}"));
         } else if let Some(suffix) = node.id.strip_prefix(&format!("{old_prefix}_")) {
             id_remap.insert(node.id.clone(), format!("{new_prefix}_{suffix}"));
         }
@@ -2186,7 +2226,7 @@ mod tests {
             fs::create_dir_all(root.join(".hidden"))?;
             fs::write(
                 source.join("Page.astro"),
-                "---\nimport Layout from '../.hidden/Layout.astro';\n---\n<Layout />\n",
+                "---\nimport Layout from '../.hidden/Layout.astro';\nconst values: string[] = [];\n---\n<Layout />\n",
             )?;
             fs::write(root.join(".hidden/Layout.astro"), "<slot />\n")?;
             let mut options = BuildOptions::new(root);
@@ -2244,6 +2284,20 @@ mod tests {
         assert!(!encoded.contains(&make_id(&[&second.path().to_string_lossy()])));
         assert!(!encoded.contains(&first.path().to_string_lossy().to_string()));
         assert!(!encoded.contains(&second.path().to_string_lossy().to_string()));
+        let punctuation_symbols = first_graph
+            .nodes
+            .iter()
+            .filter(|node| node.string("label") == "[]")
+            .collect::<Vec<_>>();
+        assert!(
+            !punctuation_symbols.is_empty(),
+            "fixture must exercise the punctuation-symbol identity collision"
+        );
+        assert!(
+            punctuation_symbols
+                .iter()
+                .all(|node| node.id.starts_with("src_page_"))
+        );
         Ok(())
     }
 

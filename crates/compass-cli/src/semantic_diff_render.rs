@@ -8,6 +8,7 @@ use compass_semantic_diff::{
 
 pub(crate) struct RenderOptions<'a> {
     pub include_routine: bool,
+    pub max_findings_per_section: Option<usize>,
     pub explain: Option<&'a str>,
 }
 
@@ -50,6 +51,10 @@ pub(crate) fn render_text(
         .iter()
         .map(|finding| finding.affected_consumers.len())
         .sum::<usize>();
+    let public_changes = visible
+        .iter()
+        .filter(|finding| finding.public_surface)
+        .count();
     let gaps = visible
         .iter()
         .filter(|finding| finding.verification.state == VerificationState::Gap)
@@ -61,9 +66,63 @@ pub(crate) fn render_text(
         short_revision(&report.comparison.old_commit),
         short_revision(&report.comparison.new_commit)
     );
+    let test_mapping = report
+        .completeness
+        .get("test_mapping")
+        .copied()
+        .unwrap_or(compass_semantic_diff::Completeness::Unavailable);
+    let call_resolution = report
+        .completeness
+        .get("call_resolution")
+        .copied()
+        .unwrap_or(compass_semantic_diff::Completeness::Unavailable);
+    let consumer_summary = if call_resolution == compass_semantic_diff::Completeness::Complete {
+        format!("{consumers} affected consumers")
+    } else {
+        format!(
+            "{consumers} resolved affected consumers · call mapping {}",
+            completeness_name(call_resolution)
+        )
+    };
+    let gap_summary = if test_mapping == compass_semantic_diff::Completeness::Complete {
+        format!("{gaps} test gaps")
+    } else {
+        format!(
+            "{gaps} proven test gaps · test mapping {}",
+            completeness_name(test_mapping)
+        )
+    };
     let _ = writeln!(
         output,
-        "{breaks} likely breaks · {behaviors} behavior changes · {consumers} affected consumers · {gaps} test gaps"
+        "{breaks} likely breaks · {public_changes} public-surface changes · {behaviors} behavior changes · {consumer_summary} · {gap_summary}"
+    );
+    if !report.feature_groups.is_empty() {
+        output.push_str("\nFeature-level changes\n");
+        let group_limit = if options.include_routine {
+            report.feature_groups.len()
+        } else {
+            5
+        };
+        for group in report.feature_groups.iter().take(group_limit) {
+            let _ = writeln!(output, "  {} ({})", group.headline, group.id);
+            let _ = writeln!(output, "    {}", group.summary);
+        }
+        if report.feature_groups.len() > group_limit {
+            let _ = writeln!(
+                output,
+                "  … {} more feature groups",
+                report.feature_groups.len() - group_limit
+            );
+        }
+    }
+    render_section(
+        &mut output,
+        "Public API changes",
+        visible
+            .iter()
+            .copied()
+            .filter(|finding| finding.public_surface),
+        options.max_findings_per_section,
     );
     render_section(
         &mut output,
@@ -72,8 +131,9 @@ pub(crate) fn render_text(
             matches!(
                 finding.compatibility,
                 Compatibility::ProvenBreak | Compatibility::PossibleBreak
-            )
+            ) && !finding.public_surface
         }),
+        options.max_findings_per_section,
     );
     render_section(
         &mut output,
@@ -82,11 +142,13 @@ pub(crate) fn render_text(
             matches!(
                 finding.finding_type,
                 FindingType::BehaviorChange | FindingType::DependencyChange
-            ) && !matches!(
-                finding.compatibility,
-                Compatibility::ProvenBreak | Compatibility::PossibleBreak
-            )
+            ) && !finding.public_surface
+                && !matches!(
+                    finding.compatibility,
+                    Compatibility::ProvenBreak | Compatibility::PossibleBreak
+                )
         }),
+        options.max_findings_per_section,
     );
     render_section(
         &mut output,
@@ -95,13 +157,15 @@ pub(crate) fn render_text(
             !matches!(
                 finding.compatibility,
                 Compatibility::ProvenBreak | Compatibility::PossibleBreak
-            ) && !matches!(
-                finding.finding_type,
-                FindingType::BehaviorChange
-                    | FindingType::DependencyChange
-                    | FindingType::VerificationGap
-            )
+            ) && !finding.public_surface
+                && !matches!(
+                    finding.finding_type,
+                    FindingType::BehaviorChange
+                        | FindingType::DependencyChange
+                        | FindingType::VerificationGap
+                )
         }),
+        options.max_findings_per_section,
     );
     if !options.include_routine {
         let count = report
@@ -110,9 +174,15 @@ pub(crate) fn render_text(
             .map(|group| group.count)
             .sum::<usize>();
         if count > 0 {
+            let detail = report
+                .collapsed_groups
+                .iter()
+                .map(|group| format!("{} {}", group.count, group.label))
+                .collect::<Vec<_>>()
+                .join(", ");
             let _ = writeln!(
                 output,
-                "\nRoutine changes collapsed: {count} (use --all to expand)"
+                "\nRoutine changes collapsed: {count} ({detail}; use --all to expand)"
             );
         }
     }
@@ -147,6 +217,7 @@ fn render_section<'a>(
     output: &mut String,
     title: &str,
     findings: impl Iterator<Item = &'a SemanticFinding>,
+    limit: Option<usize>,
 ) {
     let findings = findings.collect::<Vec<_>>();
     if findings.is_empty() {
@@ -154,8 +225,11 @@ fn render_section<'a>(
     }
     let _ = write!(output, "\n{title}\n");
     let mut shown = 0_usize;
+    let total = findings.len();
     for finding in findings {
-        if shown >= 20 && finding.compatibility != Compatibility::ProvenBreak {
+        if limit.is_some_and(|limit| shown >= limit)
+            && finding.compatibility != Compatibility::ProvenBreak
+        {
             continue;
         }
         shown += 1;
@@ -187,6 +261,14 @@ fn render_section<'a>(
             );
         }
         let _ = writeln!(output, "    Review: {}", finding.reviewer_action);
+    }
+    let hidden = total.saturating_sub(shown);
+    if hidden > 0 {
+        let _ = writeln!(
+            output,
+            "  … {hidden} more findings (use --limit {} or --all)",
+            shown.saturating_add(hidden)
+        );
     }
 }
 
@@ -265,6 +347,85 @@ fn verification_name(state: VerificationState) -> &'static str {
     }
 }
 
+fn completeness_name(completeness: compass_semantic_diff::Completeness) -> &'static str {
+    match completeness {
+        compass_semantic_diff::Completeness::Complete => "complete",
+        compass_semantic_diff::Completeness::Partial => "partial",
+        compass_semantic_diff::Completeness::Unavailable => "unavailable",
+    }
+}
+
 fn short_revision(revision: &str) -> &str {
     revision.get(..revision.len().min(12)).unwrap_or(revision)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use compass_semantic_diff::{
+        Compatibility, Confidence, FindingOrigin, FindingType, SemanticFinding, Verification,
+        VerificationState,
+    };
+
+    use super::render_section;
+
+    fn finding(index: usize, compatibility: Compatibility) -> SemanticFinding {
+        SemanticFinding {
+            id: format!("sd2-{index:024x}"),
+            finding_type: FindingType::BehaviorChange,
+            subject: format!("subject-{index}"),
+            origin: FindingOrigin::Direct,
+            headline: format!("finding {index}"),
+            explanation: "changed".to_owned(),
+            compatibility,
+            confidence: Confidence::Exact,
+            review_priority: 1,
+            public_surface: false,
+            routine: false,
+            before: None,
+            after: None,
+            affected_consumers: Vec::new(),
+            witness_paths: Vec::new(),
+            verification: Verification {
+                state: VerificationState::Unknown,
+                exact_tests: Vec::new(),
+                recommended_tests: Vec::new(),
+                reason: "unavailable".to_owned(),
+            },
+            reviewer_action: "review".to_owned(),
+            evidence: Vec::new(),
+            completeness: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn section_limits_are_explicit_and_unlimited_is_exhaustive() {
+        let findings = (0..23)
+            .map(|index| finding(index, Compatibility::Behavioral))
+            .collect::<Vec<_>>();
+        let mut limited = String::new();
+        render_section(&mut limited, "Changes", findings.iter(), Some(20));
+        assert!(limited.contains("… 3 more findings (use --limit 23 or --all)"));
+        assert!(!limited.contains("finding 22"));
+
+        let mut exhaustive = String::new();
+        render_section(&mut exhaustive, "Changes", findings.iter(), None);
+        assert!(exhaustive.contains("finding 22"));
+        assert!(!exhaustive.contains("more findings"));
+    }
+
+    #[test]
+    fn limits_never_hide_proven_breaks() {
+        let findings = [
+            finding(0, Compatibility::Behavioral),
+            finding(1, Compatibility::Behavioral),
+            finding(2, Compatibility::ProvenBreak),
+        ];
+        let mut output = String::new();
+        render_section(&mut output, "Changes", findings.iter(), Some(1));
+        assert!(output.contains("finding 0"));
+        assert!(output.contains("finding 2"));
+        assert!(output.contains("… 1 more finding"));
+    }
 }

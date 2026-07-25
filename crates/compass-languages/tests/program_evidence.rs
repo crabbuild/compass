@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 use std::error::Error;
 
 use compass_ir::{
-    Capability, CoverageState, ExecutionMode, OperationKind, ParameterKind, Visibility,
+    Capability, CoverageState, ExceptionKind, ExecutionMode, OperationKind, ParameterKind,
+    Visibility,
 };
 use compass_languages::TreeSitterSyntaxProvider;
-use compass_program::{FileInput, SyntaxProvider};
+use compass_program::{FileInput, SyntaxProvider, merge_evidence};
 
 #[test]
 fn rust_provider_emits_conservative_program_evidence() -> Result<(), Box<dyn Error>> {
@@ -128,6 +129,80 @@ fn repeated_signatures_in_distinct_lexical_scopes_have_unique_syntax_symbols()
         );
         compass_program::merge_evidence(vec![batch])?.validate()?;
     }
+    Ok(())
+}
+
+#[test]
+fn syntax_merge_resolves_unique_local_calls() -> Result<(), Box<dyn Error>> {
+    let batch = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/app.py",
+            language: "python",
+            source: b"def helper():\n    return 1\n\ndef run():\n    return helper()\n",
+        })?
+        .ok_or("missing Python batch")?;
+    let bundle = merge_evidence(vec![batch])?;
+    let helper = bundle.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "helper")
+        .ok_or("missing helper")?;
+    let run = bundle.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "run")
+        .ok_or("missing run")?;
+    let resolved = run
+        .blocks
+        .iter()
+        .flat_map(|block| &block.operations)
+        .find_map(|operation| match &operation.kind {
+            OperationKind::Call {
+                callee,
+                resolved_symbols,
+                ..
+            } if callee == "helper" => Some(resolved_symbols),
+            _ => None,
+        })
+        .ok_or("missing helper call")?;
+    assert_eq!(resolved, std::slice::from_ref(&helper.symbol_id));
+    Ok(())
+}
+
+#[test]
+fn python_exceptions_are_structured_without_inventing_error_types() -> Result<(), Box<dyn Error>> {
+    let batch = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "src/app.py",
+            language: "python",
+            source: b"def reroute(result):\n    try:\n        work()\n    except Exception as cause:\n        raise RetryError('again') from cause\n\ndef relay():\n    try:\n        work()\n    except:\n        raise\n\ndef dynamic(result):\n    raise result.error\n",
+        })?
+        .ok_or("missing Python batch")?;
+    let throws = batch.modules[0]
+        .functions
+        .iter()
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.operations)
+        .filter_map(|operation| match &operation.kind {
+            OperationKind::Throw { effect } => Some(effect),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(throws.iter().any(|effect| {
+        effect.kind == ExceptionKind::Exception
+            && effect.type_name.as_deref() == Some("RetryError")
+            && effect.chained
+    }));
+    assert!(
+        throws
+            .iter()
+            .any(|effect| effect.kind == ExceptionKind::Rethrow)
+    );
+    assert!(throws.iter().any(|effect| {
+        effect.kind == ExceptionKind::Dynamic
+            && effect.expression.as_deref() == Some("result.error")
+            && effect.type_name.is_none()
+    }));
     Ok(())
 }
 

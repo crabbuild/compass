@@ -45,4 +45,4 @@ pub use validate::{
 };
 
 /// Current node-link graph schema included in history build profiles and fingerprints.
-pub const HISTORY_GRAPH_SCHEMA: &str = "networkx-node-link/v2";
+pub const HISTORY_GRAPH_SCHEMA: &str = "networkx-node-link/v6";

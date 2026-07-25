@@ -146,7 +146,7 @@ fn validation_rejects_duplicate_provider_and_evidence_ids() {
 #[test]
 fn public_v2_schema_uses_the_four_coverage_states() {
     assert_eq!(compass_ir::PROGRAM_SCHEMA, "http://crab.build/compass/v1");
-    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 2);
+    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 3);
 
     let mut current = bundle();
     current.modules[0].coverage.insert(

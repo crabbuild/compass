@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use compass_ir::{
-    Coverage, IrError, OperationKind, ProgramBundle, SymbolId, canonical_json_bytes, hex_sha256,
+    Coverage, ExceptionEffect, IrError, OperationKind, ProgramBundle, SymbolId,
+    canonical_json_bytes, hex_sha256,
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,7 @@ pub struct FunctionSummary {
     pub reads: Vec<String>,
     pub writes: Vec<String>,
     pub effects: Vec<String>,
-    pub errors: Vec<String>,
+    pub exceptions: Vec<ExceptionEffect>,
     pub evidence: Vec<String>,
     pub coverage: Coverage,
     pub summary_digest: String,
@@ -82,7 +83,7 @@ impl AnalysisBundle {
             sort_dedup(&mut summary.reads);
             sort_dedup(&mut summary.writes);
             sort_dedup(&mut summary.effects);
-            sort_dedup(&mut summary.errors);
+            sort_dedup(&mut summary.exceptions);
             sort_dedup(&mut summary.evidence);
         }
         bundle
@@ -129,7 +130,7 @@ pub(crate) fn summarize(
     let mut reads = Vec::new();
     let mut writes = Vec::new();
     let mut effects = Vec::new();
-    let mut errors = Vec::new();
+    let mut exceptions = Vec::new();
     let mut evidence = function.evidence.clone();
     for block in &function.blocks {
         evidence.extend(block.evidence.clone());
@@ -150,9 +151,9 @@ pub(crate) fn summarize(
                 OperationKind::Read { path } => reads.push(path.clone()),
                 OperationKind::Write { path } => writes.push(path.clone()),
                 OperationKind::Await => effects.push("await".to_owned()),
-                OperationKind::Throw { value } => {
+                OperationKind::Throw { effect } => {
                     effects.push("throw".to_owned());
-                    errors.push(value.clone());
+                    exceptions.push(effect.clone());
                 }
             }
         }
@@ -162,7 +163,7 @@ pub(crate) fn summarize(
     sort_dedup(&mut reads);
     sort_dedup(&mut writes);
     sort_dedup(&mut effects);
-    sort_dedup(&mut errors);
+    sort_dedup(&mut exceptions);
     sort_dedup(&mut evidence);
     let semantic_digest = semantic_digest(function)?;
     let summary_payload = (
@@ -174,7 +175,7 @@ pub(crate) fn summarize(
         &reads,
         &writes,
         &effects,
-        &errors,
+        &exceptions,
         &evidence,
         &function.coverage,
     );
@@ -188,7 +189,7 @@ pub(crate) fn summarize(
         reads,
         writes,
         effects,
-        errors,
+        exceptions,
         evidence,
         coverage: function.coverage.clone(),
         summary_digest,
