@@ -5,6 +5,12 @@ import {
 } from "./messages";
 
 describe("community graph messages", () => {
+  it("accepts graph hydration recovery actions", () => {
+    expect(GraphToHostMessageSchema.safeParse({ type: "retry" }).success).toBe(true);
+    expect(GraphToHostMessageSchema.safeParse({ type: "showOutput" }).success).toBe(true);
+    expect(GraphToHostMessageSchema.safeParse({ type: "reload" }).success).toBe(false);
+  });
+
   it("accepts non-negative community requests and rejects invalid IDs", () => {
     expect(GraphToHostMessageSchema.safeParse({
       type: "openCommunity",

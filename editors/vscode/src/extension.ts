@@ -128,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (action === "Initialize") await vscode.commands.executeCommand("compass.initialize");
         return;
       }
-      await GraphPanel.open(context, session);
+      await GraphPanel.open(context, session, output);
     }),
     vscode.commands.registerCommand("compass.openCallGraph", async () => {
       const editor = vscode.window.activeTextEditor;

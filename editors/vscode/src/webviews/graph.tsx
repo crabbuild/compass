@@ -1,12 +1,19 @@
 import { createRoot, type Root } from "react-dom/client";
 import {
   CompassGraph,
-  type GraphViewModel
+  type GraphViewModel,
+  type InspectorLayout
 } from "@compass/viewer";
 import { HostToGraphMessageSchema } from "../transport/messages";
+import { GraphLoadingState } from "./GraphLoadingState";
 
+type WebviewState = {
+  inspector?: InspectorLayout;
+};
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void;
+  getState(): WebviewState | undefined;
+  setState(state: WebviewState): void;
 };
 
 const vscode = acquireVsCodeApi();
@@ -20,7 +27,41 @@ let communityLoading: number | null = null;
 let communityError: string | undefined;
 let activeCommunityRequest = "";
 
-function render(): void {
+function resetGraphState(): void {
+  overview = undefined;
+  communityDetail = undefined;
+  communityLoading = null;
+  communityError = undefined;
+  activeCommunityRequest = "";
+}
+
+function retryHydration(): void {
+  resetGraphState();
+  renderLoading();
+  vscode.postMessage({ type: "retry" });
+}
+
+function renderLoading(): void {
+  root.render(
+    <GraphLoadingState
+      state={{ kind: "loading" }}
+      onRetry={retryHydration}
+      onShowOutput={() => vscode.postMessage({ type: "showOutput" })}
+    />
+  );
+}
+
+function renderError(message: string): void {
+  root.render(
+    <GraphLoadingState
+      state={{ kind: "error", message }}
+      onRetry={retryHydration}
+      onShowOutput={() => vscode.postMessage({ type: "showOutput" })}
+    />
+  );
+}
+
+function renderGraph(): void {
   if (!overview) return;
   root.render(
     <CompassGraph
@@ -33,8 +74,13 @@ function render(): void {
         communityLoading = null;
         communityError = undefined;
         activeCommunityRequest = "";
-        render();
+        renderGraph();
       }}
+      initialInspectorLayout={vscode.getState()?.inspector}
+      onInspectorLayoutChange={(inspector) => vscode.setState({
+        ...vscode.getState(),
+        inspector
+      })}
       host={{
         openSource(source) {
           vscode.postMessage({ type: "openSource", repositoryId, source });
@@ -50,7 +96,7 @@ function render(): void {
             repositoryId,
             communityId
           });
-          render();
+          renderGraph();
         }
       }}
     />
@@ -61,14 +107,7 @@ window.addEventListener("message", (event) => {
   const parsed = HostToGraphMessageSchema.safeParse(event.data);
   if (!parsed.success) return;
   if (parsed.data.type === "error") {
-    root.render(
-      <main className="grid min-h-screen place-items-center p-8 text-center">
-        <div>
-          <h1 className="text-lg font-semibold">Compass could not load this graph</h1>
-          <p className="mt-2 text-sm text-muted-foreground">{parsed.data.message}</p>
-        </div>
-      </main>
-    );
+    renderError(parsed.data.message);
     return;
   }
   if (parsed.data.type === "hydrateGraph") {
@@ -90,7 +129,8 @@ window.addEventListener("message", (event) => {
       communityError = parsed.data.message;
     }
   }
-  render();
+  renderGraph();
 });
 
+renderLoading();
 vscode.postMessage({ type: "ready" });

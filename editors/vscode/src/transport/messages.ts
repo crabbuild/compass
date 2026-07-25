@@ -26,6 +26,8 @@ export const HostToGraphMessageSchema = z.discriminatedUnion("type", [
 
 export const GraphToHostMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ready") }),
+  z.object({ type: z.literal("retry") }),
+  z.object({ type: z.literal("showOutput") }),
   z.object({
     type: z.literal("openSource"),
     repositoryId: z.string(),

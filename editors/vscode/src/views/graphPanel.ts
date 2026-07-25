@@ -13,7 +13,8 @@ import { openGraphSource } from "./sourceNavigation";
 export class GraphPanel {
   static async open(
     context: vscode.ExtensionContext,
-    session: RepositorySession
+    session: RepositorySession,
+    output: vscode.OutputChannel
   ): Promise<GraphPanel> {
     const panel = vscode.window.createWebviewPanel(
       "compass.graph",
@@ -25,7 +26,7 @@ export class GraphPanel {
         localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist")]
       }
     );
-    const graph = new GraphPanel(context, session, panel);
+    const graph = new GraphPanel(context, session, panel, output);
     await graph.initialize();
     return graph;
   }
@@ -38,7 +39,8 @@ export class GraphPanel {
   private constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly session: RepositorySession,
-    private readonly panel: vscode.WebviewPanel
+    private readonly panel: vscode.WebviewPanel,
+    private readonly output: vscode.OutputChannel
   ) {}
 
   private async initialize(): Promise<void> {
@@ -50,8 +52,10 @@ export class GraphPanel {
     this.panel.webview.onDidReceiveMessage(async (untrusted) => {
       const parsed = GraphToHostMessageSchema.safeParse(untrusted);
       if (!parsed.success) return;
-      if (parsed.data.type === "ready") {
+      if (parsed.data.type === "ready" || parsed.data.type === "retry") {
         await this.hydrate();
+      } else if (parsed.data.type === "showOutput") {
+        this.output.show(true);
       } else if (parsed.data.type === "openSource") {
         try {
           await openGraphSource(this.session, parsed.data.repositoryId, parsed.data.source);
@@ -182,7 +186,7 @@ export class GraphPanel {
 <title>Compass Code Graph</title>
 </head>
 <body>
-<div id="root" role="status" aria-live="polite">Loading Compass graph…</div>
+<div id="root"></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
