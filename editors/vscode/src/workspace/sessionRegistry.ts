@@ -20,6 +20,11 @@ export class SessionRegistry {
     return [...this.sessions.values()];
   }
 
+  byId(id: string | undefined): RepositorySession | undefined {
+    if (!id) return undefined;
+    return this.all().find((session) => session.id === id);
+  }
+
   forEditor(editor: TextEditor | undefined): RepositorySession | undefined {
     if (!editor) return this.all()[0];
     return this.all()

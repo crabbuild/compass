@@ -1,47 +1,46 @@
 import * as vscode from "vscode";
+import type { CompassDiscovery } from "../cli/discovery";
 import type { SessionRegistry } from "../workspace/sessionRegistry";
+import { buildRepositoryTree, type TreeNode } from "./treeModel";
 
-export class StatusTree implements vscode.TreeDataProvider<vscode.TreeItem> {
+export class StatusTree implements vscode.TreeDataProvider<TreeNode> {
   private readonly changes = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changes.event;
 
   constructor(
     private readonly registry: SessionRegistry,
-    private readonly cliLabel: string
+    private readonly discovery: CompassDiscovery
   ) {}
 
   refresh(): void {
     this.changes.fire();
   }
 
-  getTreeItem(item: vscode.TreeItem): vscode.TreeItem {
+  getTreeItem(node: TreeNode): vscode.TreeItem {
+    const state = node.children?.length
+      ? node.expanded
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem(node.label, state);
+    item.id = node.id;
+    if (node.description !== undefined) item.description = node.description;
+    if (node.tooltip !== undefined) item.tooltip = node.tooltip;
+    item.iconPath = new vscode.ThemeIcon(node.icon);
+    if (node.command) {
+      item.command = {
+        command: node.command,
+        title: node.label
+      };
+      if (node.commandArguments !== undefined) {
+        item.command.arguments = node.commandArguments;
+      }
+    }
     return item;
   }
 
-  getChildren(): vscode.TreeItem[] {
-    const cli = new vscode.TreeItem("Compass CLI", vscode.TreeItemCollapsibleState.None);
-    cli.description = this.cliLabel;
-    cli.iconPath = new vscode.ThemeIcon(this.cliLabel === "Not found" ? "warning" : "check");
-    const repositories = this.registry.all().map((session) => {
-      const item = new vscode.TreeItem(session.root, vscode.TreeItemCollapsibleState.None);
-      item.description = stateLabel(session.graphState);
-      item.iconPath = new vscode.ThemeIcon(
-        session.graphState === "available" ? "pass"
-          : session.graphState === "building" ? "sync~spin"
-            : session.graphState === "failed" ? "error" : "circle-large-outline"
-      );
-      item.command = session.graphState === "available"
-        ? { command: "compass.openGraph", title: "Open code graph" }
-        : { command: "compass.initialize", title: "Initialize Compass" };
-      return item;
-    });
-    return [cli, ...repositories];
+  getChildren(node?: TreeNode): TreeNode[] {
+    if (node) return node.children ?? [];
+    return buildRepositoryTree(this.discovery, this.registry.all());
   }
-}
-
-function stateLabel(state: string): string {
-  return state === "available" ? "Graph available"
-    : state === "not-materialized" ? "Not materialized"
-      : state === "building" ? "Building"
-        : "Failed";
 }

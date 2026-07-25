@@ -13,14 +13,16 @@ export async function discoverCompass(
   platform: NodeJS.Platform = process.platform
 ): Promise<CompassDiscovery> {
   const configured = configuration.get<string>("cliPath")?.trim();
-  const candidates = configured
-    ? [configured]
-    : (environment.PATH ?? "")
-      .split(path.delimiter)
-      .filter(Boolean)
-      .flatMap((directory) => platform === "win32"
-        ? ["compass.exe", "compass.cmd", "compass.bat"].map((name) => path.join(directory, name))
-        : [path.join(directory, "compass")]);
+  const pathCandidates = (environment.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .flatMap((directory) => platform === "win32"
+      ? ["compass.exe", "compass.cmd", "compass.bat"].map((name) => path.join(directory, name))
+      : [path.join(directory, "compass")]);
+  const candidates = [
+    ...(configured ? [configured] : []),
+    ...pathCandidates
+  ].filter((candidate, index, all) => all.indexOf(candidate) === index);
   for (const candidate of candidates) {
     try {
       await access(candidate, constants.X_OK);

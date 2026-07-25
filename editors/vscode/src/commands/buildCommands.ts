@@ -14,10 +14,10 @@ export function registerBuildCommands(
     requirement: CapabilityRequirement
   ) => Promise<boolean>
 ): void {
-  const pick = () => pickRepository(registry);
+  const pick = (repositoryId?: string) => pickRepository(registry, repositoryId);
   context.subscriptions.push(
-    vscode.commands.registerCommand("compass.initialize", async () => {
-      const session = await pick();
+    vscode.commands.registerCommand("compass.initialize", async (repositoryId?: string) => {
+      const session = await pick(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.initialize)) return;
       const includes = await vscode.window.showInputBox({
@@ -43,8 +43,8 @@ export function registerBuildCommands(
         force: false
       }), "Initializing Compass", output, refresh);
     }),
-    vscode.commands.registerCommand("compass.update", async () => {
-      const session = await pick();
+    vscode.commands.registerCommand("compass.update", async (repositoryId?: string) => {
+      const session = await pick(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.update)) return;
       if (session.watch) {
@@ -64,8 +64,8 @@ export function registerBuildCommands(
         refresh
       );
     }),
-    vscode.commands.registerCommand("compass.toggleWatch", async () => {
-      const session = await pick();
+    vscode.commands.registerCommand("compass.toggleWatch", async (repositoryId?: string) => {
+      const session = await pick(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.watch)) return;
       if (session.watch) {
@@ -141,7 +141,12 @@ async function runGuided(
   }
 }
 
-async function pickRepository(registry: SessionRegistry): Promise<RepositorySession | undefined> {
+async function pickRepository(
+  registry: SessionRegistry,
+  repositoryId?: string
+): Promise<RepositorySession | undefined> {
+  const requested = registry.byId(repositoryId);
+  if (requested) return requested;
   const sessions = registry.all();
   if (sessions.length === 0) {
     void vscode.window.showInformationMessage("Open a repository folder to use Compass.");

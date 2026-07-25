@@ -42,10 +42,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }));
   }
 
-  const statusTree = new StatusTree(
-    registry,
-    discovery.kind === "found" ? executable : "Not found"
-  );
+  const statusTree = new StatusTree(registry, discovery);
   const operationsTree = new OperationsTree(registry);
   const statusBar = createCompassStatusBar(context, registry);
   const refresh = async () => {
@@ -109,12 +106,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.registerTreeDataProvider("compass.operations", operationsTree),
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
     vscode.commands.registerCommand("compass.selectCli", selectCompassBinary),
-    vscode.commands.registerCommand("compass.openGraph", async () => {
+    vscode.commands.registerCommand("compass.openGraph", async (repositoryId?: string) => {
       if (!vscode.workspace.isTrusted) {
         void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
         return;
       }
-      const session = registry.forEditor(vscode.window.activeTextEditor);
+      const session = registry.byId(repositoryId)
+        ?? registry.forEditor(vscode.window.activeTextEditor);
       if (!session) {
         void vscode.window.showInformationMessage("Open a repository folder first.");
         return;
@@ -125,7 +123,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           "This repository does not have a materialized Compass graph.",
           "Initialize"
         );
-        if (action === "Initialize") await vscode.commands.executeCommand("compass.initialize");
+        if (action === "Initialize") {
+          await vscode.commands.executeCommand("compass.initialize", session.id);
+        }
         return;
       }
       await GraphPanel.open(context, session, output);
@@ -158,8 +158,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.query)) return;
       await openQueryPanel(context, session);
     }),
-    vscode.commands.registerCommand("compass.openHistory", async () => {
-      const session = registry.forEditor(vscode.window.activeTextEditor);
+    vscode.commands.registerCommand("compass.openHistory", async (repositoryId?: string) => {
+      const session = registry.byId(repositoryId)
+        ?? registry.forEditor(vscode.window.activeTextEditor);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.history)) return;
       await openHistoryPanel(context, session, output);
