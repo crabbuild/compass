@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::SemanticDiffError;
 
-pub const REPORT_SCHEMA: &str = "compass.semantic_diff.report/2";
-pub const CLASSIFIER_VERSION: u32 = 2;
+pub const REPORT_SCHEMA: &str = "compass.semantic_diff.report/1";
+pub const CLASSIFIER_VERSION: u32 = 1;
 pub const MAX_DIRECT_ENTITIES: usize = 10_000;
 pub const MAX_TRAVERSED_CALL_EDGES: usize = 200_000;
 pub const MAX_IMPACT_DEPTH: u8 = 4;

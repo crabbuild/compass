@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Version of the Compass history realization schema.
-pub const HISTORY_SCHEMA_VERSION: u32 = 3;
+pub const HISTORY_SCHEMA_VERSION: u32 = 1;
 
 /// Persistence treatment for one realization artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

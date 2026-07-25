@@ -81,7 +81,6 @@ pub fn merge_graphs(paths: &[PathBuf], output: &Path) -> Result<MergeResult, Cor
         nodes,
         links: edges,
         extras: BTreeMap::new(),
-        used_legacy_edges_key: false,
     };
     write_json_atomic(output, &document, true)?;
     Ok(MergeResult {

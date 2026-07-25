@@ -2474,7 +2474,6 @@ mod tests {
             }],
             links: Vec::new(),
             extras: BTreeMap::new(),
-            used_legacy_edges_key: false,
         };
         write_json_atomic(&graph_path, &semantic, true)?;
 

@@ -7,7 +7,7 @@ use compass_ir::{
 
 use crate::{EvidenceBatch, EvidenceFact, FactKind, ProviderError, normalize_source_path};
 
-pub const MERGER_VERSION: u32 = 2;
+pub const MERGER_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MergeError {

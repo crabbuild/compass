@@ -607,7 +607,7 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
         "{}",
         String::from_utf8_lossy(&export.stderr)
     );
-    let exported = GraphDocument::load_for_recluster_compatibility(&graph_json)?;
+    let exported = GraphDocument::load_for_recluster(&graph_json)?;
     assert_eq!(exported.nodes[0].label(), "First");
 
     let graph_directory = directory.path().join("not-a-graph-file");
@@ -980,7 +980,7 @@ fn diff_emits_semantic_text_json_and_rejects_removed_flags()
     )?;
     assert!(json_output.status.success());
     let envelope: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
-    assert_eq!(envelope["schema"], "compass.semantic_diff.report/2");
+    assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
     assert!(envelope["findings"].is_array());
     assert!(envelope.get("changes").is_none());
     for removed in [
@@ -1265,7 +1265,7 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
         String::from_utf8_lossy(&diff.stderr)
     );
     let envelope: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
-    assert_eq!(envelope["schema"], "compass.semantic_diff.report/2");
+    assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
     assert!(envelope["findings"].is_array());
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
@@ -1386,7 +1386,7 @@ fn semantic_diff_end_to_end_languages() -> Result<(), Box<dyn std::error::Error>
             String::from_utf8_lossy(&diff.stderr)
         );
         let report: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
-        assert_eq!(report["schema"], "compass.semantic_diff.report/2");
+        assert_eq!(report["schema"], "compass.semantic_diff.report/1");
         let findings = report["findings"].as_array().ok_or("findings")?;
         let finding = findings
             .iter()

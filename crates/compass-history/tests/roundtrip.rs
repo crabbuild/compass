@@ -166,18 +166,16 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
 }
 
 #[test]
-fn legacy_unicode_and_empty_hyperedge_placement_round_trip()
--> Result<(), Box<dyn std::error::Error>> {
+fn unicode_and_empty_hyperedge_placement_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let document: GraphDocument = serde_json::from_value(json!({
         "directed": true,
         "multigraph": false,
         "graph": {"hyperedges": []},
         "nodes": [{"id":"a\u{0000}雪","label":"雪"}],
-        "edges": [],
+        "links": [],
         "hyperedges": [],
         "extension": true
     }))?;
-    assert!(document.used_legacy_edges_key);
     let artifacts = GraphArtifacts {
         document,
         program: None,
@@ -189,7 +187,7 @@ fn legacy_unicode_and_empty_hyperedge_placement_round_trip()
     let restored = GraphArtifacts::reconstruct(&artifacts.partition(&completion())?)?;
     assert_eq!(restored, artifacts);
     let value = serde_json::to_value(&restored.document)?;
-    assert!(value.get("edges").is_some());
+    assert!(value.get("links").is_some());
     assert!(
         value["graph"]["hyperedges"]
             .as_array()

@@ -540,7 +540,7 @@ pub fn attach_graph_impact(
     }
     // `graphify prs --graph` accepts any filename, not only a `.json`
     // extension, while retaining the same graph-size guard.
-    let Ok(document) = GraphDocument::load_for_recluster_compatibility(graph_path) else {
+    let Ok(document) = GraphDocument::load_for_recluster(graph_path) else {
         return BTreeMap::new();
     };
     let (file_communities, file_counts) = graph_file_index(&document);

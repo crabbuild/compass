@@ -777,7 +777,6 @@ mod tests {
             nodes: Vec::new(),
             links: Vec::new(),
             extras: BTreeMap::new(),
-            used_legacy_edges_key: false,
         })
     }
 }

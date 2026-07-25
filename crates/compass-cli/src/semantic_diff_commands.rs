@@ -483,7 +483,7 @@ mod tests {
             "new".to_owned(),
             "--format=json".to_owned(),
             "--all".to_owned(),
-            "--explain=sd2-0123456789abcdef01234567".to_owned(),
+            "--explain=sd1-0123456789abcdef01234567".to_owned(),
             format!("--fingerprint={fingerprint}"),
         ]);
         let Ok(parsed) = parsed else {
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(parsed.limit, None);
         assert_eq!(
             parsed.explain.as_deref(),
-            Some("sd2-0123456789abcdef01234567")
+            Some("sd1-0123456789abcdef01234567")
         );
         assert_eq!(parsed.fingerprint.as_deref(), Some(fingerprint.as_str()));
 

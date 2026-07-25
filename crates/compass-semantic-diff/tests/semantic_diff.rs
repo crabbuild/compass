@@ -138,7 +138,7 @@ fn required_parameter_and_behavior_changes_are_actionable() -> Result<(), Box<dy
         report
             .findings
             .iter()
-            .all(|finding| finding.id.starts_with("sd2-"))
+            .all(|finding| finding.id.starts_with("sd1-"))
     );
     assert_eq!(
         report.completeness,

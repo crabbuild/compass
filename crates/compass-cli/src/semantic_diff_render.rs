@@ -372,7 +372,7 @@ mod tests {
 
     fn finding(index: usize, compatibility: Compatibility) -> SemanticFinding {
         SemanticFinding {
-            id: format!("sd2-{index:024x}"),
+            id: format!("sd1-{index:024x}"),
             finding_type: FindingType::BehaviorChange,
             subject: format!("subject-{index}"),
             origin: FindingOrigin::Direct,

@@ -338,7 +338,7 @@ fn validate_root_listing(
         })?;
         let valid = match segments.as_slice() {
             [compass, version, kind, id, root_kind]
-                if compass == b"compass" && version == b"v2" && kind == b"version" =>
+                if compass == b"compass" && version == b"v1" && kind == b"version" =>
             {
                 let parsed = std::str::from_utf8(id)
                     .ok()
@@ -356,7 +356,7 @@ fn validate_root_listing(
                 }
             }
             [compass, version, kind, commit]
-                if compass == b"compass" && version == b"v2" && kind == b"preferred" =>
+                if compass == b"compass" && version == b"v1" && kind == b"preferred" =>
             {
                 let parsed = std::str::from_utf8(commit)
                     .ok()
@@ -411,7 +411,7 @@ fn roots_for_realizations(
         })?;
         if let [compass, version, kind, id, _] = segments.as_slice()
             && compass == b"compass"
-            && version == b"v2"
+            && version == b"v1"
             && kind == b"version"
             && std::str::from_utf8(id).is_ok_and(|id| ids.contains(id))
         {

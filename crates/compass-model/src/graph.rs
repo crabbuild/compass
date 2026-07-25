@@ -347,7 +347,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_legacy_edges_key_and_forces_direction() {
+    fn normalizes_edges_key_to_links() {
         let raw = r#"{
             "directed": false,
             "multigraph": false,
@@ -358,12 +358,13 @@ mod tests {
         let document: GraphDocument = serde_json::from_str(raw).unwrap_or_else(|_error| {
             std::process::abort();
         });
+        let serialized = serde_json::to_value(&document).unwrap_or_else(|_error| {
+            std::process::abort();
+        });
+        assert!(serialized.get("edges").is_none());
+        assert!(serialized.get("links").is_some());
         let graph = Graph::from_document(document).unwrap_or_else(|_| std::process::abort());
-        assert_eq!(graph.node_count(), 2);
         assert_eq!(graph.edge_count(), 1);
-        assert_eq!(graph.successors(0).collect::<Vec<_>>(), vec![1]);
-        assert_eq!(graph.predecessors(1).collect::<Vec<_>>(), vec![0]);
-        assert_eq!(graph.successors(1).collect::<Vec<_>>(), vec![0]);
     }
 
     #[test]

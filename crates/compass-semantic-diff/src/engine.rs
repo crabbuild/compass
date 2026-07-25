@@ -1190,7 +1190,7 @@ pub fn finding_id(
         relationships,
     ))?;
     let digest = Sha256::digest(bytes);
-    Ok(format!("sd2-{}", hex(&digest[..12])))
+    Ok(format!("sd1-{}", hex(&digest[..12])))
 }
 
 fn build_feature_groups(

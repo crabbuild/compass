@@ -17,9 +17,9 @@ History stores immutable realizations outside normal Git history. Enabling eager
 history records a repository build profile and installs managed enqueueing
 hooks. `--code-only` is the explicit local no-model profile.
 
-History uses only `networkx-node-link/v6`. Pre-v6 build profiles, realizations,
-and stores are intentionally unsupported and must be archived or removed before
-building fresh history.
+History uses only the current `networkx-node-link/v1` contract. Any store,
+profile, or realization written under another contract is intentionally
+unsupported and must be archived or removed before building fresh history.
 
 Use `history build REF --all` to build every locally reachable commit in one
 oldest-first batch. Add `--first-parent` to exclude merged branch histories.
@@ -50,7 +50,7 @@ offline worktree. Report the resolved revision when answering.
 compass diff v1.2.0 HEAD
 compass diff HEAD~1 HEAD --all
 compass diff HEAD~1 HEAD --format json
-compass diff HEAD~1 HEAD --explain sd2-...
+compass diff HEAD~1 HEAD --explain sd1-...
 compass history list HEAD --format json
 compass history show HEAD
 compass history export HEAD --format compass-out --output historical-output

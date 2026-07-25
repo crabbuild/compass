@@ -152,12 +152,12 @@ fn previous_graph_schema_profiles_are_rejected_at_publication()
     let mut publish = request('a', false)?;
     publish
         .profile
-        .insert("graph_schema", "networkx-node-link/v5")?;
+        .insert("graph_schema", "networkx-node-link/v6")?;
     let error = match history.publish(publish) {
         Ok(_) => return Err("previous graph schema must not be published".into()),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("networkx-node-link/v6"));
+    assert!(error.to_string().contains("networkx-node-link/v1"));
     Ok(())
 }
 
@@ -354,7 +354,7 @@ fn corrupt_preferred_recovery_requires_the_exact_observation_and_commit()
     let prolly = Prolly::new(adapter, Config::default());
     let preferred_name = KeyBuilder::new()
         .push_segment(b"compass")
-        .push_segment(b"v2")
+        .push_segment(b"v1")
         .push_segment(b"preferred")
         .push_segment(commit.as_str().as_bytes())
         .finish();

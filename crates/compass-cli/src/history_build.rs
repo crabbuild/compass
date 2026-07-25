@@ -1129,7 +1129,7 @@ mod tests {
                 .map_err(HistoryError::InvalidFingerprint)?
                 .options
                 .profile();
-        profile.insert("graph_schema", "networkx-node-link/v1")?;
+        profile.insert("graph_schema", "networkx-node-link/v6")?;
 
         let result = HistoryBuildOptions::from_profile(profile);
         assert!(matches!(

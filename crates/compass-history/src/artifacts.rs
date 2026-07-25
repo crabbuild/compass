@@ -66,7 +66,6 @@ struct DocumentHeader {
     multigraph: bool,
     graph: Map<String, Value>,
     extras: BTreeMap<String, Value>,
-    used_legacy_edges_key: bool,
     graph_hyperedges_present: bool,
     top_hyperedges_present: bool,
 }
@@ -148,9 +147,7 @@ impl GraphArtifacts {
             authoritative_sidecars.insert(entry.relative_path.clone(), bytes);
         }
         let artifacts = Self {
-            document: GraphDocument::load_for_recluster_compatibility(
-                &output_dir.join("graph.json"),
-            )?,
+            document: GraphDocument::load_for_recluster(&output_dir.join("graph.json"))?,
             program: read_optional_program(&output_dir.join("program.json"))?,
             analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
             labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
@@ -284,7 +281,7 @@ impl GraphArtifacts {
                 &mut edge_occurrences,
             )?;
             let (source, target) = edge_identity_endpoints(edge);
-            // Compass keeps a legacy undirected NetworkX header while its
+            // Compass keeps an undirected NetworkX header while its
             // persisted link endpoints retain the true semantic direction.
             let key = edge_key(
                 source,
@@ -383,7 +380,6 @@ impl GraphArtifacts {
                     multigraph: self.document.multigraph,
                     graph,
                     extras,
-                    used_legacy_edges_key: self.document.used_legacy_edges_key,
                     graph_hyperedges_present,
                     top_hyperedges_present,
                 })?,
@@ -590,7 +586,6 @@ impl GraphArtifacts {
                 nodes: ordered_nodes,
                 links: ordered_edges,
                 extras: header.extras,
-                used_legacy_edges_key: header.used_legacy_edges_key,
             },
             program,
             analysis,

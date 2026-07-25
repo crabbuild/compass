@@ -34,9 +34,9 @@ pub enum HistoryRecord {
     ReverseCallers(Vec<String>),
 }
 
-pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v2";
+pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
 const STORE_FORMAT_KEY: &[u8] = b"format";
-const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"graph_schema":"networkx-node-link/v6","history_schema":3,"typed_keys":1}"#;
+const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"graph_schema":"networkx-node-link/v1","history_schema":1,"typed_keys":1}"#;
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
 
 /// Project-owned wrapper around the pinned SQLite Prolly adapter.
@@ -464,7 +464,7 @@ impl HistoryStore {
             };
             if segments.len() != 5
                 || segments[0] != b"compass"
-                || segments[1] != b"v2"
+                || segments[1] != b"v1"
                 || segments[2] != b"version"
                 || segments[4] != b"manifest"
             {
@@ -706,18 +706,16 @@ impl HistoryStore {
         self.get_without_activity(first)?;
         self.get_without_activity(second)?;
         let roots = |id: &RealizationId| -> Result<Vec<Tree>, HistoryError> {
-            let published = self.get_without_activity(id)?;
-            let mut kinds = vec![
+            let kinds = [
                 b"nodes".as_slice(),
                 b"edges".as_slice(),
                 b"hyperedges".as_slice(),
                 b"analysis".as_slice(),
                 b"metadata".as_slice(),
                 b"manifest".as_slice(),
+                b"program-facts".as_slice(),
+                b"program-summaries".as_slice(),
             ];
-            if published.version.schema_version >= 3 {
-                kinds.extend([b"program-facts".as_slice(), b"program-summaries".as_slice()]);
-            }
             kinds
                 .into_iter()
                 .map(|kind| self.load_realization_root(id, kind))
@@ -898,22 +896,18 @@ impl HistoryStore {
         id: &RealizationId,
         version: &GraphVersion,
     ) -> Result<(), HistoryError> {
-        let mut expected_roots = vec![
+        let expected_roots = [
             (b"nodes".as_slice(), &version.nodes_root),
             (b"edges".as_slice(), &version.edges_root),
             (b"hyperedges".as_slice(), &version.hyperedges_root),
             (b"analysis".as_slice(), &version.analysis_root),
             (b"metadata".as_slice(), &version.metadata_root),
+            (b"program-facts".as_slice(), &version.program_facts_root),
+            (
+                b"program-summaries".as_slice(),
+                &version.program_summaries_root,
+            ),
         ];
-        if version.schema_version >= 3 {
-            expected_roots.extend([
-                (b"program-facts".as_slice(), &version.program_facts_root),
-                (
-                    b"program-summaries".as_slice(),
-                    &version.program_summaries_root,
-                ),
-            ]);
-        }
         for (kind, expected) in expected_roots {
             let actual = self
                 .prolly
@@ -986,11 +980,11 @@ impl HistoryStore {
 }
 
 pub(crate) fn version_root_name(id: &RealizationId, kind: &[u8]) -> Vec<u8> {
-    root_name(&[b"compass", b"v2", b"version", id.as_hex().as_bytes(), kind])
+    root_name(&[b"compass", b"v1", b"version", id.as_hex().as_bytes(), kind])
 }
 
 fn preferred_root_name(commit: &CommitId) -> Vec<u8> {
-    root_name(&[b"compass", b"v2", b"preferred", commit.as_str().as_bytes()])
+    root_name(&[b"compass", b"v1", b"preferred", commit.as_str().as_bytes()])
 }
 
 fn count(value: usize) -> Result<u64, HistoryError> {

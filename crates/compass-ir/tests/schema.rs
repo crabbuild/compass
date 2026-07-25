@@ -144,9 +144,9 @@ fn validation_rejects_duplicate_provider_and_evidence_ids() {
 }
 
 #[test]
-fn public_v2_schema_uses_the_four_coverage_states() {
+fn public_v1_schema_uses_the_four_coverage_states() {
     assert_eq!(compass_ir::PROGRAM_SCHEMA, "http://crab.build/compass/v1");
-    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 3);
+    assert_eq!(compass_ir::PROGRAM_SCHEMA_VERSION, 1);
 
     let mut current = bundle();
     current.modules[0].coverage.insert(
@@ -163,9 +163,7 @@ fn public_v2_schema_uses_the_four_coverage_states() {
     );
     assert!(current.validate().is_ok());
 
-    for pre_release_schema in ["compass.program/1", "compass.program/2"] {
-        let mut pre_release = bundle();
-        pre_release.schema = pre_release_schema.to_owned();
-        assert!(matches!(pre_release.validate(), Err(IrError::Schema(_))));
-    }
+    let mut unsupported = bundle();
+    unsupported.schema = "unsupported".to_owned();
+    assert!(matches!(unsupported.validate(), Err(IrError::Schema(_))));
 }

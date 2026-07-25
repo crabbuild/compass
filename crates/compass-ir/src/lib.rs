@@ -16,4 +16,4 @@ pub use validation::IrError;
 /// Stable serialized Program IR schema identifier.
 pub const PROGRAM_SCHEMA: &str = "http://crab.build/compass/v1";
 /// Numeric Program IR schema version used by caches and history.
-pub const PROGRAM_SCHEMA_VERSION: u32 = 3;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 1;

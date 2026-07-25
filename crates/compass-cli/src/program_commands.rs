@@ -650,7 +650,6 @@ fn program_graph(analysis: &AnalysisBundle) -> Result<GraphDocument, compass_mod
         nodes,
         links,
         extras: BTreeMap::new(),
-        used_legacy_edges_key: false,
     })
 }
 

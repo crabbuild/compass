@@ -241,7 +241,7 @@ Record:
 compass diff OLD NEW --format json
 ```
 
-Uses schema `compass.semantic_diff.report/2`. The report contains ranked
+Uses schema `compass.semantic_diff.report/1`. The report contains ranked
 semantic findings, affected callers/modules, source and graph evidence,
 verification state, completeness, and a collapsed-finding summary. Routine
 symbol churn is collapsed unless `--all` is supplied. Default text output

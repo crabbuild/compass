@@ -56,7 +56,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         },
     )?;
     assert_eq!(
-        GraphDocument::load_for_recluster_compatibility(&destination.join("graph.json"))?,
+        GraphDocument::load_for_recluster(&destination.join("graph.json"))?,
         document
     );
     assert!(destination.join("GRAPH_REPORT.md").is_file());

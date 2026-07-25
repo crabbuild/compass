@@ -29,7 +29,7 @@ fn document_loading_serialization_and_python_strings_cover_boundary_shapes()
                 {"id":"a","label":"Alpha","null":null,"bool":true,"number":7,"array":[1],"object":{"x":1}},
                 {"id":"a","label":"Merged","extra":"kept"}
             ],
-            "edges":[
+            "links":[
                 {"source":"a","target":"ghost","relation":"first","context":"call"},
                 {"source":"a","target":"ghost","relation":"merged","weight":2}
             ],
@@ -37,7 +37,6 @@ fn document_loading_serialization_and_python_strings_cover_boundary_shapes()
         }))?,
     )?;
     let document = GraphDocument::load(&graph_path)?;
-    assert!(document.used_legacy_edges_key);
     assert_eq!(document.extras["custom"], "value");
     assert_eq!(document.nodes[0].string("null"), "");
     assert_eq!(document.nodes[0].string("bool"), "True");
@@ -54,8 +53,8 @@ fn document_loading_serialization_and_python_strings_cover_boundary_shapes()
         "fallback"
     );
     let encoded = serde_json::to_value(&document)?;
-    assert!(encoded.get("edges").is_some());
-    assert!(encoded.get("links").is_none());
+    assert!(encoded.get("edges").is_none());
+    assert!(encoded.get("links").is_some());
 
     let graph = Graph::from_document(document)?;
     assert_eq!((graph.node_count(), graph.edge_count()), (2, 1));
