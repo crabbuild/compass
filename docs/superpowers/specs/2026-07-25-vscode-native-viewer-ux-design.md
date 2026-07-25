@@ -151,7 +151,7 @@ Layouts adapt at content-driven breakpoints. Wide columns use side-by-side navig
 
 ## Testing strategy
 
-Behavior changes follow a red, green, refactor loop. Pure utilities receive unit coverage before component integration.
+Implement each bounded behavior before adding its targeted regression coverage. Pure utilities receive unit coverage before component integration.
 
 Automated coverage includes:
 
