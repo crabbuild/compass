@@ -144,6 +144,11 @@
           "command": "compass.openGraph",
           "when": "view == compass.status",
           "group": "navigation"
+        },
+        {
+          "command": "compass.openHistory",
+          "when": "view == compass.status",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [

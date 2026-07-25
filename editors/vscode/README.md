@@ -35,6 +35,61 @@ offers **Select Compass Binary** instead of displaying raw CLI usage output.
 - Explicitly build missing historical graphs, load exact revisions, and compare
   a commit with any parent using structural and semantic findings.
 
+## Using the Compass activity bar
+
+### Repository
+
+Repository shows the Compass state of every folder in the current VS Code
+workspace. Expand a repository to use the actions that match its current state:
+
+- **Initialize repository** creates the first local graph in
+  `<repository>/compass-out/`.
+- **Open graph** opens the current code graph. Use the right inspector to search,
+  inspect connected nodes, filter communities, and open source. Drag the inspector
+  divider to resize it, or use its header control to collapse and expand it.
+- **Codebase evolution** opens Git and graph-build history.
+- **Update graph** retries a failed build.
+
+Compass discovers the CLI automatically from the configured location and then
+from `PATH`. A CLI row appears only when the executable is missing or incompatible;
+a healthy CLI path does not occupy the Repository view.
+
+### Operations
+
+Operations is the command center. Its groups expose the workflows that can run for
+the current workspace:
+
+- **Build** — initialize a repository, update a graph, and start or stop watch.
+- **Explore** — open the graph, trace a call graph from the cursor, read the
+  architecture flow, or query the codebase.
+- **History** — open Codebase Evolution.
+- **Active operations** — see builds and watchers currently running. Select an
+  active watcher to stop it.
+
+In a multi-root workspace, Compass uses the repository attached to the clicked
+Repository action. Operations asks you to choose a repository when an action could
+apply to more than one folder.
+
+### Git commits and revision graphs
+
+Open **Codebase evolution** from Repository, Operations, the Repository title bar,
+or the Command Palette. The left rail lists every reachable Git commit and shows
+whether its Compass graph is available, not materialized, building, or failed.
+
+Select a commit, then:
+
+1. Choose **Build graph** if the revision is not materialized. Select the configured
+   history profile, a local code-only build, or a profile reused from another
+   revision.
+2. Choose **Open graph** to explore an available revision.
+3. Choose **Compare parent** to see structural and semantic changes after both
+   revision graphs are available.
+4. Choose **Query this revision** to run a query against that exact commit.
+
+Opening Codebase Evolution never builds historical graphs automatically. Revision
+builds are explicit because they can take time and may use a configured semantic
+provider.
+
 Compass runs only in trusted workspaces. Browser-only `vscode.dev` is not
 supported; Remote SSH, WSL, and Dev Containers run Compass on the remote
 extension host.

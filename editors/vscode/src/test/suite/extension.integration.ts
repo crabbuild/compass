@@ -20,5 +20,15 @@ suite("Compass extension", () => {
     ]) {
       assert.ok(commands.has(command), `${command} is registered`);
     }
+    const viewTitle = extension.packageJSON.contributes.menus["view/title"] as Array<{
+      command: string;
+      when: string;
+    }>;
+    assert.ok(
+      viewTitle.some((item) =>
+        item.command === "compass.openHistory" && item.when === "view == compass.status"
+      ),
+      "Codebase Evolution is available from the Repository title"
+    );
   });
 });
