@@ -174,7 +174,7 @@ export default async function generate(): Promise<void> {
     title: "Revision C graph"
   };
   await writeFile(path.join(output, "architecture.html"), harness("architecture", { type: "hydrate", repositoryId: "fixture", model: architecture }));
-  await writeFile(path.join(output, "calls.html"), harness("callGraph", { type: "hydrateCallGraph", repositoryId: "fixture", graph: calls }));
+  await writeFile(path.join(output, "calls.html"), callGraphHarness(calls));
   await writeFile(
     path.join(output, "history.html"),
     historyHarness(
@@ -204,6 +204,32 @@ window.acquireVsCodeApi=()=>({
     }
   }
 })</script><script src="/vscodeGraph.js"></script></body></html>`;
+}
+
+function callGraphHarness(graph: unknown): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass call graph fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.callGraphHostMessages=[];
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.callGraphHostMessages.push(message);
+  if(message.type==="openSource") {
+    window.openedCallGraphSource=message.source;
+    return;
+  }
+  if(message.type==="showOutput") {
+    window.showedCallGraphOutput=true;
+    return;
+  }
+  if(message.type!=="ready" && message.type!=="retry") return;
+  if(new URLSearchParams(window.location.search).has("error")) {
+    setTimeout(()=>window.postMessage({type:"error",message:"No function could be resolved at this cursor position."},"*"),20);
+    return;
+  }
+  setTimeout(()=>window.postMessage({
+    type:"hydrateCallGraph",
+    repositoryId:"fixture",
+    graph:${JSON.stringify(graph)}
+  },"*"),1000);
+}})</script><script src="/callGraph.js"></script></body></html>`;
 }
 
 function communityHarness(overview: unknown, detail: unknown): string {

@@ -25,3 +25,57 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   await expect(page.getByRole("button", { name: /Expand (callers|callees)/ })).toHaveCount(21);
   await expect(page.getByText("Showing 20 of 21 continuations")).toHaveCount(0);
 });
+
+test("call graph uses a balanced cursor-resolution state and recoverable error", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.goto("/calls.html");
+  await expect(
+    page.getByRole("heading", { name: "Resolving the function under your cursor" })
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Locating symbol");
+  await expect(page.getByRole("status")).toContainText("Tracing callers");
+  await expect(page.getByRole("status")).toContainText("Tracing callees");
+
+  const shell = await page.locator(".compass-load-shell").boundingBox();
+  const content = await page.locator(".compass-load-copy").boundingBox();
+  expect(shell).not.toBeNull();
+  expect(content).not.toBeNull();
+  expect(Math.abs(
+    (content!.x + content!.width / 2) - (shell!.x + shell!.width / 2)
+  )).toBeLessThan(2);
+  await expect(page.getByText("Calls from run")).toBeVisible();
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("helper");
+  await page.getByRole("option", { name: /helper/i }).click();
+  const source = page.getByRole("button", {
+    name: "Open source src/lib.rs at bytes 11–20"
+  });
+  await expect(source.locator(".compass-source-range")).toHaveText("Bytes 11–20");
+  await source.click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { openedCallGraphSource?: unknown }
+  ).openedCallGraphSource)).toEqual({
+    file: "src/lib.rs",
+    startByte: 11,
+    endByte: 20
+  });
+
+  await page.goto("/calls.html?error=1");
+  await expect(page.getByRole("alert")).toContainText(
+    "No function could be resolved at this cursor position."
+  );
+  await page.getByRole("button", { name: "Show Compass output" }).click();
+  expect(await page.evaluate(() => (
+    window as typeof window & { showedCallGraphOutput?: boolean }
+  ).showedCallGraphOutput)).toBe(true);
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { callGraphHostMessages: Array<{ type: string }> }
+  ).callGraphHostMessages.map(({ type }) => type))).toEqual([
+    "ready",
+    "showOutput",
+    "retry"
+  ]);
+});

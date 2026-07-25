@@ -10,7 +10,8 @@ export class CallGraphPanel {
   static async open(
     context: vscode.ExtensionContext,
     session: RepositorySession,
-    editor: vscode.TextEditor
+    editor: vscode.TextEditor,
+    output: vscode.OutputChannel
   ): Promise<void> {
     const relative = path.relative(session.root, editor.document.uri.fsPath)
       .split(path.sep)
@@ -30,15 +31,19 @@ export class CallGraphPanel {
       }
     );
     const controller = new AbortController();
+    let rootGeneration = 0;
     panel.onDidDispose(() => controller.abort());
     panel.webview.html = html(context, panel.webview);
     panel.webview.onDidReceiveMessage(async (message) => {
-      if (message?.type === "ready") {
+      if (message?.type === "ready" || message?.type === "retry") {
+        rootGeneration += 1;
         await send([
           "--at", `${relative}:${byte}`,
           "--direction", "both",
           "--depth", "2"
-        ], "hydrateCallGraph");
+        ], "hydrateCallGraph", rootGeneration);
+      } else if (message?.type === "showOutput") {
+        output.show(true);
       } else if (message?.type === "expand"
         && typeof message.symbol === "string"
         && ["callers", "callees", "both"].includes(message.direction)
@@ -47,13 +52,17 @@ export class CallGraphPanel {
           "--symbol", message.symbol,
           "--direction", message.direction,
           "--depth", String(message.depth)
-        ], "mergeCallGraph");
+        ], "mergeCallGraph", rootGeneration);
       } else if (message?.type === "openSource") {
         await openGraphSource(session, message.repositoryId, message.source);
       }
     });
 
-    async function send(rootArgs: string[], type: string): Promise<void> {
+    async function send(
+      rootArgs: string[],
+      type: "hydrateCallGraph" | "mergeCallGraph",
+      generation: number
+    ): Promise<void> {
       try {
         const graphArgs = [
           "program", "call-graph",
@@ -70,6 +79,7 @@ export class CallGraphPanel {
           CallGraphResponseSchema,
           controller.signal
         );
+        if (generation !== rootGeneration || controller.signal.aborted) return;
         await panel.webview.postMessage({
           type,
           requestId: randomUUID(),
@@ -77,9 +87,12 @@ export class CallGraphPanel {
           graph
         });
       } catch (error) {
+        if (generation !== rootGeneration || controller.signal.aborted) return;
+        const message = error instanceof Error ? error.message : String(error);
+        output.appendLine(`[error] Call graph failed for ${relative}:${byte}: ${message}`);
         await panel.webview.postMessage({
           type: "error",
-          message: error instanceof Error ? error.message : String(error)
+          message
         });
       }
     }
@@ -98,6 +111,6 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>Compass Call Graph</title>
-</head><body><div id="root" role="status">Resolving the function under your cursor…</div>
+</head><body><div id="root"></div>
 <script nonce="${nonce}" src="${script}"></script></body></html>`;
 }
