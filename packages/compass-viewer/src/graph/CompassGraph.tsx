@@ -1,7 +1,19 @@
-import { useCallback, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties
+} from "react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import { GraphInspector } from "./GraphInspector";
 import { GraphToolbar } from "./GraphToolbar";
+import { InspectorResizeHandle } from "./InspectorResizeHandle";
+import {
+  normalizeInspectorLayout,
+  type InspectorLayout
+} from "./inspectorLayout";
 import { graphNodeActivation } from "./nodeActivation";
 import { NodeHoverCard, type GraphHover } from "./NodeHoverCard";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
@@ -12,21 +24,35 @@ export type GraphHost = {
   openCommunity?(communityId: number): void;
 };
 
-export function CompassGraph({
-  model,
-  host,
-  communityDetail,
-  communityLoading,
-  communityError,
-  onBackToOverview
-}: {
+export type CompassGraphProps = {
   model: GraphViewModel;
   host: GraphHost;
   communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
-}) {
+  initialInspectorLayout?: Partial<InspectorLayout> | undefined;
+  onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
+};
+
+export function CompassGraph({
+  model,
+  host,
+  communityDetail,
+  communityLoading,
+  communityError,
+  onBackToOverview,
+  initialInspectorLayout,
+  onInspectorLayoutChange
+}: CompassGraphProps) {
+  const [inspectorLayout, setInspectorLayout] = useState(
+    () => normalizeInspectorLayout(initialInspectorLayout)
+  );
+  const updateInspectorLayout = useCallback((next: InspectorLayout) => {
+    const normalized = normalizeInspectorLayout(next);
+    setInspectorLayout(normalized);
+    onInspectorLayoutChange?.(normalized);
+  }, [onInspectorLayoutChange]);
   const activeModel = communityDetail?.model ?? model;
   const viewKey = communityDetail ? `community-${communityDetail.communityId}` : "overview";
   return (
@@ -38,6 +64,8 @@ export function CompassGraph({
       communityLoading={communityLoading}
       communityError={communityError}
       onBackToOverview={communityDetail ? onBackToOverview : undefined}
+      inspectorLayout={inspectorLayout}
+      onInspectorLayoutChange={updateInspectorLayout}
     />
   );
 }
@@ -48,7 +76,9 @@ function CompassGraphView({
   detailCommunityId,
   communityLoading,
   communityError,
-  onBackToOverview
+  onBackToOverview,
+  inspectorLayout,
+  onInspectorLayoutChange
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -56,6 +86,8 @@ function CompassGraphView({
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
+  inspectorLayout: InspectorLayout;
+  onInspectorLayoutChange(layout: InspectorLayout): void;
 }) {
   const [state, dispatch] = useReducer(graphReducer, initialGraphState);
   const [hover, setHover] = useState<GraphHover | null>(null);
@@ -113,7 +145,13 @@ function CompassGraphView({
     : state.physicsRunning ? "Layout settling" : "Layout paused";
 
   return (
-    <div className="compass-workspace">
+    <div
+      className="compass-workspace"
+      data-inspector-collapsed={inspectorLayout.collapsed}
+      style={{
+        "--compass-inspector-width": `${inspectorLayout.width}px`
+      } as CSSProperties}
+    >
       <main className="compass-graph-stage">
         <VisNetworkCanvas
           ref={canvasRef}
@@ -157,6 +195,15 @@ function CompassGraphView({
         )}
         {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
       </main>
+      {!inspectorLayout.collapsed && (
+        <InspectorResizeHandle
+          width={inspectorLayout.width}
+          onResize={(width) => onInspectorLayoutChange({
+            ...inspectorLayout,
+            width
+          })}
+        />
+      )}
       <GraphInspector
         model={model}
         selected={selected}
@@ -175,6 +222,11 @@ function CompassGraphView({
         onSetAllVisible={(visible) => dispatch({
           type: "setHiddenCommunities",
           communityIds: visible ? [] : model.communities.map((community) => community.id)
+        })}
+        collapsed={inspectorLayout.collapsed}
+        onToggleCollapsed={() => onInspectorLayoutChange({
+          ...inspectorLayout,
+          collapsed: !inspectorLayout.collapsed
         })}
       />
     </div>

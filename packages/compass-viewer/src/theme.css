@@ -108,11 +108,15 @@ button:not(:disabled),
 
 .compass-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 8px var(--compass-inspector-width, 340px);
   height: 100vh;
   min-height: 30rem;
   overflow: hidden;
   background: var(--compass-canvas);
+}
+
+.compass-workspace[data-inspector-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr) 48px;
 }
 
 .compass-graph-stage {
@@ -238,10 +242,41 @@ button:not(:disabled),
 .compass-search-field input:focus-visible,
 .compass-search-item:focus-visible,
 .compass-inspector-action:focus-visible,
+.compass-inspector-disclosure:focus-visible,
+.compass-inspector-resizer:focus-visible,
 .compass-neighbor-link:focus-visible,
 .compass-community-item:focus-within {
   outline: 2px solid var(--compass-focus);
   outline-offset: 2px;
+}
+
+.compass-inspector-resizer {
+  position: relative;
+  z-index: 6;
+  min-width: 8px;
+  border: 0;
+  outline: none;
+  background: var(--compass-panel);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.compass-inspector-resizer span {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 2px;
+  height: 42px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--compass-line-strong);
+  transition: height 0.16s ease, background 0.16s ease;
+}
+
+.compass-inspector-resizer:hover span,
+.compass-inspector-resizer:focus-visible span {
+  height: 68px;
+  background: var(--compass-focus);
 }
 
 .compass-graph-inspector {
@@ -260,6 +295,12 @@ button:not(:disabled),
   box-shadow: -22px 0 60px color-mix(in srgb, #000 18%, transparent);
 }
 
+.compass-graph-inspector-collapsed {
+  align-items: center;
+  border-left: 1px solid var(--compass-line);
+  box-shadow: -12px 0 38px color-mix(in srgb, #000 14%, transparent);
+}
+
 .compass-inspector-header {
   display: flex;
   min-height: 70px;
@@ -267,6 +308,11 @@ button:not(:disabled),
   gap: 11px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-inspector-title {
+  min-width: 0;
+  flex: 1;
 }
 
 .compass-inspector-header strong,
@@ -306,6 +352,45 @@ button:not(:disabled),
 .compass-product-mark svg {
   width: 19px;
   height: 19px;
+}
+
+.compass-inspector-disclosure {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  outline: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.compass-inspector-disclosure:hover {
+  border-color: var(--compass-line);
+  background: var(--compass-focus-soft);
+  color: var(--foreground);
+}
+
+.compass-inspector-disclosure svg {
+  width: 17px;
+  height: 17px;
+}
+
+.compass-inspector-expand {
+  margin-top: 18px;
+}
+
+.compass-inspector-rail-label {
+  margin-top: 16px;
+  color: var(--compass-faint);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
 }
 
 .compass-inspector-search {
@@ -729,8 +814,10 @@ button:not(:disabled),
 
 body.vscode-high-contrast .compass-glass-panel,
 body.vscode-high-contrast .compass-graph-inspector,
+body.vscode-high-contrast .compass-inspector-resizer,
 body.vscode-high-contrast-light .compass-glass-panel,
-body.vscode-high-contrast-light .compass-graph-inspector {
+body.vscode-high-contrast-light .compass-graph-inspector,
+body.vscode-high-contrast-light .compass-inspector-resizer {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--compass-focus));
 }
@@ -746,12 +833,21 @@ body.vscode-high-contrast-light .compass-graph-inspector {
 }
 
 @media (max-width: 760px) {
-  .compass-workspace {
+  .compass-workspace,
+  .compass-workspace[data-inspector-collapsed="true"] {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(360px, 62vh) minmax(280px, 40vh);
     height: auto;
     min-height: 100vh;
     overflow: auto;
+  }
+
+  .compass-workspace[data-inspector-collapsed="true"] {
+    grid-template-rows: minmax(360px, calc(100vh - 48px)) 48px;
+  }
+
+  .compass-inspector-resizer {
+    display: none;
   }
 
   .compass-graph-inspector {
@@ -760,6 +856,23 @@ body.vscode-high-contrast-light .compass-graph-inspector {
     border-left: 0;
     border-radius: 18px 18px 0 0;
     box-shadow: 0 -22px 58px color-mix(in srgb, #000 35%, transparent);
+  }
+
+  .compass-graph-inspector-collapsed {
+    min-height: 48px;
+    flex-direction: row;
+    justify-content: center;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .compass-inspector-expand {
+    margin-top: 0;
+  }
+
+  .compass-inspector-rail-label {
+    margin-top: 0;
+    margin-left: 10px;
+    writing-mode: horizontal-tb;
   }
 
   .compass-graph-toolbar {

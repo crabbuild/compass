@@ -1,5 +1,10 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
-import { CompassIcon, SearchIcon } from "lucide-react";
+import {
+  CompassIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  SearchIcon
+} from "lucide-react";
 import type { GraphNode, GraphViewModel, SourceLocation } from "../contracts/graph";
 import { navigableSource } from "./sourceNavigation";
 
@@ -22,7 +27,9 @@ export function GraphInspector({
   onOpenSource,
   onOpenCommunity,
   onToggleCommunity,
-  onSetAllVisible
+  onSetAllVisible,
+  collapsed,
+  onToggleCollapsed
 }: {
   model: GraphViewModel;
   selected: GraphNode | undefined;
@@ -36,6 +43,8 @@ export function GraphInspector({
   onOpenCommunity?: ((communityId: number) => void) | undefined;
   onToggleCommunity(communityId: number): void;
   onSetAllVisible(visible: boolean): void;
+  collapsed: boolean;
+  onToggleCollapsed(): void;
 }) {
   const [activeResult, setActiveResult] = useState(0);
   const source = selected ? navigableSource(selected) : undefined;
@@ -71,14 +80,43 @@ export function GraphInspector({
     }
   };
 
+  if (collapsed) {
+    return (
+      <aside
+        className="compass-graph-inspector compass-graph-inspector-collapsed"
+        aria-label="Graph inspector"
+      >
+        <button
+          className="compass-inspector-disclosure compass-inspector-expand"
+          type="button"
+          aria-label="Expand graph inspector"
+          title="Expand graph inspector"
+          onClick={onToggleCollapsed}
+        >
+          <PanelRightOpenIcon aria-hidden="true" />
+        </button>
+        <span className="compass-inspector-rail-label" aria-hidden="true">Inspector</span>
+      </aside>
+    );
+  }
+
   return (
     <aside className="compass-graph-inspector" aria-label="Graph inspector">
       <header className="compass-inspector-header">
         <span className="compass-product-mark" aria-hidden="true"><CompassIcon /></span>
-        <span>
+        <span className="compass-inspector-title">
           <strong>Compass</strong>
           <small>{model.title}</small>
         </span>
+        <button
+          className="compass-inspector-disclosure"
+          type="button"
+          aria-label="Collapse graph inspector"
+          title="Collapse graph inspector"
+          onClick={onToggleCollapsed}
+        >
+          <PanelRightCloseIcon aria-hidden="true" />
+        </button>
       </header>
 
       <div className="compass-inspector-search" role="search">
