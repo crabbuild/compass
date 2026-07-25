@@ -72,6 +72,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Build and maintain",
         commands: &[
+            "init",
             "update",
             "extract",
             "watch",
@@ -131,6 +132,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "init",
+        "Configure project scope and build the first knowledge graph",
+        ["compass init [PATH] [OPTIONS]"],
+        "Arguments:\n  [PATH]                       Project root [default: .]\n\nOptions:\n  --include <PATH_OR_GLOB>     Include a file, folder, or glob; repeatable\n  --exclude <GLOB>             Exclude a project-relative glob; repeatable\n  --yes                        Accept the preview without prompting\n  --force                      Replace existing .compass/config.toml\n\nExamples:\n  compass init\n  compass init . --include src --exclude '**/generated/**' --yes\n\nNotes:\n  Init writes .compass/config.toml and performs a forced structural build."
+    ),
     page!(
         "update",
         "Incrementally refresh the local knowledge graph",

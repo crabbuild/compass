@@ -7,6 +7,7 @@ mod history_build;
 mod history_commands;
 mod hook_commands;
 mod ingest_commands;
+mod init_commands;
 mod install_commands;
 mod integration_commands;
 mod label_commands;
@@ -35,7 +36,9 @@ use compass_core::{
     diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
     watch_local_graph,
 };
-use compass_files::{DetectOptions, Manifest, ManifestKind, detect, write_bytes_atomic};
+use compass_files::{
+    BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect, write_bytes_atomic,
+};
 use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
@@ -56,6 +59,7 @@ use compass_semantic::{
 };
 
 pub use help::HelpStyle;
+pub use init_commands::run_init;
 
 static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
@@ -211,6 +215,10 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "diagnose" => command_diagnose(frontend, &args),
         "update" => command_build(frontend, &args, false),
         "extract" => command_build(frontend, &args, true),
+        "init" if frontend == Frontend::Compass => Outcome::failure(
+            "error: init requires terminal input and must be run from the compass binary"
+                .to_owned(),
+        ),
         "watch" if frontend == Frontend::Compass => Outcome::failure(
             "error: watch is a streaming command and must be run from the compass binary"
                 .to_owned(),
@@ -759,6 +767,9 @@ fn parse_watch_options(
         index += 1;
     }
     let mut options = WatchOptions::new(root.unwrap_or_else(|| PathBuf::from(".")));
+    options.build.scope = ProjectConfig::load(&options.build.root)
+        .map_err(|error| format!("error: {error}"))?
+        .map_or_else(BuildScope::default, |config| config.build);
     options.debounce = debounce;
     options.force_polling = force_polling;
     options.build.output_root = output_root;
@@ -1684,6 +1695,13 @@ fn command_build_with_validation(
         return Outcome::failure(format!("error: path not found: {}", root.display()));
     }
     let mut options = BuildOptions::new(&root);
+    if frontend == Frontend::Compass {
+        options.scope = match ProjectConfig::load(&root) {
+            Ok(Some(config)) => config.build,
+            Ok(None) => BuildScope::default(),
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+    }
     options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
     options.force = force;
@@ -2049,6 +2067,7 @@ fn pending_semantic_count(options: &BuildOptions, incremental: bool) -> usize {
         gitignore: options.gitignore,
         ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
+        scope: options.scope.clone(),
         output_name: output_name.clone(),
         cache_root: Some(output_root.clone()),
         google_workspace: options.google_workspace,
@@ -2119,6 +2138,7 @@ fn graphify_extract_provider_failure(
         gitignore: options.gitignore,
         ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
+        scope: options.scope.clone(),
         output_name,
         ..DetectOptions::default()
     };
@@ -2441,6 +2461,7 @@ fn build_semantic_graph(
         gitignore: options.gitignore,
         ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
+        scope: options.scope.clone(),
         output_name,
         ..DetectOptions::default()
     };

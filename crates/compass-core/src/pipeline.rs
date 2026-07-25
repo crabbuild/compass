@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use compass_files::{
-    BuildGuard, Cache, CacheKind, DetectOptions, Detection, IgnorePolicy, Manifest, ManifestKind,
-    detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
+    BuildGuard, BuildScope, Cache, CacheKind, DetectOptions, Detection, IgnorePolicy, Manifest,
+    ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
     ClusterOptions, EntityTiebreaker, build_with_tiebreaker as build_document, cluster,
@@ -37,6 +37,7 @@ pub struct BuildOptions {
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
+    pub scope: BuildScope,
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub google_workspace: bool,
@@ -88,6 +89,7 @@ impl BuildOptions {
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
+            scope: BuildScope::default(),
             resolution: 1.0,
             exclude_hubs: None,
             google_workspace: false,
@@ -302,6 +304,7 @@ fn build_graph_inner(
         gitignore: options.gitignore,
         ignore_policy: options.ignore_policy,
         extra_excludes: options.extra_excludes.clone(),
+        scope: options.scope.clone(),
         output_name: output_name.clone(),
         cache_root: Some(output_root.clone()),
         ..DetectOptions::default()

@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::{FileError, StatHashIndex, io_error};
+use crate::{BuildScope, FileError, ScopeMatcher, StatHashIndex, io_error};
 
 const CORPUS_WARN_THRESHOLD: u64 = 50_000;
 const CORPUS_UPPER_THRESHOLD: u64 = 500_000;
@@ -145,6 +145,7 @@ pub struct DetectOptions {
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
+    pub scope: BuildScope,
     pub output_name: String,
     pub cache_root: Option<PathBuf>,
     pub google_workspace: bool,
@@ -159,6 +160,7 @@ impl Default for DetectOptions {
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
+            scope: BuildScope::default(),
             output_name: std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()),
             cache_root: None,
             google_workspace: false,
@@ -205,6 +207,7 @@ pub struct WatchPathFilter {
     lexical_root: PathBuf,
     output_name: String,
     patterns: Vec<IgnorePattern>,
+    scope: ScopeMatcher,
 }
 
 impl WatchPathFilter {
@@ -222,6 +225,7 @@ impl WatchPathFilter {
             parse_ignore_line(raw).and_then(|line| IgnorePattern::new(root.clone(), &line))
         }));
         Ok(Self {
+            scope: ScopeMatcher::new(&root, &options.scope)?,
             root,
             lexical_root,
             output_name: options.output_name.clone(),
@@ -259,7 +263,9 @@ impl WatchPathFilter {
         {
             return false;
         }
-        classify_file(&absolute).is_some() && !ignored(&absolute, &self.root, &self.patterns)
+        classify_file(&absolute).is_some()
+            && self.scope.allows(&absolute)
+            && !ignored(&absolute, &self.root, &self.patterns)
     }
 }
 
@@ -835,6 +841,7 @@ impl WalkState<'_> {
 
 pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileError> {
     let root = fs::canonicalize(root).map_err(|source| io_error(root, source))?;
+    let scope = ScopeMatcher::new(&root, &options.scope)?;
     let mut patterns = Vec::new();
     if options.scan_filesystem {
         patterns = initial_ignore_patterns(&root, options.gitignore, options.ignore_policy);
@@ -877,6 +884,9 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
             state.ignored.push(path.to_string_lossy().into_owned());
             continue;
         }
+        if !in_memory && !scope.allows(&path) {
+            continue;
+        }
         if !path_is_under(&path, &root) {
             state.skipped_sensitive.push(format!(
                 "{} [symlink target outside scan root]",
@@ -915,6 +925,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         if !path_is_under(path, &root)
             || has_noise_ancestor(path, &root, &options.output_name)
             || ignored(path, &root, &state.patterns)
+            || !scope.allows(path)
             || sensitive(path)
         {
             continue;

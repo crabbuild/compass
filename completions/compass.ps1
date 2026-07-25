@@ -2,7 +2,9 @@ Register-ArgumentCompleter -Native -CommandName compass -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
     $tokens = $commandAst.CommandElements | ForEach-Object { $_.Extent.Text }
     $values = if ($tokens.Count -le 1) {
-        @('update', 'extract', 'watch', 'serve', 'cluster-only', 'query', 'path', 'explain', 'affected', 'tree', 'export', 'benchmark', 'diagnose', 'merge-graphs', 'history', '--help', '--version')
+        @('init', 'update', 'extract', 'watch', 'serve', 'cluster-only', 'query', 'path', 'explain', 'affected', 'tree', 'export', 'benchmark', 'diagnose', 'merge-graphs', 'history', '--help', '--version')
+    } elseif ($tokens -contains 'init') {
+        @('--include', '--exclude', '--yes', '--force', '--help')
     } elseif (($tokens -contains 'history') -and $tokens.Count -le 2) {
         @('enable', 'disable', 'status', 'build', 'rebuild', 'list', 'show', 'prefer', 'export', 'gc')
     } elseif (($tokens -contains 'history') -and ($tokens -contains 'build')) {

@@ -56,6 +56,29 @@ Do not point two concurrent writers at one output directory.
 
 ## Build configuration
 
+Initialize a reviewable repository scope with:
+
+```bash
+compass init . --include src --exclude '**/generated/**' --yes
+```
+
+Compass writes:
+
+```toml
+version = 1
+
+[build]
+include = ["src/"]
+exclude = ["**/generated/**"]
+```
+
+An empty include list means the whole eligible repository. Paths are
+project-root-relative; absolute paths and root escapes are rejected.
+`update`, `extract`, and `watch` load this file automatically. Filtering is
+applied as built-in safety skips, Git ignores, configured includes, configured
+excludes, then command-line exclusions. Invalid configuration stops the build
+instead of silently widening its scope.
+
 Common explicit options:
 
 | Concern | Options |

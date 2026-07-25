@@ -85,6 +85,7 @@ debug a graph result; it should not silently replace the graph-first workflow.
 
 Choose the least expensive command that satisfies the request:
 
+- `compass init` to choose and persist repository scope before the first build.
 - `compass update .` for local, deterministic structural extraction.
 - `compass extract PATH --code-only` for explicit no-model extraction with
   optional native integrations.

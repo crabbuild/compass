@@ -21,6 +21,18 @@ fn main() -> ExitCode {
             ));
         }
     }
+    if !compatibility && arguments.first().and_then(|value| value.to_str()) == Some("init") {
+        let stdin = io::stdin();
+        let input_is_terminal = stdin.is_terminal();
+        let mut locked = stdin.lock();
+        return ExitCode::from(compass_cli::run_init(
+            &arguments[1..],
+            &mut locked,
+            &mut io::stdout(),
+            &mut io::stderr(),
+            input_is_terminal,
+        ));
+    }
     if arguments.first().and_then(|value| value.to_str()) == Some("watch") {
         if compatibility {
             return ExitCode::from(compass_cli::run_graphify_watch(
