@@ -41,6 +41,7 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
             ("query", true),
             ("history", true),
             ("semantic_diff", true),
+            ("community_detail", true),
         ]),
     };
     match serde_json::to_string(&report) {

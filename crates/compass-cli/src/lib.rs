@@ -48,8 +48,9 @@ use compass_model::GraphError;
 use compass_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
     TreeOptions, WikiOptions, callflow_view_model, export_obsidian, export_wiki,
-    graph_view_model_document, node_filenames, write_callflow_html, write_canvas, write_cypher,
-    write_graphml, write_html, write_svg, write_tree_html,
+    graph_community_view_model_document, graph_view_model_document, node_filenames,
+    write_callflow_html, write_canvas, write_cypher, write_graphml, write_html, write_svg,
+    write_tree_html,
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
@@ -3149,6 +3150,7 @@ fn command_export(args: &[String]) -> Outcome {
     if !matches!(
         format,
         "html"
+            | "json"
             | "viewer-json"
             | "callflow-html"
             | "callflow-json"
@@ -3181,6 +3183,7 @@ fn command_export(args: &[String]) -> Outcome {
     let mut max_diagram_nodes = 18_usize;
     let mut max_diagram_edges = 24_usize;
     let mut node_limit = 5000_isize;
+    let mut community = None;
     let mut no_viz = false;
     let mut obsidian_dir = default_graph_path()
         .parent()
@@ -3304,6 +3307,46 @@ fn command_export(args: &[String]) -> Outcome {
                 node_limit = value;
                 index += 2;
             }
+            "--community" if matches!(format, "json" | "viewer-json") => {
+                let Some(value) = next().and_then(|value| value.parse::<usize>().ok()) else {
+                    return Outcome::failure(
+                        "error: --community must be a non-negative integer".to_owned(),
+                    );
+                };
+                if community.is_some() {
+                    return Outcome::failure("error: duplicate --community".to_owned());
+                }
+                community = Some(value);
+                index += 2;
+            }
+            value
+                if matches!(format, "json" | "viewer-json")
+                    && value.starts_with("--community=") =>
+            {
+                let Some(value) = value
+                    .strip_prefix("--community=")
+                    .and_then(|value| value.parse::<usize>().ok())
+                else {
+                    return Outcome::failure(
+                        "error: --community must be a non-negative integer".to_owned(),
+                    );
+                };
+                if community.is_some() {
+                    return Outcome::failure("error: duplicate --community".to_owned());
+                }
+                community = Some(value);
+                index += 1;
+            }
+            "--community" => {
+                return Outcome::failure(
+                    "error: --community is only valid with export json".to_owned(),
+                );
+            }
+            value if value.starts_with("--community=") => {
+                return Outcome::failure(
+                    "error: --community is only valid with export json".to_owned(),
+                );
+            }
             "--diagram-scale" => {
                 let Some(value) = next().and_then(|value| value.parse::<f64>().ok()) else {
                     return Outcome::failure("error: --diagram-scale must be a number".to_owned());
@@ -3317,6 +3360,9 @@ fn command_export(args: &[String]) -> Outcome {
             }
             "-h" | "--help" if matches!(format, "callflow-html" | "callflow-json") => {
                 return Outcome::success(callflow_help());
+            }
+            "-h" | "--help" if matches!(format, "json" | "viewer-json") => {
+                return Outcome::success(export_json_help());
             }
             value
                 if matches!(format, "callflow-html" | "callflow-json")
@@ -3349,6 +3395,9 @@ fn command_export(args: &[String]) -> Outcome {
             report_path = output_dir.join("GRAPH_REPORT.md");
         }
     }
+    if matches!(format, "json" | "viewer-json") && node_limit < 1 {
+        return Outcome::failure("error: --node-limit must be a positive integer".to_owned());
+    }
     let mut inputs = match ExportInputs::load(&graph_path) {
         Ok(inputs) => inputs,
         Err(GraphError::NotFound(_)) => {
@@ -3371,22 +3420,36 @@ fn command_export(args: &[String]) -> Outcome {
     let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
     let result = match format {
         "html" => export_html(&inputs, output_dir, no_viz, node_limit),
-        "viewer-json" => graph_view_model_document(
-            &inputs.document,
-            &inputs.communities,
-            &graph_path,
-            &HtmlOptions {
+        "json" | "viewer-json" => {
+            let options = HtmlOptions {
                 community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
                 member_counts: None,
                 node_limit: Some(node_limit),
                 learning_overlay: None,
-            },
-        )
-        .map_err(|error| error.to_string())
-        .and_then(|model| {
-            model.ok_or_else(|| "graph has no renderable community overview".to_owned())
-        })
-        .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string())),
+            };
+            let model = if let Some(community) = community {
+                graph_community_view_model_document(
+                    &inputs.document,
+                    &inputs.communities,
+                    &graph_path,
+                    &options,
+                    community,
+                )
+                .map_err(|error| error.to_string())
+            } else {
+                graph_view_model_document(
+                    &inputs.document,
+                    &inputs.communities,
+                    &graph_path,
+                    &options,
+                )
+                .map_err(|error| error.to_string())
+                .and_then(|model| {
+                    model.ok_or_else(|| "graph has no renderable community overview".to_owned())
+                })
+            };
+            model.and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
+        }
         "callflow-html" => export_callflow(
             &inputs,
             &graph_path,
@@ -3797,7 +3860,11 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: graphify export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+    "Usage: graphify export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  json      [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+}
+
+fn export_json_help() -> String {
+    "Usage: compass export json [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  --graph PATH       graph JSON (default compass-out/graph.json)\n  --labels PATH      community-label JSON\n  --node-limit N     maximum overview or community-detail nodes (default 5000)\n  --community ID     export one complete community detail graph".to_owned()
 }
 
 fn callflow_help() -> String {

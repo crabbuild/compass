@@ -34,7 +34,10 @@ pub use graphml::{graphml_document, write_graphml};
 pub use history_bundle::{
     DerivedArtifactRequest, HistoryBundleInput, SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
 };
-pub use html::{HtmlOptions, HtmlRender, graph_view_model_document, html_document, write_html};
+pub use html::{
+    HtmlOptions, HtmlRender, graph_community_view_model_document, graph_view_model_document,
+    html_document, write_html,
+};
 pub use json::{JsonExportOptions, export_json_value, write_json};
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
 pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
@@ -62,6 +65,20 @@ pub enum OutputError {
         "graph has {nodes} nodes - too large for HTML viz (limit: {limit}). Use --no-viz, raise GRAPHIFY_VIZ_NODE_LIMIT, or reduce input size."
     )]
     HtmlTooLarge { nodes: usize, limit: isize },
+    #[error("community {community} does not exist in this graph")]
+    UnknownCommunity { community: usize },
+    #[error(
+        "community {community} is incomplete because {missing} declared member nodes are missing from the graph; rebuild the graph before exporting this community"
+    )]
+    IncompleteCommunity { community: usize, missing: usize },
+    #[error(
+        "community {community} has {nodes} nodes, exceeding the detail limit of {limit}; increase the graph node limit to explore it"
+    )]
+    CommunityTooLarge {
+        community: usize,
+        nodes: usize,
+        limit: isize,
+    },
     #[error("graph.json contains 0 nodes")]
     EmptyCallflowGraph,
     #[error("no sections defined")]

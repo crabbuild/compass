@@ -302,7 +302,7 @@ const PAGES: &[Page] = &[
         "history export",
         "Restore a historical graph or Compass output bundle",
         ["compass history export <REV> --format <FORMAT> --output <PATH>"],
-        "Arguments:\n  <REV>                         Git revision\n\nOptions:\n  --format <graph-json|compass-out> Required export format\n  --output <PATH>                Required destination\n\nExamples:\n  compass history export HEAD~10 --format graph-json --output old.json\n  compass history export v1.2.0 --format compass-out --output release-graph\n\nNotes:\n  A compass-out destination must not already exist."
+        "Arguments:\n  <REV>                              Git revision\n\nOptions:\n  --format <graph-json|json|compass-out> Required export format\n  --community <ID>                   Export one JSON community detail\n  --node-limit <N>                   Maximum JSON overview or detail nodes [default: 5000]\n  --output <PATH>                     Required destination\n\nExamples:\n  compass history export HEAD~10 --format json --output old-view.json\n  compass history export HEAD~10 --format json --community 7 --node-limit 10000 --output old-community.json\n  compass history export v1.2.0 --format compass-out --output release-graph\n\nNotes:\n  viewer-json remains a deprecated compatibility alias. A compass-out destination must not already exist."
     ),
     page!(
         "history gc",
@@ -326,7 +326,13 @@ const PAGES: &[Page] = &[
         "export",
         "Export or publish the graph in another format",
         ["compass export <FORMAT> [OPTIONS]"],
-        "Examples:\n  compass export html\n  compass export viewer-json --graph compass-out/graph.json\n  compass export callflow-json --graph compass-out/graph.json\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
+        "Examples:\n  compass export html\n  compass export json --graph compass-out/graph.json\n  compass export json --community 7\n  compass export callflow-json --graph compass-out/graph.json\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
+    ),
+    page!(
+        "export json",
+        "Export the versioned graph presentation model",
+        ["compass export json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum overview or detail nodes [default: 5000]\n  --community <ID>        Export one complete community detail\n\nExamples:\n  compass export json\n  compass export json --community 7\n\nNotes:\n  The payload schema is compass.viewer.graph/1. viewer-json remains a deprecated compatibility alias."
     ),
     page!(
         "export html",

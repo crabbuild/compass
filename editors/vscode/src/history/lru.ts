@@ -19,6 +19,9 @@ export class LruCache<K, V> {
       this.values.delete(oldest);
     }
   }
+  delete(key: K): void {
+    this.values.delete(key);
+  }
   keys(): K[] {
     return [...this.values.keys()].reverse();
   }

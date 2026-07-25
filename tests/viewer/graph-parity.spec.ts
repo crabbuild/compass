@@ -103,3 +103,61 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
   const dark = await stage.evaluate((element) => getComputedStyle(element).backgroundImage);
   expect(light).not.toBe(dark);
 });
+
+test("community double-click enters lazy detail, source opens, and Back restores overview", async ({
+  page
+}) => {
+  await page.goto("/community.html");
+  const search = page.getByRole("combobox", { name: "Search graph nodes" });
+  await search.fill("Core");
+  await page.getByRole("option", { name: /Core/i }).click();
+  await page.waitForTimeout(300);
+  await page.locator("canvas").dblclick();
+  await expect.poll(() => page.evaluate(
+    () => (window as typeof window & { openedCommunity?: number }).openedCommunity
+  )).toBe(0);
+  await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
+
+  await search.fill("run");
+  await page.getByRole("option", { name: /^run/i }).click();
+  await page.waitForTimeout(300);
+  await page.locator("canvas").dblclick();
+  await expect.poll(() => page.evaluate(
+    () => (window as typeof window & { openedSource?: unknown }).openedSource
+  )).toEqual({ file: "src/lib.rs", startLine: 1, endLine: 3 });
+
+  await page.getByRole("button", { name: "Back to community overview" }).click();
+  await expect(page.getByRole("button", { name: "Back to community overview" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Communities" })).toBeVisible();
+  await expect(page.getByText("Data", { exact: true })).toBeVisible();
+});
+
+test("community failure preserves the overview, suppresses duplicates, and permits retry", async ({
+  page
+}) => {
+  await page.goto("/community.html");
+  const search = page.getByRole("combobox", { name: "Search graph nodes" });
+  await search.fill("Data");
+  await page.getByRole("option", { name: /Data/i }).click();
+  const openCommunity = page.getByRole("button", { name: "Open community" });
+  await openCommunity.click();
+  await openCommunity.click();
+  await page.waitForTimeout(50);
+  expect(await page.evaluate(
+    () => (window as typeof window & { communityRequestCount?: number }).communityRequestCount
+  )).toBe(1);
+
+  await expect(page.getByRole("alert")).toContainText("Community detail failed");
+  await expect(
+    page.getByRole("complementary", { name: "Graph inspector" })
+      .getByText("Core", { exact: true })
+      .last()
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to community overview" })).toHaveCount(0);
+
+  await openCommunity.click();
+  await expect.poll(() => page.evaluate(
+    () => (window as typeof window & { communityRequestCount?: number }).communityRequestCount
+  )).toBe(2);
+  await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
+});

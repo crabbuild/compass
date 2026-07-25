@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -119,6 +119,106 @@ pub fn graph_view_model_document(
         options,
         false,
     )))
+}
+
+pub fn graph_community_view_model_document(
+    document: &GraphDocument,
+    communities: &Communities,
+    output_path: impl AsRef<Path>,
+    options: &HtmlOptions<'_>,
+    community: usize,
+) -> Result<GraphViewModel, OutputError> {
+    let members = communities
+        .get(&community)
+        .ok_or(OutputError::UnknownCommunity { community })?;
+    let member_ids = members.iter().map(String::as_str).collect::<HashSet<_>>();
+    let nodes = document
+        .nodes
+        .iter()
+        .filter(|node| member_ids.contains(node.id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if nodes.is_empty() {
+        return Err(OutputError::UnknownCommunity { community });
+    }
+    if nodes.len() != member_ids.len() {
+        return Err(OutputError::IncompleteCommunity {
+            community,
+            missing: member_ids.len().saturating_sub(nodes.len()),
+        });
+    }
+    let selected_ids = nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let limit = options.node_limit.unwrap_or_else(viz_node_limit);
+    if nodes.len() as isize > limit {
+        return Err(OutputError::CommunityTooLarge {
+            community,
+            nodes: nodes.len(),
+            limit,
+        });
+    }
+    let links = document
+        .links
+        .iter()
+        .filter(|edge| {
+            selected_ids.contains(edge.source.as_str())
+                && selected_ids.contains(edge.target.as_str())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut graph = document.graph.clone();
+    if let Some(hyperedges) = graph.get("hyperedges").and_then(Value::as_array) {
+        let filtered = hyperedges
+            .iter()
+            .filter(|hyperedge| {
+                let Some(ids) = hyperedge.get("nodes").and_then(Value::as_array) else {
+                    return false;
+                };
+                ids.len() >= 2
+                    && ids
+                        .iter()
+                        .all(|id| id.as_str().is_some_and(|id| selected_ids.contains(id)))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if filtered.is_empty() {
+            graph.remove("hyperedges");
+        } else {
+            graph.insert("hyperedges".into(), Value::Array(filtered));
+        }
+    }
+    let detail = GraphDocument {
+        directed: document.directed,
+        multigraph: document.multigraph,
+        graph,
+        nodes,
+        links,
+        extras: document.extras.clone(),
+        used_legacy_edges_key: document.used_legacy_edges_key,
+    };
+    let detail_communities = BTreeMap::from([(
+        community,
+        detail.nodes.iter().map(|node| node.id.clone()).collect(),
+    )]);
+    let detail_labels = options.community_labels.and_then(|labels| {
+        labels
+            .get(&community)
+            .map(|label| BTreeMap::from([(community, label.clone())]))
+    });
+    Ok(crate::viewer_model::graph_view_model(
+        &detail,
+        &detail_communities,
+        sanitize_label(&output_path.as_ref().to_string_lossy()),
+        &HtmlOptions {
+            community_labels: detail_labels.as_ref(),
+            member_counts: None,
+            node_limit: None,
+            learning_overlay: options.learning_overlay,
+        },
+        false,
+    ))
 }
 
 pub fn write_html(
@@ -2343,6 +2443,105 @@ mod tests {
         entry.insert("code_fingerprint".to_owned(), Value::String(String::new()));
         assert!(learning_entry_is_stale(&entry, &output));
         assert_eq!(resolve_learning_source("", &output), None);
+        Ok(())
+    }
+
+    #[test]
+    fn community_view_model_is_complete_and_excludes_cross_community_records()
+    -> Result<(), Box<dyn Error>> {
+        let graph: GraphDocument = serde_json::from_value(json!({
+            "graph":{"hyperedges":[
+                {"id":"inside","nodes":["a","b"]},
+                {"id":"cross","nodes":["a","c"]}
+            ]},
+            "nodes":[
+                {"id":"a","label":"A","community":7,"source_file":"src/a.rs","line_start":4},
+                {"id":"b","label":"B","community":7},
+                {"id":"c","label":"C","community":8}
+            ],
+            "links":[
+                {"source":"a","target":"b","relation":"calls"},
+                {"source":"a","target":"c","relation":"calls"}
+            ]
+        }))?;
+        let communities = Communities::from([
+            (7, vec!["a".to_owned(), "b".to_owned()]),
+            (8, vec!["c".to_owned()]),
+        ]);
+        let model = graph_community_view_model_document(
+            &graph,
+            &communities,
+            "graph.json",
+            &HtmlOptions {
+                node_limit: Some(2),
+                ..HtmlOptions::default()
+            },
+            7,
+        )?;
+        assert!(!model.stats.aggregated);
+        assert_eq!(
+            model
+                .nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(model.edges.len(), 1);
+        assert_eq!(model.hyperedges.len(), 1);
+        assert_eq!(model.hyperedges[0]["id"], "inside");
+        assert_eq!(
+            model.nodes[0]
+                .source
+                .as_ref()
+                .map(|source| source.file.as_str()),
+            Some("src/a.rs")
+        );
+
+        assert!(matches!(
+            graph_community_view_model_document(
+                &graph,
+                &communities,
+                "graph.json",
+                &HtmlOptions::default(),
+                99
+            ),
+            Err(OutputError::UnknownCommunity { community: 99 })
+        ));
+        assert!(matches!(
+            graph_community_view_model_document(
+                &graph,
+                &communities,
+                "graph.json",
+                &HtmlOptions {
+                    node_limit: Some(1),
+                    ..HtmlOptions::default()
+                },
+                7
+            ),
+            Err(OutputError::CommunityTooLarge {
+                community: 7,
+                nodes: 2,
+                limit: 1
+            })
+        ));
+        let stale = Communities::from([(
+            7,
+            vec!["a".to_owned(), "b".to_owned(), "deleted".to_owned()],
+        )]);
+        assert!(matches!(
+            graph_community_view_model_document(
+                &graph,
+                &stale,
+                "graph.json",
+                &HtmlOptions::default(),
+                7
+            ),
+            Err(OutputError::IncompleteCommunity {
+                community: 7,
+                missing: 1
+            })
+        ));
         Ok(())
     }
 }

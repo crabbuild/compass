@@ -20,6 +20,7 @@ export function GraphInspector({
   onQueryChange,
   onFocus,
   onOpenSource,
+  onOpenCommunity,
   onToggleCommunity,
   onSetAllVisible
 }: {
@@ -32,6 +33,7 @@ export function GraphInspector({
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation): void;
+  onOpenCommunity?: ((communityId: number) => void) | undefined;
   onToggleCommunity(communityId: number): void;
   onSetAllVisible(visible: boolean): void;
 }) {
@@ -181,6 +183,18 @@ export function GraphInspector({
                 <span>{source.file}{range ? `:${range}` : ""}</span>
               </button>
             )}
+            {model.stats.aggregated
+              && selected.memberCount !== undefined
+              && onOpenCommunity && (
+                <button
+                  className="compass-inspector-action"
+                  type="button"
+                  onClick={() => onOpenCommunity(selected.community)}
+                >
+                  Open community
+                  <span>{selected.memberCount.toLocaleString()} members</span>
+                </button>
+              )}
             <div className="compass-neighbors-heading">
               <span>Connected nodes</span>
               <strong>{neighbors.length}</strong>

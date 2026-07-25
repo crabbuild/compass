@@ -17,6 +17,11 @@ if (!element) throw new Error("Compass history root is missing");
 const root = createRoot(element);
 let timeline: HistoryTimeline | undefined;
 let graph: GraphViewModel | undefined;
+let graphCommit: string | undefined;
+let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
+let communityLoading: number | null = null;
+let communityError: string | undefined;
+let activeCommunityRequest = "";
 let semanticDiff: unknown;
 let repositoryId = "";
 let changeCounts: HistoryChangeCounts | undefined;
@@ -27,6 +32,17 @@ function render(): void {
     <HistoryWorkspace
       timeline={timeline}
       graph={graph}
+      graphCommit={graphCommit}
+      communityDetail={communityDetail}
+      communityLoading={communityLoading}
+      communityError={communityError}
+      onBackToOverview={() => {
+        communityDetail = undefined;
+        communityLoading = null;
+        communityError = undefined;
+        activeCommunityRequest = "";
+        render();
+      }}
       semanticDiff={semanticDiff}
       changeCounts={changeCounts}
       host={{
@@ -47,6 +63,19 @@ function render(): void {
         },
         openSource(source) {
           vscode.postMessage({ type: "openSource", repositoryId, source });
+        },
+        openCommunity(commit, communityId) {
+          if (communityLoading !== null) return;
+          communityLoading = communityId;
+          communityError = undefined;
+          activeCommunityRequest = crypto.randomUUID();
+          vscode.postMessage({
+            type: "openCommunity",
+            requestId: activeCommunityRequest,
+            commit,
+            communityId
+          });
+          render();
         }
       }}
     />
@@ -63,12 +92,41 @@ window.addEventListener("message", (event) => {
     }
   } else if (event.data?.type === "graph") {
     const parsed = GraphViewModelSchema.safeParse(event.data.graph);
-    if (parsed.success) graph = parsed.data;
+    if (parsed.success) {
+      graph = parsed.data;
+      graphCommit = typeof event.data.commit === "string" ? event.data.commit : undefined;
+      communityDetail = undefined;
+      communityLoading = null;
+      communityError = undefined;
+      activeCommunityRequest = "";
+    }
+  } else if (event.data?.type === "communityGraph") {
+    const parsed = GraphViewModelSchema.safeParse(event.data.graph);
+    if (parsed.success
+      && event.data.requestId === activeCommunityRequest
+      && event.data.commit === graphCommit) {
+      communityDetail = {
+        communityId: event.data.communityId,
+        model: parsed.data
+      };
+      communityLoading = null;
+      communityError = undefined;
+    }
+  } else if (event.data?.type === "communityError") {
+    if (event.data.requestId === activeCommunityRequest) {
+      communityLoading = null;
+      communityError = String(event.data.message);
+    }
   } else if (event.data?.type === "comparison") {
     const current = GraphViewModelSchema.safeParse(event.data.currentGraph);
     const parent = GraphViewModelSchema.safeParse(event.data.parentGraph);
     if (current.success && parent.success) {
       graph = current.data;
+      graphCommit = typeof event.data.commit === "string" ? event.data.commit : undefined;
+      communityDetail = undefined;
+      communityLoading = null;
+      communityError = undefined;
+      activeCommunityRequest = "";
       semanticDiff = {
         structural: compareGraphs(parent.data, current.data),
         semantic: event.data.semanticDiff

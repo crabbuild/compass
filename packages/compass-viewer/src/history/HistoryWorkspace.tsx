@@ -16,6 +16,7 @@ export type HistoryHost = {
   queryRevision(commit: string): void;
   loadChangeCounts(commit: string): void;
   openSource(source: SourceLocation): void;
+  openCommunity(commit: string, communityId: number): void;
 };
 
 export function HistoryWorkspace({
@@ -23,12 +24,22 @@ export function HistoryWorkspace({
   graph,
   semanticDiff,
   changeCounts,
+  graphCommit,
+  communityDetail,
+  communityLoading,
+  communityError,
+  onBackToOverview,
   host
 }: {
   timeline: HistoryTimeline;
   graph?: GraphViewModel | undefined;
   semanticDiff?: unknown;
   changeCounts?: HistoryChangeCounts | undefined;
+  graphCommit?: string | undefined;
+  communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
+  communityLoading?: number | null | undefined;
+  communityError?: string | undefined;
+  onBackToOverview?: (() => void) | undefined;
   host: HistoryHost;
 }) {
   const [state, dispatch] = useReducer(historyReducer, timeline, initialHistoryState);
@@ -94,7 +105,19 @@ export function HistoryWorkspace({
         )}
         <div className="mt-4 h-[calc(100vh-12rem)] min-h-96 overflow-hidden rounded-md border">
           {graph ? (
-            <CompassGraph model={graph} host={{ openSource: host.openSource }} />
+            <CompassGraph
+              model={graph}
+              communityDetail={communityDetail}
+              communityLoading={communityLoading}
+              communityError={communityError}
+              onBackToOverview={onBackToOverview}
+              host={{
+                openSource: host.openSource,
+                openCommunity(communityId) {
+                  if (graphCommit) host.openCommunity(graphCommit, communityId);
+                }
+              }}
+            />
           ) : (
             <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
               Select an available commit and choose Open graph. Missing commits are never built implicitly.

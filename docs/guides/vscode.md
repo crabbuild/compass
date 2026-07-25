@@ -23,7 +23,7 @@ CLI Binary**, then reload VS Code.
 ## Current graph
 
 Choose **Open Code Graph** to use the same versioned graph model as
-`compass export viewer-json`, rendered with the active `compass export html`
+`compass export json`, rendered with the active `compass export html`
 canvas structure, community palette, force layout, evidence styling, hover
 metadata, and inspector concepts. VS Code colors take priority so the canvas
 follows the active light, dark, or high-contrast theme; the Compass export
@@ -35,6 +35,10 @@ node to select it without leaving the graph. Double-click a node to open its
 exact source range when Compass provides a non-empty file plus line or byte
 location. Nodes without that exact location remain inspectable and do not
 trigger navigation. Graphs above 5,000 nodes use Compass's community overview.
+Double-click an overview community to lazily load its complete member graph
+through `compass export json --community ID`; then double-click a located source
+node to open it. **Overview** returns to the community map. Historical graphs
+use the same interaction against their exact commit.
 
 ## Calls and architecture
 
@@ -71,6 +75,8 @@ configured profile, a code-only build, or a profile inherited from another
 revision. Historical
 exports are validated against the full commit and realization identity, decoded
 in a three-entry memory cache, and removed from temporary storage after use.
+The configured graph node limit applies to both current and historical
+overview/detail exports.
 Choose a parent to see structural counts and Compass semantic findings. Queries
 can target the selected available revision; unavailable revisions stay
 disabled and are never materialized implicitly.

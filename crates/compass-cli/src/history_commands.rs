@@ -19,7 +19,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|viewer-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -343,9 +343,15 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
         HistoryConfig::disable(&repository).map_err(runtime)?;
         return Ok("history: disabled".to_owned());
     }
-    let (positionals, format, output) = parse(&args[1..]).map_err(usage)?;
+    let (positionals, format, output, community, node_limit) = parse(&args[1..]).map_err(usage)?;
     if args[0] != "export" && output.is_some() {
         return Err(usage("--output is only valid for history export"));
+    }
+    if args[0] != "export" && community.is_some() {
+        return Err(usage("--community is only valid for history export"));
+    }
+    if args[0] != "export" && node_limit.is_some() {
+        return Err(usage("--node-limit is only valid for history export"));
     }
     if args[0] != "export" && !matches!(format.as_str(), "text" | "json") {
         return Err(usage("--format must be text or json"));
@@ -602,7 +608,11 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             exact(&positionals, 1, "export requires REV")?;
             let output = output.ok_or_else(|| usage("export requires --output PATH"))?;
             let commit = repository.resolve(&positionals[0]).map_err(runtime)?;
-            if format == "viewer-json" {
+            if matches!(format.as_str(), "json" | "viewer-json") {
+                let node_limit = node_limit.unwrap_or(5_000);
+                if node_limit < 1 {
+                    return Err(usage("--node-limit must be a positive integer"));
+                }
                 let history = store(&repository)?;
                 let preferred = history
                     .preferred(&commit)
@@ -616,19 +626,31 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 let artifacts = history.artifacts(&preferred.id).map_err(runtime)?;
                 let communities = communities_from_document(&artifacts.artifacts.document);
                 let labels = history_labels(artifacts.artifacts.labels.as_ref());
-                let graph = compass_output::graph_view_model_document(
-                    &artifacts.artifacts.document,
-                    &communities,
-                    format!("{} @ {}", repository.root().display(), commit),
-                    &compass_output::HtmlOptions {
-                        community_labels: (!labels.is_empty()).then_some(&labels),
-                        member_counts: None,
-                        node_limit: Some(5_000),
-                        learning_overlay: None,
-                    },
-                )
-                .map_err(runtime)?
-                .ok_or_else(|| runtime("historical graph has no renderable overview"))?;
+                let options = compass_output::HtmlOptions {
+                    community_labels: (!labels.is_empty()).then_some(&labels),
+                    member_counts: None,
+                    node_limit: Some(node_limit),
+                    learning_overlay: None,
+                };
+                let graph = if let Some(community) = community {
+                    compass_output::graph_community_view_model_document(
+                        &artifacts.artifacts.document,
+                        &communities,
+                        format!("{} @ {}", repository.root().display(), commit),
+                        &options,
+                        community,
+                    )
+                    .map_err(runtime)?
+                } else {
+                    compass_output::graph_view_model_document(
+                        &artifacts.artifacts.document,
+                        &communities,
+                        format!("{} @ {}", repository.root().display(), commit),
+                        &options,
+                    )
+                    .map_err(runtime)?
+                    .ok_or_else(|| runtime("historical graph has no renderable overview"))?
+                };
                 let envelope = serde_json::json!({
                     "schema": "compass.history.viewer_graph/1",
                     "commit": commit,
@@ -639,6 +661,16 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 let bytes = serde_json::to_vec(&envelope).map_err(runtime)?;
                 compass_files::write_bytes_atomic(&output, &bytes).map_err(runtime)?;
                 return Ok(format!("exported {} to {}", preferred.id, output.display()));
+            }
+            if community.is_some() {
+                return Err(usage(
+                    "--community is only valid with history export --format json",
+                ));
+            }
+            if node_limit.is_some() {
+                return Err(usage(
+                    "--node-limit is only valid with history export --format json",
+                ));
             }
             let build_options = configured_build_options(&repository).map_err(runtime)?;
             let (history, preferred) =
@@ -703,7 +735,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 .map_err(runtime)?;
             } else {
                 return Err(usage(
-                    "export --format must be graph-json, viewer-json, or compass-out",
+                    "export --format must be graph-json, json, or compass-out",
                 ));
             }
             Ok(format!("exported {} to {}", preferred.id, output.display()))
@@ -1396,10 +1428,23 @@ fn stored_profile(repository: &Repository, source: &str) -> Result<BuildProfile,
     Ok(version.version.build_profile)
 }
 
-fn parse(args: &[String]) -> Result<(Vec<String>, String, Option<std::path::PathBuf>), String> {
+fn parse(
+    args: &[String],
+) -> Result<
+    (
+        Vec<String>,
+        String,
+        Option<std::path::PathBuf>,
+        Option<usize>,
+        Option<isize>,
+    ),
+    String,
+> {
     let mut p = Vec::new();
     let mut f = None;
     let mut o = None;
+    let mut c = None;
+    let mut n = None;
     let mut i = 0;
     let mut options = true;
     while i < args.len() {
@@ -1417,6 +1462,26 @@ fn parse(args: &[String]) -> Result<(Vec<String>, String, Option<std::path::Path
                 let v = args.get(i).ok_or("--output requires a path")?;
                 if o.replace(v.into()).is_some() {
                     return Err("duplicate --output".into());
+                }
+            }
+            "--community" if options => {
+                i += 1;
+                let value = args.get(i).ok_or("--community requires an id")?;
+                let value = value
+                    .parse::<usize>()
+                    .map_err(|_| "--community must be a non-negative integer")?;
+                if c.replace(value).is_some() {
+                    return Err("duplicate --community".into());
+                }
+            }
+            "--node-limit" if options => {
+                i += 1;
+                let value = args.get(i).ok_or("--node-limit requires a value")?;
+                let value = value
+                    .parse::<isize>()
+                    .map_err(|_| "--node-limit must be an integer")?;
+                if n.replace(value).is_some() {
+                    return Err("duplicate --node-limit".into());
                 }
             }
             v if options && v.starts_with("--format=") => {
@@ -1437,12 +1502,36 @@ fn parse(args: &[String]) -> Result<(Vec<String>, String, Option<std::path::Path
                     return Err("duplicate --output".into());
                 }
             }
+            v if options && v.starts_with("--community=") => {
+                let value = &v[12..];
+                if value.is_empty() {
+                    return Err("--community requires an id".to_owned());
+                }
+                let value = value
+                    .parse::<usize>()
+                    .map_err(|_| "--community must be a non-negative integer")?;
+                if c.replace(value).is_some() {
+                    return Err("duplicate --community".into());
+                }
+            }
+            v if options && v.starts_with("--node-limit=") => {
+                let value = &v[13..];
+                if value.is_empty() {
+                    return Err("--node-limit requires a value".to_owned());
+                }
+                let value = value
+                    .parse::<isize>()
+                    .map_err(|_| "--node-limit must be an integer")?;
+                if n.replace(value).is_some() {
+                    return Err("duplicate --node-limit".into());
+                }
+            }
             v if options && v.starts_with('-') => return Err(format!("unknown option {v}")),
             v => p.push(v.into()),
         }
         i += 1;
     }
-    Ok((p, f.unwrap_or_else(|| "text".into()), o))
+    Ok((p, f.unwrap_or_else(|| "text".into()), o, c, n))
 }
 fn store(r: &Repository) -> Result<HistoryStore, CommandFailure> {
     HistoryStore::open_existing(r)
@@ -1493,13 +1582,15 @@ mod tests {
             "--".to_owned(),
             "-revision".to_owned(),
         ]);
-        let Ok((positionals, format, output)) = result else {
+        let Ok((positionals, format, output, community, node_limit)) = result else {
             assert!(result.is_ok());
             return;
         };
         assert_eq!(positionals, ["-revision"]);
         assert_eq!(format, "json");
         assert_eq!(output.as_deref(), Some(std::path::Path::new("result")));
+        assert_eq!(community, None);
+        assert_eq!(node_limit, None);
         assert!(
             parse(&[
                 "--format=json".to_owned(),

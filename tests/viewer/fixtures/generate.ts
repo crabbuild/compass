@@ -16,6 +16,10 @@ export default async function generate(): Promise<void> {
       path.join(output, `${name}.js`)
     );
   }
+  await cp(
+    path.join(root, "editors/vscode/dist/webviews/graph.js"),
+    path.join(output, "vscodeGraph.js")
+  );
   const graph = {
     schema: "compass.viewer.graph/1",
     title: "Fixture",
@@ -51,6 +55,33 @@ export default async function generate(): Promise<void> {
   const viewerJs = await readFile(path.join(output, "graph.js"), "utf8");
   const viewerCss = await readFile(path.join(output, "viewer.css"), "utf8");
   await writeFile(path.join(output, "graph.html"), `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(graph)}</script><script>${viewerJs}</script></body></html>`);
+  const communityOverview = {
+    schema: "compass.viewer.graph/1",
+    title: "Community fixture",
+    stats: { nodes: 2, edges: 1, communities: 2, aggregated: true },
+    nodes: [
+      { id: "0", label: "Core", community: 0, memberCount: 2, degree: 1 },
+      { id: "1", label: "Data", community: 1, memberCount: 1, degree: 1 }
+    ],
+    edges: [{ id: "overview-edge", source: "0", target: "1", relation: "calls" }],
+    communities: [
+      { id: 0, label: "Core", color: "#4E79A7", hidden: false },
+      { id: 1, label: "Data", color: "#F28E2B", hidden: false }
+    ],
+    hyperedges: []
+  };
+  const communityDetail = {
+    ...graph,
+    title: "Core detail",
+    stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+    nodes: graph.nodes.slice(0, 2),
+    edges: graph.edges.slice(0, 1),
+    communities: graph.communities.slice(0, 1)
+  };
+  await writeFile(
+    path.join(output, "community.html"),
+    communityHarness(communityOverview, communityDetail)
+  );
   const architecture = {
     schema: "compass.viewer.callflow/1",
     title: "Fixture — Architecture Flow",
@@ -89,8 +120,48 @@ export default async function generate(): Promise<void> {
   };
   await writeFile(path.join(output, "architecture.html"), harness("architecture", { type: "hydrate", repositoryId: "fixture", model: architecture }));
   await writeFile(path.join(output, "calls.html"), harness("callGraph", { type: "hydrateCallGraph", repositoryId: "fixture", graph: calls }));
-  await writeFile(path.join(output, "history.html"), harness("history", { type: "timeline", repositoryId: "fixture", timeline }));
+  await writeFile(
+    path.join(output, "history.html"),
+    historyHarness(timeline, communityOverview, communityDetail)
+  );
   await writeFile(path.join(output, "query.html"), harness("query", { type: "state", running: false }));
+}
+
+function communityHarness(overview: unknown, detail: unknown): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass community fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.communityRequestCount=0;
+window.acquireVsCodeApi=()=>({postMessage(message){
+  if(message.type==="ready") {
+    setTimeout(()=>window.postMessage({type:"hydrateGraph",requestId:"overview",repositoryId:"fixture",model:${JSON.stringify(overview)}},"*"),0);
+  } else if(message.type==="openCommunity") {
+    window.communityRequestCount+=1;
+    window.openedCommunity=message.communityId;
+    if(message.communityId===1 && window.communityRequestCount===1) {
+      setTimeout(()=>window.postMessage({type:"communityError",requestId:message.requestId,communityId:message.communityId,message:"Community detail failed"},"*"),250);
+    } else {
+      setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,repositoryId:"fixture",communityId:message.communityId,model:${JSON.stringify(detail)}},"*"),0);
+    }
+  } else if(message.type==="openSource") {
+    window.openedSource=message.source;
+  }
+}})</script><script src="/vscodeGraph.js"></script></body></html>`;
+}
+
+function historyHarness(timeline: { entries: Array<{ commit: string }> }, overview: unknown, detail: unknown): string {
+  const commit = timeline.entries[0]?.commit ?? "";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass history fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.acquireVsCodeApi=()=>({postMessage(message){
+  if(message.type==="ready") {
+    setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:${JSON.stringify(timeline)}},"*"),0);
+  } else if(message.type==="loadRevision") {
+    setTimeout(()=>window.postMessage({type:"graph",commit:${JSON.stringify(commit)},graph:${JSON.stringify(overview)}},"*"),0);
+  } else if(message.type==="openCommunity") {
+    window.openedHistoricalCommunity=message.communityId;
+    setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,commit:${JSON.stringify(commit)},communityId:message.communityId,graph:${JSON.stringify(detail)}},"*"),0);
+  } else if(message.type==="openSource") {
+    window.openedSource=message.source;
+  }
+}})</script><script src="/history.js"></script></body></html>`;
 }
 
 function harness(script: string, hydration: unknown): string {

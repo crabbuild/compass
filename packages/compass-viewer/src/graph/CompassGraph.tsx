@@ -2,25 +2,66 @@ import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import { GraphInspector } from "./GraphInspector";
 import { GraphToolbar } from "./GraphToolbar";
+import { graphNodeActivation } from "./nodeActivation";
 import { NodeHoverCard, type GraphHover } from "./NodeHoverCard";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
-import { navigableSource } from "./sourceNavigation";
 import { graphReducer, initialGraphState } from "./state";
 
 export type GraphHost = {
   openSource(source: SourceLocation): void;
+  openCommunity?(communityId: number): void;
 };
 
 export function CompassGraph({
   model,
-  host
+  host,
+  communityDetail,
+  communityLoading,
+  communityError,
+  onBackToOverview
 }: {
   model: GraphViewModel;
   host: GraphHost;
+  communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
+  communityLoading?: number | null | undefined;
+  communityError?: string | undefined;
+  onBackToOverview?: (() => void) | undefined;
+}) {
+  const activeModel = communityDetail?.model ?? model;
+  const viewKey = communityDetail ? `community-${communityDetail.communityId}` : "overview";
+  return (
+    <CompassGraphView
+      key={viewKey}
+      model={activeModel}
+      host={host}
+      detailCommunityId={communityDetail?.communityId}
+      communityLoading={communityLoading}
+      communityError={communityError}
+      onBackToOverview={communityDetail ? onBackToOverview : undefined}
+    />
+  );
+}
+
+function CompassGraphView({
+  model,
+  host,
+  detailCommunityId,
+  communityLoading,
+  communityError,
+  onBackToOverview
+}: {
+  model: GraphViewModel;
+  host: GraphHost;
+  detailCommunityId?: number | undefined;
+  communityLoading?: number | null | undefined;
+  communityError?: string | undefined;
+  onBackToOverview?: (() => void) | undefined;
 }) {
   const [state, dispatch] = useReducer(graphReducer, initialGraphState);
   const [hover, setHover] = useState<GraphHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
+  const hostRef = useRef(host);
+  hostRef.current = host;
   const selected = model.nodes.find((node) => node.id === state.focusedNodeId);
   const hovered = hover ? model.nodes.find((node) => node.id === hover.nodeId) : undefined;
   const neighbors = useMemo(() => {
@@ -56,13 +97,18 @@ export function CompassGraph({
   const handleStabilized = useCallback(() => {
     dispatch({ type: "stabilized" });
   }, []);
-  const openNodeSource = useCallback((nodeId: string) => {
+  const activateNode = useCallback((nodeId: string) => {
     const node = model.nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return;
-    const source = navigableSource(node);
-    if (source) host.openSource(source);
-  }, [host, model.nodes]);
-  const status = selected
+    const activation = graphNodeActivation(model, node, detailCommunityId);
+    if (activation.type === "community") {
+      hostRef.current.openCommunity?.(activation.communityId);
+    }
+    if (activation.type === "source") hostRef.current.openSource(activation.source);
+  }, [detailCommunityId, model.nodes, model.stats.aggregated]);
+  const status = communityLoading !== undefined && communityLoading !== null
+    ? `Loading community ${communityLoading}`
+    : selected
     ? `Inspecting ${selected.label}`
     : state.physicsRunning ? "Layout settling" : "Layout paused";
 
@@ -77,7 +123,7 @@ export function CompassGraph({
           forceLabels={state.forceLabels}
           hiddenCommunities={state.hiddenCommunities}
           onFocus={focus}
-          onOpenSource={openNodeSource}
+          onOpenSource={activateNode}
           onHover={setHover}
           onClear={clear}
           onStabilized={handleStabilized}
@@ -99,7 +145,16 @@ export function CompassGraph({
             type: "setLabels",
             visible: !state.forceLabels
           })}
+          onBack={onBackToOverview}
         />
+        {communityError && (
+          <div
+            className="absolute bottom-4 left-4 z-20 max-w-md rounded-md border border-destructive/50 bg-background/95 px-3 py-2 text-sm text-destructive shadow-lg"
+            role="alert"
+          >
+            {communityError}
+          </div>
+        )}
         {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
       </main>
       <GraphInspector
@@ -112,6 +167,7 @@ export function CompassGraph({
         onQueryChange={(query) => dispatch({ type: "search", query })}
         onFocus={focus}
         onOpenSource={host.openSource}
+        onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
         onToggleCommunity={(communityId) => dispatch({
           type: "toggleCommunity",
           communityId

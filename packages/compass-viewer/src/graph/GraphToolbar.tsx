@@ -1,4 +1,5 @@
 import {
+  ArrowLeftIcon,
   Maximize2Icon,
   PauseIcon,
   PlayIcon,
@@ -13,7 +14,8 @@ export function GraphToolbar({
   onTogglePhysics,
   onFit,
   onReset,
-  onToggleLabels
+  onToggleLabels,
+  onBack
 }: {
   status: string;
   physicsRunning: boolean;
@@ -22,6 +24,7 @@ export function GraphToolbar({
   onFit(): void;
   onReset(): void;
   onToggleLabels(): void;
+  onBack?: (() => void) | undefined;
 }) {
   return (
     <div
@@ -39,6 +42,17 @@ export function GraphToolbar({
         <span className="compass-viewer-status-text">{status}</span>
       </div>
       <div className="compass-toolbar-actions">
+        {onBack && (
+          <button
+            className="compass-tool-button"
+            type="button"
+            aria-label="Back to community overview"
+            onClick={onBack}
+          >
+            <ArrowLeftIcon />
+            <span>Overview</span>
+          </button>
+        )}
         <button
           className="compass-tool-button"
           type="button"

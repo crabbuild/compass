@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./contracts/callGraph": "./src/contracts/callGraph.ts",
+    "./contracts/callflow": "./src/contracts/callflow.ts",
+    "./contracts/graph": "./src/contracts/graph.ts",
+    "./contracts/history": "./src/contracts/history.ts"
   },
   "scripts": {
     "build": "vite build",

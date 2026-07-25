@@ -32,6 +32,10 @@ export async function openHistoryPanel(
   );
   await revisions.initialize();
   let timeline = await loadTimeline(session);
+  let activeGraph: Awaited<ReturnType<RevisionStore["load"]>> | undefined;
+  const graphNodeLimit = vscode.workspace
+    .getConfiguration("compass")
+    .get("graphNodeLimit", 5000);
   const countCache = new Map<string, Awaited<ReturnType<typeof loadChangeCounts>>>();
   panel.webview.html = html(context, panel.webview);
   panel.webview.onDidReceiveMessage(async (message) => {
@@ -39,10 +43,47 @@ export async function openHistoryPanel(
       if (message?.type === "ready") {
         await panel.webview.postMessage({ type: "timeline", timeline, repositoryId: session.id });
       } else if (message?.type === "loadRevision" && typeof message.commit === "string") {
-        const revision = await revisions.load(message.commit);
+        const entry = timeline.entries.find((candidate) => candidate.commit === message.commit);
+        const revision = await revisions.load(
+          message.commit,
+          graphNodeLimit,
+          historyIdentity(entry)
+        );
+        activeGraph = revision;
         await panel.webview.postMessage({
           type: "graph",
           commit: message.commit,
+          graph: revision.graph
+        });
+      } else if (message?.type === "openCommunity"
+        && typeof message.commit === "string"
+        && typeof message.communityId === "number"
+        && typeof message.requestId === "string") {
+        if (session.capabilities?.features.community_detail !== true) {
+          throw new Error(
+            "The installed Compass CLI does not support historical community details. Upgrade Compass and reload VS Code."
+          );
+        }
+        const expected = activeGraph;
+        if (!expected || message.commit !== expected.commit) {
+          throw new Error("The selected historical graph changed before this community loaded.");
+        }
+        const revision = await revisions.loadCommunity(
+          message.commit,
+          message.communityId,
+          graphNodeLimit,
+          expected
+        );
+        if (activeGraph?.commit !== expected.commit
+          || activeGraph.realization !== expected.realization
+          || activeGraph.fingerprint !== expected.fingerprint) {
+          throw new Error("The selected historical graph changed before this community loaded.");
+        }
+        await panel.webview.postMessage({
+          type: "communityGraph",
+          requestId: message.requestId,
+          commit: message.commit,
+          communityId: message.communityId,
           graph: revision.graph
         });
       } else if (message?.type === "buildRevision" && typeof message.commit === "string") {
@@ -126,10 +167,11 @@ export async function openHistoryPanel(
           throw new Error("Both revisions must have graph available before comparison.");
         }
         const [current, parent, semanticDiff] = await Promise.all([
-          revisions.load(message.commit),
-          revisions.load(message.parent),
+          revisions.load(message.commit, graphNodeLimit, historyIdentity(currentEntry)),
+          revisions.load(message.parent, graphNodeLimit, historyIdentity(parentEntry)),
           loadSemanticDiff(session, message.parent, message.commit)
         ]);
+        activeGraph = current;
         await panel.webview.postMessage({
           type: "comparison",
           commit: message.commit,
@@ -155,12 +197,31 @@ export async function openHistoryPanel(
         await openGraphSource(session, message.repositoryId, message.source);
       }
     } catch (error) {
+      if (message?.type === "openCommunity"
+        && typeof message.requestId === "string"
+        && typeof message.communityId === "number") {
+        await panel.webview.postMessage({
+          type: "communityError",
+          requestId: message.requestId,
+          communityId: message.communityId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
       await panel.webview.postMessage({
         type: "error",
         message: error instanceof Error ? error.message : String(error)
       });
     }
   });
+}
+
+function historyIdentity(
+  entry: { realization: string | null; fingerprint: string | null } | undefined
+): { realization: string; fingerprint: string } | undefined {
+  return entry?.realization && entry.fingerprint
+    ? { realization: entry.realization, fingerprint: entry.fingerprint }
+    : undefined;
 }
 
 function html(context: vscode.ExtensionContext, webview: vscode.Webview): string {
