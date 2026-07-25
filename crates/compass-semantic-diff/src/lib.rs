@@ -9,10 +9,10 @@ pub use engine::{compare, finding_id};
 pub use error::SemanticDiffError;
 pub use model::{
     AffectedConsumer, ChangeDirection, CollapsedGroup, Comparison, Compatibility, Completeness,
-    Confidence, DependencyDelta, EvidenceRef, FeatureGroup, FindingOrigin, FindingType,
-    MAX_DIRECT_ENTITIES, MAX_EVIDENCE_PER_FINDING, MAX_FINDINGS, MAX_IMPACT_DEPTH,
-    MAX_TRAVERSED_CALL_EDGES, NoTestEvidence, REPORT_SCHEMA, SemanticDiffInput, SemanticDiffReport,
-    SemanticFinding, SnapshotIdentity, SnapshotReader, SnapshotSide, TestEvidence,
-    TestEvidenceProvider, Verification, VerificationState, WitnessHop, WitnessPath,
+    Confidence, DependencyDelta, EvidenceRef, FeatureGroup, FindingOrigin, FindingType, GraphDelta,
+    GraphEdgeDelta, GraphNodeDelta, MAX_DIRECT_ENTITIES, MAX_EVIDENCE_PER_FINDING, MAX_FINDINGS,
+    MAX_IMPACT_DEPTH, MAX_TRAVERSED_CALL_EDGES, NoTestEvidence, REPORT_SCHEMA, SemanticDiffInput,
+    SemanticDiffReport, SemanticFinding, SnapshotIdentity, SnapshotReader, SnapshotSide,
+    TestEvidence, TestEvidenceProvider, Verification, VerificationState, WitnessHop, WitnessPath,
 };
 pub use verification::StaticTestEvidence;

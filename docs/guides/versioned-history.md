@@ -240,6 +240,14 @@ Machine-readable output:
 compass diff v1.2.0 HEAD --format json
 ```
 
+Self-contained interactive reviewer report:
+
+```bash
+compass diff v1.2.0 HEAD \
+  --format html \
+  --output semantic-diff.html
+```
+
 Explain one finding:
 
 ```bash
@@ -252,7 +260,12 @@ is collapsed. Its five core concepts are contract changes, behavior changes,
 dependency changes, affected consumers, and verification evidence. JSON uses
 schema `compass.semantic_diff.report/1`; deterministic `sd1-...` finding IDs
 make `--explain` and automation stable when the underlying semantic evidence
-does not change.
+does not change. HTML embeds that complete JSON report and provides local
+search, change-type filtering, routine-churn control, expandable evidence, and
+analysis-completeness indicators without requiring a server. It also shows the
+exact source patch and the meaningful code-graph delta in the same report. The
+graph visualization focuses on the changed subgraph; its node/edge lists and
+embedded JSON remain exhaustive.
 
 Semantic diff requires Program IR v1 evidence. Rebuild older realizations with
 the current Compass binary before comparing them. Static test mapping may

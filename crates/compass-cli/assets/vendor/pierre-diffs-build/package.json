@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "bun run build.js"
+  },
+  "dependencies": {
+    "@pierre/diffs": "1.2.12",
+    "shiki": "4.3.1"
+  }
+}

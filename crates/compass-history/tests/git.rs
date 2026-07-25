@@ -304,6 +304,9 @@ fn source_delta_reports_statuses_renames_and_zero_context_hunks()
             new_lines: 1,
         }]
     );
+    assert!(edit.patch.contains("diff --git a/edit.rs b/edit.rs"));
+    assert!(edit.patch.contains("@@ -2 +2 @@"));
+    assert!(edit.patch.contains("-two\n+changed\n"));
     let renamed = deltas
         .iter()
         .find(|delta| delta.status == SourceFileStatus::Renamed)
