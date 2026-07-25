@@ -1,7 +1,13 @@
-import { useMemo, useState } from "react";
-import { BracesIcon, PlayIcon, SearchIcon, SquareIcon } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
+import { useMemo, useRef, useState } from "react";
+import {
+  BracesIcon,
+  Clock3Icon,
+  PlayIcon,
+  SearchIcon,
+  SquareIcon
+} from "lucide-react";
+import { WorkspaceState } from "../components/workbench/WorkspaceState";
+import { normalizeStructuredResult } from "./state";
 
 export type QueryMode = "natural" | "cql";
 export type QueryRequest = {
@@ -22,6 +28,12 @@ export type QueryHost = {
   cancel(): void;
 };
 
+const NATURAL_EXAMPLES = [
+  "How does authentication reach storage?",
+  "Which modules depend on the query engine?",
+  "Where are errors converted into API responses?"
+];
+
 export function QueryWorkspace({
   result,
   running,
@@ -35,139 +47,200 @@ export function QueryWorkspace({
   revision?: string | undefined;
   host: QueryHost;
 }) {
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const [mode, setMode] = useState<QueryMode>("natural");
   const [query, setQuery] = useState("");
   const [params, setParams] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const parsedParams = useMemo(() => parseParams(params), [params]);
+  const structured = useMemo(
+    () => result?.json === undefined ? undefined : normalizeStructuredResult(result.json),
+    [result?.json]
+  );
   const execute = () => {
     const trimmed = query.trim();
-    if (!trimmed) return;
-    setHistory((current) => [trimmed, ...current.filter((item) => item !== trimmed)].slice(0, 100));
-    host.execute({ mode, query: trimmed, params: parsedParams, timeoutMs: 5000, maxRows: 1000 });
+    if (!trimmed || running) return;
+    setHistory((current) =>
+      [trimmed, ...current.filter((item) => item !== trimmed)].slice(0, 20)
+    );
+    host.execute({
+      mode,
+      query: trimmed,
+      params: parsedParams,
+      timeoutMs: 5000,
+      maxRows: 1000
+    });
   };
+
   return (
     <div className="query-shell">
-      <header className="border-b p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <header className="query-header">
+        <div className="query-heading-row">
           <div>
-            <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              Compass query {revision ? `· ${revision.slice(0, 12)}` : "· working tree"}
+            <span className="query-context">
+              Compass query · {revision ? revision.slice(0, 12) : "working tree"}
             </span>
-            <h1 className="text-lg font-semibold">Ask the codebase</h1>
+            <h1>Ask the codebase</h1>
           </div>
-          <div
-            className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px]"
-            role="group"
-            aria-label="Query language"
-          >
-            <Button
-              size="xs"
-              variant={mode === "natural" ? "secondary" : "ghost"}
+          <div className="query-mode" role="group" aria-label="Query language">
+            <button
+              type="button"
               aria-pressed={mode === "natural"}
               onClick={() => setMode("natural")}
             >
-              <SearchIcon /> Natural language
-            </Button>
-            <Button
-              size="xs"
-              variant={mode === "cql" ? "secondary" : "ghost"}
+              <SearchIcon aria-hidden="true" /> Natural language
+            </button>
+            <button
+              type="button"
               aria-pressed={mode === "cql"}
               onClick={() => setMode("cql")}
             >
-              <BracesIcon /> CompassQL
-            </Button>
+              <BracesIcon aria-hidden="true" /> CompassQL
+            </button>
           </div>
         </div>
-        <div className="mt-4 flex gap-2">
-          <textarea
-            className="min-h-24 flex-1 resize-y rounded-md border bg-input/30 px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={query}
-            placeholder={mode === "natural"
-              ? "How does authentication reach the data layer?"
-              : "MATCH (n) RETURN n LIMIT 20"}
-            aria-label={mode === "natural" ? "Natural-language query" : "CompassQL query"}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") execute();
-            }}
-          />
-          <Button className="self-end" onClick={running ? host.cancel : execute}>
-            {running ? <SquareIcon /> : <PlayIcon />}
+        <div className="query-composer">
+          <div className="query-editor">
+            <textarea
+              ref={editorRef}
+              value={query}
+              placeholder={mode === "natural"
+                ? "Ask how code, modules, or systems connect"
+                : "MATCH (n) RETURN n LIMIT 20"}
+              aria-label={mode === "natural" ? "Natural-language query" : "CompassQL query"}
+              aria-keyshortcuts="Control+Enter Meta+Enter"
+              spellCheck={mode === "natural"}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  execute();
+                }
+              }}
+            />
+            <span className="query-shortcut">
+              {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
+            </span>
+          </div>
+          <button
+            type="button"
+            className="query-run"
+            aria-label={running ? "Cancel query" : "Run query"}
+            disabled={!running && !query.trim()}
+            onClick={running ? host.cancel : execute}
+          >
+            {running ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
             {running ? "Cancel" : "Run"}
-          </Button>
+          </button>
         </div>
-        {mode === "cql" && (
-          <Input
-            className="mt-2 font-mono"
-            value={params}
-            placeholder="Parameters: kind=Function, module=api"
-            aria-label="CompassQL parameters"
-            onChange={(event) => setParams(event.target.value)}
-          />
+        {mode === "cql" ? (
+          <label className="query-params">
+            <span>Parameters</span>
+            <input
+              value={params}
+              placeholder="kind=Function, module=api"
+              aria-label="CompassQL parameters"
+              onChange={(event) => setParams(event.target.value)}
+            />
+          </label>
+        ) : (
+          <div className="query-examples" aria-label="Example questions">
+            {NATURAL_EXAMPLES.map((example) => (
+              <button key={example} type="button" onClick={() => {
+                setQuery(example);
+                editorRef.current?.focus();
+              }}>
+                {example}
+              </button>
+            ))}
+          </div>
         )}
       </header>
-      <main className="min-h-0 overflow-auto p-4">
-        {error && <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">{error}</div>}
-        {!result && !running && !error && (
-          <div className="grid min-h-64 place-items-center text-center text-muted-foreground">
-            <div>
-              <SearchIcon className="mx-auto mb-2 size-8" />
-              <p>Run a question or deterministic CompassQL query.</p>
-              {history.length > 0 && (
-                <div className="mt-4 flex max-w-xl flex-wrap justify-center gap-1">
-                  {history.slice(0, 8).map((item) => (
-                    <Button key={item} size="xs" variant="outline" onClick={() => setQuery(item)}>
-                      {item}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {running && <div role="status" className="text-sm text-muted-foreground">Compass is traversing the graph…</div>}
-        {result && (
-          <section>
-            <div className="mb-2 text-xs text-muted-foreground">Completed in {result.durationMs} ms</div>
+
+      <main className="query-results">
+        {running ? (
+          <WorkspaceState
+            kind="running"
+            title="Traversing the code graph"
+            description="Compass is resolving symbols and following relationships for this query."
+          />
+        ) : error ? (
+          <WorkspaceState
+            kind="error"
+            title="Query failed"
+            description={error}
+            action={{ label: "Revise query", onClick: () => editorRef.current?.focus() }}
+          />
+        ) : result ? (
+          <section className="query-result" aria-labelledby="query-result-heading">
+            <header>
+              <div>
+                <span>Result</span>
+                <h2 id="query-result-heading">
+                  {result.mode === "natural" ? "Codebase answer" : "CompassQL rows"}
+                </h2>
+              </div>
+              <span><Clock3Icon aria-hidden="true" /> {result.durationMs.toLocaleString()} ms</span>
+            </header>
             {result.text !== undefined ? (
-              <pre className="whitespace-pre-wrap rounded-md border bg-card p-4 text-sm">{result.text}</pre>
+              <pre className="query-text-result">{result.text}</pre>
+            ) : structured ? (
+              <div className="query-table">
+                <table>
+                  <thead>
+                    <tr>{structured.columns.map((column) => <th key={column}>{column}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {structured.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell, columnIndex) => (
+                          <td key={`${rowIndex}:${structured.columns[columnIndex]}`}>{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <StructuredResult value={result.json} />
+              <pre className="query-json-result">{JSON.stringify(result.json, null, 2)}</pre>
             )}
           </section>
+        ) : (
+          <div className="query-empty">
+            <WorkspaceState
+              kind="empty"
+              title="Ask how this codebase works"
+              description="Use natural language for an explanation or CompassQL for deterministic graph rows."
+            />
+            {history.length > 0 && (
+              <section className="query-history" aria-label="Recent queries">
+                <h2>Recent in this tab</h2>
+                {history.slice(0, 6).map((item) => (
+                  <button key={item} type="button" onClick={() => {
+                    setQuery(item);
+                    editorRef.current?.focus();
+                  }}>
+                    {item}
+                  </button>
+                ))}
+              </section>
+            )}
+          </div>
         )}
       </main>
     </div>
   );
 }
 
-function StructuredResult({ value }: { value: unknown }) {
-  const rows = value && typeof value === "object" && "rows" in value
-    && Array.isArray((value as { rows?: unknown }).rows)
-    ? (value as { rows: unknown[] }).rows
-    : undefined;
-  if (!rows) {
-    return <pre className="overflow-auto rounded-md border bg-card p-4 text-xs">{JSON.stringify(value, null, 2)}</pre>;
-  }
-  return (
-    <div className="overflow-auto rounded-md border">
-      <table className="w-full text-left text-sm">
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} className="border-t">
-              <td className="p-2 font-mono text-xs">{JSON.stringify(row)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function parseParams(value: string): Record<string, string> {
-  return Object.fromEntries(value.split(",").map((entry) => entry.trim()).filter(Boolean).map((entry) => {
-    const [name, ...rest] = entry.split("=");
-    return [name ?? "", rest.join("=")];
-  }).filter(([name]) => name));
+  return Object.fromEntries(
+    value.split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [name, ...rest] = entry.split("=");
+        return [name ?? "", rest.join("=")];
+      })
+      .filter(([name]) => name)
+  );
 }

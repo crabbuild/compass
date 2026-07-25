@@ -206,7 +206,7 @@ export default async function generate(): Promise<void> {
       communityDetail
     )
   );
-  await writeFile(path.join(output, "query.html"), harness("query", { type: "state", running: false }));
+  await writeFile(path.join(output, "query.html"), queryHarness());
 }
 
 function graphLoadingHarness(): string {
@@ -277,6 +277,51 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     model:${JSON.stringify(model)}
   },"*"),delay);
 }})</script><script src="/architecture.js"></script></body></html>`;
+}
+
+function queryHarness(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass query fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.queryHostMessages=[];
+window.queryTimer=undefined;
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.queryHostMessages.push(message);
+  if(message.type==="ready") {
+    setTimeout(()=>window.postMessage({type:"state",running:false},"*"),0);
+    return;
+  }
+  if(message.type==="cancel") {
+    clearTimeout(window.queryTimer);
+    window.postMessage({type:"state",running:false},"*");
+    return;
+  }
+  if(message.type!=="execute") return;
+  window.postMessage({type:"state",running:true},"*");
+  const params=new URLSearchParams(window.location.search);
+  const delay=params.has("delay") ? 1200 : 20;
+  window.queryTimer=setTimeout(()=>{
+    if(params.has("error")) {
+      window.postMessage({type:"error",message:"CompassQL could not parse this query"},"*");
+    } else if(params.get("result")==="rows") {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          json:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]},
+          durationMs:18
+        }
+      },"*");
+    } else {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          text:"Authentication reaches storage through the repository service.",
+          durationMs:24
+        }
+      },"*");
+    }
+  },delay);
+}})</script><script src="/query.js"></script></body></html>`;
 }
 
 function communityHarness(overview: unknown, detail: unknown): string {
@@ -373,8 +418,4 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     window.openedSource=message.source;
   }
 }})</script><script src="/history.js"></script></body></html>`;
-}
-
-function harness(script: string, hydration: unknown): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass ${script} fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>window.acquireVsCodeApi=()=>({postMessage(message){if(message.type==="ready")setTimeout(()=>window.postMessage(${JSON.stringify(hydration)},"*"),0)}})</script><script src="/${script}.js"></script></body></html>`;
 }
