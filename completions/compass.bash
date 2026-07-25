@@ -3,7 +3,9 @@ _compass_complete() {
   current="${COMP_WORDS[COMP_CWORD]}"
   previous="${COMP_WORDS[COMP_CWORD-1]}"
   if (( COMP_CWORD == 1 )); then
-    COMPREPLY=( $(compgen -W "update extract watch serve cluster-only query path explain affected tree export benchmark diagnose merge-graphs history" -- "$current") )
+    COMPREPLY=( $(compgen -W "init update extract watch serve cluster-only query path explain affected tree export benchmark diagnose merge-graphs history" -- "$current") )
+  elif [[ "${COMP_WORDS[1]}" == "init" && "$current" == -* ]]; then
+    COMPREPLY=( $(compgen -W "--include --exclude --yes --force --help" -- "$current") )
   elif [[ "${COMP_WORDS[1]}" == "history" && "$COMP_CWORD" == 2 ]]; then
     COMPREPLY=( $(compgen -W "enable disable status build rebuild list show prefer export gc" -- "$current") )
   elif [[ "${COMP_WORDS[1]}" == "history" && "${COMP_WORDS[2]}" == "build" && "$current" == -* ]]; then

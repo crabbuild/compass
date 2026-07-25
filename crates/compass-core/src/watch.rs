@@ -92,6 +92,7 @@ pub fn watch_local_graph(
         &DetectOptions {
             gitignore: options.build.gitignore,
             extra_excludes: options.build.extra_excludes.clone(),
+            scope: options.build.scope.clone(),
             output_name,
             ..DetectOptions::default()
         },

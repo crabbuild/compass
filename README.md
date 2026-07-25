@@ -168,12 +168,23 @@ You can also install directly through Cargo:
 cargo install --locked --path crates/compass-cli --bin compass
 ```
 
-### 2. Build a local graph
+### 2. Initialize and build a local graph
 
 ```bash
 cd your-project
-compass update .
+compass init
 ```
+
+`compass init` previews the eligible corpus, saves project scope in
+`.compass/config.toml`, and performs the first structural build. For automation
+or a focused monorepo scope:
+
+```bash
+compass init . --include src --include 'services/*/src' --exclude '**/generated/**' --yes
+```
+
+After setup, `compass update` and `compass watch` automatically reuse the
+saved scope.
 
 Compass writes:
 

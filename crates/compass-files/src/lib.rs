@@ -7,6 +7,8 @@ mod detect;
 mod encoding;
 mod hash;
 mod manifest;
+mod project_config;
+mod scope;
 mod slice;
 
 pub use atomic::{
@@ -20,6 +22,8 @@ pub use detect::{
 pub use encoding::read_source_lossy;
 pub use hash::{StatHashIndex, body_content, file_hash, md5_file, prompt_fingerprint};
 pub use manifest::{IncrementalDetection, Manifest, ManifestEntry, ManifestKind};
+pub use project_config::{PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig};
+pub use scope::{BuildScope, ScopeMatcher};
 pub use slice::{FileSlice, bisect_slice, read_slice_text, slice_boundaries, split_file};
 
 use std::path::PathBuf;
@@ -49,6 +53,24 @@ pub enum FileError {
     IncompleteBuild(PathBuf),
     #[error("invalid cache kind for operation: {0}")]
     InvalidCacheKind(String),
+    #[error("invalid Compass project config at {path}: {source}")]
+    ProjectConfigToml {
+        path: PathBuf,
+        #[source]
+        source: Box<toml::de::Error>,
+    },
+    #[error("could not encode Compass project config at {path}: {source}")]
+    ProjectConfigEncode {
+        path: PathBuf,
+        #[source]
+        source: Box<toml::ser::Error>,
+    },
+    #[error("unsupported Compass config version {version} at {path}")]
+    UnsupportedProjectConfig { path: PathBuf, version: u32 },
+    #[error("Compass project config path {path} resolves outside project root {root}")]
+    ProjectConfigOutsideRoot { path: PathBuf, root: PathBuf },
+    #[error("invalid build scope entry '{entry}': {reason}")]
+    InvalidScope { entry: String, reason: String },
 }
 
 pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> FileError {

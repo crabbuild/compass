@@ -150,12 +150,19 @@ Git is required for exact-revision history features.
 From the project root, run:
 
 ```bash
-compass update .
+compass init
 ```
 
-`update` is the normal “make the saved graph match this working tree” command.
-On the first run, Compass performs a cold build. On later runs it can use the
-manifest and extraction cache to avoid repeating unchanged work.
+`init` previews the files Compass will use, writes `.compass/config.toml`, and
+performs the first build. Choose a focused scope non-interactively with:
+
+```bash
+compass init . --include src --include 'services/*/src' --exclude '**/generated/**' --yes
+```
+
+After initialization, `compass update` is the normal “make the saved graph
+match this working tree” command. It and `compass watch` automatically reuse
+the configured scope.
 
 For source code, Compass:
 

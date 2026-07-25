@@ -3,6 +3,7 @@
 _compass() {
   local -a commands
   commands=(
+    'init:configure project scope and build the first graph'
     'update:incrementally update a local graph'
     'extract:extract deterministic code facts'
     'watch:watch and incrementally rebuild'
@@ -21,6 +22,13 @@ _compass() {
   )
   if (( CURRENT == 2 )); then
     _describe 'graph command' commands
+  elif [[ "$words[2]" == init ]]; then
+    _arguments \
+      '*--include=[include a file, folder, or glob]:scope:' \
+      '*--exclude=[exclude a project-relative glob]:glob:' \
+      '--yes[accept without prompting]' \
+      '--force[replace existing configuration]' \
+      '*:project root:_files'
   elif [[ "$words[2]" == history && CURRENT == 3 ]]; then
     local -a history_commands
     history_commands=(

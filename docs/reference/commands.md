@@ -28,6 +28,22 @@ should not depend on the internal Graphify compatibility frontend.
 
 ## Build and analysis
 
+### `init`
+
+Configure repository scope and perform the first structural build:
+
+```text
+compass init [PATH]
+  [--include PATH_OR_GLOB]
+  [--exclude GLOB]
+  [--yes]
+  [--force]
+```
+
+Includes and excludes are repeatable. Interactive mode previews the effective
+corpus before writing `.compass/config.toml`; scripts must pass `--yes`.
+Replacing an existing configuration requires `--force`.
+
 ### `update`
 
 Make a saved current-tree graph match the project:

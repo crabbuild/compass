@@ -25,6 +25,7 @@ fn root_help_groups_every_public_command_with_descriptions() {
         assert!(outcome.stdout.contains(heading), "missing {heading}");
     }
     for command in [
+        "init",
         "update",
         "extract",
         "watch",
@@ -75,7 +76,8 @@ fn root_help_groups_every_public_command_with_descriptions() {
 #[test]
 fn command_and_nested_help_explain_options_and_examples() {
     for arguments in [
-        &["update", "--help"][..],
+        &["init", "--help"][..],
+        &["update", "--help"],
         &["query", "--help"],
         &["history", "build", "--help"],
         &["export", "neo4j", "--help"],
