@@ -1,84 +1,82 @@
 # VS Code Workbench Enhancements Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver a polished Compass graph-loading experience, a collapsible and resizable inspector, quiet automatic CLI discovery, actionable Repository and Operations trees, and discoverable Git revision graphs.
+**Goal:** Deliver a polished Compass graph-loading experience, a collapsible and
+resizable inspector, quiet automatic CLI discovery, actionable Repository and
+Operations trees, and discoverable Git revision graphs.
 
-**Architecture:** Keep graph export, validation, and command execution in the VS Code host. Add reusable inspector layout behavior to `@compass/viewer`, keep loading/error presentation in the graph webview, and derive both native VS Code trees from pure descriptor builders so their behavior can be unit tested without a VS Code process.
+**Architecture:** Keep graph export, validation, and command execution in the VS
+Code host. Put reusable inspector layout behavior in `@compass/viewer`, keep
+loading/error presentation in the graph webview, and derive native VS Code trees
+from pure descriptor builders.
 
-**Tech Stack:** TypeScript 5.9, React 19, VS Code Extension API 1.95, Zod 4, Vitest 3, Testing Library, Vite 7, esbuild 0.25, Playwright viewer tests.
+**Tech Stack:** TypeScript 5.9, React 19, VS Code Extension API 1.95, Zod 4,
+Vitest 3, Testing Library, Vite 7, esbuild 0.25, and Playwright.
 
-## Global Constraints
+## Execution method
 
-- Preserve local-only processing and the existing Compass CLI capability contracts.
+This is an implementation-first plan, not a test-driven-development plan.
+Implement each task's behavior first, then add or update tests to verify the
+completed behavior. A task is complete only when its expected outcome and
+verification commands both succeed.
+
+## Global constraints
+
+- Preserve local-only processing and existing Compass CLI capability contracts.
 - Do not bundle or download the Compass CLI.
-- Resolve a configured executable first, then fall back to executables named `compass` on `PATH`.
-- Do not display a successfully discovered CLI path as a permanent Repository row.
-- Do not build historical graphs implicitly.
-- Use existing extension commands as the single execution path for tree actions.
-- Preserve VS Code high-contrast themes and `prefers-reduced-motion`.
-- Preserve the stacked inspector layout below `760px`.
+- Resolve a configured executable first, then fall back to `compass` on `PATH`.
+- Do not display a healthy CLI path as a permanent Repository row.
 - Store repository graph artifacts only under `<repository>/compass-out/`.
 - Do not create or use a `graphify-out/` directory for this feature.
+- Do not build historical graphs implicitly.
+- Use existing extension commands as the execution path for tree actions.
+- Preserve VS Code high-contrast themes and `prefers-reduced-motion`.
+- Preserve the stacked inspector layout below `760px`.
+- Preserve unrelated user changes and untracked files.
 
 ---
 
-### Task 1: Inspector layout state
+## Task 1: Flexible graph inspector
+
+**Context:** `CompassGraph` currently uses a fixed `340px` inspector column.
+`GraphInspector` has no collapse control, and the canvas cannot reclaim inspector
+space. The inspector is part of the shared viewer, so this capability belongs in
+`@compass/viewer`, not in a VS Code-only wrapper.
+
+**Task goal:** Add a right-docked inspector that users can resize with a pointer or
+keyboard, collapse into a narrow rail, and expand again.
+
+**Expected outcome:**
+
+- Default offline and VS Code graphs still open with a `340px` inspector.
+- Width is clamped from `280px` through `560px`.
+- Dragging the separator changes the right inspector width.
+- Left/Right arrows resize it in `24px` increments.
+- Collapse leaves a `48px` right rail with an expand control.
+- Narrow layouts retain the stacked inspector experience.
+- Existing search, inspection, communities, and source navigation still work.
 
 **Files:**
+
 - Create: `packages/compass-viewer/src/graph/inspectorLayout.ts`
+- Create: `packages/compass-viewer/src/graph/InspectorResizeHandle.tsx`
 - Create: `packages/compass-viewer/src/graph/inspectorLayout.test.ts`
+- Create: `packages/compass-viewer/src/graph/InspectorResizeHandle.test.tsx`
+- Modify: `packages/compass-viewer/src/graph/CompassGraph.tsx`
+- Modify: `packages/compass-viewer/src/graph/GraphInspector.tsx`
+- Modify: `packages/compass-viewer/src/theme.css`
 - Modify: `packages/compass-viewer/src/index.ts`
+- Modify: `tests/viewer/accessibility.spec.ts`
 
-**Interfaces:**
-- Consumes: browser pointer coordinates and stored partial layout values.
-- Produces: `InspectorLayout`, `DEFAULT_INSPECTOR_LAYOUT`, `normalizeInspectorLayout()`, `resizeInspectorFromPointer()`, and `resizeInspectorByKeyboard()`.
+- [ ] **Step 1.1: Implement the layout model**
 
-- [ ] **Step 1: Write the failing layout tests**
+**Step context:** Width math and stored-state normalization should be independent
+of React and browser events.
 
-```ts
-import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_INSPECTOR_LAYOUT,
-  normalizeInspectorLayout,
-  resizeInspectorByKeyboard,
-  resizeInspectorFromPointer
-} from "./inspectorLayout";
+**Step goal:** Provide one reusable source of truth for inspector dimensions.
 
-describe("inspector layout", () => {
-  it("normalizes stored state into the supported width range", () => {
-    expect(normalizeInspectorLayout({ width: 40, collapsed: false }).width).toBe(280);
-    expect(normalizeInspectorLayout({ width: 900, collapsed: true })).toEqual({
-      width: 560,
-      collapsed: true
-    });
-    expect(normalizeInspectorLayout(undefined)).toEqual(DEFAULT_INSPECTOR_LAYOUT);
-  });
-
-  it("resizes from the right-docked separator", () => {
-    expect(resizeInspectorFromPointer(1200, 850)).toBe(350);
-    expect(resizeInspectorFromPointer(1200, 1100)).toBe(280);
-  });
-
-  it("supports keyboard resizing in 24 pixel increments", () => {
-    expect(resizeInspectorByKeyboard(340, "ArrowLeft")).toBe(364);
-    expect(resizeInspectorByKeyboard(340, "ArrowRight")).toBe(316);
-    expect(resizeInspectorByKeyboard(280, "ArrowRight")).toBe(280);
-  });
-});
-```
-
-- [ ] **Step 2: Run the focused test and confirm the missing module failure**
-
-Run:
-
-```bash
-npm test -w @compass/viewer -- inspectorLayout.test.ts
-```
-
-Expected: FAIL because `./inspectorLayout` does not exist.
-
-- [ ] **Step 3: Implement the pure layout model**
+**Action:** Add:
 
 ```ts
 export const INSPECTOR_MIN_WIDTH = 280;
@@ -96,103 +94,30 @@ export const DEFAULT_INSPECTOR_LAYOUT: InspectorLayout = {
   collapsed: false
 };
 
-export function clampInspectorWidth(width: number): number {
-  return Math.min(INSPECTOR_MAX_WIDTH, Math.max(INSPECTOR_MIN_WIDTH, width));
-}
-
+export function clampInspectorWidth(width: number): number;
 export function normalizeInspectorLayout(
   value: Partial<InspectorLayout> | undefined
-): InspectorLayout {
-  return {
-    width: clampInspectorWidth(value?.width ?? DEFAULT_INSPECTOR_LAYOUT.width),
-    collapsed: value?.collapsed ?? DEFAULT_INSPECTOR_LAYOUT.collapsed
-  };
-}
-
-export function resizeInspectorFromPointer(containerRight: number, clientX: number): number {
-  return clampInspectorWidth(containerRight - clientX);
-}
-
-export function resizeInspectorByKeyboard(width: number, key: string): number {
-  if (key === "ArrowLeft") return clampInspectorWidth(width + INSPECTOR_KEYBOARD_STEP);
-  if (key === "ArrowRight") return clampInspectorWidth(width - INSPECTOR_KEYBOARD_STEP);
-  return clampInspectorWidth(width);
-}
+): InspectorLayout;
+export function resizeInspectorFromPointer(
+  containerRight: number,
+  clientX: number
+): number;
+export function resizeInspectorByKeyboard(width: number, key: string): number;
 ```
 
-Export these symbols from `packages/compass-viewer/src/index.ts`.
+Export the layout type and functions from `packages/compass-viewer/src/index.ts`.
 
-- [ ] **Step 4: Run viewer unit tests and type checking**
+**Expected:** Invalid or stale stored widths cannot break the graph layout; every
+consumer receives a normalized `InspectorLayout`.
 
-Run:
+- [ ] **Step 1.2: Implement the accessible resize handle**
 
-```bash
-npm test -w @compass/viewer -- inspectorLayout.test.ts
-npm run typecheck -w @compass/viewer
-```
+**Step context:** The separator sits between the graph stage and the right-docked
+inspector.
 
-Expected: both commands PASS.
+**Step goal:** Support equivalent pointer and keyboard resizing.
 
-- [ ] **Step 5: Commit the layout model**
-
-```bash
-git add packages/compass-viewer/src/graph/inspectorLayout.ts packages/compass-viewer/src/graph/inspectorLayout.test.ts packages/compass-viewer/src/index.ts
-git commit -m "feat(viewer): add inspector layout state"
-```
-
----
-
-### Task 2: Collapsible and resizable graph inspector
-
-**Files:**
-- Create: `packages/compass-viewer/src/graph/InspectorResizeHandle.tsx`
-- Create: `packages/compass-viewer/src/graph/InspectorResizeHandle.test.tsx`
-- Modify: `packages/compass-viewer/src/graph/CompassGraph.tsx`
-- Modify: `packages/compass-viewer/src/graph/GraphInspector.tsx`
-- Modify: `packages/compass-viewer/src/theme.css`
-- Modify: `tests/viewer/accessibility.spec.ts`
-- Regenerate: `crates/compass-output/assets/viewer/graph.js`
-- Regenerate: `crates/compass-output/assets/viewer/viewer.css`
-- Regenerate: `crates/compass-output/assets/viewer/manifest.json`
-
-**Interfaces:**
-- Consumes: `initialInspectorLayout?: Partial<InspectorLayout>` and `onInspectorLayoutChange?: (layout: InspectorLayout) => void` on `CompassGraph`.
-- Produces: a right-docked inspector with pointer resizing, arrow-key resizing, collapse/expand controls, and unchanged defaults for offline exports.
-
-- [ ] **Step 1: Write the failing resize-handle component tests**
-
-```tsx
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { InspectorResizeHandle } from "./InspectorResizeHandle";
-
-describe("InspectorResizeHandle", () => {
-  it("exposes separator values and keyboard resize", () => {
-    const onResize = vi.fn();
-    render(<InspectorResizeHandle width={340} onResize={onResize} />);
-    const separator = screen.getByRole("separator", { name: "Resize graph inspector" });
-    expect(separator).toHaveAttribute("aria-valuemin", "280");
-    expect(separator).toHaveAttribute("aria-valuemax", "560");
-    expect(separator).toHaveAttribute("aria-valuenow", "340");
-    fireEvent.keyDown(separator, { key: "ArrowLeft" });
-    expect(onResize).toHaveBeenCalledWith(364);
-  });
-});
-```
-
-- [ ] **Step 2: Run the focused test and confirm the missing component failure**
-
-Run:
-
-```bash
-npm test -w @compass/viewer -- InspectorResizeHandle.test.tsx
-```
-
-Expected: FAIL because `InspectorResizeHandle` does not exist.
-
-- [ ] **Step 3: Implement the accessible resize handle**
-
-Implement `InspectorResizeHandle` with this public shape:
+**Action:** Create `InspectorResizeHandle` with:
 
 ```tsx
 export function InspectorResizeHandle({
@@ -201,49 +126,25 @@ export function InspectorResizeHandle({
 }: {
   width: number;
   onResize(width: number): void;
-}) {
-  const dragging = useRef(false);
-  return (
-    <div
-      className="compass-inspector-resizer"
-      role="separator"
-      aria-label="Resize graph inspector"
-      aria-orientation="vertical"
-      aria-valuemin={INSPECTOR_MIN_WIDTH}
-      aria-valuemax={INSPECTOR_MAX_WIDTH}
-      aria-valuenow={width}
-      tabIndex={0}
-      onPointerDown={(event) => {
-        dragging.current = true;
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        if (!dragging.current) return;
-        const workspace = event.currentTarget.parentElement;
-        if (workspace) onResize(resizeInspectorFromPointer(
-          workspace.getBoundingClientRect().right,
-          event.clientX
-        ));
-      }}
-      onPointerUp={(event) => {
-        dragging.current = false;
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        onResize(resizeInspectorByKeyboard(width, event.key));
-      }}
-    />
-  );
-}
+});
 ```
 
-- [ ] **Step 4: Wire layout state into `CompassGraph` and `GraphInspector`**
+Use `role="separator"`, `aria-orientation="vertical"`, current/minimum/maximum
+ARIA values, pointer capture during dragging, and Left/Right key handling.
 
-Add the optional props without changing existing callers:
+**Expected:** The separator is focusable, visibly focused, screen-reader
+identifiable, and does not continue resizing after pointer release.
 
-```tsx
+- [ ] **Step 1.3: Integrate layout state with `CompassGraph`**
+
+**Step context:** Offline exports need defaults, while VS Code needs to supply and
+persist a layout.
+
+**Step goal:** Extend the shared viewer without breaking existing callers.
+
+**Action:** Change the graph props to:
+
+```ts
 export type CompassGraphProps = {
   model: GraphViewModel;
   host: GraphHost;
@@ -252,147 +153,43 @@ export type CompassGraphProps = {
 };
 ```
 
-Normalize once when state is created, update the CSS width variable, render the
-separator only while expanded, and notify the host after width or collapsed state
-changes:
+Normalize initial state once. Render the separator only while expanded. Pass
+`collapsed` and `onToggleCollapsed` into `GraphInspector`. Publish every committed
+width/collapse change through `onInspectorLayoutChange`.
 
-```tsx
-const [inspectorLayout, setInspectorLayout] = useState(
-  () => normalizeInspectorLayout(initialInspectorLayout)
-);
-const updateInspector = (next: InspectorLayout) => {
-  setInspectorLayout(next);
-  onInspectorLayoutChange?.(next);
-};
+**Expected:** Existing callers compile unchanged, while hosts that provide layout
+state receive deterministic change notifications.
 
-<div
-  className="compass-workspace"
-  data-inspector-collapsed={inspectorLayout.collapsed}
-  style={{ "--compass-inspector-width": `${inspectorLayout.width}px` } as CSSProperties}
->
-  <main className="compass-graph-stage">
-    <VisNetworkCanvas
-      ref={canvasRef}
-      model={model}
-      focusedNodeId={state.focusedNodeId}
-      physicsRunning={state.physicsRunning}
-      forceLabels={state.forceLabels}
-      hiddenCommunities={state.hiddenCommunities}
-      onFocus={focus}
-      onOpenSource={openNodeSource}
-      onHover={setHover}
-      onClear={clear}
-      onStabilized={handleStabilized}
-    />
-    <GraphToolbar
-      status={status}
-      physicsRunning={state.physicsRunning}
-      forceLabels={state.forceLabels}
-      onTogglePhysics={() => dispatch({
-        type: "setPhysics",
-        running: !state.physicsRunning
-      })}
-      onFit={() => canvasRef.current?.fit()}
-      onReset={() => {
-        clear();
-        canvasRef.current?.reset();
-      }}
-      onToggleLabels={() => dispatch({
-        type: "setLabels",
-        visible: !state.forceLabels
-      })}
-    />
-    {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
-  </main>
-  {!inspectorLayout.collapsed && (
-    <InspectorResizeHandle
-      width={inspectorLayout.width}
-      onResize={(width) => updateInspector({ ...inspectorLayout, width })}
-    />
-  )}
-  <GraphInspector
-    model={model}
-    selected={selected}
-    neighbors={neighbors}
-    query={state.query}
-    matches={matches}
-    hiddenCommunities={state.hiddenCommunities}
-    onQueryChange={(query) => dispatch({ type: "search", query })}
-    onFocus={focus}
-    onOpenSource={host.openSource}
-    onToggleCommunity={(communityId) => dispatch({
-      type: "toggleCommunity",
-      communityId
-    })}
-    onSetAllVisible={(visible) => dispatch({
-      type: "setHiddenCommunities",
-      communityIds: visible ? [] : model.communities.map((community) => community.id)
-    })}
-    collapsed={inspectorLayout.collapsed}
-    onToggleCollapsed={() => updateInspector({
-      ...inspectorLayout,
-      collapsed: !inspectorLayout.collapsed
-    })}
-  />
-</div>
-```
+- [ ] **Step 1.4: Add collapse/expand controls and responsive styling**
 
-`GraphInspector` must render a narrow rail containing an accessible `Expand graph
-inspector` button when collapsed, and add a `Collapse graph inspector` button to its
-existing header when expanded. Use `PanelRightCloseIcon` and
-`PanelRightOpenIcon` from `lucide-react`.
+**Step context:** The right inspector already owns its header and content, making
+it the correct place for disclosure controls.
 
-- [ ] **Step 5: Add responsive, focus, high-contrast, and reduced-motion styles**
+**Step goal:** Reclaim graph space without losing inspector discoverability.
 
-Change the desktop grid to:
+**Action:** Use `PanelRightCloseIcon` and `PanelRightOpenIcon`. Add
+`Collapse graph inspector` to the expanded header and `Expand graph inspector` to
+the collapsed rail. Drive the desktop grid with
+`--compass-inspector-width`. Hide the drag handle in the existing `760px` media
+query. Add focus and high-contrast styling and keep nonessential transitions under
+the reduced-motion rule.
 
-```css
-.compass-workspace {
-  grid-template-columns: minmax(0, 1fr) 8px var(--compass-inspector-width, 340px);
-}
+**Expected:** Expanded, collapsed, high-contrast, reduced-motion, and narrow-screen
+states remain readable and operable.
 
-.compass-workspace[data-inspector-collapsed="true"] {
-  grid-template-columns: minmax(0, 1fr) 48px;
-}
+- [ ] **Step 1.5: Add verification coverage after implementation**
 
-.compass-inspector-resizer {
-  position: relative;
-  z-index: 6;
-  cursor: col-resize;
-  background: var(--compass-panel);
-}
+**Step context:** The completed layout behavior now has stable interfaces to test.
 
-.compass-inspector-resizer::after {
-  content: "";
-  position: absolute;
-  inset: 0 3px;
-  background: var(--compass-line);
-}
+**Step goal:** Protect normalization, keyboard behavior, and accessibility.
 
-.compass-inspector-resizer:hover::after,
-.compass-inspector-resizer:focus-visible::after {
-  background: var(--compass-focus);
-}
-```
+**Action:** Add unit cases for clamping, stored state, pointer width, and keyboard
+width. Add Testing Library coverage for separator ARIA attributes. Extend the
+Playwright accessibility spec to collapse and expand the inspector.
 
-At `max-width: 760px`, restore a single-column stacked layout, hide
-`.compass-inspector-resizer`, and render the inspector expanded so existing mobile
-content remains reachable. Include the new controls in the existing focus-visible
-and high-contrast selector groups.
+**Expected:** The tests prove behavior rather than implementation details.
 
-- [ ] **Step 6: Extend the viewer accessibility test**
-
-Add assertions:
-
-```ts
-const inspector = page.getByRole("complementary", { name: "Graph inspector" });
-await expect(inspector).toBeVisible();
-await expect(page.getByRole("separator", { name: "Resize graph inspector" })).toBeVisible();
-await page.getByRole("button", { name: "Collapse graph inspector" }).click();
-await expect(page.getByRole("button", { name: "Expand graph inspector" })).toBeVisible();
-```
-
-- [ ] **Step 7: Run viewer tests and regenerate embedded assets**
+- [ ] **Step 1.6: Verify and commit**
 
 Run:
 
@@ -404,21 +201,38 @@ node scripts/build_viewer_assets.mjs
 npx playwright test tests/viewer/accessibility.spec.ts tests/viewer/graph-parity.spec.ts
 ```
 
-Expected: all tests PASS and the embedded viewer manifest matches the generated
-JavaScript and CSS.
+**Expected:** All commands pass and embedded viewer assets match the new source.
 
-- [ ] **Step 8: Commit the inspector UI**
+Commit:
 
 ```bash
-git add packages/compass-viewer/src/graph/InspectorResizeHandle.tsx packages/compass-viewer/src/graph/InspectorResizeHandle.test.tsx packages/compass-viewer/src/graph/CompassGraph.tsx packages/compass-viewer/src/graph/GraphInspector.tsx packages/compass-viewer/src/theme.css tests/viewer/accessibility.spec.ts crates/compass-output/assets/viewer/graph.js crates/compass-output/assets/viewer/viewer.css crates/compass-output/assets/viewer/manifest.json
+git add packages/compass-viewer/src/graph packages/compass-viewer/src/theme.css packages/compass-viewer/src/index.ts tests/viewer/accessibility.spec.ts crates/compass-output/assets/viewer
 git commit -m "feat(viewer): make graph inspector flexible"
 ```
 
 ---
 
-### Task 3: Graph loading and recoverable error experience
+## Task 2: Polished loading and recoverable graph errors
+
+**Context:** `GraphPanel.html()` currently displays a small unstyled sentence in
+the top-left corner. Hydration errors replace it with a basic message, and recovery
+requires reopening the graph.
+
+**Task goal:** Render a centered Compass constellation immediately, transition to
+the hydrated graph, and provide Retry and Show Compass output after failure.
+
+**Expected outcome:**
+
+- Opening a graph immediately shows `Mapping your codebase`.
+- Decorative nodes and edges are hidden from assistive technology.
+- Reduced-motion users do not receive ambient pulses.
+- Hydration success replaces the loader with `CompassGraph`.
+- Failure provides the real host error plus Retry and Show Compass output.
+- Retry reruns hydration in the same tab.
+- Inspector state survives graph tab visibility changes and re-renders.
 
 **Files:**
+
 - Create: `editors/vscode/src/webviews/GraphLoadingState.tsx`
 - Create: `editors/vscode/src/webviews/GraphLoadingState.test.tsx`
 - Modify: `editors/vscode/src/webviews/graph.tsx`
@@ -428,161 +242,64 @@ git commit -m "feat(viewer): make graph inspector flexible"
 - Modify: `editors/vscode/package.json`
 - Modify: `package-lock.json`
 - Modify: `packages/compass-viewer/src/theme.css`
-- Regenerate: `crates/compass-output/assets/viewer/viewer.css`
-- Regenerate: `crates/compass-output/assets/viewer/manifest.json`
 
-**Interfaces:**
-- Consumes: host messages `hydrateGraph` and `error`; VS Code webview persistence through `getState()` and `setState()`.
-- Produces: webview messages `{ type: "retry" }` and `{ type: "showOutput" }`, immediate loading UI, recoverable errors, and persisted `InspectorLayout`.
+- [ ] **Step 2.1: Implement the loading/error component**
 
-- [ ] **Step 1: Add explicit webview testing dependencies**
+**Step context:** The webview should own visual state while the extension host owns
+CLI execution.
 
-Run:
+**Step goal:** Give loading and failure a consistent, useful presentation.
 
-```bash
-npm install -w editors/vscode -D @testing-library/react@^16.3.0 @testing-library/jest-dom@^6.9.1 jsdom@^27.0.0
-```
+**Action:** Add:
 
-Expected: `editors/vscode/package.json` and `package-lock.json` declare the testing
-packages with no new runtime dependency.
-
-- [ ] **Step 2: Write failing loading/error component tests**
-
-```tsx
-/* @vitest-environment jsdom */
-import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { GraphLoadingState } from "./GraphLoadingState";
-
-describe("GraphLoadingState", () => {
-  it("announces graph mapping without exposing decorative nodes", () => {
-    render(<GraphLoadingState state={{ kind: "loading" }} onRetry={vi.fn()} onShowOutput={vi.fn()} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Mapping your codebase");
-    expect(screen.getByTestId("graph-constellation")).toHaveAttribute("aria-hidden", "true");
-  });
-
-  it("offers retry and output actions after an error", () => {
-    const retry = vi.fn();
-    const showOutput = vi.fn();
-    render(<GraphLoadingState
-      state={{ kind: "error", message: "viewer export failed" }}
-      onRetry={retry}
-      onShowOutput={showOutput}
-    />);
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    fireEvent.click(screen.getByRole("button", { name: "Show Compass output" }));
-    expect(retry).toHaveBeenCalledOnce();
-    expect(showOutput).toHaveBeenCalledOnce();
-  });
-});
-```
-
-- [ ] **Step 3: Run the focused tests and confirm the missing component failure**
-
-Run:
-
-```bash
-npm test -w editors/vscode -- GraphLoadingState.test.tsx
-```
-
-Expected: FAIL because `GraphLoadingState` does not exist.
-
-- [ ] **Step 4: Build the loading constellation and error shell**
-
-Create the discriminated state and component:
-
-```tsx
-import { AlertTriangleIcon, CompassIcon, RotateCcwIcon, TerminalSquareIcon } from "lucide-react";
-
+```ts
 export type GraphLoadState =
   | { kind: "loading" }
   | { kind: "error"; message: string };
-
-export function GraphLoadingState({
-  state,
-  onRetry,
-  onShowOutput
-}: {
-  state: GraphLoadState;
-  onRetry(): void;
-  onShowOutput(): void;
-}) {
-  return (
-    <main className="compass-load-shell">
-      <div className="compass-load-constellation" data-testid="graph-constellation" aria-hidden="true">
-        <span className="compass-load-orbit" />
-        <span className="compass-load-node compass-load-node-a" />
-        <span className="compass-load-node compass-load-node-b" />
-        <span className="compass-load-node compass-load-node-c" />
-        <span className="compass-load-mark">
-          {state.kind === "loading" ? <CompassIcon /> : <AlertTriangleIcon />}
-        </span>
-      </div>
-      <section role={state.kind === "loading" ? "status" : "alert"} aria-live="polite">
-        <span className="compass-load-eyebrow">Compass graph</span>
-        <h1>{state.kind === "loading" ? "Mapping your codebase" : "Compass could not load this graph"}</h1>
-        {state.kind === "loading" ? (
-          <p>Reading graph <b>·</b> Arranging relationships <b>·</b> Preparing inspector</p>
-        ) : (
-          <>
-            <p>{state.message}</p>
-            <div className="compass-load-actions">
-              <button type="button" onClick={onRetry}><RotateCcwIcon />Retry</button>
-              <button type="button" onClick={onShowOutput}><TerminalSquareIcon />Show Compass output</button>
-            </div>
-          </>
-        )}
-      </section>
-    </main>
-  );
-}
 ```
 
-Add the constellation, action, high-contrast, and reduced-motion styles to
-`theme.css`. Use only existing Compass/VS Code color variables. The primary node
-pulse must be disabled by the existing reduced-motion media query.
+`GraphLoadingState` receives `state`, `onRetry`, and `onShowOutput`. Use the approved
+copy:
 
-- [ ] **Step 5: Add typed retry/output messages and host handlers**
+- `Compass graph`
+- `Mapping your codebase`
+- `Reading graph · Arranging relationships · Preparing inspector`
+- `Compass could not load this graph`
 
-Extend `GraphToHostMessageSchema`:
+Build the constellation with CSS and inline SVG icons; do not add image files.
 
-```ts
-z.object({ type: z.literal("retry") }),
-z.object({ type: z.literal("showOutput") })
-```
+**Expected:** The screen is centered and theme-aware in light, dark, and
+high-contrast VS Code themes.
 
-Change `GraphPanel.open()` to accept the Compass output channel:
+- [ ] **Step 2.2: Add typed host recovery messages**
 
-```ts
-static async open(
-  context: vscode.ExtensionContext,
-  session: RepositorySession,
-  output: vscode.OutputChannel
-): Promise<GraphPanel>
-```
+**Step context:** All graph webview messages are schema-validated before the host
+acts.
 
-Handle the new messages:
+**Step goal:** Keep retry and output actions inside the existing trusted message
+boundary.
 
-```ts
-if (parsed.data.type === "ready" || parsed.data.type === "retry") {
-  await this.hydrate();
-} else if (parsed.data.type === "showOutput") {
-  this.output.show(true);
-} else if (parsed.data.type === "openSource") {
-  await openGraphSource(this.session, parsed.data.repositoryId, parsed.data.source);
-}
-```
+**Action:** Add `{ type: "retry" }` and `{ type: "showOutput" }` to
+`GraphToHostMessageSchema`. Pass the Compass `OutputChannel` into
+`GraphPanel.open()`. Treat `ready` and `retry` as hydration requests; call
+`output.show(true)` for `showOutput`.
 
-Pass `output` from the `compass.openGraph` command. Remove the raw loading sentence
-from `GraphPanel.html()` so the React webview owns all loading presentation.
+**Expected:** Unknown messages remain ignored, while the two new actions are
+validated and deterministic.
 
-- [ ] **Step 6: Persist inspector layout and render state transitions**
+- [ ] **Step 2.3: Render webview states and persist inspector layout**
 
-Use an expanded VS Code API type:
+**Step context:** VS Code provides `getState()` and `setState()` specifically for
+webview-local persistence.
+
+**Step goal:** Make loading immediate and inspector preferences stable within the
+tab.
+
+**Action:** Extend the local API declaration:
 
 ```ts
 type WebviewState = { inspector?: InspectorLayout };
+
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void;
   getState(): WebviewState | undefined;
@@ -590,38 +307,28 @@ declare function acquireVsCodeApi(): {
 };
 ```
 
-Render loading before posting `ready`, and render it again before posting `retry`:
+Render loading before posting `ready`. On hydration, pass stored layout to
+`CompassGraph` and persist changes. On retry, render loading before posting the
+retry request. Remove the raw loading text from the host HTML.
 
-```tsx
-const renderLoading = () => root.render(
-  <GraphLoadingState
-    state={{ kind: "loading" }}
-    onRetry={() => {
-      renderLoading();
-      vscode.postMessage({ type: "retry" });
-    }}
-    onShowOutput={() => vscode.postMessage({ type: "showOutput" })}
-  />
-);
+**Expected:** Users never see the old top-left sentence or an empty graph tab.
 
-renderLoading();
-vscode.postMessage({ type: "ready" });
-```
+- [ ] **Step 2.4: Add verification coverage after implementation**
 
-On hydration, render:
+**Step context:** The component and message contracts now exist.
 
-```tsx
-<CompassGraph
-  model={parsed.data.model}
-  host={host}
-  initialInspectorLayout={vscode.getState()?.inspector}
-  onInspectorLayoutChange={(inspector) => vscode.setState({ inspector })}
-/>
-```
+**Step goal:** Verify visible copy, ARIA roles, action callbacks, and schema
+acceptance.
 
-On `error`, render the component with the host error message.
+**Action:** Add Testing Library dependencies to the VS Code workspace as dev-only
+packages. Test loading status, decorative `aria-hidden`, error alert, Retry, and
+Show Compass output. Extend schema tests or add focused assertions for both new
+messages.
 
-- [ ] **Step 7: Run focused tests, build assets, and type check**
+**Expected:** Tests fail if the loading copy, recovery actions, or trusted message
+contracts regress.
+
+- [ ] **Step 2.5: Verify and commit**
 
 Run:
 
@@ -633,20 +340,41 @@ node scripts/build_viewer_assets.mjs
 npm run build -w editors/vscode
 ```
 
-Expected: all commands PASS and the VS Code bundle includes the new loading shell.
+**Expected:** Component tests, type checking, shared CSS generation, and the
+production extension bundle pass.
 
-- [ ] **Step 8: Commit the loading experience**
+Commit:
 
 ```bash
-git add editors/vscode/src/webviews/GraphLoadingState.tsx editors/vscode/src/webviews/GraphLoadingState.test.tsx editors/vscode/src/webviews/graph.tsx editors/vscode/src/transport/messages.ts editors/vscode/src/views/graphPanel.ts editors/vscode/src/extension.ts editors/vscode/package.json package-lock.json packages/compass-viewer/src/theme.css crates/compass-output/assets/viewer/viewer.css crates/compass-output/assets/viewer/manifest.json
+git add editors/vscode/src/webviews editors/vscode/src/transport/messages.ts editors/vscode/src/views/graphPanel.ts editors/vscode/src/extension.ts editors/vscode/package.json package-lock.json packages/compass-viewer/src/theme.css crates/compass-output/assets/viewer
 git commit -m "feat(vscode): add polished graph loading state"
 ```
 
 ---
 
-### Task 4: Automatic CLI fallback and Repository tree
+## Task 3: Automatic CLI discovery and useful Repository tree
+
+**Context:** Discovery already checks `PATH`, but an invalid configured path
+currently prevents fallback. The Repository tree permanently shows the full CLI
+path even when it is healthy, while repository actions are not exposed as child
+items.
+
+**Task goal:** Make CLI discovery resilient and make Repository describe the
+workspace rather than internal setup.
+
+**Expected outcome:**
+
+- A valid configured binary wins.
+- An invalid configured binary falls back to `PATH`.
+- A healthy CLI path is not shown in Repository.
+- Missing or incompatible CLI state produces one actionable setup row.
+- Each repository row displays graph state and contextual child actions.
+- Available graphs expose Open graph and Codebase evolution.
+- Missing graphs expose Initialize repository.
+- Failed graphs expose Update graph.
 
 **Files:**
+
 - Create: `editors/vscode/src/views/treeModel.ts`
 - Create: `editors/vscode/src/views/treeModel.test.ts`
 - Modify: `editors/vscode/src/cli/discovery.ts`
@@ -654,93 +382,35 @@ git commit -m "feat(vscode): add polished graph loading state"
 - Modify: `editors/vscode/src/views/statusTree.ts`
 - Modify: `editors/vscode/src/extension.ts`
 
-**Interfaces:**
-- Consumes: `CompassDiscovery` and snapshots of `RepositorySession`.
-- Produces: `TreeNode` descriptors and `buildRepositoryTree(discovery, sessions)`.
+- [ ] **Step 3.1: Make discovery fall back after configured-path failure**
 
-- [ ] **Step 1: Write failing CLI fallback tests**
+**Step context:** Remote SSH, WSL, and Dev Containers use the extension host's
+environment, so `PATH` remains the reliable automatic fallback.
 
-Add:
+**Step goal:** Avoid forcing manual selection when a working CLI is already
+available.
 
-```ts
-it("falls back to PATH when the configured executable is unavailable", async () => {
-  const directory = path.join(process.cwd(), `.tmp-discovery-path-${Date.now()}`);
-  created.push(directory);
-  await mkdir(directory);
-  const executable = path.join(directory, "compass");
-  await writeFile(executable, "#!/bin/sh\n");
-  chmodSync(executable, 0o755);
-  const result = await discoverCompass(
-    { get: () => path.join(directory, "missing-compass") },
-    { PATH: directory },
-    "darwin"
-  );
-  expect(result).toEqual({ kind: "found", executable });
-});
-```
-
-- [ ] **Step 2: Write failing Repository model tests**
+**Action:** Build a deduplicated candidate list in this order:
 
 ```ts
-import { describe, expect, it } from "vitest";
-import { buildRepositoryTree } from "./treeModel";
-
-describe("buildRepositoryTree", () => {
-  it("hides a healthy discovered CLI and exposes graph actions", () => {
-    const nodes = buildRepositoryTree(
-      { kind: "found", executable: "/usr/local/bin/compass" },
-      [{ id: "repo", root: "/work/repo", graphState: "available", capabilityError: undefined }]
-    );
-    expect(nodes.map((node) => node.label)).toEqual(["repo"]);
-    expect(nodes[0]?.children?.map((node) => node.command)).toEqual([
-      "compass.openGraph",
-      "compass.openHistory"
-    ]);
-  });
-
-  it("shows setup only when CLI discovery failed", () => {
-    const nodes = buildRepositoryTree(
-      { kind: "missing", searched: ["/usr/bin/compass"] },
-      [{ id: "repo", root: "/work/repo", graphState: "not-materialized", capabilityError: undefined }]
-    );
-    expect(nodes[0]).toMatchObject({
-      label: "Compass CLI needs attention",
-      command: "compass.selectCli"
-    });
-    expect(nodes[1]?.children?.[0]?.command).toBe("compass.initialize");
-  });
-});
+const candidates = [
+  ...(configured ? [configured] : []),
+  ...pathCandidates
+].filter((candidate, index, all) => all.indexOf(candidate) === index);
 ```
 
-- [ ] **Step 3: Run focused tests and confirm failures**
+Keep the existing executable checks and Windows filename variants.
 
-Run:
+**Expected:** Discovery returns the first executable candidate and reports every
+searched candidate only when all checks fail.
 
-```bash
-npm test -w editors/vscode -- discovery.test.ts treeModel.test.ts
-```
+- [ ] **Step 3.2: Implement pure tree descriptors**
 
-Expected: the fallback assertion FAILS and `treeModel` is missing.
+**Step context:** Unit tests should not need to import the `vscode` module.
 
-- [ ] **Step 4: Make discovery try configured and PATH candidates in order**
+**Step goal:** Separate tree decisions from native TreeItem rendering.
 
-Build and deduplicate the candidates:
-
-```ts
-const pathCandidates = (environment.PATH ?? "")
-  .split(path.delimiter)
-  .filter(Boolean)
-  .flatMap((directory) => platform === "win32"
-    ? ["compass.exe", "compass.cmd", "compass.bat"].map((name) => path.join(directory, name))
-    : [path.join(directory, "compass")]);
-const candidates = [...new Set([...(configured ? [configured] : []), ...pathCandidates])];
-```
-
-Keep the existing executable access check and return type.
-
-- [ ] **Step 5: Implement pure tree descriptors and the nested Repository tree**
-
-Use:
+**Action:** Define:
 
 ```ts
 export type TreeNode = {
@@ -750,44 +420,44 @@ export type TreeNode = {
   tooltip?: string;
   icon: string;
   command?: string;
+  commandArguments?: unknown[];
   children?: TreeNode[];
 };
-
-export type SessionTreeSnapshot = {
-  id: string;
-  root: string;
-  graphState: GraphState;
-  capabilityError: string | undefined;
-  activeWriter?: unknown;
-  watch?: unknown;
-};
 ```
 
-`buildRepositoryTree()` must:
+Add `buildRepositoryTree(discovery, sessions)`. Use `path.basename(root)` for the
+repository label and preserve the full root in the tooltip.
 
-- prepend one `Compass CLI needs attention` action for missing discovery;
-- prepend one incompatible CLI action when any session has `capabilityError`;
-- use `path.basename(root)` as the repository label and the full root as tooltip;
-- add `Open graph` and `Codebase evolution` children for available graphs;
-- add `Initialize repository` for non-materialized graphs;
-- add `Update graph` after a failed build;
-- never include a healthy executable path row.
+**Expected:** Repository content can be fully tested with plain objects.
 
-Update `StatusTree` to use `TreeNode`, map its icon to `ThemeIcon`, map its command
-to a `vscode.Command`, return `children` from `getChildren(element)`, and use
-`Expanded` for repository nodes.
+- [ ] **Step 3.3: Render the nested native Repository tree**
 
-- [ ] **Step 6: Pass discovery into `StatusTree`**
+**Step context:** `StatusTree` currently returns a flat `TreeItem[]`.
 
-Replace the `cliLabel` constructor argument with `CompassDiscovery`:
+**Step goal:** Preserve native VS Code behavior while exposing contextual actions.
 
-```ts
-const statusTree = new StatusTree(registry, discovery);
-```
+**Action:** Make `StatusTree` a `TreeDataProvider<TreeNode>`. Convert descriptors
+to `TreeItem` in `getTreeItem()`, including icons, tooltips, commands, arguments,
+and collapsible state. Return descriptor children from `getChildren(element)`.
+Pass the full `CompassDiscovery` result from activation.
 
-Keep the setup notification and binary selection command unchanged.
+**Expected:** Repository rows expand natively and action items execute the existing
+commands.
 
-- [ ] **Step 7: Run Repository and CLI tests**
+- [ ] **Step 3.4: Add verification coverage after implementation**
+
+**Step context:** Discovery and tree decisions now have pure inputs and outputs.
+
+**Step goal:** Cover success, fallback, missing, incompatible, available,
+not-materialized, and failed states.
+
+**Action:** Add unit tests for configured precedence, configured failure with PATH
+success, hidden healthy CLI, setup rows, and repository child commands.
+
+**Expected:** A regression cannot reintroduce the permanent healthy CLI path row or
+remove the history action.
+
+- [ ] **Step 3.5: Verify and commit**
 
 Run:
 
@@ -796,20 +466,42 @@ npm test -w editors/vscode -- discovery.test.ts treeModel.test.ts
 npm run typecheck -w editors/vscode
 ```
 
-Expected: all tests PASS.
+**Expected:** Discovery and Repository tests pass without a VS Code integration
+host.
 
-- [ ] **Step 8: Commit CLI and Repository improvements**
+Commit:
 
 ```bash
-git add editors/vscode/src/views/treeModel.ts editors/vscode/src/views/treeModel.test.ts editors/vscode/src/cli/discovery.ts editors/vscode/src/cli/discovery.test.ts editors/vscode/src/views/statusTree.ts editors/vscode/src/extension.ts
+git add editors/vscode/src/cli editors/vscode/src/views/treeModel.ts editors/vscode/src/views/treeModel.test.ts editors/vscode/src/views/statusTree.ts editors/vscode/src/extension.ts
 git commit -m "feat(vscode): streamline repository setup"
 ```
 
 ---
 
-### Task 5: Operations command center and reliable operation state
+## Task 4: Complete Operations command center
+
+**Context:** Operations currently shows only Building, Watching, or No active
+operations. Users cannot discover or launch the extension's existing workflows
+from that view. Session refresh also risks replacing transient building/failed
+states with a filesystem-only state.
+
+**Task goal:** Turn Operations into a grouped command center while keeping active
+work visible and accurate.
+
+**Expected outcome:**
+
+- Active builds and watches appear first.
+- Build contains Initialize or Update plus Start/Stop watch as appropriate.
+- Explore contains Open graph, Call graph from cursor, Architecture flow, and Query
+  codebase when a graph is available.
+- History contains Codebase evolution.
+- Items invoke existing command handlers.
+- Multi-root commands still use the existing repository picker.
+- Building remains visible while a writer is active.
+- Failed state remains visible until a later successful materialization.
 
 **Files:**
+
 - Modify: `editors/vscode/src/views/treeModel.ts`
 - Modify: `editors/vscode/src/views/treeModel.test.ts`
 - Modify: `editors/vscode/src/views/operationsTree.ts`
@@ -817,117 +509,56 @@ git commit -m "feat(vscode): streamline repository setup"
 - Create: `editors/vscode/src/workspace/sessionRegistry.test.ts`
 - Modify: `editors/vscode/src/commands/buildCommands.ts`
 
-**Interfaces:**
-- Consumes: `SessionTreeSnapshot[]`.
-- Produces: `buildOperationsTree(sessions)` with Active operations, Build, Explore, and History groups.
+- [ ] **Step 4.1: Implement grouped Operations descriptors**
 
-- [ ] **Step 1: Write failing Operations model tests**
+**Step context:** The extension already registers every requested action.
 
-```ts
-import { buildOperationsTree } from "./treeModel";
+**Step goal:** Improve discovery without duplicating command execution logic.
 
-it("groups available actions and places active work first", () => {
-  const nodes = buildOperationsTree([{
-    id: "repo",
-    root: "/work/repo",
-    graphState: "available",
-    capabilityError: undefined,
-    activeWriter: { operationId: "build-1" },
-    watch: { operationId: "watch-1" }
-  }]);
-  expect(nodes.map((node) => node.label)).toEqual([
-    "Active operations",
-    "Build",
-    "Explore",
-    "History"
-  ]);
-  expect(nodes[0]?.children?.map((node) => node.label)).toEqual([
-    "Building graph",
-    "Watching for changes"
-  ]);
-  expect(nodes[1]?.children?.map((node) => node.command)).toEqual([
-    "compass.update",
-    "compass.toggleWatch"
-  ]);
-  expect(nodes[3]?.children?.[0]?.command).toBe("compass.openHistory");
-});
+**Action:** Add `buildOperationsTree(sessions)` with groups in this order:
 
-it("offers initialization before a graph exists", () => {
-  const nodes = buildOperationsTree([{
-    id: "repo",
-    root: "/work/repo",
-    graphState: "not-materialized",
-    capabilityError: undefined
-  }]);
-  expect(nodes.find((node) => node.label === "Build")?.children?.map((node) => node.command))
-    .toEqual(["compass.initialize"]);
-});
-```
+1. Active operations, only when non-empty.
+2. Build.
+3. Explore, when at least one graph is available.
+4. History.
 
-- [ ] **Step 2: Write failing session refresh tests**
-
-Extract a pure state resolver and test it:
+Use these command IDs:
 
 ```ts
-import { describe, expect, it } from "vitest";
-import { refreshedGraphState } from "./sessionRegistry";
-
-describe("refreshedGraphState", () => {
-  it("preserves active builds and failures", () => {
-    expect(refreshedGraphState("available", true, true)).toBe("building");
-    expect(refreshedGraphState("failed", false, false)).toBe("failed");
-  });
-
-  it("uses materialization when no operation or failure owns the state", () => {
-    expect(refreshedGraphState("available", false, false)).toBe("not-materialized");
-    expect(refreshedGraphState("failed", true, false)).toBe("available");
-  });
-});
+"compass.initialize"
+"compass.update"
+"compass.toggleWatch"
+"compass.openGraph"
+"compass.openCallGraph"
+"compass.openArchitecture"
+"compass.openQuery"
+"compass.openHistory"
 ```
 
-- [ ] **Step 3: Run the focused tests and confirm failures**
+**Expected:** Operations always offers meaningful actions and never falls back to
+the passive `No active operations` row.
 
-Run:
+- [ ] **Step 4.2: Render grouped Operations as a native tree**
 
-```bash
-npm test -w editors/vscode -- treeModel.test.ts sessionRegistry.test.ts
-```
+**Step context:** Groups and actions need native expansion, icons, and command
+dispatch.
 
-Expected: FAIL because the operations builder and state resolver are absent.
+**Step goal:** Keep the activity-bar experience consistent with VS Code.
 
-- [ ] **Step 4: Implement the contextual Operations descriptor builder**
+**Action:** Convert `OperationsTree` to `TreeDataProvider<TreeNode>`. Expand Active
+operations by default, collapse command groups by default, and map action commands
+through the same descriptor renderer used by Repository where practical.
 
-Build the groups with these exact actions:
+**Expected:** All actions are keyboard accessible and use VS Code theme icons.
 
-```ts
-const exploreActions: TreeNode[] = [
-  action("open-graph", "Open graph", "type-hierarchy", "compass.openGraph"),
-  action("call-graph", "Call graph from cursor", "references", "compass.openCallGraph"),
-  action("architecture", "Architecture flow", "circuit-board", "compass.openArchitecture"),
-  action("query", "Query codebase", "search", "compass.openQuery")
-];
+- [ ] **Step 4.3: Preserve transient operation state**
 
-const historyActions: TreeNode[] = [
-  action("history", "Codebase evolution", "history", "compass.openHistory")
-];
-```
+**Step context:** `SessionRegistry.refresh()` currently derives state from graph
+file existence alone.
 
-For an available graph, Build contains Update and Start/Stop watch. For a missing
-graph, Build contains Initialize only. If any session has an active writer or watch,
-prepend Active operations with spinning sync and eye icons. Include the repository
-name in descriptions when more than one workspace is open.
+**Step goal:** Keep UI state aligned with in-process work.
 
-- [ ] **Step 5: Render nested Operations nodes**
-
-Update `OperationsTree` to use `TreeNode`, return descriptor children from
-`getChildren(element)`, create VS Code commands from `node.command`, and use
-`Expanded` for Active operations and `Collapsed` for command groups. Remove the
-passive `No active operations` row because the available command groups now fill the
-view.
-
-- [ ] **Step 6: Preserve building and failed states during refresh**
-
-Implement:
+**Action:** Add:
 
 ```ts
 export function refreshedGraphState(
@@ -942,11 +573,26 @@ export function refreshedGraphState(
 }
 ```
 
-Use it in `SessionRegistry.refresh()`. In `runGuided()`, create and assign
-`session.activeWriter` before calling `refresh()` so the Operations and Repository
-views observe the build immediately.
+Assign `session.activeWriter` before refreshing at operation start. Clear it only
+when the same operation completes.
 
-- [ ] **Step 7: Run Operations and state tests**
+**Expected:** Repository and Operations show building immediately and do not erase
+failed state during the final refresh.
+
+- [ ] **Step 4.4: Add verification coverage after implementation**
+
+**Step context:** Operations grouping and session-state resolution are now pure.
+
+**Step goal:** Verify action availability and transient states.
+
+**Action:** Test missing/available graphs, active build/watch ordering, watch label
+changes, command IDs, building precedence, materialized success, and preserved
+failure.
+
+**Expected:** Tests describe the complete Operations surface and operation-state
+lifecycle.
+
+- [ ] **Step 4.5: Verify and commit**
 
 Run:
 
@@ -955,66 +601,49 @@ npm test -w editors/vscode -- treeModel.test.ts sessionRegistry.test.ts
 npm run typecheck -w editors/vscode
 ```
 
-Expected: all tests PASS.
+**Expected:** Operations and session-state verification pass.
 
-- [ ] **Step 8: Commit the command center**
+Commit:
 
 ```bash
-git add editors/vscode/src/views/treeModel.ts editors/vscode/src/views/treeModel.test.ts editors/vscode/src/views/operationsTree.ts editors/vscode/src/workspace/sessionRegistry.ts editors/vscode/src/workspace/sessionRegistry.test.ts editors/vscode/src/commands/buildCommands.ts
+git add editors/vscode/src/views editors/vscode/src/workspace/sessionRegistry.ts editors/vscode/src/workspace/sessionRegistry.test.ts editors/vscode/src/commands/buildCommands.ts
 git commit -m "feat(vscode): complete operations command center"
 ```
 
 ---
 
-### Task 6: User guidance for Repository, Operations, and history
+## Task 5: Discoverable Git and build history
+
+**Context:** The Codebase Evolution workspace already lists reachable Git commits,
+loads available revision graphs, explicitly builds missing ones, compares parents,
+and queries revisions. Its command exists but is difficult to discover.
+
+**Task goal:** Surface the existing history workflow in Repository, Operations, and
+the Repository view title, then explain how both activity-bar sections work.
+
+**Expected outcome:**
+
+- Codebase evolution is visible under Repository and Operations.
+- A history icon appears in the Repository view title.
+- Users understand the difference between Git commits and materialized graph
+  builds.
+- Documentation states that history never builds revisions implicitly.
+- Existing history safety and profile selection remain unchanged.
 
 **Files:**
-- Modify: `editors/vscode/README.md`
+
 - Modify: `editors/vscode/package.json`
+- Modify: `editors/vscode/README.md`
 - Modify: `editors/vscode/src/test/suite/extension.integration.ts`
 
-**Interfaces:**
-- Consumes: existing commands and the tree structures from Tasks 4 and 5.
-- Produces: discoverable view-title history action and concise end-user instructions.
+- [ ] **Step 5.1: Add the Repository title history action**
 
-- [ ] **Step 1: Write the failing command/menu integration assertion**
+**Step context:** Native view-title actions remain visible even when tree groups are
+collapsed.
 
-Extend the integration test to assert that the history command remains registered
-and execute the `commands.getCommands(true)` check with:
+**Step goal:** Provide a one-click entry to Git/build history.
 
-```ts
-for (const command of [
-  "compass.initialize",
-  "compass.update",
-  "compass.toggleWatch",
-  "compass.openGraph",
-  "compass.openCallGraph",
-  "compass.openArchitecture",
-  "compass.openQuery",
-  "compass.openHistory",
-  "compass.selectCli"
-]) {
-  assert.ok(commands.has(command), `${command} is registered`);
-}
-```
-
-Add a package manifest assertion that `compass.openHistory` is contributed to the
-Repository view title:
-
-```ts
-const extension = vscode.extensions.getExtension("crabbuild.compass-vscode");
-const menus = extension?.packageJSON.contributes.menus["view/title"] as Array<{
-  command: string;
-  when: string;
-}>;
-assert.ok(menus.some((item) =>
-  item.command === "compass.openHistory" && item.when === "view == compass.status"
-));
-```
-
-- [ ] **Step 2: Add the Repository title history action**
-
-Add:
+**Action:** Add:
 
 ```json
 {
@@ -1024,23 +653,42 @@ Add:
 }
 ```
 
-Keep Open Graph and Update in the same native view-title menu.
+**Expected:** Repository offers Open Graph, Codebase Evolution, and Update in its
+native title area.
 
-- [ ] **Step 3: Document how the two views work**
+- [ ] **Step 5.2: Document Repository, Operations, and Codebase Evolution**
 
-Add a `Using the Compass activity bar` section to `editors/vscode/README.md` with
-these points:
+**Step context:** The user requested an explanation of these surfaces, not only
+implementation.
 
-- Repository shows one workspace row, graph state, and contextual graph/history
-  actions; the CLI appears only when setup needs attention.
-- Operations is the command center for Initialize, Update, Watch, Open Graph, Call
-  Graph, Architecture, Query, and Codebase Evolution; active builds and watchers
-  appear first.
-- Codebase Evolution lists reachable commits. Select a commit, choose Build graph
-  when needed, then Open graph, Compare parent, or Query this revision. Opening the
-  timeline does not build revisions.
+**Step goal:** Make the workflows understandable without reading source code.
 
-- [ ] **Step 4: Build and run the extension integration test**
+**Action:** Add `Using the Compass activity bar` to the extension README:
+
+- Repository describes workspace/graph health and contextual actions.
+- Operations launches Build, Explore, and History workflows and shows active work.
+- Codebase Evolution lists reachable commits and graph materialization state.
+- Select a commit, choose Build graph when missing, then Open graph, Compare
+  parent, or Query this revision.
+- Opening history never creates a missing revision graph.
+
+**Expected:** The README answers what both panels do and how to inspect historical
+graphs.
+
+- [ ] **Step 5.3: Add integration verification after implementation**
+
+**Step context:** Command contribution and registration are extension-host
+behaviors.
+
+**Step goal:** Ensure the history entry cannot disappear from the UI manifest.
+
+**Action:** Extend the integration test to assert all primary commands remain
+registered and `compass.openHistory` is contributed to `view == compass.status`.
+
+**Expected:** The test fails if either history command registration or the title
+menu entry is removed.
+
+- [ ] **Step 5.4: Verify and commit**
 
 Run:
 
@@ -1049,30 +697,41 @@ npm run build -w editors/vscode
 npm run test:integration -w editors/vscode
 ```
 
-Expected: the test host activates the extension and confirms the history command
-and Repository view-title entry.
+**Expected:** The extension activates and exposes the documented history entry.
 
-- [ ] **Step 5: Commit user guidance**
+Commit:
 
 ```bash
-git add editors/vscode/README.md editors/vscode/package.json editors/vscode/src/test/suite/extension.integration.ts
+git add editors/vscode/package.json editors/vscode/README.md editors/vscode/src/test/suite/extension.integration.ts
 git commit -m "docs(vscode): explain repository operations and history"
 ```
 
 ---
 
-### Task 7: Full verification
+## Task 6: Full product verification
 
-**Files:**
-- Modify if required by generated output: `crates/compass-output/assets/viewer/graph.js`
-- Modify if required by generated output: `crates/compass-output/assets/viewer/viewer.css`
-- Modify if required by generated output: `crates/compass-output/assets/viewer/manifest.json`
+**Context:** The work crosses a shared viewer, generated embedded assets, a VS Code
+webview, native tree providers, and extension packaging. Focused tests alone do not
+prove the shipped VSIX contains matching assets.
 
-**Interfaces:**
-- Consumes: the complete implementation from Tasks 1–6.
-- Produces: verified extension artifacts and current embedded viewer assets.
+**Task goal:** Verify the complete extension as it will be packaged.
 
-- [ ] **Step 1: Run all JavaScript unit tests and type checks**
+**Expected outcome:**
+
+- All JavaScript unit tests and type checks pass.
+- Viewer source and embedded assets match.
+- Viewer accessibility and parity browser tests pass.
+- VS Code integration tests pass.
+- Packaging produces a smoke-testable VSIX.
+- No `graphify-out/` directory is created or modified.
+- Only planned source, test, documentation, package metadata, and generated viewer
+  assets appear in the Compass repository diff.
+
+- [ ] **Step 6.1: Run workspace tests and type checks**
+
+**Step context:** This catches cross-package API mismatches after focused work.
+
+**Step goal:** Prove TypeScript and unit behavior are consistent across workspaces.
 
 Run:
 
@@ -1081,9 +740,14 @@ npm run test:js
 npm run typecheck:js
 ```
 
-Expected: every workspace test and type check PASS.
+**Expected:** Every workspace test and type check passes.
 
-- [ ] **Step 2: Rebuild and validate embedded viewer assets**
+- [ ] **Step 6.2: Validate generated viewer assets**
+
+**Step context:** The extension copies CSS from `crates/compass-output/assets/viewer`
+during its build.
+
+**Step goal:** Prevent source/embedded asset drift.
 
 Run:
 
@@ -1093,32 +757,47 @@ node scripts/build_viewer_assets.mjs
 node scripts/check_viewer_assets.mjs
 ```
 
-Expected: asset validation exits successfully with no manifest mismatch.
+**Expected:** The manifest hashes match generated JavaScript and CSS.
 
-- [ ] **Step 3: Run viewer browser coverage**
+- [ ] **Step 6.3: Run browser and extension-host tests**
+
+**Step context:** Accessibility interactions and command contribution require real
+browser/extension environments.
+
+**Step goal:** Verify user-visible behavior beyond unit boundaries.
 
 Run:
 
 ```bash
 npx playwright test tests/viewer/accessibility.spec.ts tests/viewer/graph-parity.spec.ts
+npm run test:integration -w editors/vscode
 ```
 
-Expected: both browser specs PASS in the configured projects.
+**Expected:** Inspector interactions, graph parity, command registration, and
+history contribution pass.
 
-- [ ] **Step 4: Build, package, and smoke-test the VSIX**
+- [ ] **Step 6.4: Package and smoke-test the VSIX**
+
+**Step context:** The packaged artifact is the deliverable users install.
+
+**Step goal:** Confirm production bundling includes every required local asset.
 
 Run:
 
 ```bash
-npm run build -w editors/vscode
 npm run package -w editors/vscode
 npm run smoke:vsix -w editors/vscode
 ```
 
-Expected: packaging produces a `.vsix`; smoke validation confirms required files,
-commands, and local webview assets.
+**Expected:** Packaging creates a VSIX and smoke validation confirms required
+commands, bundles, and local webview assets.
 
-- [ ] **Step 5: Inspect the final diff for generated noise and unrelated files**
+- [ ] **Step 6.5: Audit final scope**
+
+**Step context:** The Compass repository already contains unrelated untracked
+directories that belong to the user.
+
+**Step goal:** Keep the handoff limited to this feature.
 
 Run:
 
@@ -1128,12 +807,21 @@ git diff --check
 git diff --stat
 ```
 
-Expected: only the planned source, tests, docs, package metadata, and generated
-viewer assets are modified; `git diff --check` prints nothing.
+**Expected:** `git diff --check` prints nothing; no unrelated file is staged or
+modified; no `graphify-out/` path is created or changed.
 
-- [ ] **Step 6: Commit final generated artifacts if the earlier commits did not capture them**
+- [ ] **Step 6.6: Commit remaining generated assets only if needed**
+
+**Step context:** Asset regeneration may be unchanged after earlier task commits.
+
+**Step goal:** Avoid empty commits while keeping the repository reproducible.
+
+Run:
 
 ```bash
 git add crates/compass-output/assets/viewer/graph.js crates/compass-output/assets/viewer/viewer.css crates/compass-output/assets/viewer/manifest.json
 git diff --cached --quiet || git commit -m "chore(viewer): refresh embedded assets"
 ```
+
+**Expected:** Generated assets are either already current or committed in one
+focused commit.
