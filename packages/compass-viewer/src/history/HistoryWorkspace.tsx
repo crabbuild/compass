@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { HistoryIcon, SearchIcon } from "lucide-react";
+import { WorkspaceState } from "../components/workbench/WorkspaceState";
 import { CompassGraph } from "../graph/CompassGraph";
-import { Input } from "../components/ui/input";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type {
   HistoryBuildState,
@@ -34,6 +34,7 @@ export function HistoryWorkspace({
   communityError,
   onBackToOverview,
   selectedCommit,
+  revisionLoadState,
   buildState,
   operationError,
   onSelectCommit,
@@ -49,6 +50,7 @@ export function HistoryWorkspace({
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
   selectedCommit: string;
+  revisionLoadState: "idle" | "loading" | "ready";
   buildState?: HistoryBuildState | undefined;
   operationError?: HistoryOperationError | undefined;
   onSelectCommit(commit: string): void;
@@ -56,15 +58,14 @@ export function HistoryWorkspace({
 }) {
   const [query, setQuery] = useState("");
   const entries = useMemo(() => {
-    const normalizedQuery = query.toLocaleLowerCase();
+    const normalizedQuery = query.trim().toLocaleLowerCase();
     return timeline.entries.filter((entry) => !normalizedQuery
       || entry.commit.includes(normalizedQuery)
       || entry.subject.toLocaleLowerCase().includes(normalizedQuery)
       || entry.authorName.toLocaleLowerCase().includes(normalizedQuery)
-      || entry.graphState.includes(normalizedQuery));
+      || entry.graphState.replaceAll("_", " ").includes(normalizedQuery));
   }, [query, timeline.entries]);
-  const selected = timeline.entries.find((entry) => entry.commit === selectedCommit)
-    ?? entries[0];
+  const selected = timeline.entries.find((entry) => entry.commit === selectedCommit);
   const availableCommits = useMemo(
     () => new Set(timeline.entries
       .filter((entry) => entry.presentationAvailable)
@@ -72,27 +73,43 @@ export function HistoryWorkspace({
     [timeline.entries]
   );
   const visibleGraph = graph && graphCommit === selected?.commit ? graph : undefined;
+
   return (
     <div className="history-shell">
       <aside className="history-sidebar">
-        <header className="border-b p-3">
-          <div className="mb-2 flex items-center gap-2">
-            <HistoryIcon />
+        <header className="history-sidebar-header">
+          <div className="history-title">
+            <HistoryIcon aria-hidden="true" />
             <div>
-              <h1 className="text-sm font-semibold">Codebase evolution</h1>
-              <p className="text-xs text-muted-foreground">{timeline.entries.length} reachable commits</p>
+              <h1>Codebase evolution</h1>
+              <p>{timeline.entries.length.toLocaleString()} reachable commits</p>
             </div>
           </div>
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-8"
+          <label className="history-search">
+            <SearchIcon aria-hidden="true" />
+            <span className="sr-only">Search commit history</span>
+            <input
+              type="search"
               value={query}
-              placeholder="Search commits and states"
+              placeholder="Search commits and graph states"
               aria-label="Search commit history"
               onChange={(event) => setQuery(event.target.value)}
             />
-          </div>
+          </label>
+          <label className="history-mobile-select">
+            <span>Select revision</span>
+            <select
+              value={selected?.commit ?? ""}
+              aria-label="Select revision"
+              onChange={(event) => onSelectCommit(event.target.value)}
+            >
+              {entries.map((entry) => (
+                <option key={entry.commit} value={entry.commit}>
+                  {entry.subject || "(no subject)"} · {entry.commit.slice(0, 9)}
+                </option>
+              ))}
+            </select>
+          </label>
         </header>
         <CommitRail
           entries={entries}
@@ -100,56 +117,122 @@ export function HistoryWorkspace({
           onSelect={onSelectCommit}
         />
       </aside>
-      <main className="min-w-0 overflow-auto p-4">
-        {selected && (
-          <CommitDetails
-            entry={selected}
-            buildState={buildState}
-            operationError={operationError}
-            availableCommits={availableCommits}
-            onLoad={() => host.loadRevision(selected.commit)}
-            onBuild={() => host.buildRevision(selected.commit)}
-            onCompare={(parent) => host.compare(selected.commit, parent)}
-            onQuery={() => host.queryRevision(selected.commit)}
-            changeCounts={changeCounts?.commit === selected.commit ? changeCounts : undefined}
+
+      <main className="history-content">
+        {!timeline.historyEnabled ? (
+          <WorkspaceState
+            kind="unavailable"
+            title="Revision graphs are not enabled"
+            description="Enable a Compass history profile for this repository, then reload Codebase Evolution."
           />
-        )}
-        <div className="mt-4 h-[calc(100vh-12rem)] min-h-96 overflow-hidden rounded-md border">
-          {visibleGraph ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div
-                className="border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
-                role="status"
-              >
-                Viewing graph for <span className="font-mono text-foreground">
-                  {selected?.commit.slice(0, 9)}
-                </span>
-              </div>
-              <div className="min-h-0 flex-1">
-                <CompassGraph
-                  model={visibleGraph}
-                  communityDetail={communityDetail}
-                  communityLoading={communityLoading}
-                  communityError={communityError}
-                  onBackToOverview={onBackToOverview}
-                  host={{
-                    openSource(source) {
-                      if (selected) host.openSource(selected.commit, source);
-                    },
-                    openCommunity(communityId) {
-                      if (graphCommit) host.openCommunity(graphCommit, communityId);
-                    }
+        ) : !selected ? (
+          <WorkspaceState
+            kind="empty"
+            title={timeline.entries.length === 0 ? "No commits to show" : "No matching commits"}
+            description={timeline.entries.length === 0
+              ? "This repository has no reachable commits."
+              : "Clear the history search to select a revision."}
+            {...(query
+              ? { action: { label: "Clear search", onClick: () => setQuery("") } }
+              : {})}
+          />
+        ) : (
+          <>
+            <CommitDetails
+              entry={selected}
+              operationError={operationError?.operation === "Load graph" ? undefined : operationError}
+              availableCommits={availableCommits}
+              onCompare={(parent) => host.compare(selected.commit, parent)}
+              onQuery={() => host.queryRevision(selected.commit)}
+              changeCounts={changeCounts?.commit === selected.commit ? changeCounts : undefined}
+            />
+            <div className="history-graph-frame">
+              {visibleGraph ? (
+                <div className="history-graph-ready">
+                  <div className="history-graph-status" role="status">
+                    Viewing graph for <span>{selected.commit.slice(0, 9)}</span>
+                  </div>
+                  <div className="history-graph-canvas">
+                    <CompassGraph
+                      model={visibleGraph}
+                      communityDetail={communityDetail}
+                      communityLoading={communityLoading}
+                      communityError={communityError}
+                      onBackToOverview={onBackToOverview}
+                      host={{
+                        openSource(source) {
+                          host.openSource(selected.commit, source);
+                        },
+                        openCommunity(communityId) {
+                          if (graphCommit) host.openCommunity(graphCommit, communityId);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : buildState?.status === "requesting" ? (
+                <WorkspaceState
+                  kind="running"
+                  title="Choosing a build profile"
+                  description="Select how Compass should materialize this revision graph."
+                />
+              ) : buildState?.status === "running" ? (
+                <WorkspaceState
+                  kind="running"
+                  title="Building revision graph"
+                  description={`Compass is materializing ${selected.commit.slice(0, 9)}. You can cancel from the VS Code progress notification.`}
+                />
+              ) : buildState?.status === "failed" ? (
+                <WorkspaceState
+                  kind="error"
+                  title="Revision build failed"
+                  description={buildState.message}
+                  action={{
+                    label: "Retry build",
+                    onClick: () => host.buildRevision(selected.commit)
                   }}
                 />
-              </div>
+              ) : operationError?.operation === "Load graph" ? (
+                <WorkspaceState
+                  kind="error"
+                  title="Revision graph could not be opened"
+                  description={operationError.message}
+                  action={{
+                    label: "Retry load",
+                    onClick: () => host.loadRevision(selected.commit)
+                  }}
+                />
+              ) : !selected.presentationAvailable ? (
+                <WorkspaceState
+                  kind="unavailable"
+                  title="Graph not built for this revision"
+                  description="Build this revision explicitly to inspect, compare, or query its code graph."
+                  action={{
+                    label: "Build graph",
+                    onClick: () => host.buildRevision(selected.commit)
+                  }}
+                />
+              ) : revisionLoadState === "loading" ? (
+                <WorkspaceState
+                  kind="running"
+                  title={`Loading ${selected.subject || selected.commit.slice(0, 9)}`}
+                  description="Compass is opening the stored graph for this revision."
+                />
+              ) : (
+                <WorkspaceState
+                  kind="unavailable"
+                  title="Revision graph is ready to open"
+                  description="Load the stored graph without rebuilding this revision."
+                  action={{
+                    label: "Open graph",
+                    onClick: () => host.loadRevision(selected.commit)
+                  }}
+                />
+              )}
             </div>
-          ) : (
-            <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
-              Select an available commit and choose Open graph. Missing commits are never built implicitly.
-            </div>
-          )}
-        </div>
-        {semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
+            {semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
+          </>
+        )}
       </main>
     </div>
   );

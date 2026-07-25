@@ -6,6 +6,7 @@ import type {
 } from "@compass/viewer";
 
 export type HistoryOperation =
+  | "Load history"
   | "Load graph"
   | "Build graph"
   | "Compare revisions"
@@ -16,6 +17,7 @@ export type HistoryOperation =
 
 export type HistoryWebviewMessage =
   | { type: "ready" }
+  | { type: "retryTimeline" }
   | { type: "loadRevision"; commit: string }
   | { type: "buildRevision"; commit: string }
   | { type: "compare"; commit: string; parent: string }
@@ -38,6 +40,7 @@ export type HistoryWebviewMessage =
 
 export type HistoryHostMessage =
   | { type: "timeline"; timeline: HistoryTimeline; repositoryId: string }
+  | { type: "bootstrapError"; message: string }
   | {
     type: "graph";
     commit: string;
@@ -86,6 +89,7 @@ export function historyOperationFor(message: unknown): HistoryOperation {
     ? (message as { type?: unknown }).type
     : undefined;
   switch (type) {
+    case "retryTimeline": return "Load history";
     case "loadRevision": return "Load graph";
     case "buildRevision": return "Build graph";
     case "compare": return "Compare revisions";

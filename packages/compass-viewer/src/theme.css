@@ -2008,19 +2008,117 @@ body.vscode-high-contrast-light .query-table {
 .history-shell {
   display: grid;
   grid-template-columns: minmax(270px, 340px) minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 440px;
+  overflow: hidden;
   background: var(--background);
   color: var(--foreground);
 }
 
+.history-bootstrap {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--vscode-editor-background, var(--background));
+}
+
 .history-sidebar {
+  display: flex;
   min-width: 0;
+  min-height: 0;
+  flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
+  color: var(--sidebar-foreground);
+}
+
+.history-sidebar-header {
+  flex: 0 0 auto;
+  padding: 14px 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.history-title > svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--muted-foreground);
+}
+
+.history-title h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.history-title p {
+  margin: 3px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.history-search > svg {
+  position: absolute;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+  pointer-events: none;
+}
+
+.history-search input,
+.history-mobile-select select {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.history-search input {
+  padding: 4px 8px 4px 28px;
+}
+
+.history-search input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.history-search input:focus-visible,
+.history-mobile-select select:focus-visible,
+.history-rail:focus-visible,
+.history-commit:focus-visible {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.history-mobile-select {
+  display: none;
 }
 
 .history-rail {
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
+  outline: none;
 }
 
 .history-commit {
@@ -2031,18 +2129,262 @@ body.vscode-high-contrast-light .query-table {
   align-items: center;
   gap: .625rem;
   width: 100%;
-  padding: .5rem .75rem;
+  padding: 8px 11px;
   border: 0;
   border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: transparent;
   color: inherit;
   text-align: left;
+}
+
+.history-commit:hover {
+  background: var(--workbench-hover);
+  color: var(--workbench-hover-foreground);
 }
 
 .history-commit[aria-selected="true"] {
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
   box-shadow: inset 2px 0 var(--sidebar-primary);
+}
+
+.history-commit > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.history-commit > svg[data-state="available"] {
+  color: var(--compass-success);
+}
+
+.history-commit > svg[data-state="building"] {
+  color: var(--vscode-progressBar-background, var(--ring));
+}
+
+.history-commit > svg[data-state="failed"] {
+  color: var(--destructive);
+}
+
+.history-commit-row-copy,
+.history-commit-subject,
+.history-commit-byline {
+  min-width: 0;
+}
+
+.history-commit-row-copy {
+  display: block;
+  flex: 1;
+}
+
+.history-commit-subject {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-commit-byline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.history-commit[aria-selected="true"] .history-commit-byline {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.history-commit-byline code {
+  color: inherit;
+  font-family: var(--compass-font-mono);
+}
+
+.history-commit-byline span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-commit-byline time {
+  margin-left: auto;
+}
+
+.history-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-commit-details {
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-commit-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.history-commit-copy {
+  min-width: 0;
+}
+
+.history-eyebrow {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.history-commit-copy h2 {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.history-commit-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-commit-metadata code {
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font-family: var(--compass-font-mono);
+}
+
+.history-state-badge {
+  flex: 0 0 auto;
+  border-radius: 2px;
+  text-transform: capitalize;
+}
+
+.history-commit-actions,
+.history-change-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.history-commit-actions:empty {
+  display: none;
+}
+
+.history-commit-actions button {
+  border-radius: 2px;
+}
+
+.history-comparison-help,
+.history-inline-error {
+  margin: 9px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.history-inline-error {
+  color: var(--destructive);
+}
+
+.history-change-counts {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-change-counts span {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--foreground));
+}
+
+.history-change-counts strong {
+  font-weight: 600;
+}
+
+.history-graph-frame {
+  display: grid;
+  height: max(400px, calc(100vh - 190px));
+  min-height: 360px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-graph-ready,
+.history-graph-canvas {
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-graph-ready {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-graph-status {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--background));
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-graph-status span {
+  color: var(--foreground);
+  font-family: var(--compass-font-mono);
+}
+
+.history-graph-canvas {
+  position: relative;
+  flex: 1;
+}
+
+.history-graph-canvas .compass-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.history-content > section:last-child {
+  margin-top: 12px;
+}
+
+body.vscode-high-contrast .history-sidebar,
+body.vscode-high-contrast-light .history-sidebar,
+body.vscode-high-contrast .history-commit-details,
+body.vscode-high-contrast-light .history-commit-details,
+body.vscode-high-contrast .history-graph-frame,
+body.vscode-high-contrast-light .history-graph-frame,
+body.vscode-high-contrast .history-change-counts span,
+body.vscode-high-contrast-light .history-change-counts span {
+  border-color: var(--vscode-contrastBorder, var(--ring));
+  border-width: 2px;
 }
 
 @media (max-width: 760px) {
@@ -2097,10 +2439,52 @@ body.vscode-high-contrast-light .query-table {
 
   .history-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
+
   .history-sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .history-sidebar-header {
+    padding: 10px;
+  }
+
+  .history-title p,
+  .history-search,
+  .history-rail {
+    display: none;
+  }
+
+  .history-mobile-select {
+    display: grid;
+    gap: 4px;
+    margin-top: 9px;
+    color: var(--muted-foreground);
+    font-size: 10px;
+  }
+
+  .history-mobile-select select {
+    padding: 4px 7px;
+  }
+
+  .history-content {
+    padding: 10px;
+  }
+
+  .history-commit-heading {
+    gap: 8px;
+  }
+
+  .history-commit-metadata {
+    display: grid;
+    gap: 3px;
+  }
+
+  .history-graph-frame {
+    height: max(360px, calc(100vh - 310px));
+    margin-top: 10px;
   }
 }
 

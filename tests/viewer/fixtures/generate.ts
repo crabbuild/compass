@@ -354,20 +354,37 @@ function historyHarness(
 window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
 window.historyHostMessages=[];
+window.historyBootstrapAttempts=0;
 window.emitHistoryMessage=(message)=>window.postMessage(message,"*");
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.historyHostMessages.push(message);
-  if(message.type==="ready") {
-    setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*"),0);
+  if(message.type==="ready" || message.type==="retryTimeline") {
+    window.historyBootstrapAttempts+=1;
+    const scenario=new URLSearchParams(window.location.search).get("bootstrap");
+    if(scenario==="error" && window.historyBootstrapAttempts===1) {
+      setTimeout(()=>window.postMessage({type:"bootstrapError",message:"Fixture history unavailable"},"*"),40);
+    } else {
+      setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*"),40);
+    }
   } else if(message.type==="loadRevision") {
-    const delay=message.commit.startsWith("a") ? 180 : 0;
-    setTimeout(()=>window.postMessage({
-      type:"graph",
-      commit:message.commit,
-      realization:"r-"+message.commit.slice(0,1),
-      fingerprint:"f-"+message.commit.slice(0,1),
-      graph:window.historyGraphs[message.commit]
-    },"*"),delay);
+    const loadScenario=new URLSearchParams(window.location.search).get("load");
+    const delay=loadScenario==="slow" ? 500 : message.commit.startsWith("a") ? 180 : 120;
+    if(loadScenario==="error") {
+      setTimeout(()=>window.postMessage({
+        type:"error",
+        operation:"Load graph",
+        commit:message.commit,
+        message:"Fixture graph load failed"
+      },"*"),delay);
+    } else {
+      setTimeout(()=>window.postMessage({
+        type:"graph",
+        commit:message.commit,
+        realization:"r-"+message.commit.slice(0,1),
+        fingerprint:"f-"+message.commit.slice(0,1),
+        graph:window.historyGraphs[message.commit]
+      },"*"),delay);
+    }
   } else if(message.type==="changeCounts") {
     setTimeout(()=>window.postMessage({
       type:"changeCounts",

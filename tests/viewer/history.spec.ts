@@ -1,15 +1,22 @@
 import { expect, test } from "@playwright/test";
 
-test("timeline exposes explicit graph state without implicit build", async ({ page }) => {
-  await page.goto("/history.html");
+test("timeline automatically opens an available revision without building", async ({ page }) => {
+  await page.goto("/history.html?load=slow");
   await expect(page.getByRole("listbox", { name: "Git commit timeline" })).toBeVisible();
-  await expect(page.getByText("graph available")).toBeVisible();
-  await expect(page.getByRole("button", { name: /open graph/i })).toBeVisible();
+  await expect(page.getByLabel("Revision A graph").getByText("graph available")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Loading Revision A graph");
+  await expect(page.getByText(/Viewing graph for aaaaaaaaa/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.filter((message) => message.type === "loadRevision").length;
+  })).toBe(1);
 });
 
 test("historical graph lazily enters a community and returns to its overview", async ({ page }) => {
   await page.goto("/history.html");
-  await page.getByRole("button", { name: /open graph/i }).click();
+  await expect(page.getByText(/Viewing graph for aaaaaaaaa/)).toBeVisible();
   const search = page.getByRole("combobox", { name: "Search graph nodes" });
   await search.fill("Core");
   await page.getByRole("option", { name: /Core/i }).click();
@@ -39,9 +46,7 @@ test("historical graph lazily enters a community and returns to its overview", a
 
 test("late revision and derived responses cannot replace the selected commit", async ({ page }) => {
   await page.goto("/history.html");
-  await page.getByRole("button", { name: /open graph/i }).click();
   await page.getByRole("option", { name: /Revision B graph/i }).click();
-  await page.getByRole("button", { name: /open graph/i }).click();
 
   await expect(page.getByText(/Viewing graph for bbbbbbbbb/)).toBeVisible();
   await expect(page.locator("small").filter({ hasText: "Revision B graph" })).toBeVisible();
@@ -108,26 +113,21 @@ test("late revision and derived responses cannot replace the selected commit", a
 test("unavailable comparison explains how to recover", async ({ page }) => {
   await page.goto("/history.html");
   await page.getByRole("option", { name: /Revision C needs build/i }).click();
+  await expect(page.getByText("Graph not built for this revision")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.some((message) => message.type === "buildRevision");
+  })).toBe(false);
   await expect(page.getByRole("button", { name: /Compare parent 1/i })).toBeDisabled();
   await expect(page.getByText("Comparison unavailable: build this revision first.")).toBeVisible();
 });
 
 test("selected operation errors stay beside the commit and out of semantic findings", async ({ page }) => {
-  await page.goto("/history.html");
-  await page.evaluate(() => {
-    const fixture = window as typeof window & {
-      emitHistoryMessage(message: unknown): void;
-    };
-    fixture.emitHistoryMessage({
-      type: "error",
-      operation: "Load graph",
-      commit: "a".repeat(40),
-      message: "Fixture graph load failed"
-    });
-  });
-  await expect(page.getByRole("alert")).toContainText(
-    "Load graph: Fixture graph load failed"
-  );
+  await page.goto("/history.html?load=error");
+  await expect(page.getByRole("alert")).toContainText("Fixture graph load failed");
+  await expect(page.getByRole("button", { name: "Retry load" })).toBeVisible();
   await expect(page.getByText("Semantic change findings")).toHaveCount(0);
 });
 
@@ -135,7 +135,7 @@ test("cancelled build returns the revision action to idle", async ({ page }) => 
   await page.goto("/history.html?build=cancel");
   await page.getByRole("option", { name: /Revision C needs build/i }).click();
   await page.getByRole("button", { name: "Build graph" }).click();
-  await expect(page.getByRole("button", { name: "Choosing profile…" })).toBeDisabled();
+  await expect(page.getByRole("status")).toContainText("Choosing a build profile");
   await expect(page.getByRole("button", { name: "Build graph" })).toBeEnabled();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
@@ -144,9 +144,9 @@ test("failed build reports recovery and permits retry", async ({ page }) => {
   await page.goto("/history.html?build=fail");
   await page.getByRole("option", { name: /Revision C needs build/i }).click();
   await page.getByRole("button", { name: "Build graph" }).click();
-  await expect(page.getByRole("button", { name: "Choosing profile…" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Building…" })).toBeDisabled();
-  await expect(page.getByRole("alert")).toContainText("Build failed: Fixture build failed");
+  await expect(page.getByRole("status")).toContainText("Choosing a build profile");
+  await expect(page.getByRole("status")).toContainText("Building revision graph");
+  await expect(page.getByRole("alert")).toContainText("Fixture build failed");
   await expect(page.getByRole("button", { name: "Retry build" })).toBeEnabled();
 });
 
@@ -154,8 +154,22 @@ test("successful build refreshes availability and comparison controls", async ({
   await page.goto("/history.html?build=success");
   await page.getByRole("option", { name: /Revision C needs build/i }).click();
   await page.getByRole("button", { name: "Build graph" }).click();
-  await expect(page.getByRole("button", { name: "Building…" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Open graph" })).toBeEnabled();
+  await expect(page.getByRole("status")).toContainText("Building revision graph");
+  await expect(page.getByText(/Viewing graph for ccccccccc/)).toBeVisible();
   await expect(page.getByRole("button", { name: /Compare parent 1/i })).toBeEnabled();
   await expect(page.getByText(/Comparison unavailable/)).toHaveCount(0);
+});
+
+test("history bootstrap failure offers a working retry", async ({ page }) => {
+  await page.goto("/history.html?bootstrap=error");
+  await expect(page.getByRole("alert")).toContainText("Fixture history unavailable");
+  await page.getByRole("button", { name: "Retry history" }).click();
+  await expect(page.getByRole("listbox", { name: "Git commit timeline" })).toBeVisible();
+  await expect(page.getByText(/Viewing graph for aaaaaaaaa/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.filter((message) => message.type === "retryTimeline").length;
+  })).toBe(1);
 });
