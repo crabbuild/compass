@@ -1,4 +1,4 @@
-//! Application services shared by the Compass and Graphify command frontends.
+//! Application services shared by the Compass and Compass command frontends.
 
 mod cluster_existing;
 mod diagnostics;

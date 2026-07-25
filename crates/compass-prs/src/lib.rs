@@ -538,7 +538,7 @@ pub fn attach_graph_impact(
     if GraphDocument::size_cap_exceeded(graph_path).is_some() {
         return BTreeMap::new();
     }
-    // `graphify prs --graph` accepts any filename, not only a `.json`
+    // `compass prs --graph` accepts any filename, not only a `.json`
     // extension, while retaining the same graph-size guard.
     let Ok(document) = GraphDocument::load_for_recluster(graph_path) else {
         return BTreeMap::new();
@@ -640,7 +640,7 @@ impl Default for RenderOptions {
     fn default() -> Self {
         Self {
             color: false,
-            command_name: "graphify prs",
+            command_name: "compass prs",
         }
     }
 }

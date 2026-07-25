@@ -481,20 +481,20 @@ fn push_profile_option(
 fn pinned_provider_environment(profile: &BuildProfile) -> (Vec<(String, String)>, Vec<String>) {
     let mut set = Vec::new();
     let mut remove = vec![
-        "GRAPHIFY_LLM_TEMPERATURE".to_owned(),
-        "GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(),
+        "COMPASS_LLM_TEMPERATURE".to_owned(),
+        "COMPASS_MAX_OUTPUT_TOKENS".to_owned(),
     ];
     if let Some(value) = profile
         .value("provider_temperature")
         .filter(|value| *value != "none")
     {
-        set.push(("GRAPHIFY_LLM_TEMPERATURE".to_owned(), value.to_owned()));
+        set.push(("COMPASS_LLM_TEMPERATURE".to_owned(), value.to_owned()));
     }
     if let Some(value) = profile
         .value("provider_max_output_tokens")
         .filter(|value| *value != "none")
     {
-        set.push(("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), value.to_owned()));
+        set.push(("COMPASS_MAX_OUTPUT_TOKENS".to_owned(), value.to_owned()));
     }
     let provider = profile.value("provider").unwrap_or("none");
     if let Some(variable) = match provider {
@@ -868,7 +868,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             .arg("--no-viz")
             .args(&self.forwarded)
             .current_dir(checkout)
-            .env("GRAPHIFY_SKIP_HOOK", "1")
+            .env("COMPASS_SKIP_HOOK", "1")
             .env("COMPASS_HISTORY_BUILD", "1")
             .env("COMPASS_OUT", "compass-out")
             .envs(self.semantic_environment.iter().cloned())

@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs;
 
-use compass_mcp::{GraphifyMcp, HttpOptions, serve_http};
+use compass_mcp::{CompassMcp, HttpOptions, serve_http};
 use rmcp::model::{CallToolRequestParams, ReadResourceRequestParams};
 use rmcp::{ServerHandler, ServiceExt};
 use serde_json::{Map, Value, json};
@@ -46,18 +46,18 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
 -> Result<(), Box<dyn Error>> {
     let temp = tempfile::tempdir()?;
     let graph = write_fixture(temp.path())?;
-    let server = GraphifyMcp::new(&graph);
+    let server = CompassMcp::new(&graph);
 
     let info = server.get_info();
-    assert_eq!(info.server_info.name, "graphify");
-    assert_eq!(GraphifyMcp::tools().len(), 10);
-    assert!(GraphifyMcp::tools().iter().all(|tool| {
+    assert_eq!(info.server_info.name, "compass");
+    assert_eq!(CompassMcp::tools().len(), 10);
+    assert!(CompassMcp::tools().iter().all(|tool| {
         tool.input_schema
             .get("properties")
             .and_then(Value::as_object)
             .is_some_and(|properties| properties.contains_key("project_path"))
     }));
-    assert_eq!(GraphifyMcp::resources().len(), 6);
+    assert_eq!(CompassMcp::resources().len(), 6);
 
     assert!(
         server
@@ -197,20 +197,20 @@ fn resources_and_hot_reload_cover_reports_analysis_and_cache_refresh() -> Result
 {
     let temp = tempfile::tempdir()?;
     let graph = write_fixture(temp.path())?;
-    let server = GraphifyMcp::new(&graph);
+    let server = CompassMcp::new(&graph);
 
-    assert_eq!(server.read("graphify://report")?, "# Fixture report\n");
-    assert!(server.read("graphify://stats")?.contains("Nodes: 5"));
-    assert!(server.read("graphify://god-nodes")?.contains("God nodes"));
-    assert!(server.read("graphify://audit")?.contains("Total edges: 3"));
-    assert!(!server.read("graphify://surprises")?.is_empty());
-    assert!(!server.read("graphify://questions")?.is_empty());
-    assert!(server.read("graphify://unknown").is_err());
+    assert_eq!(server.read("compass://report")?, "# Fixture report\n");
+    assert!(server.read("compass://stats")?.contains("Nodes: 5"));
+    assert!(server.read("compass://god-nodes")?.contains("God nodes"));
+    assert!(server.read("compass://audit")?.contains("Total edges: 3"));
+    assert!(!server.read("compass://surprises")?.is_empty());
+    assert!(!server.read("compass://questions")?.is_empty());
+    assert!(server.read("compass://unknown").is_err());
 
     fs::remove_file(temp.path().join("GRAPH_REPORT.md"))?;
     assert!(
         server
-            .read("graphify://report")?
+            .read("compass://report")?
             .contains("GRAPH_REPORT.md not found")
     );
 
@@ -228,7 +228,7 @@ fn resources_and_hot_reload_cover_reports_analysis_and_cache_refresh() -> Result
 
 #[test]
 fn missing_graph_and_unknown_tool_errors_are_stable() {
-    let server = GraphifyMcp::new("definitely-missing-graph.json");
+    let server = CompassMcp::new("definitely-missing-graph.json");
     assert_eq!(
         server.invoke("not_a_tool", Map::new()),
         "Unknown tool: not_a_tool"
@@ -238,7 +238,7 @@ fn missing_graph_and_unknown_tool_errors_are_stable() {
             .invoke("graph_stats", Map::new())
             .contains("graph.json not found")
     );
-    assert!(server.read("graphify://stats").is_err());
+    assert!(server.read("compass://stats").is_err());
 }
 
 #[test]
@@ -252,7 +252,7 @@ fn project_path_override_loads_an_independent_graph_and_reports_corruption()
         project_output.join("graph.json"),
         r#"{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"project","label":"Project"}],"links":[]}"#,
     )?;
-    let server = GraphifyMcp::new(default.path().join("missing.json"));
+    let server = CompassMcp::new(default.path().join("missing.json"));
     let project_path = project.path().to_string_lossy().into_owned();
     let stats = server.invoke(
         "graph_stats",
@@ -281,7 +281,7 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
     let graph = write_fixture(temp.path())?;
     let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
     let server_task = tokio::spawn(async move {
-        let running = GraphifyMcp::new(graph)
+        let running = CompassMcp::new(graph)
             .serve(server_transport)
             .await
             .map_err(|error| error.to_string())?;
@@ -299,16 +299,16 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
         .await?;
     assert!(!call.content.is_empty());
     let report = client
-        .read_resource(ReadResourceRequestParams::new("graphify://report"))
+        .read_resource(ReadResourceRequestParams::new("compass://report"))
         .await?;
     assert_eq!(report.contents.len(), 1);
     let stats = client
-        .read_resource(ReadResourceRequestParams::new("graphify://stats"))
+        .read_resource(ReadResourceRequestParams::new("compass://stats"))
         .await?;
     assert_eq!(stats.contents.len(), 1);
     assert!(
         client
-            .read_resource(ReadResourceRequestParams::new("graphify://missing"))
+            .read_resource(ReadResourceRequestParams::new("compass://missing"))
             .await
             .is_err()
     );

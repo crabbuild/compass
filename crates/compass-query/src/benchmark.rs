@@ -98,7 +98,7 @@ pub fn format_benchmark(result: &BenchmarkResult, unicode: bool) -> String {
     let arrow = if unicode { "→" } else { "->" };
     let mut lines = vec![
         String::new(),
-        "graphify token reduction benchmark".to_owned(),
+        "compass token reduction benchmark".to_owned(),
         rule,
         format!(
             "  Corpus:          {} words {arrow} ~{} tokens (naive)",

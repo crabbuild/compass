@@ -70,9 +70,6 @@ cargo test -p compass-history --test diff
 cargo test -p compass-history --test maintenance
 cargo test -p compass-cli --test history_cli history_commands_inspect_prefer_and_export_published_realizations
 
-echo "[program-ir] Graphify compatibility produces no program.json"
-cargo test -p compass-cli --test program_cli graphify_rejects_program_artifacts_and_never_enables_program_output
-
 echo "[program-ir] workspace qualification"
 cargo fmt --all -- --check
 cargo test --workspace

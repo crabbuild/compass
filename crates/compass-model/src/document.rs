@@ -381,7 +381,7 @@ struct RawGraphDocument {
     #[serde(default)]
     directed: bool,
     // NetworkX's node_link_graph() treats an omitted `multigraph` member as
-    // true. Graphify's compact graph writer relies on that legacy default, so
+    // true. Compass's compact graph writer relies on that legacy default, so
     // treating omission as false would collapse parallel edges and change
     // degree-sensitive traversal semantics.
     #[serde(default = "networkx_default_multigraph")]

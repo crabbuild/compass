@@ -1,4 +1,4 @@
-//! Batched, failure-tolerant community naming compatible with Graphify.
+//! Batched, failure-tolerant community naming compatible with Compass.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -124,9 +124,9 @@ where
     let batch_size = options.batch_size.max(1);
     let batch_count = community_ids.len().div_ceil(batch_size);
     let force_serial = (options.backend_name == "ollama"
-        && std::env::var("GRAPHIFY_OLLAMA_PARALLEL").as_deref() != Ok("1"))
+        && std::env::var("COMPASS_OLLAMA_PARALLEL").as_deref() != Ok("1"))
         || (options.backend_name == "claude-cli"
-            && std::env::var("GRAPHIFY_CLAUDE_CLI_PARALLEL").as_deref() != Ok("1"));
+            && std::env::var("COMPASS_CLAUDE_CLI_PARALLEL").as_deref() != Ok("1"));
     let worker_count = if force_serial {
         1
     } else {
@@ -205,7 +205,7 @@ where
             Err(error) => {
                 first_error.get_or_insert_with(|| error.clone());
                 result.warnings.push(format!(
-                    "[graphify label] batch {}/{} ({} communities) failed: {error}",
+                    "[compass label] batch {}/{} ({} communities) failed: {error}",
                     batch.index + 1,
                     batch_count,
                     batch.size
@@ -217,7 +217,7 @@ where
         && let Some(error) = first_error
     {
         result.warnings.push(format!(
-            "[graphify label] warning: community labeling failed ({error}); using Community N placeholders."
+            "[compass label] warning: community labeling failed ({error}); using Community N placeholders."
         ));
     }
     result
@@ -321,7 +321,7 @@ where
             .join(", ");
         let suffix = if community_ids.len() > 5 { "..." } else { "" };
         warnings.push(format!(
-                "[graphify label] batch of {} still unparseable at depth {depth} (cids=[{preview}]{suffix}): {error}",
+                "[compass label] batch of {} still unparseable at depth {depth} (cids=[{preview}]{suffix}): {error}",
                 community_ids.len()
             ));
         Err(error)

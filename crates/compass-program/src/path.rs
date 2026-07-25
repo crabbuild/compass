@@ -22,9 +22,7 @@ pub fn normalize_source_path(path: &str) -> Result<String, ProviderError> {
         return Err(ProviderError::UnsafePath(path.to_owned()));
     }
     let first = normalized.split('/').next().unwrap_or_default();
-    if matches!(first, "compass-out" | "graphify-out" | ".compass-cache")
-        || normalized.contains("/cache/program-")
-    {
+    if matches!(first, "compass-out" | ".compass-cache") || normalized.contains("/cache/program-") {
         return Err(ProviderError::UnsafePath(path.to_owned()));
     }
     Ok(normalized)

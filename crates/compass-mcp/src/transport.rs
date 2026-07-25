@@ -16,13 +16,13 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::GraphifyMcp;
+use crate::CompassMcp;
 
 const MAX_HTTP_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const MAX_HTTP_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STDIO_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
-/// Configuration for the Graphify-compatible MCP Streamable HTTP transport.
+/// Configuration for the Compass-compatible MCP Streamable HTTP transport.
 #[derive(Clone, Debug)]
 pub struct HttpOptions {
     pub graph_path: PathBuf,
@@ -87,7 +87,7 @@ pub async fn serve_stdio(graph_path: PathBuf) -> Result<(), String> {
         }
         Ok::<(), String>(())
     });
-    let running = GraphifyMcp::new(graph_path)
+    let running = CompassMcp::new(graph_path)
         .serve((relay_read, tokio::io::stdout()))
         .await
         .map_err(|error| error.to_string())?;
@@ -126,12 +126,12 @@ pub async fn serve_http(mut options: HttpOptions) -> Result<(), String> {
         "no auth (set --api-key to require one)"
     };
     eprintln!(
-        "graphify MCP server (streamable-http) on http://{}:{}{} - {auth_note}",
+        "compass MCP server (streamable-http) on http://{}:{}{} - {auth_note}",
         options.host, options.port, options.path
     );
     if is_wildcard_host(&options.host) && options.api_key.is_none() {
         eprintln!(
-            "WARNING: binding {} with no api-key exposes the graph unauthenticated on the network. Set --api-key (or GRAPHIFY_API_KEY).",
+            "WARNING: binding {} with no api-key exposes the graph unauthenticated on the network. Set --api-key (or COMPASS_API_KEY).",
             if options.host.is_empty() {
                 "0.0.0.0"
             } else {
@@ -162,7 +162,7 @@ fn build_http_router(options: &HttpOptions, cancellation: &CancellationToken) ->
         options.session_timeout.filter(|timeout| !timeout.is_zero())
     };
     let manager = Arc::new(manager);
-    let factory_graph = GraphifyMcp::new(options.graph_path.clone());
+    let factory_graph = CompassMcp::new(options.graph_path.clone());
     let mut config = StreamableHttpServerConfig::default()
         .with_stateful_mode(!options.stateless)
         .with_json_response(options.json_response)
@@ -464,7 +464,7 @@ mod tests {
         );
         let session = header_value(&initialized, "mcp-session-id").ok_or("missing session id")?;
         let payload: Value = serde_json::from_str(response_body(&initialized))?;
-        assert_eq!(payload["result"]["serverInfo"]["name"], "graphify");
+        assert_eq!(payload["result"]["serverInfo"]["name"], "compass");
 
         let listed = request(
             address,

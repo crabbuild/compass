@@ -238,7 +238,7 @@ pub fn execute_plain_text_backend(
                 }
             };
             let disable_thinking = environment
-                .get("GRAPHIFY_DISABLE_THINKING")
+                .get("COMPASS_DISABLE_THINKING")
                 .is_some_and(|value| env_truthy(value));
             let parameters = openai_plain_call_parameters(
                 base_url,
@@ -284,7 +284,7 @@ pub fn execute_plain_text_custom_backend(
         ));
     }
     let disable_thinking = environment
-        .get("GRAPHIFY_DISABLE_THINKING")
+        .get("COMPASS_DISABLE_THINKING")
         .is_some_and(|value| env_truthy(value));
     let parameters = openai_plain_call_parameters(
         &backend.base_url,

@@ -5,13 +5,6 @@ use compass_ingest::{IngestRequest, ingest};
 use crate::{Frontend, Outcome};
 
 pub(super) fn command_add(frontend: Frontend, args: &[String]) -> Outcome {
-    if frontend == Frontend::Graphify
-        && args
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
-    {
-        return Outcome::success("Run 'graphify --help' for full usage.".to_owned());
-    }
     let Some(url) = args.first() else {
         return Outcome::failure(add_help(frontend));
     };
@@ -43,7 +36,7 @@ pub(super) fn command_add(frontend: Frontend, args: &[String]) -> Outcome {
         contributor,
     }) {
         Ok(result) => Outcome::success(format!(
-            "{}\nSaved to {}\nRun /graphify --update in your AI assistant to update the graph.",
+            "{}\nSaved to {}\nRun /compass --update in your AI assistant to update the graph.",
             result.message,
             result.path.display()
         )),
@@ -51,14 +44,6 @@ pub(super) fn command_add(frontend: Frontend, args: &[String]) -> Outcome {
     }
 }
 
-pub(super) fn add_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => {
-            "Usage: compass add <url> [--author Name] [--contributor Name] [--dir ./raw]"
-        }
-        Frontend::Graphify => {
-            "Usage: graphify add <url> [--author Name] [--contributor Name] [--dir ./raw]"
-        }
-    }
-    .to_owned()
+pub(super) fn add_help(_frontend: Frontend) -> String {
+    "Usage: compass add <url> [--author Name] [--contributor Name] [--dir ./raw]".to_owned()
 }

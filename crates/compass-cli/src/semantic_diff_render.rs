@@ -418,13 +418,11 @@ footer{color:var(--muted);border-top:1px solid var(--border);margin-top:40px;pad
     );
     output.push_str(&html_escape(&report.schema));
     output.push_str("</div></div><div class=\"comparison\"><span>Base</span><code>");
-    output.push_str(&html_escape(&short_revision(&report.comparison.old_commit)));
+    output.push_str(&html_escape(short_revision(&report.comparison.old_commit)));
     output.push_str("</code><span>→</span><span>Target</span><code>");
-    output.push_str(&html_escape(&short_revision(&report.comparison.new_commit)));
+    output.push_str(&html_escape(short_revision(&report.comparison.new_commit)));
     output.push_str("</code><span>·</span><span>Profile ");
-    output.push_str(&html_escape(&short_revision(
-        &report.comparison.fingerprint,
-    )));
+    output.push_str(&html_escape(short_revision(&report.comparison.fingerprint)));
     output.push_str("</span></div></header><section class=\"metrics\">");
     for (value, label) in [
         (breaks, "likely breaks"),
@@ -1466,8 +1464,11 @@ mod tests {
                 max_findings_per_section: Some(20),
                 explain: None,
             },
-        )
-        .expect("HTML report");
+        );
+        let Ok(html) = html else {
+            assert!(html.is_ok());
+            return;
+        };
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("id=\"semantic-diff-data\""));
         assert!(html.contains("compass.semantic_diff.report/1"));

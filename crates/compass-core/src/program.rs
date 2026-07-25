@@ -529,7 +529,7 @@ fn discover_artifacts(root: &Path, options: &BuildOptions) -> Result<Vec<Artifac
             source,
         })?;
         if canonical.starts_with(root.join("compass-out"))
-            || canonical.starts_with(root.join("graphify-out"))
+            || canonical.starts_with(root.join("compass-out"))
         {
             return Err(CoreError::InvalidProgramInput(
                 "program artifacts cannot come from output directories".to_owned(),

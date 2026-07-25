@@ -383,6 +383,7 @@ fn source_line_range(location: &str) -> (Option<u64>, Option<u64>) {
     (start.parse().ok(), end.and_then(|end| end.parse().ok()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn node_tooltip(
     label: &str,
     symbol_kind: &str,
@@ -723,7 +724,7 @@ fn node_color(background: &str, border: &str) -> Value {
 }
 
 fn viz_node_limit() -> isize {
-    std::env::var("GRAPHIFY_VIZ_NODE_LIMIT")
+    std::env::var("COMPASS_VIZ_NODE_LIMIT")
         .ok()
         .filter(|raw| !raw.trim().is_empty())
         .and_then(|raw| raw.trim().parse().ok())
@@ -817,6 +818,7 @@ fn resolve_learning_source(source: &str, output_path: &Path) -> Option<std::path
         .find(|candidate| candidate.is_file())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn page(
     title: &str,
     stats: &str,

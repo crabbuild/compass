@@ -1,7 +1,6 @@
 # Compass skill generator guard
 
-Compass borrows the useful build-time properties of the Graphify skill
-generator without copying its Python runtime workflow.
+Compass validates its installed assistant assets at build time.
 
 The canonical native skill lives under
 `crates/compass-cli/assets/compass-skill/`. `compass-cli/build.rs` loads this

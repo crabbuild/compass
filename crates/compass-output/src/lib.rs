@@ -48,7 +48,7 @@ pub enum OutputError {
     #[error("invalid Obsidian output path: {0}")]
     InvalidObsidianPath(std::path::PathBuf),
     #[error(
-        "graph has {nodes} nodes - too large for HTML viz (limit: {limit}). Use --no-viz, raise GRAPHIFY_VIZ_NODE_LIMIT, or reduce input size."
+        "graph has {nodes} nodes - too large for HTML viz (limit: {limit}). Use --no-viz, raise COMPASS_VIZ_NODE_LIMIT, or reduce input size."
     )]
     HtmlTooLarge { nodes: usize, limit: isize },
     #[error("graph.json contains 0 nodes")]
@@ -56,11 +56,11 @@ pub enum OutputError {
     #[error("no sections defined")]
     NoCallflowSections,
     #[error(
-        "communities dict is empty — refusing to clear wiki/. Run `graphify extract .` or `graphify cluster-only .` first."
+        "communities dict is empty — refusing to clear wiki/. Run `compass extract .` or `compass cluster-only .` first."
     )]
     EmptyWikiCommunities,
     #[error(
-        "all community node IDs are stale — none exist in the graph. Re-run `graphify extract .` to regenerate .compass_analysis.json."
+        "all community node IDs are stale — none exist in the graph. Re-run `compass extract .` to regenerate .compass_analysis.json."
     )]
     StaleWikiCommunities,
     #[error("unsupported history renderer {version} for {path}")]

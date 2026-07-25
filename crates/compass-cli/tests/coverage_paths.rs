@@ -1,9 +1,9 @@
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use compass_cli::{Frontend, McpFrontend, run, run_graphify_watch, run_mcp, run_watch};
+use compass_cli::{Frontend, run, run_mcp, run_watch};
 
 fn invoke(frontend: Frontend, arguments: &[&str]) -> compass_cli::Outcome {
     run(
@@ -14,6 +14,28 @@ fn invoke(frontend: Frontend, arguments: &[&str]) -> compass_cli::Outcome {
 
 fn invoke_owned(frontend: Frontend, arguments: &[String]) -> compass_cli::Outcome {
     run(frontend, arguments.iter().map(OsString::from))
+}
+
+fn write_graph_fixture(path: &Path) -> Result<(), Box<dyn Error>> {
+    fs::write(
+        path,
+        r#"{
+          "directed": true,
+          "multigraph": false,
+          "graph": {},
+          "nodes": [
+            {"id":"n_transformer","label":"Transformer","source_file":"model.py","source_location":"L1","file_type":"code","community":0},
+            {"id":"n_attention","label":"Attention","source_file":"attention.py","source_location":"L2","file_type":"code","community":0},
+            {"id":"n_layernorm","label":"LayerNorm","source_file":"model.py","source_location":"L3","file_type":"code","community":1},
+            {"id":"n_concept_attn","label":"attention mechanism","source_file":"guide.md","source_location":"L4","file_type":"document","community":1}
+          ],
+          "links": [
+            {"source":"n_transformer","target":"n_attention","relation":"calls","confidence":"EXTRACTED"},
+            {"source":"n_attention","target":"n_concept_attn","relation":"references","confidence":"INFERRED"}
+          ]
+        }"#,
+    )?;
+    Ok(())
 }
 
 #[test]
@@ -36,9 +58,9 @@ fn frontend_roots_versions_help_and_unknown_commands_are_total() {
         vec!["version"],
         vec!["-v"],
     ] {
-        assert_eq!(invoke(Frontend::Graphify, &arguments).code, 0);
+        assert_eq!(invoke(Frontend::Compass, &arguments).code, 0);
     }
-    let unknown = invoke(Frontend::Graphify, &["not-real"]);
+    let unknown = invoke(Frontend::Compass, &["not-real"]);
     assert_ne!(unknown.code, 0);
     assert!(unknown.stderr.contains("unknown command"));
 }
@@ -171,7 +193,7 @@ fn completed_command_help_routes_and_parser_boundaries_are_total() {
         vec!["cluster-only", "--batch-size=2"],
         vec!["cluster-only", "--missing-only", "--legacy-option"],
     ] {
-        let outcome = invoke(Frontend::Graphify, &arguments);
+        let outcome = invoke(Frontend::Compass, &arguments);
         assert_ne!(outcome.code, 0, "{arguments:?}");
     }
 
@@ -238,7 +260,7 @@ fn read_command_missing_values_and_load_errors_are_diagnostic() -> Result<(), Bo
         assert_ne!(outcome.code, 0, "{arguments:?}");
         assert!(!outcome.stderr.is_empty(), "{arguments:?}");
     }
-    for frontend in [Frontend::Compass, Frontend::Graphify] {
+    for frontend in [Frontend::Compass, Frontend::Compass] {
         for arguments in [
             &["query", "q", "--at"][..],
             &["path", "a", "b", "--at"][..],
@@ -274,7 +296,7 @@ fn export_parser_reports_all_missing_and_invalid_option_values() {
         "--node-limit",
         "--diagram-scale",
     ] {
-        let outcome = invoke(Frontend::Graphify, &["export", "callflow-html", option]);
+        let outcome = invoke(Frontend::Compass, &["export", "callflow-html", option]);
         assert_ne!(outcome.code, 0, "{option}");
         assert!(!outcome.stderr.is_empty(), "{option}");
     }
@@ -286,19 +308,19 @@ fn export_parser_reports_all_missing_and_invalid_option_values() {
         ("--diagram-scale", "bad"),
     ] {
         let outcome = invoke(
-            Frontend::Graphify,
+            Frontend::Compass,
             &["export", "callflow-html", option, value],
         );
         assert_ne!(outcome.code, 0, "{option}");
     }
     assert_eq!(
-        invoke(Frontend::Graphify, &["export", "callflow-html", "--help"]).code,
+        invoke(Frontend::Compass, &["export", "callflow-html", "--help"]).code,
         0
     );
 }
 
 #[test]
-fn graphify_legacy_parsers_tolerate_or_report_frozen_edge_cases() {
+fn compass_legacy_parsers_tolerate_or_report_frozen_edge_cases() {
     let cases: &[&[&str]] = &[
         &["query"],
         &["path"],
@@ -330,7 +352,7 @@ fn graphify_legacy_parsers_tolerate_or_report_frozen_edge_cases() {
         &["prs", "--unknown"],
     ];
     for arguments in cases {
-        let outcome = invoke(Frontend::Graphify, arguments);
+        let outcome = invoke(Frontend::Compass, arguments);
         if outcome.code != 0 {
             assert!(!outcome.stderr.is_empty(), "missing error: {arguments:?}");
         }
@@ -338,8 +360,7 @@ fn graphify_legacy_parsers_tolerate_or_report_frozen_edge_cases() {
 }
 
 #[test]
-fn dense_extract_value_forms_and_graphify_formatting_run_end_to_end() -> Result<(), Box<dyn Error>>
-{
+fn dense_extract_value_forms_and_compass_formatting_run_end_to_end() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     fs::create_dir_all(directory.path().join("src"))?;
     fs::write(directory.path().join("src/lib.rs"), "pub fn run() {}\n")?;
@@ -350,8 +371,8 @@ fn dense_extract_value_forms_and_graphify_formatting_run_end_to_end() -> Result<
         fs::write(directory.path().join(format!("raw-{index}.blob")), b"raw")?;
     }
     let root = directory.path().to_string_lossy().into_owned();
-    let output = directory.path().join("artifacts");
-    let output = output.to_string_lossy().into_owned();
+    let output_path = directory.path().join("artifacts");
+    let output = output_path.to_string_lossy().into_owned();
     let arguments = vec![
         "extract".to_owned(),
         root,
@@ -378,32 +399,21 @@ fn dense_extract_value_forms_and_graphify_formatting_run_end_to_end() -> Result<
         "--out".to_owned(),
         output,
     ];
-    let outcome = invoke_owned(Frontend::Graphify, &arguments);
+    let outcome = invoke_owned(Frontend::Compass, &arguments);
     assert_eq!(outcome.code, 0, "{}", outcome.stderr);
-    assert!(outcome.stdout.contains("--force"));
-    assert!(outcome.stdout.contains("--code-only"));
-    assert!(outcome.stdout.contains("(+2 more)"));
-    assert!(outcome.stdout.contains("no clustering"));
-    assert!(outcome.stderr.contains("[graphify timing] write"));
+    assert!(outcome.stderr.contains("[compass timing] write"));
     Ok(())
 }
 
 #[test]
 fn mcp_option_parser_covers_help_equals_missing_and_invalid_values() {
-    for frontend in [McpFrontend::Compass, McpFrontend::Graphify] {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        assert_eq!(
-            run_mcp(
-                frontend,
-                &[OsString::from("--help")],
-                &mut stdout,
-                &mut stderr
-            ),
-            0
-        );
-        assert!(!stdout.is_empty());
-    }
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    assert_eq!(
+        run_mcp(&[OsString::from("--help")], &mut stdout, &mut stderr),
+        0
+    );
+    assert!(!stdout.is_empty());
 
     let invalid: &[&[&str]] = &[
         &["--graph"],
@@ -422,11 +432,7 @@ fn mcp_option_parser_covers_help_equals_missing_and_invalid_values() {
         let args = arguments.iter().map(OsString::from).collect::<Vec<_>>();
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        assert_eq!(
-            run_mcp(McpFrontend::Compass, &args, &mut stdout, &mut stderr),
-            2,
-            "{arguments:?}"
-        );
+        assert_eq!(run_mcp(&args, &mut stdout, &mut stderr), 2, "{arguments:?}");
         assert!(!stderr.is_empty());
     }
 }
@@ -466,17 +472,13 @@ fn mcp_valid_option_forms_reach_native_load_failures_without_starting_a_server()
         let args = arguments.iter().map(OsString::from).collect::<Vec<_>>();
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        assert_eq!(
-            run_mcp(McpFrontend::Compass, &args, &mut stdout, &mut stderr),
-            1,
-            "{arguments:?}"
-        );
+        assert_eq!(run_mcp(&args, &mut stdout, &mut stderr), 1, "{arguments:?}");
         assert!(!stderr.is_empty());
     }
 }
 
 #[test]
-fn watch_option_parser_covers_help_validation_and_legacy_missing_path() {
+fn watch_option_parser_covers_help_validation_and_missing_path() {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     assert_eq!(
@@ -501,14 +503,14 @@ fn watch_option_parser_covers_help_validation_and_legacy_missing_path() {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     assert_eq!(
-        run_graphify_watch(
+        run_watch(
             &[OsString::from("definitely-missing-watch-root")],
             &mut stdout,
             &mut stderr,
         ),
         1
     );
-    assert!(String::from_utf8_lossy(&stderr).contains("path not found"));
+    assert!(!stderr.is_empty());
 }
 
 #[test]
@@ -536,19 +538,10 @@ fn valid_watch_options_reach_missing_root_failure_after_full_parse() {
 fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
-    let output = directory.path().join("graphify-out");
+    let output = directory.path().join("compass-out");
     fs::create_dir_all(&output)?;
     let graph = output.join("graph.json");
-    let repository = std::env::var_os("GRAPHIFY_REPO_ROOT")
-        .map(PathBuf::from)
-        .or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .ancestors()
-                .nth(3)
-                .map(Path::to_path_buf)
-        })
-        .ok_or("repository root")?;
-    fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
+    write_graph_fixture(&graph)?;
     fs::write(output.join(".compass_labels.json"), r#"{"0":"Core"}"#)?;
     fs::write(
         output.join(".compass_analysis.json"),
@@ -678,7 +671,7 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
         r#"{"sections":[{"id":"runtime","name":"Runtime","communities":["0"]}]}"#,
     )?;
     let callflow_result = invoke_owned(
-        Frontend::Graphify,
+        Frontend::Compass,
         &[
             "export".to_owned(),
             "callflow-html".to_owned(),
@@ -712,19 +705,10 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
 fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
-    let output = directory.path().join("graphify-out");
+    let output = directory.path().join("compass-out");
     fs::create_dir_all(&output)?;
     let graph = output.join("graph.json");
-    let repository = std::env::var_os("GRAPHIFY_REPO_ROOT")
-        .map(PathBuf::from)
-        .or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .ancestors()
-                .nth(3)
-                .map(Path::to_path_buf)
-        })
-        .ok_or("repository root")?;
-    fs::copy(repository.join("tests/fixtures/extraction.json"), &graph)?;
+    write_graph_fixture(&graph)?;
     fs::write(output.join(".compass_labels.json"), r#"{"0":"Core"}"#)?;
     fs::write(
         output.join(".compass_analysis.json"),
@@ -775,7 +759,7 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
 
     let callflow = directory.path().join("directory-callflow.html");
     let callflow_result = invoke_owned(
-        Frontend::Graphify,
+        Frontend::Compass,
         &[
             "export".to_owned(),
             "callflow-html".to_owned(),
@@ -788,7 +772,7 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
     assert!(callflow.is_file());
 
     let clustered = invoke_owned(
-        Frontend::Graphify,
+        Frontend::Compass,
         &[
             "cluster-only".to_owned(),
             directory.path().to_string_lossy().into_owned(),
@@ -806,7 +790,7 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
     );
     assert_eq!(clustered.code, 0, "{}", clustered.stderr);
     assert!(clustered.stdout.contains("communities"));
-    assert!(clustered.stderr.contains("[graphify timing] total"));
+    assert!(clustered.stderr.contains("[compass timing] total"));
     Ok(())
 }
 
@@ -820,8 +804,8 @@ fn install_and_extract_equals_forms_cover_namespaced_parser_boundaries()
         (Frontend::Compass, vec!["install", "--all", "claude"]),
         (Frontend::Compass, vec!["uninstall", "--platform"]),
         (Frontend::Compass, vec!["uninstall", "--unknown"]),
-        (Frontend::Graphify, vec!["install", "--platform"]),
-        (Frontend::Graphify, vec!["uninstall", "--platform"]),
+        (Frontend::Compass, vec!["install", "--platform"]),
+        (Frontend::Compass, vec!["uninstall", "--platform"]),
     ] {
         let outcome = invoke(frontend, &arguments);
         assert_ne!(outcome.code, 0, "{arguments:?}");
@@ -880,8 +864,7 @@ fn install_and_extract_equals_forms_cover_namespaced_parser_boundaries()
 }
 
 #[test]
-fn semantic_provider_failures_are_formatted_for_both_frontends_after_ast_detection()
--> Result<(), Box<dyn Error>> {
+fn semantic_provider_failures_are_formatted_after_ast_detection() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     fs::write(directory.path().join("main.rs"), "pub fn local() {}\n")?;
     fs::write(
@@ -908,8 +891,8 @@ fn semantic_provider_failures_are_formatted_for_both_frontends_after_ast_detecti
         compass.stderr
     );
 
-    let graphify = invoke_owned(
-        Frontend::Graphify,
+    let compass = invoke_owned(
+        Frontend::Compass,
         &[
             "extract".to_owned(),
             root,
@@ -920,12 +903,12 @@ fn semantic_provider_failures_are_formatted_for_both_frontends_after_ast_detecti
             "--force".to_owned(),
         ],
     );
-    assert_ne!(graphify.code, 0);
+    assert_ne!(compass.code, 0);
     assert!(
-        graphify.stderr.contains("unknown backend") || graphify.stdout.contains("unknown backend"),
+        compass.stderr.contains("unknown backend") || compass.stdout.contains("unknown backend"),
         "stdout={} stderr={}",
-        graphify.stdout,
-        graphify.stderr
+        compass.stdout,
+        compass.stderr
     );
     Ok(())
 }

@@ -16,7 +16,7 @@ use serde_json::json;
 fn database_only_detection_does_not_read_local_files() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     fs::write(directory.path().join("local.rs"), "fn local() {}\n")?;
-    fs::write(directory.path().join(".graphifyignore"), "[invalid\n")?;
+    fs::write(directory.path().join(".compassignore"), "[invalid\n")?;
     let detection = compass_files::detect(
         directory.path(),
         &DetectOptions {
@@ -99,7 +99,7 @@ fn markdown_frontmatter_matches_legacy_bytes() {
 fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
-    fs::write(root.join(".graphifyignore"), "ignored/\n*.generated.rs\n")?;
+    fs::write(root.join(".compassignore"), "ignored/\n*.generated.rs\n")?;
     fs::create_dir(root.join("ignored"))?;
     let filter = WatchPathFilter::new(root, &DetectOptions::default())?;
 
@@ -108,19 +108,19 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
     assert!(!filter.allows(&root.join("model.generated.rs")));
     assert!(!filter.allows(&root.join(".hidden/main.rs")));
     assert!(!filter.allows(&root.join("compass-out/graph.json")));
-    assert!(!filter.allows(&root.join("graphify-out/graph.json")));
+    assert!(!filter.allows(&root.join("compass-out/graph.json")));
     assert!(!filter.allows(&root.join("README.unknown")));
     Ok(())
 }
 
 #[test]
-fn detection_ignores_graphify_generated_output() -> Result<(), Box<dyn Error>> {
+fn detection_ignores_compass_generated_output() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     fs::write(root.join("main.rs"), "fn main() {}\n")?;
-    fs::create_dir(root.join("graphify-out"))?;
-    fs::write(root.join("graphify-out/graph.json"), "{}\n")?;
-    fs::write(root.join("graphify-out/.graphify_labels.json"), "{}\n")?;
+    fs::create_dir(root.join("compass-out"))?;
+    fs::write(root.join("compass-out/graph.json"), "{}\n")?;
+    fs::write(root.join("compass-out/.compass_labels.json"), "{}\n")?;
 
     let detection = compass_files::detect(root, &DetectOptions::default())?;
     assert_eq!(detection.files["code"].len(), 1);
@@ -208,7 +208,7 @@ fn detector_covers_nested_ignores_memory_sensitive_files_and_large_corpus_warnin
     fs::create_dir_all(root.join(".git/info"))?;
     fs::write(root.join(".git/info/exclude"), "excluded-by-git.rs\n")?;
     fs::write(
-        root.join(".graphifyignore"),
+        root.join(".compassignore"),
         "ignored/**\n!ignored/keep.rs\n*.generated.rs\n",
     )?;
     fs::create_dir_all(root.join("ignored"))?;
@@ -270,7 +270,7 @@ fn detector_covers_nested_ignores_memory_sensitive_files_and_large_corpus_warnin
             .iter()
             .any(|path| path.contains("ignored"))
     );
-    assert!(detection.graphifyignore_patterns >= 4);
+    assert!(detection.compassignore_patterns >= 4);
     Ok(())
 }
 
@@ -394,7 +394,7 @@ fn manifest_round_trip_preserves_independent_stamps() -> Result<(), Box<dyn Erro
     let source = directory.path().join("main.rs");
     fs::write(&source, "fn main() {}\n")?;
     let source = fs::canonicalize(source)?;
-    let manifest_path = directory.path().join("graphify-out/manifest.json");
+    let manifest_path = directory.path().join("compass-out/manifest.json");
     let mut files = BTreeMap::new();
     files.insert(
         "code".to_owned(),
@@ -680,7 +680,7 @@ fn manifest_incremental_tracks_changes_deletions_exclusions_and_legacy_entries()
     )?;
     fs::write(&first, "fn first_changed() {}\n")?;
     fs::remove_file(&second)?;
-    fs::write(root.join(".graphifyignore"), "excluded.rs\n")?;
+    fs::write(root.join(".compassignore"), "excluded.rs\n")?;
     let delta = Manifest::incremental(
         root,
         &manifest_path,
@@ -784,7 +784,7 @@ fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
     assert_eq!(md5_file(&source)?.len(), 32);
     assert_eq!(file_hash(&source, directory.path())?.len(), 64);
     assert!(file_hash(directory.path(), directory.path()).is_err());
-    let mut index = StatHashIndex::load(directory.path(), "graphify-out");
+    let mut index = StatHashIndex::load(directory.path(), "compass-out");
     let first_hash = index.hash(&source, directory.path())?;
     assert_eq!(index.hash(&source, directory.path())?, first_hash);
     assert_eq!(index.word_count(&source, |_| 4), 4);

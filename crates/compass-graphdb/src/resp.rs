@@ -289,7 +289,7 @@ fn connect(host: &str, port: u16) -> Result<TcpStream, GraphDbError> {
 }
 
 fn timeout() -> Duration {
-    std::env::var("GRAPHIFY_GRAPHDB_TIMEOUT")
+    std::env::var("COMPASS_GRAPHDB_TIMEOUT")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|seconds| *seconds > 0)
@@ -335,7 +335,7 @@ mod tests {
             &format!("falkordb://compass:secret@{address}"),
             Some("ignored"),
             Some("ignored"),
-            "graphify",
+            "compass",
         )?;
         assert_eq!(counts, PushCounts { nodes: 1, edges: 1 });
         let commands = server
@@ -377,12 +377,12 @@ mod tests {
     fn resp_commands_are_binary_safe() {
         let encoded = encode_command(&[
             "GRAPH.QUERY".to_owned(),
-            "graphify".to_owned(),
+            "compass".to_owned(),
             "RETURN 'a\r\nb'".to_owned(),
         ]);
         assert_eq!(
             encoded,
-            b"*3\r\n$11\r\nGRAPH.QUERY\r\n$8\r\ngraphify\r\n$13\r\nRETURN 'a\r\nb'\r\n"
+            b"*3\r\n$11\r\nGRAPH.QUERY\r\n$7\r\ncompass\r\n$13\r\nRETURN 'a\r\nb'\r\n"
         );
     }
 

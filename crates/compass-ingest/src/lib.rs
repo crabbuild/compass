@@ -1,4 +1,4 @@
-//! Bounded, SSRF-resistant URL ingestion compatible with Graphify's corpus files.
+//! Bounded, SSRF-resistant URL ingestion compatible with Compass's corpus files.
 
 use std::fs;
 use std::io::{ErrorKind, Read as _};
@@ -19,7 +19,7 @@ use url::Url;
 
 const MAX_BINARY_BYTES: u64 = 52_428_800;
 const MAX_TEXT_BYTES: u64 = 10_485_760;
-const USER_AGENT: &str = "Mozilla/5.0 graphify/1.0";
+const USER_AGENT: &str = "Mozilla/5.0 compass/1.0";
 
 static UNSAFE_FILENAME: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"[^\w\-]"));
 static REPEATED_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"_+"));

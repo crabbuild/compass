@@ -194,20 +194,18 @@ change the requested revision.
 The same commit can have several valid realizations. Compass makes the selected
 profile and preference visible.
 
-## 11. Compatibility is evidence, not identity
+## 11. Compatibility is a Compass-owned contract
 
-Compass was inspired by Graphify and uses a frozen Graphify version as a
-development oracle for certified command families. This provides valuable
-behavioral evidence.
-
-Compass is not permanently constrained to Graphify's surface:
+Compass was inspired by Graphify, but the products now evolve independently.
+Compass compatibility is established by its own documentation and native test
+evidence:
 
 - the shipped executable is `compass`;
 - CompassQL is Compass-native;
 - versioned graph history is Compass-native;
 - native architecture, performance, safety, and product needs can justify
   divergence;
-- intentional incompatibility requires documentation and migration guidance.
+- incompatible changes require documentation and migration guidance.
 
 The compatibility ledger defines the current boundary. Marketing language does
 not.
@@ -220,7 +218,7 @@ use practical.
 
 Performance changes still must preserve:
 
-- graph parity/equivalence;
+- graph correctness and deterministic equivalence;
 - deterministic ordering contracts;
 - completeness;
 - resource bounds;

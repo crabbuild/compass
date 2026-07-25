@@ -30,7 +30,9 @@ Run the command-line interface from the workspace while developing:
 cargo run --locked -p compass-cli -- --help
 ```
 
-Python isn't required to build Compass. Differential compatibility tests need a sibling Graphify checkout and the interpreters described in [COMPATIBILITY.md](COMPATIBILITY.md).
+Python and Graphify are not required to build or test Compass. The repository's
+native verification contract is described in
+[COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Make a focused change
 

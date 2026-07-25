@@ -9,5 +9,6 @@
 - Advance the AST extraction cache namespace to `v0.9.21`. The first update
   after upgrading refreshes deterministic AST facts, then unchanged updates
   reuse the new cache normally.
-- Add a development-only Graphify superset comparator and guarded Podman
-  qualification script for node, edge, cold, warm, and query measurements.
+- Remove the Graphify compatibility frontend, Python oracle, differential
+  qualification phases, stale assistant assets, and legacy runtime
+  configuration. Compass now builds and tests as an independent product.

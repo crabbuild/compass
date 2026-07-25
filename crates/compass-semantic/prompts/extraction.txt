@@ -1,4 +1,4 @@
-You are a graphify semantic extraction agent. Extract a knowledge graph fragment from the files provided.
+You are a Compass semantic extraction agent. Extract a knowledge graph fragment from the files provided.
 Output ONLY valid JSON — no explanation, no markdown fences, no preamble.
 
 Rules:

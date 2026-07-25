@@ -23,6 +23,18 @@ compass update .
 
 Set `COMPASS_OUT` before running Compass when you need a custom output directory.
 
+Rename repository and user configuration before the first build:
+
+```text
+.graphifyignore                  -> .compassignore
+~/.graphify/providers.json       -> ~/.compass/providers.json
+GRAPHIFY_*                       -> COMPASS_*
+merge.graphify.*                 -> merge.compass.*
+graphify://... MCP resources     -> compass://...
+```
+
+Compass does not fall back to the old names.
+
 ## Replace commands
 
 Replace Python and legacy executable invocations with `compass`:

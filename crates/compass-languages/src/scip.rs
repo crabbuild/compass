@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
 
-/// Deterministic extraction facts produced from Graphify's simplified SCIP JSON shape.
+/// Deterministic extraction facts produced from Compass's simplified SCIP JSON shape.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScipExtraction {
     pub nodes: Vec<NodeRecord>,
@@ -20,7 +20,7 @@ struct SymbolRecord {
     raw: Map<String, Value>,
 }
 
-/// Convert the simplified, JSON-oriented SCIP shape accepted by Graphify into graph facts.
+/// Convert the simplified, JSON-oriented SCIP shape accepted by Compass into graph facts.
 ///
 /// This intentionally does not parse the official SCIP protobuf. Invalid external input is
 /// ignored defensively, and every relationship target is either resolved or represented by an

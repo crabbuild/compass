@@ -20,7 +20,7 @@ const IMPLEMENTATION_SUFFIXES: &[&str] = &["m", "mm", "cpp", "cc", "cxx", "c"];
 /// Collapse a clean sibling header/implementation declaration pair before
 /// portable file-prefix remapping would split their shared symbol IDs.
 ///
-/// This mirrors Graphify's collection-level C/C++/Objective-C pass. Only an
+/// This mirrors Compass's collection-level C/C++/Objective-C pass. Only an
 /// ID collision from one directory/base-stem family with exactly one header
 /// is eligible; every other collision is left for conservative disambiguation.
 pub fn merge_decl_def_classes(extractions: &mut [Extraction]) {
@@ -222,7 +222,7 @@ fn finish_resolution(
     merged
 }
 
-/// Graphify's per-file JavaScript extractor emits only the explicit
+/// Compass's per-file JavaScript extractor emits only the explicit
 /// `imports_from` module edge plus named symbol re-exports. Its collection pass
 /// then adds the file-level `re_exports` edge used by cycle and facade analysis.
 fn resolve_javascript_reexports(extraction: &mut Extraction) {
@@ -326,7 +326,7 @@ fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
 /// Resolve a sourceless type stub inside the language family of the edge that
 /// references it. A globally common name such as `Processor` is ambiguous, but
 /// a JVM edge can still have exactly one JVM definition. This is the same
-/// conservative boundary used by Graphify's Java/Groovy resolver.
+/// conservative boundary used by Compass's Java/Groovy resolver.
 fn rewire_unique_family_stubs(extraction: &mut Extraction) {
     let mut definitions = HashMap::<(String, &'static str), Vec<String>>::new();
     let mut stubs = HashMap::<String, String>::new();
@@ -2200,20 +2200,20 @@ mod tests {
         let qualified = HashMap::from([(
             "edge_data".to_owned(),
             vec![(
-                "/repo/graphify/build.py".to_owned(),
-                "graphify_build_edge_data".to_owned(),
+                "/repo/compass/build.py".to_owned(),
+                "compass_build_edge_data".to_owned(),
             )],
         )]);
         assert_eq!(
             python_definition_candidates(
-                Path::new("/repo/graphify/analyze.py"),
+                Path::new("/repo/compass/analyze.py"),
                 Path::new("/repo"),
-                "graphify.build",
+                "compass.build",
                 "edge_data",
                 &qualified,
                 false,
             ),
-            vec!["graphify_build_edge_data"]
+            vec!["compass_build_edge_data"]
         );
     }
 

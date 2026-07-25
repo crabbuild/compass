@@ -151,7 +151,7 @@ fn compass_lifecycle_preserves_adjacent_graphify_install() -> Result<(), Box<dyn
     let graphify = fixture.project.join(".codex/skills/graphify/SKILL.md");
     fs::create_dir_all(graphify.parent().ok_or("graphify parent")?)?;
     fs::write(&graphify, "---\nname: graphify\n---\n")?;
-    fs::create_dir_all(fixture.project.join("graphify-out"))?;
+    fs::create_dir_all(fixture.project.join("compass-out"))?;
 
     assert_success(
         "install beside graphify",
@@ -163,7 +163,7 @@ fn compass_lifecycle_preserves_adjacent_graphify_install() -> Result<(), Box<dyn
     );
 
     assert_eq!(fs::read_to_string(graphify)?, "---\nname: graphify\n---\n");
-    assert!(fixture.project.join("graphify-out").is_dir());
+    assert!(fixture.project.join("compass-out").is_dir());
     Ok(())
 }
 

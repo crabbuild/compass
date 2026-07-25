@@ -83,12 +83,12 @@ pub fn is_url(input: &str) -> bool {
 
 #[must_use]
 pub fn model_name() -> String {
-    std::env::var("GRAPHIFY_WHISPER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_owned())
+    std::env::var("COMPASS_WHISPER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_owned())
 }
 
 #[must_use]
 pub fn build_whisper_prompt<'a>(labels: impl IntoIterator<Item = &'a str>) -> String {
-    let override_prompt = std::env::var("GRAPHIFY_WHISPER_PROMPT").ok();
+    let override_prompt = std::env::var("COMPASS_WHISPER_PROMPT").ok();
     build_whisper_prompt_with_override(labels, override_prompt.as_deref())
 }
 

@@ -12,7 +12,7 @@ fuzz_target!(|data: &[u8]| {
     };
     let root = directory.path();
     let split = data.len() / 2;
-    if std::fs::write(root.join(".graphifyignore"), &data[..split]).is_err()
+    if std::fs::write(root.join(".compassignore"), &data[..split]).is_err()
         || std::fs::write(root.join(".gitignore"), &data[split..]).is_err()
         || std::fs::create_dir_all(root.join("src/nested")).is_err()
         || std::fs::write(root.join("src/nested/input.py"), b"def fuzz(): pass\n").is_err()
@@ -23,6 +23,6 @@ fuzz_target!(|data: &[u8]| {
     let _ = detect(root, &options);
     if let Ok(filter) = WatchPathFilter::new(root, &options) {
         let _ = filter.allows(&root.join("src/nested/input.py"));
-        let _ = filter.allows(&root.join("graphify-out/graph.json"));
+        let _ = filter.allows(&root.join("compass-out/graph.json"));
     }
 });

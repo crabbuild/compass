@@ -69,75 +69,37 @@ CheckoutHandler
 Read [How Compass works](docs/concepts/how-it-works.md) for the complete
 pipeline and [Graph model](docs/concepts/graph-model.md) for the data model.
 
-## Inspired by Graphify, extended by Compass
+## Project lineage
 
 Compass is inspired by and modeled after
 [Graphify](https://github.com/Graphify-Labs/graphify). Graphify established the
 core workflow: extract a codebase into a knowledge graph, analyze its
 communities, and use focused graph queries to navigate complex projects.
 
-Compass gives explicit credit to that foundation. A frozen Graphify release is
-still used as a behavioral oracle for compatible commands, graph structures,
-and output contracts.
+Compass gives explicit credit to that foundation, but it is now an independent
+product with its own implementation, commands, configuration, artifacts, and
+test suite. Compass does not execute or depend on Graphify.
 
-```text
-Graphify ideas and behavior
-           |
-           v
-compatibility fixtures and differential checks
-           |
-           v
-Compass: native Rust engine
-           |
-           +--> preserves proven graph workflows
-           +--> adds Compass-specific capabilities
-           +--> evolves independently where the products diverge
-```
-
-### What Compass adds beyond the frozen Graphify baseline
+### Compass capabilities
 
 | Area | Compass extension |
 | --- | --- |
-| Runtime | One native Rust executable; Python is used only by development parity tests |
+| Runtime | One native Rust executable with no Python or Graphify dependency |
 | Exact queries | CompassQL, a deterministic and bounded read-only openCypher subset |
 | Versioned graphs | Immutable realizations for exact commits, historical queries, exports, and diffs |
 | Incremental operation | Reuses compatible unchanged extraction work and atomically publishes graph plus manifest |
 | Query safety | Explicit row, path, expansion, memory, and time limits |
 | Native distribution | Linked parsers and native implementations for supported graph, media, database, and service boundaries |
 
-Compatibility is a foundation, not a permanent feature ceiling. Compass may
-diverge when native design, performance, safety, or new workflows benefit from
-a different contract. See [Compatibility](COMPATIBILITY.md) and
-[Migration from Graphify](MIGRATION.md) for exact boundaries.
+See [Compatibility](COMPATIBILITY.md) for Compass-owned contracts and
+[Migration from Graphify](MIGRATION.md) for the one-time hard cutover.
 
-## Performance improvements over Graphify
+## Performance
 
-Compass is qualified against the frozen Python Graphify oracle on copied
-corpora. Results are accepted only when graph topology and read outputs match
-the oracle.
-
-The current large-corpus baseline contains 850 files, 15,151 nodes, and 38,374
-edges. It was recorded on an Apple M2 Max with 32 GiB RAM using five independent
-corpus copies.
-
-| Large-corpus case | Graphify median | Compass median | Compass speedup |
-| --- | ---: | ---: | ---: |
-| Cold AST build | 10.766 s | 3.774 s | **2.85×** |
-| Unchanged update | 12.180 s | 0.232 s | **52.5×** |
-| One-file change | 12.155 s | 2.112 s | **5.8×** |
-| Query | 0.746 s | 0.132 s | **5.7×** |
-| Path | 0.655 s | 0.107 s | **6.1×** |
-| Explain | 0.609 s | 0.087 s | **7.0×** |
-| Affected analysis | 0.250 s | 0.034 s | **7.4×** |
-
-On the same large corpus, cold-build peak memory fell from 351.3 MiB to
-291.2 MiB. The qualification gate also checks warm updates, edits, renames,
-deletes, query output, and memory use.
-
-These numbers are a reproducible local baseline, not a universal promise for
-every repository or machine. Read [Performance qualification](PERFORMANCE.md)
-for hardware details, raw-evidence rules, regression gates, and benchmark
-commands.
+Compass performance is qualified against Compass-owned baselines while
+preserving graph correctness and deterministic output. Read
+[Performance qualification](PERFORMANCE.md) for the evidence policy and
+benchmark commands.
 
 ## Quick start
 

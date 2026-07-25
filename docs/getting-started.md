@@ -91,8 +91,7 @@ cargo install --locked --path crates/compass-cli --bin compass
 ```
 
 `--locked` uses the dependency versions in `Cargo.lock`. The resulting
-executable is native: normal use does not launch Python. Python is used only by
-selected development parity tests.
+executable and its test suite are native and do not launch Python.
 
 ### Verify the binary
 

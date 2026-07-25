@@ -1,2 +1,2 @@
-graphify-out/
+compass-out/
 !src/keep.py

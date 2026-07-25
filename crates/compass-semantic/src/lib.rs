@@ -1018,7 +1018,7 @@ pub const BUILTIN_BACKENDS: &[BackendSpec] = &[
         base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/"),
         default_model: "gemini-3-flash-preview",
         api_key_variables: &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-        model_variable: Some("GRAPHIFY_GEMINI_MODEL"),
+        model_variable: Some("COMPASS_GEMINI_MODEL"),
         input_price_per_million: 0.50,
         output_price_per_million: 3.0,
         temperature: Some(0.0),
@@ -1031,7 +1031,7 @@ pub const BUILTIN_BACKENDS: &[BackendSpec] = &[
         base_url: Some("https://api.openai.com/v1"),
         default_model: "gpt-4.1-mini",
         api_key_variables: &["OPENAI_API_KEY"],
-        model_variable: Some("GRAPHIFY_OPENAI_MODEL"),
+        model_variable: Some("COMPASS_OPENAI_MODEL"),
         input_price_per_million: 0.40,
         output_price_per_million: 1.60,
         temperature: Some(0.0),
@@ -1044,7 +1044,7 @@ pub const BUILTIN_BACKENDS: &[BackendSpec] = &[
         base_url: Some("https://api.deepseek.com"),
         default_model: "deepseek-v4-flash",
         api_key_variables: &["DEEPSEEK_API_KEY"],
-        model_variable: Some("GRAPHIFY_DEEPSEEK_MODEL"),
+        model_variable: Some("COMPASS_DEEPSEEK_MODEL"),
         input_price_per_million: 0.14,
         output_price_per_million: 0.28,
         temperature: Some(0.0),
@@ -1057,7 +1057,7 @@ pub const BUILTIN_BACKENDS: &[BackendSpec] = &[
         base_url: None,
         default_model: "gpt-4o",
         api_key_variables: &["AZURE_OPENAI_API_KEY"],
-        model_variable: Some("GRAPHIFY_AZURE_MODEL"),
+        model_variable: Some("COMPASS_AZURE_MODEL"),
         input_price_per_million: 2.50,
         output_price_per_million: 10.0,
         temperature: Some(0.0),
@@ -1070,7 +1070,7 @@ pub const BUILTIN_BACKENDS: &[BackendSpec] = &[
         base_url: None,
         default_model: "anthropic.claude-3-5-sonnet-20241022-v2:0",
         api_key_variables: &[],
-        model_variable: Some("GRAPHIFY_BEDROCK_MODEL"),
+        model_variable: Some("COMPASS_BEDROCK_MODEL"),
         input_price_per_million: 3.0,
         output_price_per_million: 15.0,
         temperature: Some(0.0),
@@ -1083,7 +1083,7 @@ pub const BUILTIN_BACKENDS: &[BackendSpec] = &[
         base_url: None,
         default_model: "claude-code-plan",
         api_key_variables: &[],
-        model_variable: Some("GRAPHIFY_CLAUDE_CLI_MODEL"),
+        model_variable: Some("COMPASS_CLAUDE_CLI_MODEL"),
         input_price_per_million: 0.0,
         output_price_per_million: 0.0,
         temperature: Some(0.0),
@@ -1195,7 +1195,7 @@ pub fn resolve_builtin_backend(
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| resolved_default_model(name, backend, environment));
-    let retries_override = environment.get("GRAPHIFY_MAX_RETRIES").map(String::as_str);
+    let retries_override = environment.get("COMPASS_MAX_RETRIES").map(String::as_str);
     let retry_default =
         if name == "ollama" && retries_override.is_none_or(|value| value.trim().is_empty()) {
             0
@@ -1204,7 +1204,7 @@ pub fn resolve_builtin_backend(
         };
     let timeout_seconds = resolve_positive_seconds(
         600.0,
-        environment.get("GRAPHIFY_API_TIMEOUT").map(String::as_str),
+        environment.get("COMPASS_API_TIMEOUT").map(String::as_str),
     );
     Ok(ResolvedBackend {
         backend,
@@ -1215,13 +1215,13 @@ pub fn resolve_builtin_backend(
             backend.temperature,
             &model,
             environment
-                .get("GRAPHIFY_LLM_TEMPERATURE")
+                .get("COMPASS_LLM_TEMPERATURE")
                 .map(String::as_str),
         ),
         max_output_tokens: resolve_positive_usize(
             backend.max_output_tokens,
             environment
-                .get("GRAPHIFY_MAX_OUTPUT_TOKENS")
+                .get("COMPASS_MAX_OUTPUT_TOKENS")
                 .map(String::as_str),
         ),
         timeout: Duration::from_secs_f64(timeout_seconds),
@@ -1271,7 +1271,7 @@ fn resolved_default_model(
         "openai" => environment.get("OPENAI_MODEL"),
         "azure" => environment
             .get("AZURE_OPENAI_DEPLOYMENT")
-            .or_else(|| environment.get("GRAPHIFY_AZURE_MODEL")),
+            .or_else(|| environment.get("COMPASS_AZURE_MODEL")),
         _ => None,
     }
     .cloned()
@@ -1335,16 +1335,16 @@ pub fn provider_base_url_check(base_url: &str, name: &str) -> EndpointCheck {
 }
 
 #[must_use]
-pub fn graphify_endpoint_warning(base_url: &str, name: &str, allowed: bool) -> Option<String> {
+pub fn compass_endpoint_warning(base_url: &str, name: &str, allowed: bool) -> Option<String> {
     let parsed = url::Url::parse(base_url);
     if !allowed {
         return Some(match parsed {
             Ok(parsed) => format!(
-                "[graphify] WARNING: provider '{name}' base_url scheme '{}' is not http/https; ignoring.",
+                "[compass] WARNING: provider '{name}' base_url scheme '{}' is not http/https; ignoring.",
                 parsed.scheme()
             ),
             Err(_) => format!(
-                "[graphify] WARNING: provider '{name}' has an unparseable base_url; ignoring."
+                "[compass] WARNING: provider '{name}' has an unparseable base_url; ignoring."
             ),
         });
     }
@@ -1353,7 +1353,7 @@ pub fn graphify_endpoint_warning(base_url: &str, name: &str, allowed: bool) -> O
     let loopback = host == "localhost" || host == "::1" || host.starts_with("127.");
     (parsed.scheme() == "http" && !loopback).then(|| {
         format!(
-            "[graphify] WARNING: provider '{name}' sends your corpus to '{host}' over plaintext http. Use https unless this is a trusted local endpoint."
+            "[compass] WARNING: provider '{name}' sends your corpus to '{host}' over plaintext http. Use https unless this is a trusted local endpoint."
         )
     })
 }
@@ -1488,7 +1488,7 @@ pub fn load_custom_providers(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let endpoint = provider_base_url_check(base_url, &name);
-            if let Some(warning) = graphify_endpoint_warning(base_url, &name, endpoint.allowed) {
+            if let Some(warning) = compass_endpoint_warning(base_url, &name, endpoint.allowed) {
                 loaded.warnings.push(warning);
             }
             if !endpoint.allowed {
@@ -1527,7 +1527,7 @@ fn custom_provider_environment_keys(config: &Map<String, Value>) -> Vec<&str> {
 }
 
 /// Resolve a loaded custom provider with the same explicit/model/key
-/// precedence as Graphify's OpenAI-compatible provider path.
+/// precedence as Compass's OpenAI-compatible provider path.
 pub fn resolve_custom_backend(
     name: &str,
     config: &Value,
@@ -1622,7 +1622,7 @@ pub fn resolve_custom_backend(
             default_temperature,
             &model,
             environment
-                .get("GRAPHIFY_LLM_TEMPERATURE")
+                .get("COMPASS_LLM_TEMPERATURE")
                 .map(String::as_str),
         ),
         reasoning_effort: config
@@ -1632,7 +1632,7 @@ pub fn resolve_custom_backend(
         max_output_tokens: resolve_positive_usize(
             configured_max,
             environment
-                .get("GRAPHIFY_MAX_OUTPUT_TOKENS")
+                .get("COMPASS_MAX_OUTPUT_TOKENS")
                 .map(String::as_str),
         ),
         vision: config
@@ -1642,11 +1642,11 @@ pub fn resolve_custom_backend(
         extra_body: extra_body.cloned(),
         timeout: Duration::from_secs_f64(resolve_positive_seconds(
             600.0,
-            environment.get("GRAPHIFY_API_TIMEOUT").map(String::as_str),
+            environment.get("COMPASS_API_TIMEOUT").map(String::as_str),
         )),
         max_retries: resolve_max_retries(
             6,
-            environment.get("GRAPHIFY_MAX_RETRIES").map(String::as_str),
+            environment.get("COMPASS_MAX_RETRIES").map(String::as_str),
         ),
     })
 }
@@ -2468,7 +2468,7 @@ fn claude_cli_arguments(images: &[ImageRef], environment: &HashMap<String, Strin
         }
     }
     if let Some(model) = environment
-        .get("GRAPHIFY_CLAUDE_CLI_MODEL")
+        .get("COMPASS_CLAUDE_CLI_MODEL")
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
@@ -2600,7 +2600,7 @@ pub fn execute_resolved_http_backend(
     }
 
     let disable_thinking = environment
-        .get("GRAPHIFY_DISABLE_THINKING")
+        .get("COMPASS_DISABLE_THINKING")
         .is_some_and(|value| env_truthy(value));
     let parameters = openai_call_parameters_with_images(
         base_url,
@@ -2615,10 +2615,10 @@ pub fn execute_resolved_http_backend(
         None,
         disable_thinking,
         environment
-            .get("GRAPHIFY_OLLAMA_NUM_CTX")
+            .get("COMPASS_OLLAMA_NUM_CTX")
             .map(String::as_str),
         environment
-            .get("GRAPHIFY_OLLAMA_KEEP_ALIVE")
+            .get("COMPASS_OLLAMA_KEEP_ALIVE")
             .map(String::as_str),
     );
     let request = openai_http_request(base_url, api_key, parameters)?;
@@ -2652,7 +2652,7 @@ pub fn execute_resolved_custom_backend(
     environment: &HashMap<String, String>,
 ) -> Result<Value, SemanticError> {
     let disable_thinking = environment
-        .get("GRAPHIFY_DISABLE_THINKING")
+        .get("COMPASS_DISABLE_THINKING")
         .is_some_and(|value| env_truthy(value));
     let mut parameters = openai_call_parameters_with_images(
         &backend.base_url,

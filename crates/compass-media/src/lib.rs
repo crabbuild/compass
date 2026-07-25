@@ -28,7 +28,7 @@ pub enum MediaError {
     Parse(String),
 }
 
-/// Extract text from the formats accepted by Graphify's semantic path.
+/// Extract text from the formats accepted by Compass's semantic path.
 pub fn extract_text(path: &Path) -> Result<String, MediaError> {
     enforce_raw_size(path)?;
     match extension(path).as_str() {

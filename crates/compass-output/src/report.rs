@@ -174,7 +174,7 @@ pub fn generate_report(
             "## Graph Freshness".to_owned(),
             format!("- Built from commit: `{}`", prefix_chars(commit, 8)),
             "- Run `git rev-parse HEAD` and compare to check if the graph is stale.".to_owned(),
-            "- Run `graphify update .` after code changes (no API cost).".to_owned(),
+            "- Run `compass update .` after code changes (no API cost).".to_owned(),
         ]);
     }
     if !non_empty.is_empty() {
@@ -419,7 +419,7 @@ pub fn generate_report(
             );
         }
         if thin_communities > 0 {
-            lines.push(format!("- **{thin_communities} thin communities (<{} nodes) omitted from report** — run `graphify query` to explore isolated nodes.", options.min_community_size));
+            lines.push(format!("- **{thin_communities} thin communities (<{} nodes) omitted from report** — run `compass query` to explore isolated nodes.", options.min_community_size));
         }
         if ambiguous_percent > 20 {
             lines.push(format!("- **High ambiguity: {ambiguous_percent}% of edges are AMBIGUOUS.** Review the Ambiguous Edges section above."));

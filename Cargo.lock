@@ -1236,29 +1236,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compass-parity"
-version = "0.1.5"
-dependencies = [
- "compass-cli",
- "compass-core",
- "compass-files",
- "compass-graph",
- "compass-languages",
- "compass-mcp",
- "compass-media",
- "compass-model",
- "compass-output",
- "compass-query",
- "compass-reflect",
- "compass-resolve",
- "compass-semantic",
- "compass-transcribe",
- "serde_json",
- "tempfile",
- "time",
-]
-
-[[package]]
 name = "compass-postgres"
 version = "0.1.5"
 dependencies = [

@@ -16,11 +16,10 @@ codebase.
 > **Reading time:** about 5 minutes.
 
 Compass was inspired by
-[Graphify](https://github.com/Graphify-Labs/graphify), and its compatibility
-suite still uses a frozen Graphify release as an important behavioral oracle.
-Compass is not limited to being a port, however. It already includes
+[Graphify](https://github.com/Graphify-Labs/graphify), but the products now
+evolve independently. Compass has no Graphify runtime or test dependency. It includes
 Compass-native capabilities, such as CompassQL and versioned graph history, and
-its feature set is expected to evolve independently.
+its public contracts are defined by Compass documentation and native tests.
 
 ![Three reader journeys through the Compass documentation](assets/diagrams/reader-journeys.svg)
 
@@ -125,7 +124,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Commands](reference/commands.md) | Command families, common inputs, output modes, and diagnostics |
 | [Configuration](reference/configuration.md) | Providers, environment, paths, and precedence |
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
-| [Compatibility](reference/compatibility.md) | Graphify baseline, native additions, and portability |
+| [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL 1](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |
 

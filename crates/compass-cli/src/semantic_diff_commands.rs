@@ -48,17 +48,10 @@ impl CommandOutput {
     }
 }
 
-pub(crate) fn help(frontend: Frontend) -> String {
-    let command = if frontend == Frontend::Compass {
-        "compass"
-    } else {
-        "graphify"
-    };
-    let browser_note = if frontend == Frontend::Compass {
-        "\n\nWhen run interactively, Compass asks before opening generated HTML in your browser."
-    } else {
-        ""
-    };
+pub(crate) fn help(_frontend: Frontend) -> String {
+    let command = "compass";
+    let browser_note =
+        "\n\nWhen run interactively, Compass asks before opening generated HTML in your browser.";
     format!(
         "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json|html>  Output format [default: text]\n  --output <PATH>            Write the self-contained HTML report (required with --format html)\n  --limit <N>                Show at most N findings per text section [default: 20]\n  --all                      Include routine churn and show every finding\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint{browser_note}"
     )
@@ -74,9 +67,9 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
     match execute(args) {
         Ok(output) => {
             let outcome = Outcome::success(output.message);
-            match (frontend, output.html_output) {
-                (Frontend::Compass, Some(path)) => outcome.with_html_output(path),
-                _ => outcome,
+            match output.html_output {
+                Some(path) => outcome.with_html_output(path),
+                None => outcome,
             }
         }
         Err(CommandError::Usage(message)) => {
@@ -824,8 +817,11 @@ mod tests {
             "new".to_owned(),
             "--format=html".to_owned(),
             "--output=review.html".to_owned(),
-        ])
-        .expect("HTML output options");
+        ]);
+        let Ok(html) = html else {
+            assert!(html.is_ok());
+            return;
+        };
         assert_eq!(html.format, Format::Html);
         assert_eq!(html.output.as_deref(), Some("review.html"));
 
