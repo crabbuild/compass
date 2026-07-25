@@ -83,14 +83,33 @@ export default async function generate(): Promise<void> {
     path.join(output, "community.html"),
     communityHarness(communityOverview, communityDetail)
   );
+  const architectureNodes = Array.from({ length: 31 }, (_, index) => ({
+    id: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol-${index}`,
+    label: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol${index}`,
+    kind: index % 5 === 0 ? "class" : "function",
+    sourceFile: `src/api/module-${index}.ts`
+  }));
+  const architectureEdges = Array.from({ length: 53 }, (_, index) => ({
+    source: "authenticate",
+    target: index % 4 === 0 ? "database" : `symbol-${2 + (index % 29)}`,
+    relation: index % 3 === 0 ? "calls" : "uses",
+    confidence: index % 5 === 0 ? "inferred" : "extracted"
+  }));
   const architectureSections = Array.from({ length: 26 }, (_, index) => ({
     id: `section-${index}`,
-    name: `Section ${index}`,
+    name: index === 0 ? "API" : index === 1 ? "Storage" : `Section ${index}`,
     communities: [`${index}`],
     nodes: index === 0
-      ? [{ id: "run", label: "run", kind: "function", sourceFile: "src/lib.rs" }]
-      : [],
-    edges: []
+      ? architectureNodes
+      : index === 1
+        ? [{
+          id: "database-adapter",
+          label: "database adapter",
+          kind: "class",
+          sourceFile: "src/storage/database.ts"
+        }]
+        : [],
+    edges: index === 0 ? architectureEdges : []
   }));
   const architecture = {
     schema: "compass.viewer.callflow/1",
@@ -105,7 +124,7 @@ export default async function generate(): Promise<void> {
       calls: index + 1
     })),
     reportHighlights: [],
-    statistics: { nodes: 1, edges: 0, communities: 1, hyperedges: 0, extracted: 0, inferred: 0, ambiguous: 0 },
+    statistics: { nodes: 32, edges: 53, communities: 26, hyperedges: 0, extracted: 42, inferred: 11, ambiguous: 0 },
     provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
   };
   const calls = {
