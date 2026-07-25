@@ -170,7 +170,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const session = await selectRepository(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.architecture)) return;
-      await openArchitecturePanel(context, session);
+      await openArchitecturePanel(context, session, output);
     }),
     vscode.commands.registerCommand("compass.openQuery", async (repositoryId?: string) => {
       const session = await selectRepository(repositoryId);

@@ -571,6 +571,183 @@ button:not(:disabled),
   }
 }
 
+/* VS Code-native loading shell. The older constellation selectors remain for
+   backwards-compatible embedded assets, but current webviews use this compact mark. */
+.compass-load-shell {
+  grid-template-rows: auto auto;
+  gap: 14px;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.compass-load-shell::before {
+  display: none;
+}
+
+.compass-load-constellation {
+  display: grid;
+  width: 64px;
+  height: 68px;
+  margin: 0 auto;
+  place-items: start center;
+}
+
+.compass-load-mark {
+  position: static;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--vscode-widget-border, var(--border));
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, var(--card));
+  color: var(--vscode-symbolIcon-classForeground, var(--foreground));
+  box-shadow: none;
+}
+
+.compass-load-mark svg {
+  width: 22px;
+  height: 22px;
+}
+
+.compass-load-progress {
+  position: absolute;
+  bottom: 0;
+  width: 64px;
+  height: 2px;
+  overflow: hidden;
+  background: var(
+    --vscode-progressBar-background,
+    color-mix(in srgb, var(--workbench-progress) 28%, transparent)
+  );
+}
+
+.compass-load-progress i {
+  display: block;
+  width: 45%;
+  height: 100%;
+  background: var(--workbench-progress);
+  animation: compass-native-progress 1.4s ease-in-out infinite;
+}
+
+@keyframes compass-native-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(330%);
+  }
+}
+
+.compass-load-copy {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.compass-load-eyebrow {
+  margin-bottom: 7px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.compass-load-copy h1 {
+  font-size: clamp(19px, 3vw, 25px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.compass-load-steps,
+.compass-load-error {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.compass-load-steps b {
+  color: var(--muted-foreground);
+}
+
+.compass-load-action {
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+}
+
+.compass-load-action-primary {
+  background: var(--vscode-button-background, var(--primary));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+}
+
+.compass-load-shell[data-variant="architecture"] {
+  grid-template-columns: minmax(220px, 390px) minmax(280px, 560px);
+  grid-template-rows: auto auto;
+  column-gap: clamp(24px, 6vw, 72px);
+  text-align: left;
+}
+
+.compass-load-shell[data-variant="architecture"] .compass-load-constellation {
+  grid-column: 1;
+  margin: 0;
+}
+
+.compass-load-shell[data-variant="architecture"] .compass-load-copy {
+  grid-column: 1;
+  width: auto;
+}
+
+.compass-load-shell[data-variant="architecture"] .compass-load-steps {
+  justify-content: flex-start;
+}
+
+.architecture-load-skeleton {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  grid-template-rows: 54px 1fr;
+  width: min(46vw, 560px);
+  height: min(46vh, 360px);
+  overflow: hidden;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 4px;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.architecture-load-skeleton span {
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--foreground) 7%, transparent),
+    transparent
+  );
+  background-size: 220% 100%;
+  animation: compass-skeleton 1.8s ease-in-out infinite;
+}
+
+.architecture-load-rail {
+  grid-row: 1 / span 2;
+  border-right: 1px solid var(--border);
+  background-color: var(--vscode-sideBar-background, var(--sidebar));
+}
+
+.architecture-load-flow {
+  border-bottom: 1px solid var(--border);
+}
+
+.architecture-load-content {
+  margin: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+@keyframes compass-skeleton {
+  to {
+    background-position: -220% 0;
+  }
+}
+
 .compass-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8px var(--compass-inspector-width, 340px);
@@ -1467,7 +1644,10 @@ body.vscode-high-contrast-light .compass-source-metadata {
 
   .compass-load-edge,
   .compass-load-node,
-  .compass-load-orbit {
+  .compass-load-orbit,
+  .compass-load-progress i,
+  .architecture-load-skeleton span,
+  .workbench-state-spinner {
     animation: none !important;
   }
 }
@@ -1529,6 +1709,33 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 @media (max-width: 760px) {
+  .compass-load-shell[data-variant="architecture"] {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    text-align: center;
+  }
+
+  .compass-load-shell[data-variant="architecture"] .compass-load-constellation,
+  .compass-load-shell[data-variant="architecture"] .compass-load-copy,
+  .architecture-load-skeleton {
+    grid-column: 1;
+  }
+
+  .compass-load-shell[data-variant="architecture"] .compass-load-constellation {
+    margin: 0 auto;
+  }
+
+  .compass-load-shell[data-variant="architecture"] .compass-load-steps {
+    justify-content: center;
+  }
+
+  .architecture-load-skeleton {
+    grid-row: 3;
+    width: min(88vw, 460px);
+    height: 190px;
+    margin-top: 14px;
+  }
+
   .history-shell {
     grid-template-columns: 1fr;
   }

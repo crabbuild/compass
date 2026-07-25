@@ -6,7 +6,8 @@ import { openGraphSource } from "./sourceNavigation";
 
 export async function openArchitecturePanel(
   context: vscode.ExtensionContext,
-  session: RepositorySession
+  session: RepositorySession,
+  output: vscode.OutputChannel
 ): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
     "compass.architecture",
@@ -19,10 +20,12 @@ export async function openArchitecturePanel(
     }
   );
   const controller = new AbortController();
+  let generation = 0;
   panel.onDidDispose(() => controller.abort());
   panel.webview.html = html(context, panel.webview);
   panel.webview.onDidReceiveMessage(async (message) => {
-    if (message?.type === "ready") {
+    if (message?.type === "ready" || message?.type === "retry") {
+      const requestGeneration = ++generation;
       try {
         const model = await session.processes.runJson(
           session.root,
@@ -30,17 +33,23 @@ export async function openArchitecturePanel(
           CallflowViewModelSchema,
           controller.signal
         );
+        if (requestGeneration !== generation || controller.signal.aborted) return;
         await panel.webview.postMessage({
           type: "hydrate",
           repositoryId: session.id,
           model
         });
       } catch (error) {
+        if (requestGeneration !== generation || controller.signal.aborted) return;
+        const detail = error instanceof Error ? error.message : String(error);
+        output.appendLine(`[error] Architecture export failed for ${session.root}: ${detail}`);
         await panel.webview.postMessage({
           type: "error",
-          message: error instanceof Error ? error.message : String(error)
+          message: detail
         });
       }
+    } else if (message?.type === "showOutput") {
+      output.show(true);
     } else if (message?.type === "openSource" && typeof message.file === "string") {
       await openGraphSource(session, message.repositoryId, { file: message.file });
     }
@@ -59,6 +68,6 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>Compass Architecture</title></head>
-<body><div id="root" role="status">Deriving architecture flow…</div>
+<body><div id="root"></div>
 <script nonce="${nonce}" src="${script}"></script></body></html>`;
 }

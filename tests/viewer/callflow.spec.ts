@@ -26,6 +26,25 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   await expect(page.getByText("Showing 20 of 21 continuations")).toHaveCount(0);
 });
 
+test("architecture loading is informative and recoverable", async ({ page }) => {
+  await page.goto("/architecture.html?delay=1");
+  await expect(
+    page.getByRole("heading", { name: "Deriving architecture flow" })
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Preparing symbol index");
+  await expect(page.locator(".architecture-load-skeleton")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "System call flow" })).toBeVisible();
+
+  await page.goto("/architecture.html?error=1");
+  await expect(page.getByRole("alert")).toContainText("Architecture export failed");
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & {
+      architectureHostMessages: Array<{ type: string }>;
+    }
+  ).architectureHostMessages.map(({ type }) => type))).toEqual(["ready", "retry"]);
+});
+
 test("call graph uses a balanced cursor-resolution state and recoverable error", async ({
   page
 }) => {

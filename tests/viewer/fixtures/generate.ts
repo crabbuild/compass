@@ -173,7 +173,7 @@ export default async function generate(): Promise<void> {
     ...historyOverviewB,
     title: "Revision C graph"
   };
-  await writeFile(path.join(output, "architecture.html"), harness("architecture", { type: "hydrate", repositoryId: "fixture", model: architecture }));
+  await writeFile(path.join(output, "architecture.html"), architectureHarness(architecture));
   await writeFile(path.join(output, "calls.html"), callGraphHarness(calls));
   await writeFile(
     path.join(output, "history.html"),
@@ -230,6 +230,34 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     graph:${JSON.stringify(graph)}
   },"*"),1000);
 }})</script><script src="/callGraph.js"></script></body></html>`;
+}
+
+function architectureHarness(model: unknown): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass architecture fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.architectureHostMessages=[];
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.architectureHostMessages.push(message);
+  if(message.type==="showOutput") {
+    window.showedArchitectureOutput=true;
+    return;
+  }
+  if(message.type==="openSource") {
+    window.openedArchitectureSource=message.file;
+    return;
+  }
+  if(message.type!=="ready" && message.type!=="retry") return;
+  const params=new URLSearchParams(window.location.search);
+  if(params.has("error")) {
+    setTimeout(()=>window.postMessage({type:"error",message:"Architecture export failed"},"*"),20);
+    return;
+  }
+  const delay=params.has("delay") ? 800 : 0;
+  setTimeout(()=>window.postMessage({
+    type:"hydrate",
+    repositoryId:"fixture",
+    model:${JSON.stringify(model)}
+  },"*"),delay);
+}})</script><script src="/architecture.js"></script></body></html>`;
 }
 
 function communityHarness(overview: unknown, detail: unknown): string {
