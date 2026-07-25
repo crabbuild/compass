@@ -283,6 +283,7 @@ Build-profile options include:
 ```text
 compass diff OLD NEW
   [--format text|json]
+  [--limit N]
   [--all]
   [--explain FINDING_ID]
   [--fingerprint SHA]
@@ -290,9 +291,10 @@ compass diff OLD NEW
 
 The default output is an actionable PR-review summary: likely breaks, behavior
 changes, affected callers/modules, and test evidence. Routine symbol churn is
-collapsed; `--all` expands it. `--explain` prints the evidence and reasoning
-for one finding. Diff requires comparable build profiles; rebuild the newer
-revision with `--profile-from OLD` when needed.
+collapsed; `--limit N` changes the visible per-section budget, while `--all`
+expands routine findings and is exhaustive. `--explain` prints the evidence
+and reasoning for one finding. Diff requires comparable build profiles;
+rebuild the newer revision with `--profile-from OLD` when needed.
 
 ## Service
 

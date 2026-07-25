@@ -650,7 +650,6 @@ fn program_graph(analysis: &AnalysisBundle) -> Result<GraphDocument, compass_mod
         nodes,
         links,
         extras: BTreeMap::new(),
-        used_legacy_edges_key: false,
     })
 }
 
@@ -675,7 +674,7 @@ fn operation_properties(operation: &Operation) -> (&'static str, String) {
         OperationKind::Read { path } => ("read", path.clone()),
         OperationKind::Write { path } => ("write", path.clone()),
         OperationKind::Await => ("await", "await".to_owned()),
-        OperationKind::Throw { value } => ("throw", value.clone()),
+        OperationKind::Throw { effect } => ("throw", effect.display_name()),
     }
 }
 

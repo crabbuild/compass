@@ -199,7 +199,7 @@ fn validate_requests(requests: &[DerivedArtifactRequest]) -> Result<(), OutputEr
 }
 
 fn validate_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), OutputError> {
-    let restored = GraphDocument::load_for_recluster_compatibility(&staging.join("graph.json"))
+    let restored = GraphDocument::load_for_recluster(&staging.join("graph.json"))
         .map_err(|error| OutputError::InvalidHistoryBundle(error.to_string()))?;
     if &restored != input.document {
         return Err(OutputError::InvalidHistoryBundle(

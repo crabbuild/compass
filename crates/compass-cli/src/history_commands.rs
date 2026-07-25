@@ -228,9 +228,7 @@ pub(crate) fn resolve_comparable_pair(
             (history, old, new)
         }
     };
-    let old_profile = normalized_profile_for_comparison(&old.version.build_profile)?;
-    let new_profile = normalized_profile_for_comparison(&new.version.build_profile)?;
-    if old_profile != new_profile {
+    if old.version.build_profile != new.version.build_profile {
         return Err(format!(
             "realizations are not semantically comparable\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}",
             old.version.git_commit,
@@ -244,39 +242,6 @@ pub(crate) fn resolve_comparable_pair(
         ));
     }
     Ok(ResolvedDiff { history, old, new })
-}
-
-fn normalized_profile_for_comparison(profile: &BuildProfile) -> Result<BuildProfile, String> {
-    let mut normalized = profile.clone();
-    for (key, value) in [
-        (
-            "program_provider_policy",
-            "offline-artifacts-first".to_owned(),
-        ),
-        (
-            "program_ir_schema",
-            compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
-        ),
-        (
-            "program_merger_version",
-            compass_program::MERGER_VERSION.to_string(),
-        ),
-        (
-            "program_analysis_schema",
-            compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
-        ),
-        (
-            "program_analyzer_version",
-            compass_analysis::ANALYZER_VERSION.to_string(),
-        ),
-    ] {
-        if normalized.value(key).is_none() {
-            normalized
-                .insert(key, &value)
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    Ok(normalized)
 }
 
 fn select_existing(

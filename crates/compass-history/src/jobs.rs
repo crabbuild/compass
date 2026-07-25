@@ -42,9 +42,7 @@ pub struct JobRecord {
     pub commit: CommitId,
     pub profile: BuildProfile,
     pub profile_digest: String,
-    #[serde(default)]
     pub rebuild: bool,
-    #[serde(default)]
     pub replace_corrupt: bool,
     pub resolved_fingerprint: Option<String>,
     pub state: JobState,

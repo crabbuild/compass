@@ -37,11 +37,12 @@ A **realization** is more specific than a commit. The same commit can have a
 code-only realization and one or more semantic realizations with different
 provider/model configuration.
 
-History graph schema `networkx-node-link/v2` records automatic multigraph
-promotion. On upgrade, Compass migrates a stored v1 build profile to v2. The
-fingerprint therefore no longer matches a v1 realization, and the next
-requested build rematerializes that commit instead of reusing stale graph
-metadata.
+History graph schema `networkx-node-link/v1` records automatic multigraph
+promotion. This is a hard cutover: Compass accepts only the current v1 build
+profiles, realizations, and history stores. It does not migrate, normalize,
+list, query, or diff any other history contract. Archive or remove the
+repository's Compass history directory in the common Git directory, then build
+fresh v1 realizations.
 
 ## 1. Inspect the command contract
 
@@ -227,6 +228,12 @@ Expand routine symbol churn:
 compass diff v1.2.0 HEAD --all
 ```
 
+Raise the per-section display budget without expanding routine churn:
+
+```bash
+compass diff v1.2.0 HEAD --limit 50
+```
+
 Machine-readable output:
 
 ```bash
@@ -247,7 +254,7 @@ schema `compass.semantic_diff.report/1`; deterministic `sd1-...` finding IDs
 make `--explain` and automation stable when the underlying semantic evidence
 does not change.
 
-Semantic diff requires Program IR v2 evidence. Rebuild older realizations with
+Semantic diff requires Program IR v1 evidence. Rebuild older realizations with
 the current Compass binary before comparing them. Static test mapping may
 recommend resolved test callers, but `partial` or `unknown` evidence never
 claims safety or a test gap. AI-generated summaries and hosted PR delivery are

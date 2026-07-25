@@ -239,6 +239,8 @@ fingerprints. Current and historical graphs can be queried, compared, and
 exported without putting generated graph data into Git. Semantic diff leads
 with likely breaks, behavior changes, affected callers/modules, and test
 evidence; use `--all` to expand routine symbol churn.
+Default text output reports any findings beyond its display budget; use
+`--limit N` to raise that budget or `--all` for exhaustive output.
 
 Read the [versioned history guide](docs/guides/versioned-history.md) and
 [storage design](docs/design/storage-and-history.md).

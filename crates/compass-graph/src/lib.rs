@@ -193,7 +193,6 @@ pub fn build_from_extraction(
         nodes,
         links,
         extras: BTreeMap::new(),
-        used_legacy_edges_key: false,
     }
 }
 

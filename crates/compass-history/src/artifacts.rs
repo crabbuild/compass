@@ -66,7 +66,6 @@ struct DocumentHeader {
     multigraph: bool,
     graph: Map<String, Value>,
     extras: BTreeMap<String, Value>,
-    used_legacy_edges_key: bool,
     graph_hyperedges_present: bool,
     top_hyperedges_present: bool,
 }
@@ -78,7 +77,7 @@ struct OrderedRecord {
     location: Option<HyperedgeLocation>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum HyperedgeLocation {
     Graph,
@@ -148,9 +147,7 @@ impl GraphArtifacts {
             authoritative_sidecars.insert(entry.relative_path.clone(), bytes);
         }
         let artifacts = Self {
-            document: GraphDocument::load_for_recluster_compatibility(
-                &output_dir.join("graph.json"),
-            )?,
+            document: GraphDocument::load_for_recluster(&output_dir.join("graph.json"))?,
             program: read_optional_program(&output_dir.join("program.json"))?,
             analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
             labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
@@ -230,7 +227,12 @@ impl GraphArtifacts {
             }
         }
 
-        for (rank, node) in self.document.nodes.iter().enumerate() {
+        // Node-link arrays are sets for graph identity. Canonicalize their
+        // presentation order before recording reconstructable ranks so
+        // parallel extraction order cannot change a realization ID.
+        let mut ordered_nodes = self.document.nodes.iter().collect::<Vec<_>>();
+        ordered_nodes.sort_by(|left, right| left.id.as_bytes().cmp(right.id.as_bytes()));
+        for (rank, node) in ordered_nodes.into_iter().enumerate() {
             let mut stored = node.clone();
             for field in MOVED_NODE_FIELDS {
                 if let Some(value) = stored.attributes.remove(field) {
@@ -263,9 +265,15 @@ impl GraphArtifacts {
             ));
         }
 
+        let mut ordered_edges = self
+            .document
+            .links
+            .iter()
+            .map(|edge| Ok((canonical_json_bytes(&serde_json::to_value(edge)?)?, edge)))
+            .collect::<Result<Vec<_>, HistoryError>>()?;
+        ordered_edges.sort_by(|left, right| left.0.cmp(&right.0));
         let mut edge_occurrences = BTreeMap::<Vec<u8>, u64>::new();
-        for (rank, edge) in self.document.links.iter().enumerate() {
-            let canonical = canonical_json_bytes(&serde_json::to_value(edge)?)?;
+        for (rank, (canonical, edge)) in ordered_edges.into_iter().enumerate() {
             let discriminator = edge_discriminator(
                 edge,
                 self.document.multigraph,
@@ -273,7 +281,7 @@ impl GraphArtifacts {
                 &mut edge_occurrences,
             )?;
             let (source, target) = edge_identity_endpoints(edge);
-            // Compass keeps a legacy undirected NetworkX header while its
+            // Compass keeps an undirected NetworkX header while its
             // persisted link endpoints retain the true semantic direction.
             let key = edge_key(
                 source,
@@ -308,7 +316,7 @@ impl GraphArtifacts {
         let top_hyperedges = hyperedge_array(self.document.extras.get("hyperedges"))?;
         let mut hyperedge_occurrences = BTreeMap::<Vec<u8>, u64>::new();
         let mut explicit_hyperedges = BTreeSet::<Vec<u8>>::new();
-        for (rank, (location, hyperedge)) in graph_hyperedges
+        let mut ordered_hyperedges = graph_hyperedges
             .iter()
             .map(|value| (HyperedgeLocation::Graph, value))
             .chain(
@@ -316,9 +324,11 @@ impl GraphArtifacts {
                     .iter()
                     .map(|value| (HyperedgeLocation::TopLevel, value)),
             )
-            .enumerate()
-        {
-            let canonical = canonical_json_bytes(hyperedge)?;
+            .map(|(location, value)| Ok((location, canonical_json_bytes(value)?, value)))
+            .collect::<Result<Vec<_>, HistoryError>>()?;
+        ordered_hyperedges
+            .sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        for (rank, (location, canonical, hyperedge)) in ordered_hyperedges.into_iter().enumerate() {
             let (identity, occurrence) = if let Some(id) = hyperedge.get("id") {
                 let mut identity = vec![1];
                 identity.extend(canonical_json_bytes(id)?);
@@ -370,7 +380,6 @@ impl GraphArtifacts {
                     multigraph: self.document.multigraph,
                     graph,
                     extras,
-                    used_legacy_edges_key: self.document.used_legacy_edges_key,
                     graph_hyperedges_present,
                     top_hyperedges_present,
                 })?,
@@ -395,9 +404,10 @@ impl GraphArtifacts {
             self.labels.as_ref(),
         )?;
         if let Some(manifest) = &self.manifest {
+            let manifest = canonical_manifest(manifest);
             partitioned.metadata.push((
                 metadata_key(&[b"manifest"]),
-                encode_record("compass.metadata.manifest", manifest)?,
+                encode_record("compass.metadata.manifest", &manifest)?,
             ));
         }
         for (path, bytes) in &self.authoritative_sidecars {
@@ -576,7 +586,6 @@ impl GraphArtifacts {
                 nodes: ordered_nodes,
                 links: ordered_edges,
                 extras: header.extras,
-                used_legacy_edges_key: header.used_legacy_edges_key,
             },
             program,
             analysis,
@@ -720,7 +729,7 @@ fn add_optional_analysis(
 fn artifact_registry(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
-    let graph_bytes = canonical_json_bytes(&serde_json::to_value(&artifacts.document)?)?;
+    let graph_bytes = canonical_graph_bytes(&artifacts.document)?;
     let mut registry = vec![authoritative_entry(
         "graph.json",
         "application/json",
@@ -739,6 +748,13 @@ fn artifact_registry(
         ("manifest.json", artifacts.manifest.as_ref()),
     ] {
         if let Some(value) = value {
+            let canonical;
+            let value = if path == "manifest.json" {
+                canonical = canonical_manifest(value);
+                &canonical
+            } else {
+                value
+            };
             registry.push(authoritative_entry(
                 path,
                 "application/json",
@@ -928,9 +944,7 @@ fn verify_builtin_registry_content(
         .filter(|entry| entry.class == ArtifactClass::Authoritative)
     {
         let bytes = match entry.relative_path.as_str() {
-            "graph.json" => Some(canonical_json_bytes(&serde_json::to_value(
-                &artifacts.document,
-            )?)?),
+            "graph.json" => Some(canonical_graph_bytes(&artifacts.document)?),
             ".compass_analysis.json" => artifacts
                 .analysis
                 .as_ref()
@@ -944,7 +958,7 @@ fn verify_builtin_registry_content(
             "manifest.json" => artifacts
                 .manifest
                 .as_ref()
-                .map(canonical_json_bytes)
+                .map(|manifest| canonical_json_bytes(&canonical_manifest(manifest)))
                 .transpose()?,
             _ => None,
         };
@@ -958,6 +972,54 @@ fn verify_builtin_registry_content(
             verify_registry_content(entry, &bytes)?;
         }
     }
+    Ok(())
+}
+
+fn canonical_graph_bytes(document: &GraphDocument) -> Result<Vec<u8>, HistoryError> {
+    let mut canonical = document.clone();
+    canonical
+        .nodes
+        .sort_by(|left, right| left.id.as_bytes().cmp(right.id.as_bytes()));
+    let mut links = canonical
+        .links
+        .into_iter()
+        .map(|edge| Ok((canonical_json_bytes(&serde_json::to_value(&edge)?)?, edge)))
+        .collect::<Result<Vec<_>, HistoryError>>()?;
+    links.sort_by(|left, right| left.0.cmp(&right.0));
+    canonical.links = links.into_iter().map(|(_, edge)| edge).collect();
+    canonicalize_hyperedge_array(canonical.graph.get_mut("hyperedges"))?;
+    canonicalize_hyperedge_array(canonical.extras.get_mut("hyperedges"))?;
+    canonical_json_bytes(&serde_json::to_value(canonical)?)
+}
+
+fn canonical_manifest(manifest: &Value) -> Value {
+    let mut canonical = manifest.clone();
+    let Some(entries) = canonical.as_object_mut() else {
+        return canonical;
+    };
+    for entry in entries.values_mut() {
+        if let Some(fields) = entry.as_object_mut() {
+            fields.insert("mtime".to_owned(), Value::from(0));
+        } else if entry.is_number() {
+            *entry = Value::from(0);
+        }
+    }
+    canonical
+}
+
+fn canonicalize_hyperedge_array(value: Option<&mut Value>) -> Result<(), HistoryError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let values = value
+        .as_array_mut()
+        .ok_or_else(|| HistoryError::InvalidArtifacts("hyperedges must be an array".to_owned()))?;
+    let mut canonical = values
+        .drain(..)
+        .map(|value| Ok((canonical_json_bytes(&value)?, value)))
+        .collect::<Result<Vec<_>, HistoryError>>()?;
+    canonical.sort_by(|left, right| left.0.cmp(&right.0));
+    values.extend(canonical.into_iter().map(|(_, value)| value));
     Ok(())
 }
 

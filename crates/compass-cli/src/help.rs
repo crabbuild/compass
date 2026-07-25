@@ -307,7 +307,7 @@ const PAGES: &[Page] = &[
         "diff",
         "Review semantic changes between two Git revisions",
         ["compass diff <OLD> <NEW> [OPTIONS]"],
-        "Arguments:\n  <OLD>                         Base Git revision\n  <NEW>                         Target Git revision\n\nOptions:\n  --format <text|json>          Output format [default: text]\n  --all                         Include routine symbol churn\n  --explain <FINDING_ID>        Expand one semantic finding\n  --fingerprint <SHA256>        Select one extraction fingerprint\n\nExamples:\n  compass diff v1.2.0 HEAD\n  compass diff HEAD~1 HEAD --format json\n  compass diff main feature --all\n\nNotes:\n  Findings report callable breaks, behavior, dependencies, affected consumers, and evidence limitations."
+        "Arguments:\n  <OLD>                         Base Git revision\n  <NEW>                         Target Git revision\n\nOptions:\n  --format <text|json>          Output format [default: text]\n  --limit <N>                   Show at most N findings per text section [default: 20]\n  --all                         Include routine churn and show every finding\n  --explain <FINDING_ID>        Expand one semantic finding\n  --fingerprint <SHA256>        Select one extraction fingerprint\n\nExamples:\n  compass diff v1.2.0 HEAD\n  compass diff HEAD~1 HEAD --format json\n  compass diff main feature --limit 50\n  compass diff main feature --all\n\nNotes:\n  Findings report callable breaks, behavior, dependencies, affected consumers, and evidence limitations. JSON and --all are exhaustive."
     ),
     page!(
         "tree",
@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 35);
+        assert_eq!(roots.len(), 36);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

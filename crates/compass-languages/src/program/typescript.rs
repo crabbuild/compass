@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use compass_ir::{
-    BasicBlock, Capability, Coverage, CoverageState, ExecutionMode, FunctionIr, ModuleIr,
-    Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor, SourceAnchor,
-    Terminator, TypeRef, Visibility, hex_sha256,
+    BasicBlock, Capability, Coverage, CoverageState, ExceptionEffect, ExceptionKind, ExecutionMode,
+    FunctionIr, ModuleIr, Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor,
+    SourceAnchor, Terminator, TypeRef, Visibility, hex_sha256,
 };
 use compass_program::{EvidenceBatch, FileInput, evidence_record};
 use tree_sitter::Node;
@@ -395,7 +395,7 @@ fn collect_operations(
             node,
             "throw",
             OperationKind::Throw {
-                value: text(input.source, node).to_owned(),
+                effect: typescript_exception_effect(text(input.source, node)),
             },
             evidence,
             operations,
@@ -414,6 +414,34 @@ fn collect_operations(
             reasons,
         );
     }
+}
+
+fn typescript_exception_effect(statement: &str) -> ExceptionEffect {
+    let expression = statement
+        .trim()
+        .strip_prefix("throw")
+        .unwrap_or(statement)
+        .trim()
+        .trim_end_matches(';')
+        .trim();
+    let constructor = expression
+        .strip_prefix("new ")
+        .and_then(|value| value.split_once('(').map(|(name, _)| name.trim()))
+        .filter(|name| !name.is_empty());
+    constructor.map_or_else(
+        || ExceptionEffect {
+            kind: ExceptionKind::Dynamic,
+            type_name: None,
+            expression: (!expression.is_empty()).then(|| expression.to_owned()),
+            chained: false,
+        },
+        |name| ExceptionEffect {
+            kind: ExceptionKind::Exception,
+            type_name: Some(name.to_owned()),
+            expression: None,
+            chained: false,
+        },
+    )
 }
 
 fn push_path(

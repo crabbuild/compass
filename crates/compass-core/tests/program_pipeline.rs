@@ -190,7 +190,10 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
         document["program"]["schema"],
         "http://crab.build/compass/v1"
     );
-    assert_eq!(document["analysis_schema_version"], 1);
+    assert_eq!(
+        document["analysis_schema_version"],
+        compass_analysis::ANALYSIS_SCHEMA_VERSION
+    );
 
     let warm = build_local_graph(&options)?;
     assert_eq!(warm.program_syntax_analyzed, 0);

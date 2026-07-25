@@ -244,8 +244,10 @@ compass diff OLD NEW --format json
 Uses schema `compass.semantic_diff.report/1`. The report contains ranked
 semantic findings, affected callers/modules, source and graph evidence,
 verification state, completeness, and a collapsed-finding summary. Routine
-symbol churn is collapsed unless `--all` is supplied. Normal diff requires
-compatible build profiles.
+symbol churn is collapsed unless `--all` is supplied. Default text output
+shows 20 findings per section and reports every hidden count; `--limit N`
+changes that budget, while JSON and `--all` are exhaustive. Normal diff
+requires compatible build profiles.
 
 `verification.state` is `covered`, `gap`, `partial`, or `unknown` for the
 static MVP (runtime adapters may also report `stale`, `failing`, or `not_run`).

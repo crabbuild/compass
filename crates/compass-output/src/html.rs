@@ -597,7 +597,6 @@ fn aggregate(
             nodes,
             links,
             extras: BTreeMap::new(),
-            used_legacy_edges_key: false,
         },
         meta_communities,
         members,

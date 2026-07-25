@@ -14,14 +14,6 @@ use crate::{HistoryError, HistoryQueue, HistoryStore, JobState, RealizationId};
 const GC_SCHEMA_VERSION: u32 = 1;
 const TERMINAL_JOB_RETENTION_MILLIS: u64 = 30 * 24 * 60 * 60 * 1_000;
 const TEMP_RETENTION_MILLIS: u64 = 24 * 60 * 60 * 1_000;
-const LEGACY_REALIZATION_ROOT_KINDS: [&[u8]; 6] = [
-    b"nodes",
-    b"edges",
-    b"hyperedges",
-    b"analysis",
-    b"metadata",
-    b"manifest",
-];
 const REALIZATION_ROOT_KINDS: [&[u8]; 8] = [
     b"nodes",
     b"edges",
@@ -389,14 +381,10 @@ fn validate_root_listing(
         .iter()
         .map(|kind| kind.to_vec())
         .collect::<BTreeSet<_>>();
-    let legacy_expected = LEGACY_REALIZATION_ROOT_KINDS
-        .iter()
-        .map(|kind| kind.to_vec())
-        .collect::<BTreeSet<_>>();
     for (id, kinds) in realization_roots {
-        if kinds != expected && kinds != legacy_expected {
+        if kinds != expected {
             return Err(HistoryError::CorruptHistory(format!(
-                "realization {id} does not have a complete schema-2 or schema-3 root set"
+                "realization {id} does not have the complete current root set"
             )));
         }
     }

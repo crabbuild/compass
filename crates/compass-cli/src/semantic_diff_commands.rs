@@ -24,6 +24,7 @@ struct Options {
     new: String,
     format: Format,
     all: bool,
+    limit: Option<usize>,
     explain: Option<String>,
     fingerprint: Option<String>,
 }
@@ -35,7 +36,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json>       Output format [default: text]\n  --all                      Include routine symbol churn\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint"
+        "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json>       Output format [default: text]\n  --limit <N>                Show at most N findings per text section [default: 20]\n  --all                      Include routine churn and show every finding\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint"
     )
 }
 
@@ -108,6 +109,7 @@ fn execute(args: &[String]) -> Result<String, CommandError> {
     .map_err(runtime)?;
     let render = RenderOptions {
         include_routine: options.all,
+        max_findings_per_section: options.limit.or((!options.all).then_some(20)),
         explain: options.explain.as_deref(),
     };
     match options.format {
@@ -121,6 +123,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let mut format = Format::Text;
     let mut format_set = false;
     let mut all = false;
+    let mut limit = None;
     let mut explain = None;
     let mut fingerprint = None;
     let mut parse_options = true;
@@ -134,6 +137,18 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     return Err("duplicate --all".to_owned());
                 }
                 all = true;
+            }
+            "--limit" if parse_options => {
+                index += 1;
+                let value = args.get(index).ok_or("--limit requires a value")?;
+                if limit.replace(parse_limit(value)?).is_some() {
+                    return Err("duplicate --limit".to_owned());
+                }
+            }
+            value if parse_options && value.starts_with("--limit=") => {
+                if limit.replace(parse_limit(&value[8..])?).is_some() {
+                    return Err("duplicate --limit".to_owned());
+                }
             }
             "--format" if parse_options => {
                 index += 1;
@@ -187,6 +202,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
     if revisions.len() != 2 {
         return Err("diff requires exactly OLD and NEW revisions".to_owned());
     }
+    if all && limit.is_some() {
+        return Err("--all conflicts with --limit; --all is intentionally exhaustive".to_owned());
+    }
     if let Some(value) = &fingerprint {
         value
             .parse::<ExtractionFingerprint>()
@@ -197,9 +215,18 @@ fn parse(args: &[String]) -> Result<Options, String> {
         new: revisions.remove(0),
         format,
         all,
+        limit,
         explain,
         fingerprint,
     })
+}
+
+fn parse_limit(value: &str) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "--limit must be a positive integer".to_owned())
 }
 
 fn parse_format(value: &str) -> Result<Format, String> {
@@ -465,6 +492,7 @@ mod tests {
         };
         assert_eq!(parsed.format, Format::Json);
         assert!(parsed.all);
+        assert_eq!(parsed.limit, None);
         assert_eq!(
             parsed.explain.as_deref(),
             Some("sd1-0123456789abcdef01234567")
@@ -477,6 +505,15 @@ mod tests {
                 "old".to_owned(),
                 "new".to_owned(),
                 "--format=yaml".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "old".to_owned(),
+                "new".to_owned(),
+                "--all".to_owned(),
+                "--limit=10".to_owned(),
             ])
             .is_err()
         );

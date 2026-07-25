@@ -159,6 +159,12 @@ pub struct SemanticFinding {
     pub compatibility: Compatibility,
     pub confidence: Confidence,
     pub review_priority: u16,
+    /// True when the changed entity is public, or is a conservative
+    /// public-surface candidate from graph evidence.
+    pub public_surface: bool,
+    /// Routine implementation/test churn is retained in JSON and `--all`, but
+    /// collapsed from the default reviewer view.
+    pub routine: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,6 +185,19 @@ pub struct CollapsedGroup {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FeatureGroup {
+    pub id: String,
+    pub headline: String,
+    pub summary: String,
+    pub finding_ids: Vec<String>,
+    pub source_files: Vec<String>,
+    pub public_surface_changes: usize,
+    pub behavior_changes: usize,
+    pub dependency_changes: usize,
+    pub test_changes: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Comparison {
     pub old_commit: String,
     pub new_commit: String,
@@ -190,6 +209,7 @@ pub struct SemanticDiffReport {
     pub schema: String,
     pub comparison: Comparison,
     pub findings: Vec<SemanticFinding>,
+    pub feature_groups: Vec<FeatureGroup>,
     pub collapsed_groups: Vec<CollapsedGroup>,
     pub completeness: BTreeMap<String, Completeness>,
     pub limitations: Vec<String>,

@@ -340,7 +340,6 @@ fn empty_global_graph() -> GraphDocument {
         nodes: Vec::new(),
         links: Vec::new(),
         extras: Default::default(),
-        used_legacy_edges_key: false,
     }
 }
 

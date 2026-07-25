@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Version of the Compass history realization schema.
-pub const HISTORY_SCHEMA_VERSION: u32 = 3;
+pub const HISTORY_SCHEMA_VERSION: u32 = 1;
 
 /// Persistence treatment for one realization artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -101,9 +101,7 @@ pub struct GraphVersion {
     pub schema_version: u32,
     pub git_commit: String,
     pub git_parents: Vec<String>,
-    #[serde(default)]
     pub build_profile: BuildProfile,
-    #[serde(default)]
     pub profile_digest: String,
     pub extraction_fingerprint: String,
     pub nodes_root: StoredTree,
@@ -111,26 +109,15 @@ pub struct GraphVersion {
     pub hyperedges_root: StoredTree,
     pub analysis_root: StoredTree,
     pub metadata_root: StoredTree,
-    #[serde(default = "empty_stored_tree")]
     pub program_facts_root: StoredTree,
-    #[serde(default = "empty_stored_tree")]
     pub program_summaries_root: StoredTree,
     pub node_count: u64,
     pub edge_count: u64,
     pub hyperedge_count: u64,
     pub analysis_count: u64,
     pub metadata_count: u64,
-    #[serde(default)]
     pub program_fact_count: u64,
-    #[serde(default)]
     pub program_summary_count: u64,
-}
-
-fn empty_stored_tree() -> StoredTree {
-    StoredTree {
-        root: None,
-        format: Config::default().format,
-    }
 }
 
 /// SHA-256 identity of canonical [`GraphVersion`] bytes.
@@ -140,19 +127,7 @@ pub struct RealizationId([u8; 32]);
 impl RealizationId {
     /// Derive a realization ID without operational fields.
     pub fn for_version(version: &GraphVersion) -> Result<Self, HistoryError> {
-        let mut value = serde_json::to_value(version)?;
-        if version.schema_version == 2
-            && let Some(object) = value.as_object_mut()
-        {
-            for field in [
-                "program_facts_root",
-                "program_summaries_root",
-                "program_fact_count",
-                "program_summary_count",
-            ] {
-                object.remove(field);
-            }
-        }
+        let value = serde_json::to_value(version)?;
         Ok(Self(Sha256::digest(canonical_json_bytes(&value)?).into()))
     }
 

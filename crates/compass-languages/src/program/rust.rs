@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use compass_ir::{
-    BasicBlock, Capability, Coverage, CoverageState, ExecutionMode, FunctionIr, ModuleIr,
-    Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor, SourceAnchor,
-    Terminator, TypeRef, Visibility, hex_sha256,
+    BasicBlock, Capability, Coverage, CoverageState, ExceptionEffect, ExceptionKind, ExecutionMode,
+    FunctionIr, ModuleIr, Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor,
+    SourceAnchor, Terminator, TypeRef, Visibility, hex_sha256,
 };
 use compass_program::{EvidenceBatch, FileInput, evidence_record};
 use tree_sitter::Node;
@@ -362,7 +362,17 @@ fn collect_operations(
                     node,
                     "throw",
                     OperationKind::Throw {
-                        value: value.to_owned(),
+                        effect: ExceptionEffect {
+                            kind: if value.starts_with("panic!") {
+                                ExceptionKind::Panic
+                            } else {
+                                ExceptionKind::Exception
+                            },
+                            type_name: (!value.starts_with("panic!"))
+                                .then(|| "error result".to_owned()),
+                            expression: Some(value.to_owned()),
+                            chained: false,
+                        },
                     },
                     evidence,
                     operations,

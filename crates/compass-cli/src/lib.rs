@@ -1171,8 +1171,7 @@ fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
             grouped_decimal(cap)
         ));
     }
-    let document = match compass_model::GraphDocument::load_for_recluster_compatibility(&graph_path)
-    {
+    let document = match compass_model::GraphDocument::load_for_recluster(&graph_path) {
         Ok(document) => document,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };

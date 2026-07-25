@@ -70,9 +70,11 @@ fn request(
     changed: bool,
 ) -> Result<PublishRequest, Box<dyn std::error::Error>> {
     let commit = repository.resolve("HEAD")?;
+    let mut profile = compass_history::BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
     Ok(PublishRequest {
         parents: repository.parents(&commit)?,
-        profile: compass_history::BuildProfile::default(),
+        profile,
         artifacts: GraphArtifacts {
             document: graph(commit.as_str(), changed)?,
             program: None,
