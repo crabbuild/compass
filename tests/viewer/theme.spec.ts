@@ -1,0 +1,139 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const themeCases = [
+  {
+    name: "light",
+    bodyClass: "vscode-light",
+    background: "#f4f4f4",
+    foreground: "#202020",
+    sidebar: "#ebebeb",
+    input: "#ffffff"
+  },
+  {
+    name: "dark",
+    bodyClass: "vscode-dark",
+    background: "#181818",
+    foreground: "#d6d6d6",
+    sidebar: "#202020",
+    input: "#292929"
+  },
+  {
+    name: "high contrast dark",
+    bodyClass: "vscode-high-contrast",
+    background: "#000000",
+    foreground: "#ffffff",
+    sidebar: "#000000",
+    input: "#000000"
+  },
+  {
+    name: "high contrast light",
+    bodyClass: "vscode-high-contrast-light",
+    background: "#ffffff",
+    foreground: "#000000",
+    sidebar: "#ffffff",
+    input: "#ffffff"
+  }
+] as const;
+
+for (const theme of themeCases) {
+  test(`Ask Codebase inherits ${theme.name} VS Code tokens`, async ({ page }) => {
+    await page.goto("/query.html");
+    await applyTheme(page, theme);
+
+    await expect(page.locator(".query-shell")).toHaveCSS(
+      "background-color",
+      hexToRgb(theme.background)
+    );
+    await expect(page.locator(".query-shell")).toHaveCSS("color", hexToRgb(theme.foreground));
+    await expect(page.getByRole("textbox", { name: "Natural-language query" }))
+      .toHaveCSS("background-color", hexToRgb(theme.input));
+  });
+}
+
+test("high-contrast themes use the VS Code contrast border", async ({ page }) => {
+  await page.goto("/history.html");
+  await expect(page.locator(".history-commit-details")).toBeVisible();
+  await applyTheme(page, {
+    bodyClass: "vscode-high-contrast",
+    background: "#000000",
+    foreground: "#ffffff",
+    sidebar: "#000000",
+    input: "#000000",
+    contrastBorder: "#ff00ff"
+  });
+
+  await expect(page.locator(".history-commit-details"))
+    .toHaveCSS("border-top-color", "rgb(255, 0, 255)");
+  await expect(page.locator(".history-commit-details")).toHaveCSS("border-top-width", "2px");
+});
+
+test("loading respects reduced motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/architecture.html?delay=1");
+
+  await expect(page.locator(".compass-load-progress i")).toHaveCSS("animation-name", "none");
+  await expect(page.locator(".architecture-load-skeleton span").first())
+    .toHaveCSS("animation-name", "none");
+});
+
+test("narrow Architecture, Ask Codebase, and Evolution views preserve core actions", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 420, height: 780 });
+
+  await page.goto("/architecture.html");
+  await expect(page.getByRole("searchbox", { name: "Search architecture" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /API/ }).first()).toBeVisible();
+  await expectNoHorizontalDocumentOverflow(page);
+
+  await page.goto("/query.html");
+  await expect(page.getByRole("button", { name: "Run query" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Natural-language query" }))
+    .toBeVisible();
+  await expectNoHorizontalDocumentOverflow(page);
+
+  await page.goto("/history.html");
+  await expect(page.getByRole("combobox", { name: "Select revision" })).toBeVisible();
+  await expect(page.getByRole("listbox", { name: "Git commit timeline" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Query this revision" })).toBeVisible();
+  await expectNoHorizontalDocumentOverflow(page);
+});
+
+async function applyTheme(
+  page: Page,
+  theme: {
+    bodyClass: string;
+    background: string;
+    foreground: string;
+    sidebar: string;
+    input: string;
+    contrastBorder?: string;
+  }
+): Promise<void> {
+  await page.evaluate((tokens) => {
+    document.body.className = tokens.bodyClass;
+    const root = document.documentElement.style;
+    root.setProperty("--vscode-editor-background", tokens.background);
+    root.setProperty("--vscode-editor-foreground", tokens.foreground);
+    root.setProperty("--vscode-sideBar-background", tokens.sidebar);
+    root.setProperty("--vscode-sideBar-foreground", tokens.foreground);
+    root.setProperty("--vscode-input-background", tokens.input);
+    root.setProperty("--vscode-input-foreground", tokens.foreground);
+    root.setProperty("--vscode-panel-border", tokens.foreground);
+    root.setProperty("--vscode-focusBorder", tokens.foreground);
+    if (tokens.contrastBorder) {
+      root.setProperty("--vscode-contrastBorder", tokens.contrastBorder);
+    }
+  }, theme);
+}
+
+async function expectNoHorizontalDocumentOverflow(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth
+  )).toBe(true);
+}
+
+function hexToRgb(hex: string): string {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${value >> 16}, ${(value >> 8) & 255}, ${value & 255})`;
+}
