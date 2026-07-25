@@ -130,7 +130,8 @@ export default async function generate(): Promise<void> {
 function communityHarness(overview: unknown, detail: unknown): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass community fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.communityRequestCount=0;
-window.acquireVsCodeApi=()=>({postMessage(message){
+window.webviewState=undefined;
+window.acquireVsCodeApi=()=>({getState(){return window.webviewState},setState(state){window.webviewState=state},postMessage(message){
   if(message.type==="ready") {
     setTimeout(()=>window.postMessage({type:"hydrateGraph",requestId:"overview",repositoryId:"fixture",model:${JSON.stringify(overview)}},"*"),0);
   } else if(message.type==="openCommunity") {
