@@ -74,6 +74,56 @@ fn project_config_rejects_unknown_versions_and_root_escapes() -> Result<(), Box<
         .normalize(root.path())
         .is_err()
     );
+    assert!(
+        ProjectConfig::new(BuildScope {
+            include: vec!["C:\\outside\\source".to_owned()],
+            exclude: Vec::new(),
+        })
+        .normalize(root.path())
+        .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn project_root_is_a_valid_literal_directory_scope() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
+    let scope = BuildScope {
+        include: vec!["./".to_owned()],
+        exclude: Vec::new(),
+    }
+    .normalize(root.path())?;
+    assert_eq!(scope.include, ["."]);
+    let detection = detect(
+        root.path(),
+        &DetectOptions {
+            scope,
+            ..DetectOptions::default()
+        },
+    )?;
+    assert_eq!(detection.total_files, 1);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn project_config_rejects_an_out_of_root_symlink() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    fs::create_dir(root.path().join(".compass"))?;
+    let outside_config = outside.path().join("config.toml");
+    fs::write(&outside_config, "version = 1\n[build]\n")?;
+    symlink(&outside_config, root.path().join(".compass/config.toml"))?;
+
+    assert!(ProjectConfig::load(root.path()).is_err());
+    assert!(
+        ProjectConfig::new(BuildScope::default())
+            .write(root.path())
+            .is_err()
+    );
     Ok(())
 }
 

@@ -1,7 +1,10 @@
 use std::error::Error;
+use std::ffi::OsString;
 use std::fs;
-use std::process::Command;
+use std::io::Cursor;
+use std::process::{Command, Stdio};
 
+use compass_files::ProjectConfig;
 use compass_model::GraphDocument;
 
 #[test]
@@ -44,6 +47,13 @@ fn init_refuses_overwrite_and_unmatched_scope() -> Result<(), Box<dyn Error>> {
         .current_dir(root.path())
         .output()?;
     assert_eq!(second.status.code(), Some(2));
+    let forced = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["init", ".", "--include", "main.rs", "--yes", "--force"])
+        .current_dir(root.path())
+        .output()?;
+    assert!(forced.status.success());
+    let config = ProjectConfig::load(root.path())?.ok_or("missing forced config")?;
+    assert_eq!(config.build.include, ["main.rs"]);
 
     let other = tempfile::tempdir()?;
     fs::write(other.path().join("main.rs"), "fn main() {}\n")?;
@@ -53,5 +63,81 @@ fn init_refuses_overwrite_and_unmatched_scope() -> Result<(), Box<dyn Error>> {
         .output()?;
     assert_eq!(unmatched.status.code(), Some(2));
     assert!(!other.path().join(".compass/config.toml").exists());
+    Ok(())
+}
+
+#[test]
+fn update_reuses_scope_and_invalid_config_never_widens_it() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::create_dir(root.path().join("src"))?;
+    fs::create_dir(root.path().join("tools"))?;
+    fs::write(root.path().join("src/lib.rs"), "pub fn included() {}\n")?;
+    fs::write(root.path().join("tools/task.rs"), "pub fn excluded() {}\n")?;
+    let init = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["init", ".", "--include", "src", "--yes"])
+        .current_dir(root.path())
+        .output()?;
+    assert!(init.status.success());
+
+    fs::write(
+        root.path().join("tools/task.rs"),
+        "pub fn newly_excluded() {}\n",
+    )?;
+    let update = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", "."])
+        .current_dir(root.path())
+        .output()?;
+    assert!(update.status.success());
+    let graph = GraphDocument::load(&root.path().join("compass-out/graph.json"))?;
+    assert!(
+        !graph
+            .nodes
+            .iter()
+            .any(|node| node.label() == "newly_excluded()")
+    );
+
+    fs::write(
+        root.path().join(".compass/config.toml"),
+        "version = 1\nunknown = true\n[build]\n",
+    )?;
+    let invalid = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", "."])
+        .current_dir(root.path())
+        .output()?;
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("invalid Compass project config"));
+    Ok(())
+}
+
+#[test]
+fn non_interactive_init_requires_yes() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["init", "."])
+        .current_dir(root.path())
+        .stdin(Stdio::null())
+        .output()?;
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("pass --yes"));
+    assert!(!root.path().join(".compass/config.toml").exists());
+    Ok(())
+}
+
+#[test]
+fn interactive_init_uses_the_same_validated_configuration() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::create_dir(root.path().join("src"))?;
+    fs::write(root.path().join("src/lib.rs"), "pub fn included() {}\n")?;
+    let arguments = vec![OsString::from(root.path())];
+    let mut input = Cursor::new(b"custom\nsrc\n\nyes\n");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let code = compass_cli::run_init(&arguments, &mut input, &mut stdout, &mut stderr, true);
+
+    assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&stderr));
+    let config = ProjectConfig::load(root.path())?.ok_or("missing interactive config")?;
+    assert_eq!(config.build.include, ["src/"]);
     Ok(())
 }

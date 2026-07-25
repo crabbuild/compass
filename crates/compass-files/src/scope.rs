@@ -27,8 +27,12 @@ fn normalize_entries(root: &Path, entries: Vec<String>) -> Result<Vec<String>, F
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for original in entries {
-        let directory_hint = original.ends_with(['/', '\\']);
-        let mut value = original.trim().replace('\\', "/");
+        let trimmed = original.trim();
+        let directory_hint = trimmed.ends_with(['/', '\\']);
+        let mut value = trimmed.replace('\\', "/");
+        if matches!(value.as_str(), "." | "./") {
+            value = ".".to_owned();
+        }
         while let Some(rest) = value.strip_prefix("./") {
             value = rest.to_owned();
         }
@@ -40,6 +44,7 @@ fn normalize_entries(root: &Path, entries: Vec<String>) -> Result<Vec<String>, F
         }
         let path = Path::new(&value);
         if path.is_absolute()
+            || is_windows_absolute(&value)
             || path.components().any(|component| {
                 matches!(
                     component,
@@ -66,7 +71,7 @@ fn normalize_entries(root: &Path, entries: Vec<String>) -> Result<Vec<String>, F
                     reason: "entry resolves outside the project root".to_owned(),
                 });
             }
-            if canonical.is_dir() && !value.ends_with('/') {
+            if canonical.is_dir() && value != "." && !value.ends_with('/') {
                 value.push('/');
             }
         } else if directory_hint && !value.ends_with('/') {
@@ -79,9 +84,15 @@ fn normalize_entries(root: &Path, entries: Vec<String>) -> Result<Vec<String>, F
     Ok(normalized)
 }
 
+fn is_windows_absolute(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
+}
+
 #[derive(Clone, Debug)]
 struct ScopePattern {
     raw: String,
+    root: bool,
     literal: bool,
     directory: bool,
     pattern: Pattern,
@@ -90,11 +101,13 @@ struct ScopePattern {
 impl ScopePattern {
     fn new(raw: &str) -> Result<Self, FileError> {
         let trimmed = raw.trim_end_matches('/');
+        let root = trimmed == ".";
         let literal = !trimmed.contains(['*', '?', '[']);
         Ok(Self {
             raw: trimmed.to_owned(),
+            root,
             literal,
-            directory: raw.ends_with('/'),
+            directory: root || raw.ends_with('/'),
             pattern: Pattern::new(trimmed).map_err(|error| FileError::InvalidScope {
                 entry: raw.to_owned(),
                 reason: error.to_string(),
@@ -103,6 +116,9 @@ impl ScopePattern {
     }
 
     fn matches(&self, relative: &str) -> bool {
+        if self.root {
+            return true;
+        }
         if self.literal {
             return relative == self.raw
                 || (self.directory

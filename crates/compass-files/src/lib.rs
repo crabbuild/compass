@@ -67,6 +67,8 @@ pub enum FileError {
     },
     #[error("unsupported Compass config version {version} at {path}")]
     UnsupportedProjectConfig { path: PathBuf, version: u32 },
+    #[error("Compass project config path {path} resolves outside project root {root}")]
+    ProjectConfigOutsideRoot { path: PathBuf, root: PathBuf },
     #[error("invalid build scope entry '{entry}': {reason}")]
     InvalidScope { entry: String, reason: String },
 }
