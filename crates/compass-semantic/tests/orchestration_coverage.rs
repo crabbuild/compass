@@ -159,7 +159,7 @@ fn reconciliation_and_parallel_extraction_cover_scope_failures_panics_and_orderi
             "ollama",
             8,
             4,
-            &HashMap::from([("GRAPHIFY_OLLAMA_PARALLEL".to_owned(), "1".to_owned())]),
+            &HashMap::from([("COMPASS_OLLAMA_PARALLEL".to_owned(), "1".to_owned())]),
         ),
         4
     );

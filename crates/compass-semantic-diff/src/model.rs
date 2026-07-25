@@ -159,6 +159,12 @@ pub struct SemanticFinding {
     pub compatibility: Compatibility,
     pub confidence: Confidence,
     pub review_priority: u16,
+    /// True when the changed entity is public, or is a conservative
+    /// public-surface candidate from graph evidence.
+    pub public_surface: bool,
+    /// Routine implementation/test churn is retained in JSON and `--all`, but
+    /// collapsed from the default reviewer view.
+    pub routine: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,10 +185,53 @@ pub struct CollapsedGroup {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FeatureGroup {
+    pub id: String,
+    pub headline: String,
+    pub summary: String,
+    pub finding_ids: Vec<String>,
+    pub source_files: Vec<String>,
+    pub public_surface_changes: usize,
+    pub behavior_changes: usize,
+    pub dependency_changes: usize,
+    pub test_changes: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Comparison {
     pub old_commit: String,
     pub new_commit: String,
     pub fingerprint: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GraphNodeDelta {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub source_file: String,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GraphEdgeDelta {
+    pub source: String,
+    pub target: String,
+    pub relation: String,
+    pub key: String,
+    pub source_file: String,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GraphDelta {
+    pub added_nodes: Vec<GraphNodeDelta>,
+    pub removed_nodes: Vec<GraphNodeDelta>,
+    pub changed_nodes: Vec<GraphNodeDelta>,
+    pub added_edges: Vec<GraphEdgeDelta>,
+    pub removed_edges: Vec<GraphEdgeDelta>,
+    pub changed_edges: Vec<GraphEdgeDelta>,
+    pub collapsed_attribute_changes: BTreeMap<String, usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -190,7 +239,10 @@ pub struct SemanticDiffReport {
     pub schema: String,
     pub comparison: Comparison,
     pub findings: Vec<SemanticFinding>,
+    pub feature_groups: Vec<FeatureGroup>,
     pub collapsed_groups: Vec<CollapsedGroup>,
+    pub source_changes: Vec<compass_history::SourceFileDelta>,
+    pub graph_delta: GraphDelta,
     pub completeness: BTreeMap<String, Completeness>,
     pub limitations: Vec<String>,
 }
@@ -257,6 +309,7 @@ pub struct SemanticDiffInput<'a> {
     pub source_deltas: &'a [SourceFileDelta],
     pub changed_node_ids: &'a [String],
     pub dependency_deltas: &'a [DependencyDelta],
+    pub graph_delta: &'a GraphDelta,
     pub snapshots: &'a dyn SnapshotReader,
     pub test_evidence: &'a dyn TestEvidenceProvider,
 }

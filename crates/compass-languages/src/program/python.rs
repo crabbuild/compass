@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use compass_ir::{
-    BasicBlock, Capability, Coverage, CoverageState, ExecutionMode, FunctionIr, ModuleIr,
-    Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor, SourceAnchor,
-    Terminator, TypeRef, Visibility, hex_sha256,
+    BasicBlock, Capability, Coverage, CoverageState, ExceptionEffect, ExceptionKind, ExecutionMode,
+    FunctionIr, ModuleIr, Operation, OperationKind, ParameterIr, ParameterKind, ProviderDescriptor,
+    SourceAnchor, Terminator, TypeRef, Visibility, hex_sha256,
 };
 use compass_program::{EvidenceBatch, FileInput, evidence_record};
 use tree_sitter::Node;
@@ -302,11 +302,12 @@ fn collect_operations(
                 .trim_start_matches("raise")
                 .trim()
                 .to_owned();
+            let effect = python_exception_effect(&value);
             Some((
                 Capability::Effects,
                 "throw",
-                value.clone(),
-                OperationKind::Throw { value },
+                effect.display_name(),
+                OperationKind::Throw { effect },
             ))
         }
         _ => None,
@@ -332,6 +333,48 @@ fn collect_operations(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_operations(input, child, provider_id, evidence, operations);
+    }
+}
+
+fn python_exception_effect(value: &str) -> ExceptionEffect {
+    if value.is_empty() {
+        return ExceptionEffect {
+            kind: ExceptionKind::Rethrow,
+            type_name: None,
+            expression: None,
+            chained: false,
+        };
+    }
+    let (expression, chained) = value
+        .split_once(" from ")
+        .map_or((value, false), |(expression, _)| (expression.trim(), true));
+    let type_name = expression
+        .split_once('(')
+        .map(|(candidate, _)| candidate.trim())
+        .filter(|candidate| {
+            !candidate.is_empty()
+                && candidate.split('.').all(|part| {
+                    !part.is_empty()
+                        && part
+                            .chars()
+                            .all(|character| character == '_' || character.is_alphanumeric())
+                })
+        })
+        .map(str::to_owned);
+    if let Some(type_name) = type_name {
+        ExceptionEffect {
+            kind: ExceptionKind::Exception,
+            type_name: Some(type_name),
+            expression: None,
+            chained,
+        }
+    } else {
+        ExceptionEffect {
+            kind: ExceptionKind::Dynamic,
+            type_name: None,
+            expression: Some(expression.to_owned()),
+            chained,
+        }
     }
 }
 

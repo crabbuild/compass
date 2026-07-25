@@ -1,4 +1,4 @@
-//! Command compatibility layer for Compass and the Graphify compatibility binary.
+//! Command implementation for the native Compass CLI.
 
 mod capability_commands;
 mod dedup_commands;
@@ -25,8 +25,9 @@ mod semantic_diff_render;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -38,9 +39,7 @@ use compass_core::{
     default_graph_path, diagnose_graph_file, format_diagnostic_json, format_diagnostic_report,
     merge_graphs, watch_local_graph,
 };
-use compass_files::{
-    BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect, write_bytes_atomic,
-};
+use compass_files::{BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect};
 use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
@@ -78,12 +77,9 @@ pub(crate) fn process_cancellation() -> Result<&'static AtomicBool, String> {
     Ok(&PROCESS_CANCELLED)
 }
 
-const GRAPHIFY_COMPAT_VERSION: &str = "0.9.20";
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frontend {
     Compass,
-    Graphify,
 }
 
 #[derive(Debug)]
@@ -93,9 +89,22 @@ pub struct Outcome {
     pub stderr: String,
     pub stdout_trailing_newline: bool,
     pub stderr_trailing_newline: bool,
+    html_output: Option<PathBuf>,
 }
 
 impl Outcome {
+    #[must_use]
+    pub fn from_command_output(code: u8, stdout: String, stderr: String) -> Self {
+        Self {
+            code,
+            stdout,
+            stderr,
+            stdout_trailing_newline: true,
+            stderr_trailing_newline: true,
+            html_output: None,
+        }
+    }
+
     fn success(stdout: String) -> Self {
         Self {
             code: 0,
@@ -103,6 +112,7 @@ impl Outcome {
             stderr: String::new(),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         }
     }
 
@@ -113,6 +123,7 @@ impl Outcome {
             stderr: String::new(),
             stdout_trailing_newline: false,
             stderr_trailing_newline: true,
+            html_output: None,
         }
     }
 
@@ -127,7 +138,18 @@ impl Outcome {
             stderr,
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         }
+    }
+
+    fn with_html_output(mut self, path: impl Into<PathBuf>) -> Self {
+        self.html_output = Some(absolutize(path.into()));
+        self
+    }
+
+    #[must_use]
+    pub fn html_output(&self) -> Option<&Path> {
+        self.html_output.as_deref()
     }
 }
 
@@ -144,6 +166,99 @@ pub fn write_outcome(outcome: &Outcome, stdout: &mut impl Write, stderr: &mut im
         return 1;
     }
     outcome.code
+}
+
+/// Ask before opening a successfully generated HTML page.
+///
+/// The prompt is deliberately disabled unless both input and prompt output are terminals, so
+/// scripts, CI jobs, pipes, and redirected commands never block or launch a browser.
+pub fn prompt_to_open_html(
+    outcome: &Outcome,
+    input: &mut impl BufRead,
+    prompt_output: &mut impl Write,
+    input_is_terminal: bool,
+    prompt_is_terminal: bool,
+) -> Result<bool, String> {
+    prompt_to_open_html_with(
+        outcome,
+        input,
+        prompt_output,
+        input_is_terminal,
+        prompt_is_terminal,
+        open_html,
+    )
+}
+
+fn prompt_to_open_html_with(
+    outcome: &Outcome,
+    input: &mut impl BufRead,
+    prompt_output: &mut impl Write,
+    input_is_terminal: bool,
+    prompt_is_terminal: bool,
+    mut opener: impl FnMut(&Path) -> Result<(), String>,
+) -> Result<bool, String> {
+    let Some(path) = outcome.html_output() else {
+        return Ok(false);
+    };
+    if outcome.code != 0 || !input_is_terminal || !prompt_is_terminal {
+        return Ok(false);
+    }
+    if !path.is_file() {
+        return Err(format!(
+            "generated HTML page no longer exists: {}",
+            path.display()
+        ));
+    }
+
+    write!(
+        prompt_output,
+        "Open {} in your browser? [y/N] ",
+        path.display()
+    )
+    .map_err(|error| format!("could not write browser prompt: {error}"))?;
+    prompt_output
+        .flush()
+        .map_err(|error| format!("could not flush browser prompt: {error}"))?;
+
+    let mut answer = String::new();
+    input
+        .read_line(&mut answer)
+        .map_err(|error| format!("could not read browser confirmation: {error}"))?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        return Ok(false);
+    }
+
+    opener(path)?;
+    Ok(true)
+}
+
+fn open_html(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut command = Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    return Err("opening a browser is not supported on this platform".to_owned());
+
+    command
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let status = command
+        .status()
+        .map_err(|error| format!("could not launch the default browser: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the browser launcher exited with status {status}"))
+    }
 }
 
 fn write_output<W: Write + ?Sized>(
@@ -167,31 +282,25 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let events = if frontend == Frontend::Compass {
-        let mut os_args = args.iter().map(OsString::from).collect::<Vec<_>>();
-        match ide_contract::take_jsonl_events(&mut os_args) {
-            Ok(enabled) => {
-                args = os_args
-                    .into_iter()
-                    .map(|argument| argument.to_string_lossy().into_owned())
-                    .collect();
-                enabled
-            }
-            Err(error) => return Outcome::failure_with_code(error, 2),
+    let mut os_args = args.iter().map(OsString::from).collect::<Vec<_>>();
+    let events = match ide_contract::take_jsonl_events(&mut os_args) {
+        Ok(enabled) => {
+            args = os_args
+                .into_iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect();
+            enabled
         }
-    } else {
-        false
+        Err(error) => return Outcome::failure_with_code(error, 2),
     };
-    if frontend == Frontend::Compass {
-        if let Some(outcome) = help::request(&args, HelpStyle::Plain) {
-            return outcome;
-        }
-        if let Some("--version" | "-V") = args.first().map(String::as_str) {
-            return Outcome::success(format!("compass {}", env!("CARGO_PKG_VERSION")));
-        }
+    if let Some(outcome) = help::request(&args, HelpStyle::Plain) {
+        return outcome;
+    }
+    if let Some("--version" | "-V") = args.first().map(String::as_str) {
+        return Outcome::success(format!("compass {}", env!("CARGO_PKG_VERSION")));
     }
     let Some(command) = args.first().cloned() else {
-        return Outcome::success(graphify_help());
+        return Outcome::failure("error: missing command".to_owned());
     };
     args.remove(0);
     let operation = if command == "history" {
@@ -212,7 +321,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "path" => command_path(frontend, &args),
         "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
-        "export" => command_export(&args),
+        "export" => command_export(frontend, &args),
         "benchmark" => command_benchmark(&args),
         "merge-graphs" => command_merge_graphs(&args),
         "cache-check" => semantic_commands::command_cache_check(frontend, &args),
@@ -243,33 +352,24 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "diagnose" => command_diagnose(frontend, &args),
         "update" => command_build(frontend, &args, false),
         "extract" => command_build(frontend, &args, true),
-        "init" if frontend == Frontend::Compass => Outcome::failure(
+        "init" => Outcome::failure(
             "error: init requires terminal input and must be run from the compass binary"
                 .to_owned(),
         ),
-        "watch" if frontend == Frontend::Compass => Outcome::failure(
+        "watch" => Outcome::failure(
             "error: watch is a streaming command and must be run from the compass binary"
                 .to_owned(),
         ),
-        "serve" if frontend == Frontend::Compass => Outcome::failure(
+        "serve" => Outcome::failure(
             "error: serve is a long-lived command and must be run from the compass binary"
                 .to_owned(),
         ),
-        "--help" | "-h" | "-?" | "help" => Outcome::success(graphify_help()),
-        "--version" | "-V" | "-v" | "version" => Outcome::success(match frontend {
-            Frontend::Compass => format!("compass {}", env!("CARGO_PKG_VERSION")),
-            Frontend::Graphify => format!("graphify {GRAPHIFY_COMPAT_VERSION}"),
-        }),
-        _ if frontend == Frontend::Graphify => Outcome::failure(format!(
-            "error: unknown command '{command}'\nRun 'graphify --help' for usage."
-        )),
+        "--version" | "-V" | "-v" | "version" => {
+            Outcome::success(format!("compass {}", env!("CARGO_PKG_VERSION")))
+        }
         _ => Outcome::failure(help::unknown_command(&command)),
     };
-    let outcome = if frontend == Frontend::Compass {
-        help::append_usage_hint(outcome, &command, &args)
-    } else {
-        outcome
-    };
+    let outcome = help::append_usage_hint(outcome, &command, &args);
     if events {
         ide_contract::progress_outcome(&operation, outcome)
     } else {
@@ -349,27 +449,16 @@ pub fn compass_help_request(arguments: &[OsString], style: HelpStyle) -> Option<
     help::request_os(arguments, style)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum McpFrontend {
-    Compass,
-    Graphify,
-}
-
 /// Parse and run the long-lived native MCP server.
-pub fn run_mcp(
-    frontend: McpFrontend,
-    arguments: &[OsString],
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) -> u8 {
+pub fn run_mcp(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
     let args = arguments
         .iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let options = match parse_mcp_options(frontend, &args) {
+    let options = match parse_mcp_options(&args) {
         Ok(Some(options)) => options,
         Ok(None) => {
-            let _result = writeln!(stdout, "{}", mcp_help(frontend));
+            let _result = writeln!(stdout, "{}", mcp_help());
             return 0;
         }
         Err(error) => {
@@ -423,7 +512,7 @@ struct McpOptions {
     session_timeout: Option<Duration>,
 }
 
-fn parse_mcp_options(frontend: McpFrontend, args: &[String]) -> Result<Option<McpOptions>, String> {
+fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
     if args
         .iter()
         .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
@@ -435,7 +524,7 @@ fn parse_mcp_options(frontend: McpFrontend, args: &[String]) -> Result<Option<Mc
     let mut transport = "stdio".to_owned();
     let mut host = "127.0.0.1".to_owned();
     let mut port = 8080_u16;
-    let mut api_key = std::env::var("GRAPHIFY_API_KEY").ok();
+    let mut api_key = std::env::var("COMPASS_API_KEY").ok();
     let mut path = "/mcp".to_owned();
     let mut json_response = false;
     let mut stateless = false;
@@ -504,7 +593,6 @@ fn parse_mcp_options(frontend: McpFrontend, args: &[String]) -> Result<Option<Mc
         .filter(|path| !path.as_os_str().is_empty())
         .or_else(|| positional.filter(|path| !path.as_os_str().is_empty()))
         .unwrap_or_else(default_graph_path);
-    let _ = frontend;
     Ok(Some(McpOptions {
         graph_path,
         transport,
@@ -540,15 +628,8 @@ fn parse_session_timeout(raw: &str) -> Result<Option<Duration>, String> {
         .map_err(|_| "error: --session-timeout is out of range".to_owned())
 }
 
-fn mcp_help(frontend: McpFrontend) -> String {
-    let command = if frontend == McpFrontend::Compass {
-        "compass serve"
-    } else {
-        "graphify-mcp"
-    };
-    format!(
-        "Usage: {command} [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]"
-    )
+fn mcp_help() -> String {
+    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]".to_owned()
 }
 
 /// Run Compass's long-lived native watcher, streaming status as changes arrive.
@@ -575,15 +656,6 @@ pub fn run_watch_with_terminal(
     )
 }
 
-/// Run the frozen Graphify watch frontend without requiring Python or watchdog.
-pub fn run_graphify_watch(
-    arguments: &[OsString],
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) -> u8 {
-    run_watch_with_frontend(Frontend::Graphify, arguments, stdout, stderr, true)
-}
-
 fn run_watch_with_frontend(
     frontend: Frontend,
     arguments: &[OsString],
@@ -595,7 +667,7 @@ fn run_watch_with_frontend(
         .iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let options = match parse_watch_options(frontend, &args) {
+    let options = match parse_watch_options(&args) {
         Ok(Some(options)) => options,
         Ok(None) => {
             let _result = writeln!(stdout, "{}", watch_help());
@@ -626,13 +698,8 @@ fn run_watch_with_frontend(
 }
 
 #[cfg(test)]
-fn write_watch_status(
-    frontend: Frontend,
-    status: WatchStatus,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) {
-    write_watch_status_mode(frontend, status, stdout, stderr, true);
+fn write_watch_status(status: WatchStatus, stdout: &mut impl Write, stderr: &mut impl Write) {
+    write_watch_status_mode(Frontend::Compass, status, stdout, stderr, true);
 }
 
 fn write_watch_status_mode(
@@ -709,24 +776,6 @@ fn write_watch_status_mode(
             }
         }
         WatchStatus::Watching { root, debounce } => {
-            if frontend == Frontend::Graphify {
-                let _result = writeln!(
-                    stdout,
-                    "[graphify watch] Watching {} - press Ctrl+C to stop",
-                    root.display()
-                );
-                let _result = writeln!(
-                    stdout,
-                    "[graphify watch] Code changes rebuild graph automatically. Doc/image changes require /graphify --update."
-                );
-                let _result = writeln!(
-                    stdout,
-                    "[graphify watch] Debounce: {:.1}s",
-                    debounce.as_secs_f64()
-                );
-                let _result = stdout.flush();
-                return;
-            }
             let _result = native_line!(
                 stdout,
                 "[compass watch] Watching {} - press Ctrl+C to stop",
@@ -779,12 +828,6 @@ fn write_watch_status_mode(
             deterministic,
             semantic,
         } => {
-            if frontend == Frontend::Graphify {
-                let _result =
-                    writeln!(stdout, "\n[graphify watch] {} file(s) changed", paths.len());
-                let _result = stdout.flush();
-                return;
-            }
             let _result = native_line!(
                 stdout,
                 "[compass watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
@@ -793,32 +836,6 @@ fn write_watch_status_mode(
             let _result = stdout.flush();
         }
         WatchStatus::Rebuilt(result) => {
-            if frontend == Frontend::Graphify {
-                if result.outputs_changed {
-                    let _result = writeln!(
-                        stdout,
-                        "[graphify watch] Rebuilt: {} nodes, {} edges, {} communities",
-                        result.nodes, result.edges, result.communities
-                    );
-                    let html = if result.html_written {
-                        ", graph.html"
-                    } else {
-                        ""
-                    };
-                    let _result = writeln!(
-                        stdout,
-                        "[graphify watch] graph.json{html} and GRAPH_REPORT.md updated in {}",
-                        result.output_dir.display()
-                    );
-                } else {
-                    let _result = writeln!(
-                        stdout,
-                        "[graphify watch] No code-graph topology changes detected; outputs left untouched."
-                    );
-                }
-                let _result = stdout.flush();
-                return;
-            }
             let _result = native_line!(
                 stdout,
                 "[compass watch] Rebuilt: {} nodes, {} edges, {} communities ({} extracted, {} cached)",
@@ -879,32 +896,6 @@ fn write_watch_status_mode(
             }
         }
         WatchStatus::SemanticUpdateRequired { flag } => {
-            if frontend == Frontend::Graphify {
-                let watch_root = flag
-                    .parent()
-                    .and_then(Path::parent)
-                    .unwrap_or_else(|| Path::new("."));
-                let _result = writeln!(
-                    stdout,
-                    "\n[graphify watch] New or changed files detected in {}",
-                    watch_root.display()
-                );
-                let _result = writeln!(
-                    stdout,
-                    "[graphify watch] Non-code files changed - semantic re-extraction requires LLM."
-                );
-                let _result = writeln!(
-                    stdout,
-                    "[graphify watch] Run `/graphify --update` in Claude Code to update the graph."
-                );
-                let _result = writeln!(
-                    stdout,
-                    "[graphify watch] Flag written to {}",
-                    flag.display()
-                );
-                let _result = stdout.flush();
-                return;
-            }
             let _result = native_line!(
                 stdout,
                 "[compass watch] Semantic media changed; update required. Flag written to {}",
@@ -913,22 +904,12 @@ fn write_watch_status_mode(
             let _result = stdout.flush();
         }
         WatchStatus::EventError(error) => {
-            if frontend == Frontend::Graphify {
-                let _result = writeln!(stdout, "[graphify watch] Filesystem event error: {error}");
-                let _result = stdout.flush();
-                return;
-            }
             let _result = native_line!(stderr, "[compass watch] Filesystem event error: {error}");
             let _result = stderr.flush();
         }
         WatchStatus::RebuildError(error) => {
-            if frontend == Frontend::Graphify {
-                let _result = writeln!(stdout, "[graphify watch] Rebuild failed: {error}");
-                let _result = stdout.flush();
-            } else {
-                let _result = native_line!(stderr, "[compass watch] Rebuild failed: {error}");
-                let _result = stderr.flush();
-            }
+            let _result = native_line!(stderr, "[compass watch] Rebuild failed: {error}");
+            let _result = stderr.flush();
         }
         WatchStatus::Finishing => {
             if frontend == Frontend::Compass {
@@ -938,16 +919,7 @@ fn write_watch_status_mode(
             }
         }
         WatchStatus::Stopped => {
-            let label = if frontend == Frontend::Graphify {
-                "graphify watch"
-            } else {
-                "compass watch"
-            };
-            let _result = if frontend == Frontend::Compass {
-                native_line!(stdout, "[{label}] Stopped.")
-            } else {
-                writeln!(stdout, "\n[{label}] Stopped.")
-            };
+            let _result = native_line!(stdout, "[compass watch] Stopped.");
             let _result = stdout.flush();
         }
     }
@@ -968,32 +940,7 @@ fn watch_timestamp() -> Option<String> {
         .ok()
 }
 
-fn parse_watch_options(
-    frontend: Frontend,
-    args: &[String],
-) -> Result<Option<WatchOptions>, String> {
-    if frontend == Frontend::Graphify {
-        if args.iter().any(|argument| {
-            argument == "--program-artifact" || argument.starts_with("--program-artifact=")
-        }) {
-            return Err(
-                "error: --program-artifact is unsupported in Graphify compatibility mode"
-                    .to_owned(),
-            );
-        }
-        let root = args
-            .first()
-            .map_or_else(|| PathBuf::from("."), PathBuf::from);
-        if !root.exists() {
-            return Err(format!("error: path not found: {}", root.display()));
-        }
-        let mut options = WatchOptions::new(root);
-        options.graphify_compatibility = true;
-        options.adaptive = false;
-        options.debounce = Duration::from_secs(3);
-        options.force_polling = cfg!(target_os = "macos");
-        return Ok(Some(options));
-    }
+fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> {
     let mut root = None;
     let mut output_root = None;
     let mut debounce = Duration::from_millis(150);
@@ -1084,13 +1031,10 @@ fn parse_positive_seconds(value: &str, option: &str) -> Result<Duration, String>
 
 fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
     if args.first().map(String::as_str) != Some("multigraph") {
-        let prefix = match frontend {
-            Frontend::Compass => "compass",
-            Frontend::Graphify => "graphify",
-        };
-        return Outcome::failure(format!(
-            "Usage: {prefix} diagnose multigraph [--graph path] [--json] [--max-examples N] [--directed] [--undirected] [--extract-path path]"
-        ));
+        return Outcome::failure(
+            "Usage: compass diagnose multigraph [--graph path] [--json] [--max-examples N] [--directed] [--undirected] [--extract-path path]"
+                .to_owned(),
+        );
     }
     let mut graph_path = default_graph_path();
     let mut max_examples = 5_usize;
@@ -1143,12 +1087,7 @@ fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
         }
         index += 1;
     }
-    if frontend == Frontend::Graphify && extract_path.is_none() {
-        let source_checkout = PathBuf::from("graphify/extract.py");
-        if source_checkout.is_file() {
-            extract_path = source_checkout.canonicalize().ok();
-        }
-    }
+    let _ = frontend;
     match diagnose_graph_file(&graph_path, directed, max_examples, extract_path.as_deref()) {
         Ok(summary) if json_output => {
             match serde_json::to_string_pretty(&format_diagnostic_json(&summary)) {
@@ -1161,7 +1100,7 @@ fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
     }
 }
 
-fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
+fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
     let mut root = PathBuf::from(".");
     let mut root_set = false;
     let mut graph_override = None;
@@ -1176,10 +1115,6 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
         match args[index].as_str() {
             "--graph" => {
                 let Some(value) = args.get(index + 1) else {
-                    if frontend == Frontend::Graphify {
-                        index += 1;
-                        continue;
-                    }
                     return Outcome::failure("error: --graph requires a value".to_owned());
                 };
                 graph_override = Some(PathBuf::from(value));
@@ -1187,14 +1122,9 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
             }
             "--no-viz" => no_viz = true,
             "--no-label" => no_label = true,
-            "--missing-only" => {}
             "--timing" => timing = true,
             "--resolution" => {
                 let Some(argument) = args.get(index + 1) else {
-                    if frontend == Frontend::Graphify {
-                        index += 1;
-                        continue;
-                    }
                     return Outcome::failure("error: --resolution requires a value".to_owned());
                 };
                 let Ok(value) = argument.parse::<f64>() else {
@@ -1211,10 +1141,6 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
             }
             "--exclude-hubs" => {
                 let Some(argument) = args.get(index + 1) else {
-                    if frontend == Frontend::Graphify {
-                        index += 1;
-                        continue;
-                    }
                     return Outcome::failure("error: --exclude-hubs requires a value".to_owned());
                 };
                 let Ok(value) = argument.parse::<f64>() else {
@@ -1229,16 +1155,6 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
                 };
                 exclude_hubs = Some(parsed);
             }
-            "--backend" | "--model" | "--max-concurrency" | "--batch-size"
-                if index + 1 < args.len() =>
-            {
-                index += 1;
-            }
-            value
-                if value.starts_with("--backend=")
-                    || value.starts_with("--model=")
-                    || value.starts_with("--max-concurrency=")
-                    || value.starts_with("--batch-size=") => {}
             value if value.starts_with("--min-community-size=") => {
                 let Ok(parsed) = value[21..].parse::<usize>() else {
                     return Outcome::failure(
@@ -1247,23 +1163,21 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
                 };
                 min_community_size = parsed;
             }
-            "-h" | "--help" if frontend == Frontend::Compass => {
+            "-h" | "--help" => {
                 return Outcome::success("Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned());
             }
-            value if value.starts_with('-') && frontend == Frontend::Compass => {
+            value if value.starts_with('-') => {
                 return Outcome::failure(format!(
                     "error: unsupported native cluster-only option: {value}"
                 ));
             }
-            value if value.starts_with('-') => {}
             value if !root_set => {
                 root = PathBuf::from(value);
                 root_set = true;
             }
-            value if frontend == Frontend::Compass => {
+            value => {
                 return Outcome::failure(format!("error: unexpected path: {value}"));
             }
-            _ => {}
         }
         index += 1;
     }
@@ -1272,17 +1186,11 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
         .clone()
         .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
     if !graph_path.exists() {
-        return Outcome::failure(match frontend {
-            Frontend::Graphify => format!(
-                "error: no graph found at {} — run /graphify first",
-                graph_path.display()
-            ),
-            Frontend::Compass => format!(
-                "error: no graph found at {} — run `compass extract {}` first",
-                graph_path.display(),
-                root.display()
-            ),
-        });
+        return Outcome::failure(format!(
+            "error: no graph found at {} — run `compass extract {}` first",
+            graph_path.display(),
+            root.display()
+        ));
     }
     let output_dir = if graph_override.is_some()
         && graph_path.parent().and_then(Path::file_name) == Path::new(&output_name).file_name()
@@ -1294,12 +1202,6 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
     } else {
         root.join(&output_name)
     };
-    if frontend == Frontend::Graphify
-        && !no_label
-        && !output_dir.join(".compass_labels.json").is_file()
-    {
-        return label_commands::command_label(frontend, args);
-    }
     match cluster_existing_graph(&ClusterExistingOptions {
         graph_path,
         output_dir: output_dir.clone(),
@@ -1310,99 +1212,34 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
         exclude_hubs,
         min_community_size,
     }) {
-        Ok(result) if frontend == Frontend::Graphify => {
-            let mut warnings = result.load_warning.clone().into_iter().collect::<Vec<_>>();
+        Ok(result) => {
+            let mut outcome = Outcome::success(format!(
+                "Compass clustered {} nodes and {} edges into {} communities ({} labels reused).\nWritten to: {}",
+                result.nodes,
+                result.edges,
+                result.communities,
+                result.labels_reused,
+                output_dir.display()
+            ));
             if timing {
-                warnings.extend([
-                    format!(
-                        "[graphify timing] load: {:.1}s",
-                        result.timings.load.as_secs_f64()
-                    ),
-                    format!(
-                        "[graphify timing] cluster: {:.1}s",
-                        result.timings.cluster.as_secs_f64()
-                    ),
-                    format!(
-                        "[graphify timing] analyze: {:.1}s",
-                        result.timings.analyze.as_secs_f64()
-                    ),
-                    format!(
-                        "[graphify timing] label: {:.1}s",
-                        result.timings.label.as_secs_f64()
-                    ),
-                    format!(
-                        "[graphify timing] report: {:.1}s",
-                        result.timings.report.as_secs_f64()
-                    ),
-                ]);
+                outcome.stderr = format!(
+                    "[compass timing] load: {:.1}s\n[compass timing] cluster: {:.1}s\n[compass timing] analyze: {:.1}s\n[compass timing] label: {:.1}s\n[compass timing] report: {:.1}s\n[compass timing] export: {:.1}s\n[compass timing] total: {:.1}s",
+                    result.timings.load.as_secs_f64(),
+                    result.timings.cluster.as_secs_f64(),
+                    result.timings.analyze.as_secs_f64(),
+                    result.timings.label.as_secs_f64(),
+                    result.timings.report.as_secs_f64(),
+                    result.timings.export.as_secs_f64(),
+                    result.timings.total.as_secs_f64()
+                );
             }
-            if let Some(warning) = result.backup_warning.clone() {
-                warnings.push(warning);
-            }
-            if timing {
-                warnings.extend([
-                    format!(
-                        "[graphify timing] export: {:.1}s",
-                        result.timings.export.as_secs_f64()
-                    ),
-                    format!(
-                        "[graphify timing] total: {:.1}s",
-                        result.timings.total.as_secs_f64()
-                    ),
-                ]);
-            }
-            let done = if no_viz {
-                format!(
-                    "Done - {} communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).",
-                    result.communities
-                )
-            } else if result.html_written {
-                format!(
-                    "Done - {} communities. GRAPH_REPORT.md, graph.json and graph.html updated.",
-                    result.communities
-                )
-            } else {
-                format!(
-                    "Done - {} communities. GRAPH_REPORT.md and graph.json updated.",
-                    result.communities
-                )
-            };
-            let backup = result
-                .backup_message
-                .as_deref()
-                .map(|message| format!("{message}\n"))
-                .unwrap_or_default();
-            Outcome {
-                code: 0,
-                stdout: format!(
-                    "Loading existing graph...\nGraph: {} nodes, {} edges\nRe-clustering...\n{backup}{done}",
-                    result.nodes, result.edges
-                ),
-                stderr: warnings.join("\n"),
-                stdout_trailing_newline: true,
-                stderr_trailing_newline: true,
-            }
+            outcome
         }
-        Ok(result) => Outcome::success(format!(
-            "Compass clustered {} nodes and {} edges into {} communities ({} labels reused).\nWritten to: {}",
-            result.nodes,
-            result.edges,
-            result.communities,
-            result.labels_reused,
-            output_dir.display()
-        )),
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
 }
 
 fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
-    if frontend == Frontend::Graphify
-        && args
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "-h" | "--help" | "-?"))
-    {
-        return Outcome::success("Run 'graphify --help' for full usage.".to_owned());
-    }
     let mut graph_path = default_graph_path();
     let mut output_path = None;
     let mut root = None;
@@ -1455,14 +1292,13 @@ fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
     }
     if let Some((size, cap)) = compass_model::GraphDocument::size_cap_exceeded(&graph_path) {
         return Outcome::failure(format!(
-            "error: graph file {} is {} bytes, exceeds {}-byte cap\n(set GRAPHIFY_MAX_GRAPH_BYTES=<bytes> or GRAPHIFY_MAX_GRAPH_BYTES=<N>GB to raise the limit)",
+            "error: graph file {} is {} bytes, exceeds {}-byte cap\n(set COMPASS_MAX_GRAPH_BYTES=<bytes> or COMPASS_MAX_GRAPH_BYTES=<N>GB to raise the limit)",
             graph_path.display(),
             grouped_decimal(size),
             grouped_decimal(cap)
         ));
     }
-    let document = match compass_model::GraphDocument::load_for_recluster_compatibility(&graph_path)
-    {
+    let document = match compass_model::GraphDocument::load_for_recluster(&graph_path) {
         Ok(document) => document,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
@@ -1487,14 +1323,8 @@ fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
     let size = fs::metadata(&output_path)
         .map(|metadata| metadata.len() as f64 / 1024.0)
         .unwrap_or_default();
-    let absolute =
-        fs::canonicalize(&output_path).unwrap_or_else(|_| absolutize(output_path.clone()));
-    Outcome::success(format!(
-        "wrote {} ({size:.1} KB)\nopen with: xdg-open {}  (or file://{})",
-        output_path.display(),
-        output_path.display(),
-        absolute.display()
-    ))
+    Outcome::success(format!("wrote {} ({size:.1} KB)", output_path.display()))
+        .with_html_output(output_path)
 }
 
 fn grouped_decimal(value: u64) -> String {
@@ -1510,13 +1340,9 @@ fn grouped_decimal(value: u64) -> String {
 }
 
 fn tree_help(frontend: Frontend) -> String {
-    let prefix = match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    };
-    format!(
-        "Usage: {prefix} tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default compass-out/graph.json)\n  --output HTML        output path (default compass-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header"
-    )
+    let _ = frontend;
+    "Usage: compass tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default compass-out/graph.json)\n  --output HTML        output path (default compass-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header\n\nWhen run interactively, Compass asks before opening generated HTML in your browser."
+        .to_owned()
 }
 
 fn command_merge_graphs(args: &[String]) -> Outcome {
@@ -1537,7 +1363,7 @@ fn command_merge_graphs(args: &[String]) -> Outcome {
     }
     if paths.len() < 2 {
         return Outcome::failure(
-            "Usage: graphify merge-graphs <graph1.json> <graph2.json> [...] [--out merged.json]"
+            "Usage: compass merge-graphs <graph1.json> <graph2.json> [...] [--out merged.json]"
                 .to_owned(),
         );
     }
@@ -1583,165 +1409,15 @@ fn command_benchmark(args: &[String]) -> Outcome {
     ))
 }
 
-fn validate_graphify_update_args(args: &[String]) -> Option<Outcome> {
-    let mut path = None;
-    for argument in args {
-        if matches!(argument.as_str(), "--force" | "--no-cluster") {
-            continue;
-        }
-        if argument.starts_with('-') {
-            return Some(Outcome::failure_with_code(
-                format!("error: unknown update option: {argument}"),
-                2,
-            ));
-        }
-        if path.is_some() {
-            return Some(Outcome::failure_with_code(
-                "error: update accepts at most one path argument".to_owned(),
-                2,
-            ));
-        }
-        path = Some(argument);
-    }
-    if let Some(path) = path
-        && !Path::new(path).exists()
-    {
-        return Some(Outcome::failure(format!("error: path not found: {path}")));
-    }
-    None
-}
-
-fn format_graphify_update(result: &BuildResult, watch_path: &Path, no_cluster: bool) -> Outcome {
-    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let output_dir = if watch_path == Path::new(".") {
-        PathBuf::from(&output_name)
-    } else {
-        watch_path.join(&output_name)
-    };
-    let mut lines = vec![format!(
-        "Re-extracting code files in {} (no LLM needed)...",
-        watch_path.display()
-    )];
-    if !result.empty_files.is_empty() {
-        let examples = result
-            .empty_files
-            .iter()
-            .take(5)
-            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
-            .collect::<Vec<_>>();
-        let remaining = result.empty_files.len().saturating_sub(examples.len());
-        let suffix = if remaining == 0 {
-            String::new()
-        } else {
-            format!(" (+{remaining} more)")
-        };
-        lines.push(format!(
-            "  warning: {} source file(s) produced zero nodes and are absent from the graph: {}{suffix}. A re-run will retry them (empties are no longer cached); if it persists, please report the file(s) (#1666).",
-            result.empty_files.len(),
-            examples.join(", ")
-        ));
-    }
-    if result.outputs_changed {
-        if no_cluster {
-            lines.push(format!(
-                "[graphify watch] Rebuilt (no clustering): {} nodes, {} edges",
-                result.nodes, result.edges
-            ));
-            lines.push(format!(
-                "[graphify watch] graph.json updated in {}",
-                output_dir.display()
-            ));
-        } else {
-            let viz_limit = std::env::var("GRAPHIFY_VIZ_NODE_LIMIT")
-                .ok()
-                .and_then(|value| value.parse::<isize>().ok())
-                .unwrap_or(5_000);
-            if !result.html_written
-                && isize::try_from(result.nodes).map_or(true, |nodes| nodes > viz_limit)
-            {
-                lines.push(format!(
-                    "[graphify watch] Skipped graph.html: Graph has {} nodes - too large for HTML viz (limit: {viz_limit}). Use --no-viz, raise GRAPHIFY_VIZ_NODE_LIMIT, or reduce input size.",
-                    result.nodes,
-                ));
-            }
-            lines.push(format!(
-                "[graphify watch] Rebuilt: {} nodes, {} edges, {} communities",
-                result.nodes, result.edges, result.communities
-            ));
-            let artifacts = if result.html_written {
-                "graph.json, graph.html and GRAPH_REPORT.md"
-            } else {
-                "graph.json and GRAPH_REPORT.md"
-            };
-            lines.push(format!(
-                "[graphify watch] {artifacts} updated in {}",
-                output_dir.display()
-            ));
-        }
-    } else {
-        lines.push(
-            "[graphify watch] No code-graph topology changes detected; outputs left untouched."
-                .to_owned(),
-        );
-    }
-    lines.push(
-        "Code graph updated. For doc/paper/image changes run /graphify --update in your AI assistant."
-            .to_owned(),
-    );
-    if ![
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "MOONSHOT_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "GRAPHIFY_NO_TIPS",
-    ]
-    .into_iter()
-    .any(|key| std::env::var_os(key).is_some())
-    {
-        lines.push(
-            "Tip: set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini for semantic extraction."
-                .to_owned(),
-        );
-    }
-    Outcome::success(lines.join("\n"))
-}
-
 fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
-    if frontend == Frontend::Graphify
-        && args.iter().any(|argument| {
-            argument == "--program-artifact" || argument.starts_with("--program-artifact=")
-        })
-    {
-        return Outcome::failure(
-            "error: --program-artifact is unsupported in Graphify compatibility mode".to_owned(),
-        );
-    }
-    if frontend == Frontend::Graphify && extract && args.is_empty() {
-        return Outcome::failure(
-            "Usage: graphify extract <path> [--backend gemini|kimi|claude|openai|deepseek|ollama] [--model M] [--mode deep] [--out DIR] [--google-workspace] [--no-cluster] [--no-gitignore] [--max-workers N] [--token-budget N] [--max-concurrency N] [--api-timeout S] [--postgres DSN] [--cargo] [--allow-partial] [--timing]"
-                .to_owned(),
-        );
-    }
-    command_build_with_validation(frontend, args, extract, true)
+    command_build_with_validation(frontend, args, extract)
 }
 
-fn command_build_with_validation(
-    frontend: Frontend,
-    args: &[String],
-    extract: bool,
-    validate_external_args: bool,
-) -> Outcome {
-    if validate_external_args
-        && frontend == Frontend::Graphify
-        && !extract
-        && let Some(error) = validate_graphify_update_args(args)
-    {
-        return error;
-    }
+fn command_build_with_validation(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
     let started = Instant::now();
     let mut root = None;
     let mut output_root = None;
-    let mut force = environment_truthy("GRAPHIFY_FORCE");
+    let mut force = environment_truthy("COMPASS_FORCE");
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut gitignore = true;
@@ -1879,14 +1555,14 @@ fn command_build_with_validation(
                 index += 1;
             }
             value if value.starts_with("--exclude=") => excludes.push(value[10..].to_owned()),
-            "--program-artifact" if frontend == Frontend::Compass && index + 1 < args.len() => {
+            "--program-artifact" if index + 1 < args.len() => {
                 program_artifacts.push(PathBuf::from(&args[index + 1]));
                 index += 1;
             }
-            "--program-artifact" if frontend == Frontend::Compass => {
+            "--program-artifact" => {
                 return Outcome::failure("error: --program-artifact requires a path".to_owned());
             }
-            value if frontend == Frontend::Compass && value.starts_with("--program-artifact=") => {
+            value if value.starts_with("--program-artifact=") => {
                 let path = &value[19..];
                 if path.is_empty() {
                     return Outcome::failure(
@@ -1941,23 +1617,19 @@ fn command_build_with_validation(
             }
             "--timing" if extract => timing = true,
             "--dedup-llm" if extract => dedup_llm = true,
-            "-h" | "--help" if !(frontend == Frontend::Graphify && extract) => {
+            "-h" | "--help" => {
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
                     "Usage: compass update [path] [--program-artifact PATH] [--no-cluster] [--force] [--no-viz]".to_owned()
                 });
             }
-            value if frontend == Frontend::Graphify && extract && value.starts_with('-') => {}
             value if value.starts_with('-') => {
                 return Outcome::failure(format!("error: unknown graph build option: {value}"));
             }
-            value
-                if root.is_none() && !(frontend == Frontend::Graphify && extract && index != 0) =>
-            {
+            value if root.is_none() => {
                 root = Some(PathBuf::from(value));
             }
-            _value if frontend == Frontend::Graphify && extract => {}
             value => {
                 return Outcome::failure(format!(
                     "error: graph build accepts one path, unexpected: {value}"
@@ -1972,26 +1644,18 @@ fn command_build_with_validation(
             "error: must specify a path to scan or a --postgres DSN".to_owned(),
         );
     }
-    let mut root = if extract && !has_explicit_root {
+    let root = if extract && !has_explicit_root {
         PathBuf::from(".")
     } else {
         root.or_else(saved_graph_root)
             .unwrap_or_else(|| PathBuf::from("."))
     };
-    if frontend == Frontend::Graphify && extract {
-        root = resolve_cli_path(&root);
-    }
-    if frontend == Frontend::Graphify && !root.exists() {
-        return Outcome::failure(format!("error: path not found: {}", root.display()));
-    }
     let mut options = BuildOptions::new(&root);
-    if frontend == Frontend::Compass {
-        options.scope = match ProjectConfig::load(&root) {
-            Ok(Some(config)) => config.build,
-            Ok(None) => BuildScope::default(),
-            Err(error) => return Outcome::failure(format!("error: {error}")),
-        };
-    }
+    options.scope = match ProjectConfig::load(&root) {
+        Ok(Some(config)) => config.build,
+        Ok(None) => BuildScope::default(),
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
     options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
     options.force = force;
@@ -2011,7 +1675,7 @@ fn command_build_with_validation(
     };
     options.google_workspace =
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
-    options.program_analysis = frontend == Frontend::Compass;
+    options.program_analysis = true;
     options.program_artifacts = program_artifacts;
     apply_max_workers_override(&mut options, max_workers);
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
@@ -2027,16 +1691,16 @@ fn command_build_with_validation(
             .is_file();
     let mut dedup_environment = std::env::vars().collect::<HashMap<_, _>>();
     if let Some(timeout) = api_timeout {
-        dedup_environment.insert("GRAPHIFY_API_TIMEOUT".to_owned(), timeout.to_string());
+        dedup_environment.insert("COMPASS_API_TIMEOUT".to_owned(), timeout.to_string());
     }
     let mut dedup_tiebreaker = if dedup_llm {
         let global_providers = home_directory()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".graphify")
+            .join(".compass")
             .join("providers.json");
         let local_providers = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".graphify")
+            .join(".compass")
             .join("providers.json");
         match dedup_commands::DedupLlmTiebreaker::prepare(
             backend.as_deref(),
@@ -2044,7 +1708,7 @@ fn command_build_with_validation(
             dedup_environment,
             &global_providers,
             &local_providers,
-            environment_truthy("GRAPHIFY_ALLOW_LOCAL_PROVIDERS"),
+            environment_truthy("COMPASS_ALLOW_LOCAL_PROVIDERS"),
             executable_on_path("claude"),
         ) {
             Ok(tiebreaker) => Some(tiebreaker),
@@ -2055,45 +1719,16 @@ fn command_build_with_validation(
                     pending_semantic_count(&options, extract_incremental)
                 };
                 let message = format!("error: {}", no_llm_api_key_message(semantic_count, true));
-                return if frontend == Frontend::Graphify {
-                    graphify_extract_provider_failure(
-                        &options,
-                        code_only,
-                        force,
-                        extract_incremental,
-                        message,
-                        1,
-                    )
-                } else {
-                    Outcome::failure(message)
-                };
+                return Outcome::failure(message);
             }
             Err(error) => {
                 let message = format!("error: {error}");
-                return if frontend == Frontend::Graphify {
-                    graphify_extract_provider_failure(
-                        &options,
-                        code_only,
-                        force,
-                        extract_incremental,
-                        message,
-                        1,
-                    )
-                } else {
-                    Outcome::failure(message)
-                };
+                return Outcome::failure(message);
             }
         }
     } else {
         None
     };
-    let compatibility_manifest = (frontend == Frontend::Graphify && !extract).then(|| {
-        let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-        let output_root = options.output_root.as_ref().unwrap_or(&root);
-        let path = output_root.join(output_name).join("manifest.json");
-        let existing = fs::read(&path).ok();
-        (path, existing)
-    });
     let postgres_graph = if let Some(dsn) = postgres_dsn.as_deref() {
         match compass_postgres::introspect_postgres(Some(dsn)) {
             Ok(graph) => Some(graph),
@@ -2179,23 +1814,6 @@ fn command_build_with_validation(
             if let Some(tiebreaker) = dedup_tiebreaker.as_mut() {
                 notes.extend(tiebreaker.take_warnings());
             }
-            if let Some((path, existing)) = compatibility_manifest {
-                let restored = match existing {
-                    Some(bytes) => {
-                        write_bytes_atomic(&path, &bytes).map_err(|error| error.to_string())
-                    }
-                    None if path.exists() => {
-                        fs::remove_file(&path).map_err(|error| error.to_string())
-                    }
-                    None => Ok(()),
-                };
-                if let Err(error) = restored {
-                    return Outcome::failure(format!(
-                        "error: could not restore legacy manifest state at {}: {error}",
-                        path.display()
-                    ));
-                }
-            }
             let mut global_warning = None;
             if let Some((nodes, edges)) = postgres_counts {
                 notes.push(format!(
@@ -2223,15 +1841,15 @@ fn command_build_with_validation(
                     )
                 }) {
                     Ok(merged) if merged.skipped => notes.push(format!(
-                        "[graphify global] '{tag}' unchanged since last add - skipped."
+                        "[compass global] '{tag}' unchanged since last add - skipped."
                     )),
                     Ok(merged) => notes.push(format!(
-                        "[graphify global] '{tag}' merged into global graph (+{} nodes, -{} pruned).",
+                        "[compass global] '{tag}' merged into global graph (+{} nodes, -{} pruned).",
                         merged.nodes_added, merged.nodes_removed
                     )),
                     Err(error) => {
                         global_warning = Some(format!(
-                            "[graphify global] warning: failed to merge into global graph: {error}"
+                            "[compass global] warning: failed to merge into global graph: {error}"
                         ));
                     }
                 }
@@ -2241,22 +1859,6 @@ fn command_build_with_validation(
             } else {
                 "with clustering"
             };
-            if frontend == Frontend::Graphify && !extract {
-                return format_graphify_update(&result, &root, no_cluster);
-            }
-            if frontend == Frontend::Graphify && extract {
-                return format_graphify_extract(
-                    &result,
-                    code_only,
-                    no_cluster,
-                    force,
-                    extract_incremental,
-                    backend.as_deref(),
-                    &notes,
-                    timing.then_some((started.elapsed(), semantic_elapsed)),
-                    global_warning,
-                );
-            }
             let mut output = format!(
                 "Compass indexed {} files ({} extracted, {} cached): {} nodes, {} edges, {} communities {mode}.\nWritten to: {}",
                 result.files_considered,
@@ -2289,16 +1891,6 @@ fn command_build_with_validation(
                 ));
             }
             outcome
-        }
-        Err(error) if frontend == Frontend::Graphify && extract => {
-            graphify_extract_provider_failure(
-                &options,
-                code_only,
-                force,
-                extract_incremental,
-                format!("error: {error}"),
-                1,
-            )
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
@@ -2334,11 +1926,11 @@ fn format_extract_timings(
     let mut lines = stages
         .into_iter()
         .map(|(stage, duration)| {
-            format!("[graphify timing] {stage}: {:.1}s", duration.as_secs_f64())
+            format!("[compass timing] {stage}: {:.1}s", duration.as_secs_f64())
         })
         .collect::<Vec<_>>();
     lines.push(format!(
-        "[graphify timing] total: {:.1}s",
+        "[compass timing] total: {:.1}s",
         elapsed.as_secs_f64()
     ));
     lines.join("\n")
@@ -2407,285 +1999,6 @@ fn no_llm_api_key_message(semantic_count: usize, dedup_llm: bool) -> String {
     )
 }
 
-fn graphify_extract_provider_failure(
-    options: &BuildOptions,
-    code_only: bool,
-    force: bool,
-    incremental: bool,
-    stderr: String,
-    code: u8,
-) -> Outcome {
-    let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let output_root = options
-        .output_root
-        .as_deref()
-        .map(absolute_cli_path)
-        .unwrap_or_else(|| options.root.clone());
-    let output_dir = output_root.join(&output_name);
-    let _result = fs::create_dir_all(&output_dir);
-    let detect_options = DetectOptions {
-        scan_filesystem: options.scan_filesystem,
-        gitignore: options.gitignore,
-        ignore_policy: options.ignore_policy,
-        extra_excludes: options.extra_excludes.clone(),
-        scope: options.scope.clone(),
-        output_name,
-        ..DetectOptions::default()
-    };
-    let detection = detect(&options.root, &detect_options).ok();
-    let mut lines = Vec::new();
-    if force {
-        lines.push(
-            "[graphify extract] --force: full re-scan, semantic cache reads skipped".to_owned(),
-        );
-    }
-    lines.push(format!(
-        "[graphify extract] {} {}",
-        if incremental {
-            "incremental scan of"
-        } else {
-            "scanning"
-        },
-        options.root.display()
-    ));
-    if let Some(detection) = detection {
-        let count = |kind: &str| detection.files.get(kind).map_or(0, std::vec::Vec::len);
-        let code_files = count("code");
-        let docs = count("document");
-        let papers = count("paper");
-        let images = count("image");
-        let semantic = docs + papers + images;
-        if code_only && semantic > 0 {
-            lines.push(format!(
-                "[graphify extract] --code-only: skipping {semantic} non-code file(s) ({docs} docs, {papers} papers, {images} images) — no LLM extraction"
-            ));
-        }
-        if incremental {
-            lines.push(format!(
-                "[graphify extract] {code_files} code, {} docs, {} papers, {} images changed; 0 unchanged; 0 deleted",
-                if code_only { 0 } else { docs },
-                if code_only { 0 } else { papers },
-                if code_only { 0 } else { images }
-            ));
-        } else {
-            lines.push(format!(
-                "[graphify extract] found {code_files} code, {} docs, {} papers, {} images",
-                if code_only { 0 } else { docs },
-                if code_only { 0 } else { papers },
-                if code_only { 0 } else { images }
-            ));
-        }
-        if !detection.unclassified.is_empty() {
-            let mut names = detection
-                .unclassified
-                .iter()
-                .filter_map(|path| Path::new(path).file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-            let more = names.len().saturating_sub(6);
-            names.truncate(6);
-            lines.push(format!(
-                "[graphify extract] {} file(s) not classified (no supported extension or shebang), skipped: {}{}",
-                detection.unclassified.len(),
-                names.join(", "),
-                if more > 0 {
-                    format!(" (+{more} more)")
-                } else {
-                    String::new()
-                }
-            ));
-        }
-    }
-    Outcome {
-        code,
-        stdout: lines.join("\n"),
-        stderr,
-        stdout_trailing_newline: true,
-        stderr_trailing_newline: true,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn format_graphify_extract(
-    result: &BuildResult,
-    code_only: bool,
-    no_cluster: bool,
-    force: bool,
-    incremental: bool,
-    backend: Option<&str>,
-    notes: &[String],
-    timing: Option<(Duration, Duration)>,
-    global_warning: Option<String>,
-) -> Outcome {
-    let count = |kind: &str| {
-        result
-            .detection
-            .files
-            .get(kind)
-            .map_or(0, std::vec::Vec::len)
-    };
-    let live_code = count("code");
-    let live_docs = count("document");
-    let live_papers = count("paper");
-    let live_images = count("image");
-    let live_semantic = live_docs + live_papers + live_images;
-    let changed_code = if incremental {
-        result.files_extracted
-    } else {
-        live_code
-    };
-    let mut lines = Vec::new();
-    if force {
-        lines.push(
-            "[graphify extract] --force: full re-scan, semantic cache reads skipped".to_owned(),
-        );
-    }
-    lines.push(format!(
-        "[graphify extract] {} {}",
-        if incremental {
-            "incremental scan of"
-        } else {
-            "scanning"
-        },
-        result.root.display()
-    ));
-    if code_only && live_semantic > 0 {
-        lines.push(format!(
-            "[graphify extract] --code-only: skipping {live_semantic} non-code file(s) ({live_docs} docs, {live_papers} papers, {live_images} images) — no LLM extraction"
-        ));
-    }
-    if incremental {
-        let unchanged = result
-            .detection
-            .total_files
-            .saturating_sub(result.files_extracted);
-        lines.push(format!(
-            "[graphify extract] {changed_code} code, {} docs, {} papers, {} images changed; {unchanged} unchanged; 0 deleted",
-            if code_only { 0 } else { live_docs.saturating_sub(unchanged) },
-            if code_only { 0 } else { live_papers.saturating_sub(unchanged) },
-            if code_only { 0 } else { live_images.saturating_sub(unchanged) },
-        ));
-    } else {
-        lines.push(format!(
-            "[graphify extract] found {live_code} code, {} docs, {} papers, {} images",
-            if code_only { 0 } else { live_docs },
-            if code_only { 0 } else { live_papers },
-            if code_only { 0 } else { live_images },
-        ));
-    }
-    if !result.detection.unclassified.is_empty() {
-        let mut names = result
-            .detection
-            .unclassified
-            .iter()
-            .filter_map(|path| Path::new(path).file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let more = names.len().saturating_sub(6);
-        names.truncate(6);
-        lines.push(format!(
-            "[graphify extract] {} file(s) not classified (no supported extension or shebang), skipped: {}{}",
-            result.detection.unclassified.len(),
-            names.join(", "),
-            if more > 0 {
-                format!(" (+{more} more)")
-            } else {
-                String::new()
-            }
-        ));
-    }
-    if changed_code > 0 {
-        lines.push(format!(
-            "[graphify extract] AST extraction on {changed_code} code files..."
-        ));
-    }
-
-    let mut chunk_notes = Vec::new();
-    for note in notes {
-        if let Some(cache) = note.strip_prefix("[compass extract] semantic cache: ") {
-            lines.push(format!("[graphify extract] semantic cache: {cache}"));
-        } else if let Some(chunk) = note.strip_prefix("[compass extract] chunk ") {
-            chunk_notes.push(format!("[graphify extract] chunk {chunk}"));
-        } else if let Some(cargo) = note.strip_prefix("[compass extract] Cargo: ") {
-            lines.push("[graphify extract] introspecting Cargo workspace...".to_owned());
-            lines.push(format!("[graphify extract] Cargo: {cargo}"));
-        } else if let Some(postgres) = note.strip_prefix("[compass extract] PostgreSQL: ") {
-            lines.push("[graphify extract] introspecting PostgreSQL schema...".to_owned());
-            lines.push(format!("[graphify extract] PostgreSQL: {postgres}"));
-        } else if note.starts_with("[graphify]") || note.starts_with("[graphify global]") {
-            lines.push(note.clone());
-        }
-    }
-    if !chunk_notes.is_empty() {
-        lines.push(format!(
-            "[graphify extract] semantic extraction on {} files via {}...",
-            chunk_notes.len(),
-            backend.unwrap_or("configured backend")
-        ));
-        lines.extend(chunk_notes);
-    }
-
-    let graph_path = result.output_dir.join("graph.json");
-    if no_cluster {
-        if incremental && !result.outputs_changed {
-            lines.push(
-                "[graphify extract] no incremental changes detected (--no-cluster); outputs left untouched."
-                    .to_owned(),
-            );
-        } else {
-            lines.push(format!(
-                "[graphify extract] wrote {} — {} nodes, {} edges (no clustering)",
-                graph_path.display(),
-                result.nodes,
-                result.edges
-            ));
-        }
-    } else {
-        lines.push(format!(
-            "[graphify extract] wrote {}: {} nodes, {} edges, {} communities",
-            graph_path.display(),
-            result.nodes,
-            result.edges,
-            result.communities
-        ));
-        lines.push(format!(
-            "[graphify extract] wrote {}",
-            result.output_dir.join(".compass_analysis.json").display()
-        ));
-        if incremental {
-            lines.push(format!(
-                "[graphify extract] incremental summary: {} files cached/unchanged, {} re-extracted, 0 deleted",
-                result.files_cached,
-                result.files_extracted
-            ));
-        }
-        lines.push(format!(
-            "[graphify extract] next: run `graphify cluster-only {}` to generate GRAPH_REPORT.md and name communities",
-            result.output_dir.parent().unwrap_or(&result.root).display()
-        ));
-    }
-    let mut outcome = Outcome::success(lines.join("\n"));
-    if let Some(warning) = global_warning {
-        outcome.stderr = warning;
-    }
-    if let Some((elapsed, semantic_elapsed)) = timing {
-        if !outcome.stderr.is_empty() {
-            outcome.stderr.push('\n');
-        }
-        outcome.stderr.push_str(&format_extract_timings(
-            no_cluster,
-            elapsed,
-            semantic_elapsed,
-            &result.timings,
-        ));
-    }
-    outcome
-}
-
 fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
     let launch_root = args
         .iter()
@@ -2707,7 +2020,7 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
             ]
         },
     );
-    let result = command_build_with_validation(frontend, &build_args, false, false);
+    let result = command_build_with_validation(frontend, &build_args, false);
     if result.code != 0 {
         return result;
     }
@@ -2778,7 +2091,7 @@ fn build_semantic_graph(
 
     let mut environment = std::env::vars().collect::<HashMap<_, _>>();
     if let Some(timeout) = api_timeout {
-        environment.insert("GRAPHIFY_API_TIMEOUT".to_owned(), timeout.to_string());
+        environment.insert("COMPASS_API_TIMEOUT".to_owned(), timeout.to_string());
     }
     let mut extraction_options = CorpusExtractionOptions::default();
     if let Some(token_budget) = token_budget {
@@ -2801,16 +2114,16 @@ fn build_semantic_graph(
     } else {
         let global_providers = home_directory()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".graphify")
+            .join(".compass")
             .join("providers.json");
         let local_providers = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".graphify")
+            .join(".compass")
             .join("providers.json");
         let custom = load_custom_providers(
             &global_providers,
             &local_providers,
-            environment_truthy_from(&environment, "GRAPHIFY_ALLOW_LOCAL_PROVIDERS"),
+            environment_truthy_from(&environment, "COMPASS_ALLOW_LOCAL_PROVIDERS"),
         );
         notes.extend(
             custom
@@ -3055,11 +2368,8 @@ fn python_string_repr(value: &str) -> String {
 }
 
 fn extract_parse_failure(frontend: Frontend, error: String) -> Outcome {
-    if frontend == Frontend::Graphify {
-        Outcome::failure_with_code(error, 2)
-    } else {
-        Outcome::failure(error)
-    }
+    let _ = frontend;
+    Outcome::failure(error)
 }
 
 fn environment_truthy(key: &str) -> bool {
@@ -3143,7 +2453,7 @@ fn saved_graph_root() -> Option<PathBuf> {
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
-fn command_export(args: &[String]) -> Outcome {
+fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let Some(format) = args.first().map(String::as_str) else {
         return Outcome::failure(export_help());
     };
@@ -3402,7 +2712,7 @@ fn command_export(args: &[String]) -> Outcome {
         Ok(inputs) => inputs,
         Err(GraphError::NotFound(_)) => {
             return Outcome::failure(format!(
-                "error: graph not found: {}. Run /graphify <path> first.",
+                "error: graph not found: {}. Run /compass <path> first.",
                 graph_path.display()
             ));
         }
@@ -3448,7 +2758,9 @@ fn command_export(args: &[String]) -> Outcome {
                     model.ok_or_else(|| "graph has no renderable community overview".to_owned())
                 })
             };
-            model.and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
+            model
+                .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
+                .map(ExportOutput::text)
         }
         "callflow-html" => export_callflow(
             &inputs,
@@ -3470,9 +2782,8 @@ fn command_export(args: &[String]) -> Outcome {
             diagram_scale,
             max_diagram_nodes,
             max_diagram_edges,
-        ),
-        "obsidian" => export_obsidian_cli(&inputs, &obsidian_dir),
-        "wiki" => export_wiki_cli(&inputs, output_dir),
+        )
+        .map(ExportOutput::text),
         "svg" => write_svg(
             &inputs.document,
             &inputs.communities,
@@ -3483,6 +2794,7 @@ fn command_export(args: &[String]) -> Outcome {
             },
         )
         .map(|()| "graph.svg written - embeds in Obsidian, Notion, GitHub READMEs".to_owned())
+        .map(ExportOutput::text)
         .map_err(|error| error.to_string()),
         "graphml" => write_graphml(
             &inputs.document,
@@ -3490,6 +2802,7 @@ fn command_export(args: &[String]) -> Outcome {
             output_dir.join("graph.graphml"),
         )
         .map(|()| "graph.graphml written - open in Gephi, yEd, or any GraphML tool".to_owned())
+        .map(ExportOutput::text)
         .map_err(|error| error.to_string()),
         "neo4j" => export_neo4j(
             &inputs,
@@ -3497,18 +2810,28 @@ fn command_export(args: &[String]) -> Outcome {
             push_uri.as_deref(),
             &push_user,
             push_password.as_deref(),
-        ),
+        )
+        .map(ExportOutput::text),
         "falkordb" => export_falkordb(
             &inputs,
             output_dir,
             push_uri.as_deref(),
             &push_user,
             push_password.as_deref(),
-        ),
+        )
+        .map(ExportOutput::text),
+        "obsidian" => export_obsidian_cli(&inputs, &obsidian_dir).map(ExportOutput::text),
+        "wiki" => export_wiki_cli(&inputs, output_dir).map(ExportOutput::text),
         _ => Err("unsupported export format".to_owned()),
     };
     match result {
-        Ok(output) => Outcome::success(output),
+        Ok(output) => {
+            let outcome = Outcome::success(output.message);
+            match (frontend, output.html_output) {
+                (Frontend::Compass, Some(path)) => outcome.with_html_output(path),
+                _ => outcome,
+            }
+        }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
 }
@@ -3560,6 +2883,27 @@ fn export_callflow_json(
     serde_json::to_string(&model).map_err(|error| error.to_string())
 }
 
+struct ExportOutput {
+    message: String,
+    html_output: Option<PathBuf>,
+}
+
+impl ExportOutput {
+    fn text(message: String) -> Self {
+        Self {
+            message,
+            html_output: None,
+        }
+    }
+
+    fn html(message: String, path: PathBuf) -> Self {
+        Self {
+            message,
+            html_output: Some(path),
+        }
+    }
+}
+
 fn export_neo4j(
     inputs: &ExportInputs,
     output_dir: &Path,
@@ -3605,7 +2949,7 @@ fn export_falkordb(
             Some(user),
             password,
             Some(&inputs.communities),
-            "graphify",
+            "compass",
         )
         .map_err(|error| error.to_string())?;
         Ok(format!(
@@ -3616,7 +2960,7 @@ fn export_falkordb(
         let path = output_dir.join("cypher.txt");
         write_cypher(&inputs.document, &path).map_err(|error| error.to_string())?;
         Ok(format!(
-            "cypher.txt written ({}) - statements are OpenCypher. FalkorDB's GRAPH.QUERY runs one statement at a time (no bulk script import), so load a graph with: graphify export falkordb --push falkordb://localhost:6379",
+            "cypher.txt written ({}) - statements are OpenCypher. FalkorDB's GRAPH.QUERY runs one statement at a time (no bulk script import), so load a graph with: compass export falkordb --push falkordb://localhost:6379",
             path.display()
         ))
     }
@@ -3627,13 +2971,15 @@ fn export_html(
     output_dir: &Path,
     no_viz: bool,
     node_limit: isize,
-) -> Result<String, String> {
+) -> Result<ExportOutput, String> {
     let path = output_dir.join("graph.html");
     if no_viz {
         if path.exists() {
             fs::remove_file(&path).map_err(|error| error.to_string())?;
         }
-        return Ok("--no-viz: skipped graph.html".to_owned());
+        return Ok(ExportOutput::text(
+            "--no-viz: skipped graph.html".to_owned(),
+        ));
     }
     let result = write_html(
         &inputs.document,
@@ -3647,9 +2993,13 @@ fn export_html(
         },
     )
     .map_err(|error| error.to_string())?;
-    Ok(result.map_or_else(String::new, |_| {
-        "graph.html written - open in any browser, no server needed".to_owned()
-    }))
+    Ok(match result {
+        Some(_) => ExportOutput::html(
+            "graph.html written - open in any browser, no server needed".to_owned(),
+            path,
+        ),
+        None => ExportOutput::text(String::new()),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3663,7 +3013,7 @@ fn export_callflow(
     diagram_scale: f64,
     max_diagram_nodes: usize,
     max_diagram_edges: usize,
-) -> Result<String, String> {
+) -> Result<ExportOutput, String> {
     let sections = sections_path.map(load_sections).transpose()?;
     let project = inputs
         .document
@@ -3704,17 +3054,20 @@ fn export_callflow(
         },
     )
     .map_err(|error| error.to_string())?;
-    Ok(format!(
-        "Loaded: {} nodes, {} edges, {} sections\nGraph: {}\nCall-flow HTML written: {}\n  Sections: {}  |  Mermaid diagrams: {}  |  Call tables: {}\n  Diagrams use Mermaid init directives plus interactive zoom/pan controls.\ncallflow HTML written - open in any browser: {}",
-        inputs.document.nodes.len(),
-        inputs.document.links.len(),
-        result.loaded_sections,
-        graph_path.display(),
-        path.display(),
-        result.rendered_sections,
-        result.mermaid_diagrams,
-        result.call_tables,
-        path.display(),
+    Ok(ExportOutput::html(
+        format!(
+            "Loaded: {} nodes, {} edges, {} sections\nGraph: {}\nCall-flow HTML written: {}\n  Sections: {}  |  Mermaid diagrams: {}  |  Call tables: {}\n  Diagrams use Mermaid init directives plus interactive zoom/pan controls.\ncallflow HTML written - open in any browser: {}",
+            inputs.document.nodes.len(),
+            inputs.document.links.len(),
+            result.loaded_sections,
+            graph_path.display(),
+            path.display(),
+            result.rendered_sections,
+            result.mermaid_diagrams,
+            result.call_tables,
+            path.display(),
+        ),
+        path,
     ))
 }
 
@@ -3752,7 +3105,7 @@ fn export_obsidian_cli(inputs: &ExportInputs, output_dir: &Path) -> Result<Strin
 fn export_wiki_cli(inputs: &ExportInputs, output_dir: &Path) -> Result<String, String> {
     if inputs.communities.is_empty() {
         return Err(
-            ".compass_analysis.json is missing or empty — refusing to export wiki to prevent data loss.\nRun `graphify extract .` (or `graphify cluster-only .`) to regenerate community data first."
+            ".compass_analysis.json is missing or empty — refusing to export wiki to prevent data loss.\nRun `compass extract .` (or `compass cluster-only .`) to regenerate community data first."
                 .to_owned(),
         );
     }
@@ -3860,7 +3213,7 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: graphify export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  json      [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+    "Usage: compass export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  json      [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
 }
 
 fn export_json_help() -> String {
@@ -3868,7 +3221,7 @@ fn export_json_help() -> String {
 }
 
 fn callflow_help() -> String {
-    "Usage: graphify export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default compass-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
+    "Usage: compass export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default compass-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -4004,7 +3357,7 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
 fn command_affected(args: &[String]) -> Outcome {
     let Some(query) = args.first() else {
         return Outcome::failure(
-            "Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]"
+            "Usage: compass affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]"
                 .to_owned(),
         );
     };
@@ -4173,10 +3526,8 @@ fn explain_help(frontend: Frontend) -> String {
 }
 
 fn frontend_name(frontend: Frontend) -> &'static str {
-    match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    }
+    let _ = frontend;
+    "compass"
 }
 
 fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
@@ -4224,13 +3575,10 @@ fn format_program_analysis(result: &BuildResult) -> String {
     )
 }
 
-fn graphify_help() -> String {
-    include_str!("../assets/graphify-help.txt").to_owned()
-}
-
 #[cfg(test)]
 mod mcp_option_tests {
     use super::*;
+    use std::io::Cursor;
 
     fn sample_build_result(outputs_changed: bool, html_written: bool) -> BuildResult {
         BuildResult {
@@ -4246,7 +3594,7 @@ mod mcp_option_tests {
                 unclassified: Vec::new(),
                 walk_errors: Vec::new(),
                 ignored: Vec::new(),
-                graphifyignore_patterns: 0,
+                compassignore_patterns: 0,
                 scan_root: "project".to_owned(),
                 google_workspace_shortcuts: Vec::new(),
             },
@@ -4273,6 +3621,73 @@ mod mcp_option_tests {
     }
 
     #[test]
+    fn html_open_confirmation_requires_explicit_yes() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let html = directory.path().join("report.html");
+        fs::write(&html, "<!doctype html>")?;
+        let outcome = Outcome::success("report written".to_owned()).with_html_output(html.clone());
+        let mut input = Cursor::new(b"yes\n");
+        let mut prompt = Vec::new();
+        let mut opened = Vec::new();
+
+        assert!(prompt_to_open_html_with(
+            &outcome,
+            &mut input,
+            &mut prompt,
+            true,
+            true,
+            |path| {
+                opened.push(path.to_path_buf());
+                Ok(())
+            },
+        )?);
+        assert_eq!(opened, [absolutize(html)]);
+        assert!(String::from_utf8(prompt)?.contains("Open "));
+        Ok(())
+    }
+
+    #[test]
+    fn html_open_confirmation_is_safe_for_default_and_noninteractive_runs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let html = directory.path().join("report.html");
+        fs::write(&html, "<!doctype html>")?;
+        let outcome = Outcome::success("report written".to_owned()).with_html_output(html);
+        let mut opened = false;
+        let mut input = Cursor::new(b"\n");
+        let mut prompt = Vec::new();
+        assert!(!prompt_to_open_html_with(
+            &outcome,
+            &mut input,
+            &mut prompt,
+            true,
+            true,
+            |_| {
+                opened = true;
+                Ok(())
+            },
+        )?);
+        assert!(!opened);
+
+        let mut input = Cursor::new(b"yes\n");
+        let mut prompt = Vec::new();
+        assert!(!prompt_to_open_html_with(
+            &outcome,
+            &mut input,
+            &mut prompt,
+            false,
+            false,
+            |_| {
+                opened = true;
+                Ok(())
+            },
+        )?);
+        assert!(!opened);
+        assert!(prompt.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn argparse_style_equals_options_are_supported() -> Result<(), String> {
         let args = [
             "--graph=custom.json",
@@ -4288,7 +3703,7 @@ mod mcp_option_tests {
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-        let options = parse_mcp_options(McpFrontend::Graphify, &args)?
+        let options = parse_mcp_options(&args)?
             .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
         assert_eq!(options.graph_path, PathBuf::from("custom.json"));
         assert_eq!(options.transport, "http");
@@ -4308,7 +3723,7 @@ mod mcp_option_tests {
             .into_iter()
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        let options = parse_mcp_options(McpFrontend::Graphify, &args)?
+        let options = parse_mcp_options(&args)?
             .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
         assert_eq!(options.graph_path, PathBuf::from("flag.json"));
         Ok(())
@@ -4323,19 +3738,22 @@ mod mcp_option_tests {
     }
 
     #[test]
-    fn graphify_version_reports_the_compatibility_baseline() {
-        let outcome = run(Frontend::Graphify, [OsString::from("--version")]);
+    fn compass_version_reports_the_package_version() {
+        let outcome = run(Frontend::Compass, [OsString::from("--version")]);
         assert_eq!(outcome.code, 0);
-        assert_eq!(outcome.stdout, "graphify 0.9.20");
+        assert_eq!(
+            outcome.stdout,
+            format!("compass {}", env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]
-    fn graphify_unknown_command_matches_the_legacy_diagnostic() {
-        let outcome = run(Frontend::Graphify, [OsString::from("not-a-command")]);
+    fn compass_unknown_command_matches_the_legacy_diagnostic() {
+        let outcome = run(Frontend::Compass, [OsString::from("not-a-command")]);
         assert_eq!(outcome.code, 1);
         assert_eq!(
             outcome.stderr,
-            "error: unknown command 'not-a-command'\nRun 'graphify --help' for usage."
+            "error: unknown command 'not-a-command'\nRun 'compass --help' for usage."
         );
     }
 
@@ -4344,7 +3762,6 @@ mod mcp_option_tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::Starting {
                 root: PathBuf::from("project"),
                 includes: 1,
@@ -4355,7 +3772,6 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::Backend {
                 backend: WatchBackend::Native,
                 fallback_error: None,
@@ -4364,14 +3780,8 @@ mod mcp_option_tests {
             &mut stdout,
             &mut stderr,
         );
+        write_watch_status(WatchStatus::Synchronizing, &mut stdout, &mut stderr);
         write_watch_status(
-            Frontend::Compass,
-            WatchStatus::Synchronizing,
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Compass,
             WatchStatus::Watching {
                 root: PathBuf::from("project"),
                 debounce: Duration::from_millis(1500),
@@ -4380,7 +3790,6 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::Settling {
                 paths: 2,
                 quiet_window: Duration::from_millis(150),
@@ -4390,7 +3799,6 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::Building {
                 reason: WatchBuildReason::Changes,
             },
@@ -4398,7 +3806,6 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::Batch {
                 paths: vec![PathBuf::from("src/lib.rs"), PathBuf::from("notes.md")],
                 deterministic: 1,
@@ -4408,7 +3815,6 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::UpToDate {
                 reason: WatchBuildReason::Reconciliation,
             },
@@ -4416,13 +3822,11 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::FollowUpQueued { paths: 1 },
             &mut stdout,
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::RetryScheduled {
                 delay: Duration::from_secs(2),
                 error: "temporarily blocked".to_owned(),
@@ -4431,20 +3835,13 @@ mod mcp_option_tests {
             &mut stdout,
             &mut stderr,
         );
+        write_watch_status(WatchStatus::Finishing, &mut stdout, &mut stderr);
         write_watch_status(
-            Frontend::Compass,
-            WatchStatus::Finishing,
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Compass,
             WatchStatus::Rebuilt(Box::new(sample_build_result(true, true))),
             &mut stdout,
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::SemanticUpdateRequired {
                 flag: PathBuf::from("project/compass-out/needs_update"),
             },
@@ -4452,23 +3849,16 @@ mod mcp_option_tests {
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::EventError("event failed".to_owned()),
             &mut stdout,
             &mut stderr,
         );
         write_watch_status(
-            Frontend::Compass,
             WatchStatus::RebuildError("build failed".to_owned()),
             &mut stdout,
             &mut stderr,
         );
-        write_watch_status(
-            Frontend::Compass,
-            WatchStatus::Stopped,
-            &mut stdout,
-            &mut stderr,
-        );
+        write_watch_status(WatchStatus::Stopped, &mut stdout, &mut stderr);
 
         let stdout = String::from_utf8(stdout)?;
         let stderr = String::from_utf8(stderr)?;
@@ -4500,190 +3890,6 @@ mod mcp_option_tests {
         let logged = String::from_utf8(logged)?;
         assert!(logged.contains("Z] [compass watch] Synchronizing current graph"));
         Ok(())
-    }
-
-    #[test]
-    fn watch_statuses_preserve_graphify_output_contract() -> Result<(), Box<dyn std::error::Error>>
-    {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::Watching {
-                root: PathBuf::from("project"),
-                debounce: Duration::from_millis(1500),
-            },
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::Batch {
-                paths: vec![PathBuf::from("src/lib.rs")],
-                deterministic: 1,
-                semantic: 0,
-            },
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::Rebuilt(Box::new(sample_build_result(true, true))),
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::Rebuilt(Box::new(sample_build_result(true, false))),
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::Rebuilt(Box::new(sample_build_result(false, false))),
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::SemanticUpdateRequired {
-                flag: PathBuf::from("project/compass-out/needs_update"),
-            },
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::EventError("event failed".to_owned()),
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::RebuildError("build failed".to_owned()),
-            &mut stdout,
-            &mut stderr,
-        );
-        write_watch_status(
-            Frontend::Graphify,
-            WatchStatus::Stopped,
-            &mut stdout,
-            &mut stderr,
-        );
-
-        let stdout = String::from_utf8(stdout)?;
-        let stderr = String::from_utf8(stderr)?;
-        assert!(stdout.contains("[graphify watch] Watching project"));
-        assert!(stdout.contains("Debounce: 1.5s"));
-        assert!(stdout.contains("1 file(s) changed"));
-        assert!(stdout.contains("graph.json, graph.html and GRAPH_REPORT.md updated"));
-        assert!(stdout.contains("graph.json and GRAPH_REPORT.md updated"));
-        assert!(stdout.contains("No code-graph topology changes detected"));
-        assert!(stdout.contains("New or changed files detected in project"));
-        assert!(stdout.contains("Filesystem event error: event failed"));
-        assert!(stdout.contains("Rebuild failed: build failed"));
-        assert!(stdout.contains("[graphify watch] Stopped."));
-        assert!(stderr.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn graphify_update_and_extract_formatters_cover_warnings_notes_and_timing() {
-        let mut result = sample_build_result(true, false);
-        result.nodes = 6_000;
-        result.empty_files = (0..7)
-            .map(|index| PathBuf::from(format!("empty-{index}.rs")))
-            .collect();
-        let updated = format_graphify_update(&result, Path::new("project"), false);
-        assert!(updated.stdout.contains("7 source file(s)"));
-        assert!(updated.stdout.contains("(+2 more)"));
-        assert!(updated.stdout.contains("too large for HTML viz"));
-        assert!(updated.stdout.contains("graph.json and GRAPH_REPORT.md"));
-        assert!(
-            format_graphify_update(&result, Path::new("."), true)
-                .stdout
-                .contains("no clustering")
-        );
-        result.outputs_changed = false;
-        assert!(
-            format_graphify_update(&result, Path::new("project"), false)
-                .stdout
-                .contains("outputs left untouched")
-        );
-
-        result.outputs_changed = true;
-        result.files_extracted = 2;
-        result.files_cached = 3;
-        result.detection.total_files = 8;
-        result.detection.files = std::collections::BTreeMap::from([
-            (
-                "code".to_owned(),
-                vec!["a.rs".to_owned(), "b.rs".to_owned()],
-            ),
-            ("document".to_owned(), vec!["a.md".to_owned()]),
-            ("paper".to_owned(), vec!["a.pdf".to_owned()]),
-            ("image".to_owned(), vec!["a.png".to_owned()]),
-        ]);
-        result.detection.unclassified = (0..8).map(|index| format!("raw-{index}.bin")).collect();
-        result.timings = BuildTimings {
-            detect: Duration::from_millis(100),
-            ast_extract: Duration::from_millis(200),
-            build: Duration::from_millis(300),
-            cluster: Duration::from_millis(400),
-            analyze: Duration::from_millis(500),
-            export: Duration::from_millis(600),
-            write: Duration::from_millis(700),
-        };
-        let notes = [
-            "[compass extract] semantic cache: 1 hit".to_owned(),
-            "[compass extract] chunk 1/1".to_owned(),
-            "[compass extract] Cargo: 2 nodes".to_owned(),
-            "[compass extract] PostgreSQL: 3 nodes".to_owned(),
-            "[graphify global] retained".to_owned(),
-            "ignored".to_owned(),
-        ];
-        let extracted = format_graphify_extract(
-            &result,
-            true,
-            false,
-            true,
-            true,
-            None,
-            &notes,
-            Some((Duration::from_secs(3), Duration::from_secs(1))),
-            Some("global warning".to_owned()),
-        );
-        for expected in [
-            "--force",
-            "--code-only",
-            "(+2 more)",
-            "semantic cache",
-            "configured backend",
-            "introspecting Cargo",
-            "introspecting PostgreSQL",
-            "incremental summary",
-        ] {
-            assert!(extracted.stdout.contains(expected), "missing {expected}");
-        }
-        assert!(
-            extracted
-                .stderr
-                .contains("global warning\n[graphify timing] detect")
-        );
-        result.outputs_changed = false;
-        let no_cluster = format_graphify_extract(
-            &result,
-            false,
-            true,
-            false,
-            true,
-            Some("gemini"),
-            &[],
-            Some((Duration::from_secs(1), Duration::ZERO)),
-            None,
-        );
-        assert!(no_cluster.stdout.contains("outputs left untouched"));
-        assert!(no_cluster.stderr.contains("[graphify timing] write"));
     }
 
     #[test]
@@ -4735,8 +3941,8 @@ mod mcp_option_tests {
     }
 
     #[test]
-    fn watch_tree_cluster_and_provider_failure_parsers_cover_value_forms()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn watch_tree_and_cluster_parsers_cover_value_forms() -> Result<(), Box<dyn std::error::Error>>
+    {
         let directory = tempfile::tempdir()?;
         let root = directory.path().to_string_lossy().into_owned();
         let args = vec![
@@ -4749,19 +3955,16 @@ mod mcp_option_tests {
             "target".to_owned(),
             "--poll".to_owned(),
         ];
-        let watch = parse_watch_options(Frontend::Compass, &args)?.ok_or("unexpected help")?;
+        let watch = parse_watch_options(&args)?.ok_or("unexpected help")?;
         assert_eq!(watch.debounce, Duration::from_millis(250));
         assert_eq!(watch.build.output_root, Some(PathBuf::from("artifacts")));
         assert_eq!(watch.build.extra_excludes, ["target"]);
         assert!(watch.force_polling);
         assert!(watch.adaptive);
 
-        let defaults = parse_watch_options(Frontend::Compass, &[])?.ok_or("unexpected help")?;
+        let defaults = parse_watch_options(&[])?.ok_or("unexpected help")?;
         assert_eq!(defaults.debounce, Duration::from_millis(150));
         assert!(defaults.adaptive);
-        let graphify = parse_watch_options(Frontend::Graphify, &[])?.ok_or("unexpected help")?;
-        assert_eq!(graphify.debounce, Duration::from_secs(3));
-        assert!(!graphify.adaptive);
 
         assert_eq!(
             command_cluster_only(Frontend::Compass, &["--help".to_owned()]).code,
@@ -4792,23 +3995,6 @@ mod mcp_option_tests {
             1
         );
 
-        fs::write(directory.path().join("main.rs"), "fn main() {}")?;
-        fs::write(directory.path().join("notes.md"), "# Notes")?;
-        fs::write(directory.path().join("unknown.blob"), "raw")?;
-        let mut options = BuildOptions::new(directory.path().to_path_buf());
-        options.output_root = Some(directory.path().to_path_buf());
-        let failed = graphify_extract_provider_failure(
-            &options,
-            true,
-            true,
-            true,
-            "provider unavailable".to_owned(),
-            2,
-        );
-        assert_eq!(failed.code, 2);
-        assert!(failed.stdout.contains("--force"));
-        assert!(failed.stdout.contains("--code-only"));
-        assert!(failed.stderr.contains("provider unavailable"));
         Ok(())
     }
 

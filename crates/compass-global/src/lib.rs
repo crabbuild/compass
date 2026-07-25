@@ -1,4 +1,4 @@
-//! Persistent cross-project graph management for Compass and Graphify.
+//! Persistent cross-project graph management for Compass and Compass.
 
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -57,7 +57,7 @@ pub struct GlobalPaths {
 impl GlobalPaths {
     pub fn discover() -> Result<Self, GlobalError> {
         let home = home_directory().ok_or(GlobalError::MissingHome)?;
-        let directory = home.join(".graphify");
+        let directory = home.join(".compass");
         Ok(Self {
             graph: directory.join("global-graph.json"),
             manifest: directory.join("global-manifest.json"),
@@ -107,7 +107,7 @@ pub fn global_add(
         && existing_path != absolute_source.to_string_lossy()
     {
         loaded_manifest.warnings.push(format!(
-            "[graphify global] warning: repo tag '{repo_tag}' previously pointed to {}, now updating to {}. Use --as <tag> to give it a different name.",
+            "[compass global] warning: repo tag '{repo_tag}' previously pointed to {}, now updating to {}. Use --as <tag> to give it a different name.",
             python_repr(existing_path),
             python_repr(&absolute_source.to_string_lossy())
         ));
@@ -340,7 +340,6 @@ fn empty_global_graph() -> GraphDocument {
         nodes: Vec::new(),
         links: Vec::new(),
         extras: Default::default(),
-        used_legacy_edges_key: false,
     }
 }
 
@@ -369,7 +368,7 @@ fn check_graph_size(path: &Path) -> Result<(), GlobalError> {
 }
 
 fn effective_graph_cap() -> u64 {
-    let raw = env::var("GRAPHIFY_MAX_GRAPH_BYTES").unwrap_or_default();
+    let raw = env::var("COMPASS_MAX_GRAPH_BYTES").unwrap_or_default();
     let text = raw.trim().to_ascii_uppercase();
     if text.is_empty() {
         return MAX_GRAPH_BYTES;
@@ -480,12 +479,12 @@ fn load_manifest(paths: &GlobalPaths) -> ManifestLoad {
             .with_extension(format!("json.corrupt.{timestamp}"));
         let warning = match fs::rename(&paths.manifest, &backup) {
             Ok(()) => format!(
-                "[graphify global] manifest at {} failed to parse; moved to {} and starting fresh. Restore from the backup if this was unexpected.",
+                "[compass global] manifest at {} failed to parse; moved to {} and starting fresh. Restore from the backup if this was unexpected.",
                 paths.manifest.display(),
                 backup.display()
             ),
             Err(error) => format!(
-                "[graphify global] manifest at {} failed to parse and could not be backed up ({error}). Starting fresh.",
+                "[compass global] manifest at {} failed to parse and could not be backed up ({error}). Starting fresh.",
                 paths.manifest.display()
             ),
         };

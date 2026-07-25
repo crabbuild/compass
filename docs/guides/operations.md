@@ -138,7 +138,7 @@ The hook integration:
 - can enqueue exact history commits where history is enabled;
 - writes logs to its configured/default cache path.
 
-Use `GRAPHIFY_SKIP_HOOK=1` only as the documented compatibility control for a
+Use `COMPASS_SKIP_HOOK=1` only as the documented control for a
 specific operation. Do not permanently mask failing hooks without fixing or
 uninstalling them.
 

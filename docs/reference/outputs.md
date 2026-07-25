@@ -244,13 +244,41 @@ compass diff OLD NEW --format json
 Uses schema `compass.semantic_diff.report/1`. The report contains ranked
 semantic findings, affected callers/modules, source and graph evidence,
 verification state, completeness, and a collapsed-finding summary. Routine
-symbol churn is collapsed unless `--all` is supplied. Normal diff requires
-compatible build profiles.
+symbol churn is collapsed unless `--all` is supplied. Default text output
+shows 20 findings per section and reports every hidden count; `--limit N`
+changes that budget, while JSON and `--all` are exhaustive. Normal diff
+requires compatible build profiles.
 
 `verification.state` is `covered`, `gap`, `partial`, or `unknown` for the
 static MVP (runtime adapters may also report `stale`, `failing`, or `not_run`).
 Compass reports a test gap only when the available evidence can establish one;
 missing or incomplete evidence is not presented as proof of a gap.
+
+## Diff HTML
+
+```bash
+compass diff OLD NEW --format html --output semantic-diff.html
+```
+
+Writes one self-contained HTML document with no runtime server or external
+assets. It includes the complete `compass.semantic_diff.report/1` JSON payload,
+actionable metrics, feature groups, finding search and filters, expandable
+evidence, affected consumers, verification state, completeness, limitations,
+and collapsed routine-change groups. The Code section uses the pinned
+`@pierre/diffs` 1.2.12 renderer for line numbers, intraline emphasis, hunk
+metadata, line wrapping, and unified/split layouts. Compass embeds the library
+in the document, so the report has no CDN or runtime dependency, and retains
+the exact Git patch as a fallback if script execution is unavailable. The
+Graph section contains a compact changed-subgraph visualization plus
+exhaustive added, removed, and changed node/edge lists. Non-semantic graph
+metadata churn is summarized separately, including location/layout fields and
+edge-identity shifts that preserve multigraph multiplicity. HTML output always
+requires an explicit path; `compass export html` remains the full graph
+renderer and does not accept semantic-diff reports.
+
+After writing any HTML page, an interactive Compass CLI asks before opening it
+in the default browser; Enter or `n` leaves the page closed. Scripts, pipes,
+redirected commands, and CI never prompt or launch a browser.
 
 ## History export
 

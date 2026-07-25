@@ -8,12 +8,12 @@ use compass_history::{CommitId, HistoryConfig, HistoryQueue, JobRequest, Reposit
 
 use crate::{Frontend, Outcome};
 
-const COMMIT_START: &str = "# graphify-hook-start";
-const COMMIT_END: &str = "# graphify-hook-end";
-const MERGE_START: &str = "# graphify-merge-hook-start";
-const MERGE_END: &str = "# graphify-merge-hook-end";
-const CHECKOUT_START: &str = "# graphify-checkout-hook-start";
-const CHECKOUT_END: &str = "# graphify-checkout-hook-end";
+const COMMIT_START: &str = "# compass-hook-start";
+const COMMIT_END: &str = "# compass-hook-end";
+const MERGE_START: &str = "# compass-merge-hook-start";
+const MERGE_END: &str = "# compass-merge-hook-end";
+const CHECKOUT_START: &str = "# compass-checkout-hook-start";
+const CHECKOUT_END: &str = "# compass-checkout-hook-end";
 const MAX_HOOK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ATTRIBUTES_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -88,9 +88,9 @@ pub(super) fn command_hook_spawn(_frontend: Frontend, args: &[String]) -> Outcom
 }
 
 fn background_log() -> Option<fs::File> {
-    let log = std::env::var_os("GRAPHIFY_REBUILD_LOG")
+    let log = std::env::var_os("COMPASS_REBUILD_LOG")
         .map(PathBuf::from)
-        .unwrap_or_else(|| cache_home().join("graphify-rebuild.log"));
+        .unwrap_or_else(|| cache_home().join("compass-rebuild.log"));
     if let Some(parent) = log.parent() {
         let _created = fs::create_dir_all(parent);
     }
@@ -181,6 +181,7 @@ fn hook_action(frontend: Frontend, action: HookAction) -> Outcome {
             stderr: warning.unwrap_or_default(),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         },
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
@@ -304,7 +305,7 @@ fn hooks_directory(root: &Path) -> Result<(PathBuf, Option<String>), String> {
             Ok((
                 root.join(".git/hooks"),
                 Some(format!(
-                    "[graphify hooks] git could not resolve the hooks path for {}: {detail}",
+                    "[compass hooks] git could not resolve the hooks path for {}: {detail}",
                     root.display()
                 )),
             ))
@@ -359,12 +360,12 @@ fn uninstall_hook(
     let content = read_text_bounded(&path, MAX_HOOK_BYTES)?;
     let Some(start) = content.find(marker) else {
         return Ok(format!(
-            "graphify hook not found in {name} - nothing to remove."
+            "compass hook not found in {name} - nothing to remove."
         ));
     };
     let Some(relative_end) = content[start..].find(marker_end) else {
         return Ok(format!(
-            "graphify hook not found in {name} - nothing to remove."
+            "compass hook not found in {name} - nothing to remove."
         ));
     };
     let mut end = start + relative_end + marker_end.len();
@@ -380,7 +381,7 @@ fn uninstall_hook(
     }
     write_text_atomic(&path, &format!("{remaining}\n")).map_err(|error| error.to_string())?;
     Ok(format!(
-        "graphify removed from {name} at {} (other hook content preserved)",
+        "compass removed from {name} at {} (other hook content preserved)",
         path.display()
     ))
 }
@@ -393,7 +394,7 @@ fn hook_status(path: &Path, marker: &str) -> Result<&'static str, String> {
     Ok(if content.contains(marker) {
         "installed"
     } else {
-        "not installed (hook exists but graphify not found)"
+        "not installed (hook exists but compass not found)"
     })
 }
 
@@ -401,8 +402,8 @@ fn register_merge_driver(frontend: Frontend, root: &Path) -> Result<String, Stri
     let invocation = pinned_invocation(frontend)?;
     let driver = format!("{invocation} merge-driver %O %A %B");
     for (key, value) in [
-        ("merge.graphify.name", "graphify graph.json union merge"),
-        ("merge.graphify.driver", driver.as_str()),
+        ("merge.compass.name", "compass graph.json union merge"),
+        ("merge.compass.driver", driver.as_str()),
     ] {
         let output = Command::new("git")
             .args(["-C", root.to_string_lossy().as_ref(), "config", key, value])
@@ -432,7 +433,7 @@ fn register_merge_driver(frontend: Frontend, root: &Path) -> Result<String, Stri
 }
 
 fn unregister_merge_driver(root: &Path) -> Result<String, String> {
-    for key in ["merge.graphify.name", "merge.graphify.driver"] {
+    for key in ["merge.compass.name", "merge.compass.driver"] {
         let _ = Command::new("git")
             .args([
                 "-C",
@@ -473,7 +474,7 @@ fn merge_driver_status(root: &Path) -> &'static str {
             root.to_string_lossy().as_ref(),
             "config",
             "--get",
-            "merge.graphify.driver",
+            "merge.compass.driver",
         ])
         .output()
         .is_ok_and(|output| output.status.success() && !output.stdout.is_empty());
@@ -497,10 +498,7 @@ fn has_merge_attribute(content: &str) -> bool {
         fields
             .first()
             .is_some_and(|field| field.ends_with("graph.json"))
-            && fields
-                .iter()
-                .skip(1)
-                .any(|field| *field == "merge=graphify")
+            && fields.iter().skip(1).any(|field| *field == "merge=compass")
     })
 }
 
@@ -511,7 +509,7 @@ fn merge_attribute_line() -> String {
     } else {
         output.trim_end_matches('/')
     };
-    format!("{output}/graph.json merge=graphify")
+    format!("{output}/graph.json merge=compass")
 }
 
 fn pinned_invocation(frontend: Frontend) -> Result<String, String> {
@@ -527,13 +525,13 @@ fn shell_quote(value: &str) -> String {
 
 fn commit_script(invocation: &str) -> String {
     format!(
-        "{COMMIT_START}\n# Native Compass graph refresh installed by: compass hook install\n_COMPASS_HISTORY_COMMIT=$(git rev-parse --verify 'HEAD^{{commit}}' 2>/dev/null || true)\n[ -n \"$_COMPASS_HISTORY_COMMIT\" ] && {invocation} hook-spawn . --history-commit \"$_COMPASS_HISTORY_COMMIT\"\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)\n[ -z \"$_CHANGED\" ] && exit 0\n_NON_GRAPH=$(printf '%s\\n' \"$_CHANGED\" | grep -v '^compass-out/' || true)\n[ -z \"$_NON_GRAPH\" ] && exit 0\nexport GRAPHIFY_CHANGED=\"$_CHANGED\"\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[compass hook] launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{COMMIT_END}\n"
+        "{COMMIT_START}\n# Native Compass graph refresh installed by: compass hook install\n_COMPASS_HISTORY_COMMIT=$(git rev-parse --verify 'HEAD^{{commit}}' 2>/dev/null || true)\n[ -n \"$_COMPASS_HISTORY_COMMIT\" ] && {invocation} hook-spawn . --history-commit \"$_COMPASS_HISTORY_COMMIT\"\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{COMPASS_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_COMPASS_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_COMPASS_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_COMPASS_COMMONDIR\" ] && [ \"$_COMPASS_GITDIR\" != \"$_COMPASS_COMMONDIR\" ] && exit 0\n_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)\n[ -z \"$_CHANGED\" ] && exit 0\n_NON_GRAPH=$(printf '%s\\n' \"$_CHANGED\" | grep -v '^compass-out/' || true)\n[ -z \"$_NON_GRAPH\" ] && exit 0\nexport COMPASS_CHANGED=\"$_CHANGED\"\n_COMPASS_LOG=${{COMPASS_REBUILD_LOG:-${{HOME:-.}}/.cache/compass-rebuild.log}}\nexport COMPASS_REBUILD_LOG=\"$_COMPASS_LOG\"\necho \"[compass hook] launching background rebuild (log: $_COMPASS_LOG)\"\n{invocation} hook-spawn .\n{COMMIT_END}\n"
     )
 }
 
 fn checkout_script(invocation: &str) -> String {
     format!(
-        "{CHECKOUT_START}\n# Native Compass graph refresh installed by: graphify hook install\n[ \"$3\" != \"1\" ] && exit 0\n[ ! -d \"${{COMPASS_OUT:-compass-out}}\" ] && exit 0\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{GRAPHIFY_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_GFY_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_GFY_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_GFY_COMMONDIR\" ] && [ \"$_GFY_GITDIR\" != \"$_GFY_COMMONDIR\" ] && exit 0\n_GRAPHIFY_LOG=${{GRAPHIFY_REBUILD_LOG:-${{HOME:-.}}/.cache/graphify-rebuild.log}}\nexport GRAPHIFY_REBUILD_LOG=\"$_GRAPHIFY_LOG\"\necho \"[graphify] Branch switched - launching background rebuild (log: $_GRAPHIFY_LOG)\"\n{invocation} hook-spawn .\n{CHECKOUT_END}\n"
+        "{CHECKOUT_START}\n# Native Compass graph refresh installed by: compass hook install\n[ \"$3\" != \"1\" ] && exit 0\n[ ! -d \"${{COMPASS_OUT:-compass-out}}\" ] && exit 0\nGIT_DIR=${{GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}}\n[ -d \"$GIT_DIR/rebase-merge\" ] && exit 0\n[ -d \"$GIT_DIR/rebase-apply\" ] && exit 0\n[ -f \"$GIT_DIR/MERGE_HEAD\" ] && exit 0\n[ -f \"$GIT_DIR/CHERRY_PICK_HEAD\" ] && exit 0\n[ \"${{COMPASS_SKIP_HOOK:-0}}\" = \"1\" ] && exit 0\n_COMPASS_GITDIR=$(cd \"$(git rev-parse --git-dir 2>/dev/null)\" 2>/dev/null && pwd)\n_COMPASS_COMMONDIR=$(cd \"$(git rev-parse --git-common-dir 2>/dev/null)\" 2>/dev/null && pwd)\n[ -n \"$_COMPASS_COMMONDIR\" ] && [ \"$_COMPASS_GITDIR\" != \"$_COMPASS_COMMONDIR\" ] && exit 0\n_COMPASS_LOG=${{COMPASS_REBUILD_LOG:-${{HOME:-.}}/.cache/compass-rebuild.log}}\nexport COMPASS_REBUILD_LOG=\"$_COMPASS_LOG\"\necho \"[compass] Branch switched - launching background rebuild (log: $_COMPASS_LOG)\"\n{invocation} hook-spawn .\n{CHECKOUT_END}\n"
     )
 }
 
@@ -621,12 +619,8 @@ fn make_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn hook_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass hook [install|uninstall|status]",
-        Frontend::Graphify => "Usage: graphify hook [install|uninstall|status]",
-    }
-    .to_owned()
+pub(super) fn hook_help(_frontend: Frontend) -> String {
+    "Usage: compass hook [install|uninstall|status]".to_owned()
 }
 
 #[cfg(test)]

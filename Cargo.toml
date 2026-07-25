@@ -17,7 +17,6 @@ members = [
     "crates/compass-mcp",
     "crates/compass-model",
     "crates/compass-output",
-    "crates/compass-parity",
     "crates/compass-postgres",
     "crates/compass-prs",
     "crates/compass-program",
@@ -35,7 +34,7 @@ resolver = "3"
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"

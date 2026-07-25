@@ -97,8 +97,8 @@ fn reflection_loads_memory_graph_context_writes_overlay_and_tracks_freshness()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
-    let memory_dir = root.join("graphify-out/memory");
-    let output_dir = root.join("graphify-out");
+    let memory_dir = root.join("compass-out/memory");
+    let output_dir = root.join("compass-out");
     fs::create_dir_all(&memory_dir)?;
     fs::write(root.join("source.rs"), "pub fn alpha() {}\n")?;
     let graph = output_dir.join("graph.json");
@@ -107,15 +107,15 @@ fn reflection_loads_memory_graph_context_writes_overlay_and_tracks_freshness()
         r#"{"directed":true,"multigraph":false,"graph":{},"nodes":[{"id":"node_a","label":"Alpha","source_file":"source.rs"},{"id":"node_b","label":"Duplicate"},{"id":"node_c","label":"Duplicate"}],"links":[]}"#,
     )?;
     fs::write(
-        output_dir.join(".graphify_root"),
+        output_dir.join(".compass_root"),
         root.to_string_lossy().as_bytes(),
     )?;
-    let analysis = output_dir.join(".graphify_analysis.json");
+    let analysis = output_dir.join(".compass_analysis.json");
     fs::write(
         &analysis,
         r#"{"communities":{"0":["node_a"],"1":["node_b"],"2":[]}}"#,
     )?;
-    let labels = output_dir.join(".graphify_labels.json");
+    let labels = output_dir.join(".compass_labels.json");
     fs::write(
         &labels,
         r#"{"0":"Core","1":true,"2":7,"3":{"name":"ignored"}}"#,

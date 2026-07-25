@@ -15,14 +15,14 @@ pub fn diagnose_graph_file(
     enforce_graph_size_cap(path)?;
     let bytes = fs::read(path).map_err(|source| {
         CoreError::DiagnosticFile(format!(
-            "Cannot parse {}: {}. The file may be corrupted — re-run 'graphify extract'.",
+            "Cannot parse {}: {}. The file may be corrupted — re-run 'compass extract'.",
             path.display(),
             python_io_error(path, &source)
         ))
     })?;
     let input: Value = serde_json::from_slice(&bytes).map_err(|source| {
         CoreError::DiagnosticFile(format!(
-            "Cannot parse {}: {}. The file may be corrupted — re-run 'graphify extract'.",
+            "Cannot parse {}: {}. The file may be corrupted — re-run 'compass extract'.",
             path.display(),
             python_json_error(&bytes, &source)
         ))
@@ -133,7 +133,7 @@ fn enforce_graph_size_cap(path: &Path) -> Result<(), CoreError> {
         return Ok(());
     }
     Err(CoreError::DiagnosticFile(format!(
-        "graph file {} is {} bytes, exceeds {}-byte cap\n(set GRAPHIFY_MAX_GRAPH_BYTES=<bytes> or GRAPHIFY_MAX_GRAPH_BYTES=<N>GB to raise the limit)",
+        "graph file {} is {} bytes, exceeds {}-byte cap\n(set COMPASS_MAX_GRAPH_BYTES=<bytes> or COMPASS_MAX_GRAPH_BYTES=<N>GB to raise the limit)",
         path.display(),
         grouped(u128::from(size)),
         grouped(cap)
@@ -142,7 +142,7 @@ fn enforce_graph_size_cap(path: &Path) -> Result<(), CoreError> {
 
 fn graph_size_cap() -> u128 {
     const DEFAULT: u128 = 512 * 1024 * 1024;
-    let Ok(raw) = std::env::var("GRAPHIFY_MAX_GRAPH_BYTES") else {
+    let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
         return DEFAULT;
     };
     let upper = raw.trim().to_uppercase();
@@ -239,7 +239,7 @@ pub fn format_diagnostic_json(summary: &Value) -> Value {
 pub fn format_diagnostic_report(s: &Value) -> String {
     let get = |k: &str| s.get(k).map(text).unwrap_or_default();
     let mut lines = vec![
-        "[graphify] MultiDiGraph edge-collapse diagnostic".to_owned(),
+        "[compass] MultiDiGraph edge-collapse diagnostic".to_owned(),
         format!("input: {}", get("input_path")),
         "input_stage: provided JSON (normal graph.json is post-build)".to_owned(),
         format!("effective_directed: {}", get("effective_directed")),
@@ -344,7 +344,7 @@ pub fn format_diagnostic_report(s: &Value) -> String {
 fn default_producer_suppression() -> Value {
     let source = std::env::current_dir()
         .ok()
-        .map(|directory| directory.join("graphify").join("extract.py"));
+        .map(|directory| directory.join("compass").join("extract.py"));
     if let Some(path) = source.filter(|path| path.is_file()) {
         return scan_producer_suppression_sites(&path);
     }
@@ -352,7 +352,7 @@ fn default_producer_suppression() -> Value {
     // Binary releases contain no Python runtime or source tree. This versioned snapshot keeps
     // the producer-risk diagnostic useful while explicit --extract-path scans remain live.
     json!({
-        "path": "graphify/extract.py",
+        "path": "compass/extract.py",
         "total_sites": 10,
         "sites": [
             {"line":967,"name":"seen_ids","tuple_arity":0,"sample":"seen_ids = {n[\"id\"] for n in nodes}"},

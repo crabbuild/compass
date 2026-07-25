@@ -42,8 +42,7 @@ impl HistoryBuildOptions {
         self.profile.clone()
     }
 
-    pub(crate) fn from_profile(mut profile: BuildProfile) -> Result<Self, HistoryError> {
-        upgrade_persisted_profile(&mut profile)?;
+    pub(crate) fn from_profile(profile: BuildProfile) -> Result<Self, HistoryError> {
         validate_persisted_profile(&profile)?;
         let gitignore = profile.value("gitignore") != Some("false");
         let excludes = profile
@@ -280,39 +279,6 @@ impl HistoryBuildOptions {
     }
 }
 
-fn upgrade_persisted_profile(profile: &mut BuildProfile) -> Result<(), HistoryError> {
-    if profile.value("graph_schema") == Some("networkx-node-link/v1") {
-        profile.insert("graph_schema", HISTORY_GRAPH_SCHEMA)?;
-    }
-    for (key, value) in [
-        (
-            "program_provider_policy",
-            "offline-artifacts-first".to_owned(),
-        ),
-        (
-            "program_ir_schema",
-            compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
-        ),
-        (
-            "program_merger_version",
-            compass_program::MERGER_VERSION.to_string(),
-        ),
-        (
-            "program_analysis_schema",
-            compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
-        ),
-        (
-            "program_analyzer_version",
-            compass_analysis::ANALYZER_VERSION.to_string(),
-        ),
-    ] {
-        if profile.value(key).is_none() {
-            profile.insert(key, &value)?;
-        }
-    }
-    Ok(())
-}
-
 fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError> {
     for (key, _) in profile.entries() {
         if !matches!(
@@ -515,20 +481,20 @@ fn push_profile_option(
 fn pinned_provider_environment(profile: &BuildProfile) -> (Vec<(String, String)>, Vec<String>) {
     let mut set = Vec::new();
     let mut remove = vec![
-        "GRAPHIFY_LLM_TEMPERATURE".to_owned(),
-        "GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(),
+        "COMPASS_LLM_TEMPERATURE".to_owned(),
+        "COMPASS_MAX_OUTPUT_TOKENS".to_owned(),
     ];
     if let Some(value) = profile
         .value("provider_temperature")
         .filter(|value| *value != "none")
     {
-        set.push(("GRAPHIFY_LLM_TEMPERATURE".to_owned(), value.to_owned()));
+        set.push(("COMPASS_LLM_TEMPERATURE".to_owned(), value.to_owned()));
     }
     if let Some(value) = profile
         .value("provider_max_output_tokens")
         .filter(|value| *value != "none")
     {
-        set.push(("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), value.to_owned()));
+        set.push(("COMPASS_MAX_OUTPUT_TOKENS".to_owned(), value.to_owned()));
     }
     let provider = profile.value("provider").unwrap_or("none");
     if let Some(variable) = match provider {
@@ -902,7 +868,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             .arg("--no-viz")
             .args(&self.forwarded)
             .current_dir(checkout)
-            .env("GRAPHIFY_SKIP_HOOK", "1")
+            .env("COMPASS_SKIP_HOOK", "1")
             .env("COMPASS_HISTORY_BUILD", "1")
             .env("COMPASS_OUT", "compass-out")
             .envs(self.semantic_environment.iter().cloned())
@@ -1157,20 +1123,19 @@ mod tests {
     }
 
     #[test]
-    fn persisted_v1_profile_is_migrated_to_force_v2_realization() -> Result<(), HistoryError> {
+    fn previous_graph_schema_profiles_are_rejected() -> Result<(), HistoryError> {
         let mut profile =
             parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])
                 .map_err(HistoryError::InvalidFingerprint)?
                 .options
                 .profile();
-        profile.insert("graph_schema", "networkx-node-link/v1")?;
+        profile.insert("graph_schema", "networkx-node-link/v6")?;
 
-        let options = HistoryBuildOptions::from_profile(profile)?;
-
-        assert_eq!(
-            options.profile().value("graph_schema"),
-            Some(HISTORY_GRAPH_SCHEMA)
-        );
+        let result = HistoryBuildOptions::from_profile(profile);
+        assert!(matches!(
+            result,
+            Err(error) if error.to_string().contains(HISTORY_GRAPH_SCHEMA)
+        ));
         Ok(())
     }
 

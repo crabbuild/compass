@@ -45,8 +45,6 @@ fuzz_target!(|data: &[u8]| {
         ],
         _ => vec!["benchmark".to_owned(), graph_text],
     };
-    let graphify = args.iter().cloned().map(OsString::from).collect::<Vec<_>>();
-    let compass = graphify.iter().cloned().collect::<Vec<_>>();
-    let _ = run(Frontend::Graphify, graphify);
+    let compass = args.into_iter().map(OsString::from).collect::<Vec<_>>();
     let _ = run(Frontend::Compass, compass);
 });

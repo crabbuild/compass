@@ -23,8 +23,8 @@ compass --version
 compass <command> --help
 ```
 
-The shipped product executable is `compass`. Scripts and new documentation
-should not depend on the internal Graphify compatibility frontend.
+The shipped product executable is `compass`; there is no legacy command
+frontend or alias.
 
 ## Build and analysis
 
@@ -239,6 +239,10 @@ Defaults:
 - max children: 200;
 - top outbound edges: 12.
 
+After a successful interactive HTML export, Compass asks whether to open the
+page in the default browser. The answer defaults to no. With redirected input
+or output, in pipes, and in CI, Compass neither prompts nor launches a browser.
+
 ### `benchmark`
 
 ```text
@@ -291,7 +295,9 @@ Build-profile options include:
 
 ```text
 compass diff OLD NEW
-  [--format text|json]
+  [--format text|json|html]
+  [--output PATH]
+  [--limit N]
   [--all]
   [--explain FINDING_ID]
   [--fingerprint SHA]
@@ -299,9 +305,15 @@ compass diff OLD NEW
 
 The default output is an actionable PR-review summary: likely breaks, behavior
 changes, affected callers/modules, and test evidence. Routine symbol churn is
-collapsed; `--all` expands it. `--explain` prints the evidence and reasoning
-for one finding. Diff requires comparable build profiles; rebuild the newer
-revision with `--profile-from OLD` when needed.
+collapsed; `--limit N` changes the visible per-section budget, while `--all`
+expands routine findings and is exhaustive. `--explain` prints the evidence
+and reasoning for one finding. Diff requires comparable build profiles;
+rebuild the newer revision with `--profile-from OLD` when needed.
+`--format html` requires `--output PATH` and writes a self-contained
+interactive report containing the reviewer findings, unified/split source
+diffs, the exact Git patch fallback, and meaningful code-graph changes.
+`--output` is rejected for text and JSON; there is no alternate semantic-diff
+export command.
 
 ## Service
 
@@ -350,6 +362,10 @@ compass export callflow-html --help
 
 Common inputs include `--graph PATH`, labels/report/sections, output directory,
 node/diagram limits, and database connection arguments.
+
+For `html` and `callflow-html`, an interactive terminal asks before opening the
+generated page in the default browser. Non-interactive commands never prompt or
+launch a browser.
 
 For database credentials, prefer supported environment variables over
 `--password`.

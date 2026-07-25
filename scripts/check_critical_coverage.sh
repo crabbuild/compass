@@ -6,7 +6,6 @@ minimum=${2:-95}
 
 awk -v minimum="$minimum" '
 BEGIN {
-    targets["crates/compass-parity/src/lib.rs"] = "compatibility"
     targets["crates/compass-model/src/graph.rs"] = "serialization"
     targets["crates/compass-files/src/cache.rs"] = "cache"
     targets["crates/compass-files/src/build_guard.rs"] = "security-atomic"

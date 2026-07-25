@@ -12,12 +12,8 @@ use compass_history::{
 use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
 use crate::{Frontend, Outcome};
 
-pub(crate) fn help(frontend: Frontend) -> String {
-    let prefix = if frontend == Frontend::Compass {
-        "compass"
-    } else {
-        "graphify"
-    };
+pub(crate) fn help(_frontend: Frontend) -> String {
+    let prefix = "compass";
     format!(
         "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
@@ -173,6 +169,7 @@ fn outcome(result: Result<String, CommandFailure>) -> Outcome {
             stderr: format!("error: {message}"),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         },
         Err(error) if error.code == 2 => {
             Outcome::failure_with_code(format!("error: {}", error.message), 2)
@@ -228,9 +225,7 @@ pub(crate) fn resolve_comparable_pair(
             (history, old, new)
         }
     };
-    let old_profile = normalized_profile_for_comparison(&old.version.build_profile)?;
-    let new_profile = normalized_profile_for_comparison(&new.version.build_profile)?;
-    if old_profile != new_profile {
+    if old.version.build_profile != new.version.build_profile {
         return Err(format!(
             "realizations are not semantically comparable\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}",
             old.version.git_commit,
@@ -244,39 +239,6 @@ pub(crate) fn resolve_comparable_pair(
         ));
     }
     Ok(ResolvedDiff { history, old, new })
-}
-
-fn normalized_profile_for_comparison(profile: &BuildProfile) -> Result<BuildProfile, String> {
-    let mut normalized = profile.clone();
-    for (key, value) in [
-        (
-            "program_provider_policy",
-            "offline-artifacts-first".to_owned(),
-        ),
-        (
-            "program_ir_schema",
-            compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
-        ),
-        (
-            "program_merger_version",
-            compass_program::MERGER_VERSION.to_string(),
-        ),
-        (
-            "program_analysis_schema",
-            compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
-        ),
-        (
-            "program_analyzer_version",
-            compass_analysis::ANALYZER_VERSION.to_string(),
-        ),
-    ] {
-        if normalized.value(key).is_none() {
-            normalized
-                .insert(key, &value)
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    Ok(normalized)
 }
 
 fn select_existing(
@@ -343,7 +305,13 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
         HistoryConfig::disable(&repository).map_err(runtime)?;
         return Ok("history: disabled".to_owned());
     }
-    let (positionals, format, output, community, node_limit) = parse(&args[1..]).map_err(usage)?;
+    let ParsedCommonOptions {
+        positionals,
+        format,
+        output,
+        community,
+        node_limit,
+    } = parse(&args[1..]).map_err(usage)?;
     if args[0] != "export" && output.is_some() {
         return Err(usage("--output is only valid for history export"));
     }
@@ -575,12 +543,8 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             let history = store(&repository)?;
             history.validate(&id).map_err(runtime)?;
             let rebuild_error = |error: &dyn std::fmt::Display| {
-                let prefix = match frontend {
-                    Frontend::Compass => "compass",
-                    Frontend::Graphify => "graphify",
-                };
                 runtime(format!(
-                    "cannot replace an unreadable preferred realization: {error}; run `{prefix} history rebuild {} --replace-corrupt`",
+                    "cannot replace an unreadable preferred realization: {error}; run `compass history rebuild {} --replace-corrupt`",
                     positionals[0]
                 ))
             };
@@ -1428,18 +1392,15 @@ fn stored_profile(repository: &Repository, source: &str) -> Result<BuildProfile,
     Ok(version.version.build_profile)
 }
 
-fn parse(
-    args: &[String],
-) -> Result<
-    (
-        Vec<String>,
-        String,
-        Option<std::path::PathBuf>,
-        Option<usize>,
-        Option<isize>,
-    ),
-    String,
-> {
+struct ParsedCommonOptions {
+    positionals: Vec<String>,
+    format: String,
+    output: Option<std::path::PathBuf>,
+    community: Option<usize>,
+    node_limit: Option<isize>,
+}
+
+fn parse(args: &[String]) -> Result<ParsedCommonOptions, String> {
     let mut p = Vec::new();
     let mut f = None;
     let mut o = None;
@@ -1531,7 +1492,13 @@ fn parse(
         }
         i += 1;
     }
-    Ok((p, f.unwrap_or_else(|| "text".into()), o, c, n))
+    Ok(ParsedCommonOptions {
+        positionals: p,
+        format: f.unwrap_or_else(|| "text".into()),
+        output: o,
+        community: c,
+        node_limit: n,
+    })
 }
 fn store(r: &Repository) -> Result<HistoryStore, CommandFailure> {
     HistoryStore::open_existing(r)

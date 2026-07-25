@@ -8,21 +8,13 @@ use std::time::{Duration, Instant};
 use compass_history::{HistoryQueue, JobState, Repository};
 
 fn repository_root() -> PathBuf {
-    if let Some(root) = std::env::var_os("GRAPHIFY_REPO_ROOT") {
+    if let Some(root) = std::env::var_os("COMPASS_REPO_ROOT") {
         return PathBuf::from(root);
     }
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
         .map_or_else(|| PathBuf::from("../.."), Path::to_path_buf)
-}
-
-fn python_executable(repo: &Path) -> PathBuf {
-    if cfg!(windows) {
-        repo.join(".venv/Scripts/python.exe")
-    } else {
-        repo.join(".venv/bin/python")
-    }
 }
 
 fn initialize_repo(path: &Path) -> Result<(), Box<dyn Error>> {
@@ -41,63 +33,20 @@ fn initialize_repo(path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_graphify(
+fn run_compass(
     executable: &Path,
-    repo: &Path,
+    _repo: &Path,
     cwd: &Path,
     args: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
     let mut command = support::command(executable);
-    if executable == python_executable(repo) {
-        command.args(["-m", "graphify"]);
-        command.env("PYTHONPATH", repo);
-    }
     Ok(command
         .args(args)
         .current_dir(cwd)
         .env("HOME", cwd)
         .env("USERPROFILE", cwd)
-        .env_remove("GRAPHIFY_OUT")
+        .env_remove("COMPASS_OUT")
         .output()?)
-}
-
-fn normalized(bytes: &[u8], root: &Path) -> String {
-    String::from_utf8_lossy(bytes).replace(&root.to_string_lossy().to_string(), "<ROOT>")
-}
-
-#[test]
-fn graphify_hook_lifecycle_matches_python_oracle() -> Result<(), Box<dyn Error>> {
-    let directory = tempfile::tempdir()?;
-    let python_root = directory.path().join("python");
-    let native_root = directory.path().join("native");
-    initialize_repo(&python_root)?;
-    initialize_repo(&native_root)?;
-    let repo = repository_root();
-    let python_exe = python_executable(&repo);
-    if !python_exe.is_file() {
-        return Ok(());
-    }
-    let native_exe = support::compat_executable();
-
-    for args in [
-        ["hook", "status"],
-        ["hook", "install"],
-        ["hook", "install"],
-        ["hook", "status"],
-        ["hook", "uninstall"],
-        ["hook", "status"],
-    ] {
-        let python = run_graphify(&python_exe, &repo, &python_root, &args)?;
-        let native = run_graphify(native_exe, &repo, &native_root, &args)?;
-        assert_eq!(native.status.code(), python.status.code(), "{args:?}");
-        assert_eq!(
-            normalized(&native.stdout, &native_root),
-            normalized(&python.stdout, &python_root),
-            "{args:?}"
-        );
-        assert_eq!(native.stderr, python.stderr, "{args:?}");
-    }
-    Ok(())
 }
 
 #[test]
@@ -109,15 +58,15 @@ fn native_hooks_are_self_contained_safe_and_preserve_user_content() -> Result<()
     std::fs::write(&existing, "#!/bin/sh\necho user-hook\n")?;
 
     let repo = repository_root();
-    let native_exe = support::compat_executable();
-    let installed = run_graphify(native_exe, &repo, root, &["hook", "install"])?;
+    let native_exe = support::compass_executable();
+    let installed = run_compass(native_exe, &repo, root, &["hook", "install"])?;
     assert!(installed.status.success());
 
     for name in ["post-commit", "post-checkout", "post-merge"] {
         let script = std::fs::read_to_string(root.join(".git/hooks").join(name))?;
         assert!(script.contains("hook-spawn"));
         if name != "post-merge" {
-            assert!(script.contains("GRAPHIFY_SKIP_HOOK"));
+            assert!(script.contains("COMPASS_SKIP_HOOK"));
             assert!(script.contains("rebase-merge"));
             assert!(script.contains("MERGE_HEAD"));
             assert!(script.contains("git rev-parse --git-common-dir"));
@@ -126,14 +75,14 @@ fn native_hooks_are_self_contained_safe_and_preserve_user_content() -> Result<()
         assert!(!script.contains("nohup"));
     }
     let driver = Command::new("git")
-        .args(["config", "--get", "merge.graphify.driver"])
+        .args(["config", "--get", "merge.compass.driver"])
         .current_dir(root)
         .output()?;
     let driver = String::from_utf8(driver.stdout)?;
     assert!(driver.contains(&native_exe.to_string_lossy().to_string()));
     assert!(driver.contains("merge-driver %O %A %B"));
 
-    let removed = run_graphify(native_exe, &repo, root, &["hook", "uninstall"])?;
+    let removed = run_compass(native_exe, &repo, root, &["hook", "uninstall"])?;
     assert!(removed.status.success());
     assert_eq!(
         std::fs::read_to_string(existing)?,
@@ -154,8 +103,8 @@ fn oversized_existing_hook_is_rejected_without_overwrite() -> Result<(), Box<dyn
     file.set_len(4 * 1024 * 1024 + 1)?;
 
     let repo = repository_root();
-    let output = run_graphify(
-        support::compat_executable(),
+    let output = run_compass(
+        support::compass_executable(),
         &repo,
         root,
         &["hook", "install"],
@@ -205,19 +154,19 @@ fn native_hook_refresh_honors_recorded_scan_root() -> Result<(), Box<dyn Error>>
         source_root.join("app.py"),
         "def hook_target():\n    return 1\n",
     )?;
-    let output_root = root.join("graphify-out");
+    let output_root = root.join("compass-out");
     std::fs::create_dir_all(&output_root)?;
     std::fs::write(
-        output_root.join(".graphify_root"),
+        output_root.join(".compass_root"),
         source_root.to_string_lossy().as_bytes(),
     )?;
 
-    let output = support::compat_command()
+    let output = support::compass_command()
         .args(["hook-refresh", "."])
         .current_dir(root)
         .env("HOME", root)
         .env("USERPROFILE", root)
-        .env_remove("GRAPHIFY_OUT")
+        .env_remove("COMPASS_OUT")
         .output()?;
     assert!(
         output.status.success(),
@@ -226,7 +175,7 @@ fn native_hook_refresh_honors_recorded_scan_root() -> Result<(), Box<dyn Error>>
     );
     let graph = std::fs::read_to_string(output_root.join("graph.json"))?;
     assert!(graph.contains("hook_target"));
-    assert!(!source_root.join("graphify-out/graph.json").exists());
+    assert!(!source_root.join("compass-out/graph.json").exists());
     Ok(())
 }
 
@@ -243,8 +192,8 @@ fn windows_style_hook_path_fails_without_creating_junk() -> Result<(), Box<dyn E
     assert!(configured.status.success());
 
     let repo = repository_root();
-    let output = run_graphify(
-        support::compat_executable(),
+    let output = run_compass(
+        support::compass_executable(),
         &repo,
         root,
         &["hook", "install"],
@@ -295,7 +244,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
     let disabled_commit = Command::new("git")
         .args(["commit", "--quiet", "-m", "disabled"])
         .current_dir(root)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(disabled_commit.status.success());
     assert!(!root.join(".git/compass").exists());
@@ -318,7 +267,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
     let committed = Command::new("git")
         .args(["commit", "--quiet", "-m", "enabled"])
         .current_dir(root)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(committed.status.success());
     assert!(started.elapsed() < Duration::from_secs(2));
@@ -342,7 +291,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
             let jobs = HistoryQueue::open_existing(&repository)?
                 .map(|queue| queue.list())
                 .transpose()?;
-            let log = std::fs::read_to_string(root.join(".cache/graphify-rebuild.log"))
+            let log = std::fs::read_to_string(root.join(".cache/compass-rebuild.log"))
                 .unwrap_or_else(|error| format!("<no worker log: {error}>"));
             return Err(format!(
                 "eager history worker did not publish before deadline; jobs={jobs:?}; log={log}"
@@ -379,7 +328,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
     let linked_commit = Command::new("git")
         .args(["commit", "--quiet", "-m", "linked"])
         .current_dir(&linked)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(linked_commit.status.success());
     let linked_sha = String::from_utf8(
@@ -409,7 +358,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
             "merge",
         ])
         .current_dir(root)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(merged.status.success());
     let merge_sha = String::from_utf8(
@@ -440,7 +389,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
     let source_commit = Command::new("git")
         .args(["commit", "--quiet", "-m", "pick source"])
         .current_dir(&linked)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(source_commit.status.success());
     let source_sha = String::from_utf8(
@@ -455,7 +404,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
     let picked = Command::new("git")
         .args(["cherry-pick", "--quiet", &source_sha])
         .current_dir(root)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(picked.status.success());
     let picked_sha = String::from_utf8(
@@ -504,7 +453,7 @@ fn eager_history_is_opt_in_non_blocking_and_captures_the_exact_commit() -> Resul
     let later = Command::new("git")
         .args(["commit", "--quiet", "-m", "later"])
         .current_dir(root)
-        .env("GRAPHIFY_SKIP_HOOK", "1")
+        .env("COMPASS_SKIP_HOOK", "1")
         .output()?;
     assert!(later.status.success());
     std::thread::sleep(Duration::from_millis(200));

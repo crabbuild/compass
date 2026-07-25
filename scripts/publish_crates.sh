@@ -6,7 +6,7 @@ compass_root="$(cd "$script_dir/.." && pwd)"
 cd "$compass_root"
 
 version="$(cargo metadata --no-deps --format-version 1 \
-  | jq -r '[.packages[] | select(.name != "compass-parity" and .name != "compass-tree-sitter-language-pack") | .version] | unique | if length == 1 then .[0] else error("workspace versions differ") end')"
+  | jq -r '[.packages[] | select(.name != "compass-tree-sitter-language-pack") | .version] | unique | if length == 1 then .[0] else error("workspace versions differ") end')"
 expected_confirmation="publish-$version"
 if [[ "${COMPASS_PUBLISH_CONFIRM:-}" != "$expected_confirmation" ]]; then
   echo "error: set COMPASS_PUBLISH_CONFIRM=$expected_confirmation" >&2

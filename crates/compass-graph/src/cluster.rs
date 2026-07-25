@@ -927,7 +927,6 @@ mod tests {
                 })
                 .collect(),
             extras: BTreeMap::new(),
-            used_legacy_edges_key: false,
         }
     }
 

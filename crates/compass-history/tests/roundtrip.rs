@@ -120,7 +120,7 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
         program: Some(program_fixture(b"first")?),
         analysis: Some(json!({"communities":{"1":["a","b"]}})),
         labels: Some(json!({"1":"Core"})),
-        manifest: Some(json!({"a.py":{"ast_hash":"abc","semantic_hash":"abc","mtime":1.0}})),
+        manifest: Some(json!({"a.py":{"ast_hash":"abc","semantic_hash":"abc","mtime":0}})),
         authoritative_sidecars: BTreeMap::from([(
             "semantic/custom.bin".to_owned(),
             vec![0, 1, 2, 255],
@@ -130,24 +130,52 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
     let restored = GraphArtifacts::reconstruct(&partitioned)?;
     assert_eq!(restored, artifacts);
     assert_eq!(restored.document, document);
+    let mut reordered = artifacts.clone();
+    reordered.document.nodes.reverse();
+    reordered.document.links.reverse();
+    reordered
+        .document
+        .graph
+        .get_mut("hyperedges")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("missing graph hyperedges")?
+        .reverse();
+    reordered
+        .document
+        .extras
+        .get_mut("hyperedges")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("missing top-level hyperedges")?
+        .reverse();
+    reordered
+        .manifest
+        .as_mut()
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|entries| entries.get_mut("a.py"))
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("missing manifest fixture")?
+        .insert("mtime".to_owned(), json!(1234.5));
+    assert_eq!(
+        partitioned,
+        reordered.partition(&completion())?,
+        "node-link array order must not change realization identity"
+    );
     assert_eq!(partitioned.program_facts.len(), 5);
     assert_eq!(partitioned.program_summaries.len(), 2);
     Ok(())
 }
 
 #[test]
-fn legacy_unicode_and_empty_hyperedge_placement_round_trip()
--> Result<(), Box<dyn std::error::Error>> {
+fn unicode_and_empty_hyperedge_placement_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let document: GraphDocument = serde_json::from_value(json!({
         "directed": true,
         "multigraph": false,
         "graph": {"hyperedges": []},
         "nodes": [{"id":"a\u{0000}雪","label":"雪"}],
-        "edges": [],
+        "links": [],
         "hyperedges": [],
         "extension": true
     }))?;
-    assert!(document.used_legacy_edges_key);
     let artifacts = GraphArtifacts {
         document,
         program: None,
@@ -159,7 +187,7 @@ fn legacy_unicode_and_empty_hyperedge_placement_round_trip()
     let restored = GraphArtifacts::reconstruct(&artifacts.partition(&completion())?)?;
     assert_eq!(restored, artifacts);
     let value = serde_json::to_value(&restored.document)?;
-    assert!(value.get("edges").is_some());
+    assert!(value.get("links").is_some());
     assert!(
         value["graph"]["hyperedges"]
             .as_array()
@@ -367,7 +395,7 @@ fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
     let graph = canonical_json_bytes(&serde_json::to_value(&document)?)?;
     let analysis = canonical_json_bytes(&json!({"score": 1}))?;
     let labels = canonical_json_bytes(&json!({"0": "Core"}))?;
-    let manifest = canonical_json_bytes(&json!({"a.rs": {"ast_hash": "a"}}))?;
+    let manifest = canonical_json_bytes(&json!({"a.rs": {"ast_hash": "a", "mtime": 0}}))?;
     let opaque = vec![0, 1, 255];
     for (path, bytes) in [
         ("graph.json", graph.as_slice()),

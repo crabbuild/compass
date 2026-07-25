@@ -14,12 +14,7 @@ use super::{Frontend, Outcome};
 
 const MAX_PROGRAM_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-pub(super) fn command(frontend: Frontend, args: &[String]) -> Outcome {
-    if frontend != Frontend::Compass {
-        return Outcome::failure(
-            "error: program inspection is unavailable in Graphify compatibility mode".to_owned(),
-        );
-    }
+pub(super) fn command(_frontend: Frontend, args: &[String]) -> Outcome {
     let Some(subcommand) = args.first().map(String::as_str) else {
         return Outcome::success(help());
     };
@@ -751,7 +746,6 @@ fn program_graph(analysis: &AnalysisBundle) -> Result<GraphDocument, compass_mod
         nodes,
         links,
         extras: BTreeMap::new(),
-        used_legacy_edges_key: false,
     })
 }
 
@@ -776,7 +770,7 @@ fn operation_properties(operation: &Operation) -> (&'static str, String) {
         OperationKind::Read { path } => ("read", path.clone()),
         OperationKind::Write { path } => ("write", path.clone()),
         OperationKind::Await => ("await", "await".to_owned()),
-        OperationKind::Throw { value } => ("throw", value.clone()),
+        OperationKind::Throw { effect } => ("throw", effect.display_name()),
     }
 }
 

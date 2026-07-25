@@ -37,38 +37,13 @@ jobs:
       - run: npm run package -w editors/vscode
       - run: npm run smoke:vsix -w editors/vscode
 
-  quality-and-parity:
+  quality:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Verify the compatibility contract
-        run: |
-          python3 -m unittest discover -s scripts/tests -p "test_*.py"
-          python3 scripts/check_compatibility_manifest.py --check
-
-      - name: Check out the Graphify compatibility oracle
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          repository: Graphify-Labs/graphify
-          ref: de0806be7c95d97aa7ff40371a235da899d6edb0
-          path: python-oracle
-
-      - name: Install Python oracle
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          python-version: "3.12"
-
-      - name: Sync pinned Python environment
-        working-directory: python-oracle
-        run: uv sync --frozen --extra mcp
-
-      - name: Sync isolated media oracle
-        working-directory: python-oracle
-        shell: bash
-        run: |
-          uv venv .venv-media --python 3.12
-          VIRTUAL_ENV="$GITHUB_WORKSPACE/python-oracle/.venv-media" uv sync --frozen --extra office --extra pdf --active
+      - name: Enforce Compass product boundary
+        run: sh scripts/check_product_boundary.sh
 
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -91,11 +66,7 @@ jobs:
       - name: Lints
         run: cargo clippy --workspace --lib --bins --locked -- -D warnings
 
-      - name: Native and Python-oracle tests
-        env:
-          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
-          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
-          GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
+      - name: Native tests
         run: |
           cargo test --workspace --lib --bins --locked
           cargo test -p compass-cli --test compass_product --locked
@@ -106,11 +77,7 @@ jobs:
           cargo test -p compass-query --test opencypher_tck --locked
           python3 scripts/check_compassql_support.py
 
-      - name: Isolated native and Python-oracle tests
-        env:
-          GRAPHIFY_REPO_ROOT: ${{ github.workspace }}/python-oracle
-          GRAPHIFY_PYTHON: ${{ github.workspace }}/python-oracle/.venv/bin/python
-          GRAPHIFY_MEDIA_PYTHON: ${{ github.workspace }}/python-oracle/.venv-media/bin/python
+      - name: Isolated native tests
         run: cargo nextest run --workspace --lib --bins --locked
 
       - name: Verify publishable crate archives
@@ -126,17 +93,13 @@ jobs:
       - name: Validate qualification and completion scripts
         shell: bash
         run: |
-          bash -n scripts/qualify_phase1.sh
-          bash -n scripts/qualify_phase1_matrix.sh
           sh -n scripts/check_critical_coverage.sh
           bash -n scripts/publish_crates.sh
           sh -n scripts/install.sh
-          sh -n scripts/package_macos.sh
+          sh -n scripts/package_release.sh
           sh -n scripts/test_release_scripts.sh
           sh scripts/test_release_scripts.sh
           bash -n completions/compass.bash
-          python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_graphs.py').read_text())"
-          python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/compare_phase1_read_outputs.py').read_text())"
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/measure_process.py').read_text())"
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/check_compassql_support.py').read_text())"
           sh -n scripts/benchmark_compassql.sh
@@ -175,7 +138,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Native tests
-        run: cargo test --workspace --exclude compass-parity --lib --bins --locked --target ${{ matrix.target }}
+        run: cargo test --workspace --lib --bins --locked --target ${{ matrix.target }}
 
   dependency-audit:
     runs-on: ubuntu-24.04

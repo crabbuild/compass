@@ -7,8 +7,8 @@ use compass_semantic::{
     EvidenceSource, ImageRef, SemanticUnit, ValidationLimits, anthropic_content,
     anthropic_http_request, anthropic_http_request_with_images, azure_openai_http_request,
     backend_api_key, bind_node_evidence, build_image_refs, build_untrusted_prompt, builtin_backend,
-    claude_cli_envelope, detect_backend_with_custom, detect_builtin_backend, estimate_cost,
-    graphify_endpoint_warning, image_notes, label_identifiers, load_custom_providers,
+    claude_cli_envelope, compass_endpoint_warning, detect_backend_with_custom,
+    detect_builtin_backend, estimate_cost, image_notes, label_identifiers, load_custom_providers,
     looks_like_context_exceeded, mark_partial, merged_partial_files,
     model_requires_default_temperature, normalize_anthropic_response,
     normalize_claude_cli_response, normalize_openai_response, ollama_base_url_check,
@@ -232,9 +232,9 @@ fn provider_resolution_loading_request_and_normalization_edges_are_explicit()
             "{url}"
         );
     }
-    assert!(graphify_endpoint_warning("file:///x", "x", false).is_some());
-    assert!(graphify_endpoint_warning("bad", "x", false).is_some());
-    assert!(graphify_endpoint_warning("http://example.com", "x", true).is_some());
+    assert!(compass_endpoint_warning("file:///x", "x", false).is_some());
+    assert!(compass_endpoint_warning("bad", "x", false).is_some());
+    assert!(compass_endpoint_warning("http://example.com", "x", true).is_some());
     assert!(!ollama_base_url_check("http://169.254.169.254").allowed);
     assert!(ollama_base_url_check("not-url").allowed);
     assert!(ollama_base_url_check("ftp://localhost").warning.is_some());

@@ -91,14 +91,20 @@ impl CompleteGraphBuilder for RecordingBuilder {
     }
 }
 
-fn request(repository: &Repository, commit: CommitId, rebuild: bool) -> MaterializeRequest {
-    MaterializeRequest {
+fn request(
+    repository: &Repository,
+    commit: CommitId,
+    rebuild: bool,
+) -> Result<MaterializeRequest, compass_history::HistoryError> {
+    let mut profile = BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
+    Ok(MaterializeRequest {
         repository: repository.clone(),
         commit,
-        profile: BuildProfile::default(),
+        profile,
         rebuild,
         replace_corrupt: false,
-    }
+    })
 }
 
 #[test]
@@ -126,7 +132,7 @@ fn materializer_reuses_preferred_ancestor_and_publishes_target()
     materialize_history(
         &store,
         &builder,
-        request(&repository, parent.clone(), false),
+        request(&repository, parent.clone(), false)?,
     )?;
     let mut phases = Vec::new();
     struct Observer<'a>(&'a mut Vec<MaterializeStage>);
@@ -139,7 +145,7 @@ fn materializer_reuses_preferred_ancestor_and_publishes_target()
     let published = materialize_history_with_observer(
         &store,
         &builder,
-        request(&repository, target.clone(), false),
+        request(&repository, target.clone(), false)?,
         &mut Observer(&mut phases),
     )?;
     assert_eq!(published.version.git_commit, target.to_string());
@@ -159,11 +165,11 @@ fn materializer_reuses_preferred_ancestor_and_publishes_target()
     );
 
     let before = builder.seeds()?.len();
-    let existing = materialize_history(&store, &builder, request(&repository, target, false))?;
+    let existing = materialize_history(&store, &builder, request(&repository, target, false)?)?;
     assert_eq!(existing.id, published.id);
     assert_eq!(builder.seeds()?.len(), before);
 
-    let mut invalid_recovery = request(&repository, parent, true);
+    let mut invalid_recovery = request(&repository, parent, true)?;
     invalid_recovery.replace_corrupt = true;
     assert!(matches!(
         materialize_history(&store, &builder, invalid_recovery),
@@ -203,7 +209,7 @@ fn incomplete_builder_output_is_never_published() -> Result<(), Box<dyn std::err
         materialize_history(
             &store,
             &IncompleteBuilder,
-            request(&repository, commit.clone(), false)
+            request(&repository, commit.clone(), false)?
         )
         .is_err()
     );
@@ -271,7 +277,7 @@ fn semantic_manifest_must_cover_each_exact_commit_source() -> Result<(), Box<dyn
     let error = materialize_history(
         &store,
         &MissingSemanticManifestBuilder,
-        request(&repository, commit.clone(), false),
+        request(&repository, commit.clone(), false)?,
     )
     .err()
     .ok_or("incomplete semantic manifest unexpectedly published")?;
@@ -338,7 +344,7 @@ fn observers_can_abort_every_materialization_boundary_without_publication()
         &["config", "user.email", "compass@example.invalid"],
     )?;
     std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
-    std::fs::write(directory.path().join("graphify.toml"), "mode = \"deep\"\n")?;
+    std::fs::write(directory.path().join("settings.toml"), "mode = \"deep\"\n")?;
     std::fs::create_dir(directory.path().join("config"))?;
     std::fs::write(
         directory.path().join("config/tsconfig.json"),
@@ -360,7 +366,7 @@ fn observers_can_abort_every_materialization_boundary_without_publication()
         let result = materialize_history_with_observer(
             &store,
             &builder,
-            request(&repository, commit.clone(), false),
+            request(&repository, commit.clone(), false)?,
             &mut FailingObserver(point),
         );
         assert!(matches!(result, Err(MaterializeError::Observer(_))));
@@ -448,7 +454,7 @@ fn exact_tree_validation_rejects_commit_inventory_and_manifest_mismatches()
         let result = materialize_history(
             &store,
             &InvalidBuilder(variant),
-            request(&repository, commit.clone(), false),
+            request(&repository, commit.clone(), false)?,
         );
         assert!(matches!(result, Err(MaterializeError::Incomplete(_))));
         assert!(store.preferred(&commit)?.is_none());

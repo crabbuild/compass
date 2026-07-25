@@ -25,7 +25,7 @@ pub fn extract_semantic_units(
     let vision = backend.backend.vision
         || (backend.backend.name == "ollama"
             && environment
-                .get("GRAPHIFY_OLLAMA_VISION")
+                .get("COMPASS_OLLAMA_VISION")
                 .is_some_and(|value| value.trim() == "1"));
     let inline_images = vision && backend.backend.name != "claude-cli";
     let built_images = build_image_refs(&image_paths, root, inline_images)?;
@@ -118,7 +118,7 @@ pub fn expand_oversized_semantic_files(paths: &[PathBuf], max_chars: usize) -> V
     units
 }
 
-/// Estimate prompt cost using Graphify's deterministic chars-per-token
+/// Estimate prompt cost using Compass's deterministic chars-per-token
 /// fallback. Raster images use a fixed vision charge.
 #[must_use]
 pub fn estimate_semantic_unit_tokens(unit: &SemanticUnit) -> usize {
@@ -547,11 +547,11 @@ pub fn effective_semantic_concurrency(
 ) -> usize {
     let serial = (backend_name == "ollama"
         && environment
-            .get("GRAPHIFY_OLLAMA_PARALLEL")
+            .get("COMPASS_OLLAMA_PARALLEL")
             .is_none_or(|value| value.trim() != "1"))
         || (backend_name == "claude-cli"
             && environment
-                .get("GRAPHIFY_CLAUDE_CLI_PARALLEL")
+                .get("COMPASS_CLAUDE_CLI_PARALLEL")
                 .is_none_or(|value| value.trim() != "1"));
     if serial {
         1
@@ -751,7 +751,7 @@ where
 {
     let prompt = extraction_prompt(options.deep_mode);
     let cache_enabled =
-        options.cache_enabled && !environment.contains_key("GRAPHIFY_NO_INCREMENTAL_CACHE");
+        options.cache_enabled && !environment.contains_key("COMPASS_NO_INCREMENTAL_CACHE");
     let mut cache = cache_enabled
         .then(|| Cache::new(root, cache_root))
         .transpose()?;

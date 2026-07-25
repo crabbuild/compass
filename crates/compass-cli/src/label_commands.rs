@@ -31,14 +31,7 @@ struct LabelArguments {
     min_community_size: usize,
 }
 
-pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
-    if frontend == Frontend::Graphify
-        && args
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
-    {
-        return Outcome::success("Run 'graphify --help' for full usage.".to_owned());
-    }
+pub(super) fn command_label(_frontend: Frontend, args: &[String]) -> Outcome {
     let parsed = match parse_arguments(args) {
         Ok(parsed) => parsed,
         Err(error) => return Outcome::failure(error),
@@ -49,19 +42,11 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
         .clone()
         .unwrap_or_else(|| parsed.root.join(&output_name).join("graph.json"));
     if !graph_path.exists() {
-        let message = match frontend {
-            Frontend::Graphify => {
-                format!(
-                    "error: no graph found at {} — run /graphify first",
-                    graph_path.display()
-                )
-            }
-            Frontend::Compass => format!(
-                "error: no graph found at {} — run `compass extract {}` first",
-                graph_path.display(),
-                parsed.root.display()
-            ),
-        };
+        let message = format!(
+            "error: no graph found at {} — run `compass extract {}` first",
+            graph_path.display(),
+            parsed.root.display()
+        );
         return Outcome::failure(message);
     }
     let output_dir = if parsed.graph_override.is_some()
@@ -78,11 +63,11 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
     let environment = std::env::vars().collect::<HashMap<_, _>>();
     let global_providers = home_directory()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".graphify/providers.json");
+        .join(".compass/providers.json");
     let local_providers = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".graphify/providers.json");
-    let allow_local = environment_truthy_from(&environment, "GRAPHIFY_ALLOW_LOCAL_PROVIDERS");
+        .join(".compass/providers.json");
+    let allow_local = environment_truthy_from(&environment, "COMPASS_ALLOW_LOCAL_PROVIDERS");
     let custom = load_custom_providers(&global_providers, &local_providers, allow_local);
     let selected = parsed
         .backend
@@ -90,7 +75,7 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
         .or_else(|| detect_backend_with_custom(&custom.providers, &environment).map(str::to_owned));
     let mut warnings = (!allow_local && local_providers.is_file())
         .then(|| {
-            "[graphify] WARNING: ignoring project-local .graphify/providers.json (custom providers control where your corpus and API key are sent). Set GRAPHIFY_ALLOW_LOCAL_PROVIDERS=1 to load it."
+            "[compass] WARNING: ignoring project-local .compass/providers.json (custom providers control where your corpus and API key are sent). Set COMPASS_ALLOW_LOCAL_PROVIDERS=1 to load it."
                 .to_owned()
         })
         .into_iter()
@@ -101,10 +86,10 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
             .iter()
             .filter(|warning| !warning.starts_with("ignoring project-local "))
             .map(|warning| {
-                if warning.starts_with("[graphify]") {
+                if warning.starts_with("[compass]") {
                     warning.clone()
                 } else {
-                    format!("[graphify label] warning: {warning}")
+                    format!("[compass label] warning: {warning}")
                 }
             }),
     );
@@ -142,27 +127,27 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
             ]
             .into_iter()
             .map(|(stage, duration)| {
-                format!("[graphify timing] {stage}: {:.1}s", duration.as_secs_f64())
+                format!("[compass timing] {stage}: {:.1}s", duration.as_secs_f64())
             }),
         );
         ordered.append(&mut warnings);
         ordered.push(format!(
-            "[graphify timing] label: {:.1}s",
+            "[compass timing] label: {:.1}s",
             result.timings.label.as_secs_f64()
         ));
         ordered.push(format!(
-            "[graphify timing] report: {:.1}s",
+            "[compass timing] report: {:.1}s",
             result.timings.report.as_secs_f64()
         ));
         if let Some(warning) = result.backup_warning.clone() {
             ordered.push(warning);
         }
         ordered.push(format!(
-            "[graphify timing] export: {:.1}s",
+            "[compass timing] export: {:.1}s",
             result.timings.export.as_secs_f64()
         ));
         ordered.push(format!(
-            "[graphify timing] total: {:.1}s",
+            "[compass timing] total: {:.1}s",
             result.timings.total.as_secs_f64()
         ));
         warnings = ordered;
@@ -204,6 +189,7 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
         stderr: warnings.join("\n"),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -292,7 +278,7 @@ fn generate_labels(
         return CommunityLabelResult {
             labels: placeholder_labels(communities),
             warnings: vec![
-                "[graphify label] no LLM backend configured; keeping Community N placeholders. Set an API key (e.g. GOOGLE_API_KEY) or pass --backend."
+                "[compass label] no LLM backend configured; keeping Community N placeholders. Set an API key (e.g. GOOGLE_API_KEY) or pass --backend."
                     .to_owned(),
             ],
             ..CommunityLabelResult::default()
@@ -302,7 +288,7 @@ fn generate_labels(
     options.batch_size = arguments.batch_size;
     options.max_concurrency = arguments.max_concurrency;
     let configured_max = environment
-        .get("GRAPHIFY_MAX_OUTPUT_TOKENS")
+        .get("COMPASS_MAX_OUTPUT_TOKENS")
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|value| *value > 0);
     let node_labels = context

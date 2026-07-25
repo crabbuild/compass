@@ -56,7 +56,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         },
     )?;
     assert_eq!(
-        GraphDocument::load_for_recluster_compatibility(&destination.join("graph.json"))?,
+        GraphDocument::load_for_recluster(&destination.join("graph.json"))?,
         document
     );
     assert!(destination.join("GRAPH_REPORT.md").is_file());
@@ -70,7 +70,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
     assert!(std::fs::read_to_string(destination.join("graph.html"))?.contains("data-nid"));
     assert!(
         std::fs::read_to_string(destination.join("GRAPH_TREE.html"))?
-            .contains("graphify tree viewer")
+            .contains("compass tree viewer")
     );
     let signatures: serde_json::Value = serde_json::from_slice(&std::fs::read(
         destination.join(".compass_labels.json.sig"),

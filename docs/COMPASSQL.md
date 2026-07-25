@@ -15,7 +15,8 @@ compass query --cql --stdin --format json
 compass query --cql --repl
 ```
 
-Compass never guesses the mode from query text. The `graphify` compatibility executable does not expose `--cql` because the frozen Python oracle has no equivalent flag.
+Compass never guesses the mode from query text. There is no alternate legacy
+frontend; `compass query --cql` is the only command contract.
 
 Exactly one query source is required: one positional argument, `--file`, `--stdin`, or `--repl`. Files and stdin are limited to 1 MiB. A parameter file must be a JSON object no larger than 16 MiB. `--param name=value` parses JSON scalars/lists/maps and otherwise uses a string.
 

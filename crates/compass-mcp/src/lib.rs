@@ -1,4 +1,4 @@
-//! Native MCP service for Graphify-compatible Compass graph queries.
+//! Native MCP service for Compass-compatible Compass graph queries.
 
 mod transport;
 
@@ -34,7 +34,7 @@ use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-const SERVER_NAME: &str = "graphify";
+const SERVER_NAME: &str = "compass";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FileKey {
@@ -170,11 +170,11 @@ impl GraphStore {
 
 /// One MCP service instance. Clones share the hot-reload cache.
 #[derive(Clone, Debug)]
-pub struct GraphifyMcp {
+pub struct CompassMcp {
     store: GraphStore,
 }
 
-impl GraphifyMcp {
+impl CompassMcp {
     #[must_use]
     pub fn new(graph_path: impl Into<PathBuf>) -> Self {
         Self {
@@ -211,14 +211,14 @@ impl GraphifyMcp {
         }
     }
 
-    /// Read a graphify resource without a transport.
+    /// Read a compass resource without a transport.
     pub fn read(&self, uri: &str) -> Result<String, String> {
         let context = self.store.load(None)?;
         read_resource_text(uri, &context)
     }
 }
 
-impl ServerHandler for GraphifyMcp {
+impl ServerHandler for CompassMcp {
     fn get_info(&self) -> ServerInfo {
         let mut capabilities = ServerCapabilities::builder()
             .enable_experimental()
@@ -269,7 +269,7 @@ impl ServerHandler for GraphifyMcp {
         let text = self
             .read(&request.uri)
             .map_err(|error| ErrorData::invalid_params(error, None))?;
-        let mime = if request.uri == "graphify://report" {
+        let mime = if request.uri == "compass://report" {
             "text/markdown"
         } else {
             "text/plain"
@@ -365,37 +365,37 @@ fn tool(name: &'static str, description: &'static str, schema: Value) -> Tool {
 fn resource_specs() -> Vec<Resource> {
     [
         (
-            "graphify://report",
+            "compass://report",
             "Graph Report",
             "Full GRAPH_REPORT.md",
             "text/markdown",
         ),
         (
-            "graphify://stats",
+            "compass://stats",
             "Graph Stats",
             "Node/edge/community counts and confidence breakdown",
             "text/plain",
         ),
         (
-            "graphify://god-nodes",
+            "compass://god-nodes",
             "God Nodes",
             "Top 10 most-connected nodes",
             "text/plain",
         ),
         (
-            "graphify://surprises",
+            "compass://surprises",
             "Surprising Connections",
             "Cross-community surprising connections",
             "text/plain",
         ),
         (
-            "graphify://audit",
+            "compass://audit",
             "Confidence Audit",
             "EXTRACTED/INFERRED/AMBIGUOUS edge breakdown",
             "text/plain",
         ),
         (
-            "graphify://questions",
+            "compass://questions",
             "Suggested Questions",
             "Suggested questions for this codebase",
             "text/plain",
@@ -507,21 +507,21 @@ fn log_mcp_query(
     token_budget: usize,
     duration: Duration,
 ) {
-    let disabled = std::env::var("GRAPHIFY_QUERY_LOG_DISABLE")
+    let disabled = std::env::var("COMPASS_QUERY_LOG_DISABLE")
         .ok()
         .is_some_and(|value| truthy(&value));
     if disabled {
         return;
     }
-    let path = std::env::var_os("GRAPHIFY_QUERY_LOG")
+    let path = std::env::var_os("COMPASS_QUERY_LOG")
         .filter(|value| !value.is_empty())
         .map(|value| expand_home(&PathBuf::from(value)))
         .or_else(|| {
-            std::env::var("GRAPHIFY_QUERY_LOG_ENABLE")
+            std::env::var("COMPASS_QUERY_LOG_ENABLE")
                 .ok()
                 .filter(|value| truthy(value))?;
             let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-            Some(PathBuf::from(home).join(".cache/graphify-queries.log"))
+            Some(PathBuf::from(home).join(".cache/compass-queries.log"))
         });
     let Some(path) = path else {
         return;
@@ -548,7 +548,7 @@ fn log_mcp_query(
         "depth": depth,
         "token_budget": token_budget,
     });
-    if std::env::var("GRAPHIFY_QUERY_LOG_RESPONSES")
+    if std::env::var("COMPASS_QUERY_LOG_RESPONSES")
         .ok()
         .is_some_and(|value| truthy(&value))
         && let Some(object) = record.as_object_mut()
@@ -1088,19 +1088,19 @@ fn status_index(status: &str) -> usize {
 
 fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, String> {
     match uri {
-        "graphify://report" => {
+        "compass://report" => {
             let report = context
                 .path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join("GRAPH_REPORT.md");
             Ok(fs::read_to_string(report).unwrap_or_else(|_| {
-                "GRAPH_REPORT.md not found. Run graphify extract first.".to_owned()
+                "GRAPH_REPORT.md not found. Run compass extract first.".to_owned()
             }))
         }
-        "graphify://stats" => Ok(tool_graph_stats(context)),
-        "graphify://god-nodes" => tool_god_nodes(&Map::new(), context),
-        "graphify://surprises" => {
+        "compass://stats" => Ok(tool_graph_stats(context)),
+        "compass://god-nodes" => tool_god_nodes(&Map::new(), context),
+        "compass://surprises" => {
             let document = context.document()?;
             let surprises = surprising_connections(&document, &context.community_ids(), 10);
             if surprises.is_empty() {
@@ -1114,7 +1114,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
             );
             Ok(lines.join("\n"))
         }
-        "graphify://audit" => {
+        "compass://audit" => {
             let mut extracted = 0_usize;
             let mut inferred = 0_usize;
             let mut ambiguous = 0_usize;
@@ -1133,7 +1133,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
                 python_percent(ambiguous, total)
             ))
         }
-        "graphify://questions" => {
+        "compass://questions" => {
             let document = context.document()?;
             let labels_path = context
                 .path
@@ -1183,9 +1183,9 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let graph = temp.path().join("graph.json");
         sample(&graph)?;
-        let server = GraphifyMcp::new(graph);
-        assert_eq!(GraphifyMcp::tools().len(), 10);
-        assert_eq!(GraphifyMcp::resources().len(), 6);
+        let server = CompassMcp::new(graph);
+        assert_eq!(CompassMcp::tools().len(), 10);
+        assert_eq!(CompassMcp::resources().len(), 6);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
             text,
@@ -1205,7 +1205,7 @@ mod tests {
             project.join("compass-out/graph.json"),
             r#"{"directed":true,"nodes":[{"id":"a"},{"id":"b"},{"id":"c"}],"links":[]}"#,
         )?;
-        let server = GraphifyMcp::new(default);
+        let server = CompassMcp::new(default);
         let mut args = Map::new();
         args.insert(
             "project_path".to_owned(),
@@ -1229,7 +1229,7 @@ mod tests {
 
     #[test]
     fn unknown_tool_does_not_require_a_default_graph() {
-        let server = GraphifyMcp::new("missing.json");
+        let server = CompassMcp::new("missing.json");
         assert_eq!(
             server.invoke("not_a_tool", Map::new()),
             "Unknown tool: not_a_tool"
@@ -1245,7 +1245,7 @@ mod tests {
             &graph,
             r#"{"directed":true,"multigraph":true,"nodes":[{"id":"a","label":"Alpha"},{"id":"b","label":"Beta"}],"links":[{"source":"a","target":"b","key":"one","relation":"calls","confidence":"EXTRACTED"},{"source":"a","target":"b","key":"two","relation":"imports","confidence":"INFERRED"}]}"#,
         )?;
-        let server = GraphifyMcp::new(graph);
+        let server = CompassMcp::new(graph);
         let mut arguments = Map::new();
         arguments.insert("label".to_owned(), Value::String("Alpha".to_owned()));
         let output = server.invoke("get_neighbors", arguments);
@@ -1277,7 +1277,7 @@ mod tests {
             temp.path().join(".compass_labels.json"),
             r#"{"0":"Core","1":"Docs"}"#,
         )?;
-        let server = GraphifyMcp::new(&graph);
+        let server = CompassMcp::new(&graph);
 
         let invoke = |name: &str, value: Value| {
             server.invoke(name, value.as_object().cloned().unwrap_or_default())
@@ -1330,16 +1330,16 @@ mod tests {
         assert!(invoke("get_pr_impact", json!({"pr_number":-1})).contains("'pr_number'"));
 
         for uri in [
-            "graphify://report",
-            "graphify://stats",
-            "graphify://god-nodes",
-            "graphify://surprises",
-            "graphify://audit",
-            "graphify://questions",
+            "compass://report",
+            "compass://stats",
+            "compass://god-nodes",
+            "compass://surprises",
+            "compass://audit",
+            "compass://questions",
         ] {
             assert!(!server.read(uri)?.is_empty(), "{uri}");
         }
-        assert!(server.read("graphify://unknown").is_err());
+        assert!(server.read("compass://unknown").is_err());
         Ok(())
     }
 
@@ -1361,13 +1361,13 @@ mod tests {
         assert!(!Arc::ptr_eq(&first, &changed));
         assert_eq!(changed.graph.node_count(), 1);
 
-        let missing = GraphifyMcp::new(temp.path().join("missing.json"));
+        let missing = CompassMcp::new(temp.path().join("missing.json"));
         assert!(
             missing
                 .invoke("graph_stats", Map::new())
                 .contains("not found")
         );
-        assert!(missing.read("graphify://stats").is_err());
+        assert!(missing.read("compass://stats").is_err());
 
         assert_eq!(integer_argument(&Map::new(), "x", 7), 7);
         assert_eq!(
@@ -1420,13 +1420,13 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let empty_path = temp.path().join("empty.json");
         fs::write(&empty_path, r#"{"directed":true,"nodes":[],"links":[]}"#)?;
-        let empty = GraphifyMcp::new(&empty_path);
+        let empty = CompassMcp::new(&empty_path);
         assert_eq!(
-            empty.read("graphify://surprises")?,
+            empty.read("compass://surprises")?,
             "No surprising connections found."
         );
         assert_eq!(
-            empty.read("graphify://questions")?,
+            empty.read("compass://questions")?,
             "Suggested questions:\n  - "
         );
         assert_eq!(

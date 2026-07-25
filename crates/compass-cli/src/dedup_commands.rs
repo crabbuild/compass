@@ -151,7 +151,7 @@ impl EntityTiebreaker for DedupLlmTiebreaker {
                 Ok(response) => response,
                 Err(error) => {
                     self.warnings
-                        .push(format!("[graphify] --dedup-llm batch failed: {error}"));
+                        .push(format!("[compass] --dedup-llm batch failed: {error}"));
                     continue;
                 }
             };

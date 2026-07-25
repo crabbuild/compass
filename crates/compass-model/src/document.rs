@@ -64,11 +64,10 @@ pub struct GraphDocument {
     pub nodes: Vec<NodeRecord>,
     pub links: Vec<EdgeRecord>,
     pub extras: BTreeMap<String, Value>,
-    pub used_legacy_edges_key: bool,
 }
 
 impl GraphDocument {
-    /// Load a node-link document under the compatible extension and size guards.
+    /// Load a node-link document under the extension and size guards.
     pub fn load(path: &Path) -> Result<Self, GraphError> {
         if path.extension().and_then(|part| part.to_str()) != Some("json") {
             return Err(GraphError::InvalidExtension(path.to_path_buf()));
@@ -88,7 +87,7 @@ impl GraphDocument {
             let _ = write_affected_cache(path, signature, &document);
             return Ok(document);
         }
-        let document = Self::load_for_recluster_compatibility(path)?;
+        let document = Self::load_for_recluster(path)?;
         if let Some(signature) = before
             && graph_signature(path) == Some(signature)
         {
@@ -141,7 +140,7 @@ impl GraphDocument {
     ///
     /// That command accepts arbitrary filenames and warns on oversized files
     /// while still refreshing the core graph artifacts.
-    pub fn load_for_recluster_compatibility(path: &Path) -> Result<Self, GraphError> {
+    pub fn load_for_recluster(path: &Path) -> Result<Self, GraphError> {
         if !path.exists() {
             return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
         }
@@ -203,7 +202,6 @@ impl GraphDocument {
             nodes,
             links,
             extras: BTreeMap::new(),
-            used_legacy_edges_key: self.used_legacy_edges_key,
         }
     }
 }
@@ -383,7 +381,7 @@ struct RawGraphDocument {
     #[serde(default)]
     directed: bool,
     // NetworkX's node_link_graph() treats an omitted `multigraph` member as
-    // true. Graphify's compact graph writer relies on that legacy default, so
+    // true. Compass's compact graph writer relies on that legacy default, so
     // treating omission as false would collapse parallel edges and change
     // degree-sensitive traversal semantics.
     #[serde(default = "networkx_default_multigraph")]
@@ -408,7 +406,8 @@ impl<'de> Deserialize<'de> for GraphDocument {
         D: serde::Deserializer<'de>,
     {
         let raw = RawGraphDocument::deserialize(deserializer)?;
-        let used_legacy_edges_key = raw.links.is_none() && raw.edges.is_some();
+        // Raw extraction fragments use `edges`; persisted node-link documents use
+        // `links`. Both are current inputs and serialize to the single `links` form.
         let links = raw.links.or(raw.edges).unwrap_or_default();
         Ok(Self {
             directed: raw.directed,
@@ -417,7 +416,6 @@ impl<'de> Deserialize<'de> for GraphDocument {
             nodes: raw.nodes,
             links,
             extras: raw.extras,
-            used_legacy_edges_key,
         })
     }
 }
@@ -434,11 +432,7 @@ impl Serialize for GraphDocument {
         map.serialize_entry("multigraph", &self.multigraph)?;
         map.serialize_entry("graph", &self.graph)?;
         map.serialize_entry("nodes", &self.nodes)?;
-        if self.used_legacy_edges_key {
-            map.serialize_entry("edges", &self.links)?;
-        } else {
-            map.serialize_entry("links", &self.links)?;
-        }
+        map.serialize_entry("links", &self.links)?;
         for (key, value) in &self.extras {
             map.serialize_entry(key, value)?;
         }

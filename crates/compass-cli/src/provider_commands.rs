@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_files::write_text_atomic;
-use compass_semantic::{builtin_backend, graphify_endpoint_warning, provider_base_url_check};
+use compass_semantic::{builtin_backend, compass_endpoint_warning, provider_base_url_check};
 use serde_json::{Map, Value, json};
 
 use crate::{Frontend, Outcome};
@@ -32,6 +32,7 @@ fn command_provider_at(frontend: Frontend, args: &[String], path: &Path) -> Outc
             stderr: provider_help(frontend),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         },
     };
     if !startup_warnings.is_empty() {
@@ -67,7 +68,7 @@ fn provider_list(path: &Path) -> Outcome {
 fn provider_show(args: &[String], path: &Path) -> Outcome {
     let name = args.get(1).map(String::as_str).unwrap_or_default();
     if name.is_empty() {
-        return Outcome::failure("Usage: graphify provider show <name>".to_owned());
+        return Outcome::failure("Usage: compass provider show <name>".to_owned());
     }
     let providers = read_registry(path);
     let Some(provider) = providers.get(name) else {
@@ -81,7 +82,7 @@ fn provider_show(args: &[String], path: &Path) -> Outcome {
     }
 }
 
-fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
+fn provider_add(_frontend: Frontend, args: &[String], path: &Path) -> Outcome {
     let name = args
         .get(1)
         .filter(|name| !name.starts_with('-'))
@@ -89,7 +90,7 @@ fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
         .unwrap_or_default();
     if name.is_empty() {
         return Outcome::failure(
-            "Usage: graphify provider add <name> --base-url URL --default-model MODEL --env-key KEY"
+            "Usage: compass provider add <name> --base-url URL --default-model MODEL --env-key KEY"
                 .to_owned(),
         );
     }
@@ -150,12 +151,12 @@ fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
         );
     }
     let endpoint = provider_base_url_check(&base_url, name);
-    let endpoint_warning = graphify_endpoint_warning(&base_url, name, endpoint.allowed);
+    let endpoint_warning = compass_endpoint_warning(&base_url, name, endpoint.allowed);
     if !endpoint.allowed {
         return Outcome::failure(format!(
             "{}\nError: refusing to add provider with unsafe base_url '{}'.",
             endpoint_warning.unwrap_or_else(|| format!(
-                "[graphify] WARNING: provider '{name}' has an unsafe base_url."
+                "[compass] WARNING: provider '{name}' has an unsafe base_url."
             )),
             base_url.replace('\\', "\\\\").replace('\'', "\\'")
         ));
@@ -174,23 +175,20 @@ fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
     if let Err(error) = write_registry(path, &providers) {
         return Outcome::failure(error);
     }
-    let invocation = match frontend {
-        Frontend::Compass => "compass extract",
-        Frontend::Graphify => "graphify extract",
-    };
     Outcome {
         code: 0,
-        stdout: format!("Provider '{name}' added. Use with: {invocation} . --backend {name}"),
+        stdout: format!("Provider '{name}' added. Use with: compass extract . --backend {name}"),
         stderr: endpoint_warning.unwrap_or_default(),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
 fn provider_remove(args: &[String], path: &Path) -> Outcome {
     let name = args.get(1).map(String::as_str).unwrap_or_default();
     if name.is_empty() {
-        return Outcome::failure("Usage: graphify provider remove <name>".to_owned());
+        return Outcome::failure("Usage: compass provider remove <name>".to_owned());
     }
     let mut providers = read_registry(path);
     if providers.remove(name).is_none() {
@@ -226,7 +224,7 @@ fn provider_registry_warnings(path: &Path) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let check = provider_base_url_check(base_url, &name);
-            graphify_endpoint_warning(base_url, &name, check.allowed)
+            compass_endpoint_warning(base_url, &name, check.allowed)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -280,9 +278,9 @@ fn python_pretty_json(value: &Value) -> Result<String, serde_json::Error> {
 
 fn global_provider_path() -> Result<PathBuf, String> {
     let home = home_directory().ok_or_else(|| {
-        "error: could not determine the home directory for ~/.graphify/providers.json".to_owned()
+        "error: could not determine the home directory for ~/.compass/providers.json".to_owned()
     })?;
-    Ok(home.join(".graphify/providers.json"))
+    Ok(home.join(".compass/providers.json"))
 }
 
 fn home_directory() -> Option<PathBuf> {
@@ -308,12 +306,8 @@ fn windows_home_directory() -> Option<OsString> {
     Some(combined)
 }
 
-pub(super) fn provider_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass provider [add|list|show|remove]",
-        Frontend::Graphify => "Usage: graphify provider [add|list|show|remove]",
-    }
-    .to_owned()
+pub(super) fn provider_help(_frontend: Frontend) -> String {
+    "Usage: compass provider [add|list|show|remove]".to_owned()
 }
 
 #[cfg(test)]
@@ -327,7 +321,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let registry = directory.path().join("providers.json");
         let add = command_provider_at(
-            Frontend::Graphify,
+            Frontend::Compass,
             &[
                 "add".to_owned(),
                 "本地".to_owned(),
@@ -344,16 +338,16 @@ mod tests {
         );
         assert_eq!(add.code, 0, "{}", add.stderr);
         assert!(fs::read_to_string(&registry)?.contains("\\u672c\\u5730"));
-        let list = command_provider_at(Frontend::Graphify, &["list".to_owned()], &registry);
+        let list = command_provider_at(Frontend::Compass, &["list".to_owned()], &registry);
         assert_eq!(list.stdout, "  本地  (https://example.test/v1)");
         let show = command_provider_at(
-            Frontend::Graphify,
+            Frontend::Compass,
             &["show".to_owned(), "本地".to_owned()],
             &registry,
         );
         assert!(show.stdout.contains("\\u6a21\\u578b"));
         let remove = command_provider_at(
-            Frontend::Graphify,
+            Frontend::Compass,
             &["remove".to_owned(), "本地".to_owned()],
             &registry,
         );
@@ -367,7 +361,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let registry = directory.path().join("providers.json");
         let builtin = command_provider_at(
-            Frontend::Graphify,
+            Frontend::Compass,
             &[
                 "add".to_owned(),
                 "openai".to_owned(),
@@ -380,7 +374,7 @@ mod tests {
         assert_eq!(builtin.code, 1);
         assert!(builtin.stderr.contains("built-in provider"));
         let unsafe_url = command_provider_at(
-            Frontend::Graphify,
+            Frontend::Compass,
             &[
                 "add".to_owned(),
                 "unsafe".to_owned(),

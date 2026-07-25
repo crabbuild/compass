@@ -11,10 +11,10 @@ use crate::SemanticDiffError;
 use crate::model::{
     AffectedConsumer, CLASSIFIER_VERSION, ChangeDirection, ChangedEntity, CollapsedGroup,
     Comparison, Compatibility, Completeness, Confidence, DependencyDelta, EntitySnapshot,
-    EvidenceRef, FindingOrigin, FindingType, MAX_DIRECT_ENTITIES, MAX_EVIDENCE_PER_FINDING,
-    MAX_FINDINGS, MAX_IMPACT_DEPTH, MAX_TRAVERSED_CALL_EDGES, REPORT_SCHEMA, SemanticDiffInput,
-    SemanticDiffReport, SemanticFinding, SnapshotSide, TestEvidence, Verification,
-    VerificationState, WitnessHop, WitnessPath,
+    EvidenceRef, FeatureGroup, FindingOrigin, FindingType, MAX_DIRECT_ENTITIES,
+    MAX_EVIDENCE_PER_FINDING, MAX_FINDINGS, MAX_IMPACT_DEPTH, MAX_TRAVERSED_CALL_EDGES,
+    REPORT_SCHEMA, SemanticDiffInput, SemanticDiffReport, SemanticFinding, SnapshotSide,
+    TestEvidence, Verification, VerificationState, WitnessHop, WitnessPath,
 };
 
 pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, SemanticDiffError> {
@@ -61,14 +61,16 @@ pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, Seman
             ));
             continue;
         }
-        findings.push(dependency_finding(dependency));
+        findings.push(dependency_finding(&input, dependency)?);
     }
 
     for finding in &mut findings {
-        attach_impact(&input, finding)?;
+        limitations.extend(attach_impact(&input, finding)?);
         apply_verification(input.test_evidence.tests_for(&finding.subject), finding);
     }
     add_verification_findings(&mut findings);
+    let source_changes = input.source_deltas.to_vec();
+    let graph_delta = input.graph_delta.clone();
     finalize_report(
         Comparison {
             old_commit: input.old.commit,
@@ -77,6 +79,8 @@ pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, Seman
         },
         findings,
         limitations,
+        source_changes,
+        graph_delta,
     )
 }
 
@@ -153,7 +157,7 @@ fn collect_changed_entities(
                     })
                     .map(|(index, _)| index)
                     .collect::<Vec<_>>();
-                (matches.len() == 1).then_some(matches[0])
+                (matches.len() == 1).then(|| matches[0])
             };
             let matched = exact.or_else(named);
             let new = matched.map(|index| {
@@ -249,8 +253,8 @@ fn added_function_finding(
     snapshot: &EntitySnapshot,
     _hunks: &[compass_history::SourceHunk],
 ) -> SemanticFinding {
-    let public = snapshot.function.visibility == compass_ir::Visibility::Public;
-    base_finding(
+    let public = function_is_public_surface(snapshot);
+    let mut finding = base_finding(
         FindingType::StructuralChange,
         &snapshot.function.symbol_id,
         FindingOrigin::Direct,
@@ -270,15 +274,17 @@ fn added_function_finding(
         } else {
             "No reviewer action is required unless this internal addition is unexpected."
         },
-    )
+    );
+    finding.public_surface = public;
+    finding
 }
 
 fn removed_function_finding(
     snapshot: &EntitySnapshot,
     _hunks: &[compass_history::SourceHunk],
 ) -> SemanticFinding {
-    let public = snapshot.function.visibility == compass_ir::Visibility::Public;
-    base_finding(
+    let public = function_is_public_surface(snapshot);
+    let mut finding = base_finding(
         FindingType::ContractChange,
         &snapshot.function.symbol_id,
         FindingOrigin::Direct,
@@ -298,7 +304,9 @@ fn removed_function_finding(
         None,
         snapshot_evidence(snapshot, "contracts"),
         "Review affected callers and update or remove them.",
-    )
+    );
+    finding.public_surface = public;
+    finding
 }
 
 fn contract_finding(
@@ -361,7 +369,7 @@ fn contract_finding(
     if !complete && matches!(compatibility, Compatibility::ProvenBreak) {
         compatibility = Compatibility::PossibleBreak;
     }
-    Some(base_finding(
+    let mut finding = base_finding(
         FindingType::ContractChange,
         &new.function.symbol_id,
         FindingOrigin::Direct,
@@ -376,7 +384,9 @@ fn contract_finding(
             snapshot_evidence(new, "contracts"),
         ),
         "Update affected callers for the new callable contract.",
-    ))
+    );
+    finding.public_surface = function_is_public_surface(old) || function_is_public_surface(new);
+    Some(finding)
 }
 
 fn compare_parameters(
@@ -469,19 +479,46 @@ fn behavior_finding(
         ));
     }
     let changes = describe_summary_changes(old_summary, new_summary);
-    Some(base_finding(
+    let unresolved_delta = old_summary.unresolved_calls != new_summary.unresolved_calls;
+    let call_change = old_summary.resolved_calls != new_summary.resolved_calls || unresolved_delta;
+    let call_resolution_complete =
+        capability_complete(&old_summary.coverage, Capability::CallResolution)
+            && capability_complete(&new_summary.coverage, Capability::CallResolution);
+    let mut finding = base_finding(
         FindingType::BehaviorChange,
         &new.function.symbol_id,
         FindingOrigin::Direct,
         format!("{} behavior changed", new.function.name),
         changes.join("; "),
         Compatibility::Behavioral,
-        Confidence::Exact,
+        if !call_change {
+            Confidence::Exact
+        } else if unresolved_delta {
+            Confidence::Unknown
+        } else if call_resolution_complete {
+            Confidence::Exact
+        } else {
+            Confidence::Inferred
+        },
         Some(before),
         Some(after),
         snapshot_evidence(new, "behavior"),
         "Review the changed calls, effects, errors, and state access.",
-    ))
+    );
+    if call_change {
+        finding.completeness.insert(
+            "call_resolution".to_owned(),
+            if call_resolution_complete
+                && old_summary.unresolved_calls.is_empty()
+                && new_summary.unresolved_calls.is_empty()
+            {
+                Completeness::Complete
+            } else {
+                Completeness::Partial
+            },
+        );
+    }
+    Some(finding)
 }
 
 fn describe_summary_changes(old: &FunctionSummary, new: &FunctionSummary) -> Vec<String> {
@@ -501,7 +538,17 @@ fn describe_summary_changes(old: &FunctionSummary, new: &FunctionSummary) -> Vec
     describe_set("reads", &old.reads, &new.reads, &mut changes);
     describe_set("writes", &old.writes, &new.writes, &mut changes);
     describe_set("effects", &old.effects, &new.effects, &mut changes);
-    describe_set("errors", &old.errors, &new.errors, &mut changes);
+    let old_exceptions = old
+        .exceptions
+        .iter()
+        .map(compass_ir::ExceptionEffect::display_name)
+        .collect::<Vec<_>>();
+    let new_exceptions = new
+        .exceptions
+        .iter()
+        .map(compass_ir::ExceptionEffect::display_name)
+        .collect::<Vec<_>>();
+    describe_set("exceptions", &old_exceptions, &new_exceptions, &mut changes);
     changes
 }
 
@@ -524,12 +571,48 @@ fn describe_set(label: &str, old: &[String], new: &[String], output: &mut Vec<St
     }
 }
 
-fn dependency_finding(delta: &DependencyDelta) -> SemanticFinding {
+fn dependency_finding(
+    input: &SemanticDiffInput<'_>,
+    delta: &DependencyDelta,
+) -> Result<SemanticFinding, SemanticDiffError> {
     let direction = match delta.change {
         ChangeDirection::Added => "added",
         ChangeDirection::Removed => "removed",
     };
-    base_finding(
+    let side = if delta.change == ChangeDirection::Added {
+        SnapshotSide::New
+    } else {
+        SnapshotSide::Old
+    };
+    let mut evidence = delta.evidence.clone();
+    let source = input.snapshots.node(side, &delta.source)?;
+    let target = input.snapshots.node(side, &delta.target)?;
+    evidence.extend(node_evidence(
+        source.as_ref(),
+        &delta.source,
+        "dependencies",
+    ));
+    evidence.extend(node_evidence(
+        target.as_ref(),
+        &delta.target,
+        "dependencies",
+    ));
+    let source_file = source
+        .as_ref()
+        .and_then(|node| node.attributes.get("source_file"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let target_file = target
+        .as_ref()
+        .and_then(|node| node.attributes.get("source_file"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let routine = evidence
+        .iter()
+        .any(|item| is_test_source(&item.source_file))
+        || matches!(delta.relation.as_str(), "uses" | "references")
+        || (!source_file.is_empty() && source_file == target_file);
+    let mut finding = base_finding(
         FindingType::DependencyChange,
         &format!("{}:{}:{}", delta.source, delta.relation, delta.target),
         FindingOrigin::Direct,
@@ -549,9 +632,11 @@ fn dependency_finding(delta: &DependencyDelta) -> SemanticFinding {
         (delta.change == ChangeDirection::Added).then(
             || json!({"source": delta.source, "relation": delta.relation, "target": delta.target}),
         ),
-        delta.evidence.clone(),
+        evidence,
         "Confirm the new dependency direction and affected module boundary are intentional.",
-    )
+    );
+    finding.routine = routine;
+    Ok(finding)
 }
 
 fn classify_graph_fallbacks(
@@ -570,6 +655,18 @@ fn classify_graph_fallbacks(
         }
         let old = input.snapshots.node(SnapshotSide::Old, node_id)?;
         let new = input.snapshots.node(SnapshotSide::New, node_id)?;
+        match (&old, &new) {
+            (None, Some(node)) => {
+                findings.push(added_graph_node_finding(input, node, node_id));
+                continue;
+            }
+            (Some(node), None) => {
+                findings.push(removed_graph_node_finding(input, node, node_id));
+                continue;
+            }
+            (None, None) => continue,
+            (Some(_), Some(_)) => {}
+        }
         let old_signature = old
             .as_ref()
             .and_then(|node| digest_attribute(node, "signature_hash"));
@@ -615,10 +712,185 @@ fn classify_graph_fallbacks(
     Ok(())
 }
 
+fn added_graph_node_finding(
+    input: &SemanticDiffInput<'_>,
+    node: &compass_model::NodeRecord,
+    node_id: &str,
+) -> SemanticFinding {
+    let label = graph_label(node, node_id);
+    let kind = graph_kind(node);
+    let public = graph_public_surface_candidate(input, node, node_id);
+    let mut finding = base_finding(
+        FindingType::StructuralChange,
+        node_id,
+        FindingOrigin::Direct,
+        if public {
+            format!("Public-surface {kind} {label} was added")
+        } else {
+            format!("{kind} {label} was added")
+        },
+        if public {
+            "A new callable or type is available from the changed source surface."
+        } else {
+            "A new internal graph entity was added."
+        },
+        Compatibility::Compatible,
+        if public {
+            Confidence::Probable
+        } else {
+            Confidence::Exact
+        },
+        None,
+        Some(json!({"id": node_id, "label": label, "kind": kind})),
+        node_evidence(Some(node), node_id, "contracts"),
+        if public {
+            "Confirm the new public surface and its documentation are intentional."
+        } else {
+            "No reviewer action is required unless this addition is unexpected."
+        },
+    );
+    finding.public_surface = public;
+    finding
+}
+
+fn removed_graph_node_finding(
+    input: &SemanticDiffInput<'_>,
+    node: &compass_model::NodeRecord,
+    node_id: &str,
+) -> SemanticFinding {
+    let label = graph_label(node, node_id);
+    let kind = graph_kind(node);
+    let public = graph_public_surface_candidate(input, node, node_id);
+    let mut finding = base_finding(
+        if public {
+            FindingType::ContractChange
+        } else {
+            FindingType::StructuralChange
+        },
+        node_id,
+        FindingOrigin::Direct,
+        if public {
+            format!("Public-surface {kind} {label} was removed")
+        } else {
+            format!("{kind} {label} was removed")
+        },
+        if public {
+            "A callable or type disappeared from the source surface."
+        } else {
+            "An internal graph entity was removed."
+        },
+        if public {
+            Compatibility::PossibleBreak
+        } else {
+            Compatibility::Compatible
+        },
+        if public {
+            Confidence::Probable
+        } else {
+            Confidence::Exact
+        },
+        Some(json!({"id": node_id, "label": label, "kind": kind})),
+        None,
+        node_evidence(Some(node), node_id, "contracts"),
+        if public {
+            "Review external callers before accepting the removed surface."
+        } else {
+            "No reviewer action is required unless this removal is unexpected."
+        },
+    );
+    finding.public_surface = public;
+    finding
+}
+
+fn graph_label<'a>(node: &'a compass_model::NodeRecord, fallback: &'a str) -> &'a str {
+    node.attributes
+        .get("label")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+}
+
+fn graph_kind(node: &compass_model::NodeRecord) -> &str {
+    node.attributes
+        .get("symbol_kind")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("symbol")
+}
+
+fn graph_public_surface_candidate(
+    input: &SemanticDiffInput<'_>,
+    node: &compass_model::NodeRecord,
+    node_id: &str,
+) -> bool {
+    let kind = graph_kind(node);
+    if !matches!(kind, "class" | "function" | "method" | "interface" | "type") {
+        return false;
+    }
+    let label = graph_label(node, "");
+    if label.is_empty() || label.starts_with('_') {
+        return false;
+    }
+    let source = node
+        .attributes
+        .get("source_file")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let non_test = !source.starts_with("tests/")
+        && !source.contains("/tests/")
+        && !source
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.starts_with("test_") || name.ends_with("_test.py"));
+    if !non_test {
+        return false;
+    }
+    !is_internal_source(&source)
+        || input.dependency_deltas.iter().any(|dependency| {
+            dependency.target == node_id
+                && matches!(dependency.relation.as_str(), "imports" | "imports_from")
+                && is_public_facade_identity(&dependency.source)
+        })
+}
+
+fn function_is_public_surface(snapshot: &EntitySnapshot) -> bool {
+    if snapshot.function.visibility != compass_ir::Visibility::Public
+        || snapshot.function.is_test
+        || is_test_source(&snapshot.source_file)
+        || is_test_source(&snapshot.function.anchor.source_file)
+        || is_internal_source(&snapshot.source_file)
+        || is_internal_source(&snapshot.function.anchor.source_file)
+    {
+        return false;
+    }
+    snapshot
+        .function
+        .name
+        .split(['.', ':', '#'])
+        .filter(|component| !component.is_empty())
+        .all(|component| !component.starts_with('_'))
+}
+
+fn is_internal_source(source: &str) -> bool {
+    source
+        .replace('\\', "/")
+        .split('/')
+        .any(|component| component.starts_with('_') && component != "__init__.py")
+}
+
+fn is_public_facade_identity(identity: &str) -> bool {
+    let identity = identity.to_ascii_lowercase();
+    ["_api", "__init__", "_lib", "_prelude"]
+        .iter()
+        .any(|suffix| identity.ends_with(suffix))
+}
+
 fn attach_impact(
     input: &SemanticDiffInput<'_>,
     finding: &mut SemanticFinding,
-) -> Result<(), SemanticDiffError> {
+) -> Result<Vec<String>, SemanticDiffError> {
     if !matches!(
         finding.compatibility,
         Compatibility::ProvenBreak
@@ -627,8 +899,9 @@ fn attach_impact(
             | Compatibility::Indeterminate
     ) || finding.finding_type == FindingType::DependencyChange
     {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    let mut limitations = Vec::new();
     let side = if finding.after.is_some() {
         SnapshotSide::New
     } else {
@@ -641,20 +914,21 @@ fn attach_impact(
         let callers = input.snapshots.reverse_callers(side, &symbol)?;
         if distance >= MAX_IMPACT_DEPTH {
             if !callers.is_empty() {
-                return Err(SemanticDiffError::LimitExceeded {
-                    resource: "impact_depth",
-                    limit: usize::from(MAX_IMPACT_DEPTH),
-                });
+                limitations.push(format!(
+                    "affected-consumer mapping for {} was truncated at depth {}",
+                    finding.subject, MAX_IMPACT_DEPTH
+                ));
             }
             continue;
         }
         for caller in callers {
             traversed += 1;
             if traversed > MAX_TRAVERSED_CALL_EDGES {
-                return Err(SemanticDiffError::LimitExceeded {
-                    resource: "impact_edges",
-                    limit: MAX_TRAVERSED_CALL_EDGES,
-                });
+                limitations.push(format!(
+                    "affected-consumer mapping for {} was truncated after {} call edges",
+                    finding.subject, MAX_TRAVERSED_CALL_EDGES
+                ));
+                return Ok(limitations);
             }
             if !visited.insert(caller.clone()) {
                 continue;
@@ -688,7 +962,7 @@ fn attach_impact(
             queue.push_back((caller, next_distance, witness));
         }
     }
-    Ok(())
+    Ok(limitations)
 }
 
 fn apply_verification(evidence: TestEvidence, finding: &mut SemanticFinding) {
@@ -750,6 +1024,8 @@ fn finalize_report(
     comparison: Comparison,
     mut findings: Vec<SemanticFinding>,
     mut limitations: Vec<String>,
+    source_changes: Vec<compass_history::SourceFileDelta>,
+    graph_delta: crate::GraphDelta,
 ) -> Result<SemanticDiffReport, SemanticDiffError> {
     if findings.len() > MAX_FINDINGS {
         return Err(SemanticDiffError::LimitExceeded {
@@ -796,24 +1072,59 @@ fn finalize_report(
             .then_with(|| left.subject.as_bytes().cmp(right.subject.as_bytes()))
             .then_with(|| left.id.as_bytes().cmp(right.id.as_bytes()))
     });
-    let routine_ids = findings
+    let feature_groups = build_feature_groups(&findings)?;
+    let routine_symbol_ids = findings
         .iter()
         .filter(|finding| {
             finding.finding_type == FindingType::StructuralChange
                 && finding.compatibility == Compatibility::Compatible
+                && !finding.public_surface
                 && finding.affected_consumers.is_empty()
         })
         .map(|finding| finding.id.clone())
         .collect::<Vec<_>>();
-    let collapsed_groups = if routine_ids.is_empty() {
-        Vec::new()
-    } else {
-        vec![CollapsedGroup {
+    let routine_test_ids = findings
+        .iter()
+        .filter(|finding| {
+            finding.routine
+                && finding
+                    .evidence
+                    .iter()
+                    .any(|evidence| is_test_source(&evidence.source_file))
+        })
+        .map(|finding| finding.id.clone())
+        .collect::<Vec<_>>();
+    let routine_dependency_ids = findings
+        .iter()
+        .filter(|finding| {
+            finding.routine
+                && finding.finding_type == FindingType::DependencyChange
+                && !routine_test_ids.contains(&finding.id)
+        })
+        .map(|finding| finding.id.clone())
+        .collect::<Vec<_>>();
+    let mut collapsed_groups = Vec::new();
+    if !routine_symbol_ids.is_empty() {
+        collapsed_groups.push(CollapsedGroup {
             label: "routine symbol churn".to_owned(),
-            count: routine_ids.len(),
-            finding_ids: routine_ids,
-        }]
-    };
+            count: routine_symbol_ids.len(),
+            finding_ids: routine_symbol_ids,
+        });
+    }
+    if !routine_dependency_ids.is_empty() {
+        collapsed_groups.push(CollapsedGroup {
+            label: "internal dependency churn".to_owned(),
+            count: routine_dependency_ids.len(),
+            finding_ids: routine_dependency_ids,
+        });
+    }
+    if !routine_test_ids.is_empty() {
+        collapsed_groups.push(CollapsedGroup {
+            label: "test dependency churn".to_owned(),
+            count: routine_test_ids.len(),
+            finding_ids: routine_test_ids,
+        });
+    }
     limitations.sort();
     limitations.dedup();
     let test_mapping = findings
@@ -827,14 +1138,29 @@ fn finalize_report(
         })
         .reduce(least_complete)
         .unwrap_or(Completeness::Unavailable);
+    let call_resolution = findings
+        .iter()
+        .map(|finding| {
+            finding
+                .completeness
+                .get("call_resolution")
+                .copied()
+                .unwrap_or(Completeness::Unavailable)
+        })
+        .reduce(least_complete)
+        .unwrap_or(Completeness::Unavailable);
     Ok(SemanticDiffReport {
         schema: REPORT_SCHEMA.to_owned(),
         comparison,
         findings,
+        feature_groups,
         collapsed_groups,
+        source_changes,
+        graph_delta,
         completeness: BTreeMap::from([
             ("identity".to_owned(), Completeness::Complete),
             ("source_delta".to_owned(), Completeness::Complete),
+            ("call_resolution".to_owned(), call_resolution),
             ("test_mapping".to_owned(), test_mapping),
         ]),
         limitations,
@@ -875,6 +1201,137 @@ pub fn finding_id(
     Ok(format!("sd1-{}", hex(&digest[..12])))
 }
 
+fn build_feature_groups(
+    findings: &[SemanticFinding],
+) -> Result<Vec<FeatureGroup>, SemanticDiffError> {
+    let mut parent = (0..findings.len()).collect::<Vec<_>>();
+    let mut owner = BTreeMap::<String, usize>::new();
+    for (index, finding) in findings.iter().enumerate() {
+        let files = finding
+            .evidence
+            .iter()
+            .map(|evidence| evidence.source_file.replace('\\', "/"))
+            .filter(|path| !path.is_empty())
+            .collect::<BTreeSet<_>>();
+        for file in files {
+            if let Some(other) = owner.get(&file).copied() {
+                union_groups(&mut parent, index, other);
+            } else {
+                owner.insert(file, index);
+            }
+        }
+    }
+    let mut groups = BTreeMap::<usize, Vec<&SemanticFinding>>::new();
+    for (index, finding) in findings.iter().enumerate() {
+        let root = find_group(&mut parent, index);
+        groups.entry(root).or_default().push(finding);
+    }
+    let mut output = Vec::new();
+    for mut members in groups.into_values() {
+        members.sort_by(|left, right| {
+            Reverse(left.review_priority)
+                .cmp(&Reverse(right.review_priority))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let finding_ids = members
+            .iter()
+            .map(|finding| finding.id.clone())
+            .collect::<Vec<_>>();
+        let source_files = members
+            .iter()
+            .flat_map(|finding| &finding.evidence)
+            .map(|evidence| evidence.source_file.replace('\\', "/"))
+            .filter(|path| !path.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let public_surface_changes = members
+            .iter()
+            .filter(|finding| finding.public_surface)
+            .count();
+        let behavior_changes = members
+            .iter()
+            .filter(|finding| finding.finding_type == FindingType::BehaviorChange)
+            .count();
+        let dependency_changes = members
+            .iter()
+            .filter(|finding| finding.finding_type == FindingType::DependencyChange)
+            .count();
+        let test_changes = members
+            .iter()
+            .filter(|finding| {
+                finding
+                    .evidence
+                    .iter()
+                    .any(|evidence| is_test_source(&evidence.source_file))
+            })
+            .count();
+        let anchor = members
+            .iter()
+            .find(|finding| finding.public_surface)
+            .copied()
+            .unwrap_or(members[0]);
+        let headline = if members.len() == 1 {
+            anchor.headline.clone()
+        } else {
+            format!("{} and related changes", anchor.headline)
+        };
+        let summary = format!(
+            "{public_surface_changes} public-surface, {behavior_changes} behavior, \
+             {dependency_changes} dependency, and {test_changes} test-related changes across {} files.",
+            source_files.len()
+        );
+        let digest = Sha256::digest(serde_json::to_vec(&finding_ids)?);
+        output.push(FeatureGroup {
+            id: format!("sg1-{}", hex(&digest[..12])),
+            headline,
+            summary,
+            finding_ids,
+            source_files,
+            public_surface_changes,
+            behavior_changes,
+            dependency_changes,
+            test_changes,
+        });
+    }
+    output.sort_by(|left, right| {
+        Reverse(left.public_surface_changes)
+            .cmp(&Reverse(right.public_surface_changes))
+            .then_with(|| Reverse(left.behavior_changes).cmp(&Reverse(right.behavior_changes)))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(output)
+}
+
+fn find_group(parent: &mut [usize], index: usize) -> usize {
+    if parent[index] != index {
+        parent[index] = find_group(parent, parent[index]);
+    }
+    parent[index]
+}
+
+fn union_groups(parent: &mut [usize], left: usize, right: usize) {
+    let left = find_group(parent, left);
+    let right = find_group(parent, right);
+    if left != right {
+        let (first, second) = if left < right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        parent[second] = first;
+    }
+}
+
+fn is_test_source(source: &str) -> bool {
+    let path = source.replace('\\', "/").to_ascii_lowercase();
+    let name = path.rsplit('/').next().unwrap_or(&path);
+    path.starts_with("tests/")
+        || path.contains("/tests/")
+        || name.starts_with("test_")
+        || name.ends_with("_test.py")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn base_finding(
     finding_type: FindingType,
@@ -899,6 +1356,8 @@ fn base_finding(
         compatibility,
         confidence,
         review_priority: 0,
+        public_surface: false,
+        routine: false,
         before,
         after,
         affected_consumers: Vec::new(),
@@ -972,15 +1431,16 @@ fn summary_value(summary: &FunctionSummary) -> Value {
         "reads": summary.reads,
         "writes": summary.writes,
         "effects": summary.effects,
-        "errors": summary.errors,
+        "exceptions": summary.exceptions,
     })
 }
 
 fn contracts_complete(coverage: &Coverage) -> bool {
-    matches!(
-        coverage.get(&Capability::Contracts),
-        Some(CoverageState::Complete)
-    )
+    capability_complete(coverage, Capability::Contracts)
+}
+
+fn capability_complete(coverage: &Coverage, capability: Capability) -> bool {
+    matches!(coverage.get(&capability), Some(CoverageState::Complete))
 }
 
 fn visibility_rank(visibility: compass_ir::Visibility) -> u8 {

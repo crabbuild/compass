@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
 
 use compass_cli::{Frontend, run};
 
@@ -37,39 +36,6 @@ fn native_update_emits_and_reports_program_analysis() -> Result<(), Box<dyn Erro
     assert!(warm.stdout.contains(
         "Program analysis: 0 syntax analyzed, 1 syntax reused, 0 artifacts loaded, 0 artifacts reused, 0 artifact documents analyzed, 0 artifact documents reused, 1 modules, 2 summaries, 0 conflicts"
     ));
-    Ok(())
-}
-
-#[test]
-fn graphify_rejects_program_artifacts_and_never_enables_program_output()
--> Result<(), Box<dyn Error>> {
-    let directory = tempfile::tempdir()?;
-    fs::write(directory.path().join("lib.rs"), "pub fn visible() {}\n")?;
-    let root = directory.path().to_string_lossy();
-
-    let rejected = run(
-        Frontend::Graphify,
-        arguments([
-            "extract",
-            root.as_ref(),
-            "--code-only",
-            "--program-artifact=index.scip",
-        ]),
-    );
-    assert_ne!(rejected.code, 0);
-    assert!(
-        rejected
-            .stderr
-            .contains("--program-artifact is unsupported in Graphify compatibility mode")
-    );
-
-    let built = run(
-        Frontend::Graphify,
-        arguments(["extract", root.as_ref(), "--code-only", "--no-cluster"]),
-    );
-    assert_eq!(built.code, 0, "{}", built.stderr);
-    assert!(!built.stdout.contains("Program analysis:"));
-    assert!(!contains_program_json(directory.path()));
     Ok(())
 }
 
@@ -288,7 +254,7 @@ fn program_commands_inspect_explain_and_query_canonical_ir() -> Result<(), Box<d
 }
 
 #[test]
-fn program_commands_reject_noncanonical_and_graphify_inputs() -> Result<(), Box<dyn Error>> {
+fn program_commands_reject_noncanonical_input() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("program.json");
     fs::write(&path, "{}")?;
@@ -300,16 +266,5 @@ fn program_commands_reject_noncanonical_and_graphify_inputs() -> Result<(), Box<
     assert_eq!(invalid.code, 3);
     assert!(invalid.stderr.contains("invalid Program IR"));
 
-    let graphify = run(
-        Frontend::Graphify,
-        arguments(["program", "summary", "--program", path.as_ref()]),
-    );
-    assert_ne!(graphify.code, 0);
     Ok(())
-}
-
-fn contains_program_json(root: &Path) -> bool {
-    ["compass-out", "graphify-out"]
-        .into_iter()
-        .any(|output| root.join(output).join("program.json").exists())
 }

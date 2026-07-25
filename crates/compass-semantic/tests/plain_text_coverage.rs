@@ -112,8 +112,8 @@ fn builtin_openai_and_anthropic_plain_paths_normalize_provider_envelopes()
     let openai_environment = HashMap::from([
         ("OPENAI_API_KEY".to_owned(), "openai-key".to_owned()),
         ("OPENAI_BASE_URL".to_owned(), format!("{openai_url}/v1")),
-        ("GRAPHIFY_DISABLE_THINKING".to_owned(), "yes".to_owned()),
-        ("GRAPHIFY_API_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_DISABLE_THINKING".to_owned(), "yes".to_owned()),
+        ("COMPASS_API_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let openai = resolve_builtin_backend("openai", &openai_environment, Some("gpt-fixture"))?;
     let response = execute_plain_text_backend(
@@ -138,7 +138,7 @@ fn builtin_openai_and_anthropic_plain_paths_normalize_provider_envelopes()
     let claude_environment = HashMap::from([
         ("ANTHROPIC_API_KEY".to_owned(), "claude-key".to_owned()),
         ("ANTHROPIC_BASE_URL".to_owned(), claude_url),
-        ("GRAPHIFY_API_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_API_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let claude = resolve_builtin_backend("claude", &claude_environment, None)?;
     let response = execute_plain_text_backend(
@@ -235,7 +235,7 @@ fn azure_request_and_bounded_claude_cli_failure_cover_builtin_dispatch_boundarie
             "AZURE_OPENAI_API_VERSION".to_owned(),
             " 2025-01-01 ".to_owned(),
         ),
-        ("GRAPHIFY_API_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_API_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let azure = resolve_builtin_backend("azure", &azure_environment, Some("deployment-name"))?;
     let response = execute_plain_text_backend(
@@ -253,7 +253,7 @@ fn azure_request_and_bounded_claude_cli_failure_cover_builtin_dispatch_boundarie
     assert!(request.contains("api-version=2025-01-01"));
     assert!(request.to_ascii_lowercase().contains("api-key: azure-key"));
 
-    let cli_environment = HashMap::from([("GRAPHIFY_API_TIMEOUT".to_owned(), "0.001".to_owned())]);
+    let cli_environment = HashMap::from([("COMPASS_API_TIMEOUT".to_owned(), "0.001".to_owned())]);
     let cli = resolve_builtin_backend("claude-cli", &cli_environment, Some("fixture-model"))?;
     let cli_result = execute_plain_text_backend(
         &cli,
@@ -289,7 +289,7 @@ fn azure_plain_text_uses_deployment_route_trimmed_version_and_api_key_header()
             "AZURE_OPENAI_API_VERSION".to_owned(),
             " 2026-01-01 ".to_owned(),
         ),
-        ("GRAPHIFY_API_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_API_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let backend = resolve_builtin_backend("azure", &environment, None)?;
     let response = execute_plain_text_backend(

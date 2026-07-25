@@ -22,7 +22,6 @@ pub struct WatchOptions {
     pub debounce: Duration,
     pub poll_interval: Duration,
     pub force_polling: bool,
-    pub graphify_compatibility: bool,
     pub adaptive: bool,
     pub reconciliation_interval: Duration,
 }
@@ -35,7 +34,6 @@ impl WatchOptions {
             debounce: Duration::from_millis(150),
             poll_interval: Duration::from_millis(500),
             force_polling: false,
-            graphify_compatibility: false,
             adaptive: true,
             reconciliation_interval: DEFAULT_RECONCILIATION_INTERVAL,
         }
@@ -132,7 +130,7 @@ pub fn watch_local_graph(
     stop: &AtomicBool,
     emit: impl FnMut(WatchStatus),
 ) -> Result<(), WatchError> {
-    if options.adaptive && !options.graphify_compatibility {
+    if options.adaptive {
         watch_adaptive(options, stop, emit)
     } else {
         watch_legacy(options, stop, emit)
@@ -581,9 +579,7 @@ fn run_adaptive_work(
         AdaptiveWork::Changes(paths) => {
             let deterministic = paths
                 .iter()
-                .filter(|path| {
-                    is_deterministic(path, options.graphify_compatibility, program_paths)
-                })
+                .filter(|path| is_deterministic(path, program_paths))
                 .count();
             let semantic = paths.len().saturating_sub(deterministic);
             emit(WatchStatus::Batch {
@@ -783,7 +779,7 @@ fn process_batch(
 ) -> Result<(), WatchError> {
     let deterministic = paths
         .iter()
-        .filter(|path| is_deterministic(path, options.graphify_compatibility, program_paths))
+        .filter(|path| is_deterministic(path, program_paths))
         .count();
     let semantic = paths.len().saturating_sub(deterministic);
     emit(WatchStatus::Batch {
@@ -807,17 +803,11 @@ fn process_batch(
     Ok(())
 }
 
-fn is_deterministic(
-    path: &Path,
-    graphify_compatibility: bool,
-    program_paths: &BTreeSet<PathBuf>,
-) -> bool {
+fn is_deterministic(path: &Path, program_paths: &BTreeSet<PathBuf>) -> bool {
     program_paths.contains(path)
         || classify_file(path).is_some_and(|kind| {
             kind == FileType::Code
-                || (!graphify_compatibility
-                    && kind == FileType::Document
-                    && Registry::resolve(path).is_some())
+                || (kind == FileType::Document && Registry::resolve(path).is_some())
         })
 }
 

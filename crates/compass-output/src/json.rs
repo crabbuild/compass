@@ -174,7 +174,7 @@ fn enforce_shrink_guard(path: &Path, new_count: usize, force: bool) -> Result<()
 }
 
 fn graph_size_cap() -> u64 {
-    let Ok(raw) = std::env::var("GRAPHIFY_MAX_GRAPH_BYTES") else {
+    let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
         return DEFAULT_GRAPH_SIZE_CAP;
     };
     let text = raw.trim().to_uppercase();

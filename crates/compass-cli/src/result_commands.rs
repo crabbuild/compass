@@ -309,7 +309,7 @@ fn save_query_result(
         format!("type: \"{}\"", yaml_string(query_type)),
         format!("date: \"{}\"", iso_timestamp(now)),
         format!("question: \"{}\"", yaml_string(question)),
-        "contributor: \"graphify\"".to_owned(),
+        "contributor: \"compass\"".to_owned(),
     ];
     if let Some(outcome) = outcome.filter(|value| !value.is_empty()) {
         frontmatter.push(format!("outcome: \"{}\"", yaml_string(outcome)));
@@ -413,21 +413,15 @@ fn yaml_string(value: &str) -> String {
     output
 }
 
-pub(super) fn save_result_help(frontend: Frontend) -> String {
-    let prefix = match frontend {
-        Frontend::Compass => "compass save-result",
-        Frontend::Graphify => "graphify save-result",
-    };
+pub(super) fn save_result_help(_frontend: Frontend) -> String {
+    let prefix = "compass save-result";
     format!(
         "Usage: {prefix} --question Q (--answer A | --answer-file PATH) [--type T] [--nodes N1 N2 ...] [--outcome useful|dead_end|corrected] [--correction TEXT] [--memory-dir DIR]"
     )
 }
 
-pub(super) fn reflect_help(frontend: Frontend) -> String {
-    let prefix = match frontend {
-        Frontend::Compass => "compass reflect",
-        Frontend::Graphify => "graphify reflect",
-    };
+pub(super) fn reflect_help(_frontend: Frontend) -> String {
+    let prefix = "compass reflect";
     format!(
         "Usage: {prefix} [--memory-dir DIR] [--out PATH] [--graph PATH] [--analysis PATH] [--labels PATH] [--half-life-days N] [--min-corroboration N] [--if-stale]"
     )
@@ -462,7 +456,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(path)?,
-            "---\ntype: \"explain\"\ndate: \"2026-06-01T12:34:56.123456+00:00\"\nquestion: \"path is C:\\\\Users and a \\\"quote\\\"\"\ncontributor: \"graphify\"\noutcome: \"corrected\"\ncorrection: \"line1\\nline2\"\nsource_nodes: [\"Node\\\"With\\\\Quote\"]\n---\n\n# Q: path is C:\\Users and a \"quote\"\n\n## Answer\n\nline one\nline two\n\n## Outcome\n\n- Signal: corrected\n- Correction: line1\nline2\n\n## Source Nodes\n\n- Node\"With\\Quote"
+            "---\ntype: \"explain\"\ndate: \"2026-06-01T12:34:56.123456+00:00\"\nquestion: \"path is C:\\\\Users and a \\\"quote\\\"\"\ncontributor: \"compass\"\noutcome: \"corrected\"\ncorrection: \"line1\\nline2\"\nsource_nodes: [\"Node\\\"With\\\\Quote\"]\n---\n\n# Q: path is C:\\Users and a \"quote\"\n\n## Answer\n\nline one\nline two\n\n## Outcome\n\n- Signal: corrected\n- Correction: line1\nline2\n\n## Source Nodes\n\n- Node\"With\\Quote"
         );
         Ok(())
     }

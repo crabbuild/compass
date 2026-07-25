@@ -140,6 +140,7 @@ pub(super) fn command_cache_check(frontend: Frontend, args: &[String]) -> Outcom
         stderr,
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -177,7 +178,7 @@ pub(super) fn command_merge_chunks(frontend: Frontend, args: &[String]) -> Outco
             Ok(fragment) => fragment,
             Err(error) => {
                 warnings.push(format!(
-                    "[graphify merge-chunks] warning: skipping invalid chunk {}: {error}",
+                    "[compass merge-chunks] warning: skipping invalid chunk {}: {error}",
                     path.display()
                 ));
                 continue;
@@ -201,7 +202,7 @@ pub(super) fn command_merge_chunks(frontend: Frontend, args: &[String]) -> Outco
     }
     if valid == 0 {
         warnings.push(format!(
-            "[graphify merge-chunks] error: no valid chunks to merge; refusing to write {}",
+            "[compass merge-chunks] error: no valid chunks to merge; refusing to write {}",
             output.display()
         ));
         return Outcome {
@@ -210,6 +211,7 @@ pub(super) fn command_merge_chunks(frontend: Frontend, args: &[String]) -> Outco
             stderr: warnings.join("\n"),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         };
     }
     let merged = json!({
@@ -239,6 +241,7 @@ pub(super) fn command_merge_chunks(frontend: Frontend, args: &[String]) -> Outco
         stderr: warnings.join("\n"),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -478,11 +481,8 @@ pub(super) fn merge_semantic_help(frontend: Frontend) -> String {
     )
 }
 
-fn prefix(frontend: Frontend) -> &'static str {
-    match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    }
+fn prefix(_frontend: Frontend) -> &'static str {
+    "compass"
 }
 
 #[cfg(test)]
@@ -514,7 +514,7 @@ mod tests {
             }))?,
         )?;
         let outcome = command_merge_chunks(
-            Frontend::Graphify,
+            Frontend::Compass,
             &[
                 valid.to_string_lossy().into_owned(),
                 invalid.to_string_lossy().into_owned(),
@@ -538,7 +538,7 @@ mod tests {
         fs::write(&invalid, br#"{"nodes":"not-an-array","edges":[]}"#)?;
         fs::write(&output, br#"{"previous":true}"#)?;
         let outcome = command_merge_chunks(
-            Frontend::Graphify,
+            Frontend::Compass,
             &[
                 invalid.to_string_lossy().into_owned(),
                 "--out".to_owned(),

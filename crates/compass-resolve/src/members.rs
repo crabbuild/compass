@@ -62,7 +62,7 @@ pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut
     resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut merged.edges);
 }
 
-/// Preserve Graphify's resolver-registry ordering for strict external parity.
+/// Preserve Compass's resolver-registry ordering for strict external parity.
 ///
 /// Once a corpus contains Swift type facts, the Python implementation's Swift
 /// pass sees the collection-wide raw-call list. Consequently, an explicitly

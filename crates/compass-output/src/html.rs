@@ -196,7 +196,6 @@ pub fn graph_community_view_model_document(
         nodes,
         links,
         extras: document.extras.clone(),
-        used_legacy_edges_key: document.used_legacy_edges_key,
     };
     let detail_communities = BTreeMap::from([(
         community,
@@ -740,7 +739,6 @@ fn aggregate(
             nodes,
             links,
             extras: BTreeMap::new(),
-            used_legacy_edges_key: false,
         },
         meta_communities,
         members,
@@ -867,7 +865,7 @@ fn node_color(background: &str, border: &str) -> Value {
 }
 
 fn viz_node_limit() -> isize {
-    std::env::var("GRAPHIFY_VIZ_NODE_LIMIT")
+    std::env::var("COMPASS_VIZ_NODE_LIMIT")
         .ok()
         .filter(|raw| !raw.trim().is_empty())
         .and_then(|raw| raw.trim().parse().ok())

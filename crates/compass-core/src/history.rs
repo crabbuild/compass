@@ -374,8 +374,8 @@ fn collect_configuration_files(
             let is_configuration = matches!(
                 name,
                 Some(
-                    ".graphify.toml"
-                        | "graphify.toml"
+                    ".compass.toml"
+                        | "compass.toml"
                         | "Cargo.toml"
                         | "pyproject.toml"
                         | "package.json"
@@ -383,7 +383,7 @@ fn collect_configuration_files(
                 )
             );
             let is_applied_ignore =
-                include_ignore_files && matches!(name, Some(".gitignore" | ".graphifyignore"));
+                include_ignore_files && matches!(name, Some(".gitignore" | ".compassignore"));
             if is_configuration || is_applied_ignore {
                 files.push(path);
             }

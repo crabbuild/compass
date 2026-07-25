@@ -23,7 +23,7 @@ fn viewer_json_exposes_the_same_versioned_graph_model() -> Result<(), Box<dyn Er
             ]
         }))?,
     )?;
-    let output = support::compat_command()
+    let output = support::compass_command()
         .args([
             "export",
             "viewer-json",
@@ -71,7 +71,7 @@ fn canonical_json_exports_one_complete_community() -> Result<(), Box<dyn Error>>
             ]
         }))?,
     )?;
-    let output = support::compat_command()
+    let output = support::compass_command()
         .args([
             "export",
             "json",
@@ -96,7 +96,7 @@ fn canonical_json_exports_one_complete_community() -> Result<(), Box<dyn Error>>
     assert_eq!(value["hyperedges"].as_array().map(Vec::len), Some(1));
     assert_eq!(value["hyperedges"][0]["id"], "inside");
 
-    let unsupported = support::compat_command()
+    let unsupported = support::compass_command()
         .args([
             "export",
             "html",
@@ -131,7 +131,7 @@ fn callflow_json_exposes_the_shared_architecture_model() -> Result<(), Box<dyn E
             ]
         }))?,
     )?;
-    let output = support::compat_command()
+    let output = support::compass_command()
         .args([
             "export",
             "callflow-json",

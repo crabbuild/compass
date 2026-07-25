@@ -3,9 +3,12 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{CommitId, HistoryError, TimelineCommit};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SourceFileStatus {
     Added,
     Modified,
@@ -13,7 +16,7 @@ pub enum SourceFileStatus {
     Renamed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SourceHunk {
     pub old_start: u32,
     pub old_lines: u32,
@@ -21,12 +24,13 @@ pub struct SourceHunk {
     pub new_lines: u32,
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SourceFileDelta {
     pub old_path: Option<String>,
     pub new_path: Option<String>,
     pub status: SourceFileStatus,
     pub hunks: Vec<SourceHunk>,
+    pub patch: String,
 }
 
 /// Canonical paths that identify a Git repository and its shared common directory.
@@ -428,6 +432,7 @@ fn parse_name_status(bytes: &[u8]) -> Result<Vec<SourceFileDelta>, HistoryError>
                         _ => SourceFileStatus::Modified,
                     },
                     hunks: Vec::new(),
+                    patch: String::new(),
                 }
             }
             b'R' => {
@@ -443,6 +448,7 @@ fn parse_name_status(bytes: &[u8]) -> Result<Vec<SourceFileDelta>, HistoryError>
                     new_path: Some(path(new)?),
                     status: SourceFileStatus::Renamed,
                     hunks: Vec::new(),
+                    patch: String::new(),
                 }
             }
             b'C' => {
@@ -495,7 +501,12 @@ fn attach_hunks(bytes: &[u8], deltas: &mut [SourceFileDelta]) -> Result<(), Hist
             }
             file_index = Some(files_seen);
             files_seen += 1;
-        } else if line.starts_with("@@ ") {
+        }
+        if let Some(index) = file_index {
+            deltas[index].patch.push_str(line);
+            deltas[index].patch.push('\n');
+        }
+        if line.starts_with("@@ ") {
             let index = file_index
                 .ok_or_else(|| HistoryError::Git("source hunk has no file".to_owned()))?;
             deltas[index].hunks.push(parse_hunk_header(line)?);

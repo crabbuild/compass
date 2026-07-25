@@ -25,7 +25,7 @@ use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use serde_json::{Map, Value};
 
 /// Merge resolved extraction chunks, apply native entity deduplication, and build
-/// a node-link graph. This is the deterministic counterpart of `graphify.build`.
+/// a node-link graph. This is the deterministic counterpart of `compass.build`.
 pub fn build(
     extractions: &[Extraction],
     directed: bool,
@@ -193,7 +193,6 @@ pub fn build_from_extraction(
         nodes,
         links,
         extras: BTreeMap::new(),
-        used_legacy_edges_key: false,
     }
 }
 

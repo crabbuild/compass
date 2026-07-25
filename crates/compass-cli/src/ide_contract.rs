@@ -147,5 +147,6 @@ pub fn progress_outcome(operation: &str, outcome: Outcome) -> Outcome {
         stderr: human_output,
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }

@@ -119,7 +119,7 @@ where
             "warning: graph.json exceeds cap ({size} bytes); falling back to community-aggregation view (node_limit=5000)"
         )
     });
-    let mut document = GraphDocument::load_for_recluster_compatibility(&options.graph_path)?;
+    let mut document = GraphDocument::load_for_recluster(&options.graph_path)?;
     normalize_recluster_document(&mut document);
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);

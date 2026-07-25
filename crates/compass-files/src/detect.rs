@@ -76,7 +76,7 @@ const SKIP_DIRS: &[&str] = &[
     ".nox",
     ".eggs",
     "compass-out",
-    "graphify-out",
+    "compass-out",
     "coverage",
     "lcov-report",
     "visual-tests",
@@ -94,7 +94,7 @@ const SKIP_DIRS: &[&str] = &[
     ".svelte-kit",
     ".terraform",
     ".serverless",
-    ".graphify",
+    ".compass",
     ".worktrees",
 ];
 
@@ -180,7 +180,7 @@ pub struct Detection {
     pub unclassified: Vec<String>,
     pub walk_errors: Vec<String>,
     pub ignored: Vec<String>,
-    pub graphifyignore_patterns: usize,
+    pub compassignore_patterns: usize,
     pub scan_root: String,
     #[serde(skip)]
     pub google_workspace_shortcuts: Vec<PathBuf>,
@@ -386,9 +386,9 @@ fn parse_ignore_line(raw: &str) -> Option<String> {
 
 fn load_own_ignore(directory: &Path, gitignore: bool) -> Vec<IgnorePattern> {
     let names: &[&str] = if gitignore {
-        &[".gitignore", ".graphifyignore"]
+        &[".gitignore", ".compassignore"]
     } else {
-        &[".graphifyignore"]
+        &[".compassignore"]
     };
     names
         .iter()
@@ -908,7 +908,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
             google_workspace_shortcuts.push(path.clone());
             if !options.google_workspace {
                 state.skipped_sensitive.push(format!(
-                    "{} [Google Workspace shortcut skipped - pass --google-workspace or set GRAPHIFY_GOOGLE_WORKSPACE=1]",
+                    "{} [Google Workspace shortcut skipped - pass --google-workspace or set COMPASS_GOOGLE_WORKSPACE=1]",
                     path.display()
                 ));
             }
@@ -962,7 +962,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
     };
     unclassified.sort();
     state.ignored.sort();
-    let graphifyignore_patterns = state.patterns.len();
+    let compassignore_patterns = state.patterns.len();
     stat_index.flush()?;
     Ok(Detection {
         files,
@@ -974,7 +974,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         unclassified,
         walk_errors: state.walk_errors,
         ignored: state.ignored,
-        graphifyignore_patterns,
+        compassignore_patterns,
         scan_root: root.to_string_lossy().into_owned(),
         google_workspace_shortcuts,
     })

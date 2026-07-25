@@ -16,8 +16,6 @@ use time::OffsetDateTime;
 
 use crate::{Frontend, Outcome};
 
-const HELP: &str = "graphify prs — graph-aware PR dashboard.\n\nFast terminal overview of open PRs with CI/review state, worktree mapping,\nand optional graph-impact analysis (which communities a PR touches) and\nOpus-powered triage ranking.\n\nUsage:\n  graphify prs                   # dashboard of all open PRs\n  graphify prs <number>          # deep dive on one PR\n  graphify prs --triage          # Opus ranks your review queue\n  graphify prs --worktrees       # show worktree → branch → PR mapping\n  graphify prs --conflicts       # PRs sharing graph communities (merge-order risk)\n  graphify prs --base <branch>   # filter to PRs targeting this base (default: v8)\n";
-
 #[derive(Default)]
 struct Arguments {
     base: Option<String>,
@@ -59,21 +57,9 @@ impl Colors {
 }
 
 pub(super) fn command_prs(frontend: Frontend, args: &[String]) -> Outcome {
-    if frontend == Frontend::Graphify
-        && args
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "-h" | "--help" | "-?"))
-    {
-        return Outcome::success("Run 'graphify --help' for full usage.".to_owned());
-    }
     let parsed = parse_arguments(args);
     if parsed.help {
-        return match frontend {
-            Frontend::Graphify => {
-                Outcome::success("Run 'graphify --help' for full usage.".to_owned())
-            }
-            Frontend::Compass => Outcome::success(prs_help(frontend)),
-        };
+        return Outcome::success(prs_help(frontend));
     }
 
     let colors = Colors {
@@ -81,10 +67,7 @@ pub(super) fn command_prs(frontend: Frontend, args: &[String]) -> Outcome {
     };
     let render = RenderOptions {
         color: colors.enabled,
-        command_name: match frontend {
-            Frontend::Compass => "compass prs",
-            Frontend::Graphify => "graphify prs",
-        },
+        command_name: "compass prs",
     };
     let environment = std::env::vars().collect::<HashMap<_, _>>();
     let runner = SystemRunner;
@@ -151,6 +134,7 @@ fn success_exact(stdout: String) -> Outcome {
         stderr: String::new(),
         stdout_trailing_newline: false,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -231,6 +215,7 @@ fn run_triage(
                 stderr: format!("\n\n  {}", colors.red(format!("Triage failed: {error}"))),
                 stdout_trailing_newline: false,
                 stderr_trailing_newline: true,
+                html_output: None,
             };
         }
     };
@@ -256,6 +241,7 @@ fn run_triage(
             stderr: format!("\n\n  {}", colors.red(format!("Triage failed: {error}"))),
             stdout_trailing_newline: false,
             stderr_trailing_newline: true,
+            html_output: None,
         },
     }
 }
@@ -263,7 +249,7 @@ fn run_triage(
 fn resolve_triage_backend(environment: &HashMap<String, String>) -> (String, String) {
     let custom = load_triage_custom_providers(environment);
     let explicit = environment
-        .get("GRAPHIFY_TRIAGE_BACKEND")
+        .get("COMPASS_TRIAGE_BACKEND")
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .filter(|name| builtin_backend(name).is_some() || custom.contains_key(*name));
@@ -302,7 +288,7 @@ fn resolve_triage_backend(environment: &HashMap<String, String>) -> (String, Str
             .unwrap_or_default(),
     };
     let model = environment
-        .get("GRAPHIFY_TRIAGE_MODEL")
+        .get("COMPASS_TRIAGE_MODEL")
         .filter(|value| !value.is_empty())
         .cloned()
         .unwrap_or(default);
@@ -314,14 +300,14 @@ fn load_triage_custom_providers(
 ) -> serde_json::Map<String, serde_json::Value> {
     let global = home_directory()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".graphify")
+        .join(".compass")
         .join("providers.json");
     let local = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".graphify")
+        .join(".compass")
         .join("providers.json");
     let allow_local = environment
-        .get("GRAPHIFY_ALLOW_LOCAL_PROVIDERS")
+        .get("COMPASS_ALLOW_LOCAL_PROVIDERS")
         .is_some_and(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
@@ -351,11 +337,8 @@ fn executable_on_path(name: &str) -> bool {
     })
 }
 
-pub(super) fn prs_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass prs [NUMBER] [--triage] [--worktrees] [--conflicts] [--wrong-base] [--base BRANCH] [--repo OWNER/REPO] [--graph PATH]".to_owned(),
-        Frontend::Graphify => HELP.to_owned(),
-    }
+pub(super) fn prs_help(_frontend: Frontend) -> String {
+    "Usage: compass prs [NUMBER] [--triage] [--worktrees] [--conflicts] [--wrong-base] [--base BRANCH] [--repo OWNER/REPO] [--graph PATH]".to_owned()
 }
 
 #[cfg(test)]
@@ -365,7 +348,7 @@ mod tests {
     #[test]
     fn invalid_explicit_triage_backend_falls_back_like_python() {
         let environment = HashMap::from([
-            ("GRAPHIFY_TRIAGE_BACKEND".to_owned(), "not-real".to_owned()),
+            ("COMPASS_TRIAGE_BACKEND".to_owned(), "not-real".to_owned()),
             ("OPENAI_API_KEY".to_owned(), "configured".to_owned()),
         ]);
         assert_eq!(
@@ -377,7 +360,7 @@ mod tests {
     #[test]
     fn ollama_triage_respects_python_model_override_precedence() {
         let environment = HashMap::from([
-            ("GRAPHIFY_TRIAGE_BACKEND".to_owned(), "ollama".to_owned()),
+            ("COMPASS_TRIAGE_BACKEND".to_owned(), "ollama".to_owned()),
             ("OLLAMA_MODEL".to_owned(), "local-model".to_owned()),
         ]);
         assert_eq!(

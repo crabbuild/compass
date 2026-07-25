@@ -4,14 +4,33 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
+mkdir -p "$test_root/fake-checksum-bin"
 
-fake_binary="$test_root/fake-compass"
-printf '#!/bin/sh\necho compass 0.1.0\n' > "$fake_binary"
-chmod +x "$fake_binary"
+cat > "$test_root/fake-checksum-bin/shasum" <<'EOF'
+#!/bin/sh
+echo "shasum must not be required when sha256sum is available" >&2
+exit 99
+EOF
+chmod +x "$test_root/fake-checksum-bin/shasum"
 
-for target in aarch64-apple-darwin x86_64-apple-darwin; do
+cat > "$test_root/fake-checksum-bin/sha256sum" <<'EOF'
+#!/bin/sh
+exec /usr/bin/shasum -a 256 "$@"
+EOF
+chmod +x "$test_root/fake-checksum-bin/sha256sum"
+
+for target in \
+    aarch64-apple-darwin \
+    x86_64-apple-darwin \
+    aarch64-unknown-linux-gnu \
+    x86_64-unknown-linux-gnu
+do
+    fake_binary="$test_root/fake-compass-$target"
+    printf '#!/bin/sh\necho %s\n' "$target" > "$fake_binary"
+    chmod +x "$fake_binary"
     dist="$test_root/dist-$target"
-    "$repo_root/scripts/package_macos.sh" "$target" "$fake_binary" "$dist"
+    PATH="$test_root/fake-checksum-bin:$PATH" \
+        "$repo_root/scripts/package_release.sh" "$target" "$fake_binary" "$dist"
     archive="$dist/compass-$target.tar.gz"
     checksum="$archive.sha256"
     test -f "$archive"
@@ -25,6 +44,8 @@ release_dir="$test_root/release"
 mkdir -p "$release_dir" "$test_root/fake-bin"
 cp "$test_root/dist-aarch64-apple-darwin/"* "$release_dir/"
 cp "$test_root/dist-x86_64-apple-darwin/"* "$release_dir/"
+cp "$test_root/dist-aarch64-unknown-linux-gnu/"* "$release_dir/"
+cp "$test_root/dist-x86_64-unknown-linux-gnu/"* "$release_dir/"
 
 cat > "$test_root/fake-bin/curl" <<'EOF'
 #!/bin/sh
@@ -48,29 +69,40 @@ chmod +x "$test_root/fake-bin/curl"
 cat > "$test_root/fake-bin/uname" <<'EOF'
 #!/bin/sh
 case "${1:-}" in
-    -s) printf '%s\n' Darwin ;;
+    -s) printf '%s\n' "$FIXTURE_OS" ;;
     -m) printf '%s\n' "$FIXTURE_ARCH" ;;
     *) exit 1 ;;
 esac
 EOF
 chmod +x "$test_root/fake-bin/uname"
 
-for arch in arm64 x86_64; do
-    install_dir="$test_root/install-$arch"
-    PATH="$test_root/fake-bin:$PATH" \
+for platform in \
+    "Darwin arm64 aarch64-apple-darwin" \
+    "Darwin x86_64 x86_64-apple-darwin" \
+    "Linux aarch64 aarch64-unknown-linux-gnu" \
+    "Linux x86_64 x86_64-unknown-linux-gnu"
+do
+    set -- $platform
+    os=$1
+    arch=$2
+    target=$3
+    install_dir="$test_root/install-$target"
+    PATH="$test_root/fake-bin:$test_root/fake-checksum-bin:$PATH" \
+        FIXTURE_OS="$os" \
         FIXTURE_ARCH="$arch" \
         FIXTURE_RELEASE="$release_dir" \
         COMPASS_RELEASE_BASE_URL="https://example.invalid/releases/latest/download" \
         COMPASS_INSTALL_DIR="$install_dir" \
         sh "$repo_root/scripts/install.sh"
     test -x "$install_dir/compass"
-    test "$($install_dir/compass)" = "compass 0.1.0"
+    test "$($install_dir/compass)" = "$target"
 done
 
 cp "$release_dir/compass-aarch64-apple-darwin.tar.gz.sha256" "$test_root/good.sha256"
 printf '%064d  compass-aarch64-apple-darwin.tar.gz\n' 0 \
     > "$release_dir/compass-aarch64-apple-darwin.tar.gz.sha256"
-if PATH="$test_root/fake-bin:$PATH" \
+if PATH="$test_root/fake-bin:$test_root/fake-checksum-bin:$PATH" \
+    FIXTURE_OS=Darwin \
     FIXTURE_ARCH=arm64 \
     FIXTURE_RELEASE="$release_dir" \
     COMPASS_RELEASE_BASE_URL="https://example.invalid/releases/latest/download" \
