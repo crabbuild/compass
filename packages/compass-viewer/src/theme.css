@@ -1159,6 +1159,12 @@ body.vscode-high-contrast-light .compass-load-action {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+
+  .compass-load-edge,
+  .compass-load-node,
+  .compass-load-orbit {
+    animation: none !important;
+  }
 }
 
 .architecture-shell {

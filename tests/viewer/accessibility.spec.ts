@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-for (const pageName of ["graph", "architecture", "calls", "history", "query"]) {
+for (const pageName of ["graph", "loading", "architecture", "calls", "history", "query"]) {
   test(`${pageName} has no serious accessibility violations`, async ({ page }) => {
     await page.goto(`/${pageName}.html`);
     const results = await new AxeBuilder({ page })

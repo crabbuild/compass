@@ -20,6 +20,7 @@ export default async function generate(): Promise<void> {
     path.join(root, "editors/vscode/dist/webviews/graph.js"),
     path.join(output, "vscodeGraph.js")
   );
+  await writeFile(path.join(output, "loading.html"), graphLoadingHarness());
   const graph = {
     schema: "compass.viewer.graph/1",
     title: "Fixture",
@@ -125,6 +126,22 @@ export default async function generate(): Promise<void> {
     historyHarness(timeline, communityOverview, communityDetail)
   );
   await writeFile(path.join(output, "query.html"), harness("query", { type: "state", running: false }));
+}
+
+function graphLoadingHarness(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph loading fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.hostMessages=[];
+window.webviewState=undefined;
+window.acquireVsCodeApi=()=>({
+  getState(){return window.webviewState},
+  setState(state){window.webviewState=state},
+  postMessage(message){
+    window.hostMessages.push(message);
+    if(new URLSearchParams(window.location.search).has("error") && (message.type==="ready" || message.type==="retry")) {
+      setTimeout(()=>window.postMessage({type:"error",message:"The graph export could not be read."},"*"),0);
+    }
+  }
+})</script><script src="/vscodeGraph.js"></script></body></html>`;
 }
 
 function communityHarness(overview: unknown, detail: unknown): string {
