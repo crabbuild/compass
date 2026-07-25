@@ -76,6 +76,16 @@ test("loading respects reduced motion", async ({ page }) => {
     .toHaveCSS("animation-name", "none");
 });
 
+test("graph chrome stays flat and token-driven", async ({ page }) => {
+  await page.goto("/graph.html");
+  const toolbar = page.getByRole("toolbar", { name: "Graph controls" });
+  await expect(toolbar).toHaveCSS("backdrop-filter", "none");
+  await expect(toolbar).toHaveCSS("box-shadow", "none");
+  await expect(toolbar).toHaveCSS("border-radius", "4px");
+  await expect(page.getByRole("complementary", { name: "Graph inspector" }))
+    .toHaveCSS("box-shadow", "none");
+});
+
 test("narrow Architecture, Ask Codebase, and Evolution views preserve core actions", async ({
   page
 }) => {
@@ -96,6 +106,9 @@ test("narrow Architecture, Ask Codebase, and Evolution views preserve core actio
   await expect(page.getByRole("combobox", { name: "Select revision" })).toBeVisible();
   await expect(page.getByRole("listbox", { name: "Git commit timeline" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Query this revision" })).toBeVisible();
+  const graphSearch = page.getByRole("combobox", { name: "Search graph nodes" });
+  await graphSearch.scrollIntoViewIfNeeded();
+  await expect(graphSearch).toBeInViewport();
   await expectNoHorizontalDocumentOverflow(page);
 });
 

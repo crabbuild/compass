@@ -54,6 +54,8 @@ test("architecture searches globally and bounds large symbol and call collection
   await expect(page.getByRole("group", { name: "Storage search results" })).toBeVisible();
   await page.getByRole("option", { name: /database symbol in API/i }).click();
   await expect(page.getByRole("heading", { name: "API" })).toBeVisible();
+  await expect(page.locator("[data-slot='tabs']")).toHaveCSS("flex-direction", "column");
+  expect((await page.getByRole("tablist").boundingBox())?.width).toBeGreaterThan(600);
 
   const symbolFilter = page.getByRole("searchbox", { name: "Filter API symbols" });
   await symbolFilter.fill("");
