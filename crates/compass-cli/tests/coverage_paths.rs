@@ -817,7 +817,7 @@ fn install_and_extract_equals_forms_cover_namespaced_parser_boundaries()
         (Frontend::Compass, vec!["install", "--platform"]),
         (Frontend::Compass, vec!["install", "--platform=unknown"]),
         (Frontend::Compass, vec!["install", "--unknown"]),
-        (Frontend::Compass, vec!["install", "cursor", "claude"]),
+        (Frontend::Compass, vec!["install", "--all", "claude"]),
         (Frontend::Compass, vec!["uninstall", "--platform"]),
         (Frontend::Compass, vec!["uninstall", "--unknown"]),
         (Frontend::Graphify, vec!["install", "--platform"]),

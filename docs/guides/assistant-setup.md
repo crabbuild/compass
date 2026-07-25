@@ -1,14 +1,14 @@
 # Set up Compass for a coding assistant
 
 Compass embeds assistant integration assets in its native executable. This
-guide explains how to select a platform and scope, inspect what was installed,
-and remove it safely.
+guide explains automatic detection, explicit multi-agent selection, scope,
+verification, and safe removal.
 
 > **Who this guide is for:** developers using Compass with coding assistants
 > and maintainers deciding what agent instructions belong in a repository.
 >
-> **You will learn:** global versus project scope, platform selection, strict
-> mode, verification, upgrades, and safe uninstall.
+> **You will learn:** user versus project scope, automatic and explicit platform
+> selection, strict mode, verification, upgrades, and safe uninstall.
 >
 > **Prerequisites:** the `compass` executable installed.
 >
@@ -16,8 +16,8 @@ and remove it safely.
 
 ## What the integration does
 
-The installed skill teaches an assistant to use the graph before reading a
-large set of raw files:
+When a graph exists, the installed skill teaches an assistant to use it before
+reading a large set of raw files:
 
 ```text
 architecture question
@@ -34,17 +34,29 @@ open only the source files needed to verify the answer
 
 It does not give Compass permission to run arbitrary external actions. It
 provides task instructions and, where the platform supports them, helper
-integration files.
+integration files. Installation does not build `compass-out/`; the report
+recommends `compass update .` when a project graph is absent.
+
+## Recommended setup
+
+```bash
+compass install
+```
+
+Inside Git, Compass resolves the repository root, detects supported agents, and
+always includes the portable Agent Skills target. Outside Git, it uses user
+scope. The report lists detection evidence, every destination, and reload or
+graph-build actions.
 
 ## Global or project scope
 
-### Global installation
+### User installation
 
 ```bash
-compass install --platform codex
+compass install --user --platform codex
 ```
 
-Use global scope when:
+Use user scope when:
 
 - this is your personal tool configuration;
 - many repositories should use the same skill;
@@ -62,8 +74,8 @@ Use project scope when:
 - the repository already defines assistant behavior;
 - a CI or reproducible development environment needs explicit setup.
 
-Project scope writes under the current project. Review `git status` before
-committing generated files:
+Project scope writes at the Git repository root even when invoked from a
+subdirectory. Review `git status` before committing generated files:
 
 ```bash
 git status --short
@@ -73,7 +85,7 @@ git diff -- . ':!compass-out'
 Never overwrite an existing project instruction file without reviewing the
 merged result.
 
-## Select a platform explicitly
+## Select one or more platforms explicitly
 
 Run:
 
@@ -89,33 +101,40 @@ Examples:
 
 ```bash
 compass install --platform codex
-compass install --platform agents
-compass install --platform gemini
+compass install --platform codex --platform claude
+compass install --platform agents --platform gemini
 compass install --platform cursor
+compass install --all --dry-run
 ```
 
 `skills` is accepted as an alias for the generic `agents` target. Exact
 destinations differ by platform and scope; use installer output as the source
 of truth instead of copying paths from another tool.
 
-If no platform is passed, the installer uses its documented/default detection
-behavior. Teams should prefer an explicit platform in setup scripts.
+Explicit platform selection bypasses detection. `--all` selects every registry
+entry and conflicts with `--platform`. For CI, add `--require-all` and
+`--format json` when skipped or failed targets must fail the job.
 
 ## Understand project destinations
 
 Representative project-scoped destinations include:
 
 ```text
-Codex       .codex/skills/compass/SKILL.md
+Codex       .agents/skills/compass/SKILL.md
+Gemini      .agents/skills/compass/SKILL.md
+OpenCode    .agents/skills/compass/SKILL.md
+Copilot     .agents/skills/compass/SKILL.md
 Agents      .agents/skills/compass/SKILL.md
 Claude      .claude/skills/compass/SKILL.md
-Gemini      Gemini-specific skill/config files and GEMINI.md integration
+Kiro        .kiro/skills/compass/SKILL.md
+Cline       .cline/skills/compass/SKILL.md
 Cursor      Cursor-specific project integration
 ```
 
-The installer can also write companion reference or integration files required
-by the selected platform. Treat the printed file list and `git status` as the
-authoritative result.
+The shared consumers above write one package, not five copies. Its ownership
+manifest records every consumer and content digest. The installer can also
+write companion integration files required by a selected platform. Treat the
+printed file list and `git status` as the authoritative result.
 
 ## Strict mode
 
@@ -192,7 +211,7 @@ compass install --project --platform codex
 This refreshes embedded assets for that version. Review changes like any
 dependency or generated configuration update.
 
-For global installs, record the Compass version in workstation/bootstrap
+For user installs, record the Compass version in workstation/bootstrap
 automation if reproducibility matters.
 
 ## Uninstall
@@ -203,10 +222,10 @@ Use the native lifecycle command:
 compass uninstall --project --platform codex
 ```
 
-For global scope, omit `--project`:
+For user scope, select `--user` explicitly:
 
 ```bash
-compass uninstall --platform codex
+compass uninstall --user --platform codex
 ```
 
 `--purge` is a stronger removal mode:
@@ -233,7 +252,7 @@ control or backup when you are certain a removed file was meant to be tracked.
 A healthy repository-level instruction is small and verifiable:
 
 ```text
-This project has a Compass graph at compass-out/.
+When compass-out/graph.json exists, use it as the first navigation layer.
 
 Before answering architecture questions:
 1. read compass-out/GRAPH_REPORT.md;
@@ -256,7 +275,7 @@ Avoid:
 | Problem | Action |
 | --- | --- |
 | Unknown platform | Use a name printed by `compass install --help` |
-| Project files appear in an unexpected place | Confirm current directory and whether `--project` was passed |
+| Project files appear in an unexpected place | Compass installs at the Git root; confirm the repository and explicit scope |
 | Existing instructions changed | Inspect the diff; uninstall managed content and reapply after resolving ownership |
 | Strict mode blocks unexpectedly | Set `COMPASS_HOOK_STRICT=0` for the session, then review the project hook |
 | Assistant ignores the graph | Confirm it discovers the installed skill and that `compass-out/` exists |

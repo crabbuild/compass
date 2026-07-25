@@ -11,6 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const MINIMUM_CORE_WORDS: usize = 500;
+const MAXIMUM_CORE_WORDS: usize = 5_000;
 const MINIMUM_REFERENCES: usize = 10;
 const MINIMUM_REFERENCE_WORDS: usize = 120;
 const MINIMUM_BUNDLE_WORDS: usize = 5_000;
@@ -49,6 +50,16 @@ pub(crate) fn validate(assets: &Path, cli_source: &Path, help_source: &Path) -> 
         skill.split_whitespace().count() >= MINIMUM_CORE_WORDS,
         &skill_path,
         "core skill is unexpectedly small",
+    )?;
+    require(
+        skill.split_whitespace().count() <= MAXIMUM_CORE_WORDS,
+        &skill_path,
+        "core skill exceeds the Agent Skills activation budget",
+    )?;
+    require(
+        skill.contains("\ndescription:") && skill.contains("\ncompatibility:"),
+        &skill_path,
+        "frontmatter must describe activation and runtime compatibility",
     )?;
     validate_native(&skill_path, &skill)?;
     for section in REQUIRED_CORE_SECTIONS {
