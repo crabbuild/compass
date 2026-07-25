@@ -80,6 +80,28 @@
   --compass-grid: color-mix(in srgb, var(--foreground) 16%, transparent);
   --compass-success: var(--vscode-testing-iconPassed, #3fb950);
   --compass-warning: var(--vscode-editorWarning-foreground, #d29922);
+  --sidebar: var(--vscode-sideBar-background, var(--background));
+  --sidebar-foreground: var(--vscode-sideBar-foreground, var(--foreground));
+  --sidebar-accent: var(--vscode-list-activeSelectionBackground, var(--accent));
+  --sidebar-accent-foreground: var(
+    --vscode-list-activeSelectionForeground,
+    var(--accent-foreground)
+  );
+  --sidebar-primary: var(--vscode-focusBorder, var(--ring));
+  --workbench-hover: var(
+    --vscode-list-hoverBackground,
+    color-mix(in srgb, var(--foreground) 7%, transparent)
+  );
+  --workbench-hover-foreground: var(
+    --vscode-list-hoverForeground,
+    var(--foreground)
+  );
+  --workbench-table-header: var(
+    --vscode-editorStickyScroll-background,
+    var(--background)
+  );
+  --workbench-link: var(--vscode-textLink-foreground, var(--ring));
+  --workbench-progress: var(--vscode-progressBar-background, var(--ring));
 }
 
 * {
@@ -104,6 +126,195 @@ body {
 button:not(:disabled),
 [role="button"]:not(:disabled) {
   cursor: pointer;
+}
+
+[data-slot="button"],
+[data-slot="input"],
+[data-slot="tabs-list"],
+[data-slot="tabs-trigger"] {
+  border-radius: 4px;
+}
+
+.workbench-collection-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workbench-search {
+  position: relative;
+  display: flex;
+  min-width: 180px;
+  max-width: 540px;
+  flex: 1;
+  align-items: center;
+}
+
+.workbench-search > svg {
+  position: absolute;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+  pointer-events: none;
+}
+
+.workbench-search input {
+  width: 100%;
+  height: 30px;
+  padding: 4px 30px 4px 29px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.workbench-search input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.workbench-search input:focus-visible {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.workbench-search-clear {
+  position: absolute;
+  right: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.workbench-search-clear:hover {
+  background: var(--workbench-hover);
+  color: var(--workbench-hover-foreground);
+}
+
+.workbench-search-clear svg {
+  width: 13px;
+  height: 13px;
+}
+
+.workbench-result-count,
+.workbench-pagination-range {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workbench-pagination {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.workbench-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.workbench-pagination-actions button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--foreground);
+}
+
+.workbench-pagination-actions button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--workbench-hover);
+}
+
+.workbench-pagination-actions button:disabled {
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+}
+
+.workbench-pagination-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.workbench-state {
+  display: grid;
+  width: min(520px, calc(100% - 32px));
+  min-height: 180px;
+  margin: auto;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.workbench-state > svg {
+  width: 28px;
+  height: 28px;
+}
+
+.workbench-state[data-kind="error"] > svg {
+  color: var(--destructive);
+}
+
+.workbench-state h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workbench-state p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workbench-button {
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background, var(--primary));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.workbench-button:hover {
+  background: var(--vscode-button-hoverBackground, var(--primary));
+}
+
+.workbench-button:focus-visible,
+.workbench-search-clear:focus-visible,
+.workbench-pagination-actions button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.workbench-state-spinner {
+  animation: spin 1s linear infinite;
 }
 
 .compass-load-shell {
