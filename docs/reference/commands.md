@@ -282,7 +282,8 @@ Build-profile options include:
 
 ```text
 compass diff OLD NEW
-  [--format text|json]
+  [--format text|json|html]
+  [--output PATH]
   [--limit N]
   [--all]
   [--explain FINDING_ID]
@@ -295,6 +296,11 @@ collapsed; `--limit N` changes the visible per-section budget, while `--all`
 expands routine findings and is exhaustive. `--explain` prints the evidence
 and reasoning for one finding. Diff requires comparable build profiles;
 rebuild the newer revision with `--profile-from OLD` when needed.
+`--format html` requires `--output PATH` and writes a self-contained
+interactive report containing the reviewer findings, unified/split source
+diffs, the exact Git patch fallback, and meaningful code-graph changes.
+`--output` is rejected for text and JSON; there is no alternate semantic-diff
+export command.
 
 ## Service
 

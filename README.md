@@ -232,6 +232,7 @@ compass history build main
 compass history build HEAD --profile-from main
 compass query "authentication" --at HEAD~20
 compass diff main HEAD
+compass diff main HEAD --format html --output semantic-diff.html
 ```
 
 Historical builds use exact Git commits and immutable extraction
@@ -241,6 +242,11 @@ with likely breaks, behavior changes, affected callers/modules, and test
 evidence; use `--all` to expand routine symbol churn.
 Default text output reports any findings beyond its display budget; use
 `--limit N` to raise that budget or `--all` for exhaustive output.
+HTML output is a self-contained interactive reviewer report with semantic
+findings, an enhanced unified/split source diff, and a changed-subgraph view
+with exhaustive node/edge delta lists. The source view is rendered by the
+pinned `@pierre/diffs` library and retains the exact Git patch as an offline
+fallback. HTML output requires an explicit `--output` path.
 
 Read the [versioned history guide](docs/guides/versioned-history.md) and
 [storage design](docs/design/storage-and-history.md).

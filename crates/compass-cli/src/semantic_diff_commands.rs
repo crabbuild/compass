@@ -6,17 +6,19 @@ use compass_history::{
 use compass_ir::{FunctionIr, ModuleIr};
 use compass_model::NodeRecord;
 use compass_semantic_diff::{
-    ChangeDirection, DependencyDelta, EvidenceRef, SemanticDiffError, SemanticDiffInput,
-    SnapshotIdentity, SnapshotReader, SnapshotSide, StaticTestEvidence, compare,
+    ChangeDirection, DependencyDelta, EvidenceRef, GraphDelta, GraphEdgeDelta, GraphNodeDelta,
+    SemanticDiffError, SemanticDiffInput, SnapshotIdentity, SnapshotReader, SnapshotSide,
+    StaticTestEvidence, compare,
 };
 
-use crate::semantic_diff_render::{RenderOptions, render_json, render_text};
+use crate::semantic_diff_render::{RenderOptions, render_html, render_json, render_text};
 use crate::{Frontend, Outcome, history_commands};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Format {
     Text,
     Json,
+    Html,
 }
 
 struct Options {
@@ -27,6 +29,7 @@ struct Options {
     limit: Option<usize>,
     explain: Option<String>,
     fingerprint: Option<String>,
+    output: Option<String>,
 }
 
 pub(crate) fn help(frontend: Frontend) -> String {
@@ -36,7 +39,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json>       Output format [default: text]\n  --limit <N>                Show at most N findings per text section [default: 20]\n  --all                      Include routine churn and show every finding\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint"
+        "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json|html>  Output format [default: text]\n  --output <PATH>            Write the self-contained HTML report (required with --format html)\n  --limit <N>                Show at most N findings per text section [default: 20]\n  --all                      Include routine churn and show every finding\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint"
     )
 }
 
@@ -83,6 +86,7 @@ fn execute(args: &[String]) -> Result<String, CommandError> {
         )
         .map_err(runtime)?;
     direct.cancel_attribute_only_dependency_churn();
+    direct.normalize_graph_delta();
     let snapshots = HistorySnapshots {
         store: &resolved.history,
         old: &resolved.old.id,
@@ -103,6 +107,7 @@ fn execute(args: &[String]) -> Result<String, CommandError> {
         source_deltas: &source_deltas,
         changed_node_ids: &direct.nodes,
         dependency_deltas: &direct.dependencies,
+        graph_delta: &direct.graph_delta,
         snapshots: &snapshots,
         test_evidence: &test_evidence,
     })
@@ -115,6 +120,15 @@ fn execute(args: &[String]) -> Result<String, CommandError> {
     match options.format {
         Format::Text => render_text(&report, &render).map_err(runtime),
         Format::Json => render_json(&report, &render).map_err(runtime),
+        Format::Html => {
+            let html = render_html(&report, &render).map_err(runtime)?;
+            let output = options
+                .output
+                .as_deref()
+                .ok_or_else(|| CommandError::Usage("--output is required".to_owned()))?;
+            std::fs::write(output, html).map_err(runtime)?;
+            Ok(format!("semantic diff HTML written to {output}"))
+        }
     }
 }
 
@@ -126,6 +140,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let mut limit = None;
     let mut explain = None;
     let mut fingerprint = None;
+    let mut output = None;
     let mut parse_options = true;
     let mut index = 0;
     while index < args.len() {
@@ -166,6 +181,19 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 format_set = true;
                 format = parse_format(&value[9..])?;
             }
+            "--output" if parse_options => {
+                index += 1;
+                let value = args.get(index).ok_or("--output requires a value")?;
+                if value.is_empty() || output.replace(value.clone()).is_some() {
+                    return Err("--output requires one path".to_owned());
+                }
+            }
+            value if parse_options && value.starts_with("--output=") => {
+                let value = &value[9..];
+                if value.is_empty() || output.replace(value.to_owned()).is_some() {
+                    return Err("--output requires one path".to_owned());
+                }
+            }
             "--explain" if parse_options => {
                 index += 1;
                 let value = args.get(index).ok_or("--explain requires a value")?;
@@ -205,6 +233,16 @@ fn parse(args: &[String]) -> Result<Options, String> {
     if all && limit.is_some() {
         return Err("--all conflicts with --limit; --all is intentionally exhaustive".to_owned());
     }
+    match (format, output.as_ref()) {
+        (Format::Html, None) => {
+            return Err("--output is required with --format html".to_owned());
+        }
+        (Format::Html, Some(_)) => {}
+        (_, Some(_)) => {
+            return Err("--output is only valid with --format html".to_owned());
+        }
+        (_, None) => {}
+    }
     if let Some(value) = &fingerprint {
         value
             .parse::<ExtractionFingerprint>()
@@ -218,6 +256,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         limit,
         explain,
         fingerprint,
+        output,
     })
 }
 
@@ -233,7 +272,8 @@ fn parse_format(value: &str) -> Result<Format, String> {
     match value {
         "text" => Ok(Format::Text),
         "json" => Ok(Format::Json),
-        _ => Err("--format must be text or json".to_owned()),
+        "html" => Ok(Format::Html),
+        _ => Err("--format must be text, json, or html".to_owned()),
     }
 }
 
@@ -360,6 +400,7 @@ impl SnapshotReader for HistorySnapshots<'_> {
 struct DirectChanges {
     nodes: Vec<String>,
     dependencies: Vec<DependencyDelta>,
+    graph_delta: GraphDelta,
 }
 
 impl DirectChanges {
@@ -400,6 +441,110 @@ impl DirectChanges {
             }
         });
     }
+
+    fn normalize_graph_delta(&mut self) {
+        let sort_nodes = |nodes: &mut Vec<GraphNodeDelta>| {
+            for node in nodes.iter_mut() {
+                node.changed_fields.sort();
+                node.changed_fields.dedup();
+            }
+            nodes.sort_by(|left, right| left.id.as_bytes().cmp(right.id.as_bytes()));
+            nodes.dedup_by(|left, right| left.id == right.id);
+        };
+        sort_nodes(&mut self.graph_delta.added_nodes);
+        sort_nodes(&mut self.graph_delta.removed_nodes);
+        sort_nodes(&mut self.graph_delta.changed_nodes);
+        let sort_edges = |edges: &mut Vec<GraphEdgeDelta>| {
+            for edge in edges.iter_mut() {
+                edge.changed_fields.sort();
+                edge.changed_fields.dedup();
+            }
+            edges.sort_by(|left, right| {
+                (
+                    left.source.as_bytes(),
+                    left.relation.as_bytes(),
+                    left.target.as_bytes(),
+                    left.key.as_bytes(),
+                )
+                    .cmp(&(
+                        right.source.as_bytes(),
+                        right.relation.as_bytes(),
+                        right.target.as_bytes(),
+                        right.key.as_bytes(),
+                    ))
+            });
+            edges.dedup_by(|left, right| {
+                left.source == right.source
+                    && left.target == right.target
+                    && left.relation == right.relation
+                    && left.key == right.key
+                    && left.changed_fields == right.changed_fields
+            });
+        };
+        sort_edges(&mut self.graph_delta.added_edges);
+        sort_edges(&mut self.graph_delta.removed_edges);
+        sort_edges(&mut self.graph_delta.changed_edges);
+        let mut balances = std::collections::BTreeMap::<(String, String, String), i64>::new();
+        for edge in &self.graph_delta.added_edges {
+            *balances
+                .entry((
+                    edge.source.clone(),
+                    edge.relation.clone(),
+                    edge.target.clone(),
+                ))
+                .or_default() += 1;
+        }
+        for edge in &self.graph_delta.removed_edges {
+            *balances
+                .entry((
+                    edge.source.clone(),
+                    edge.relation.clone(),
+                    edge.target.clone(),
+                ))
+                .or_default() -= 1;
+        }
+        let removed_before = self.graph_delta.removed_edges.len();
+        self.graph_delta.added_edges.retain(|edge| {
+            let key = (
+                edge.source.clone(),
+                edge.relation.clone(),
+                edge.target.clone(),
+            );
+            let Some(balance) = balances.get_mut(&key) else {
+                return true;
+            };
+            if *balance > 0 {
+                *balance -= 1;
+                true
+            } else {
+                false
+            }
+        });
+        self.graph_delta.removed_edges.retain(|edge| {
+            let key = (
+                edge.source.clone(),
+                edge.relation.clone(),
+                edge.target.clone(),
+            );
+            let Some(balance) = balances.get_mut(&key) else {
+                return true;
+            };
+            if *balance < 0 {
+                *balance += 1;
+                true
+            } else {
+                false
+            }
+        });
+        let cancelled = removed_before.saturating_sub(self.graph_delta.removed_edges.len());
+        if cancelled > 0 {
+            *self
+                .graph_delta
+                .collapsed_attribute_changes
+                .entry("edge_identity".to_owned())
+                .or_default() += cancelled;
+        }
+    }
 }
 
 impl ChangeSink for DirectChanges {
@@ -408,19 +553,79 @@ impl ChangeSink for DirectChanges {
             RecordKind::Node => {
                 if let Some(node_id) = change.key.first() {
                     self.nodes.push(node_id.clone());
+                    match change.change {
+                        ChangeKind::Added => self.graph_delta.added_nodes.push(graph_node_delta(
+                            node_id,
+                            change.new.as_ref(),
+                            Vec::new(),
+                        )),
+                        ChangeKind::Removed => {
+                            self.graph_delta.removed_nodes.push(graph_node_delta(
+                                node_id,
+                                change.old.as_ref(),
+                                Vec::new(),
+                            ));
+                        }
+                        ChangeKind::Changed => {
+                            let fields = meaningful_graph_fields(
+                                change.old.as_ref(),
+                                change.new.as_ref(),
+                                &mut self.graph_delta.collapsed_attribute_changes,
+                            );
+                            if !fields.is_empty() {
+                                self.graph_delta.changed_nodes.push(graph_node_delta(
+                                    node_id,
+                                    change.new.as_ref().or(change.old.as_ref()),
+                                    fields,
+                                ));
+                            }
+                        }
+                    }
                 }
             }
-            RecordKind::Edge if change.change != ChangeKind::Changed => {
+            RecordKind::Edge => {
                 let Some((source, target, relation)) = edge_key(&change) else {
                     return Ok(());
                 };
+                let key = change.key.get(3).map(String::as_str).unwrap_or_default();
+                let value = change.new.as_ref().or(change.old.as_ref());
+                match change.change {
+                    ChangeKind::Added => self.graph_delta.added_edges.push(graph_edge_delta(
+                        source,
+                        target,
+                        relation,
+                        key,
+                        value,
+                        Vec::new(),
+                    )),
+                    ChangeKind::Removed => self.graph_delta.removed_edges.push(graph_edge_delta(
+                        source,
+                        target,
+                        relation,
+                        key,
+                        value,
+                        Vec::new(),
+                    )),
+                    ChangeKind::Changed => {
+                        let fields = meaningful_graph_fields(
+                            change.old.as_ref(),
+                            change.new.as_ref(),
+                            &mut self.graph_delta.collapsed_attribute_changes,
+                        );
+                        if !fields.is_empty() {
+                            self.graph_delta.changed_edges.push(graph_edge_delta(
+                                source, target, relation, key, value, fields,
+                            ));
+                        }
+                        return Ok(());
+                    }
+                }
                 if !matches!(
                     relation,
                     "calls" | "imports" | "imports_from" | "depends_on" | "uses" | "references"
                 ) {
                     return Ok(());
                 }
-                let value = change.new.as_ref().or(change.old.as_ref());
                 let source_file = value
                     .and_then(|value| value.get("source_file"))
                     .and_then(serde_json::Value::as_str)
@@ -456,6 +661,86 @@ fn edge_key(change: &GraphChange) -> Option<(&str, &str, &str)> {
         change.key.get(1)?.as_str(),
         change.key.get(2)?.as_str(),
     ))
+}
+
+fn graph_node_delta(
+    id: &str,
+    value: Option<&serde_json::Value>,
+    changed_fields: Vec<String>,
+) -> GraphNodeDelta {
+    GraphNodeDelta {
+        id: id.to_owned(),
+        label: graph_string(value, "label"),
+        kind: graph_string(value, "kind"),
+        source_file: graph_string(value, "source_file"),
+        changed_fields,
+    }
+}
+
+fn graph_edge_delta(
+    source: &str,
+    target: &str,
+    relation: &str,
+    key: &str,
+    value: Option<&serde_json::Value>,
+    changed_fields: Vec<String>,
+) -> GraphEdgeDelta {
+    GraphEdgeDelta {
+        source: source.to_owned(),
+        target: target.to_owned(),
+        relation: relation.to_owned(),
+        key: key.to_owned(),
+        source_file: graph_string(value, "source_file"),
+        changed_fields,
+    }
+}
+
+fn graph_string(value: Option<&serde_json::Value>, key: &str) -> String {
+    value
+        .and_then(|value| value.get(key))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn meaningful_graph_fields(
+    old: Option<&serde_json::Value>,
+    new: Option<&serde_json::Value>,
+    collapsed: &mut std::collections::BTreeMap<String, usize>,
+) -> Vec<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    if let Some(object) = old.and_then(serde_json::Value::as_object) {
+        keys.extend(object.keys().cloned());
+    }
+    if let Some(object) = new.and_then(serde_json::Value::as_object) {
+        keys.extend(object.keys().cloned());
+    }
+    let mut meaningful = Vec::new();
+    for key in keys {
+        if old.and_then(|value| value.get(&key)) == new.and_then(|value| value.get(&key)) {
+            continue;
+        }
+        if is_graph_churn_field(&key) {
+            *collapsed.entry(key).or_default() += 1;
+        } else {
+            meaningful.push(key);
+        }
+    }
+    meaningful
+}
+
+fn is_graph_churn_field(field: &str) -> bool {
+    matches!(
+        field,
+        "community"
+            | "line_start"
+            | "line_end"
+            | "source_location"
+            | "source_hash"
+            | "start_byte"
+            | "end_byte"
+            | "column"
+    )
 }
 
 enum CommandError {
@@ -498,6 +783,17 @@ mod tests {
             Some("sd1-0123456789abcdef01234567")
         );
         assert_eq!(parsed.fingerprint.as_deref(), Some(fingerprint.as_str()));
+        assert_eq!(parsed.output, None);
+
+        let html = parse(&[
+            "old".to_owned(),
+            "new".to_owned(),
+            "--format=html".to_owned(),
+            "--output=review.html".to_owned(),
+        ])
+        .expect("HTML output options");
+        assert_eq!(html.format, Format::Html);
+        assert_eq!(html.output.as_deref(), Some("review.html"));
 
         assert!(parse(&["old".to_owned()]).is_err());
         assert!(
@@ -514,6 +810,22 @@ mod tests {
                 "new".to_owned(),
                 "--all".to_owned(),
                 "--limit=10".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "old".to_owned(),
+                "new".to_owned(),
+                "--format=html".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "old".to_owned(),
+                "new".to_owned(),
+                "--output=review.html".to_owned(),
             ])
             .is_err()
         );
@@ -538,9 +850,41 @@ mod tests {
                     ..delta(ChangeDirection::Added)
                 },
             ],
+            graph_delta: GraphDelta::default(),
         };
         changes.cancel_attribute_only_dependency_churn();
         assert_eq!(changes.dependencies.len(), 1);
         assert_eq!(changes.dependencies[0].target, "new-target");
+    }
+
+    #[test]
+    fn graph_edge_identity_churn_preserves_only_net_multigraph_multiplicity() {
+        let edge = |key: &str| GraphEdgeDelta {
+            source: "caller".to_owned(),
+            target: "target".to_owned(),
+            relation: "calls".to_owned(),
+            key: key.to_owned(),
+            source_file: "example.rs".to_owned(),
+            changed_fields: Vec::new(),
+        };
+        let mut changes = DirectChanges {
+            nodes: Vec::new(),
+            dependencies: Vec::new(),
+            graph_delta: GraphDelta {
+                added_edges: vec![edge("new-1"), edge("new-2")],
+                removed_edges: vec![edge("old-1")],
+                ..GraphDelta::default()
+            },
+        };
+        changes.normalize_graph_delta();
+        assert_eq!(changes.graph_delta.added_edges.len(), 1);
+        assert!(changes.graph_delta.removed_edges.is_empty());
+        assert_eq!(
+            changes
+                .graph_delta
+                .collapsed_attribute_changes
+                .get("edge_identity"),
+            Some(&1)
+        );
     }
 }

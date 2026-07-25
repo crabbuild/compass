@@ -204,6 +204,36 @@ pub struct Comparison {
     pub fingerprint: String,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GraphNodeDelta {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub source_file: String,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GraphEdgeDelta {
+    pub source: String,
+    pub target: String,
+    pub relation: String,
+    pub key: String,
+    pub source_file: String,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GraphDelta {
+    pub added_nodes: Vec<GraphNodeDelta>,
+    pub removed_nodes: Vec<GraphNodeDelta>,
+    pub changed_nodes: Vec<GraphNodeDelta>,
+    pub added_edges: Vec<GraphEdgeDelta>,
+    pub removed_edges: Vec<GraphEdgeDelta>,
+    pub changed_edges: Vec<GraphEdgeDelta>,
+    pub collapsed_attribute_changes: BTreeMap<String, usize>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SemanticDiffReport {
     pub schema: String,
@@ -211,6 +241,8 @@ pub struct SemanticDiffReport {
     pub findings: Vec<SemanticFinding>,
     pub feature_groups: Vec<FeatureGroup>,
     pub collapsed_groups: Vec<CollapsedGroup>,
+    pub source_changes: Vec<compass_history::SourceFileDelta>,
+    pub graph_delta: GraphDelta,
     pub completeness: BTreeMap<String, Completeness>,
     pub limitations: Vec<String>,
 }
@@ -277,6 +309,7 @@ pub struct SemanticDiffInput<'a> {
     pub source_deltas: &'a [SourceFileDelta],
     pub changed_node_ids: &'a [String],
     pub dependency_deltas: &'a [DependencyDelta],
+    pub graph_delta: &'a GraphDelta,
     pub snapshots: &'a dyn SnapshotReader,
     pub test_evidence: &'a dyn TestEvidenceProvider,
 }

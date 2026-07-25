@@ -867,7 +867,7 @@ fn completed_outcomes_handle_short_and_broken_writers() {
 }
 
 #[test]
-fn diff_emits_semantic_text_json_and_rejects_removed_flags()
+fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     git(directory.path(), &["init", "--quiet"])?;
@@ -982,7 +982,77 @@ fn diff_emits_semantic_text_json_and_rejects_removed_flags()
     let envelope: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
     assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
     assert!(envelope["findings"].is_array());
+    assert!(envelope["source_changes"].is_array());
+    assert!(envelope["graph_delta"].is_object());
     assert!(envelope.get("changes").is_none());
+
+    let html_output = run(
+        compass,
+        directory.path(),
+        &[
+            "diff",
+            "HEAD~1",
+            "HEAD",
+            "--format",
+            "html",
+            "--output",
+            "semantic-diff.html",
+        ],
+    )?;
+    assert!(
+        html_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&html_output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&html_output.stdout)
+            .contains("semantic diff HTML written to semantic-diff.html")
+    );
+    let html = std::fs::read_to_string(directory.path().join("semantic-diff.html"))?;
+    assert!(html.starts_with("<!doctype html>"));
+    assert!(html.contains("<h1>Semantic diff</h1>"));
+    assert!(html.contains("id=\"semantic-diff-data\""));
+    assert!(html.contains("compass.semantic_diff.report/1"));
+    assert!(html.contains("data-type=\"structural_change\""));
+    assert!(html.contains("id=\"code\""));
+    assert!(html.contains("Unified source patch"));
+    assert!(html.contains("data-diff-style=\"unified\""));
+    assert!(html.contains("data-diff-style=\"split\""));
+    assert!(html.contains("globalThis.CompassDiffs"));
+    assert!(html.contains("@pierre/diffs 1.2.12"));
+    assert!(!html.contains("<script src="));
+    assert!(html.contains("id=\"graph\""));
+    assert!(html.contains("id=\"graph-canvas\""));
+
+    let missing_html_output = run(
+        compass,
+        directory.path(),
+        &["diff", "HEAD~1", "HEAD", "--format", "html"],
+    )?;
+    assert_eq!(missing_html_output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&missing_html_output.stderr)
+            .contains("--output is required with --format html")
+    );
+    let output_with_json = run(
+        compass,
+        directory.path(),
+        &[
+            "diff",
+            "HEAD~1",
+            "HEAD",
+            "--format",
+            "json",
+            "--output",
+            "semantic-diff.html",
+        ],
+    )?;
+    assert_eq!(output_with_json.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output_with_json.stderr)
+            .contains("--output is only valid with --format html")
+    );
+
     for removed in [
         "--detailed",
         "--topology-only",

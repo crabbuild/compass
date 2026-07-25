@@ -69,6 +69,8 @@ pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, Seman
         apply_verification(input.test_evidence.tests_for(&finding.subject), finding);
     }
     add_verification_findings(&mut findings);
+    let source_changes = input.source_deltas.to_vec();
+    let graph_delta = input.graph_delta.clone();
     finalize_report(
         Comparison {
             old_commit: input.old.commit,
@@ -77,6 +79,8 @@ pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, Seman
         },
         findings,
         limitations,
+        source_changes,
+        graph_delta,
     )
 }
 
@@ -1020,6 +1024,8 @@ fn finalize_report(
     comparison: Comparison,
     mut findings: Vec<SemanticFinding>,
     mut limitations: Vec<String>,
+    source_changes: Vec<compass_history::SourceFileDelta>,
+    graph_delta: crate::GraphDelta,
 ) -> Result<SemanticDiffReport, SemanticDiffError> {
     if findings.len() > MAX_FINDINGS {
         return Err(SemanticDiffError::LimitExceeded {
@@ -1149,6 +1155,8 @@ fn finalize_report(
         findings,
         feature_groups,
         collapsed_groups,
+        source_changes,
+        graph_delta,
         completeness: BTreeMap::from([
             ("identity".to_owned(), Completeness::Complete),
             ("source_delta".to_owned(), Completeness::Complete),

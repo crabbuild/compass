@@ -8,7 +8,7 @@ use compass_languages::TreeSitterSyntaxProvider;
 use compass_model::NodeRecord;
 use compass_program::{FileInput, SyntaxProvider, merge_evidence};
 use compass_semantic_diff::{
-    ChangeDirection, Compatibility, DependencyDelta, NoTestEvidence, REPORT_SCHEMA,
+    ChangeDirection, Compatibility, DependencyDelta, GraphDelta, NoTestEvidence, REPORT_SCHEMA,
     SemanticDiffError, SemanticDiffInput, SnapshotIdentity, SnapshotReader, SnapshotSide, compare,
 };
 
@@ -108,6 +108,7 @@ fn required_parameter_and_behavior_changes_are_actionable() -> Result<(), Box<dy
             new_start: 1,
             new_lines: 1,
         }],
+        patch: String::new(),
     }];
     let report = compare(SemanticDiffInput {
         old: SnapshotIdentity {
@@ -123,6 +124,7 @@ fn required_parameter_and_behavior_changes_are_actionable() -> Result<(), Box<dy
         source_deltas: &deltas,
         changed_node_ids: &[],
         dependency_deltas: &[],
+        graph_delta: &GraphDelta::default(),
         snapshots: &fixtures,
         test_evidence: &NoTestEvidence,
     })?;
@@ -175,6 +177,7 @@ fn comparisons_complete_in_both_directions_when_one_side_has_no_functions()
         new_path: Some("src/app.ts".to_owned()),
         status: SourceFileStatus::Modified,
         hunks: Vec::new(),
+        patch: String::new(),
     }];
     let run = |old: AnalysisBundle, new: AnalysisBundle| {
         let fixtures = Fixtures {
@@ -197,6 +200,7 @@ fn comparisons_complete_in_both_directions_when_one_side_has_no_functions()
             source_deltas: &delta,
             changed_node_ids: &[],
             dependency_deltas: &[],
+            graph_delta: &GraphDelta::default(),
             snapshots: &fixtures,
             test_evidence: &NoTestEvidence,
         })
@@ -238,6 +242,7 @@ fn comparisons_complete_in_both_directions_when_impact_exceeds_depth() -> Result
         new_path: Some("src/app.ts".to_owned()),
         status: SourceFileStatus::Modified,
         hunks: Vec::new(),
+        patch: String::new(),
     }];
     let run = |old: AnalysisBundle, new: AnalysisBundle| {
         let fixtures = Fixtures {
@@ -260,6 +265,7 @@ fn comparisons_complete_in_both_directions_when_impact_exceeds_depth() -> Result
             source_deltas: &delta,
             changed_node_ids: &[],
             dependency_deltas: &[],
+            graph_delta: &GraphDelta::default(),
             snapshots: &fixtures,
             test_evidence: &NoTestEvidence,
         })
@@ -348,6 +354,7 @@ fn graph_only_additions_and_removals_are_classified_before_digest_changes()
         source_deltas: &[],
         changed_node_ids: &changed,
         dependency_deltas: &dependencies,
+        graph_delta: &GraphDelta::default(),
         snapshots: &fixtures,
         test_evidence: &NoTestEvidence,
     })?;

@@ -91,6 +91,16 @@ For scripts:
 compass diff HEAD~1 HEAD --format json
 ```
 
+For an interactive reviewer report:
+
+```bash
+compass diff HEAD~1 HEAD --format html --output semantic-diff.html
+```
+
+The resulting standalone report combines the actionable semantic review,
+unified/split source diffs with an exact-patch fallback, and the changed code
+subgraph.
+
 ### Build only structural code knowledge
 
 ```bash
