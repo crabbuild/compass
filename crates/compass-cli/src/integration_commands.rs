@@ -176,6 +176,7 @@ pub(super) fn command_clone(frontend: Frontend, args: &[String]) -> Outcome {
                     ),
                     stdout_trailing_newline: true,
                     stderr_trailing_newline: true,
+                    html_output: None,
                 };
             }
             Err(error) => {
@@ -185,6 +186,7 @@ pub(super) fn command_clone(frontend: Frontend, args: &[String]) -> Outcome {
                     stderr: format!("error: git clone failed:\n{error}"),
                     stdout_trailing_newline: true,
                     stderr_trailing_newline: true,
+                    html_output: None,
                 };
             }
         }
@@ -197,6 +199,7 @@ pub(super) fn command_clone(frontend: Frontend, args: &[String]) -> Outcome {
         stderr,
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -276,6 +279,7 @@ fn outcome_with_warnings(stdout: String, warnings: Vec<String>) -> Outcome {
         stderr: warnings.join("\n"),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 

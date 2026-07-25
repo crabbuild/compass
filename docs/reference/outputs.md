@@ -276,6 +276,10 @@ edge-identity shifts that preserve multigraph multiplicity. HTML output always
 requires an explicit path; `compass export html` remains the full graph
 renderer and does not accept semantic-diff reports.
 
+After writing any HTML page, an interactive Compass CLI asks before opening it
+in the default browser; Enter or `n` leaves the page closed. Scripts, pipes,
+redirected commands, and CI never prompt or launch a browser.
+
 ## History export
 
 ### `graph-json`

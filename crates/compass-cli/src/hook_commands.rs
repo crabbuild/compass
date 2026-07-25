@@ -181,6 +181,7 @@ fn hook_action(frontend: Frontend, action: HookAction) -> Outcome {
             stderr: warning.unwrap_or_default(),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         },
         Err(error) => Outcome::failure(format!("error: {error}")),
     }

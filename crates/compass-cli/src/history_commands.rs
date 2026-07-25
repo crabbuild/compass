@@ -173,6 +173,7 @@ fn outcome(result: Result<String, CommandFailure>) -> Outcome {
             stderr: format!("error: {message}"),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         },
         Err(error) if error.code == 2 => {
             Outcome::failure_with_code(format!("error: {}", error.message), 2)

@@ -32,6 +32,7 @@ fn command_provider_at(frontend: Frontend, args: &[String], path: &Path) -> Outc
             stderr: provider_help(frontend),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         },
     };
     if !startup_warnings.is_empty() {
@@ -184,6 +185,7 @@ fn provider_add(frontend: Frontend, args: &[String], path: &Path) -> Outcome {
         stderr: endpoint_warning.unwrap_or_default(),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 

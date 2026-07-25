@@ -230,6 +230,10 @@ Defaults:
 - max children: 200;
 - top outbound edges: 12.
 
+After a successful interactive HTML export, Compass asks whether to open the
+page in the default browser. The answer defaults to no. With redirected input
+or output, in pipes, and in CI, Compass neither prompts nor launches a browser.
+
 ### `benchmark`
 
 ```text
@@ -349,6 +353,10 @@ compass export callflow-html --help
 
 Common inputs include `--graph PATH`, labels/report/sections, output directory,
 node/diagram limits, and database connection arguments.
+
+For `html` and `callflow-html`, an interactive terminal asks before opening the
+generated page in the default browser. Non-interactive commands never prompt or
+launch a browser.
 
 For database credentials, prefer supported environment variables over
 `--password`.
