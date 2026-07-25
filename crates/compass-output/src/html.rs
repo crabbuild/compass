@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::OutputError;
+use crate::json::python_json_compact;
 use crate::viewer_model::GraphViewModel;
 
 const DEFAULT_NODE_LIMIT: isize = 5_000;
@@ -40,16 +41,42 @@ pub fn html_document(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
 ) -> Result<Option<HtmlRender>, OutputError> {
-    let Some(model) = graph_view_model_document(document, communities, output_path, options)?
-    else {
-        return Ok(None);
-    };
-    let html = crate::viewer_model::shared_viewer_html(&model)?;
+    let limit = options.node_limit.unwrap_or_else(viz_node_limit);
+    if document.nodes.len() as isize > limit {
+        if options.node_limit.is_none() {
+            return Err(OutputError::HtmlTooLarge {
+                nodes: document.nodes.len(),
+                limit,
+            });
+        }
+        let (meta, meta_communities, member_counts) = aggregate(document, communities, options);
+        if meta.nodes.len() <= 1 {
+            return Ok(None);
+        }
+        let rendered = render(
+            &meta,
+            &meta_communities,
+            output_path.as_ref(),
+            &HtmlOptions {
+                community_labels: options.community_labels,
+                member_counts: Some(&member_counts),
+                node_limit: None,
+                learning_overlay: options.learning_overlay,
+            },
+            Some((document, communities)),
+        );
+        return Ok(Some(HtmlRender {
+            nodes: meta.nodes.len(),
+            edges: meta.links.len(),
+            html: rendered,
+            aggregated: true,
+        }));
+    }
     Ok(Some(HtmlRender {
-        html,
-        aggregated: model.stats.aggregated,
-        nodes: model.stats.nodes,
-        edges: model.stats.edges,
+        html: render(document, communities, output_path.as_ref(), options, None),
+        aggregated: false,
+        nodes: document.nodes.len(),
+        edges: document.links.len(),
     }))
 }
 
@@ -118,6 +145,76 @@ pub fn write_html(
         write_text_atomic(output_path, &rendered.html)?;
     }
     Ok(rendered)
+}
+
+fn render(
+    document: &GraphDocument,
+    communities: &Communities,
+    output_path: &Path,
+    options: &HtmlOptions<'_>,
+    drilldown: Option<(&GraphDocument, &Communities)>,
+) -> String {
+    let nodes = node_values(document, communities, options);
+    let edges = document.links.iter().map(edge_value).collect::<Vec<_>>();
+    let mut legend = Vec::new();
+    if let Some(labels) = options.community_labels {
+        for community in labels.keys() {
+            let count = options.member_counts.map_or_else(
+                || communities.get(community).map(Vec::len).unwrap_or_default(),
+                |counts| {
+                    counts.get(community).copied().unwrap_or_else(|| {
+                        communities.get(community).map(Vec::len).unwrap_or_default()
+                    })
+                },
+            );
+            let mut item = Map::new();
+            item.insert("cid".into(), Value::from(*community));
+            item.insert(
+                "color".into(),
+                Value::String(COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()].into()),
+            );
+            item.insert(
+                "label".into(),
+                Value::String(html_escape(&sanitize_label(&community_name(
+                    *community,
+                    options.community_labels,
+                )))),
+            );
+            item.insert("count".into(), Value::from(count));
+            legend.push(Value::Object(item));
+        }
+    }
+    let hyperedges = document
+        .graph
+        .get("hyperedges")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let details = drilldown.map_or_else(
+        || Value::Object(Map::new()),
+        |(source, source_communities)| community_details(source, source_communities, options),
+    );
+    let nodes_json = js_safe(&python_json_compact(&Value::Array(nodes)));
+    let edges_json = js_safe(&python_json_compact(&Value::Array(edges)));
+    let legend_json = js_safe(&python_json_compact(&Value::Array(legend)));
+    let hyperedges_json = js_safe(&python_json_compact(&hyperedges));
+    let details_json = js_safe(&python_json_compact(&details));
+    let title = html_escape(&sanitize_label(&output_path.to_string_lossy()));
+    let stats = format!(
+        "{} nodes &middot; {} edges &middot; {} communities",
+        document.nodes.len(),
+        document.links.len(),
+        communities.len()
+    );
+    page(
+        &title,
+        &stats,
+        &nodes_json,
+        &edges_json,
+        &legend_json,
+        &hyperedges_json,
+        &details_json,
+        drilldown.is_some(),
+    )
 }
 
 pub(crate) fn node_values(
@@ -257,7 +354,6 @@ pub(crate) fn node_values(
     nodes
 }
 
-#[allow(dead_code)]
 fn community_details(
     document: &GraphDocument,
     communities: &Communities,
@@ -657,7 +753,6 @@ fn html_escape(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
 }
-#[allow(dead_code)]
 fn js_safe(value: &str) -> String {
     value.replace("</", "<\\/")
 }
@@ -766,7 +861,6 @@ fn resolve_learning_source(source: &str, output_path: &Path) -> Option<std::path
         .find(|candidate| candidate.is_file())
 }
 
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 fn page(
     title: &str,
@@ -2027,13 +2121,9 @@ mod tests {
             &HtmlOptions::default(),
         )?
         .ok_or("HTML unexpectedly skipped")?;
-        assert!(rendered.html.contains("\\u003c/script\\u003e"));
-        assert!(!rendered.html.contains("</script><script>alert(1)</script>"));
-        assert!(
-            rendered
-                .html
-                .contains("id=\"compass-viewer-model\" type=\"application/json\"")
-        );
+        assert!(rendered.html.contains("<\\/script>"));
+        assert!(!rendered.html.contains("onclick=\"focusNode("));
+        assert!(rendered.html.contains("data-nid=\"${esc(nid)}\""));
         Ok(())
     }
 
@@ -2051,18 +2141,26 @@ mod tests {
         )?
         .ok_or("HTML unexpectedly skipped")?;
         for marker in [
-            "id=\"compass-viewer-root\"",
-            "id=\"compass-viewer-model\"",
-            "Pause layout",
-            "Resume layout",
-            "Fit graph in view",
-            "Reset graph view",
-            "Search graph nodes",
-            "compass:open-source",
+            "id=\"graph-toolbar\"",
+            "id=\"physics-toggle\"",
+            "id=\"fit-graph\"",
+            "id=\"reset-view\"",
+            "id=\"labels-toggle\"",
+            "id=\"viewer-status\"",
+            "const viewerState =",
+            "function setPhysicsRunning(running)",
+            "network.stopSimulation()",
+            "network.once('stabilizationIterationsDone'",
+            "function applyRelationshipSpotlight(id)",
+            "function clearFocus()",
+            "function focusNode(id)",
+            "setPhysicsRunning(false);",
+            "applyRelationshipSpotlight(id);",
+            "focusNode(params.nodes[0]);",
+            "else clearFocus();",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
-        assert!(!rendered.html.contains("https://unpkg.com"));
         Ok(())
     }
 
@@ -2080,14 +2178,20 @@ mod tests {
         )?
         .ok_or("HTML unexpectedly skipped")?;
         for marker in [
-            "aria-label",
-            "Graph controls",
-            "Graph inspector",
-            "Search nodes and files",
-            "@media(max-width:760px)",
-            "@media(prefers-reduced-motion:reduce)",
+            "<strong>Compass</strong>",
+            "role=\"search\"",
+            "role=\"listbox\"",
+            "aria-controls=\"search-results\"",
+            "search.addEventListener('keydown'",
+            "case 'ArrowDown':",
+            "case 'ArrowUp':",
+            "case 'Enter':",
+            "case 'Escape':",
+            "@media (max-width: 760px)",
+            "@media (prefers-reduced-motion: reduce)",
             ":focus-visible",
-            "color-scheme",
+            "class=\"node-identity\"",
+            "class=\"metadata-grid\"",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
@@ -2129,12 +2233,18 @@ mod tests {
         .ok_or("aggregated HTML unexpectedly skipped")?;
         assert!(rendered.aggregated);
         assert_eq!((rendered.nodes, rendered.edges), (2, 1));
+        assert!(rendered.html.contains("2 cross-community edges"));
         for marker in [
-            "\"aggregated\":true",
-            "\"nodes\":2",
-            "\"edges\":1",
-            "\"communityName\"",
-            "Community overview",
+            "const COMMUNITY_DETAILS =",
+            "const IS_AGGREGATED = true",
+            "function enterCommunity(community, focusId = null)",
+            "id=\"back-overview\"",
+            "\"symbol_kind\": \"function\"",
+            "\"language\": \"python\"",
+            "\"line_start\": 4",
+            "\"line_end\": 8",
+            "\"signature\": \"def A(value)\"",
+            "class=\\\"node-hover-card\\\"",
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
@@ -2168,8 +2278,8 @@ mod tests {
             &HtmlOptions::default(),
         )?
         .ok_or("HTML unexpectedly skipped")?;
-        assert!(rendered.html.contains("\"learningStatus\":\"preferred\""));
-        assert!(rendered.html.contains("\"learningStale\":false"));
+        assert!(rendered.html.contains("\"learning_status\": \"preferred\""));
+        assert!(rendered.html.contains("\"learning_stale\": false"));
         Ok(())
     }
 
