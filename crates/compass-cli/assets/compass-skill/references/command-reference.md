@@ -6,6 +6,8 @@ whether a Compass capability is covered by the installed skill. Run
 
 ## Read and navigate
 
+- `compass capabilities`: report versioned, read-only machine contracts for
+  editor and automation integrations.
 - `compass query`: natural-language graph traversal or deterministic CompassQL.
 - `compass program`: inspect canonical Program IR functions, coverage, callers,
   and call evidence, or run CompassQL over its read-only graph projection.

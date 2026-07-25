@@ -1,0 +1,14 @@
+{
+  "schema": "compass.viewer.assets/1",
+  "viewerSchema": "compass.viewer.graph/1",
+  "files": {
+    "graph.js": {
+      "bytes": 1397725,
+      "sha256": "2c560143bfa7b30755bc23abc4171e27585ef1efa70c0afae0bb5b0c77331ebe"
+    },
+    "viewer.css": {
+      "bytes": 56492,
+      "sha256": "557f72cdb4899164fd85d1309a18edc690c6ebaf479cb9bc8735537a5c422885"
+    }
+  }
+}

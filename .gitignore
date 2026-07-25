@@ -1,5 +1,8 @@
 /target/
 /dist/
+node_modules/
+/editors/vscode/dist/
+/packages/compass-viewer/dist/
 /.worktrees/
 __pycache__/
 *.pyc

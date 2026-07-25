@@ -1,0 +1,21 @@
+import { GraphViewModelSchema, SourceLocationSchema } from "@compass/viewer/contracts/graph";
+import { z } from "zod";
+
+export const HostToGraphMessageSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("hydrateGraph"),
+    requestId: z.string(),
+    repositoryId: z.string(),
+    model: GraphViewModelSchema
+  }),
+  z.object({ type: z.literal("error"), message: z.string() })
+]);
+
+export const GraphToHostMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("ready") }),
+  z.object({
+    type: z.literal("openSource"),
+    repositoryId: z.string(),
+    source: SourceLocationSchema
+  })
+]);

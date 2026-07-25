@@ -1,11 +1,13 @@
 //! Command compatibility layer for Compass and the Graphify compatibility binary.
 
+mod capability_commands;
 mod dedup_commands;
 mod help;
 mod history_batch;
 mod history_build;
 mod history_commands;
 mod hook_commands;
+pub mod ide_contract;
 mod ingest_commands;
 mod init_commands;
 mod install_commands;
@@ -45,8 +47,9 @@ use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
 use compass_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
-    TreeOptions, WikiOptions, export_obsidian, export_wiki, node_filenames, write_callflow_html,
-    write_canvas, write_cypher, write_graphml, write_html, write_svg, write_tree_html,
+    TreeOptions, WikiOptions, export_obsidian, export_wiki, graph_view_model_document,
+    node_filenames, write_callflow_html, write_canvas, write_cypher, write_graphml, write_html,
+    write_svg, write_tree_html,
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
@@ -177,6 +180,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     args.remove(0);
     let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
+        "capabilities" => capability_commands::command(frontend, &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
@@ -3049,7 +3053,15 @@ fn command_export(args: &[String]) -> Outcome {
     };
     if !matches!(
         format,
-        "html" | "callflow-html" | "obsidian" | "wiki" | "svg" | "graphml" | "neo4j" | "falkordb"
+        "html"
+            | "viewer-json"
+            | "callflow-html"
+            | "obsidian"
+            | "wiki"
+            | "svg"
+            | "graphml"
+            | "neo4j"
+            | "falkordb"
     ) {
         return Outcome::failure(export_help());
     }
@@ -3259,6 +3271,22 @@ fn command_export(args: &[String]) -> Outcome {
     let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
     let result = match format {
         "html" => export_html(&inputs, output_dir, no_viz, node_limit),
+        "viewer-json" => graph_view_model_document(
+            &inputs.document,
+            &inputs.communities,
+            &graph_path,
+            &HtmlOptions {
+                community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+                member_counts: None,
+                node_limit: Some(node_limit),
+                learning_overlay: None,
+            },
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|model| {
+            model.ok_or_else(|| "graph has no renderable community overview".to_owned())
+        })
+        .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string())),
         "callflow-html" => export_callflow(
             &inputs,
             &graph_path,

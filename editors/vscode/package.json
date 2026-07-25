@@ -1,0 +1,154 @@
+{
+  "name": "compass-vscode",
+  "displayName": "Compass",
+  "description": "Explore, query, and understand how your codebase evolves with Compass.",
+  "publisher": "crabbuild",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Visualization",
+    "Programming Languages",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "compass.initialize",
+        "title": "Compass: Initialize Repository",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "compass.update",
+        "title": "Compass: Update Graph",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "compass.toggleWatch",
+        "title": "Compass: Start or Stop Watch",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "compass.openGraph",
+        "title": "Compass: Open Code Graph",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "compass.openCallGraph",
+        "title": "Compass: Open Call Graph from Cursor",
+        "icon": "$(references)"
+      },
+      {
+        "command": "compass.openArchitecture",
+        "title": "Compass: Open Architecture Flow",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "compass.openQuery",
+        "title": "Compass: Query Codebase",
+        "icon": "$(search)"
+      },
+      {
+        "command": "compass.openHistory",
+        "title": "Compass: Open Codebase Evolution",
+        "icon": "$(history)"
+      }
+    ],
+    "configuration": {
+      "title": "Compass",
+      "properties": {
+        "compass.cliPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Absolute path to an installed Compass CLI. Leave empty to discover compass on PATH."
+        },
+        "compass.graphNodeLimit": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1,
+          "description": "Maximum detailed nodes before Compass uses a community overview."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "compass",
+          "title": "Compass",
+          "icon": "media/compass.svg"
+        }
+      ]
+    },
+    "views": {
+      "compass": [
+        {
+          "id": "compass.status",
+          "name": "Repository"
+        },
+        {
+          "id": "compass.operations",
+          "name": "Operations"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "compass.update",
+          "when": "view == compass.status",
+          "group": "navigation"
+        },
+        {
+          "command": "compass.openGraph",
+          "when": "view == compass.status",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "compass.openCallGraph",
+          "when": "resourceScheme == file",
+          "group": "navigation@90"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "node ./dist/test/runTest.js",
+    "package": "npm run build && vsce package --no-dependencies",
+    "smoke:vsix": "node scripts/smoke-vsix.mjs"
+  },
+  "dependencies": {
+    "@compass/viewer": "0.1.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.12",
+    "vitest": "^3.2.4"
+  }
+}

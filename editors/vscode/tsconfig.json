@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../../packages/compass-viewer/src/*"],
+      "@compass/viewer": ["../../packages/compass-viewer/src/index.ts"],
+      "@compass/viewer/*": ["../../packages/compass-viewer/src/*"]
+    },
+    "types": ["node", "vscode", "vitest/globals"]
+  },
+  "include": ["src", "esbuild.mjs"]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "compass-workspace",
+  "private": true,
+  "packageManager": "npm@11.8.0",
+  "workspaces": [
+    "packages/*",
+    "editors/*",
+    "tests/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:viewer": "npm run build -w @compass/viewer",
+    "build:vscode": "npm run build -w editors/vscode",
+    "test:js": "npm run test --workspaces --if-present",
+    "typecheck:js": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "@types/node": "^24.10.0",
+    "jsdom": "^27.0.0",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "vitest": "^3.2.4"
+  }
+}

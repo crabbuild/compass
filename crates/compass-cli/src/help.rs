@@ -122,6 +122,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Diagnose and support",
         commands: &[
+            "capabilities",
             "diagnose",
             "check-update",
             "merge-driver",
@@ -132,6 +133,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "capabilities",
+        "Report versioned machine contracts for editor integrations",
+        ["compass capabilities --format json"],
+        "Options:\n  --format json              Emit the versioned capability document\n\nExamples:\n  compass capabilities --format json\n\nNotes:\n  This command is read-only and intended for IDE capability negotiation."
+    ),
     page!(
         "init",
         "Configure project scope and build the first knowledge graph",
@@ -319,7 +326,7 @@ const PAGES: &[Page] = &[
         "export",
         "Export or publish the graph in another format",
         ["compass export <FORMAT> [OPTIONS]"],
-        "Examples:\n  compass export html\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
+        "Examples:\n  compass export html\n  compass export viewer-json --graph compass-out/graph.json\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
     ),
     page!(
         "export html",
