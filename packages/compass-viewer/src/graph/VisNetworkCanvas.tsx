@@ -126,6 +126,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
   }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
+    const physicsRunningRef = useRef(physicsRunning);
+    physicsRunningRef.current = physicsRunning;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
     const themeRevision = useThemeRevision();
     const maxDegree = useMemo(
@@ -180,10 +182,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     useEffect(() => {
       const container = containerRef.current;
       if (!container) return;
+      initialViewRef.current = null;
       const network = new Network(container, {
         nodes: nodeData,
         edges: edgeData
       }, options);
+      network.setOptions({ physics: { enabled: physicsRunningRef.current } });
+      if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
       bindGraphNetworkEvents(network, {
         onFocus,
@@ -218,7 +223,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       network.setOptions({ physics: { enabled: physicsRunning } });
       if (physicsRunning) network.startSimulation();
       else network.stopSimulation();
-    }, [physicsRunning]);
+    }, [edgeData, nodeData, physicsRunning]);
 
     useEffect(() => {
       const hiddenNodes = new Set(

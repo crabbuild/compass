@@ -3,8 +3,8 @@
   "viewerSchema": "compass.viewer.graph/1",
   "files": {
     "graph.js": {
-      "bytes": 903216,
-      "sha256": "d344ac7fa7984fd541562571fbb88307826f864c77c6efc876faed23bb1750cf"
+      "bytes": 903358,
+      "sha256": "fa8832e76fcc383902b5de2785ea88037c6d2483aeec35b1f676b9112b93a21a"
     },
     "viewer.css": {
       "bytes": 59543,
