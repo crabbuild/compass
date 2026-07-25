@@ -5,15 +5,14 @@ use std::sync::Arc;
 
 use compass_analysis::{AnalysisBundle, analyze};
 use compass_history::{
-    CommitId, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, GraphVersion,
-    HistoryStore, PublishRequest, RealizationId, Repository, canonical_json_bytes,
+    CommitId, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryStore,
+    PublishRequest, Repository,
 };
 use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
 use prolly::{Config, KeyBuilder, Prolly};
 use prolly_store_sqlite::SqliteStore;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
 struct Fixture {
     _directory: tempfile::TempDir,
@@ -68,10 +67,12 @@ fn request(
         "nodes": nodes,
         "links": links
     }))?;
+    let mut profile = compass_history::BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
     Ok(PublishRequest {
         commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse()?,
         parents: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse()?],
-        profile: compass_history::BuildProfile::default(),
+        profile,
         fingerprint: std::iter::repeat_n(fingerprint, 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -143,30 +144,20 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
 }
 
 #[test]
-fn schema_two_manifests_deserialize_with_identity_preserving_empty_program_trees()
+fn previous_graph_schema_profiles_are_rejected_at_publication()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::new()?;
     let repository = Repository::discover(&fixture.path)?;
-    let published = HistoryStore::create(&repository)?.publish(request('9', false)?)?;
-    let mut legacy = serde_json::to_value(&published.version)?;
-    let object = legacy.as_object_mut().ok_or("version is not an object")?;
-    object.insert("schema_version".to_owned(), json!(2));
-    for field in [
-        "program_facts_root",
-        "program_summaries_root",
-        "program_fact_count",
-        "program_summary_count",
-    ] {
-        object.remove(field);
-    }
-    let expected = format!("{:x}", Sha256::digest(canonical_json_bytes(&legacy)?));
-    let parsed: GraphVersion = serde_json::from_value(legacy)?;
-    assert_eq!(parsed.schema_version, 2);
-    assert!(parsed.program_facts_root.root.is_none());
-    assert!(parsed.program_summaries_root.root.is_none());
-    assert_eq!(parsed.program_fact_count, 0);
-    assert_eq!(parsed.program_summary_count, 0);
-    assert_eq!(RealizationId::for_version(&parsed)?.as_hex(), expected);
+    let history = HistoryStore::create(&repository)?;
+    let mut publish = request('a', false)?;
+    publish
+        .profile
+        .insert("graph_schema", "networkx-node-link/v5")?;
+    let error = match history.publish(publish) {
+        Ok(_) => return Err("previous graph schema must not be published".into()),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("networkx-node-link/v6"));
     Ok(())
 }
 
@@ -363,7 +354,7 @@ fn corrupt_preferred_recovery_requires_the_exact_observation_and_commit()
     let prolly = Prolly::new(adapter, Config::default());
     let preferred_name = KeyBuilder::new()
         .push_segment(b"compass")
-        .push_segment(b"v1")
+        .push_segment(b"v2")
         .push_segment(b"preferred")
         .push_segment(commit.as_str().as_bytes())
         .finish();

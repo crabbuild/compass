@@ -60,10 +60,12 @@ fn request(fingerprint: char, label: &str) -> Result<PublishRequest, Box<dyn std
         "nodes": [{"id": "fixture", "label": label}],
         "links": []
     }))?;
+    let mut profile = compass_history::BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
     Ok(PublishRequest {
         commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse()?,
         parents: Vec::new(),
-        profile: compass_history::BuildProfile::default(),
+        profile,
         fingerprint: std::iter::repeat_n(fingerprint, 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -240,7 +242,7 @@ fn gc_rejects_incomplete_realization_root_sets() -> Result<(), Box<dyn std::erro
         Ok(_) => return Err("incomplete roots unexpectedly accepted".into()),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("complete schema-2 or schema-3"));
+    assert!(error.to_string().contains("complete current root set"));
     Ok(())
 }
 

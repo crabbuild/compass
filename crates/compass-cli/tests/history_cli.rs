@@ -35,6 +35,13 @@ fn run(
         .output()?)
 }
 
+fn current_history_profile() -> Result<compass_history::BuildProfile, compass_history::HistoryError>
+{
+    let mut profile = compass_history::BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
+    Ok(profile)
+}
+
 #[test]
 fn history_help_and_empty_status_are_actionable_and_non_mutating()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -380,7 +387,7 @@ fn worker_reconciles_catalog_and_preferred_crash_windows() -> Result<(), Box<dyn
     let candidate = history.publish(PublishRequest {
         commit: commit.clone(),
         parents: repository.parents(&commit)?,
-        profile: compass_history::BuildProfile::default(),
+        profile: current_history_profile()?,
         fingerprint: std::iter::repeat_n('c', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -501,7 +508,7 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
         Ok(history.publish(PublishRequest {
             commit: commit.clone(),
             parents: repository.parents(&commit)?,
-            profile: compass_history::BuildProfile::default(),
+            profile: current_history_profile()?,
             fingerprint: std::iter::repeat_n(fingerprint, 64)
                 .collect::<String>()
                 .parse::<ExtractionFingerprint>()?,
@@ -721,7 +728,7 @@ fn gc_requires_explicit_confirmation_for_non_preferred_realizations()
         history.publish(PublishRequest {
             commit: commit.clone(),
             parents: Vec::new(),
-            profile: compass_history::BuildProfile::default(),
+            profile: current_history_profile()?,
             fingerprint: std::iter::repeat_n(fingerprint, 64)
                 .collect::<String>()
                 .parse::<ExtractionFingerprint>()?,
@@ -891,7 +898,7 @@ fn diff_emits_semantic_text_json_and_rejects_removed_flags()
     history.publish(PublishRequest {
         commit: old_commit.clone(),
         parents: repository.parents(&old_commit)?,
-        profile: compass_history::BuildProfile::default(),
+        profile: current_history_profile()?,
         fingerprint: std::iter::repeat_n('c', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -941,7 +948,7 @@ fn diff_emits_semantic_text_json_and_rejects_removed_flags()
     history.publish(PublishRequest {
         commit: new_commit.clone(),
         parents: repository.parents(&new_commit)?,
-        profile: compass_history::BuildProfile::default(),
+        profile: current_history_profile()?,
         fingerprint: std::iter::repeat_n('c', 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,
@@ -997,7 +1004,7 @@ fn diff_emits_semantic_text_json_and_rejects_removed_flags()
     let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
     assert!(String::from_utf8_lossy(&empty.stdout).contains("0 likely breaks"));
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
-    let mut incompatible_profile = compass_history::BuildProfile::default();
+    let mut incompatible_profile = current_history_profile()?;
     incompatible_profile.insert("compass_version", "incompatible")?;
     let incompatible = history.publish(PublishRequest {
         commit: new_commit,
@@ -1064,7 +1071,7 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
         history.publish(PublishRequest {
             parents: repository.parents(&commit)?,
             commit,
-            profile: compass_history::BuildProfile::default(),
+            profile: current_history_profile()?,
             fingerprint: std::iter::repeat_n(fingerprint, 64)
                 .collect::<String>()
                 .parse::<ExtractionFingerprint>()?,

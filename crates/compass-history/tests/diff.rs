@@ -63,10 +63,12 @@ fn request(
         "links": links,
         "hyperedges": hyperedges
     }))?;
+    let mut profile = compass_history::BuildProfile::default();
+    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
     Ok(PublishRequest {
         commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse()?,
         parents: Vec::new(),
-        profile: compass_history::BuildProfile::default(),
+        profile,
         fingerprint: std::iter::repeat_n(fingerprint, 64)
             .collect::<String>()
             .parse::<ExtractionFingerprint>()?,

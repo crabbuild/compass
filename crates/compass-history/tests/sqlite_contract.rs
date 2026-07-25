@@ -148,6 +148,33 @@ fn incompatible_store_format_fails_closed() -> Result<(), Box<dyn std::error::Er
         b"format".to_vec(),
         br#"{"history_schema":999}"#.to_vec(),
     )?;
+    manager.publish_named_root(b"compass/store-format/v2", &tree)?;
+    drop(manager);
+
+    assert!(HistoryStore::open_existing(&repository).is_err());
+    Ok(())
+}
+
+#[test]
+fn previous_store_format_is_not_opened() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = CommittedRepository::new()?;
+    let repository = Repository::discover(fixture.path())?;
+    let history = HistoryStore::create(&repository)?;
+    let database_path = history.database_path().to_path_buf();
+    drop(history);
+
+    let backend = Arc::new(SqliteStore::open_with_config(
+        &database_path,
+        sqlite_config(),
+    )?);
+    let manager = Prolly::new(backend, Config::default());
+    manager.delete_named_root(b"compass/store-format/v2")?;
+    let tree = manager.put(
+        &manager.create(),
+        b"format".to_vec(),
+        br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"history_schema":1,"typed_keys":1}"#
+            .to_vec(),
+    )?;
     manager.publish_named_root(b"compass/store-format/v1", &tree)?;
     drop(manager);
 

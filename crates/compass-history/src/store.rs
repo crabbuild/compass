@@ -34,9 +34,9 @@ pub enum HistoryRecord {
     ReverseCallers(Vec<String>),
 }
 
-pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
+pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v2";
 const STORE_FORMAT_KEY: &[u8] = b"format";
-const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"history_schema":1,"typed_keys":1}"#;
+const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"graph_schema":"networkx-node-link/v6","history_schema":3,"typed_keys":1}"#;
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
 
 /// Project-owned wrapper around the pinned SQLite Prolly adapter.
@@ -154,22 +154,22 @@ impl HistoryStore {
                 "compass.node",
             ),
             HistoryRecordKey::ProgramModule(source_file) => (
-                self.load_program_root(realization, &published.version, b"program-facts")?,
+                self.load_program_root(realization, b"program-facts")?,
                 crate::artifacts::program_key("module", source_file),
                 "compass.program.module",
             ),
             HistoryRecordKey::ProgramFunction(symbol_id) => (
-                self.load_program_root(realization, &published.version, b"program-facts")?,
+                self.load_program_root(realization, b"program-facts")?,
                 crate::artifacts::program_key("function", symbol_id),
                 "compass.program.function",
             ),
             HistoryRecordKey::ProgramSummary(symbol_id) => (
-                self.load_program_root(realization, &published.version, b"program-summaries")?,
+                self.load_program_root(realization, b"program-summaries")?,
                 crate::artifacts::program_key("summary", symbol_id),
                 "compass.program.summary",
             ),
             HistoryRecordKey::ReverseCallers(symbol_id) => (
-                self.load_program_root(realization, &published.version, b"program-summaries")?,
+                self.load_program_root(realization, b"program-summaries")?,
                 crate::artifacts::program_key("reverse-call", symbol_id),
                 "compass.program.reverse-call",
             ),
@@ -464,7 +464,7 @@ impl HistoryStore {
             };
             if segments.len() != 5
                 || segments[0] != b"compass"
-                || segments[1] != b"v1"
+                || segments[1] != b"v2"
                 || segments[2] != b"version"
                 || segments[4] != b"manifest"
             {
@@ -647,9 +647,8 @@ impl HistoryStore {
         let hyperedges = self.load_realization_root(id, b"hyperedges")?;
         let analysis = self.load_realization_root(id, b"analysis")?;
         let metadata = self.load_realization_root(id, b"metadata")?;
-        let program_facts = self.load_program_root(id, &published.version, b"program-facts")?;
-        let program_summaries =
-            self.load_program_root(id, &published.version, b"program-summaries")?;
+        let program_facts = self.load_program_root(id, b"program-facts")?;
+        let program_summaries = self.load_program_root(id, b"program-summaries")?;
         validate_trees(
             &self.prolly,
             id,
@@ -681,23 +680,15 @@ impl HistoryStore {
         _guard: &ActivityGuard,
     ) -> Result<crate::CompletedGraphArtifacts, HistoryError> {
         self.validate_without_activity(id)?;
-        let published = self.get_without_activity(id)?;
         let partitioned = crate::PartitionedGraph {
             nodes: self.read_tree(&self.load_realization_root(id, b"nodes")?)?,
             edges: self.read_tree(&self.load_realization_root(id, b"edges")?)?,
             hyperedges: self.read_tree(&self.load_realization_root(id, b"hyperedges")?)?,
             analysis: self.read_tree(&self.load_realization_root(id, b"analysis")?)?,
             metadata: self.read_tree(&self.load_realization_root(id, b"metadata")?)?,
-            program_facts: self.read_tree(&self.load_program_root(
-                id,
-                &published.version,
-                b"program-facts",
-            )?)?,
-            program_summaries: self.read_tree(&self.load_program_root(
-                id,
-                &published.version,
-                b"program-summaries",
-            )?)?,
+            program_facts: self.read_tree(&self.load_program_root(id, b"program-facts")?)?,
+            program_summaries: self
+                .read_tree(&self.load_program_root(id, b"program-summaries")?)?,
         };
         crate::CompletedGraphArtifacts::reconstruct(&partitioned)
     }
@@ -800,20 +791,8 @@ impl HistoryStore {
     fn load_program_root(
         &self,
         id: &RealizationId,
-        version: &GraphVersion,
         kind: &'static [u8],
     ) -> Result<Tree, HistoryError> {
-        if version.schema_version == 2 {
-            return Ok(match kind {
-                b"program-facts" => version.program_facts_root.to_tree(),
-                b"program-summaries" => version.program_summaries_root.to_tree(),
-                _ => {
-                    return Err(HistoryError::CorruptHistory(
-                        "invalid program root kind".to_owned(),
-                    ));
-                }
-            });
-        }
         self.load_realization_root(id, kind)
     }
 
@@ -862,10 +841,20 @@ impl HistoryStore {
             HistoryError::CorruptHistory("manifest tree has no manifest record".to_owned())
         })?;
         let version: GraphVersion = serde_json::from_slice(&bytes)?;
-        if !matches!(version.schema_version, 2 | crate::HISTORY_SCHEMA_VERSION) {
+        if version.schema_version != crate::HISTORY_SCHEMA_VERSION {
             return Err(HistoryError::CorruptHistory(format!(
                 "unsupported realization schema {}",
                 version.schema_version
+            )));
+        }
+        if version.build_profile.value("graph_schema") != Some(crate::HISTORY_GRAPH_SCHEMA) {
+            return Err(HistoryError::CorruptHistory(format!(
+                "unsupported history graph schema {}; only {} is accepted",
+                version
+                    .build_profile
+                    .value("graph_schema")
+                    .unwrap_or("<missing>"),
+                crate::HISTORY_GRAPH_SCHEMA
             )));
         }
         let _: CommitId = version.git_commit.parse()?;
@@ -997,11 +986,11 @@ impl HistoryStore {
 }
 
 pub(crate) fn version_root_name(id: &RealizationId, kind: &[u8]) -> Vec<u8> {
-    root_name(&[b"compass", b"v1", b"version", id.as_hex().as_bytes(), kind])
+    root_name(&[b"compass", b"v2", b"version", id.as_hex().as_bytes(), kind])
 }
 
 fn preferred_root_name(commit: &CommitId) -> Vec<u8> {
-    root_name(&[b"compass", b"v1", b"preferred", commit.as_str().as_bytes()])
+    root_name(&[b"compass", b"v2", b"preferred", commit.as_str().as_bytes()])
 }
 
 fn count(value: usize) -> Result<u64, HistoryError> {

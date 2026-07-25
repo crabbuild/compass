@@ -38,10 +38,10 @@ code-only realization and one or more semantic realizations with different
 provider/model configuration.
 
 History graph schema `networkx-node-link/v6` records automatic multigraph
-promotion. On upgrade, Compass migrates a stored v1 build profile to v2. The
-fingerprint therefore no longer matches a v1 realization, and the next
-requested build rematerializes that commit instead of reusing stale graph
-metadata.
+promotion. This is a hard cutover: Compass accepts only v6 build profiles,
+realizations, and history stores. It does not migrate, normalize, list, query,
+or diff pre-v6 history. Archive or remove the repository's Compass history
+directory in the common Git directory, then build fresh v6 realizations.
 
 ## 1. Inspect the command contract
 
