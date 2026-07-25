@@ -47,6 +47,14 @@ pub struct GraphViewNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degree: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<GraphViewSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<GraphViewColor>,
@@ -114,6 +122,13 @@ pub fn graph_view_model(
                 community_name: non_empty(object, "community_name"),
                 degree: object
                     .get("degree")
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                language: non_empty(object, "language"),
+                signature: non_empty(object, "signature"),
+                size: object.get("size").and_then(Value::as_f64),
+                member_count: object
+                    .get("member_count")
                     .and_then(Value::as_u64)
                     .map(|value| value as usize),
                 source: file
@@ -251,4 +266,66 @@ fn escape_html(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use compass_graph::Communities;
+    use compass_model::GraphDocument;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn graph_model_preserves_sanitized_presentation_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [{
+                "id": "run",
+                "label": "run",
+                "source_file": "src/main.rs",
+                "line_start": 4,
+                "line_end": 8,
+                "symbol_kind": "function",
+                "language": "rust",
+                "signature": "fn run(value: usize)"
+            }],
+            "links": []
+        }))?;
+        let communities: Communities = BTreeMap::from([(0, vec!["run".into()])]);
+        let member_counts = BTreeMap::from([(0, 7)]);
+        let learning_overlay = BTreeMap::from([(
+            "run".to_owned(),
+            json!({"status": "preferred", "stale": false}),
+        )]);
+        let model = graph_view_model(
+            &document,
+            &communities,
+            "Fixture",
+            &HtmlOptions {
+                member_counts: Some(&member_counts),
+                learning_overlay: Some(&learning_overlay),
+                ..HtmlOptions::default()
+            },
+            true,
+        );
+        let node = &model.nodes[0];
+        assert_eq!(node.language.as_deref(), Some("rust"));
+        assert_eq!(node.signature.as_deref(), Some("fn run(value: usize)"));
+        assert!(node.size.is_some_and(|size| size > 0.0));
+        assert_eq!(node.member_count, Some(7));
+        assert_eq!(node.learning_status.as_deref(), Some("preferred"));
+        assert_eq!(node.learning_stale, Some(false));
+        assert_eq!(
+            node.source.as_ref().and_then(|source| source.start_line),
+            Some(4)
+        );
+        assert_eq!(
+            node.source.as_ref().and_then(|source| source.end_line),
+            Some(8)
+        );
+        Ok(())
+    }
 }

@@ -17,6 +17,12 @@ export const GraphNodeSchema = z.object({
   community: z.number().int(),
   communityName: z.string().optional(),
   degree: z.number().int().nonnegative().optional(),
+  language: z.string().optional(),
+  signature: z.string().optional(),
+  size: z.number().positive().optional(),
+  memberCount: z.number().int().nonnegative().optional(),
+  learningStatus: z.string().optional(),
+  learningStale: z.boolean().optional(),
   source: SourceLocationSchema.optional(),
   color: z.object({
     background: z.string(),
