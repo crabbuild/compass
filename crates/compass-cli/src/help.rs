@@ -122,6 +122,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Diagnose and support",
         commands: &[
+            "capabilities",
             "diagnose",
             "check-update",
             "merge-driver",
@@ -132,6 +133,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "capabilities",
+        "Report versioned machine contracts for editor integrations",
+        ["compass capabilities --format json"],
+        "Options:\n  --format json              Emit the versioned capability document\n\nExamples:\n  compass capabilities --format json\n\nNotes:\n  This command is read-only and intended for IDE capability negotiation."
+    ),
     page!(
         "init",
         "Configure project scope and build the first knowledge graph",
@@ -157,7 +164,7 @@ const PAGES: &[Page] = &[
         "watch",
         "Rebuild the graph automatically when project files change",
         ["compass watch [PATH] [OPTIONS]"],
-        "Arguments:\n  [PATH]                       Project directory to watch [default: .]\n\nOptions:\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --debounce <SECONDS>         Wait after changes before rebuilding [default: 3]\n  --out <DIR>                  Output directory\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --poll                       Poll instead of using filesystem notifications\n\nExamples:\n  compass watch\n  compass watch ./services/api --program-artifact index.scip --poll"
+        "Arguments:\n  [PATH]                       Project directory to watch [default: .]\n\nOptions:\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --debounce <SECONDS>         Adaptive quiet window [default: 0.15]\n  --out <DIR>                  Output directory\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --poll                       Force content-aware polling\n\nExamples:\n  compass watch\n  compass watch ./services/api --program-artifact index.scip --poll\n\nNotes:\n  Watch synchronizes once at startup, then uses native filesystem events with adaptive coalescing. Continuous edits cannot delay a build beyond five debounce windows. If native watching is unavailable, Compass falls back to polling automatically."
     ),
     page!(
         "cluster-only",
@@ -211,7 +218,7 @@ const PAGES: &[Page] = &[
         "program",
         "Inspect and query canonical Program IR",
         ["compass program <COMMAND> [OPTIONS]"],
-        "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
+        "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  call-graph                 Build a bounded caller/callee graph from --symbol or --at\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
     ),
     page!(
         "path",
@@ -295,7 +302,7 @@ const PAGES: &[Page] = &[
         "history export",
         "Restore a historical graph or Compass output bundle",
         ["compass history export <REV> --format <FORMAT> --output <PATH>"],
-        "Arguments:\n  <REV>                         Git revision\n\nOptions:\n  --format <graph-json|compass-out> Required export format\n  --output <PATH>                Required destination\n\nExamples:\n  compass history export HEAD~10 --format graph-json --output old.json\n  compass history export v1.2.0 --format compass-out --output release-graph\n\nNotes:\n  A compass-out destination must not already exist."
+        "Arguments:\n  <REV>                              Git revision\n\nOptions:\n  --format <graph-json|json|compass-out> Required export format\n  --community <ID>                   Export one JSON community detail\n  --node-limit <N>                   Maximum JSON overview or detail nodes [default: 5000]\n  --output <PATH>                     Required destination\n\nExamples:\n  compass history export HEAD~10 --format json --output old-view.json\n  compass history export HEAD~10 --format json --community 7 --node-limit 10000 --output old-community.json\n  compass history export v1.2.0 --format compass-out --output release-graph\n\nNotes:\n  viewer-json remains a deprecated compatibility alias. A compass-out destination must not already exist."
     ),
     page!(
         "history gc",
@@ -319,7 +326,13 @@ const PAGES: &[Page] = &[
         "export",
         "Export or publish the graph in another format",
         ["compass export <FORMAT> [OPTIONS]"],
-        "Examples:\n  compass export html\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
+        "Examples:\n  compass export html\n  compass export json --graph compass-out/graph.json\n  compass export json --community 7\n  compass export callflow-json --graph compass-out/graph.json\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
+    ),
+    page!(
+        "export json",
+        "Export the versioned graph presentation model",
+        ["compass export json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum overview or detail nodes [default: 5000]\n  --community <ID>        Export one complete community detail\n\nExamples:\n  compass export json\n  compass export json --community 7\n\nNotes:\n  The payload schema is compass.viewer.graph/1. viewer-json remains a deprecated compatibility alias."
     ),
     page!(
         "export html",
@@ -978,7 +991,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 36);
+        assert_eq!(roots.len(), 37);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

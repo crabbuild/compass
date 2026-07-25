@@ -354,7 +354,8 @@ An incremental update should preserve unchanged extraction work and republish a
 coherent artifact set. Do not edit `graph.json` or `manifest.json` by hand and
 expect an update to preserve those edits.
 
-For continuous local changes, `compass watch` can keep the output current. Read
+For continuous local changes, `compass watch` synchronizes once at startup and
+then keeps the output current with adaptive filesystem-event builds. Read
 [Operations](guides/operations.md) before using a long-running process in CI or
 an editor integration.
 

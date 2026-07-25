@@ -88,6 +88,16 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
         serde_json::from_slice::<serde_json::Value>(&status_json.stdout)?["store"],
         false
     );
+    let timeline = run(
+        compass,
+        directory.path(),
+        &["history", "timeline", "--format=json"],
+    )?;
+    assert!(timeline.status.success());
+    let timeline: serde_json::Value = serde_json::from_slice(&timeline.stdout)?;
+    assert_eq!(timeline["schema"], "compass.history.timeline/1");
+    assert_eq!(timeline["entries"].as_array().map(Vec::len), Some(1));
+    assert_eq!(timeline["entries"][0]["graphState"], "not_materialized");
     assert!(!directory.path().join(".git/compass").exists());
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::create(&repository)?;
@@ -495,7 +505,10 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
             "directed": true,
             "multigraph": false,
             "graph":{"name":"fixture"},
-            "nodes":[{"id":"a","label":label,"community":0}],
+            "nodes":[
+                {"id":"a","label":label,"community":0},
+                {"id":"b","label":"Helper","community":0}
+            ],
             "links":[],
             "built_at_commit":commit
         }))?;
@@ -609,6 +622,124 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     );
     let exported = GraphDocument::load_for_recluster(&graph_json)?;
     assert_eq!(exported.nodes[0].label(), "First");
+
+    let viewer_json = directory.path().join("historical-viewer.json");
+    let viewer_export = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "json",
+            "--community",
+            "0",
+            "--output",
+            viewer_json.to_str().ok_or("path")?,
+        ],
+    )?;
+    assert!(
+        viewer_export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&viewer_export.stderr)
+    );
+    let viewer: serde_json::Value = serde_json::from_slice(&std::fs::read(&viewer_json)?)?;
+    assert_eq!(viewer["schema"], "compass.history.viewer_graph/1");
+    assert_eq!(viewer["commit"], commit.as_str());
+    assert_eq!(viewer["graph"]["schema"], "compass.viewer.graph/1");
+    assert_eq!(viewer["graph"]["stats"]["aggregated"], false);
+    assert_eq!(viewer["graph"]["nodes"][0]["label"], "First");
+    assert_eq!(
+        viewer["graph"]["communities"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(viewer["graph"]["nodes"].as_array().map(Vec::len), Some(2));
+
+    let alias_path = directory.path().join("historical-viewer-alias.json");
+    let alias = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "viewer-json",
+            "--community",
+            "0",
+            "--output",
+            alias_path.to_str().ok_or("path")?,
+        ],
+    )?;
+    assert!(alias.status.success());
+
+    let unknown = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "json",
+            "--community",
+            "99",
+            "--output",
+            directory
+                .path()
+                .join("unknown-community.json")
+                .to_str()
+                .ok_or("path")?,
+        ],
+    )?;
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("community 99"));
+
+    let oversized = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "json",
+            "--community",
+            "0",
+            "--node-limit",
+            "1",
+            "--output",
+            directory
+                .path()
+                .join("oversized-community.json")
+                .to_str()
+                .ok_or("path")?,
+        ],
+    )?;
+    assert_eq!(oversized.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&oversized.stderr).contains("exceeding"));
+
+    let invalid_community_format = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "export",
+            "HEAD",
+            "--format",
+            "graph-json",
+            "--community",
+            "0",
+            "--output",
+            directory
+                .path()
+                .join("invalid-community.json")
+                .to_str()
+                .ok_or("path")?,
+        ],
+    )?;
+    assert_eq!(invalid_community_format.status.code(), Some(2));
 
     let graph_directory = directory.path().join("not-a-graph-file");
     std::fs::create_dir(&graph_directory)?;

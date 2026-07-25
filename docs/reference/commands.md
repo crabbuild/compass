@@ -107,7 +107,16 @@ compass watch [PATH]
   [--poll]
 ```
 
-Long-running filesystem watcher. Use a manual `update` as its recovery oracle.
+Long-running adaptive filesystem watcher. Compass synchronizes once at startup,
+then coalesces native filesystem events with a 150 ms quiet window and a 750 ms
+maximum delay. `--debounce` changes the quiet window; the maximum becomes five
+times that value, capped at five seconds.
+
+Only one build runs at a time. Changes received during a build queue one
+follow-up, transient build failures retry with bounded backoff, and an idle
+five-minute reconciliation catches missed events. Native watcher startup
+automatically falls back to content-aware polling; `--poll` forces that backend.
+A manual `compass update` remains the recovery oracle.
 
 ### `cluster-only`
 
@@ -593,6 +602,28 @@ Managed integration/update probe.
 - Build `PATH` defaults are command-specific; run help before scripting.
 - `COMPASS_OUT` can change the default output root for several compatible
   command families; explicit `--out` is clearer in automation.
+
+## IDE and graph-inspection commands
+
+```text
+compass capabilities --format json
+compass export json [--community ID]
+compass export callflow-json --output PATH
+compass program call-graph (--symbol SYMBOL | --source FILE --byte BYTE)
+  [--direction callers|callees|both] [--depth N] --format json
+compass history timeline [--rev REV] --format json
+compass history change-counts REV [--parent REV] --format json
+compass history export REV --format json [--community ID] [--node-limit N] --output PATH
+```
+
+`history timeline` is inspection-only and defaults to all commits reachable
+from local refs. `history change-counts` requires existing preferred
+realizations for both revisions and never builds them. Guided writers accept
+`--events jsonl`; stdout then contains `compass.ide.progress/1` events and
+human diagnostics move to stderr.
+
+`json` is the canonical versioned graph-presentation export. `viewer-json`
+remains accepted as a deprecated compatibility alias.
 
 ## Output and exit conventions
 

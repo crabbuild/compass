@@ -49,9 +49,16 @@ Current options include:
 --poll
 ```
 
-Watch mode observes relevant changes, debounces bursts, and refreshes the
-output. Choose polling only when native filesystem events are unavailable or
-unreliable.
+Watch mode first synchronizes the current graph, then observes relevant native
+filesystem events. Its adaptive 150 ms quiet window coalesces editor save
+bursts, while a 750 ms maximum prevents continuous changes from postponing a
+build indefinitely. Only one build runs at once; changes received during that
+build produce one follow-up.
+
+Transient build failures retry with bounded backoff, and a five-minute idle
+reconciliation catches missed events without rewriting unchanged artifacts.
+Compass automatically falls back to content-aware polling when native watcher
+startup fails. Use `--poll` only when you want to force that backend.
 
 ### Good use cases
 
@@ -64,12 +71,13 @@ unreliable.
 - starting multiple watchers for the same output directory;
 - using watch as an unbounded CI step;
 - watching dependency caches or generated directories;
-- assuming the output is current after the watcher has failed.
+- ignoring repeated retry messages without fixing a persistent build error.
 
 ### Operate it
 
-Capture logs and stop it through your process supervisor or foreground terminal.
-After a failure, run one manual update:
+Capture logs and stop it through your process supervisor or foreground
+terminal. Redirected native status output includes timestamps. If automatic
+retries cannot recover, stop the watcher and run one manual update:
 
 ```bash
 compass update .

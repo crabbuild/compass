@@ -2,6 +2,7 @@
 
 mod backup;
 mod callflow;
+mod callflow_model;
 mod canvas;
 mod cql;
 mod cypher;
@@ -13,12 +14,18 @@ mod obsidian;
 mod report;
 mod svg;
 mod tree;
+mod viewer_model;
 mod wiki;
 
 pub use backup::{BackupResult, backup_if_protected};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,
+};
+pub use callflow_model::{
+    CALLFLOW_VIEWER_SCHEMA, CallflowProvenance, CallflowStatistics, CallflowViewEdge,
+    CallflowViewLink, CallflowViewModel, CallflowViewNode, CallflowViewSection,
+    callflow_view_model,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
@@ -27,12 +34,19 @@ pub use graphml::{graphml_document, write_graphml};
 pub use history_bundle::{
     DerivedArtifactRequest, HistoryBundleInput, SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
 };
-pub use html::{HtmlOptions, HtmlRender, html_document, write_html};
+pub use html::{
+    HtmlOptions, HtmlRender, graph_community_view_model_document, graph_view_model_document,
+    html_document, write_html,
+};
 pub use json::{JsonExportOptions, export_json_value, write_json};
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
 pub use report::{DetectionSummary, ReportOptions, TokenCost, generate_report};
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
+pub use viewer_model::{
+    GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewEdge, GraphViewModel, GraphViewNode,
+    GraphViewSource, GraphViewStats, graph_view_model, shared_viewer_html,
+};
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +65,20 @@ pub enum OutputError {
         "graph has {nodes} nodes - too large for HTML viz (limit: {limit}). Use --no-viz, raise COMPASS_VIZ_NODE_LIMIT, or reduce input size."
     )]
     HtmlTooLarge { nodes: usize, limit: isize },
+    #[error("community {community} does not exist in this graph")]
+    UnknownCommunity { community: usize },
+    #[error(
+        "community {community} is incomplete because {missing} declared member nodes are missing from the graph; rebuild the graph before exporting this community"
+    )]
+    IncompleteCommunity { community: usize, missing: usize },
+    #[error(
+        "community {community} has {nodes} nodes, exceeding the detail limit of {limit}; increase the graph node limit to explore it"
+    )]
+    CommunityTooLarge {
+        community: usize,
+        nodes: usize,
+        limit: isize,
+    },
     #[error("graph.json contains 0 nodes")]
     EmptyCallflowGraph,
     #[error("no sections defined")]

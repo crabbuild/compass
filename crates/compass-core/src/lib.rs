@@ -8,6 +8,7 @@ mod pipeline;
 mod program;
 mod raw_guard;
 mod watch;
+mod watch_scheduler;
 
 pub use cluster_existing::{
     ClusterExistingOptions, ClusterExistingResult, ClusterExistingTimings, ClusterLabelContext,
@@ -24,7 +25,9 @@ pub use pipeline::{
     build_graph_with_layers, build_graph_with_layers_and_tiebreaker, build_graph_with_semantic,
     build_local_graph,
 };
-pub use watch::{WatchError, WatchOptions, WatchStatus, watch_local_graph};
+pub use watch::{
+    WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,
+};
 
 use std::collections::HashMap;
 use std::fs;

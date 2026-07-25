@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_analysis::{AnalysisBundle, FunctionSummary};
+use compass_analysis::{
+    AnalysisBundle, CallGraphDirection, CallGraphRequest, CallGraphRoot, FunctionSummary,
+    build_call_graph,
+};
 use compass_ir::{Capability, CoverageState, FunctionIr, Operation, OperationKind};
 use compass_model::{EdgeRecord, Graph, GraphDocument, NodeRecord};
 use serde_json::{Map, Value, json};
@@ -33,6 +36,7 @@ pub(super) fn command(_frontend: Frontend, args: &[String]) -> Outcome {
         "show" => show(&analysis, &remaining, options.format),
         "callers" => callers(&analysis, &remaining, options.format),
         "explain-call" => explain_call(&analysis, &remaining, options.format),
+        "call-graph" => call_graph(&analysis, &remaining, options.format),
         "query" => query(&analysis, &remaining),
         unknown => Outcome::failure_with_code(
             format!("error: unknown program command '{unknown}'\n{}", help()),
@@ -470,6 +474,103 @@ fn explain_call(analysis: &AnalysisBundle, args: &[String], format: Format) -> O
     render(Value::Array(rows), format)
 }
 
+fn call_graph(analysis: &AnalysisBundle, args: &[String], format: Format) -> Outcome {
+    if !matches!(format, Format::Json) {
+        return usage_error("program call-graph requires --format json");
+    }
+    let mut root = None;
+    let mut direction = CallGraphDirection::Both;
+    let mut depth = 2_u32;
+    let mut max_nodes = 250_usize;
+    let mut max_edges = 500_usize;
+    let mut graph_path = None;
+    let mut index = 0;
+    while index < args.len() {
+        let (key, value, consumed) = match_option(args, index);
+        let Some(value) = value else {
+            return usage_error(&format!("{key} requires a value"));
+        };
+        match key {
+            "--symbol" => {
+                if root.is_some() {
+                    return usage_error("provide exactly one of --symbol and --at");
+                }
+                root = Some(CallGraphRoot::Symbol { symbol: value });
+            }
+            "--at" => {
+                if root.is_some() {
+                    return usage_error("provide exactly one of --symbol and --at");
+                }
+                let Some((file, byte)) = value.rsplit_once(':') else {
+                    return usage_error("--at must be FILE:BYTE");
+                };
+                let Ok(byte) = byte.parse::<u64>() else {
+                    return usage_error("--at byte must be a non-negative integer");
+                };
+                root = Some(CallGraphRoot::SourceByte {
+                    file: file.to_owned(),
+                    byte,
+                });
+            }
+            "--direction" => {
+                direction = match value.as_str() {
+                    "callers" => CallGraphDirection::Callers,
+                    "callees" => CallGraphDirection::Callees,
+                    "both" => CallGraphDirection::Both,
+                    _ => return usage_error("--direction must be callers, callees, or both"),
+                };
+            }
+            "--depth" => match value.parse() {
+                Ok(value) if value > 0 => depth = value,
+                _ => return usage_error("--depth must be a positive integer"),
+            },
+            "--max-nodes" => match value.parse() {
+                Ok(value) if value > 0 => max_nodes = value,
+                _ => return usage_error("--max-nodes must be a positive integer"),
+            },
+            "--max-edges" => match value.parse() {
+                Ok(value) if value > 0 => max_edges = value,
+                _ => return usage_error("--max-edges must be a positive integer"),
+            },
+            "--graph" => graph_path = Some(PathBuf::from(value)),
+            _ => return usage_error(&format!("unknown call-graph option {}", args[index])),
+        }
+        index += consumed;
+    }
+    let Some(root) = root else {
+        return usage_error("provide exactly one of --symbol and --at");
+    };
+    let graph = match graph_path {
+        Some(path) => match GraphDocument::load(&path) {
+            Ok(graph) => Some(graph),
+            Err(error) => {
+                return Outcome::failure_with_code(
+                    format!("error: could not load graph {}: {error}", path.display()),
+                    3,
+                );
+            }
+        },
+        None => None,
+    };
+    match build_call_graph(
+        analysis,
+        graph.as_ref(),
+        &CallGraphRequest {
+            root,
+            direction,
+            depth,
+            max_nodes,
+            max_edges,
+        },
+    ) {
+        Ok(response) => match serde_json::to_string(&response) {
+            Ok(json) => Outcome::success(json),
+            Err(error) => Outcome::failure(format!("error: could not render call graph: {error}")),
+        },
+        Err(error) => Outcome::failure_with_code(format!("error: {error}"), 4),
+    }
+}
+
 fn query(analysis: &AnalysisBundle, args: &[String]) -> Outcome {
     if args.is_empty() {
         return usage_error("usage: compass program query <COMPASSQL> [--format table|json|jsonl]");
@@ -795,6 +896,7 @@ Commands:
   show <SYMBOL>              Show one function, summary, evidence coverage, and callers
   callers <SYMBOL>           List resolved callers
   explain-call <FILE:BYTE>   Explain calls containing an exact source byte
+  call-graph                 Build a bounded caller/callee graph from --symbol or --at
   query <COMPASSQL>          Query an in-memory Program IR graph projection
 
 Common options:
@@ -806,6 +908,7 @@ Examples:
   compass program functions --language rust --name build --format json
   compass program show 0123abcd
   compass program explain-call src/lib.rs:240
+  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json
   compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"
 
 Notes:

@@ -1,5 +1,13 @@
 /target/
 /dist/
+node_modules/
+/editors/vscode/dist/
+/packages/compass-viewer/dist/
+/editors/vscode/.vscode-test/
+/editors/vscode/*.vsix
+/tests/viewer/test-results/
+/tests/viewer/playwright-report/
+/tests/viewer/fixtures/out/
 /.worktrees/
 __pycache__/
 *.pyc

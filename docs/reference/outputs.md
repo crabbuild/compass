@@ -351,6 +351,17 @@ Do not archive them as the only graph copy.
 Each format has separate escaping, direction, multiplicity, and size concerns.
 Use its command help and retain the source graph.
 
+First-party editor and offline-viewer contracts are versioned independently:
+
+- `compass.viewer.graph/1` — shared interactive graph model;
+- `compass.program.call_graph/1` — bounded symbol-centered caller/callee graph;
+- `compass.viewer.callflow/1` — broader subsystem architecture flow;
+- `compass.history.timeline/1` — commit and materialization states;
+- `compass.history.change_counts/1` — lazy structural counts between existing
+  realizations;
+- `compass.history.viewer_graph/1` — exact historical graph envelope;
+- `compass.ide.progress/1` — newline-delimited guided-operation events.
+
 ## Filesystem and concurrency
 
 - Wait for the producing command to succeed.

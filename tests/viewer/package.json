@@ -1,0 +1,14 @@
+{
+  "name": "@compass/viewer-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:performance": "playwright test performance.spec.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.56.1"
+  }
+}

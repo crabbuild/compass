@@ -1,11 +1,13 @@
 //! Command implementation for the native Compass CLI.
 
+mod capability_commands;
 mod dedup_commands;
 mod help;
 mod history_batch;
 mod history_build;
 mod history_commands;
 mod hook_commands;
+pub mod ide_contract;
 mod ingest_commands;
 mod init_commands;
 mod install_commands;
@@ -32,10 +34,10 @@ use std::time::{Duration, Instant};
 
 use compass_core::{
     BuildOptions, BuildPurpose, BuildResult, BuildTimings, ClusterExistingOptions, ExportInputs,
-    LoadedGraph, SemanticLayer, WatchOptions, WatchStatus, build_graph_with_layers,
-    build_graph_with_layers_and_tiebreaker, cluster_existing_graph, default_graph_path,
-    diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
-    watch_local_graph,
+    LoadedGraph, SemanticLayer, WatchBackend, WatchBuildReason, WatchOptions, WatchStatus,
+    build_graph_with_layers, build_graph_with_layers_and_tiebreaker, cluster_existing_graph,
+    default_graph_path, diagnose_graph_file, format_diagnostic_json, format_diagnostic_report,
+    merge_graphs, watch_local_graph,
 };
 use compass_files::{BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect};
 use compass_global::{GlobalPaths, global_add};
@@ -44,8 +46,10 @@ use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
 use compass_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
-    TreeOptions, WikiOptions, export_obsidian, export_wiki, node_filenames, write_callflow_html,
-    write_canvas, write_cypher, write_graphml, write_html, write_svg, write_tree_html,
+    TreeOptions, WikiOptions, callflow_view_model, export_obsidian, export_wiki,
+    graph_community_view_model_document, graph_view_model_document, node_filenames,
+    write_callflow_html, write_canvas, write_cypher, write_graphml, write_html, write_svg,
+    write_tree_html,
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
@@ -89,6 +93,18 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    #[must_use]
+    pub fn from_command_output(code: u8, stdout: String, stderr: String) -> Self {
+        Self {
+            code,
+            stdout,
+            stderr,
+            stdout_trailing_newline: true,
+            stderr_trailing_newline: true,
+            html_output: None,
+        }
+    }
+
     fn success(stdout: String) -> Self {
         Self {
             code: 0,
@@ -266,6 +282,17 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
+    let mut os_args = args.iter().map(OsString::from).collect::<Vec<_>>();
+    let events = match ide_contract::take_jsonl_events(&mut os_args) {
+        Ok(enabled) => {
+            args = os_args
+                .into_iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect();
+            enabled
+        }
+        Err(error) => return Outcome::failure_with_code(error, 2),
+    };
     if let Some(outcome) = help::request(&args, HelpStyle::Plain) {
         return outcome;
     }
@@ -276,8 +303,17 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         return Outcome::failure("error: missing command".to_owned());
     };
     args.remove(0);
+    let operation = if command == "history" {
+        args.first().map_or_else(
+            || command.clone(),
+            |subcommand| format!("{command}_{subcommand}"),
+        )
+    } else {
+        command.clone()
+    };
     let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
+        "capabilities" => capability_commands::command(frontend, &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
@@ -333,7 +369,79 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         }
         _ => Outcome::failure(help::unknown_command(&command)),
     };
-    help::append_usage_hint(outcome, &command, &args)
+    let outcome = help::append_usage_hint(outcome, &command, &args);
+    if events {
+        ide_contract::progress_outcome(&operation, outcome)
+    } else {
+        outcome
+    }
+}
+
+pub fn run_watch_jsonl(
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> u8 {
+    let operation_id = format!("watch-{}", std::process::id());
+    let mut writer = ide_contract::ProgressWriter::new(stdout);
+    if writer
+        .write(&ide_contract::ProgressEvent {
+            schema: ide_contract::PROGRESS_SCHEMA,
+            operation_id: &operation_id,
+            operation: "watch",
+            state: ide_contract::ProgressState::Started,
+            phase: "watching",
+            current: None,
+            total: None,
+            message: "Compass watch started",
+            terminal: false,
+        })
+        .is_err()
+    {
+        return 1;
+    }
+    let code = run_watch_with_frontend(
+        Frontend::Compass,
+        arguments,
+        &mut std::io::sink(),
+        stderr,
+        false,
+    );
+    let cancelled = PROCESS_CANCELLED.load(Ordering::Acquire);
+    let terminal = ide_contract::ProgressEvent {
+        schema: ide_contract::PROGRESS_SCHEMA,
+        operation_id: &operation_id,
+        operation: "watch",
+        state: if cancelled {
+            ide_contract::ProgressState::Cancelled
+        } else if code == 0 {
+            ide_contract::ProgressState::Succeeded
+        } else {
+            ide_contract::ProgressState::Failed
+        },
+        phase: if cancelled {
+            "cancelled"
+        } else if code == 0 {
+            "complete"
+        } else {
+            "failed"
+        },
+        current: None,
+        total: None,
+        message: if cancelled {
+            "Compass watch stopped"
+        } else if code == 0 {
+            "Compass watch completed"
+        } else {
+            "Compass watch failed"
+        },
+        terminal: true,
+    };
+    if writer.write(&terminal).is_err() {
+        1
+    } else {
+        code
+    }
 }
 
 #[must_use]
@@ -529,6 +637,32 @@ fn mcp_help() -> String {
 /// Signal registration lives at this process boundary rather than in
 /// `compass-core`, so embedders can provide their own cancellation mechanism.
 pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
+    run_watch_with_frontend(Frontend::Compass, arguments, stdout, stderr, true)
+}
+
+/// Run Compass's watcher with terminal-aware status rendering.
+pub fn run_watch_with_terminal(
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    output_is_terminal: bool,
+) -> u8 {
+    run_watch_with_frontend(
+        Frontend::Compass,
+        arguments,
+        stdout,
+        stderr,
+        output_is_terminal,
+    )
+}
+
+fn run_watch_with_frontend(
+    frontend: Frontend,
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    output_is_terminal: bool,
+) -> u8 {
     let args = arguments
         .iter()
         .map(|argument| argument.to_string_lossy().into_owned())
@@ -552,7 +686,7 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
         }
     };
     let result = watch_local_graph(&options, stop, |status| {
-        write_watch_status(status, stdout, stderr)
+        write_watch_status_mode(frontend, status, stdout, stderr, output_is_terminal);
     });
     match result {
         Ok(()) => 0,
@@ -563,39 +697,146 @@ pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut i
     }
 }
 
+#[cfg(test)]
 fn write_watch_status(status: WatchStatus, stdout: &mut impl Write, stderr: &mut impl Write) {
+    write_watch_status_mode(Frontend::Compass, status, stdout, stderr, true);
+}
+
+fn write_watch_status_mode(
+    frontend: Frontend,
+    status: WatchStatus,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    output_is_terminal: bool,
+) {
+    let timestamp = (!output_is_terminal && frontend == Frontend::Compass)
+        .then(watch_timestamp)
+        .flatten();
+    macro_rules! native_line {
+        ($writer:expr, $($argument:tt)*) => {
+            if let Some(timestamp) = timestamp.as_deref() {
+                writeln!($writer, "[{timestamp}] {}", format_args!($($argument)*))
+            } else {
+                writeln!($writer, $($argument)*)
+            }
+        };
+    }
     match status {
+        WatchStatus::Starting {
+            root,
+            includes,
+            excludes,
+            output,
+        } => {
+            if frontend == Frontend::Compass {
+                let scope = if includes == 0 {
+                    format!("all eligible files, {excludes} exclude")
+                } else {
+                    format!("{includes} include, {excludes} exclude")
+                };
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] Starting {} (scope: {scope}; output: {})",
+                    root.display(),
+                    output.display()
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::Backend {
+            backend,
+            fallback_error,
+            poll_interval,
+        } => {
+            if frontend == Frontend::Compass {
+                match (backend, fallback_error) {
+                    (WatchBackend::Native, _) => {
+                        let _result = native_line!(
+                            stdout,
+                            "[compass watch] Native filesystem events active."
+                        );
+                    }
+                    (WatchBackend::Polling, Some(error)) => {
+                        let _result = native_line!(
+                            stderr,
+                            "[compass watch] Native watcher unavailable; polling every {}s: {error}",
+                            poll_interval.as_secs_f64()
+                        );
+                    }
+                    (WatchBackend::Polling, None) => {
+                        let _result = native_line!(
+                            stdout,
+                            "[compass watch] Polling every {}s.",
+                            poll_interval.as_secs_f64()
+                        );
+                    }
+                }
+                let _result = stdout.flush();
+                let _result = stderr.flush();
+            }
+        }
         WatchStatus::Watching { root, debounce } => {
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Watching {} - press Ctrl+C to stop",
                 root.display()
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Deterministic changes rebuild locally; semantic media changes set needs_update."
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
-                "[compass watch] Debounce: {}s",
+                "[compass watch] Adaptive debounce: {}s",
                 debounce.as_secs_f64()
             );
             let _result = stdout.flush();
+        }
+        WatchStatus::Synchronizing => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(stdout, "[compass watch] Synchronizing current graph…");
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::Settling {
+            paths,
+            quiet_window,
+            maximum_window,
+        } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] {paths} path(s) changed; settling for {}s (maximum {}s)…",
+                    quiet_window.as_secs_f64(),
+                    maximum_window.as_secs_f64()
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::Building { reason } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] Building ({})…",
+                    watch_reason(reason)
+                );
+                let _result = stdout.flush();
+            }
         }
         WatchStatus::Batch {
             paths,
             deterministic,
             semantic,
         } => {
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
-                "\n[compass watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
+                "[compass watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
                 paths.len()
             );
             let _result = stdout.flush();
         }
         WatchStatus::Rebuilt(result) => {
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Rebuilt: {} nodes, {} edges, {} communities ({} extracted, {} cached)",
                 result.nodes,
@@ -604,20 +845,58 @@ fn write_watch_status(status: WatchStatus, stdout: &mut impl Write, stderr: &mut
                 result.files_extracted,
                 result.files_cached
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] {}",
                 format_program_analysis(&result)
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] graph artifacts updated in {}",
                 result.output_dir.display()
             );
             let _result = stdout.flush();
         }
+        WatchStatus::UpToDate { reason } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] Up to date after {}.",
+                    watch_reason(reason)
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::FollowUpQueued { paths } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] {paths} path(s) arrived during build; one follow-up queued."
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::RetryScheduled {
+            delay,
+            error,
+            repeated,
+        } => {
+            if frontend == Frontend::Compass {
+                let suffix = if repeated > 1 {
+                    format!(" (same failure {repeated} times)")
+                } else {
+                    String::new()
+                };
+                let _result = native_line!(
+                    stderr,
+                    "[compass watch] Build failed; retrying in {}s: {error}{suffix}",
+                    delay.as_secs_f64()
+                );
+                let _result = stderr.flush();
+            }
+        }
         WatchStatus::SemanticUpdateRequired { flag } => {
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Semantic media changed; update required. Flag written to {}",
                 flag.display()
@@ -625,24 +904,46 @@ fn write_watch_status(status: WatchStatus, stdout: &mut impl Write, stderr: &mut
             let _result = stdout.flush();
         }
         WatchStatus::EventError(error) => {
-            let _result = writeln!(stderr, "[compass watch] Filesystem event error: {error}");
+            let _result = native_line!(stderr, "[compass watch] Filesystem event error: {error}");
             let _result = stderr.flush();
         }
         WatchStatus::RebuildError(error) => {
-            let _result = writeln!(stderr, "[compass watch] Rebuild failed: {error}");
+            let _result = native_line!(stderr, "[compass watch] Rebuild failed: {error}");
             let _result = stderr.flush();
         }
+        WatchStatus::Finishing => {
+            if frontend == Frontend::Compass {
+                let _result =
+                    native_line!(stdout, "[compass watch] Finishing the active atomic build…");
+                let _result = stdout.flush();
+            }
+        }
         WatchStatus::Stopped => {
-            let _result = writeln!(stdout, "\n[compass watch] Stopped.");
+            let _result = native_line!(stdout, "[compass watch] Stopped.");
             let _result = stdout.flush();
         }
     }
 }
 
+fn watch_reason(reason: WatchBuildReason) -> &'static str {
+    match reason {
+        WatchBuildReason::Initial => "initial synchronization",
+        WatchBuildReason::Changes => "filesystem changes",
+        WatchBuildReason::Retry => "retry",
+        WatchBuildReason::Reconciliation => "periodic reconciliation",
+    }
+}
+
+fn watch_timestamp() -> Option<String> {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()
+}
+
 fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> {
     let mut root = None;
     let mut output_root = None;
-    let mut debounce = Duration::from_secs(3);
+    let mut debounce = Duration::from_millis(150);
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut gitignore = true;
@@ -2158,7 +2459,17 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     };
     if !matches!(
         format,
-        "html" | "callflow-html" | "obsidian" | "wiki" | "svg" | "graphml" | "neo4j" | "falkordb"
+        "html"
+            | "json"
+            | "viewer-json"
+            | "callflow-html"
+            | "callflow-json"
+            | "obsidian"
+            | "wiki"
+            | "svg"
+            | "graphml"
+            | "neo4j"
+            | "falkordb"
     ) {
         return Outcome::failure(export_help());
     }
@@ -2182,6 +2493,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let mut max_diagram_nodes = 18_usize;
     let mut max_diagram_edges = 24_usize;
     let mut node_limit = 5000_isize;
+    let mut community = None;
     let mut no_viz = false;
     let mut obsidian_dir = default_graph_path()
         .parent()
@@ -2305,6 +2617,46 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 node_limit = value;
                 index += 2;
             }
+            "--community" if matches!(format, "json" | "viewer-json") => {
+                let Some(value) = next().and_then(|value| value.parse::<usize>().ok()) else {
+                    return Outcome::failure(
+                        "error: --community must be a non-negative integer".to_owned(),
+                    );
+                };
+                if community.is_some() {
+                    return Outcome::failure("error: duplicate --community".to_owned());
+                }
+                community = Some(value);
+                index += 2;
+            }
+            value
+                if matches!(format, "json" | "viewer-json")
+                    && value.starts_with("--community=") =>
+            {
+                let Some(value) = value
+                    .strip_prefix("--community=")
+                    .and_then(|value| value.parse::<usize>().ok())
+                else {
+                    return Outcome::failure(
+                        "error: --community must be a non-negative integer".to_owned(),
+                    );
+                };
+                if community.is_some() {
+                    return Outcome::failure("error: duplicate --community".to_owned());
+                }
+                community = Some(value);
+                index += 1;
+            }
+            "--community" => {
+                return Outcome::failure(
+                    "error: --community is only valid with export json".to_owned(),
+                );
+            }
+            value if value.starts_with("--community=") => {
+                return Outcome::failure(
+                    "error: --community is only valid with export json".to_owned(),
+                );
+            }
             "--diagram-scale" => {
                 let Some(value) = next().and_then(|value| value.parse::<f64>().ok()) else {
                     return Outcome::failure("error: --diagram-scale must be a number".to_owned());
@@ -2316,10 +2668,17 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 no_viz = true;
                 index += 1;
             }
-            "-h" | "--help" if format == "callflow-html" => {
+            "-h" | "--help" if matches!(format, "callflow-html" | "callflow-json") => {
                 return Outcome::success(callflow_help());
             }
-            value if format == "callflow-html" && !value.starts_with('-') && !graph_explicit => {
+            "-h" | "--help" if matches!(format, "json" | "viewer-json") => {
+                return Outcome::success(export_json_help());
+            }
+            value
+                if matches!(format, "callflow-html" | "callflow-json")
+                    && !value.starts_with('-')
+                    && !graph_explicit =>
+            {
                 let candidate = PathBuf::from(value);
                 graph_path = if candidate.file_name().and_then(|name| name.to_str())
                     == Some("graph.json")
@@ -2346,6 +2705,9 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             report_path = output_dir.join("GRAPH_REPORT.md");
         }
     }
+    if matches!(format, "json" | "viewer-json") && node_limit < 1 {
+        return Outcome::failure("error: --node-limit must be a positive integer".to_owned());
+    }
     let mut inputs = match ExportInputs::load(&graph_path) {
         Ok(inputs) => inputs,
         Err(GraphError::NotFound(_)) => {
@@ -2368,6 +2730,38 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
     let result = match format {
         "html" => export_html(&inputs, output_dir, no_viz, node_limit),
+        "json" | "viewer-json" => {
+            let options = HtmlOptions {
+                community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+                member_counts: None,
+                node_limit: Some(node_limit),
+                learning_overlay: None,
+            };
+            let model = if let Some(community) = community {
+                graph_community_view_model_document(
+                    &inputs.document,
+                    &inputs.communities,
+                    &graph_path,
+                    &options,
+                    community,
+                )
+                .map_err(|error| error.to_string())
+            } else {
+                graph_view_model_document(
+                    &inputs.document,
+                    &inputs.communities,
+                    &graph_path,
+                    &options,
+                )
+                .map_err(|error| error.to_string())
+                .and_then(|model| {
+                    model.ok_or_else(|| "graph has no renderable community overview".to_owned())
+                })
+            };
+            model
+                .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
+                .map(ExportOutput::text)
+        }
         "callflow-html" => export_callflow(
             &inputs,
             &graph_path,
@@ -2379,6 +2773,17 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             max_diagram_nodes,
             max_diagram_edges,
         ),
+        "callflow-json" => export_callflow_json(
+            &inputs,
+            &graph_path,
+            sections_path.as_deref(),
+            &language,
+            max_sections,
+            diagram_scale,
+            max_diagram_nodes,
+            max_diagram_edges,
+        )
+        .map(ExportOutput::text),
         "svg" => write_svg(
             &inputs.document,
             &inputs.communities,
@@ -2429,6 +2834,53 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn export_callflow_json(
+    inputs: &ExportInputs,
+    graph_path: &Path,
+    sections_path: Option<&Path>,
+    language: &str,
+    max_sections: usize,
+    diagram_scale: f64,
+    max_diagram_nodes: usize,
+    max_diagram_edges: usize,
+) -> Result<String, String> {
+    let sections = sections_path.map(load_sections).transpose()?;
+    let project = inputs
+        .document
+        .graph
+        .get("project_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            graph_path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "Project".to_owned());
+    let model = callflow_view_model(
+        &inputs.document,
+        &inputs.communities,
+        &CallflowOptions {
+            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+            sections: sections.as_deref(),
+            report: &inputs.report,
+            project_name: &project,
+            language,
+            max_sections,
+            diagram_scale,
+            max_diagram_nodes,
+            max_diagram_edges,
+            ..CallflowOptions::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    serde_json::to_string(&model).map_err(|error| error.to_string())
 }
 
 struct ExportOutput {
@@ -2761,7 +3213,11 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+    "Usage: compass export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  json      [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+}
+
+fn export_json_help() -> String {
+    "Usage: compass export json [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  --graph PATH       graph JSON (default compass-out/graph.json)\n  --labels PATH      community-label JSON\n  --node-limit N     maximum overview or community-detail nodes (default 5000)\n  --community ID     export one complete community detail graph".to_owned()
 }
 
 fn callflow_help() -> String {
@@ -3306,9 +3762,45 @@ mod mcp_option_tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         write_watch_status(
+            WatchStatus::Starting {
+                root: PathBuf::from("project"),
+                includes: 1,
+                excludes: 2,
+                output: PathBuf::from("project/compass-out"),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            WatchStatus::Backend {
+                backend: WatchBackend::Native,
+                fallback_error: None,
+                poll_interval: Duration::from_millis(500),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(WatchStatus::Synchronizing, &mut stdout, &mut stderr);
+        write_watch_status(
             WatchStatus::Watching {
                 root: PathBuf::from("project"),
                 debounce: Duration::from_millis(1500),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            WatchStatus::Settling {
+                paths: 2,
+                quiet_window: Duration::from_millis(150),
+                maximum_window: Duration::from_millis(750),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            WatchStatus::Building {
+                reason: WatchBuildReason::Changes,
             },
             &mut stdout,
             &mut stderr,
@@ -3322,6 +3814,28 @@ mod mcp_option_tests {
             &mut stdout,
             &mut stderr,
         );
+        write_watch_status(
+            WatchStatus::UpToDate {
+                reason: WatchBuildReason::Reconciliation,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            WatchStatus::FollowUpQueued { paths: 1 },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            WatchStatus::RetryScheduled {
+                delay: Duration::from_secs(2),
+                error: "temporarily blocked".to_owned(),
+                repeated: 1,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(WatchStatus::Finishing, &mut stdout, &mut stderr);
         write_watch_status(
             WatchStatus::Rebuilt(Box::new(sample_build_result(true, true))),
             &mut stdout,
@@ -3348,13 +3862,33 @@ mod mcp_option_tests {
 
         let stdout = String::from_utf8(stdout)?;
         let stderr = String::from_utf8(stderr)?;
+        assert!(stdout.contains("Starting project (scope: 1 include, 2 exclude"));
+        assert!(stdout.contains("Native filesystem events active"));
+        assert!(stdout.contains("Synchronizing current graph"));
         assert!(stdout.contains("[compass watch] Watching project"));
+        assert!(stdout.contains("settling for 0.15s (maximum 0.75s)"));
+        assert!(stdout.contains("Building (filesystem changes)"));
         assert!(stdout.contains("2 file(s) changed (1 deterministic, 1 semantic)"));
         assert!(stdout.contains("3 nodes, 2 edges, 1 communities (1 extracted, 1 cached)"));
+        assert!(stdout.contains("Up to date after periodic reconciliation"));
+        assert!(stdout.contains("one follow-up queued"));
+        assert!(stdout.contains("Finishing the active atomic build"));
         assert!(stdout.contains("Flag written to project/compass-out/needs_update"));
         assert!(stdout.contains("[compass watch] Stopped."));
         assert!(stderr.contains("Filesystem event error: event failed"));
         assert!(stderr.contains("Rebuild failed: build failed"));
+        assert!(stderr.contains("retrying in 2s: temporarily blocked"));
+
+        let mut logged = Vec::new();
+        write_watch_status_mode(
+            Frontend::Compass,
+            WatchStatus::Synchronizing,
+            &mut logged,
+            &mut Vec::new(),
+            false,
+        );
+        let logged = String::from_utf8(logged)?;
+        assert!(logged.contains("Z] [compass watch] Synchronizing current graph"));
         Ok(())
     }
 
@@ -3426,6 +3960,11 @@ mod mcp_option_tests {
         assert_eq!(watch.build.output_root, Some(PathBuf::from("artifacts")));
         assert_eq!(watch.build.extra_excludes, ["target"]);
         assert!(watch.force_polling);
+        assert!(watch.adaptive);
+
+        let defaults = parse_watch_options(&[])?.ok_or("unexpected help")?;
+        assert_eq!(defaults.debounce, Duration::from_millis(150));
+        assert!(defaults.adaptive);
 
         assert_eq!(
             command_cluster_only(Frontend::Compass, &["--help".to_owned()]).code,

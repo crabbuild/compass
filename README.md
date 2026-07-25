@@ -23,6 +23,10 @@ less searching, smaller context, traceable evidence
 [Explore the roadmap](docs/roadmap.md) ·
 [View releases](https://github.com/crabbuild/compass/releases)
 
+Use Compass inside your editor with the first-party
+[VS Code extension guide](docs/guides/vscode.md): current graph, cursor-rooted
+call graphs, architecture flow, queries, and exact Git evolution.
+
 ## What Compass gives you
 
 | Need | Compass capability |

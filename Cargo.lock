@@ -932,6 +932,7 @@ name = "compass-analysis"
 version = "0.1.5"
 dependencies = [
  "compass-ir",
+ "compass-model",
  "serde",
  "sha2 0.10.9",
  "thiserror 2.0.19",

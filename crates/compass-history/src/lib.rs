@@ -15,6 +15,7 @@ mod leases;
 mod lock;
 mod model;
 mod store;
+mod timeline;
 mod validate;
 
 pub use artifacts::{CompletedGraphArtifacts, GraphArtifacts, PartitionedGraph};
@@ -39,6 +40,7 @@ pub use model::{
 pub use store::{
     CorruptPreferredToken, HistoryRecord, HistoryRecordKey, HistoryStore, PreparedPublication,
 };
+pub use timeline::{HISTORY_TIMELINE_SCHEMA, TimelineCommit};
 pub use validate::{
     MAX_AUTHORITATIVE_BYTES, MAX_DIAGNOSTIC_BYTES, MAX_JOB_BYTES, MAX_JSON_DEPTH, MAX_KEY_BYTES,
     MAX_RECORD_VALUE_BYTES, MAX_RECORDS_PER_TREE, ValidationProblem, ValidationReport,

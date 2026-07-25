@@ -215,6 +215,7 @@ pub(crate) fn escape_non_ascii(value: &str) -> String {
     output
 }
 
+#[allow(dead_code)]
 pub(crate) fn python_json_compact(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
