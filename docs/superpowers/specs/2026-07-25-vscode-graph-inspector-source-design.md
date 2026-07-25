@@ -42,8 +42,9 @@ When the selected graph node has a navigable source:
 
 The separate full-width Open source button is removed.
 
-When no navigable source exists, the Source card remains non-interactive and
-shows `Not recorded`. It does not render a disabled button.
+When a source file is recorded without a navigable range, the Source card
+remains non-interactive and shows that file path. It shows `Not recorded` only
+when the node has no source file. It does not render a disabled button.
 
 ### Connected-node rows
 
@@ -117,7 +118,8 @@ Post-implementation coverage will verify:
   source button;
 - the card exposes the exact path and line range;
 - activation sends the unchanged `SourceLocation`;
-- source-less nodes render a static `Not recorded` card;
+- file-only nodes render their recorded path without a Source button;
+- nodes without source metadata render a static `Not recorded` card;
 - connected-node rows render dots and no colored left border;
 - keyboard focus and serious accessibility checks remain clean;
 - viewer and VS Code packages still build and the packaged VSIX passes smoke
