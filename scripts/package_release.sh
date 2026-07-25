@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 3 ]; then
-    echo "usage: package_macos.sh <target> <compass-binary> <dist-directory>" >&2
+    echo "usage: package_release.sh <target> <compass-binary> <dist-directory>" >&2
     exit 2
 fi
 
@@ -10,9 +10,10 @@ target=$1
 binary=$2
 dist=$3
 case "$target" in
-    aarch64-apple-darwin|x86_64-apple-darwin) ;;
+    aarch64-apple-darwin|x86_64-apple-darwin|\
+    aarch64-unknown-linux-gnu|x86_64-unknown-linux-gnu) ;;
     *)
-        echo "error: unsupported macOS target: $target" >&2
+        echo "error: unsupported release target: $target" >&2
         exit 2
         ;;
 esac
@@ -37,7 +38,14 @@ archive="$dist/$name.tar.gz"
 tar -C "$staging" -czf "$archive" "$name"
 (
     cd "$dist"
-    shasum -a 256 "$(basename "$archive")" > "$(basename "$archive").sha256"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$(basename "$archive")"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$(basename "$archive")"
+    else
+        echo "error: sha256sum or shasum is required" >&2
+        exit 1
+    fi > "$(basename "$archive").sha256"
 )
 
 printf '%s\n' "$archive"

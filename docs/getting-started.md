@@ -46,9 +46,10 @@ file for each question.
 
 ## 1. Choose an installation path
 
-### Install a macOS release
+### Install a macOS or Linux release
 
-The current release workflow publishes Intel and Apple Silicon macOS archives.
+The release workflow publishes native Intel/AMD64 and Apple Silicon/ARM64
+archives for macOS and Linux.
 The installer downloads the latest archive, verifies its SHA-256 checksum, and
 installs `compass` into `~/.local/bin` by default:
 
@@ -65,8 +66,8 @@ process:
 COMPASS_INSTALL_DIR="$PWD/bin" sh install.sh
 ```
 
-The current macOS release is unsigned and not notarized. Read the release notes
-and [security policy](../SECURITY.md) before using an installer in a controlled
+The macOS release is unsigned and not notarized. Read the release notes and
+[security policy](../SECURITY.md) before using an installer in a controlled
 environment.
 
 ### Build from source

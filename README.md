@@ -143,7 +143,7 @@ commands.
 
 ### 1. Install
 
-On macOS (Apple Silicon or Intel):
+On macOS or Linux (Apple Silicon/ARM64 or Intel/AMD64):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
