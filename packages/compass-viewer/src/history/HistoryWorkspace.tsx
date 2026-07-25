@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useMemo, useState } from "react";
 import { HistoryIcon, SearchIcon } from "lucide-react";
 import { CompassGraph } from "../graph/CompassGraph";
 import { Input } from "../components/ui/input";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
-import type { HistoryChangeCounts, HistoryTimeline } from "../contracts/history";
+import type {
+  HistoryBuildState,
+  HistoryChangeCounts,
+  HistoryOperationError,
+  HistoryTimeline
+} from "../contracts/history";
 import { CommitDetails } from "./CommitDetails";
 import { CommitRail } from "./CommitRail";
-import { historyReducer, initialHistoryState } from "./state";
 import { SemanticFindings } from "./SemanticFindings";
 
 export type HistoryHost = {
@@ -15,7 +19,7 @@ export type HistoryHost = {
   compare(commit: string, parent: string): void;
   queryRevision(commit: string): void;
   loadChangeCounts(commit: string): void;
-  openSource(source: SourceLocation): void;
+  openSource(commit: string, source: SourceLocation): void;
   openCommunity(commit: string, communityId: number): void;
 };
 
@@ -29,6 +33,10 @@ export function HistoryWorkspace({
   communityLoading,
   communityError,
   onBackToOverview,
+  selectedCommit,
+  buildState,
+  operationError,
+  onSelectCommit,
   host
 }: {
   timeline: HistoryTimeline;
@@ -40,26 +48,30 @@ export function HistoryWorkspace({
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
+  selectedCommit: string;
+  buildState?: HistoryBuildState | undefined;
+  operationError?: HistoryOperationError | undefined;
+  onSelectCommit(commit: string): void;
   host: HistoryHost;
 }) {
-  const [state, dispatch] = useReducer(historyReducer, timeline, initialHistoryState);
+  const [query, setQuery] = useState("");
   const entries = useMemo(() => {
-    const query = state.query.toLocaleLowerCase();
-    return timeline.entries.filter((entry) => !query
-      || entry.commit.includes(query)
-      || entry.subject.toLocaleLowerCase().includes(query)
-      || entry.authorName.toLocaleLowerCase().includes(query)
-      || entry.graphState.includes(query));
-  }, [state.query, timeline.entries]);
-  const selected = timeline.entries.find((entry) => entry.commit === state.selected)
+    const normalizedQuery = query.toLocaleLowerCase();
+    return timeline.entries.filter((entry) => !normalizedQuery
+      || entry.commit.includes(normalizedQuery)
+      || entry.subject.toLocaleLowerCase().includes(normalizedQuery)
+      || entry.authorName.toLocaleLowerCase().includes(normalizedQuery)
+      || entry.graphState.includes(normalizedQuery));
+  }, [query, timeline.entries]);
+  const selected = timeline.entries.find((entry) => entry.commit === selectedCommit)
     ?? entries[0];
-  const requestedCounts = useRef(new Set<string>());
-  useEffect(() => {
-    if (!selected?.presentationAvailable || selected.parents.length === 0
-      || requestedCounts.current.has(selected.commit)) return;
-    requestedCounts.current.add(selected.commit);
-    host.loadChangeCounts(selected.commit);
-  }, [host, selected]);
+  const availableCommits = useMemo(
+    () => new Set(timeline.entries
+      .filter((entry) => entry.presentationAvailable)
+      .map((entry) => entry.commit)),
+    [timeline.entries]
+  );
+  const visibleGraph = graph && graphCommit === selected?.commit ? graph : undefined;
   return (
     <div className="history-shell">
       <aside className="history-sidebar">
@@ -75,49 +87,62 @@ export function HistoryWorkspace({
             <SearchIcon className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="pl-8"
-              value={state.query}
+              value={query}
               placeholder="Search commits and states"
               aria-label="Search commit history"
-              onChange={(event) => dispatch({ type: "search", query: event.target.value })}
+              onChange={(event) => setQuery(event.target.value)}
             />
           </div>
         </header>
         <CommitRail
           entries={entries}
           selected={selected?.commit ?? ""}
-          onSelect={(commit) => dispatch({ type: "select", commit })}
+          onSelect={onSelectCommit}
         />
       </aside>
       <main className="min-w-0 overflow-auto p-4">
         {selected && (
           <CommitDetails
             entry={selected}
-            building={state.building.has(selected.commit)}
+            buildState={buildState}
+            operationError={operationError}
+            availableCommits={availableCommits}
             onLoad={() => host.loadRevision(selected.commit)}
-            onBuild={() => {
-              dispatch({ type: "building", commit: selected.commit, building: true });
-              host.buildRevision(selected.commit);
-            }}
+            onBuild={() => host.buildRevision(selected.commit)}
             onCompare={(parent) => host.compare(selected.commit, parent)}
             onQuery={() => host.queryRevision(selected.commit)}
             changeCounts={changeCounts?.commit === selected.commit ? changeCounts : undefined}
           />
         )}
         <div className="mt-4 h-[calc(100vh-12rem)] min-h-96 overflow-hidden rounded-md border">
-          {graph ? (
-            <CompassGraph
-              model={graph}
-              communityDetail={communityDetail}
-              communityLoading={communityLoading}
-              communityError={communityError}
-              onBackToOverview={onBackToOverview}
-              host={{
-                openSource: host.openSource,
-                openCommunity(communityId) {
-                  if (graphCommit) host.openCommunity(graphCommit, communityId);
-                }
-              }}
-            />
+          {visibleGraph ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <div
+                className="border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                role="status"
+              >
+                Viewing graph for <span className="font-mono text-foreground">
+                  {selected?.commit.slice(0, 9)}
+                </span>
+              </div>
+              <div className="min-h-0 flex-1">
+                <CompassGraph
+                  model={visibleGraph}
+                  communityDetail={communityDetail}
+                  communityLoading={communityLoading}
+                  communityError={communityError}
+                  onBackToOverview={onBackToOverview}
+                  host={{
+                    openSource(source) {
+                      if (selected) host.openSource(selected.commit, source);
+                    },
+                    openCommunity(communityId) {
+                      if (graphCommit) host.openCommunity(graphCommit, communityId);
+                    }
+                  }}
+                />
+              </div>
+            </div>
           ) : (
             <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
               Select an available commit and choose Open graph. Missing commits are never built implicitly.

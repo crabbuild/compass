@@ -19,7 +19,11 @@ export function ArchitectureFlow({
 }) {
   const first = model.sections.find((section) => section.id !== "overview")?.id ?? "overview";
   const [sectionId, setSectionId] = useState(first);
+  const [showAllFlows, setShowAllFlows] = useState(false);
   const section = model.sections.find((candidate) => candidate.id === sectionId);
+  const visibleOverviewLinks = showAllFlows
+    ? model.overviewLinks
+    : model.overviewLinks.slice(0, 24);
   const nodeNames = useMemo(
     () => new Map(model.sections.flatMap((item) => item.nodes.map((node) => [node.id, node.label]))),
     [model.sections]
@@ -72,7 +76,7 @@ export function ArchitectureFlow({
             <Badge variant="outline"><NetworkIcon /> {model.overviewLinks.length} flows</Badge>
           </div>
           <div className="architecture-flow-grid">
-            {model.overviewLinks.slice(0, 24).map((link) => (
+            {visibleOverviewLinks.map((link) => (
               <div
                 key={`${link.sourceSection}:${link.targetSection}`}
                 className="flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm text-card-foreground"
@@ -84,6 +88,16 @@ export function ArchitectureFlow({
               </div>
             ))}
           </div>
+          {!showAllFlows && model.overviewLinks.length > visibleOverviewLinks.length && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground" role="status">
+                Showing {visibleOverviewLinks.length} of {model.overviewLinks.length} flows
+              </p>
+              <Button size="xs" variant="outline" onClick={() => setShowAllFlows(true)}>
+                Show all {model.overviewLinks.length} flows
+              </Button>
+            </div>
+          )}
         </section>
 
         {section && (

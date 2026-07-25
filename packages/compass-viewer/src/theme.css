@@ -496,6 +496,7 @@ button:not(:disabled),
 .compass-search-field input:focus-visible,
 .compass-search-item:focus-visible,
 .compass-inspector-action:focus-visible,
+.compass-source-card:focus-visible,
 .compass-inspector-disclosure:focus-visible,
 .compass-inspector-resizer:focus-visible,
 .compass-load-action:focus-visible,
@@ -854,6 +855,83 @@ button:not(:disabled),
   white-space: nowrap;
 }
 
+.compass-source-metadata[data-interactive="true"] {
+  padding: 0;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.compass-source-metadata[data-interactive="true"]:hover,
+.compass-source-metadata[data-interactive="true"]:focus-within {
+  border-color: var(--compass-focus);
+  background: var(--compass-focus-soft);
+}
+
+.compass-source-metadata[data-interactive="true"] dd {
+  margin: 0;
+  overflow: visible;
+  white-space: normal;
+}
+
+.compass-source-card {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.compass-source-copy {
+  display: block;
+  min-width: 0;
+}
+
+.compass-source-eyebrow,
+.compass-source-path,
+.compass-source-range {
+  display: block;
+}
+
+.compass-source-eyebrow {
+  color: var(--compass-faint);
+  font-family: var(--compass-font-sans);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compass-source-path {
+  margin-top: 4px;
+  overflow: hidden;
+  font: 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-source-range {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font: 10px/1.25 var(--compass-font-sans);
+}
+
+.compass-source-card > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--compass-focus);
+}
+
+.compass-source-card:hover > svg {
+  color: var(--foreground);
+}
+
 .compass-signature-block {
   display: block;
   margin-bottom: 15px;
@@ -905,25 +983,39 @@ button:not(:disabled),
 }
 
 .compass-neighbor-link {
-  display: block;
+  display: flex;
   width: 100%;
   min-height: 36px;
+  align-items: center;
+  gap: 9px;
   margin: 3px 0;
   padding: 8px 9px;
   overflow: hidden;
   border: 0;
-  border-left: 3px solid var(--border);
   border-radius: 7px;
   background: transparent;
   color: var(--muted-foreground);
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .compass-neighbor-link:hover {
   background: var(--compass-focus-soft);
   color: var(--foreground);
+}
+
+.compass-neighbor-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.compass-neighbor-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compass-empty {
@@ -1072,11 +1164,13 @@ body.vscode-high-contrast .compass-graph-inspector,
 body.vscode-high-contrast .compass-inspector-resizer,
 body.vscode-high-contrast .compass-load-mark,
 body.vscode-high-contrast .compass-load-action,
+body.vscode-high-contrast .compass-source-metadata,
 body.vscode-high-contrast-light .compass-glass-panel,
 body.vscode-high-contrast-light .compass-graph-inspector,
 body.vscode-high-contrast-light .compass-inspector-resizer,
 body.vscode-high-contrast-light .compass-load-mark,
-body.vscode-high-contrast-light .compass-load-action {
+body.vscode-high-contrast-light .compass-load-action,
+body.vscode-high-contrast-light .compass-source-metadata {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--compass-focus));
 }

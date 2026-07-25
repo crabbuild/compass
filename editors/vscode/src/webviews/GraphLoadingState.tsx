@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import {
   AlertTriangleIcon,
   CompassIcon,
@@ -9,14 +10,28 @@ export type GraphLoadState =
   | { kind: "loading" }
   | { kind: "error"; message: string };
 
+export type GraphLoadingCopy = {
+  eyebrow: string;
+  title: string;
+  steps: readonly string[];
+};
+
+const DEFAULT_LOADING_COPY: GraphLoadingCopy = {
+  eyebrow: "Compass graph",
+  title: "Mapping your codebase",
+  steps: ["Reading graph", "Arranging relationships", "Preparing inspector"]
+};
+
 export function GraphLoadingState({
   state,
   onRetry,
-  onShowOutput
+  onShowOutput,
+  loadingCopy = DEFAULT_LOADING_COPY
 }: {
   state: GraphLoadState;
   onRetry(): void;
   onShowOutput(): void;
+  loadingCopy?: GraphLoadingCopy;
 }) {
   const loading = state.kind === "loading";
   return (
@@ -50,13 +65,18 @@ export function GraphLoadingState({
         role={loading ? "status" : "alert"}
         aria-live="polite"
       >
-        <span className="compass-load-eyebrow">Compass graph</span>
-        <h1>{loading ? "Mapping your codebase" : "Compass could not load this graph"}</h1>
+        <span className="compass-load-eyebrow">
+          {loading ? loadingCopy.eyebrow : "Compass graph"}
+        </span>
+        <h1>{loading ? loadingCopy.title : "Compass could not load this graph"}</h1>
         {loading ? (
           <p className="compass-load-steps">
-            <span>Reading graph</span><b>·</b>
-            <span>Arranging relationships</span><b>·</b>
-            <span>Preparing inspector</span>
+            {loadingCopy.steps.map((step, index) => (
+              <Fragment key={step}>
+                {index > 0 && <b aria-hidden="true">·</b>}
+                <span>{step}</span>
+              </Fragment>
+            ))}
           </p>
         ) : (
           <>

@@ -47,3 +47,11 @@ export type HistoryTimeline = z.infer<typeof HistoryTimelineSchema>;
 export type HistoryEntry = HistoryTimeline["entries"][number];
 export type HistoricalGraph = z.infer<typeof HistoricalGraphSchema>;
 export type HistoryChangeCounts = z.infer<typeof HistoryChangeCountsSchema>;
+export type HistoryBuildState =
+  | { status: "requesting" }
+  | { status: "running" }
+  | { status: "failed"; message: string };
+export type HistoryOperationError = {
+  operation: string;
+  message: string;
+};

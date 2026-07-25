@@ -1,6 +1,7 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
 import {
   CompassIcon,
+  ExternalLinkIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   SearchIcon
@@ -13,6 +14,31 @@ function lineRange(node: GraphNode): string | undefined {
   const end = node.source?.endLine;
   if (start === undefined) return undefined;
   return end !== undefined && end !== start ? `${start}–${end}` : String(start);
+}
+
+function sourceDisplayRange(node: GraphNode): {
+  text: string;
+  action: string;
+} | undefined {
+  const startLine = node.source?.startLine;
+  const endLine = node.source?.endLine;
+  if (startLine !== undefined) {
+    return endLine !== undefined && endLine !== startLine
+      ? { text: `Lines ${startLine}–${endLine}`, action: `at lines ${startLine}–${endLine}` }
+      : { text: `Line ${startLine}`, action: `at line ${startLine}` };
+  }
+
+  const startByte = node.source?.startByte;
+  const endByte = node.source?.endByte;
+  if (startByte === undefined) return undefined;
+  return endByte !== undefined && endByte !== startByte
+    ? { text: `Bytes ${startByte}–${endByte}`, action: `at bytes ${startByte}–${endByte}` }
+    : { text: `Byte ${startByte}`, action: `at byte ${startByte}` };
+}
+
+function sourceActionLabel(node: GraphNode, source: SourceLocation): string {
+  const range = sourceDisplayRange(node);
+  return `Open source ${source.file}${range ? ` ${range.action}` : ""}`;
 }
 
 export function GraphInspector({
@@ -49,6 +75,7 @@ export function GraphInspector({
   const [activeResult, setActiveResult] = useState(0);
   const source = selected ? navigableSource(selected) : undefined;
   const range = selected ? lineRange(selected) : undefined;
+  const sourceRange = selected ? sourceDisplayRange(selected) : undefined;
   const communityCounts = useMemo(() => {
     const counts = new Map<number, number>();
     for (const node of model.nodes) {
@@ -201,25 +228,48 @@ export function GraphInspector({
               </div>
               {selected.language && <div><dt>Language</dt><dd>{selected.language}</dd></div>}
               {range && <div><dt>Lines</dt><dd>{range}</dd></div>}
-              <div className="compass-metadata-wide">
-                <dt>Source</dt>
-                <dd title={selected.source?.file ?? "Not recorded"}>
-                  {selected.source?.file ?? "Not recorded"}
-                </dd>
+              <div
+                className="compass-metadata-wide compass-source-metadata"
+                data-interactive={source !== undefined}
+              >
+                {source ? (
+                  <>
+                    <dt className="sr-only">Source</dt>
+                    <dd>
+                      <button
+                        className="compass-source-card"
+                        type="button"
+                        aria-label={sourceActionLabel(selected, source)}
+                        title={sourceActionLabel(selected, source)}
+                        onClick={() => onOpenSource(source)}
+                      >
+                        <span className="compass-source-copy">
+                          <span className="compass-source-eyebrow" aria-hidden="true">
+                            Source
+                          </span>
+                          <span className="compass-source-path">{source.file}</span>
+                          {sourceRange && (
+                            <span className="compass-source-range">
+                              {sourceRange.text}
+                            </span>
+                          )}
+                        </span>
+                        <ExternalLinkIcon aria-hidden="true" />
+                      </button>
+                    </dd>
+                  </>
+                ) : (
+                  <>
+                    <dt>Source</dt>
+                    <dd title={selected.source?.file ?? "Not recorded"}>
+                      {selected.source?.file ?? "Not recorded"}
+                    </dd>
+                  </>
+                )}
               </div>
             </dl>
             {selected.signature && (
               <code className="compass-signature-block">{selected.signature}</code>
-            )}
-            {source && (
-              <button
-                className="compass-inspector-action"
-                type="button"
-                onClick={() => onOpenSource(source)}
-              >
-                Open source
-                <span>{source.file}{range ? `:${range}` : ""}</span>
-              </button>
             )}
             {model.stats.aggregated
               && selected.memberCount !== undefined
@@ -243,11 +293,17 @@ export function GraphInspector({
                   key={neighbor.id}
                   type="button"
                   className="compass-neighbor-link"
-                  style={{ borderLeftColor: neighbor.color?.background
-                    ?? model.communities.find((item) => item.id === neighbor.community)?.color }}
+                  title={neighbor.label}
                   onClick={() => onFocus(neighbor.id)}
                 >
-                  {neighbor.label}
+                  <span
+                    className="compass-neighbor-dot"
+                    aria-hidden="true"
+                    style={{ background: neighbor.color?.background
+                      ?? model.communities.find((item) => item.id === neighbor.community)?.color
+                      ?? "var(--border)" }}
+                  />
+                  <span className="compass-neighbor-label">{neighbor.label}</span>
                 </button>
               )) : <span className="compass-empty">No connected nodes</span>}
             </div>

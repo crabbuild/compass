@@ -26,7 +26,26 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   await expect(page.getByRole("status")).toContainText("Inspecting helper");
   await expect(page.locator(".compass-metadata-grid")).toContainText("5–7");
   await expect(page.locator(".compass-signature-block")).toContainText("fn helper()");
-  await expect(page.getByRole("button", { name: /open source/i })).toBeVisible();
+  const source = page.getByRole("button", {
+    name: "Open source src/lib.rs at lines 5–7"
+  });
+  await expect(source).toBeVisible();
+  await expect(source.locator(".compass-source-path")).toHaveText("src/lib.rs");
+  await expect(source.locator(".compass-source-range")).toHaveText("Lines 5–7");
+  const neighbors = page.locator(".compass-neighbor-link");
+  await expect(neighbors).toHaveCount(2);
+  await expect(neighbors.locator(".compass-neighbor-dot")).toHaveCount(2);
+  await expect(neighbors.first()).toHaveCSS("border-left-width", "0px");
+
+  await page.evaluate(() => {
+    window.addEventListener("compass:open-source", ((event: CustomEvent) => {
+      (window as typeof window & { openedSource?: unknown }).openedSource = event.detail;
+    }) as EventListener);
+  });
+  await source.click();
+  await expect.poll(() => page.evaluate(
+    () => (window as typeof window & { openedSource?: unknown }).openedSource
+  )).toEqual({ file: "src/lib.rs", startLine: 5, endLine: 7 });
   expect(external).toEqual([]);
 });
 
@@ -46,6 +65,11 @@ test("file-only graph nodes stay inspectable without source navigation", async (
   expect(await page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource
   )).toBeUndefined();
+
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
+  await page.getByRole("option", { name: /Store/i }).click();
+  await expect(page.locator(".compass-source-metadata")).toContainText("Not recorded");
+  await expect(page.getByRole("button", { name: /open source/i })).toHaveCount(0);
 });
 
 test("single-click inspects and double-click opens the selected node's exact range", async ({

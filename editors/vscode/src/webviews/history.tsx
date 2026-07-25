@@ -6,9 +6,15 @@ import {
   GraphViewModelSchema,
   compareGraphs,
   type GraphViewModel,
+  type HistoryBuildState,
   type HistoryChangeCounts,
+  type HistoryOperationError,
   type HistoryTimeline
 } from "@compass/viewer";
+import type {
+  HistoryHostMessage,
+  HistoryWebviewMessage
+} from "../history/panelMessages";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -16,8 +22,10 @@ const element = document.getElementById("root");
 if (!element) throw new Error("Compass history root is missing");
 const root = createRoot(element);
 let timeline: HistoryTimeline | undefined;
+let selectedCommit = "";
 let graph: GraphViewModel | undefined;
 let graphCommit: string | undefined;
+let graphIdentity: { realization: string; fingerprint: string } | undefined;
 let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
 let communityLoading: number | null = null;
 let communityError: string | undefined;
@@ -25,12 +33,53 @@ let activeCommunityRequest = "";
 let semanticDiff: unknown;
 let repositoryId = "";
 let changeCounts: HistoryChangeCounts | undefined;
+const buildStates = new Map<string, HistoryBuildState>();
+const operationErrors = new Map<string, HistoryOperationError>();
+
+function postMessage(message: HistoryWebviewMessage): void {
+  vscode.postMessage(message);
+}
+
+function clearRevisionPresentation(): void {
+  graph = undefined;
+  graphCommit = undefined;
+  graphIdentity = undefined;
+  semanticDiff = undefined;
+  changeCounts = undefined;
+  communityDetail = undefined;
+  communityLoading = null;
+  communityError = undefined;
+  activeCommunityRequest = "";
+}
+
+function requestChangeCounts(commit: string): void {
+  const entry = timeline?.entries.find((candidate) => candidate.commit === commit);
+  if (entry?.presentationAvailable && entry.parents.length > 0) {
+    postMessage({ type: "changeCounts", commit });
+  }
+}
+
+function selectCommit(commit: string): void {
+  if (commit === selectedCommit) return;
+  selectedCommit = commit;
+  clearRevisionPresentation();
+  requestChangeCounts(commit);
+  render();
+}
+
+function acceptsCommit(commit: unknown): commit is string {
+  return typeof commit === "string" && commit === selectedCommit;
+}
 
 function render(): void {
   if (!timeline) return;
   root.render(
     <HistoryWorkspace
       timeline={timeline}
+      selectedCommit={selectedCommit}
+      buildState={buildStates.get(selectedCommit)}
+      operationError={operationErrors.get(selectedCommit)}
+      onSelectCommit={selectCommit}
       graph={graph}
       graphCommit={graphCommit}
       communityDetail={communityDetail}
@@ -47,32 +96,41 @@ function render(): void {
       changeCounts={changeCounts}
       host={{
         loadRevision(commit) {
-          vscode.postMessage({ type: "loadRevision", commit });
+          operationErrors.delete(commit);
+          render();
+          postMessage({ type: "loadRevision", commit });
         },
         buildRevision(commit) {
-          vscode.postMessage({ type: "buildRevision", commit });
+          buildStates.set(commit, { status: "requesting" });
+          operationErrors.delete(commit);
+          render();
+          postMessage({ type: "buildRevision", commit });
         },
         compare(commit, parent) {
-          vscode.postMessage({ type: "compare", commit, parent });
+          operationErrors.delete(commit);
+          render();
+          postMessage({ type: "compare", commit, parent });
         },
         queryRevision(commit) {
-          vscode.postMessage({ type: "queryRevision", commit });
+          postMessage({ type: "queryRevision", commit });
         },
         loadChangeCounts(commit) {
-          vscode.postMessage({ type: "changeCounts", commit });
+          postMessage({ type: "changeCounts", commit });
         },
-        openSource(source) {
-          vscode.postMessage({ type: "openSource", repositoryId, source });
+        openSource(commit, source) {
+          postMessage({ type: "openSource", commit, repositoryId, source });
         },
         openCommunity(commit, communityId) {
-          if (communityLoading !== null) return;
+          if (communityLoading !== null || !graphIdentity) return;
           communityLoading = communityId;
           communityError = undefined;
           activeCommunityRequest = crypto.randomUUID();
-          vscode.postMessage({
+          postMessage({
             type: "openCommunity",
             requestId: activeCommunityRequest,
             commit,
+            realization: graphIdentity.realization,
+            fingerprint: graphIdentity.fingerprint,
             communityId
           });
           render();
@@ -81,65 +139,110 @@ function render(): void {
     />
   );
 }
-window.addEventListener("message", (event) => {
-  if (event.data?.type === "timeline") {
-    const parsed = HistoryTimelineSchema.safeParse(event.data.timeline);
+
+window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => {
+  const message = event.data;
+  if (message?.type === "timeline") {
+    const parsed = HistoryTimelineSchema.safeParse(message.timeline);
     if (parsed.success) {
       timeline = parsed.data;
-      if (typeof event.data.repositoryId === "string") {
-        repositoryId = event.data.repositoryId;
+      repositoryId = message.repositoryId;
+      const retainedCommit = timeline.entries.some((entry) => entry.commit === selectedCommit)
+        ? selectedCommit
+        : "";
+      const nextCommit = retainedCommit
+        || (timeline.entries.some((entry) => entry.commit === timeline?.selectedHead)
+          ? timeline.selectedHead
+          : timeline.entries[0]?.commit)
+        || "";
+      if (nextCommit !== selectedCommit) {
+        selectedCommit = nextCommit;
+        clearRevisionPresentation();
       }
+      requestChangeCounts(nextCommit);
     }
-  } else if (event.data?.type === "graph") {
-    const parsed = GraphViewModelSchema.safeParse(event.data.graph);
+  } else if (message?.type === "graph") {
+    if (!acceptsCommit(message.commit)) return;
+    const parsed = GraphViewModelSchema.safeParse(message.graph);
     if (parsed.success) {
       graph = parsed.data;
-      graphCommit = typeof event.data.commit === "string" ? event.data.commit : undefined;
+      graphCommit = message.commit;
+      graphIdentity = {
+        realization: message.realization,
+        fingerprint: message.fingerprint
+      };
       communityDetail = undefined;
       communityLoading = null;
       communityError = undefined;
       activeCommunityRequest = "";
+      operationErrors.delete(message.commit);
     }
-  } else if (event.data?.type === "communityGraph") {
-    const parsed = GraphViewModelSchema.safeParse(event.data.graph);
+  } else if (message?.type === "communityGraph") {
+    if (!acceptsCommit(message.commit)) return;
+    const parsed = GraphViewModelSchema.safeParse(message.graph);
     if (parsed.success
-      && event.data.requestId === activeCommunityRequest
-      && event.data.commit === graphCommit) {
+      && message.requestId === activeCommunityRequest
+      && message.commit === graphCommit) {
       communityDetail = {
-        communityId: event.data.communityId,
+        communityId: message.communityId,
         model: parsed.data
       };
       communityLoading = null;
       communityError = undefined;
     }
-  } else if (event.data?.type === "communityError") {
-    if (event.data.requestId === activeCommunityRequest) {
+  } else if (message?.type === "communityError") {
+    if (!acceptsCommit(message.commit)) return;
+    if (message.requestId === activeCommunityRequest) {
       communityLoading = null;
-      communityError = String(event.data.message);
+      communityError = message.message;
     }
-  } else if (event.data?.type === "comparison") {
-    const current = GraphViewModelSchema.safeParse(event.data.currentGraph);
-    const parent = GraphViewModelSchema.safeParse(event.data.parentGraph);
+  } else if (message?.type === "comparison") {
+    if (!acceptsCommit(message.commit)) return;
+    const current = GraphViewModelSchema.safeParse(message.currentGraph);
+    const parent = GraphViewModelSchema.safeParse(message.parentGraph);
     if (current.success && parent.success) {
       graph = current.data;
-      graphCommit = typeof event.data.commit === "string" ? event.data.commit : undefined;
+      graphCommit = message.commit;
+      graphIdentity = {
+        realization: message.realization,
+        fingerprint: message.fingerprint
+      };
       communityDetail = undefined;
       communityLoading = null;
       communityError = undefined;
       activeCommunityRequest = "";
       semanticDiff = {
         structural: compareGraphs(parent.data, current.data),
-        semantic: event.data.semanticDiff
+        semantic: message.semanticDiff
       };
+      operationErrors.delete(message.commit);
     }
-  } else if (event.data?.type === "changeCounts") {
-    const parsed = HistoryChangeCountsSchema.safeParse(event.data.counts);
+  } else if (message?.type === "changeCounts") {
+    if (!acceptsCommit(message.commit)) return;
+    const parsed = HistoryChangeCountsSchema.safeParse(message.counts);
     if (parsed.success) changeCounts = parsed.data;
-  } else if (event.data?.type === "error") {
-    semanticDiff = { error: String(event.data.message) };
+  } else if (message?.type === "buildRunning") {
+    buildStates.set(message.commit, { status: "running" });
+  } else if (message?.type === "buildSucceeded") {
+    buildStates.delete(message.commit);
+    operationErrors.delete(message.commit);
+  } else if (message?.type === "buildFailed") {
+    buildStates.set(message.commit, { status: "failed", message: message.message });
+  } else if (message?.type === "buildCancelled") {
+    buildStates.delete(message.commit);
+  } else if (message?.type === "error") {
+    if (message.commit !== undefined && message.commit !== selectedCommit) return;
+    const commit = message.commit ?? selectedCommit;
+    if (commit) {
+      operationErrors.set(commit, {
+        operation: message.operation,
+        message: message.message
+      });
+    }
   } else {
     return;
   }
   render();
 });
-vscode.postMessage({ type: "ready" });
+
+postMessage({ type: "ready" });

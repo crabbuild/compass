@@ -55,18 +55,26 @@ export class CompassProcessManager {
     const child = this.start(cwd, args);
     let buffered = "";
     let terminals = 0;
+    let progressError: unknown;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      buffered += chunk;
-      const lines = buffered.split(/\r?\n/);
-      buffered = lines.pop() ?? "";
-      for (const line of lines.filter(Boolean)) {
-        const event = ProgressEventSchema.parse(JSON.parse(line));
-        if (event.terminal) terminals += 1;
-        onEvent(event);
+      if (progressError) return;
+      try {
+        buffered = bounded(buffered, chunk);
+        const lines = buffered.split(/\r?\n/);
+        buffered = lines.pop() ?? "";
+        for (const line of lines.filter(Boolean)) {
+          const event = ProgressEventSchema.parse(JSON.parse(line));
+          if (event.terminal) terminals += 1;
+          onEvent(event);
+        }
+      } catch (error) {
+        progressError = error;
+        child.kill();
       }
     });
     const completed = collect(child, false).then((result) => {
+      if (progressError) throw progressError;
       if (terminals !== 1) {
         throw new Error(`Compass emitted ${terminals} terminal progress events`);
       }
@@ -92,18 +100,35 @@ function collect(
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
+    let streamError: unknown;
+    const append = (current: string, chunk: string): string => {
+      if (streamError) return current;
+      try {
+        return bounded(current, chunk);
+      } catch (error) {
+        streamError = error;
+        child.kill();
+        return current;
+      }
+    };
     if (captureStdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
-        stdout = bounded(stdout, chunk);
+        stdout = append(stdout, chunk);
       });
     }
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
-      stderr = bounded(stderr, chunk);
+      stderr = append(stderr, chunk);
     });
     child.once("error", reject);
-    child.once("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.once("close", (code) => {
+      if (streamError) {
+        reject(streamError);
+      } else {
+        resolve({ code: code ?? 1, stdout, stderr });
+      }
+    });
   });
 }
 

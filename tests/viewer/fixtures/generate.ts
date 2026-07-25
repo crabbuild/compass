@@ -83,16 +83,27 @@ export default async function generate(): Promise<void> {
     path.join(output, "community.html"),
     communityHarness(communityOverview, communityDetail)
   );
+  const architectureSections = Array.from({ length: 26 }, (_, index) => ({
+    id: `section-${index}`,
+    name: `Section ${index}`,
+    communities: [`${index}`],
+    nodes: index === 0
+      ? [{ id: "run", label: "run", kind: "function", sourceFile: "src/lib.rs" }]
+      : [],
+    edges: []
+  }));
   const architecture = {
     schema: "compass.viewer.callflow/1",
     title: "Fixture — Architecture Flow",
     sections: [
       { id: "overview", name: "Overview", communities: [], nodes: [], edges: [] },
-      { id: "core", name: "Core", communities: ["0"], nodes: [
-        { id: "run", label: "run", kind: "function", sourceFile: "src/lib.rs" }
-      ], edges: [] }
+      ...architectureSections
     ],
-    overviewLinks: [],
+    overviewLinks: Array.from({ length: 25 }, (_, index) => ({
+      sourceSection: `section-${index}`,
+      targetSection: `section-${index + 1}`,
+      calls: index + 1
+    })),
     reportHighlights: [],
     statistics: { nodes: 1, edges: 0, communities: 1, hyperedges: 0, extracted: 0, inferred: 0, ambiguous: 0 },
     provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
@@ -102,28 +113,79 @@ export default async function generate(): Promise<void> {
     rootSymbol: "run",
     direction: "both",
     depth: 1,
-    nodes: [{ id: "run", symbol: "run", name: "run", file: "src/lib.rs", anchor: { source_file: "src/lib.rs", start_byte: 0, end_byte: 10 }, graphNodeId: "run", unresolved: false }],
-    edges: [],
-    truncated: false,
-    continuations: [],
-    coverage: { resolved: 0, inferred: 0, ambiguous: 0, unresolved: 0, warning: "Unresolved calls never prove absence." }
+    nodes: [
+      { id: "run", symbol: "run", name: "run", file: "src/lib.rs", anchor: { source_file: "src/lib.rs", start_byte: 0, end_byte: 10 }, graphNodeId: "run", unresolved: false },
+      { id: "helper", symbol: "helper", name: "helper", file: "src/lib.rs", anchor: { source_file: "src/lib.rs", start_byte: 11, end_byte: 20 }, graphNodeId: "helper", unresolved: false }
+    ],
+    edges: [{
+      id: "run-helper", source: "run", target: "helper", callee: "helper",
+      resolution: "resolved",
+      callSites: [{ anchor: { source_file: "src/lib.rs", start_byte: 4, end_byte: 10 }, evidence: ["fixture"] }]
+    }],
+    truncated: true,
+    continuations: Array.from({ length: 21 }, (_, index) => ({
+      symbol: `continuation-${index}`,
+      direction: index % 2 === 0 ? "callers" : "callees",
+      nextDepth: 2
+    })),
+    coverage: { resolved: 1, inferred: 0, ambiguous: 0, unresolved: 0, warning: "Unresolved calls never prove absence." }
   };
+  const commitA = "a".repeat(40);
+  const commitB = "b".repeat(40);
+  const commitC = "c".repeat(40);
   const timeline = {
     schema: "compass.history.timeline/1",
     repositoryId: "fixture",
-    selectedHead: "a".repeat(40),
+    selectedHead: commitA,
     historyEnabled: true,
-    entries: [{
-      commit: "a".repeat(40), parents: [], authorName: "Compass", authorEmail: "test@example.invalid",
-      authoredAtSeconds: 1, subject: "Initial graph", graphState: "graph_available",
-      presentationAvailable: true, realization: "r", fingerprint: "f", job: null
-    }]
+    entries: [
+      {
+        commit: commitA, parents: [], authorName: "Compass", authorEmail: "test@example.invalid",
+        authoredAtSeconds: 1, subject: "Revision A graph", graphState: "graph_available",
+        presentationAvailable: true, realization: "ra", fingerprint: "fa", job: null
+      },
+      {
+        commit: commitB, parents: [commitA], authorName: "Compass", authorEmail: "test@example.invalid",
+        authoredAtSeconds: 2, subject: "Revision B graph", graphState: "graph_available",
+        presentationAvailable: true, realization: "rb", fingerprint: "fb", job: null
+      },
+      {
+        commit: commitC, parents: [commitB], authorName: "Compass", authorEmail: "test@example.invalid",
+        authoredAtSeconds: 3, subject: "Revision C needs build", graphState: "not_materialized",
+        presentationAvailable: false, realization: null, fingerprint: null, job: null
+      }
+    ]
+  };
+  const historyOverviewA = { ...communityOverview, title: "Revision A graph" };
+  const historyOverviewB = {
+    ...communityOverview,
+    title: "Revision B graph",
+    nodes: communityOverview.nodes.map((node) => ({
+      ...node,
+      label: `${node.label} B`
+    })),
+    communities: communityOverview.communities.map((community) => ({
+      ...community,
+      label: `${community.label} B`
+    }))
+  };
+  const historyOverviewC = {
+    ...historyOverviewB,
+    title: "Revision C graph"
   };
   await writeFile(path.join(output, "architecture.html"), harness("architecture", { type: "hydrate", repositoryId: "fixture", model: architecture }));
-  await writeFile(path.join(output, "calls.html"), harness("callGraph", { type: "hydrateCallGraph", repositoryId: "fixture", graph: calls }));
+  await writeFile(path.join(output, "calls.html"), callGraphHarness(calls));
   await writeFile(
     path.join(output, "history.html"),
-    historyHarness(timeline, communityOverview, communityDetail)
+    historyHarness(
+      timeline,
+      {
+        [commitA]: historyOverviewA,
+        [commitB]: historyOverviewB,
+        [commitC]: historyOverviewC
+      },
+      communityDetail
+    )
   );
   await writeFile(path.join(output, "query.html"), harness("query", { type: "state", running: false }));
 }
@@ -142,6 +204,32 @@ window.acquireVsCodeApi=()=>({
     }
   }
 })</script><script src="/vscodeGraph.js"></script></body></html>`;
+}
+
+function callGraphHarness(graph: unknown): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass call graph fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.callGraphHostMessages=[];
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.callGraphHostMessages.push(message);
+  if(message.type==="openSource") {
+    window.openedCallGraphSource=message.source;
+    return;
+  }
+  if(message.type==="showOutput") {
+    window.showedCallGraphOutput=true;
+    return;
+  }
+  if(message.type!=="ready" && message.type!=="retry") return;
+  if(new URLSearchParams(window.location.search).has("error")) {
+    setTimeout(()=>window.postMessage({type:"error",message:"No function could be resolved at this cursor position."},"*"),20);
+    return;
+  }
+  setTimeout(()=>window.postMessage({
+    type:"hydrateCallGraph",
+    repositoryId:"fixture",
+    graph:${JSON.stringify(graph)}
+  },"*"),1000);
+}})</script><script src="/callGraph.js"></script></body></html>`;
 }
 
 function communityHarness(overview: unknown, detail: unknown): string {
@@ -165,17 +253,75 @@ window.acquireVsCodeApi=()=>({getState(){return window.webviewState},setState(st
 }})</script><script src="/vscodeGraph.js"></script></body></html>`;
 }
 
-function historyHarness(timeline: { entries: Array<{ commit: string }> }, overview: unknown, detail: unknown): string {
-  const commit = timeline.entries[0]?.commit ?? "";
+function historyHarness(
+  timeline: { entries: Array<{ commit: string }> },
+  graphs: Record<string, unknown>,
+  detail: unknown
+): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass history fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.fixtureTimeline=${JSON.stringify(timeline)};
+window.historyGraphs=${JSON.stringify(graphs)};
+window.historyHostMessages=[];
+window.emitHistoryMessage=(message)=>window.postMessage(message,"*");
 window.acquireVsCodeApi=()=>({postMessage(message){
+  window.historyHostMessages.push(message);
   if(message.type==="ready") {
-    setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:${JSON.stringify(timeline)}},"*"),0);
+    setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*"),0);
   } else if(message.type==="loadRevision") {
-    setTimeout(()=>window.postMessage({type:"graph",commit:${JSON.stringify(commit)},graph:${JSON.stringify(overview)}},"*"),0);
+    const delay=message.commit.startsWith("a") ? 180 : 0;
+    setTimeout(()=>window.postMessage({
+      type:"graph",
+      commit:message.commit,
+      realization:"r-"+message.commit.slice(0,1),
+      fingerprint:"f-"+message.commit.slice(0,1),
+      graph:window.historyGraphs[message.commit]
+    },"*"),delay);
+  } else if(message.type==="changeCounts") {
+    setTimeout(()=>window.postMessage({
+      type:"changeCounts",
+      commit:message.commit,
+      counts:{
+        schema:"compass.history.change_counts/1",
+        commit:message.commit,
+        parent:message.commit.startsWith("c") ? "b".repeat(40) : "a".repeat(40),
+        counts:{
+          nodes:{added:2,removed:0,changed:1},
+          edges:{added:1,removed:0,changed:0},
+          hyperedges:{added:0,removed:0,changed:0}
+        }
+      }
+    },"*"),20);
   } else if(message.type==="openCommunity") {
     window.openedHistoricalCommunity=message.communityId;
-    setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,commit:${JSON.stringify(commit)},communityId:message.communityId,graph:${JSON.stringify(detail)}},"*"),0);
+    setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,commit:message.commit,communityId:message.communityId,graph:${JSON.stringify(detail)}},"*"),0);
+  } else if(message.type==="compare") {
+    setTimeout(()=>window.postMessage({
+      type:"comparison",
+      commit:message.commit,
+      parent:message.parent,
+      realization:"r-"+message.commit.slice(0,1),
+      fingerprint:"f-"+message.commit.slice(0,1),
+      currentGraph:window.historyGraphs[message.commit],
+      parentGraph:window.historyGraphs[message.parent],
+      semanticDiff:{findings:[{summary:"Fixture comparison"}]}
+    },"*"),0);
+  } else if(message.type==="buildRevision") {
+    const scenario=new URLSearchParams(window.location.search).get("build") || "cancel";
+    if(scenario==="cancel") {
+      setTimeout(()=>window.postMessage({type:"buildCancelled",commit:message.commit},"*"),180);
+    } else {
+      setTimeout(()=>window.postMessage({type:"buildRunning",commit:message.commit},"*"),100);
+      if(scenario==="fail") {
+        setTimeout(()=>window.postMessage({type:"buildFailed",commit:message.commit,message:"Fixture build failed"},"*"),220);
+      } else {
+        setTimeout(()=>{
+          const entry=window.fixtureTimeline.entries.find(candidate=>candidate.commit===message.commit);
+          Object.assign(entry,{graphState:"graph_available",presentationAvailable:true,realization:"rc",fingerprint:"fc"});
+          window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*");
+          window.postMessage({type:"buildSucceeded",commit:message.commit},"*");
+        },220);
+      }
+    }
   } else if(message.type==="openSource") {
     window.openedSource=message.source;
   }

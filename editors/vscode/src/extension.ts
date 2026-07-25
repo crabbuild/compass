@@ -161,7 +161,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.calls)) return;
       try {
-        await CallGraphPanel.open(context, session, editor);
+        await CallGraphPanel.open(context, session, editor, output);
       } catch (error) {
         void vscode.window.showErrorMessage(`Compass call graph failed: ${message(error)}`);
       }

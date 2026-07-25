@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { CallGraph, CallGraphResponseSchema, mergeExpansion, type CallGraphResponse } from "@compass/viewer";
+import { GraphLoadingState, type GraphLoadingCopy } from "./GraphLoadingState";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -8,6 +9,37 @@ if (!element) throw new Error("Compass call graph root is missing");
 const root = createRoot(element);
 let graph: CallGraphResponse | undefined;
 let repositoryId = "";
+
+const CALL_GRAPH_LOADING_COPY: GraphLoadingCopy = {
+  eyebrow: "Compass call graph",
+  title: "Resolving the function under your cursor",
+  steps: ["Locating symbol", "Tracing callers", "Tracing callees"]
+};
+
+function renderLoading(): void {
+  root.render(
+    <GraphLoadingState
+      state={{ kind: "loading" }}
+      loadingCopy={CALL_GRAPH_LOADING_COPY}
+      onRetry={() => vscode.postMessage({ type: "retry" })}
+      onShowOutput={() => vscode.postMessage({ type: "showOutput" })}
+    />
+  );
+}
+
+function renderError(message: string): void {
+  root.render(
+    <GraphLoadingState
+      state={{ kind: "error", message }}
+      loadingCopy={CALL_GRAPH_LOADING_COPY}
+      onRetry={() => {
+        renderLoading();
+        vscode.postMessage({ type: "retry" });
+      }}
+      onShowOutput={() => vscode.postMessage({ type: "showOutput" })}
+    />
+  );
+}
 
 function render(): void {
   if (!graph) return;
@@ -28,7 +60,11 @@ function render(): void {
 
 window.addEventListener("message", (event) => {
   if (event.data?.type === "error") {
-    root.render(<main className="grid min-h-screen place-items-center p-8">{event.data.message}</main>);
+    renderError(
+      typeof event.data.message === "string"
+        ? event.data.message
+        : "Compass could not resolve this function."
+    );
     return;
   }
   if (!["hydrateCallGraph", "mergeCallGraph"].includes(event.data?.type)) return;
@@ -40,4 +76,5 @@ window.addEventListener("message", (event) => {
     : parsed.data;
   render();
 });
+renderLoading();
 vscode.postMessage({ type: "ready" });

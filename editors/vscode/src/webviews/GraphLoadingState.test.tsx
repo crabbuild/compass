@@ -33,4 +33,24 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("Retry");
     expect(markup).toContain("Show Compass output");
   });
+
+  it("accepts purpose-specific loading copy", () => {
+    const markup = renderToStaticMarkup(
+      <GraphLoadingState
+        state={{ kind: "loading" }}
+        loadingCopy={{
+          eyebrow: "Compass call graph",
+          title: "Resolving the function under your cursor",
+          steps: ["Locating symbol", "Tracing callers", "Tracing callees"]
+        }}
+        onRetry={vi.fn()}
+        onShowOutput={vi.fn()}
+      />
+    );
+
+    expect(markup).toContain("Compass call graph");
+    expect(markup).toContain("Resolving the function under your cursor");
+    expect(markup).toContain("Tracing callers");
+    expect(markup).toContain("Tracing callees");
+  });
 });
