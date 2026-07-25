@@ -157,7 +157,7 @@ const PAGES: &[Page] = &[
         "watch",
         "Rebuild the graph automatically when project files change",
         ["compass watch [PATH] [OPTIONS]"],
-        "Arguments:\n  [PATH]                       Project directory to watch [default: .]\n\nOptions:\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --debounce <SECONDS>         Wait after changes before rebuilding [default: 3]\n  --out <DIR>                  Output directory\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --poll                       Poll instead of using filesystem notifications\n\nExamples:\n  compass watch\n  compass watch ./services/api --program-artifact index.scip --poll"
+        "Arguments:\n  [PATH]                       Project directory to watch [default: .]\n\nOptions:\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --debounce <SECONDS>         Adaptive quiet window [default: 0.15]\n  --out <DIR>                  Output directory\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --poll                       Force content-aware polling\n\nExamples:\n  compass watch\n  compass watch ./services/api --program-artifact index.scip --poll\n\nNotes:\n  Watch synchronizes once at startup, then uses native filesystem events with adaptive coalescing. Continuous edits cannot delay a build beyond five debounce windows. If native watching is unavailable, Compass falls back to polling automatically."
     ),
     page!(
         "cluster-only",
@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 35);
+        assert_eq!(roots.len(), 36);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

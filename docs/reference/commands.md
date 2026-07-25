@@ -107,7 +107,16 @@ compass watch [PATH]
   [--poll]
 ```
 
-Long-running filesystem watcher. Use a manual `update` as its recovery oracle.
+Long-running adaptive filesystem watcher. Compass synchronizes once at startup,
+then coalesces native filesystem events with a 150 ms quiet window and a 750 ms
+maximum delay. `--debounce` changes the quiet window; the maximum becomes five
+times that value, capped at five seconds.
+
+Only one build runs at a time. Changes received during a build queue one
+follow-up, transient build failures retry with bounded backoff, and an idle
+five-minute reconciliation catches missed events. Native watcher startup
+automatically falls back to content-aware polling; `--poll` forces that backend.
+A manual `compass update` remains the recovery oracle.
 
 ### `cluster-only`
 

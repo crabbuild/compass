@@ -41,10 +41,12 @@ fn main() -> ExitCode {
                 &mut io::stderr(),
             ));
         }
-        return ExitCode::from(compass_cli::run_watch(
+        let output_is_terminal = io::stdout().is_terminal();
+        return ExitCode::from(compass_cli::run_watch_with_terminal(
             &arguments[1..],
             &mut io::stdout(),
             &mut io::stderr(),
+            output_is_terminal,
         ));
     }
     if arguments.first().and_then(|value| value.to_str()) == Some("serve") {
