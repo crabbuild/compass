@@ -5,16 +5,15 @@ repository=${COMPASS_REPOSITORY:-crabbuild/compass}
 release_base_url=${COMPASS_RELEASE_BASE_URL:-https://github.com/$repository/releases/latest/download}
 install_dir=${COMPASS_INSTALL_DIR:-$HOME/.local/bin}
 
-if [ "$(uname -s)" != Darwin ]; then
-    echo "error: this installer currently supports macOS only" >&2
-    exit 1
-fi
-
-case "$(uname -m)" in
-    arm64|aarch64) target=aarch64-apple-darwin ;;
-    x86_64|amd64) target=x86_64-apple-darwin ;;
+os=$(uname -s)
+arch=$(uname -m)
+case "$os:$arch" in
+    Darwin:arm64|Darwin:aarch64) target=aarch64-apple-darwin ;;
+    Darwin:x86_64|Darwin:amd64) target=x86_64-apple-darwin ;;
+    Linux:arm64|Linux:aarch64) target=aarch64-unknown-linux-gnu ;;
+    Linux:x86_64|Linux:amd64) target=x86_64-unknown-linux-gnu ;;
     *)
-        echo "error: unsupported macOS architecture: $(uname -m)" >&2
+        echo "error: unsupported platform: $os $arch" >&2
         exit 1
         ;;
 esac
@@ -30,11 +29,22 @@ download() {
         --output "$temporary/$2" "$release_base_url/$1"
 }
 
+verify_checksum() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "$1"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "$1"
+    else
+        echo "error: sha256sum or shasum is required" >&2
+        return 1
+    fi
+}
+
 download "$archive" "$archive"
 download "$checksum" "$checksum"
 (
     cd "$temporary"
-    shasum -a 256 -c "$checksum"
+    verify_checksum "$checksum"
 )
 
 tar -C "$temporary" -xzf "$temporary/$archive"

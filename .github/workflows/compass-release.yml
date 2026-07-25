@@ -1,4 +1,4 @@
-name: Release Compass for macOS
+name: Release Compass for macOS and Linux
 
 on:
   push:
@@ -36,6 +36,10 @@ jobs:
             target: x86_64-apple-darwin
           - runner: macos-15
             target: aarch64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -58,9 +62,9 @@ jobs:
         run: sh scripts/test_release_scripts.sh
       - name: Build locked Compass binary
         run: cargo build --release --locked -p compass-cli --bin compass --target ${{ matrix.target }}
-      - name: Package macOS distribution
+      - name: Package release distribution
         run: >-
-          scripts/package_macos.sh
+          scripts/package_release.sh
           ${{ matrix.target }}
           target/${{ matrix.target }}/release/compass
           dist
