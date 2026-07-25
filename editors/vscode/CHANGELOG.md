@@ -8,3 +8,5 @@
 - Architecture flow and natural-language/CompassQL editor tabs.
 - Complete Git evolution timeline, explicit historical builds, exact revision
   graphs, parent comparison, and semantic findings.
+- Capability gates and guided recovery for older or incompatible Compass CLI
+  binaries.

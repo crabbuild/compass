@@ -15,6 +15,10 @@ Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
 
 Initialization previews include and exclude globs before it writes
 `.compass/config.toml`. The extension never installs a CLI automatically.
+The CLI must support `compass capabilities --format json`. If capability
+negotiation fails or a required versioned contract is missing, the extension
+does not run the incompatible command; upgrade Compass or use **Compass: Select
+CLI Binary**, then reload VS Code.
 
 ## Current graph
 

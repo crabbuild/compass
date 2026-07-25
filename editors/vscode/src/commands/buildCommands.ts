@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { COMPASS_REQUIREMENTS, type CapabilityRequirement } from "../cli/compatibility";
 import { buildInitArgs, buildUpdateArgs, buildWatchArgs } from "./buildArguments";
 import type { RepositorySession } from "../workspace/repositorySession";
 import type { SessionRegistry } from "../workspace/sessionRegistry";
@@ -7,13 +8,18 @@ export function registerBuildCommands(
   context: vscode.ExtensionContext,
   registry: SessionRegistry,
   output: vscode.OutputChannel,
-  refresh: () => Promise<void>
+  refresh: () => Promise<void>,
+  ensureCompatible: (
+    session: RepositorySession,
+    requirement: CapabilityRequirement
+  ) => Promise<boolean>
 ): void {
   const pick = () => pickRepository(registry);
   context.subscriptions.push(
     vscode.commands.registerCommand("compass.initialize", async () => {
       const session = await pick();
       if (!session) return;
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.initialize)) return;
       const includes = await vscode.window.showInputBox({
         title: "Compass: Initialize Repository",
         prompt: "Include globs, comma separated (leave empty for everything)"
@@ -40,6 +46,7 @@ export function registerBuildCommands(
     vscode.commands.registerCommand("compass.update", async () => {
       const session = await pick();
       if (!session) return;
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.update)) return;
       if (session.watch) {
         const stop = await vscode.window.showWarningMessage(
           "Compass watch is active. Stop it before updating?",
@@ -60,6 +67,7 @@ export function registerBuildCommands(
     vscode.commands.registerCommand("compass.toggleWatch", async () => {
       const session = await pick();
       if (!session) return;
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.watch)) return;
       if (session.watch) {
         session.watch.cancel();
         session.watch = undefined;

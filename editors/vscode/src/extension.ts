@@ -1,4 +1,9 @@
 import * as vscode from "vscode";
+import {
+  COMPASS_REQUIREMENTS,
+  compatibilityIssue,
+  type CapabilityRequirement
+} from "./cli/compatibility";
 import { CapabilityReportSchema } from "./cli/contracts";
 import { discoverCompass } from "./cli/discovery";
 import { CompassProcessManager } from "./cli/processManager";
@@ -31,7 +36,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           CapabilityReportSchema
         );
       } catch (error) {
-        output.warn(`Capability negotiation failed: ${message(error)}`);
+        session.capabilityError = message(error);
+        output.warn(`Capability negotiation failed for ${executable}: ${session.capabilityError}`);
       }
     }));
   }
@@ -48,10 +54,61 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     operationsTree.refresh();
     statusBar.refresh();
   };
+  const selectCompassBinary = async () => {
+    const selected = await vscode.window.showOpenDialog({
+      title: "Select Compass CLI",
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false
+    });
+    if (!selected?.[0]) return;
+    await vscode.workspace.getConfiguration("compass").update(
+      "cliPath",
+      selected[0].fsPath,
+      vscode.ConfigurationTarget.Global
+    );
+    const action = await vscode.window.showInformationMessage(
+      "Compass CLI selected. Reload VS Code to activate it.",
+      "Reload Window"
+    );
+    if (action === "Reload Window") {
+      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    }
+  };
+  const handleSetupAction = async (action: string | undefined) => {
+    if (action === "Select Compass Binary") {
+      await vscode.commands.executeCommand("compass.selectCli");
+    } else if (action === "Open Setup") {
+      await vscode.commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        "crabbuild.compass-vscode#compass.getStarted",
+        false
+      );
+    }
+  };
+  const ensureCompatible = async (
+    session: ReturnType<SessionRegistry["all"]>[number],
+    requirement: CapabilityRequirement
+  ): Promise<boolean> => {
+    const issue = compatibilityIssue(
+      session.capabilities,
+      session.capabilityError,
+      requirement
+    );
+    if (!issue) return true;
+    const action = await vscode.window.showErrorMessage(
+      `${issue} Upgrade Compass or select a newer Compass binary, then reload VS Code.`,
+      "Select Compass Binary",
+      "Open Setup"
+    );
+    await handleSetupAction(action);
+    return false;
+  };
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("compass.status", statusTree),
     vscode.window.registerTreeDataProvider("compass.operations", operationsTree),
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
+    vscode.commands.registerCommand("compass.selectCli", selectCompassBinary),
     vscode.commands.registerCommand("compass.openGraph", async () => {
       if (!vscode.workspace.isTrusted) {
         void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
@@ -62,6 +119,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showInformationMessage("Open a repository folder first.");
         return;
       }
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.graph)) return;
       if (session.graphState !== "available") {
         const action = await vscode.window.showInformationMessage(
           "This repository does not have a materialized Compass graph.",
@@ -81,6 +139,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         return;
       }
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.calls)) return;
       try {
         await CallGraphPanel.open(context, session, editor);
       } catch (error) {
@@ -90,49 +149,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("compass.openArchitecture", async () => {
       const session = registry.forEditor(vscode.window.activeTextEditor);
       if (!session) return;
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.architecture)) return;
       await openArchitecturePanel(context, session);
     }),
     vscode.commands.registerCommand("compass.openQuery", async () => {
       const session = registry.forEditor(vscode.window.activeTextEditor);
       if (!session) return;
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.query)) return;
       await openQueryPanel(context, session);
     }),
     vscode.commands.registerCommand("compass.openHistory", async () => {
       const session = registry.forEditor(vscode.window.activeTextEditor);
       if (!session) return;
+      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.history)) return;
       await openHistoryPanel(context, session, output);
     })
   );
-  registerBuildCommands(context, registry, output, refresh);
+  registerBuildCommands(context, registry, output, refresh, ensureCompatible);
   statusBar.refresh();
 
-  if (discovery.kind === "missing") {
-    const action = await vscode.window.showInformationMessage(
+  const incompatible = registry.all().find((session) => session.capabilityError);
+  if (discovery.kind === "found" && incompatible) {
+    void vscode.window.showWarningMessage(
+      `The Compass CLI at ${executable} is not compatible with this extension. ${incompatible.capabilityError}`,
+      "Select Compass Binary",
+      "Open Setup"
+    ).then(handleSetupAction);
+  } else if (discovery.kind === "missing") {
+    void vscode.window.showInformationMessage(
       "Compass CLI is required. Install it, then select or configure the executable.",
       "Open Setup",
       "Select Compass Binary"
-    );
-    if (action === "Select Compass Binary") {
-      const selected = await vscode.window.showOpenDialog({
-        title: "Select Compass CLI",
-        canSelectFiles: true,
-        canSelectFolders: false,
-        canSelectMany: false
-      });
-      if (selected?.[0]) {
-        await vscode.workspace.getConfiguration("compass").update(
-          "cliPath",
-          selected[0].fsPath,
-          vscode.ConfigurationTarget.Global
-        );
-        void vscode.window.showInformationMessage("Compass CLI selected. Reload VS Code to activate it.");
-      }
-    }
+    ).then(handleSetupAction);
   }
 }
 
 export function deactivate(): void {}
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const detail = error instanceof Error ? error.message : String(error);
+  return detail.split(/\r?\n/, 1)[0] ?? detail;
 }

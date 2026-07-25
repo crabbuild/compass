@@ -88,6 +88,11 @@
         "command": "compass.openHistory",
         "title": "Compass: Open Codebase Evolution",
         "icon": "$(history)"
+      },
+      {
+        "command": "compass.selectCli",
+        "title": "Compass: Select CLI Binary",
+        "icon": "$(terminal)"
       }
     ],
     "configuration": {

@@ -8,6 +8,7 @@ export class RepositorySession {
   readonly graphPath: string;
   readonly programPath: string;
   capabilities: CapabilityReport | undefined;
+  capabilityError: string | undefined;
   graphState: GraphState = "not-materialized";
   activeWriter: RunningCommand | undefined;
   watch: RunningCommand | undefined;
