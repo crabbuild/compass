@@ -23,8 +23,9 @@ mod semantic_diff_render;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -89,6 +90,7 @@ pub struct Outcome {
     pub stderr: String,
     pub stdout_trailing_newline: bool,
     pub stderr_trailing_newline: bool,
+    html_output: Option<PathBuf>,
 }
 
 impl Outcome {
@@ -99,6 +101,7 @@ impl Outcome {
             stderr: String::new(),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         }
     }
 
@@ -109,6 +112,7 @@ impl Outcome {
             stderr: String::new(),
             stdout_trailing_newline: false,
             stderr_trailing_newline: true,
+            html_output: None,
         }
     }
 
@@ -123,7 +127,18 @@ impl Outcome {
             stderr,
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         }
+    }
+
+    fn with_html_output(mut self, path: impl Into<PathBuf>) -> Self {
+        self.html_output = Some(absolutize(path.into()));
+        self
+    }
+
+    #[must_use]
+    pub fn html_output(&self) -> Option<&Path> {
+        self.html_output.as_deref()
     }
 }
 
@@ -140,6 +155,99 @@ pub fn write_outcome(outcome: &Outcome, stdout: &mut impl Write, stderr: &mut im
         return 1;
     }
     outcome.code
+}
+
+/// Ask before opening a successfully generated HTML page.
+///
+/// The prompt is deliberately disabled unless both input and prompt output are terminals, so
+/// scripts, CI jobs, pipes, and redirected commands never block or launch a browser.
+pub fn prompt_to_open_html(
+    outcome: &Outcome,
+    input: &mut impl BufRead,
+    prompt_output: &mut impl Write,
+    input_is_terminal: bool,
+    prompt_is_terminal: bool,
+) -> Result<bool, String> {
+    prompt_to_open_html_with(
+        outcome,
+        input,
+        prompt_output,
+        input_is_terminal,
+        prompt_is_terminal,
+        open_html,
+    )
+}
+
+fn prompt_to_open_html_with(
+    outcome: &Outcome,
+    input: &mut impl BufRead,
+    prompt_output: &mut impl Write,
+    input_is_terminal: bool,
+    prompt_is_terminal: bool,
+    mut opener: impl FnMut(&Path) -> Result<(), String>,
+) -> Result<bool, String> {
+    let Some(path) = outcome.html_output() else {
+        return Ok(false);
+    };
+    if outcome.code != 0 || !input_is_terminal || !prompt_is_terminal {
+        return Ok(false);
+    }
+    if !path.is_file() {
+        return Err(format!(
+            "generated HTML page no longer exists: {}",
+            path.display()
+        ));
+    }
+
+    write!(
+        prompt_output,
+        "Open {} in your browser? [y/N] ",
+        path.display()
+    )
+    .map_err(|error| format!("could not write browser prompt: {error}"))?;
+    prompt_output
+        .flush()
+        .map_err(|error| format!("could not flush browser prompt: {error}"))?;
+
+    let mut answer = String::new();
+    input
+        .read_line(&mut answer)
+        .map_err(|error| format!("could not read browser confirmation: {error}"))?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        return Ok(false);
+    }
+
+    opener(path)?;
+    Ok(true)
+}
+
+fn open_html(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut command = Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    return Err("opening a browser is not supported on this platform".to_owned());
+
+    command
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let status = command
+        .status()
+        .map_err(|error| format!("could not launch the default browser: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the browser launcher exited with status {status}"))
+    }
 }
 
 fn write_output<W: Write + ?Sized>(
@@ -184,7 +292,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "path" => command_path(frontend, &args),
         "explain" => command_explain(frontend, &args),
         "affected" => command_affected(&args),
-        "export" => command_export(&args),
+        "export" => command_export(frontend, &args),
         "benchmark" => command_benchmark(&args),
         "merge-graphs" => command_merge_graphs(&args),
         "cache-check" => semantic_commands::command_cache_check(frontend, &args),
@@ -1091,6 +1199,7 @@ fn command_cluster_only(frontend: Frontend, args: &[String]) -> Outcome {
                 stderr: warnings.join("\n"),
                 stdout_trailing_newline: true,
                 stderr_trailing_newline: true,
+                html_output: None,
             }
         }
         Ok(result) => Outcome::success(format!(
@@ -1196,14 +1305,18 @@ fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
     let size = fs::metadata(&output_path)
         .map(|metadata| metadata.len() as f64 / 1024.0)
         .unwrap_or_default();
-    let absolute =
-        fs::canonicalize(&output_path).unwrap_or_else(|_| absolutize(output_path.clone()));
-    Outcome::success(format!(
-        "wrote {} ({size:.1} KB)\nopen with: xdg-open {}  (or file://{})",
-        output_path.display(),
-        output_path.display(),
-        absolute.display()
-    ))
+    if frontend == Frontend::Graphify {
+        let absolute =
+            fs::canonicalize(&output_path).unwrap_or_else(|_| absolutize(output_path.clone()));
+        return Outcome::success(format!(
+            "wrote {} ({size:.1} KB)\nopen with: xdg-open {}  (or file://{})",
+            output_path.display(),
+            output_path.display(),
+            absolute.display()
+        ));
+    }
+    Outcome::success(format!("wrote {} ({size:.1} KB)", output_path.display()))
+        .with_html_output(output_path)
 }
 
 fn grouped_decimal(value: u64) -> String {
@@ -1223,8 +1336,13 @@ fn tree_help(frontend: Frontend) -> String {
         Frontend::Compass => "compass",
         Frontend::Graphify => "graphify",
     };
+    let browser_note = if frontend == Frontend::Compass {
+        "\n\nWhen run interactively, Compass asks before opening generated HTML in your browser."
+    } else {
+        ""
+    };
     format!(
-        "Usage: {prefix} tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default compass-out/graph.json)\n  --output HTML        output path (default compass-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header"
+        "Usage: {prefix} tree [--graph PATH] [--output HTML]\n  --graph PATH         path to graph.json (default compass-out/graph.json)\n  --output HTML        output path (default compass-out/GRAPH_TREE.html)\n  --root PATH          filesystem root (default: longest common dir of all source_files)\n  --max-children N     cap visible children per node (default 200)\n  --top-k-edges N      pre-compute top-K outbound edges per symbol (default 12)\n  --label NAME         project label shown in the page header{browser_note}"
     )
 }
 
@@ -2213,6 +2331,7 @@ fn graphify_extract_provider_failure(
         stderr,
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -2852,7 +2971,7 @@ fn saved_graph_root() -> Option<PathBuf> {
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
-fn command_export(args: &[String]) -> Outcome {
+fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let Some(format) = args.first().map(String::as_str) else {
         return Outcome::failure(export_help());
     };
@@ -3079,8 +3198,6 @@ fn command_export(args: &[String]) -> Outcome {
             max_diagram_nodes,
             max_diagram_edges,
         ),
-        "obsidian" => export_obsidian_cli(&inputs, &obsidian_dir),
-        "wiki" => export_wiki_cli(&inputs, output_dir),
         "svg" => write_svg(
             &inputs.document,
             &inputs.communities,
@@ -3091,6 +3208,7 @@ fn command_export(args: &[String]) -> Outcome {
             },
         )
         .map(|()| "graph.svg written - embeds in Obsidian, Notion, GitHub READMEs".to_owned())
+        .map(ExportOutput::text)
         .map_err(|error| error.to_string()),
         "graphml" => write_graphml(
             &inputs.document,
@@ -3098,6 +3216,7 @@ fn command_export(args: &[String]) -> Outcome {
             output_dir.join("graph.graphml"),
         )
         .map(|()| "graph.graphml written - open in Gephi, yEd, or any GraphML tool".to_owned())
+        .map(ExportOutput::text)
         .map_err(|error| error.to_string()),
         "neo4j" => export_neo4j(
             &inputs,
@@ -3105,19 +3224,50 @@ fn command_export(args: &[String]) -> Outcome {
             push_uri.as_deref(),
             &push_user,
             push_password.as_deref(),
-        ),
+        )
+        .map(ExportOutput::text),
         "falkordb" => export_falkordb(
             &inputs,
             output_dir,
             push_uri.as_deref(),
             &push_user,
             push_password.as_deref(),
-        ),
+        )
+        .map(ExportOutput::text),
+        "obsidian" => export_obsidian_cli(&inputs, &obsidian_dir).map(ExportOutput::text),
+        "wiki" => export_wiki_cli(&inputs, output_dir).map(ExportOutput::text),
         _ => Err("unsupported export format".to_owned()),
     };
     match result {
-        Ok(output) => Outcome::success(output),
+        Ok(output) => {
+            let outcome = Outcome::success(output.message);
+            match (frontend, output.html_output) {
+                (Frontend::Compass, Some(path)) => outcome.with_html_output(path),
+                _ => outcome,
+            }
+        }
         Err(error) => Outcome::failure(format!("error: {error}")),
+    }
+}
+
+struct ExportOutput {
+    message: String,
+    html_output: Option<PathBuf>,
+}
+
+impl ExportOutput {
+    fn text(message: String) -> Self {
+        Self {
+            message,
+            html_output: None,
+        }
+    }
+
+    fn html(message: String, path: PathBuf) -> Self {
+        Self {
+            message,
+            html_output: Some(path),
+        }
     }
 }
 
@@ -3188,13 +3338,15 @@ fn export_html(
     output_dir: &Path,
     no_viz: bool,
     node_limit: isize,
-) -> Result<String, String> {
+) -> Result<ExportOutput, String> {
     let path = output_dir.join("graph.html");
     if no_viz {
         if path.exists() {
             fs::remove_file(&path).map_err(|error| error.to_string())?;
         }
-        return Ok("--no-viz: skipped graph.html".to_owned());
+        return Ok(ExportOutput::text(
+            "--no-viz: skipped graph.html".to_owned(),
+        ));
     }
     let result = write_html(
         &inputs.document,
@@ -3208,9 +3360,13 @@ fn export_html(
         },
     )
     .map_err(|error| error.to_string())?;
-    Ok(result.map_or_else(String::new, |_| {
-        "graph.html written - open in any browser, no server needed".to_owned()
-    }))
+    Ok(match result {
+        Some(_) => ExportOutput::html(
+            "graph.html written - open in any browser, no server needed".to_owned(),
+            path,
+        ),
+        None => ExportOutput::text(String::new()),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3224,7 +3380,7 @@ fn export_callflow(
     diagram_scale: f64,
     max_diagram_nodes: usize,
     max_diagram_edges: usize,
-) -> Result<String, String> {
+) -> Result<ExportOutput, String> {
     let sections = sections_path.map(load_sections).transpose()?;
     let project = inputs
         .document
@@ -3265,17 +3421,20 @@ fn export_callflow(
         },
     )
     .map_err(|error| error.to_string())?;
-    Ok(format!(
-        "Loaded: {} nodes, {} edges, {} sections\nGraph: {}\nCall-flow HTML written: {}\n  Sections: {}  |  Mermaid diagrams: {}  |  Call tables: {}\n  Diagrams use Mermaid init directives plus interactive zoom/pan controls.\ncallflow HTML written - open in any browser: {}",
-        inputs.document.nodes.len(),
-        inputs.document.links.len(),
-        result.loaded_sections,
-        graph_path.display(),
-        path.display(),
-        result.rendered_sections,
-        result.mermaid_diagrams,
-        result.call_tables,
-        path.display(),
+    Ok(ExportOutput::html(
+        format!(
+            "Loaded: {} nodes, {} edges, {} sections\nGraph: {}\nCall-flow HTML written: {}\n  Sections: {}  |  Mermaid diagrams: {}  |  Call tables: {}\n  Diagrams use Mermaid init directives plus interactive zoom/pan controls.\ncallflow HTML written - open in any browser: {}",
+            inputs.document.nodes.len(),
+            inputs.document.links.len(),
+            result.loaded_sections,
+            graph_path.display(),
+            path.display(),
+            result.rendered_sections,
+            result.mermaid_diagrams,
+            result.call_tables,
+            path.display(),
+        ),
+        path,
     ))
 }
 
@@ -3788,6 +3947,7 @@ fn graphify_help() -> String {
 #[cfg(test)]
 mod mcp_option_tests {
     use super::*;
+    use std::io::Cursor;
 
     fn sample_build_result(outputs_changed: bool, html_written: bool) -> BuildResult {
         BuildResult {
@@ -3827,6 +3987,73 @@ mod mcp_option_tests {
             program_conflicts: 0,
             timings: BuildTimings::default(),
         }
+    }
+
+    #[test]
+    fn html_open_confirmation_requires_explicit_yes() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let html = directory.path().join("report.html");
+        fs::write(&html, "<!doctype html>")?;
+        let outcome = Outcome::success("report written".to_owned()).with_html_output(html.clone());
+        let mut input = Cursor::new(b"yes\n");
+        let mut prompt = Vec::new();
+        let mut opened = Vec::new();
+
+        assert!(prompt_to_open_html_with(
+            &outcome,
+            &mut input,
+            &mut prompt,
+            true,
+            true,
+            |path| {
+                opened.push(path.to_path_buf());
+                Ok(())
+            },
+        )?);
+        assert_eq!(opened, [absolutize(html)]);
+        assert!(String::from_utf8(prompt)?.contains("Open "));
+        Ok(())
+    }
+
+    #[test]
+    fn html_open_confirmation_is_safe_for_default_and_noninteractive_runs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let html = directory.path().join("report.html");
+        fs::write(&html, "<!doctype html>")?;
+        let outcome = Outcome::success("report written".to_owned()).with_html_output(html);
+        let mut opened = false;
+        let mut input = Cursor::new(b"\n");
+        let mut prompt = Vec::new();
+        assert!(!prompt_to_open_html_with(
+            &outcome,
+            &mut input,
+            &mut prompt,
+            true,
+            true,
+            |_| {
+                opened = true;
+                Ok(())
+            },
+        )?);
+        assert!(!opened);
+
+        let mut input = Cursor::new(b"yes\n");
+        let mut prompt = Vec::new();
+        assert!(!prompt_to_open_html_with(
+            &outcome,
+            &mut input,
+            &mut prompt,
+            false,
+            false,
+            |_| {
+                opened = true;
+                Ok(())
+            },
+        )?);
+        assert!(!opened);
+        assert!(prompt.is_empty());
+        Ok(())
     }
 
     #[test]

@@ -140,6 +140,7 @@ pub(super) fn command_cache_check(frontend: Frontend, args: &[String]) -> Outcom
         stderr,
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -210,6 +211,7 @@ pub(super) fn command_merge_chunks(frontend: Frontend, args: &[String]) -> Outco
             stderr: warnings.join("\n"),
             stdout_trailing_newline: true,
             stderr_trailing_newline: true,
+            html_output: None,
         };
     }
     let merged = json!({
@@ -239,6 +241,7 @@ pub(super) fn command_merge_chunks(frontend: Frontend, args: &[String]) -> Outco
         stderr: warnings.join("\n"),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 

@@ -204,6 +204,7 @@ pub(super) fn command_label(frontend: Frontend, args: &[String]) -> Outcome {
         stderr: warnings.join("\n"),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 

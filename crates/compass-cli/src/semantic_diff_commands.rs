@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use compass_analysis::FunctionSummary;
 use compass_history::{
     ChangeKind, ChangeSink, ExtractionFingerprint, GraphChange, HistoryError, HistoryRecord,
@@ -32,14 +34,33 @@ struct Options {
     output: Option<String>,
 }
 
+struct CommandOutput {
+    message: String,
+    html_output: Option<PathBuf>,
+}
+
+impl CommandOutput {
+    fn text(message: String) -> Self {
+        Self {
+            message,
+            html_output: None,
+        }
+    }
+}
+
 pub(crate) fn help(frontend: Frontend) -> String {
     let command = if frontend == Frontend::Compass {
         "compass"
     } else {
         "graphify"
     };
+    let browser_note = if frontend == Frontend::Compass {
+        "\n\nWhen run interactively, Compass asks before opening generated HTML in your browser."
+    } else {
+        ""
+    };
     format!(
-        "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json|html>  Output format [default: text]\n  --output <PATH>            Write the self-contained HTML report (required with --format html)\n  --limit <N>                Show at most N findings per text section [default: 20]\n  --all                      Include routine churn and show every finding\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint"
+        "Usage: {command} diff <OLD> <NEW> [OPTIONS]\n\nOptions:\n  --format <text|json|html>  Output format [default: text]\n  --output <PATH>            Write the self-contained HTML report (required with --format html)\n  --limit <N>                Show at most N findings per text section [default: 20]\n  --all                      Include routine churn and show every finding\n  --explain <FINDING_ID>     Expand one semantic finding\n  --fingerprint <SHA256>     Select one extraction fingerprint{browser_note}"
     )
 }
 
@@ -51,7 +72,13 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
         return Outcome::success(help(frontend));
     }
     match execute(args) {
-        Ok(output) => Outcome::success(output),
+        Ok(output) => {
+            let outcome = Outcome::success(output.message);
+            match (frontend, output.html_output) {
+                (Frontend::Compass, Some(path)) => outcome.with_html_output(path),
+                _ => outcome,
+            }
+        }
         Err(CommandError::Usage(message)) => {
             Outcome::failure_with_code(format!("error: {message}"), 2)
         }
@@ -59,7 +86,7 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
     }
 }
 
-fn execute(args: &[String]) -> Result<String, CommandError> {
+fn execute(args: &[String]) -> Result<CommandOutput, CommandError> {
     let options = parse(args).map_err(CommandError::Usage)?;
     let current = std::env::current_dir().map_err(runtime)?;
     let repository = Repository::discover(&current).map_err(runtime)?;
@@ -118,8 +145,12 @@ fn execute(args: &[String]) -> Result<String, CommandError> {
         explain: options.explain.as_deref(),
     };
     match options.format {
-        Format::Text => render_text(&report, &render).map_err(runtime),
-        Format::Json => render_json(&report, &render).map_err(runtime),
+        Format::Text => render_text(&report, &render)
+            .map(CommandOutput::text)
+            .map_err(runtime),
+        Format::Json => render_json(&report, &render)
+            .map(CommandOutput::text)
+            .map_err(runtime),
         Format::Html => {
             let html = render_html(&report, &render).map_err(runtime)?;
             let output = options
@@ -127,7 +158,10 @@ fn execute(args: &[String]) -> Result<String, CommandError> {
                 .as_deref()
                 .ok_or_else(|| CommandError::Usage("--output is required".to_owned()))?;
             std::fs::write(output, html).map_err(runtime)?;
-            Ok(format!("semantic diff HTML written to {output}"))
+            Ok(CommandOutput {
+                message: format!("semantic diff HTML written to {output}"),
+                html_output: Some(PathBuf::from(output)),
+            })
         }
     }
 }

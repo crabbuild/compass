@@ -297,6 +297,7 @@ fn command_install_compass(args: &[String]) -> Outcome {
         stderr: String::new(),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -1230,6 +1231,7 @@ fn command_uninstall_compass(args: &[String]) -> Outcome {
         stderr: String::new(),
         stdout_trailing_newline: true,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 

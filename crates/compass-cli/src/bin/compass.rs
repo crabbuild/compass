@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 #[global_allocator]
@@ -63,9 +63,23 @@ fn main() -> ExitCode {
         },
         arguments,
     );
-    ExitCode::from(compass_cli::write_outcome(
-        &outcome,
-        &mut io::stdout(),
-        &mut io::stderr(),
-    ))
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
+    let input_is_terminal = stdin.is_terminal();
+    let prompt_is_terminal = stderr.is_terminal();
+    let code = compass_cli::write_outcome(&outcome, &mut stdout, &mut stderr);
+    if code == 0 {
+        let mut locked = stdin.lock();
+        if let Err(error) = compass_cli::prompt_to_open_html(
+            &outcome,
+            &mut locked,
+            &mut stderr,
+            input_is_terminal,
+            prompt_is_terminal,
+        ) {
+            let _ = writeln!(stderr, "warning: {error}");
+        }
+    }
+    ExitCode::from(code)
 }

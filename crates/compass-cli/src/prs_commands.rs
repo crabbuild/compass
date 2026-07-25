@@ -151,6 +151,7 @@ fn success_exact(stdout: String) -> Outcome {
         stderr: String::new(),
         stdout_trailing_newline: false,
         stderr_trailing_newline: true,
+        html_output: None,
     }
 }
 
@@ -231,6 +232,7 @@ fn run_triage(
                 stderr: format!("\n\n  {}", colors.red(format!("Triage failed: {error}"))),
                 stdout_trailing_newline: false,
                 stderr_trailing_newline: true,
+                html_output: None,
             };
         }
     };
@@ -256,6 +258,7 @@ fn run_triage(
             stderr: format!("\n\n  {}", colors.red(format!("Triage failed: {error}"))),
             stdout_trailing_newline: false,
             stderr_trailing_newline: true,
+            html_output: None,
         },
     }
 }
