@@ -17,11 +17,11 @@ const MERGE_MAX_NODES: usize = 100_000;
 const MANIFEST_MAX_BYTES: u64 = 2_000_000;
 const SESSION_ID_MAX_CHARS: usize = 64;
 
-const SEARCH_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run `graphify query \"<question>\"` before grepping raw files. Only grep after graphify has oriented you, or to modify/debug specific lines.";
-const READ_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run graphify before reading source files. Use: `graphify query \"<question>\"` (scoped subgraph), `graphify explain \"<concept>\"`, or `graphify path \"<A>\" \"<B>\"`. Only read raw files after graphify has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration.";
-const READ_STALE_TEXT: &str = "compass-out/graph.json exists but may be STALE for this file (the file changed after the last build). Prefer `graphify query \"<question>\"` for orientation, and run `graphify update` to refresh the graph. Reading the file directly is fine.";
-const READ_DENY_TEXT: &str = "graphify strict mode: this project has a fresh knowledge graph that covers this file. Run `graphify query \"<your question>\"` (or `graphify explain` / `graphify path`) FIRST to orient yourself, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query. Apply the same rule in any subagent prompt that explores code.";
-const GEMINI_NUDGE_TEXT: &str = "graphify: knowledge graph at compass-out/. For focused questions, run `graphify query \"<question>\"` (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.";
+const SEARCH_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run `compass query \"<question>\"` before grepping raw files. Only grep after compass has oriented you, or to modify/debug specific lines.";
+const READ_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run compass before reading source files. Use: `compass query \"<question>\"` (scoped subgraph), `compass explain \"<concept>\"`, or `compass path \"<A>\" \"<B>\"`. Only read raw files after compass has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration.";
+const READ_STALE_TEXT: &str = "compass-out/graph.json exists but may be STALE for this file (the file changed after the last build). Prefer `compass query \"<question>\"` for orientation, and run `compass update` to refresh the graph. Reading the file directly is fine.";
+const READ_DENY_TEXT: &str = "compass strict mode: this project has a fresh knowledge graph that covers this file. Run `compass query \"<your question>\"` (or `compass explain` / `compass path`) FIRST to orient yourself, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query. Apply the same rule in any subagent prompt that explores code.";
+const GEMINI_NUDGE_TEXT: &str = "compass: knowledge graph at compass-out/. For focused questions, run `compass query \"<question>\"` (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.";
 const SOURCE_EXTENSIONS: &[&str] = &[
     "py", "js", "cjs", "ts", "tsx", "jsx", "astro", "vue", "svelte", "go", "rs", "java", "rb", "c",
     "h", "cpp", "hpp", "cc", "cs", "kt", "swift", "php", "scala", "lua", "sh", "md", "rst", "txt",
@@ -49,7 +49,7 @@ pub(super) fn command_global(frontend: Frontend, args: &[String]) -> Outcome {
                 .cloned()
                 .unwrap_or_default();
             let stdout = if repos.is_empty() {
-                "Global graph is empty. Use 'graphify global add' to add a project.".to_owned()
+                "Global graph is empty. Use 'compass global add' to add a project.".to_owned()
             } else {
                 let mut lines = vec![format!("Global graph: {}", paths.graph.display())];
                 for (tag, value) in repos {
@@ -304,7 +304,7 @@ pub(super) fn command_check_update(frontend: Frontend, args: &[String]) -> Outco
     let flag = root.join(output_root()).join("needs_update");
     if flag.exists() {
         Outcome::success(format!(
-            "[graphify check-update] Pending non-code changes in {}.\n[graphify check-update] Run `/graphify --update` to apply semantic re-extraction.",
+            "[compass check-update] Pending non-code changes in {}.\n[compass check-update] Run `/compass --update` to apply semantic re-extraction.",
             root.display()
         ))
     } else {
@@ -483,7 +483,7 @@ fn python_string(value: Option<&Value>) -> String {
 }
 
 fn strict_enabled(flag: bool) -> bool {
-    match std::env::var("GRAPHIFY_HOOK_STRICT")
+    match std::env::var("COMPASS_HOOK_STRICT")
         .unwrap_or_default()
         .trim()
         .to_lowercase()
@@ -496,7 +496,7 @@ fn strict_enabled(flag: bool) -> bool {
 }
 
 fn query_stamp_fresh() -> bool {
-    let ttl = std::env::var("GRAPHIFY_HOOK_STRICT_TTL")
+    let ttl = std::env::var("COMPASS_HOOK_STRICT_TTL")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(1800.0);
@@ -620,7 +620,7 @@ pub(super) fn command_merge_driver(frontend: Frontend, args: &[String]) -> Outco
         Ok(graph) => graph,
         Err(error) => {
             return Outcome::failure(format!(
-                "[graphify merge-driver] error loading graphs: {error}"
+                "[compass merge-driver] error loading graphs: {error}"
             ));
         }
     };
@@ -628,7 +628,7 @@ pub(super) fn command_merge_driver(frontend: Frontend, args: &[String]) -> Outco
         Ok(graph) => graph,
         Err(error) => {
             return Outcome::failure(format!(
-                "[graphify merge-driver] error loading graphs: {error}"
+                "[compass merge-driver] error loading graphs: {error}"
             ));
         }
     };
@@ -636,7 +636,7 @@ pub(super) fn command_merge_driver(frontend: Frontend, args: &[String]) -> Outco
         Ok(graph) => graph,
         Err(error) => {
             return Outcome::failure(format!(
-                "[graphify merge-driver] error loading graphs: {error}"
+                "[compass merge-driver] error loading graphs: {error}"
             ));
         }
     };
@@ -646,21 +646,21 @@ pub(super) fn command_merge_driver(frontend: Frontend, args: &[String]) -> Outco
         .map_or(0, Vec::len);
     if node_count > MERGE_MAX_NODES {
         return Outcome::failure(format!(
-            "[graphify merge-driver] merged graph has {node_count} nodes, exceeds {MERGE_MAX_NODES}-node cap; aborting merge."
+            "[compass merge-driver] merged graph has {node_count} nodes, exceeds {MERGE_MAX_NODES}-node cap; aborting merge."
         ));
     }
     let encoded = match python_pretty_json(&merged) {
         Ok(encoded) => encoded,
         Err(error) => {
             return Outcome::failure(format!(
-                "[graphify merge-driver] error writing graph: {error}"
+                "[compass merge-driver] error writing graph: {error}"
             ));
         }
     };
     match write_text_atomic(current, &encoded) {
         Ok(()) => Outcome::success(String::new()),
         Err(error) => Outcome::failure(format!(
-            "[graphify merge-driver] error writing graph: {error}"
+            "[compass merge-driver] error writing graph: {error}"
         )),
     }
 }
@@ -981,54 +981,28 @@ fn is_within(path: &Path, root: &Path) -> bool {
     absolute_path(path.to_path_buf()).starts_with(root)
 }
 
-pub(super) fn check_update_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass check-update <path>",
-        Frontend::Graphify => "Usage: graphify check-update <path>",
-    }
-    .to_owned()
+pub(super) fn check_update_help(_frontend: Frontend) -> String {
+    "Usage: compass check-update <path>".to_owned()
 }
 
-pub(super) fn merge_driver_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass merge-driver <base> <current> <other>",
-        Frontend::Graphify => "Usage: graphify merge-driver <base> <current> <other>",
-    }
-    .to_owned()
+pub(super) fn merge_driver_help(_frontend: Frontend) -> String {
+    "Usage: compass merge-driver <base> <current> <other>".to_owned()
 }
 
-pub(super) fn global_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass global [add|remove|list|path]",
-        Frontend::Graphify => "Usage: graphify global [add|remove|list|path]",
-    }
-    .to_owned()
+pub(super) fn global_help(_frontend: Frontend) -> String {
+    "Usage: compass global [add|remove|list|path]".to_owned()
 }
 
-fn global_add_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass global add <graph.json> [--as <repo-tag>]",
-        Frontend::Graphify => "Usage: graphify global add <graph.json> [--as <repo-tag>]",
-    }
-    .to_owned()
+fn global_add_help(_frontend: Frontend) -> String {
+    "Usage: compass global add <graph.json> [--as <repo-tag>]".to_owned()
 }
 
-fn global_remove_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass global remove <repo-tag>",
-        Frontend::Graphify => "Usage: graphify global remove <repo-tag>",
-    }
-    .to_owned()
+fn global_remove_help(_frontend: Frontend) -> String {
+    "Usage: compass global remove <repo-tag>".to_owned()
 }
 
-pub(super) fn clone_help(frontend: Frontend) -> String {
-    match frontend {
-        Frontend::Compass => "Usage: compass clone <github-url> [--branch <branch>] [--out <dir>]",
-        Frontend::Graphify => {
-            "Usage: graphify clone <github-url> [--branch <branch>] [--out <dir>]"
-        }
-    }
-    .to_owned()
+pub(super) fn clone_help(_frontend: Frontend) -> String {
+    "Usage: compass clone <github-url> [--branch <branch>] [--out <dir>]".to_owned()
 }
 
 #[cfg(test)]
@@ -1168,7 +1142,7 @@ mod tests {
         assert_eq!(python_string(Some(&Value::from(3))), "3");
         assert_eq!(python_string(Some(&serde_json::json!([1]))), "[1]");
         assert_eq!(python_repr("a'b\\c"), "'a\\'b\\\\c'");
-        for frontend in [Frontend::Compass, Frontend::Graphify] {
+        for frontend in [Frontend::Compass, Frontend::Compass] {
             assert!(check_update_help(frontend).contains("check-update"));
             assert!(merge_driver_help(frontend).contains("merge-driver"));
             assert!(global_add_help(frontend).contains("global add"));

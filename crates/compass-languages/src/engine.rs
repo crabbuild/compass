@@ -2714,7 +2714,7 @@ fn python_import_aliases(root: Node<'_>, source: &[u8]) -> HashMap<String, Strin
         }
     }
     let mut output = HashMap::new();
-    // Graphify's collection-level symbol pass indexes every `from ... import`
+    // Compass's collection-level symbol pass indexes every `from ... import`
     // alias in the file, including function-local imports. It then scans only
     // undecorated top-level function bodies for uses. Preserve that observable
     // ordering here; `FunctionBody::top_level` supplies the matching use gate.
@@ -3489,7 +3489,7 @@ mod rationale_tests {
         let source = directory.path().join("cli.py");
         fs::write(
             &source,
-            "def dispatch():\n    from graphify import querylog\n    querylog.log_query(kind='query')\n",
+            "def dispatch():\n    from compass import querylog\n    querylog.log_query(kind='query')\n",
         )?;
 
         let extraction = Engine::default().extract(&source)?;

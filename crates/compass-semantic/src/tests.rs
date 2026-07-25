@@ -383,7 +383,7 @@ fn claude_cli_contract_builds_guarded_prompt_and_deduplicated_allowlists() {
             raw: None,
         },
     ];
-    let environment = HashMap::from([("GRAPHIFY_CLAUDE_CLI_MODEL".to_owned(), "haiku".to_owned())]);
+    let environment = HashMap::from([("COMPASS_CLAUDE_CLI_MODEL".to_owned(), "haiku".to_owned())]);
     let arguments = claude_cli_arguments(&images, &environment);
     assert_eq!(
         arguments,
@@ -554,8 +554,8 @@ fn custom_provider_resolves_precedence_detects_and_executes() -> Result<(), Box<
     let environment = HashMap::from([
         ("CUSTOM_KEY".to_owned(), "custom-secret".to_owned()),
         ("CUSTOM_MODEL".to_owned(), "environment-model".to_owned()),
-        ("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), "9000".to_owned()),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_OUTPUT_TOKENS".to_owned(), "9000".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let providers = Map::from_iter([("gateway".to_owned(), config.clone())]);
     assert_eq!(
@@ -610,13 +610,13 @@ fn builtin_provider_resolution_honors_precedence_and_safe_defaults() -> Result<(
         ),
         ("OPENAI_MODEL".to_owned(), "fallback-model".to_owned()),
         (
-            "GRAPHIFY_OPENAI_MODEL".to_owned(),
+            "COMPASS_OPENAI_MODEL".to_owned(),
             "openai/gpt-5.2".to_owned(),
         ),
         ("OPENAI_API_KEY".to_owned(), "secret-key".to_owned()),
-        ("GRAPHIFY_MAX_OUTPUT_TOKENS".to_owned(), "4096".to_owned()),
-        ("GRAPHIFY_API_TIMEOUT".to_owned(), "45.5".to_owned()),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "3".to_owned()),
+        ("COMPASS_MAX_OUTPUT_TOKENS".to_owned(), "4096".to_owned()),
+        ("COMPASS_API_TIMEOUT".to_owned(), "45.5".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "3".to_owned()),
     ]);
     let resolved = resolve_builtin_backend("openai", &environment, None)?;
     assert_eq!(
@@ -1033,7 +1033,7 @@ fn resolved_provider_corpus_runner_executes_then_replays_cache() -> Result<(), B
     let environment = HashMap::from([
         ("OPENAI_API_KEY".to_owned(), "key".to_owned()),
         ("OPENAI_BASE_URL".to_owned(), format!("http://{address}/v1")),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let backend = resolve_builtin_backend("openai", &environment, Some("model"))?;
     let options = CachedCorpusExtractionOptions::default();
@@ -1195,7 +1195,7 @@ fn lightweight_provider_calls_omit_extraction_prompt_and_track_usage() -> Result
         ("ANTHROPIC_API_KEY".to_owned(), "anthropic-key".to_owned()),
         ("OPENAI_BASE_URL".to_owned(), format!("http://{address}/v1")),
         ("ANTHROPIC_BASE_URL".to_owned(), format!("http://{address}")),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let options = PlainTextOptions {
         max_tokens: 200,
@@ -1313,7 +1313,7 @@ fn azure_backend_uses_deployment_route_api_version_and_api_key() -> Result<(), B
             "AZURE_OPENAI_API_VERSION".to_owned(),
             "2025-01-01-preview".to_owned(),
         ),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let backend = resolve_builtin_backend("azure", &environment, Some("deploy/model"))?;
     let result = execute_resolved_http_backend(&backend, "source", &[], false, &environment)?;
@@ -1358,7 +1358,7 @@ fn resolved_openai_and_anthropic_backends_execute_end_to_end() -> Result<(), Box
             "OPENAI_BASE_URL".to_owned(),
             format!("http://{openai_address}/v1"),
         ),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let openai = resolve_builtin_backend("openai", &openai_environment, Some("model-a"))?;
     let openai_result =
@@ -1391,7 +1391,7 @@ fn resolved_openai_and_anthropic_backends_execute_end_to_end() -> Result<(), Box
             "ANTHROPIC_BASE_URL".to_owned(),
             format!("http://{anthropic_address}"),
         ),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let anthropic = resolve_builtin_backend("claude", &anthropic_environment, Some("model-b"))?;
     let anthropic_result =
@@ -1442,7 +1442,7 @@ fn direct_http_extraction_loads_validates_and_binds_evidence() -> Result<(), Box
     let environment = HashMap::from([
         ("OPENAI_API_KEY".to_owned(), "test-key".to_owned()),
         ("OPENAI_BASE_URL".to_owned(), format!("http://{address}/v1")),
-        ("GRAPHIFY_MAX_RETRIES".to_owned(), "0".to_owned()),
+        ("COMPASS_MAX_RETRIES".to_owned(), "0".to_owned()),
     ]);
     let backend = resolve_builtin_backend("openai", &environment, Some("model"))?;
 

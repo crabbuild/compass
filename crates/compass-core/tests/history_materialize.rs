@@ -344,7 +344,7 @@ fn observers_can_abort_every_materialization_boundary_without_publication()
         &["config", "user.email", "compass@example.invalid"],
     )?;
     std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
-    std::fs::write(directory.path().join("graphify.toml"), "mode = \"deep\"\n")?;
+    std::fs::write(directory.path().join("settings.toml"), "mode = \"deep\"\n")?;
     std::fs::create_dir(directory.path().join("config"))?;
     std::fs::write(
         directory.path().join("config/tsconfig.json"),

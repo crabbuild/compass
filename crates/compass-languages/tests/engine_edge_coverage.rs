@@ -267,7 +267,7 @@ export function run() { target(); View(); return item; }
 }
 
 #[test]
-fn javascript_modules_reexports_require_and_decorators_keep_graphify_contracts()
+fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     fs::create_dir_all(directory.path().join("pkg"))?;

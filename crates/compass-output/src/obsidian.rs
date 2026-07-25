@@ -77,17 +77,17 @@ pub fn export_obsidian(
         );
         let file_type = string_attr(node, "file_type");
         let type_tag = match file_type.as_str() {
-            "code" => "graphify/code".to_owned(),
-            "document" => "graphify/document".to_owned(),
-            "paper" => "graphify/paper".to_owned(),
-            "image" => "graphify/image".to_owned(),
-            "" => "graphify/document".to_owned(),
-            other => format!("graphify/{other}"),
+            "code" => "compass/code".to_owned(),
+            "document" => "compass/document".to_owned(),
+            "paper" => "compass/paper".to_owned(),
+            "image" => "compass/image".to_owned(),
+            "" => "compass/document".to_owned(),
+            other => format!("compass/{other}"),
         };
         let confidence = dominant_confidence(&index, &node.id);
         let tags = [
             type_tag,
-            format!("graphify/{confidence}"),
+            format!("compass/{confidence}"),
             format!("community/{}", obsidian_tag(&name)),
         ];
         let mut lines = vec![

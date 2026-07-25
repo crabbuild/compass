@@ -11,12 +11,7 @@ use super::{Frontend, Outcome};
 
 const MAX_PROGRAM_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-pub(super) fn command(frontend: Frontend, args: &[String]) -> Outcome {
-    if frontend != Frontend::Compass {
-        return Outcome::failure(
-            "error: program inspection is unavailable in Graphify compatibility mode".to_owned(),
-        );
-    }
+pub(super) fn command(_frontend: Frontend, args: &[String]) -> Outcome {
     let Some(subcommand) = args.first().map(String::as_str) else {
         return Outcome::success(help());
     };

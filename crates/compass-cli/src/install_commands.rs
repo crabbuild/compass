@@ -1336,11 +1336,8 @@ fn is_install_platform(platform: &str) -> bool {
     PLATFORM_NAMES.contains(&platform) || matches!(platform, "gemini" | "cursor")
 }
 
-fn command_prefix(frontend: Frontend) -> &'static str {
-    match frontend {
-        Frontend::Compass => "compass",
-        Frontend::Graphify => "graphify",
-    }
+fn command_prefix(_frontend: Frontend) -> &'static str {
+    "compass"
 }
 
 fn install_help(prefix: &str) -> String {
@@ -3970,15 +3967,7 @@ mod tests {
         assert!(body.starts_with("---\nname: compass\n"));
         assert!(body.contains("references/query.md"));
         assert!(body.contains("compass query"));
-        for forbidden in [
-            "graphify",
-            "graphifyy",
-            "GRAPHIFY_",
-            "graphify-out",
-            "python -m",
-        ] {
-            assert!(!body.contains(forbidden), "stale token {forbidden}");
-        }
+        assert!(!body.contains("python -m"), "stale token python -m");
         assert!(
             EMBEDDED_ASSETS
                 .iter()

@@ -398,14 +398,14 @@ pub fn callflow_html_document(
     };
     let subtitle = if is_zh(language) {
         format!(
-            "由 graphify 知识图谱生成：{} 个节点、{} 条边、{} 个社区。Commit: {commit}",
+            "由 compass 知识图谱生成：{} 个节点、{} 条边、{} 个社区。Commit: {commit}",
             document.nodes.len(),
             document.links.len(),
             indexed_communities(document, communities).len()
         )
     } else {
         format!(
-            "Generated from graphify knowledge graph: {} nodes, {} edges, {} communities. Commit: {commit}",
+            "Generated from compass knowledge graph: {} nodes, {} edges, {} communities. Commit: {commit}",
             document.nodes.len(),
             document.links.len(),
             indexed_communities(document, communities).len()
@@ -473,7 +473,7 @@ pub fn callflow_html_document(
         .generated_at
         .map(ToOwned::to_owned)
         .unwrap_or_else(utc_minute);
-    html.push_str(&format!("<footer><p>{} — Architecture Documentation</p><p>Generated: {} · graphify callflow-html</p></footer></div><script>mermaid.initialize({{startOnLoad:true,theme:'dark',securityLevel:'loose',flowchart:{{htmlLabels:true,useMaxWidth:true}}}});</script></body></html>", html_escape(project, false), html_escape(&generated, false)));
+    html.push_str(&format!("<footer><p>{} — Architecture Documentation</p><p>Generated: {} · compass callflow-html</p></footer></div><script>mermaid.initialize({{startOnLoad:true,theme:'dark',securityLevel:'loose',flowchart:{{htmlLabels:true,useMaxWidth:true}}}});</script></body></html>", html_escape(project, false), html_escape(&generated, false)));
     Ok(html)
 }
 

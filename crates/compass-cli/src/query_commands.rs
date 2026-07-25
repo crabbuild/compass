@@ -25,12 +25,6 @@ pub(super) fn command_query(frontend: Frontend, args: &[String]) -> Outcome {
     if !args.iter().any(|argument| argument == "--cql") {
         return super::command_natural_query(frontend, args);
     }
-    if frontend == Frontend::Graphify {
-        return Outcome::failure(
-            "error: --cql is a Compass-only query mode; graphify compatibility is unchanged"
-                .to_owned(),
-        );
-    }
     let (graph_selection, args) = match parse_graph_selection(args) {
         Ok(parsed) => parsed,
         Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 2),

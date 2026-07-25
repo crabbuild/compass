@@ -25,10 +25,10 @@ pub struct BackupResult {
 /// Snapshot non-regenerable graph artifacts before an overwrite.
 ///
 /// Failures are reported but deliberately never block the graph write, matching
-/// Graphify's recovery contract.
+/// Compass's recovery contract.
 #[must_use]
 pub fn backup_if_protected(output_dir: &Path) -> BackupResult {
-    if std::env::var_os("GRAPHIFY_NO_BACKUP").is_some_and(|value| !value.is_empty()) {
+    if std::env::var_os("COMPASS_NO_BACKUP").is_some_and(|value| !value.is_empty()) {
         return BackupResult::default();
     }
     let graph_path = output_dir.join("graph.json");
@@ -63,7 +63,7 @@ pub fn backup_if_protected(output_dir: &Path) -> BackupResult {
     if let Err(error) = fs::create_dir_all(&backup_dir) {
         return BackupResult {
             warning: Some(format!(
-                "[graphify] warning: backup failed ({error}) - continuing with overwrite"
+                "[compass] warning: backup failed ({error}) - continuing with overwrite"
             )),
             ..BackupResult::default()
         };
@@ -78,7 +78,7 @@ pub fn backup_if_protected(output_dir: &Path) -> BackupResult {
     BackupResult {
         path: Some(backup_dir),
         message: (copied > 0)
-            .then(|| format!("[graphify] backed up {reason} graph ({copied} files) -> {date}/")),
+            .then(|| format!("[compass] backed up {reason} graph ({copied} files) -> {date}/")),
         warning: None,
     }
 }

@@ -51,7 +51,7 @@ Owns:
 
 - command dispatch and argument validation;
 - help and usage text;
-- frontend-specific rendering;
+- command rendering;
 - command-family exit behavior;
 - provider/install/hook/history/integration orchestration at the CLI boundary;
 - the only shipped `compass` binary.
@@ -59,9 +59,6 @@ Owns:
 The binary entry point is intentionally small. It selects specialized runners
 for commands such as `diff`, `watch`, and `serve`, then delegates the rest to
 the library command dispatcher.
-
-The source contains an internal Graphify-compatibility frontend used by
-development parity tests. It is not a second shipped product executable.
 
 ### `compass-mcp`
 
@@ -280,17 +277,6 @@ product surface.
 
 Each integration converts external data into graph-compatible facts or consumes
 graph data through a narrow boundary.
-
-## Verification layer
-
-### `compass-parity`
-
-This development-only crate performs differential verification against the
-pinned Python Graphify baseline. It exercises selected data structures,
-pipelines, outputs, and integrations.
-
-Parity evidence establishes the certified compatibility ledger. Native
-features with no Graphify equivalent require their own tests and qualification.
 
 ### Tests and scripts
 

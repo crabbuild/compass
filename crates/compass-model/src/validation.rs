@@ -19,7 +19,7 @@ enum HashableJson {
     Float(u64),
 }
 
-/// Validate raw extraction JSON using Graphify's external schema and diagnostics.
+/// Validate raw extraction JSON using Compass's external schema and diagnostics.
 #[must_use]
 pub fn validate_extraction(data: &Value) -> Vec<String> {
     let Some(data) = data.as_object() else {

@@ -1,5 +1,3 @@
-mod support;
-
 use std::error::Error;
 use std::process::Command;
 
@@ -24,8 +22,7 @@ fn seed_graph(directory: &std::path::Path) -> Result<std::path::PathBuf, Box<dyn
 }
 
 #[test]
-fn compassql_cli_supports_typed_output_files_limits_and_graphify_isolation()
--> Result<(), Box<dyn Error>> {
+fn compassql_cli_supports_typed_output_files_and_limits() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = seed_graph(directory.path())?;
     let output_path = directory.path().join("result.json");
@@ -57,10 +54,5 @@ fn compassql_cli_supports_typed_output_files_limits_and_graphify_isolation()
     assert_eq!(value["rows"][0]["caller"]["value"], "a");
     assert_eq!(value["profile"]["plan_cache_hit"], false);
 
-    let rejected = support::compat_command()
-        .args(["query", "--cql", "RETURN 1"])
-        .output()?;
-    assert!(!rejected.status.success());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("Compass-only"));
     Ok(())
 }

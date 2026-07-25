@@ -97,7 +97,7 @@ check-release: ## Fast release-mode workspace compile check
 .PHONY: test
 test: ## Run self-contained workspace tests
 	@printf "$(BOLD)Running native workspace tests...$(RESET)\n"
-	$(CARGO) test --workspace --exclude compass-parity --lib --bins --locked $(TEST_FLAGS)
+	$(CARGO) test --workspace --lib --bins --locked $(TEST_FLAGS)
 
 .PHONY: test-all
 test-all: ## Run all tests (requires the documented Python oracle setup)
@@ -105,7 +105,7 @@ test-all: ## Run all tests (requires the documented Python oracle setup)
 
 .PHONY: test-release
 test-release: ## Run self-contained tests in release mode
-	$(CARGO) test --workspace --exclude compass-parity --lib --bins --release --locked $(TEST_FLAGS)
+	$(CARGO) test --workspace --lib --bins --release --locked $(TEST_FLAGS)
 
 .PHONY: test-product
 test-product: ## Run the Compass CLI product contract
@@ -249,7 +249,7 @@ build-windows-arm: ## Build release for ARM64 Windows
 .PHONY: watch
 watch: ## Recheck and retest on source changes (requires cargo-watch)
 	$(CARGO) watch -x "check --workspace --locked" \
-	  -x "test --workspace --exclude compass-parity --lib --bins --locked"
+	  -x "test --workspace --lib --bins --locked"
 
 .PHONY: run
 run: ## Build and run Compass (override with ARGS="...")

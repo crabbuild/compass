@@ -16,7 +16,7 @@ verification commands and results
 
 ## Compatibility and documentation
 
-Describe changes to commands, output, file formats, performance, security boundaries, or Graphify compatibility. Link documentation or migration updates when applicable.
+Describe changes to commands, output, file formats, performance, or security boundaries. Link documentation or migration updates when applicable.
 
 ## Checklist
 

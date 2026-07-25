@@ -180,10 +180,3 @@ fn compatibility_help_flags_use_the_rich_renderer() {
     assert!(query.stdout.contains("Search the graph"));
     assert!(query.stdout.contains("Examples:"));
 }
-
-#[test]
-fn graphify_help_asset_remains_byte_for_byte_unchanged() {
-    let outcome = run(Frontend::Graphify, [OsString::from("--help")]);
-    assert_eq!(outcome.code, 0);
-    assert_eq!(outcome.stdout, include_str!("../assets/graphify-help.txt"));
-}

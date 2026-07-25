@@ -6,22 +6,19 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> ExitCode {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    let compatibility = std::env::var_os("COMPASS_INTERNAL_GRAPHIFY_COMPAT").is_some();
-    if !compatibility {
-        let style = compass_cli::HelpStyle::detect(
-            io::stdout().is_terminal(),
-            std::env::var_os("NO_COLOR").as_deref(),
-            std::env::var_os("TERM").as_deref(),
-        );
-        if let Some(outcome) = compass_cli::compass_help_request(&arguments, style) {
-            return ExitCode::from(compass_cli::write_outcome(
-                &outcome,
-                &mut io::stdout(),
-                &mut io::stderr(),
-            ));
-        }
+    let style = compass_cli::HelpStyle::detect(
+        io::stdout().is_terminal(),
+        std::env::var_os("NO_COLOR").as_deref(),
+        std::env::var_os("TERM").as_deref(),
+    );
+    if let Some(outcome) = compass_cli::compass_help_request(&arguments, style) {
+        return ExitCode::from(compass_cli::write_outcome(
+            &outcome,
+            &mut io::stdout(),
+            &mut io::stderr(),
+        ));
     }
-    if !compatibility && arguments.first().and_then(|value| value.to_str()) == Some("init") {
+    if arguments.first().and_then(|value| value.to_str()) == Some("init") {
         let stdin = io::stdin();
         let input_is_terminal = stdin.is_terminal();
         let mut locked = stdin.lock();
@@ -34,13 +31,6 @@ fn main() -> ExitCode {
         ));
     }
     if arguments.first().and_then(|value| value.to_str()) == Some("watch") {
-        if compatibility {
-            return ExitCode::from(compass_cli::run_graphify_watch(
-                &arguments[1..],
-                &mut io::stdout(),
-                &mut io::stderr(),
-            ));
-        }
         return ExitCode::from(compass_cli::run_watch(
             &arguments[1..],
             &mut io::stdout(),
@@ -49,20 +39,12 @@ fn main() -> ExitCode {
     }
     if arguments.first().and_then(|value| value.to_str()) == Some("serve") {
         return ExitCode::from(compass_cli::run_mcp(
-            compass_cli::McpFrontend::Compass,
             &arguments[1..],
             &mut io::stdout(),
             &mut io::stderr(),
         ));
     }
-    let outcome = compass_cli::run(
-        if compatibility {
-            compass_cli::Frontend::Graphify
-        } else {
-            compass_cli::Frontend::Compass
-        },
-        arguments,
-    );
+    let outcome = compass_cli::run(compass_cli::Frontend::Compass, arguments);
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();

@@ -102,13 +102,13 @@ Current built-in backend code recognizes families including:
 | Backend | Key variables | Endpoint/model examples |
 | --- | --- | --- |
 | Anthropic/Claude | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` |
-| Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | `GEMINI_BASE_URL`, `GRAPHIFY_GEMINI_MODEL` |
-| OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `OPENAI_MODEL`, `GRAPHIFY_OPENAI_MODEL` |
+| Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | `GEMINI_BASE_URL`, `COMPASS_GEMINI_MODEL` |
+| OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `OPENAI_MODEL`, `COMPASS_OPENAI_MODEL` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT` |
 | Ollama-compatible | optional `OLLAMA_API_KEY` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
-| Bedrock | AWS credential chain | `GRAPHIFY_BEDROCK_MODEL` |
+| Bedrock | AWS credential chain | `COMPASS_BEDROCK_MODEL` |
 
-Some compatibility variables retain `GRAPHIFY_` names. Their presence does not
+Some Compass variables retain `COMPASS_` names. Their presence does not
 change the public executable name.
 
 Use `compass extract --help` and current provider documentation before
@@ -140,8 +140,8 @@ The registry stores:
 ```
 
 It stores the environment-variable name, not its secret value. The
-compatibility registry path is under the user's Graphify-compatible config
-directory (`~/.graphify/providers.json` on common Unix setups).
+compatibility registry path is under the user's Compass config
+directory (`~/.compass/providers.json` on common Unix setups).
 
 Inspect:
 
@@ -195,10 +195,10 @@ Lower concurrency when provider rate limits or corpus sensitivity demand it.
 `--allow-partial` changes the completeness contract and should be recorded in
 automation.
 
-Compatibility environment variables for Ollama parallelism/context may exist
-in the current source, including `GRAPHIFY_OLLAMA_PARALLEL`,
-`GRAPHIFY_OLLAMA_NUM_CTX`, and `GRAPHIFY_OLLAMA_KEEP_ALIVE`. Prefer documented
-CLI options when available; treat compatibility variables as exact,
+Environment variables for Ollama parallelism/context may exist
+in the current source, including `COMPASS_OLLAMA_PARALLEL`,
+`COMPASS_OLLAMA_NUM_CTX`, and `COMPASS_OLLAMA_KEEP_ALIVE`. Prefer documented
+CLI options when available; treat Compass variables as exact,
 version-specific interfaces.
 
 ## History configuration
@@ -289,11 +289,11 @@ semantics before export.
 
 ## Hook configuration
 
-Managed hooks recognize compatibility controls such as:
+Managed hooks recognize controls such as:
 
 ```text
-GRAPHIFY_SKIP_HOOK
-GRAPHIFY_REBUILD_LOG
+COMPASS_SKIP_HOOK
+COMPASS_REBUILD_LOG
 ```
 
 The output root can be influenced by `COMPASS_OUT`.

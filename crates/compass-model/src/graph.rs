@@ -314,7 +314,7 @@ fn ensure_endpoint(id: &str, nodes: &mut Vec<NodeRecord>, ids: &mut HashMap<Stri
 
 pub(crate) fn graph_size_cap() -> u64 {
     const DEFAULT: u64 = 512 * 1024 * 1024;
-    let Ok(raw) = std::env::var("GRAPHIFY_MAX_GRAPH_BYTES") else {
+    let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
         return DEFAULT;
     };
     let upper = raw.trim().to_uppercase();

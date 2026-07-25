@@ -73,7 +73,7 @@ pub enum GoogleWorkspaceError {
     },
     #[error("gws export timed out for {file_id} after {seconds} seconds")]
     Timeout { file_id: String, seconds: u64 },
-    #[error("invalid GRAPHIFY_GOOGLE_WORKSPACE_TIMEOUT value: {0}")]
+    #[error("invalid COMPASS_GOOGLE_WORKSPACE_TIMEOUT value: {0}")]
     InvalidTimeout(String),
     #[error("gws export output exceeded the {limit}-byte safety limit for {file_id}")]
     OutputTooLarge { file_id: String, limit: usize },
@@ -120,7 +120,7 @@ pub fn is_google_workspace_path(path: &Path) -> bool {
 pub fn google_workspace_enabled(value: Option<&str>) -> bool {
     let raw = value
         .map(str::to_owned)
-        .unwrap_or_else(|| std::env::var("GRAPHIFY_GOOGLE_WORKSPACE").unwrap_or_default());
+        .unwrap_or_else(|| std::env::var("COMPASS_GOOGLE_WORKSPACE").unwrap_or_default());
     matches!(
         raw.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
@@ -282,7 +282,7 @@ fn run_gws_export(
         .stderr
         .take()
         .map(|stream| std::thread::spawn(move || drain(stream)));
-    let seconds = match std::env::var("GRAPHIFY_GOOGLE_WORKSPACE_TIMEOUT") {
+    let seconds = match std::env::var("COMPASS_GOOGLE_WORKSPACE_TIMEOUT") {
         Ok(value) => value
             .parse::<u64>()
             .map_err(|_| GoogleWorkspaceError::InvalidTimeout(value))?,

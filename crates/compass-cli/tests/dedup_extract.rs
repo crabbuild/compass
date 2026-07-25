@@ -25,7 +25,7 @@ const BACKEND_ENVIRONMENT: &[&str] = &[
 ];
 
 #[test]
-fn dedup_llm_without_backend_matches_python_diagnostic() -> Result<(), Box<dyn Error>> {
+fn dedup_llm_without_backend_has_actionable_diagnostic() -> Result<(), Box<dyn Error>> {
     let corpus = tempfile::tempdir()?;
     fs::write(corpus.path().join("main.py"), "def main():\n    return 1\n")?;
     let mut command = Command::new(env!("CARGO_BIN_EXE_compass"));
@@ -103,7 +103,7 @@ fn dedup_llm_resolves_ambiguous_semantic_entities() -> Result<(), Box<dyn Error>
         Ok(())
     });
 
-    let output = support::compat_command()
+    let output = support::compass_command()
         .args([
             "extract",
             corpus.path().to_str().ok_or("non-UTF-8 corpus path")?,
@@ -130,7 +130,7 @@ fn dedup_llm_resolves_ambiguous_semantic_entities() -> Result<(), Box<dyn Error>
     assert!(saw_tiebreak.load(Ordering::SeqCst));
 
     let graph: Value = serde_json::from_slice(&fs::read(
-        corpus.path().join("graphify-out").join("graph.json"),
+        corpus.path().join("compass-out").join("graph.json"),
     )?)?;
     let surviving = graph["nodes"]
         .as_array()

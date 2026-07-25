@@ -137,7 +137,7 @@ fn graph_size_cap_units_and_fallbacks_are_accepted_without_global_side_effects()
     ] {
         let status = std::process::Command::new(std::env::current_exe()?)
             .args(["--exact", "graph_size_cap_child", "--nocapture"])
-            .env("GRAPHIFY_MAX_GRAPH_BYTES", cap)
+            .env("COMPASS_MAX_GRAPH_BYTES", cap)
             .env("COMPASS_GRAPH_CAP_FIXTURE", &path)
             .status()?;
         assert!(status.success(), "cap child failed for {cap}");

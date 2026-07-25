@@ -88,7 +88,7 @@ imports, calls, members, re-exports, IDs, and stubs.
 **Change here when:** the extractor already emitted enough evidence but the
 final target requires multiple files/scopes.
 
-**Evidence:** language/member-resolution tests and Python-oracle/parity
+**Evidence:** native language and member-resolution tests
 fixtures.
 
 ### `compass-graph`
@@ -329,13 +329,6 @@ files with graph impact.
 
 Aggregates session memory deterministically and can write a learning overlay
 sidecar.
-
-## Verification-only crate
-
-### `compass-parity`
-
-Development-only differential tests compare selected native behavior with the
-pinned Graphify baseline. It is broad evidence, not a runtime dependency.
 
 ## Vendored parser package
 

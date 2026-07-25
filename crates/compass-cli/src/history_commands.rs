@@ -12,12 +12,8 @@ use compass_history::{
 use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
 use crate::{Frontend, Outcome};
 
-pub(crate) fn help(frontend: Frontend) -> String {
-    let prefix = if frontend == Frontend::Compass {
-        "compass"
-    } else {
-        "graphify"
-    };
+pub(crate) fn help(_frontend: Frontend) -> String {
+    let prefix = "compass";
     format!(
         "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
@@ -529,12 +525,8 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             let history = store(&repository)?;
             history.validate(&id).map_err(runtime)?;
             let rebuild_error = |error: &dyn std::fmt::Display| {
-                let prefix = match frontend {
-                    Frontend::Compass => "compass",
-                    Frontend::Graphify => "graphify",
-                };
                 runtime(format!(
-                    "cannot replace an unreadable preferred realization: {error}; run `{prefix} history rebuild {} --replace-corrupt`",
+                    "cannot replace an unreadable preferred realization: {error}; run `compass history rebuild {} --replace-corrupt`",
                     positionals[0]
                 ))
             };

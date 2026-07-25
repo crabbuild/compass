@@ -49,7 +49,7 @@ pub trait EntityTiebreaker: Send {
     fn decide(&mut self, pairs: &[AmbiguousPair]) -> Vec<bool>;
 }
 
-/// Deduplicate semantic entities using Graphify's deterministic compatibility rules.
+/// Deduplicate semantic entities using Compass's deterministic compatibility rules.
 ///
 /// Code symbols remain ID-addressed and are never label-merged. LLM tie-breaking is
 /// deliberately outside this native deterministic stage.

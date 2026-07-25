@@ -61,7 +61,7 @@ impl CacheKind {
     }
 }
 
-/// Reader/writer for Graphify's content-addressed extraction cache.
+/// Reader/writer for Compass's content-addressed extraction cache.
 #[derive(Debug)]
 pub struct Cache {
     root: PathBuf,

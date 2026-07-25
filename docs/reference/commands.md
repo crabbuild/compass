@@ -23,8 +23,8 @@ compass --version
 compass <command> --help
 ```
 
-The shipped product executable is `compass`. Scripts and new documentation
-should not depend on the internal Graphify compatibility frontend.
+The shipped product executable is `compass`; there is no legacy command
+frontend or alias.
 
 ## Build and analysis
 

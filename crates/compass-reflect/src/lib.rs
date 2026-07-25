@@ -1,4 +1,4 @@
-//! Deterministic reflection over Compass/Graphify session memory.
+//! Deterministic reflection over Compass session memory.
 
 mod aggregate;
 mod memory;

@@ -232,32 +232,21 @@ Requirements:
 - platform-specific discovery layout;
 - actual workflow instructions, not only a command list.
 
-## Compatibility and divergence
+## Compatibility and evolution
 
-If Graphify has equivalent behavior:
+For any user-visible behavior:
 
-- add/update differential evidence;
-- preserve approved normalizations;
-- update the compatibility ledger.
-
-If Compass intentionally differs:
-
-- document why;
+- define the Compass contract independently;
 - add native contract tests;
-- update migration guidance;
-- avoid exposing a half-compatible internal frontend behavior as public
-  product identity.
-
-If Compass-native:
-
-- document the new contract independently;
-- do not invent a Graphify command solely for symmetry.
+- document intentional incompatibility;
+- update migration guidance when users must take action;
+- do not add alternate legacy frontends or fallback configuration.
 
 ## Verification matrix
 
 | Extension | Required broad evidence |
 | --- | --- |
-| Language | multilingual extraction + incremental + parity where applicable |
+| Language | multilingual extraction + incremental correctness |
 | Relation | direction/provenance/multiplicity + query/impact |
 | Query | compiler + executor + TCK + CLI + limits + benchmark |
 | Command | help/args/streams/exits/files + platform cases |

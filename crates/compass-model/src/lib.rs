@@ -1,4 +1,4 @@
-//! Typed compatibility model for Graphify/Compass node-link graphs.
+//! Typed model for Compass node-link graphs.
 
 mod document;
 mod error;

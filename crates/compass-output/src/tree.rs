@@ -173,7 +173,7 @@ pub fn tree_html_document(document: &GraphDocument, options: &TreeOptions<'_>) -
     let tree = build_tree(document, options);
     emit_html(
         &tree,
-        &format!("{} — graphify tree viewer", tree.name),
+        &format!("{} — compass tree viewer", tree.name),
         &format!("{} — Knowledge Graph", tree.name),
         options.svg_width,
         options.svg_height,

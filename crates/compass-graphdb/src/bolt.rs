@@ -957,7 +957,7 @@ impl ServerCertVerifier for NoCertificateVerification {
 }
 
 fn timeout() -> Duration {
-    std::env::var("GRAPHIFY_GRAPHDB_TIMEOUT")
+    std::env::var("COMPASS_GRAPHDB_TIMEOUT")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|seconds| *seconds > 0)
