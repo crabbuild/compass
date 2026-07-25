@@ -109,14 +109,14 @@ async function runGuided(
     void vscode.window.showWarningMessage("A Compass write operation is already running.");
     return;
   }
-  session.graphState = "building";
-  await refresh();
   const command = session.processes.startJsonl(
     session.root,
     args,
     (event) => output.appendLine(`[${event.phase}] ${event.message}`)
   );
   session.activeWriter = command;
+  session.graphState = "building";
+  await refresh();
   try {
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title, cancellable: true },

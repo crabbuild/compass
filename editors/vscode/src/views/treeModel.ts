@@ -85,6 +85,146 @@ export function buildRepositoryTree(
   return nodes;
 }
 
+export function buildOperationsTree(
+  sessions: readonly SessionTreeSnapshot[]
+): TreeNode[] {
+  if (sessions.length === 0) return [];
+  const nodes: TreeNode[] = [];
+  const active: TreeNode[] = [];
+  for (const session of sessions) {
+    const repositoryName = path.basename(session.root) || session.root;
+    if (session.activeWriter) {
+      active.push({
+        id: `active-build:${session.id}`,
+        label: "Building graph",
+        description: repositoryName,
+        tooltip: session.root,
+        icon: "sync~spin"
+      });
+    }
+    if (session.watch) {
+      active.push(actionNode(
+        `active-watch:${session.id}`,
+        "Watching for changes",
+        "eye",
+        "compass.toggleWatch",
+        repositoryName,
+        [session.id]
+      ));
+    }
+  }
+  if (active.length > 0) {
+    nodes.push({
+      id: "operations:active",
+      label: "Active operations",
+      description: String(active.length),
+      icon: "pulse",
+      expanded: true,
+      children: active
+    });
+  }
+
+  const hasMissing = sessions.some((session) => session.graphState === "not-materialized");
+  const hasGraph = sessions.some((session) => session.graphState === "available");
+  const hasFailed = sessions.some((session) => session.graphState === "failed");
+  const hasWatch = sessions.some((session) => Boolean(session.watch));
+  const build: TreeNode[] = [];
+  if (hasMissing) {
+    build.push(actionNode(
+      "operations:initialize",
+      "Initialize repository",
+      "rocket",
+      "compass.initialize",
+      "Build the first Compass graph"
+    ));
+  }
+  if (hasGraph || hasFailed) {
+    build.push(actionNode(
+      "operations:update",
+      "Update graph",
+      "refresh",
+      "compass.update",
+      hasFailed ? "Retry or refresh a graph build" : "Refresh changed code relationships"
+    ));
+  }
+  if (hasGraph || hasWatch) {
+    const watchLabel = sessions.length === 1
+      ? hasWatch ? "Stop watch" : "Start watch"
+      : "Start or stop watch";
+    build.push(actionNode(
+      "operations:watch",
+      watchLabel,
+      sessions.length === 1 && hasWatch ? "debug-stop" : "eye",
+      "compass.toggleWatch",
+      sessions.length === 1
+        ? hasWatch ? "Stop the repository watcher" : "Keep the graph current as files change"
+        : "Choose a repository and toggle its watcher"
+    ));
+  }
+  if (build.length > 0) {
+    nodes.push({
+      id: "operations:build",
+      label: "Build",
+      icon: "tools",
+      children: build
+    });
+  }
+
+  if (hasGraph) {
+    nodes.push({
+      id: "operations:explore",
+      label: "Explore",
+      icon: "compass",
+      children: [
+        actionNode(
+          "operations:open-graph",
+          "Open graph",
+          "type-hierarchy",
+          "compass.openGraph",
+          "Explore the current repository graph"
+        ),
+        actionNode(
+          "operations:call-graph",
+          "Call graph from cursor",
+          "references",
+          "compass.openCallGraph",
+          "Trace callers and callees for the active function"
+        ),
+        actionNode(
+          "operations:architecture",
+          "Architecture flow",
+          "circuit-board",
+          "compass.openArchitecture",
+          "Read the codebase architecture flow"
+        ),
+        actionNode(
+          "operations:query",
+          "Query codebase",
+          "search",
+          "compass.openQuery",
+          "Ask a natural-language or CompassQL question"
+        )
+      ]
+    });
+  }
+
+  nodes.push({
+    id: "operations:history",
+    label: "History",
+    icon: "history",
+    children: [
+      actionNode(
+        "operations:open-history",
+        "Codebase evolution",
+        "history",
+        "compass.openHistory",
+        "Browse Git commits and revision graphs"
+      )
+    ]
+  });
+  return nodes;
+}
+
 function repositoryActions(
   session: SessionTreeSnapshot,
   commandArguments: unknown[]

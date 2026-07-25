@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
 import type { SessionRegistry } from "../workspace/sessionRegistry";
+import { treeItemFromNode } from "./treeItem";
+import { buildOperationsTree, type TreeNode } from "./treeModel";
 
-export class OperationsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
+export class OperationsTree implements vscode.TreeDataProvider<TreeNode> {
   private readonly changes = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changes.event;
 
@@ -11,26 +13,12 @@ export class OperationsTree implements vscode.TreeDataProvider<vscode.TreeItem> 
     this.changes.fire();
   }
 
-  getTreeItem(item: vscode.TreeItem): vscode.TreeItem {
-    return item;
+  getTreeItem(node: TreeNode): vscode.TreeItem {
+    return treeItemFromNode(node);
   }
 
-  getChildren(): vscode.TreeItem[] {
-    const items = this.registry.all().flatMap((session) => {
-      const operations: vscode.TreeItem[] = [];
-      if (session.graphState === "building") {
-        operations.push(operation("Building graph", session.root, "sync~spin"));
-      }
-      if (session.watch) operations.push(operation("Watching", session.root, "eye"));
-      return operations;
-    });
-    return items.length > 0 ? items : [operation("No active operations", "", "check")];
+  getChildren(node?: TreeNode): TreeNode[] {
+    if (node) return node.children ?? [];
+    return buildOperationsTree(this.registry.all());
   }
-}
-
-function operation(label: string, description: string, icon: string): vscode.TreeItem {
-  const item = new vscode.TreeItem(label);
-  item.description = description;
-  item.iconPath = new vscode.ThemeIcon(icon);
-  return item;
 }

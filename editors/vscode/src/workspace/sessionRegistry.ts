@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import type { TextEditor, WorkspaceFolder } from "vscode";
 import type { CompassProcessManager } from "../cli/processManager";
 import { RepositorySession } from "./repositorySession";
+import type { GraphState } from "./repositorySession";
 
 export class SessionRegistry {
   private readonly sessions = new Map<string, RepositorySession>();
@@ -34,9 +35,23 @@ export class SessionRegistry {
 
   async refresh(): Promise<void> {
     await Promise.all(this.all().map(async (session) => {
-      session.graphState = await exists(session.graphPath) ? "available" : "not-materialized";
+      session.graphState = refreshedGraphState(
+        session.graphState,
+        await exists(session.graphPath),
+        session.activeWriter !== undefined
+      );
     }));
   }
+}
+
+export function refreshedGraphState(
+  current: GraphState,
+  materialized: boolean,
+  hasActiveWriter: boolean
+): GraphState {
+  if (hasActiveWriter) return "building";
+  if (current === "failed") return "failed";
+  return materialized ? "available" : "not-materialized";
 }
 
 async function exists(file: string): Promise<boolean> {
