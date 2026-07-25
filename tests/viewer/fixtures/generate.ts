@@ -83,14 +83,33 @@ export default async function generate(): Promise<void> {
     path.join(output, "community.html"),
     communityHarness(communityOverview, communityDetail)
   );
+  const architectureNodes = Array.from({ length: 31 }, (_, index) => ({
+    id: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol-${index}`,
+    label: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol${index}`,
+    kind: index % 5 === 0 ? "class" : "function",
+    sourceFile: `src/api/module-${index}.ts`
+  }));
+  const architectureEdges = Array.from({ length: 53 }, (_, index) => ({
+    source: "authenticate",
+    target: index % 4 === 0 ? "database" : `symbol-${2 + (index % 29)}`,
+    relation: index % 3 === 0 ? "calls" : "uses",
+    confidence: index % 5 === 0 ? "inferred" : "extracted"
+  }));
   const architectureSections = Array.from({ length: 26 }, (_, index) => ({
     id: `section-${index}`,
-    name: `Section ${index}`,
+    name: index === 0 ? "API" : index === 1 ? "Storage" : `Section ${index}`,
     communities: [`${index}`],
     nodes: index === 0
-      ? [{ id: "run", label: "run", kind: "function", sourceFile: "src/lib.rs" }]
-      : [],
-    edges: []
+      ? architectureNodes
+      : index === 1
+        ? [{
+          id: "database-adapter",
+          label: "database adapter",
+          kind: "class",
+          sourceFile: "src/storage/database.ts"
+        }]
+        : [],
+    edges: index === 0 ? architectureEdges : []
   }));
   const architecture = {
     schema: "compass.viewer.callflow/1",
@@ -105,7 +124,7 @@ export default async function generate(): Promise<void> {
       calls: index + 1
     })),
     reportHighlights: [],
-    statistics: { nodes: 1, edges: 0, communities: 1, hyperedges: 0, extracted: 0, inferred: 0, ambiguous: 0 },
+    statistics: { nodes: 32, edges: 53, communities: 26, hyperedges: 0, extracted: 42, inferred: 11, ambiguous: 0 },
     provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
   };
   const calls = {
@@ -173,7 +192,7 @@ export default async function generate(): Promise<void> {
     ...historyOverviewB,
     title: "Revision C graph"
   };
-  await writeFile(path.join(output, "architecture.html"), harness("architecture", { type: "hydrate", repositoryId: "fixture", model: architecture }));
+  await writeFile(path.join(output, "architecture.html"), architectureHarness(architecture));
   await writeFile(path.join(output, "calls.html"), callGraphHarness(calls));
   await writeFile(
     path.join(output, "history.html"),
@@ -187,7 +206,7 @@ export default async function generate(): Promise<void> {
       communityDetail
     )
   );
-  await writeFile(path.join(output, "query.html"), harness("query", { type: "state", running: false }));
+  await writeFile(path.join(output, "query.html"), queryHarness());
 }
 
 function graphLoadingHarness(): string {
@@ -232,6 +251,96 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 }})</script><script src="/callGraph.js"></script></body></html>`;
 }
 
+function architectureHarness(model: unknown): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass architecture fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.architectureHostMessages=[];
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.architectureHostMessages.push(message);
+  if(message.type==="showOutput") {
+    window.showedArchitectureOutput=true;
+    return;
+  }
+  if(message.type==="openSource") {
+    window.openedArchitectureSource=message.file;
+    return;
+  }
+  if(message.type!=="ready" && message.type!=="retry") return;
+  const params=new URLSearchParams(window.location.search);
+  if(params.has("error")) {
+    setTimeout(()=>window.postMessage({type:"error",message:"Architecture export failed"},"*"),20);
+    return;
+  }
+  const delay=params.has("delay") ? 800 : 0;
+  setTimeout(()=>window.postMessage({
+    type:"hydrate",
+    repositoryId:"fixture",
+    model:${JSON.stringify(model)}
+  },"*"),delay);
+}})</script><script src="/architecture.js"></script></body></html>`;
+}
+
+function queryHarness(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass query fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.queryHostMessages=[];
+window.queryTimer=undefined;
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.queryHostMessages.push(message);
+  if(message.type==="openSource") {
+    window.openedQuerySource=message.source;
+    return;
+  }
+  if(message.type==="openGraph") {
+    window.openedQueryGraph=true;
+    return;
+  }
+  if(message.type==="ready") {
+    setTimeout(()=>window.postMessage({type:"state",running:false},"*"),0);
+    return;
+  }
+  if(message.type==="cancel") {
+    clearTimeout(window.queryTimer);
+    window.postMessage({type:"state",running:false},"*");
+    return;
+  }
+  if(message.type!=="execute") return;
+  window.postMessage({type:"state",running:true},"*");
+  const params=new URLSearchParams(window.location.search);
+  const delay=params.has("delay") ? 1200 : 20;
+  window.queryTimer=setTimeout(()=>{
+    if(params.has("error")) {
+      window.postMessage({type:"error",message:"CompassQL could not parse this query"},"*");
+    } else if(params.get("result")==="rows") {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          json:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]},
+          durationMs:18
+        }
+      },"*");
+    } else if(params.get("result")==="traversal") {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          text:"Traversal: BFS depth=2 | Start: ['Pipeline'] | 146 nodes found\\n\\nNODE Pipeline [src=caching/util/src/Pipeline.scala loc=L154 community=Pipeline]\\nNODE .assert() [src=caching/util/src/AssertMacros.scala loc=L32 community=.iassert]\\nNODE String [src= loc= community=EtcdClient]",
+          durationMs:24
+        }
+      },"*");
+    } else {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          text:"Authentication reaches storage through the repository service.",
+          durationMs:24
+        }
+      },"*");
+    }
+  },delay);
+}})</script><script src="/query.js"></script></body></html>`;
+}
+
 function communityHarness(overview: unknown, detail: unknown): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass community fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.communityRequestCount=0;
@@ -262,20 +371,37 @@ function historyHarness(
 window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
 window.historyHostMessages=[];
+window.historyBootstrapAttempts=0;
 window.emitHistoryMessage=(message)=>window.postMessage(message,"*");
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.historyHostMessages.push(message);
-  if(message.type==="ready") {
-    setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*"),0);
+  if(message.type==="ready" || message.type==="retryTimeline") {
+    window.historyBootstrapAttempts+=1;
+    const scenario=new URLSearchParams(window.location.search).get("bootstrap");
+    if(scenario==="error" && window.historyBootstrapAttempts===1) {
+      setTimeout(()=>window.postMessage({type:"bootstrapError",message:"Fixture history unavailable"},"*"),40);
+    } else {
+      setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*"),40);
+    }
   } else if(message.type==="loadRevision") {
-    const delay=message.commit.startsWith("a") ? 180 : 0;
-    setTimeout(()=>window.postMessage({
-      type:"graph",
-      commit:message.commit,
-      realization:"r-"+message.commit.slice(0,1),
-      fingerprint:"f-"+message.commit.slice(0,1),
-      graph:window.historyGraphs[message.commit]
-    },"*"),delay);
+    const loadScenario=new URLSearchParams(window.location.search).get("load");
+    const delay=loadScenario==="slow" ? 500 : message.commit.startsWith("a") ? 180 : 120;
+    if(loadScenario==="error") {
+      setTimeout(()=>window.postMessage({
+        type:"error",
+        operation:"Load graph",
+        commit:message.commit,
+        message:"Fixture graph load failed"
+      },"*"),delay);
+    } else {
+      setTimeout(()=>window.postMessage({
+        type:"graph",
+        commit:message.commit,
+        realization:"r-"+message.commit.slice(0,1),
+        fingerprint:"f-"+message.commit.slice(0,1),
+        graph:window.historyGraphs[message.commit]
+      },"*"),delay);
+    }
   } else if(message.type==="changeCounts") {
     setTimeout(()=>window.postMessage({
       type:"changeCounts",
@@ -326,8 +452,4 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     window.openedSource=message.source;
   }
 }})</script><script src="/history.js"></script></body></html>`;
-}
-
-function harness(script: string, hydration: unknown): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass ${script} fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>window.acquireVsCodeApi=()=>({postMessage(message){if(message.type==="ready")setTimeout(()=>window.postMessage(${JSON.stringify(hydration)},"*"),0)}})</script><script src="/${script}.js"></script></body></html>`;
 }

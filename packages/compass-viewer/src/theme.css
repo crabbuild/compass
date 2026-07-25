@@ -80,6 +80,28 @@
   --compass-grid: color-mix(in srgb, var(--foreground) 16%, transparent);
   --compass-success: var(--vscode-testing-iconPassed, #3fb950);
   --compass-warning: var(--vscode-editorWarning-foreground, #d29922);
+  --sidebar: var(--vscode-sideBar-background, var(--background));
+  --sidebar-foreground: var(--vscode-sideBar-foreground, var(--foreground));
+  --sidebar-accent: var(--vscode-list-activeSelectionBackground, var(--accent));
+  --sidebar-accent-foreground: var(
+    --vscode-list-activeSelectionForeground,
+    var(--accent-foreground)
+  );
+  --sidebar-primary: var(--vscode-focusBorder, var(--ring));
+  --workbench-hover: var(
+    --vscode-list-hoverBackground,
+    color-mix(in srgb, var(--foreground) 7%, transparent)
+  );
+  --workbench-hover-foreground: var(
+    --vscode-list-hoverForeground,
+    var(--foreground)
+  );
+  --workbench-table-header: var(
+    --vscode-editorStickyScroll-background,
+    var(--background)
+  );
+  --workbench-link: var(--vscode-textLink-foreground, var(--ring));
+  --workbench-progress: var(--vscode-progressBar-background, var(--ring));
 }
 
 * {
@@ -104,6 +126,195 @@ body {
 button:not(:disabled),
 [role="button"]:not(:disabled) {
   cursor: pointer;
+}
+
+[data-slot="button"],
+[data-slot="input"],
+[data-slot="tabs-list"],
+[data-slot="tabs-trigger"] {
+  border-radius: 4px;
+}
+
+.workbench-collection-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workbench-search {
+  position: relative;
+  display: flex;
+  min-width: 180px;
+  max-width: 540px;
+  flex: 1;
+  align-items: center;
+}
+
+.workbench-search > svg {
+  position: absolute;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+  pointer-events: none;
+}
+
+.workbench-search input {
+  width: 100%;
+  height: 30px;
+  padding: 4px 30px 4px 29px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.workbench-search input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.workbench-search input:focus-visible {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.workbench-search-clear {
+  position: absolute;
+  right: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.workbench-search-clear:hover {
+  background: var(--workbench-hover);
+  color: var(--workbench-hover-foreground);
+}
+
+.workbench-search-clear svg {
+  width: 13px;
+  height: 13px;
+}
+
+.workbench-result-count,
+.workbench-pagination-range {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workbench-pagination {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.workbench-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.workbench-pagination-actions button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--foreground);
+}
+
+.workbench-pagination-actions button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--workbench-hover);
+}
+
+.workbench-pagination-actions button:disabled {
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+}
+
+.workbench-pagination-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.workbench-state {
+  display: grid;
+  width: min(520px, calc(100% - 32px));
+  min-height: 180px;
+  margin: auto;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.workbench-state > svg {
+  width: 28px;
+  height: 28px;
+}
+
+.workbench-state[data-kind="error"] > svg {
+  color: var(--destructive);
+}
+
+.workbench-state h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workbench-state p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workbench-button {
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background, var(--primary));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.workbench-button:hover {
+  background: var(--vscode-button-hoverBackground, var(--primary));
+}
+
+.workbench-button:focus-visible,
+.workbench-search-clear:focus-visible,
+.workbench-pagination-actions button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.workbench-state-spinner {
+  animation: spin 1s linear infinite;
 }
 
 .compass-load-shell {
@@ -360,6 +571,183 @@ button:not(:disabled),
   }
 }
 
+/* VS Code-native loading shell. The older constellation selectors remain for
+   backwards-compatible embedded assets, but current webviews use this compact mark. */
+.compass-load-shell {
+  grid-template-rows: auto auto;
+  gap: 14px;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.compass-load-shell::before {
+  display: none;
+}
+
+.compass-load-constellation {
+  display: grid;
+  width: 64px;
+  height: 68px;
+  margin: 0 auto;
+  place-items: start center;
+}
+
+.compass-load-mark {
+  position: static;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--vscode-widget-border, var(--border));
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, var(--card));
+  color: var(--vscode-symbolIcon-classForeground, var(--foreground));
+  box-shadow: none;
+}
+
+.compass-load-mark svg {
+  width: 22px;
+  height: 22px;
+}
+
+.compass-load-progress {
+  position: absolute;
+  bottom: 0;
+  width: 64px;
+  height: 2px;
+  overflow: hidden;
+  background: var(
+    --vscode-progressBar-background,
+    color-mix(in srgb, var(--workbench-progress) 28%, transparent)
+  );
+}
+
+.compass-load-progress i {
+  display: block;
+  width: 45%;
+  height: 100%;
+  background: var(--workbench-progress);
+  animation: compass-native-progress 1.4s ease-in-out infinite;
+}
+
+@keyframes compass-native-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(330%);
+  }
+}
+
+.compass-load-copy {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.compass-load-eyebrow {
+  margin-bottom: 7px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.compass-load-copy h1 {
+  font-size: clamp(19px, 3vw, 25px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.compass-load-steps,
+.compass-load-error {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.compass-load-steps b {
+  color: var(--muted-foreground);
+}
+
+.compass-load-action {
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+}
+
+.compass-load-action-primary {
+  background: var(--vscode-button-background, var(--primary));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+}
+
+.compass-load-shell[data-variant="architecture"] {
+  grid-template-columns: minmax(220px, 390px) minmax(280px, 560px);
+  grid-template-rows: auto auto;
+  column-gap: clamp(24px, 6vw, 72px);
+  text-align: left;
+}
+
+.compass-load-shell[data-variant="architecture"] .compass-load-constellation {
+  grid-column: 1;
+  margin: 0;
+}
+
+.compass-load-shell[data-variant="architecture"] .compass-load-copy {
+  grid-column: 1;
+  width: auto;
+}
+
+.compass-load-shell[data-variant="architecture"] .compass-load-steps {
+  justify-content: flex-start;
+}
+
+.architecture-load-skeleton {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  grid-template-rows: 54px 1fr;
+  width: min(46vw, 560px);
+  height: min(46vh, 360px);
+  overflow: hidden;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 4px;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.architecture-load-skeleton span {
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--foreground) 7%, transparent),
+    transparent
+  );
+  background-size: 220% 100%;
+  animation: compass-skeleton 1.8s ease-in-out infinite;
+}
+
+.architecture-load-rail {
+  grid-row: 1 / span 2;
+  border-right: 1px solid var(--border);
+  background-color: var(--vscode-sideBar-background, var(--sidebar));
+}
+
+.architecture-load-flow {
+  border-bottom: 1px solid var(--border);
+}
+
+.architecture-load-content {
+  margin: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+@keyframes compass-skeleton {
+  to {
+    background-position: -220% 0;
+  }
+}
+
 .compass-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8px var(--compass-inspector-width, 340px);
@@ -403,26 +791,26 @@ button:not(:disabled),
 }
 
 .compass-glass-panel {
-  background: var(--compass-panel-raised);
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
   border: 1px solid var(--compass-line);
-  box-shadow: 0 18px 52px color-mix(in srgb, #000 30%, transparent);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .compass-graph-toolbar {
   position: absolute;
   z-index: 4;
-  top: 18px;
-  left: 18px;
-  right: 18px;
+  top: 12px;
+  left: 12px;
+  right: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 58px;
-  padding: 8px 10px 8px 16px;
-  border-radius: 14px;
+  gap: 10px;
+  min-height: 42px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 4px;
 }
 
 .compass-viewer-status {
@@ -468,16 +856,16 @@ button:not(:disabled),
 
 .compass-tool-button {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 30px;
   align-items: center;
   gap: 7px;
-  padding: 0 12px;
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 3px;
   background: transparent;
   color: var(--muted-foreground);
   white-space: nowrap;
-  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  transition: none;
 }
 
 .compass-tool-button svg {
@@ -488,7 +876,7 @@ button:not(:disabled),
 .compass-tool-button:hover,
 .compass-tool-button[aria-pressed="true"] {
   border-color: var(--compass-line);
-  background: var(--compass-focus-soft);
+  background: var(--workbench-hover);
   color: var(--foreground);
 }
 
@@ -543,26 +931,22 @@ button:not(:disabled),
   flex-direction: column;
   overflow: hidden;
   border-left: 1px solid var(--compass-line);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--compass-panel) 92%, var(--compass-focus) 8%) 0%,
-    var(--compass-panel) 100%
-  );
-  box-shadow: -22px 0 60px color-mix(in srgb, #000 18%, transparent);
+  background: var(--vscode-sideBar-background, var(--compass-panel));
+  box-shadow: none;
 }
 
 .compass-graph-inspector-collapsed {
   align-items: center;
   border-left: 1px solid var(--compass-line);
-  box-shadow: -12px 0 38px color-mix(in srgb, #000 14%, transparent);
+  box-shadow: none;
 }
 
 .compass-inspector-header {
   display: flex;
-  min-height: 70px;
+  min-height: 52px;
   align-items: center;
   gap: 11px;
-  padding: 14px 18px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--compass-line);
 }
 
@@ -589,20 +973,18 @@ button:not(:disabled),
 
 .compass-product-mark {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 11px;
+  border-radius: 4px;
   background: linear-gradient(
     145deg,
     var(--vscode-button-foreground, #eff8ff),
     color-mix(in srgb, var(--compass-focus) 64%, #fff)
   );
   color: var(--vscode-button-background, #09182c);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #fff 48%, transparent),
-    0 8px 22px color-mix(in srgb, var(--compass-focus) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 48%, transparent);
 }
 
 .compass-product-mark svg {
@@ -617,16 +999,16 @@ button:not(:disabled),
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 3px;
   outline: none;
   background: transparent;
   color: var(--muted-foreground);
-  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  transition: none;
 }
 
 .compass-inspector-disclosure:hover {
   border-color: var(--compass-line);
-  background: var(--compass-focus-soft);
+  background: var(--workbench-hover);
   color: var(--foreground);
 }
 
@@ -651,7 +1033,7 @@ button:not(:disabled),
 
 .compass-inspector-search {
   position: relative;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--compass-line);
 }
 
@@ -672,12 +1054,12 @@ button:not(:disabled),
 
 .compass-search-field input {
   width: 100%;
-  min-height: 42px;
-  padding: 0 13px 0 38px;
+  min-height: 30px;
+  padding: 0 10px 0 34px;
   border: 1px solid var(--compass-line);
-  border-radius: 11px;
+  border-radius: 3px;
   outline: none;
-  background: var(--vscode-input-background, color-mix(in srgb, var(--compass-canvas-deep) 64%, transparent));
+  background: var(--vscode-input-background, var(--background));
   color: var(--vscode-input-foreground, var(--foreground));
 }
 
@@ -688,16 +1070,16 @@ button:not(:disabled),
 .compass-search-results {
   position: absolute;
   z-index: 8;
-  top: 62px;
-  left: 16px;
-  right: 16px;
+  top: 46px;
+  left: 12px;
+  right: 12px;
   max-height: 230px;
   overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--compass-line-strong);
-  border-radius: 12px;
+  border-radius: 3px;
   background: var(--vscode-menu-background, var(--compass-panel));
-  box-shadow: 0 18px 38px color-mix(in srgb, #000 38%, transparent);
+  box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28));
 }
 
 .compass-search-item {
@@ -708,7 +1090,7 @@ button:not(:disabled),
   overflow: hidden;
   border: 0;
   border-left: 3px solid transparent;
-  border-radius: 8px;
+  border-radius: 2px;
   background: transparent;
   color: var(--muted-foreground);
   text-align: left;
@@ -832,8 +1214,8 @@ button:not(:disabled),
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--compass-line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--compass-canvas-deep) 30%, transparent);
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background, var(--background));
 }
 
 .compass-metadata-grid .compass-metadata-wide {
@@ -881,7 +1263,7 @@ button:not(:disabled),
   gap: 10px;
   padding: 9px 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 2px;
   outline: none;
   background: transparent;
   color: var(--foreground);
@@ -938,8 +1320,8 @@ button:not(:disabled),
   padding: 10px;
   overflow-wrap: anywhere;
   border: 1px solid var(--compass-line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--compass-canvas-deep) 42%, transparent);
+  border-radius: 3px;
+  background: var(--vscode-input-background, var(--background));
   color: var(--foreground);
   font: 11px/1.45 var(--compass-font-mono);
 }
@@ -954,8 +1336,8 @@ button:not(:disabled),
   margin-bottom: 14px;
   padding: 0 10px;
   border: 1px solid var(--compass-line);
-  border-radius: 9px;
-  background: var(--compass-focus-soft);
+  border-radius: 3px;
+  background: var(--workbench-hover);
   color: var(--foreground);
 }
 
@@ -992,14 +1374,14 @@ button:not(:disabled),
   padding: 8px 9px;
   overflow: hidden;
   border: 0;
-  border-radius: 7px;
+  border-radius: 3px;
   background: transparent;
   color: var(--muted-foreground);
   text-align: left;
 }
 
 .compass-neighbor-link:hover {
-  background: var(--compass-focus-soft);
+  background: var(--workbench-hover);
   color: var(--foreground);
 }
 
@@ -1047,11 +1429,11 @@ button:not(:disabled),
 }
 
 .compass-community-item {
-  border-radius: 7px;
+  border-radius: 3px;
 }
 
 .compass-community-item:hover {
-  background: color-mix(in srgb, var(--compass-focus) 6%, transparent);
+  background: var(--workbench-hover);
   color: var(--foreground);
 }
 
@@ -1106,10 +1488,10 @@ button:not(:disabled),
   padding: 13px 15px;
   overflow: hidden;
   border: 1px solid var(--compass-line-strong);
-  border-radius: 12px;
+  border-radius: 3px;
   background: var(--vscode-editorHoverWidget-background, var(--compass-panel));
   color: var(--vscode-editorHoverWidget-foreground, var(--muted-foreground));
-  box-shadow: 0 18px 42px color-mix(in srgb, #000 42%, transparent);
+  box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28));
   font-size: 12px;
   line-height: 1.35;
   pointer-events: none;
@@ -1207,15 +1589,15 @@ body.vscode-high-contrast-light .compass-source-metadata {
     min-height: 280px;
     border-top: 1px solid var(--compass-line);
     border-left: 0;
-    border-radius: 18px 18px 0 0;
-    box-shadow: 0 -22px 58px color-mix(in srgb, #000 35%, transparent);
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .compass-graph-inspector-collapsed {
     min-height: 48px;
     flex-direction: row;
     justify-content: center;
-    border-radius: 14px 14px 0 0;
+    border-radius: 0;
   }
 
   .compass-inspector-expand {
@@ -1256,7 +1638,10 @@ body.vscode-high-contrast-light .compass-source-metadata {
 
   .compass-load-edge,
   .compass-load-node,
-  .compass-load-orbit {
+  .compass-load-orbit,
+  .compass-load-progress i,
+  .architecture-load-skeleton span,
+  .workbench-state-spinner {
     animation: none !important;
   }
 }
@@ -1270,29 +1655,715 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-shell {
+  --query-surface: var(--vscode-editor-background, var(--background));
+  --query-surface-raised: var(
+    --vscode-editorWidget-background,
+    var(--vscode-sideBar-background, var(--card))
+  );
+  --query-border: var(--vscode-panel-border, var(--border));
+  --query-input: var(--vscode-input-background, var(--background));
+  --query-input-foreground: var(--vscode-input-foreground, var(--foreground));
+  --query-accent: var(--vscode-focusBorder, var(--ring));
   display: grid;
   grid-template-rows: auto 1fr;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 420px;
+  overflow: hidden;
   background: var(--background);
   color: var(--foreground);
+}
+
+.query-header {
+  padding: 14px 18px 16px;
+  border-bottom: 1px solid var(--query-border);
+  background: var(--query-surface);
+}
+
+.query-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.query-context {
+  color: var(--muted-foreground);
+  font: 10px/1.35 var(--compass-font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.query-heading-row h1 {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.query-mode {
+  display: flex;
+  width: 100%;
+  gap: 0;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--query-border);
+  background: transparent;
+}
+
+.query-mode button {
+  position: relative;
+  display: grid;
+  min-width: min(280px, 50%);
+  min-height: 48px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  text-align: left;
+}
+
+.query-mode button:hover {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.query-mode button[aria-selected="true"] {
+  border-bottom-color: var(--vscode-tab-activeBorder, var(--query-accent));
+  background: var(--vscode-tab-activeBackground, var(--query-surface-raised));
+  color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.query-mode svg {
+  width: 15px;
+  height: 15px;
+}
+
+.query-mode button > span,
+.query-mode strong,
+.query-mode small {
+  display: block;
+  min-width: 0;
+}
+
+.query-mode strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.query-mode small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.3;
+  opacity: 0.78;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-composer-panel {
+  padding: 12px;
+  border: 1px solid var(--query-border);
+  border-top: 0;
+  background: var(--query-surface-raised);
+}
+
+.query-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.query-editor {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+
+.query-editor textarea {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  max-height: 260px;
+  resize: vertical;
+  padding: 11px 12px 27px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  outline: none;
+  background: var(--query-input);
+  color: var(--query-input-foreground);
+  font: 13px/1.55 var(--compass-font-sans);
+  box-sizing: border-box;
+}
+
+.query-composer-panel[data-mode="cql"] .query-editor textarea {
+  font-family: var(--compass-font-mono);
+  font-size: 12px;
+}
+
+.query-editor textarea::placeholder,
+.query-params input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.query-editor textarea:focus-visible,
+.query-params input:focus-visible {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.query-shortcut {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  font: 10px/1 var(--compass-font-sans);
+}
+
+.query-run {
+  display: flex;
+  min-width: 76px;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background, var(--primary));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.query-run:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, var(--primary));
+}
+
+.query-run:disabled {
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+}
+
+.query-run svg {
+  width: 13px;
+  height: 13px;
+}
+
+.query-params {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 420px);
+  gap: 8px;
+  align-items: center;
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.query-params input {
+  height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: 11px var(--compass-font-mono);
+}
+
+.query-examples {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+  overflow-x: auto;
+}
+
+.query-examples > span {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.query-examples button,
+.query-history button {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.query-examples button:hover,
+.query-history button:hover {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.query-results {
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(12px, 2vw, 22px);
+}
+
+.query-results > .workbench-state,
+.query-empty {
+  min-height: 100%;
+}
+
+.query-result {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.query-result > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.query-result > header span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.query-result > header > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--compass-font-mono);
+}
+
+.query-result > header svg {
+  width: 12px;
+  height: 12px;
+}
+
+.query-result h2 {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.query-text-result,
+.query-json-result {
+  min-height: 120px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--card));
+  color: var(--foreground);
+  font: 12px/1.6 var(--compass-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.query-prose-result {
+  padding: 14px 16px;
+  border: 1px solid var(--query-border);
+  border-radius: 3px;
+  background: var(--query-surface-raised);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.query-prose-result p,
+.query-prose-result ul {
+  margin: 0;
+}
+
+.query-prose-result p + p,
+.query-prose-result p + ul,
+.query-prose-result ul + p {
+  margin-top: 10px;
+}
+
+.query-prose-result ul {
+  padding-left: 20px;
+}
+
+.query-traversal-result {
+  display: grid;
+  gap: 10px;
+}
+
+.query-traversal-summary {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--query-border);
+  border-left: 3px solid var(--query-accent);
+  background: var(--query-surface-raised);
+}
+
+.query-traversal-summary p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.query-result-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin-top: 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.query-result-metrics strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.query-graph-action {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: 11px var(--compass-font-sans);
+}
+
+.query-graph-action:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
+}
+
+.query-graph-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.query-node-results {
+  overflow: hidden;
+  border: 1px solid var(--query-border);
+  border-radius: 3px;
+  background: var(--query-surface);
+}
+
+.query-node-result {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(160px, 0.72fr) minmax(240px, 1.28fr);
+  gap: 9px;
+  align-items: center;
+  min-height: 48px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--query-border);
+}
+
+.query-node-result:last-child {
+  border-bottom: 0;
+}
+
+.query-node-result:hover {
+  background: var(--workbench-hover);
+}
+
+.query-node-result > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-symbolIcon-functionForeground, var(--query-accent));
+}
+
+.query-node-copy,
+.query-node-copy h3,
+.query-node-copy p {
+  min-width: 0;
+}
+
+.query-node-copy h3,
+.query-node-copy p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-node-copy h3 {
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.query-node-copy p {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.query-source-action {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--workbench-link);
+  font: 10px/1.4 var(--compass-font-mono);
+  text-align: left;
+}
+
+.query-source-action:hover {
+  border-color: var(--query-border);
+  background: var(--vscode-editorHoverWidget-background, var(--query-surface-raised));
+}
+
+.query-source-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-source-action small {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font: 10px var(--compass-font-mono);
+}
+
+.query-source-missing {
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  font: 10px var(--compass-font-mono);
+}
+
+.query-table {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.query-table table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.query-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--workbench-table-header);
+}
+
+.query-table th,
+.query-table td {
+  max-width: 380px;
+  padding: 7px 9px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-table th {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.query-table tbody tr:hover {
+  background: var(--workbench-hover);
+}
+
+.query-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.query-empty {
+  display: grid;
+  place-content: center;
+}
+
+.query-history {
+  width: min(720px, calc(100vw - 40px));
+  margin: -28px auto 20px;
+  text-align: center;
+}
+
+.query-history h2 {
+  margin: 0 0 7px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.query-history button {
+  max-width: min(100%, 460px);
+  margin: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.query-shell button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+body.vscode-high-contrast .query-mode,
+body.vscode-high-contrast-light .query-mode,
+body.vscode-high-contrast .query-text-result,
+body.vscode-high-contrast-light .query-text-result,
+body.vscode-high-contrast .query-json-result,
+body.vscode-high-contrast-light .query-json-result,
+body.vscode-high-contrast .query-table,
+body.vscode-high-contrast-light .query-table,
+body.vscode-high-contrast .query-composer-panel,
+body.vscode-high-contrast-light .query-composer-panel,
+body.vscode-high-contrast .query-prose-result,
+body.vscode-high-contrast-light .query-prose-result,
+body.vscode-high-contrast .query-traversal-summary,
+body.vscode-high-contrast-light .query-traversal-summary,
+body.vscode-high-contrast .query-node-results,
+body.vscode-high-contrast-light .query-node-results {
+  border-width: 2px;
+  border-color: var(--vscode-contrastBorder, var(--ring));
 }
 
 .history-shell {
   display: grid;
   grid-template-columns: minmax(270px, 340px) minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 440px;
+  overflow: hidden;
   background: var(--background);
   color: var(--foreground);
 }
 
+.history-bootstrap {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--vscode-editor-background, var(--background));
+}
+
 .history-sidebar {
+  display: flex;
   min-width: 0;
+  min-height: 0;
+  flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
+  color: var(--sidebar-foreground);
+}
+
+.history-sidebar-header {
+  flex: 0 0 auto;
+  padding: 14px 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.history-title > svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--muted-foreground);
+}
+
+.history-title h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.history-title p {
+  margin: 3px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.history-search > svg {
+  position: absolute;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+  pointer-events: none;
+}
+
+.history-search input,
+.history-mobile-select select {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.history-search input {
+  padding: 4px 8px 4px 28px;
+}
+
+.history-search input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.history-search input:focus-visible,
+.history-mobile-select select:focus-visible,
+.history-rail:focus-visible,
+.history-commit:focus-visible {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.history-mobile-select {
+  display: none;
 }
 
 .history-rail {
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
+  outline: none;
 }
 
 .history-commit {
@@ -1303,12 +2374,18 @@ body.vscode-high-contrast-light .compass-source-metadata {
   align-items: center;
   gap: .625rem;
   width: 100%;
-  padding: .5rem .75rem;
+  padding: 8px 11px;
   border: 0;
   border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: transparent;
   color: inherit;
   text-align: left;
+}
+
+.history-commit:hover {
+  background: var(--workbench-hover);
+  color: var(--workbench-hover-foreground);
 }
 
 .history-commit[aria-selected="true"] {
@@ -1317,13 +2394,347 @@ body.vscode-high-contrast-light .compass-source-metadata {
   box-shadow: inset 2px 0 var(--sidebar-primary);
 }
 
+.history-commit > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.history-commit > svg[data-state="available"] {
+  color: var(--compass-success);
+}
+
+.history-commit > svg[data-state="building"] {
+  color: var(--vscode-progressBar-background, var(--ring));
+}
+
+.history-commit > svg[data-state="failed"] {
+  color: var(--destructive);
+}
+
+.history-commit-row-copy,
+.history-commit-subject,
+.history-commit-byline {
+  min-width: 0;
+}
+
+.history-commit-row-copy {
+  display: block;
+  flex: 1;
+}
+
+.history-commit-subject {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-commit-byline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.history-commit[aria-selected="true"] .history-commit-byline {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.history-commit-byline code {
+  color: inherit;
+  font-family: var(--compass-font-mono);
+}
+
+.history-commit-byline span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-commit-byline time {
+  margin-left: auto;
+}
+
+.history-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-commit-details {
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-commit-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.history-commit-copy {
+  min-width: 0;
+}
+
+.history-eyebrow {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.history-commit-copy h2 {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.history-commit-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-commit-metadata code {
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font-family: var(--compass-font-mono);
+}
+
+.history-state-badge {
+  flex: 0 0 auto;
+  border-radius: 2px;
+  text-transform: capitalize;
+}
+
+.history-commit-actions,
+.history-change-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.history-commit-actions:empty {
+  display: none;
+}
+
+.history-commit-actions button {
+  border-radius: 2px;
+}
+
+.history-comparison-help,
+.history-inline-error {
+  margin: 9px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.history-inline-error {
+  color: var(--destructive);
+}
+
+.history-change-counts {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-change-counts span {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--foreground));
+}
+
+.history-change-counts strong {
+  font-weight: 600;
+}
+
+.history-graph-frame {
+  display: grid;
+  height: max(400px, calc(100vh - 190px));
+  min-height: 360px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-graph-ready,
+.history-graph-canvas {
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-graph-ready {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-graph-status {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--background));
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-graph-status span {
+  color: var(--foreground);
+  font-family: var(--compass-font-mono);
+}
+
+.history-graph-canvas {
+  position: relative;
+  flex: 1;
+}
+
+.history-graph-canvas .compass-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.history-content > section:last-child {
+  margin-top: 12px;
+}
+
+body.vscode-high-contrast .history-sidebar,
+body.vscode-high-contrast-light .history-sidebar,
+body.vscode-high-contrast .history-commit-details,
+body.vscode-high-contrast-light .history-commit-details,
+body.vscode-high-contrast .history-graph-frame,
+body.vscode-high-contrast-light .history-graph-frame,
+body.vscode-high-contrast .history-change-counts span,
+body.vscode-high-contrast-light .history-change-counts span {
+  border-color: var(--vscode-contrastBorder, var(--ring));
+  border-width: 2px;
+}
+
 @media (max-width: 760px) {
+  .query-header {
+    padding: 10px;
+  }
+
+  .query-heading-row,
+  .query-composer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .query-mode {
+    align-self: flex-start;
+  }
+
+  .query-run {
+    align-self: flex-end;
+  }
+
+  .query-examples {
+    padding-bottom: 2px;
+  }
+
+  .compass-load-shell[data-variant="architecture"] {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    text-align: center;
+  }
+
+  .compass-load-shell[data-variant="architecture"] .compass-load-constellation,
+  .compass-load-shell[data-variant="architecture"] .compass-load-copy,
+  .architecture-load-skeleton {
+    grid-column: 1;
+  }
+
+  .compass-load-shell[data-variant="architecture"] .compass-load-constellation {
+    margin: 0 auto;
+  }
+
+  .compass-load-shell[data-variant="architecture"] .compass-load-steps {
+    justify-content: center;
+  }
+
+  .architecture-load-skeleton {
+    grid-row: 3;
+    width: min(88vw, 460px);
+    height: 190px;
+    margin-top: 14px;
+  }
+
   .history-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
+
   .history-sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .history-sidebar-header {
+    padding: 10px;
+  }
+
+  .history-title p,
+  .history-search,
+  .history-rail {
+    display: none;
+  }
+
+  .history-mobile-select {
+    display: grid;
+    gap: 4px;
+    margin-top: 9px;
+    color: var(--muted-foreground);
+    font-size: 10px;
+  }
+
+  .history-mobile-select select {
+    padding: 4px 7px;
+  }
+
+  .history-content {
+    padding: 10px;
+  }
+
+  .history-commit-heading {
+    gap: 8px;
+  }
+
+  .history-commit-metadata {
+    display: grid;
+    gap: 3px;
+  }
+
+  .history-graph-frame {
+    height: max(750px, calc(102vh + 30px));
+    margin-top: 10px;
+  }
+
+  .history-graph-canvas .compass-workspace {
+    height: auto;
+    min-height: max(720px, 102vh);
   }
 }
 
@@ -1333,17 +2744,556 @@ body.vscode-high-contrast-light .compass-source-metadata {
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
+  color: var(--sidebar-foreground);
+}
+
+.architecture-nav-header {
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.architecture-nav-header > span,
+.architecture-eyebrow {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.architecture-nav-header h1 {
+  margin: 4px 0 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-section-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 5px;
+}
+
+.architecture-section-list > button {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.architecture-section-list > button:hover {
+  background: var(--workbench-hover);
+  color: var(--workbench-hover-foreground);
+}
+
+.architecture-section-list > button[aria-current="page"] {
+  border-color: var(--vscode-list-activeSelectionBackground, var(--sidebar-primary));
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+
+.architecture-section-list svg {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+
+.architecture-section-list strong,
+.architecture-section-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-section-list strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.architecture-section-list small {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.architecture-section-list > button[aria-current="page"] small {
+  color: inherit;
+  opacity: 0.78;
+}
+
+.architecture-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  padding: 8px 6px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  text-align: center;
+}
+
+.architecture-stats strong {
+  display: block;
+  margin-bottom: 1px;
+  color: var(--sidebar-foreground);
+  font-size: 11px;
+}
+
+.architecture-main {
+  min-width: 0;
+  overflow: auto;
+  padding: 14px clamp(14px, 2.2vw, 24px) 32px;
+}
+
+.architecture-global-search {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  max-width: 760px;
+  margin: 0 auto 18px;
+}
+
+.architecture-global-search > label {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.architecture-global-search > label > svg {
+  position: absolute;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.architecture-global-search input {
+  width: 100%;
+  height: 34px;
+  padding: 5px 84px 5px 33px;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: inherit;
+  font-size: 12px;
+}
+
+.architecture-global-search input:focus-visible {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.architecture-global-search label > span {
+  position: absolute;
+  right: 8px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.architecture-search-results {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: min(440px, 65vh);
+  overflow: auto;
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  border-radius: 3px;
+  background: var(--vscode-menu-background, var(--popover));
+  color: var(--vscode-menu-foreground, var(--popover-foreground));
+  box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28));
+}
+
+.architecture-search-results > p {
+  margin: 0;
+  padding: 14px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.architecture-search-results section + section {
+  border-top: 1px solid var(--vscode-menu-separatorBackground, var(--border));
+}
+
+.architecture-search-results h2 {
+  margin: 0;
+  padding: 7px 10px 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.architecture-search-results button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.architecture-search-results button:hover,
+.architecture-search-results button:focus-visible {
+  outline: none;
+  background: var(
+    --vscode-menu-selectionBackground,
+    var(--vscode-list-activeSelectionBackground, var(--accent))
+  );
+  color: var(
+    --vscode-menu-selectionForeground,
+    var(--vscode-list-activeSelectionForeground, var(--accent-foreground))
+  );
+}
+
+.architecture-search-results button span,
+.architecture-search-results button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-search-results button span {
+  font-size: 12px;
+}
+
+.architecture-search-results button small {
+  margin-top: 2px;
+  color: inherit;
+  font-size: 10px;
+  opacity: 0.72;
+}
+
+.architecture-overview,
+.architecture-detail {
+  max-width: 1500px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.architecture-detail {
+  margin-top: 26px;
+}
+
+.architecture-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.architecture-section-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.architecture-section-heading p {
+  margin: 3px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.architecture-detail-count {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .architecture-flow-grid,
 .architecture-symbol-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: .625rem;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px;
+}
+
+.architecture-flow {
+  display: grid;
+  min-width: 0;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background, var(--card));
+  color: var(--foreground);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+}
+
+.architecture-flow:hover {
+  border-color: var(--vscode-focusBorder, var(--ring));
+  background: var(--workbench-hover);
+}
+
+.architecture-flow > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-flow > svg {
+  width: 13px;
+  height: 13px;
+  color: var(--muted-foreground);
+}
+
+.architecture-flow-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.architecture-flow-footer p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.architecture-flow-footer button {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 10px;
+}
+
+.architecture-tab-content {
+  min-height: 280px;
+  padding-top: 8px;
+}
+
+.architecture-detail [data-slot="tabs-list"] {
+  width: 100%;
+  height: 30px;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.architecture-detail [data-slot="tabs-trigger"] {
+  height: 30px;
+  flex: 0 0 auto;
+  min-width: 76px;
+  padding: 4px 10px;
+  border-radius: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.architecture-detail [data-slot="tabs-trigger"][data-state="active"] {
+  color: var(--foreground);
+}
+
+.architecture-detail [data-slot="tabs-trigger"] > span {
+  min-width: 22px;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--muted-foreground));
+  font: 9px/1.4 var(--compass-font-mono);
+}
+
+.architecture-detail [data-slot="tabs-trigger"][data-state="active"] > span {
+  color: var(--vscode-badge-foreground, var(--foreground));
+}
+
+.architecture-detail [data-slot="tabs-trigger"]::after {
+  bottom: -1px;
+  background: var(--vscode-tab-activeBorder, var(--ring));
 }
 
 .architecture-symbol-grid {
-  margin-top: .75rem;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  margin-top: 8px;
+}
+
+.architecture-symbol-card {
+  display: grid;
+  min-width: 0;
+  min-height: 92px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: 0 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background, var(--card));
+  color: var(--card-foreground);
+}
+
+.architecture-symbol-card > svg {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--vscode-symbolIcon-functionForeground, var(--muted-foreground));
+}
+
+.architecture-symbol-card h3,
+.architecture-symbol-card p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-symbol-card h3 {
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.architecture-symbol-card p {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.architecture-symbol-card > button,
+.architecture-symbol-card > span {
+  grid-column: 1 / span 2;
+  align-self: end;
+  overflow: hidden;
+  margin-top: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--workbench-link);
+  font: 10px/1.35 var(--compass-font-mono);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-symbol-card > button:hover {
+  text-decoration: underline;
+}
+
+.architecture-symbol-card > span {
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+}
+
+.architecture-call-table {
+  max-height: min(54vh, 620px);
+  margin-top: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.architecture-call-table table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.architecture-call-table thead {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: var(--workbench-table-header);
+}
+
+.architecture-call-table th,
+.architecture-call-table td {
+  overflow: hidden;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-call-table th {
+  padding: 0;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.architecture-call-table th button {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.architecture-call-table th button:hover {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.architecture-call-table tbody tr:hover {
+  background: var(--workbench-hover);
+}
+
+.architecture-call-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.architecture-call-table th:nth-child(2),
+.architecture-call-table th:nth-child(4),
+.architecture-call-table td:nth-child(2),
+.architecture-call-table td:nth-child(4) {
+  width: 126px;
+}
+
+.architecture-shell button:focus-visible,
+.architecture-shell input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+body.vscode-high-contrast .architecture-section-list > button[aria-current="page"],
+body.vscode-high-contrast-light .architecture-section-list > button[aria-current="page"],
+body.vscode-high-contrast .architecture-flow:focus-visible,
+body.vscode-high-contrast-light .architecture-flow:focus-visible,
+body.vscode-high-contrast .architecture-symbol-card,
+body.vscode-high-contrast-light .architecture-symbol-card,
+body.vscode-high-contrast .architecture-call-table,
+body.vscode-high-contrast-light .architecture-call-table {
+  border-width: 2px;
+  border-color: var(--vscode-contrastBorder, var(--ring));
 }
 
 @media (max-width: 760px) {
@@ -1353,8 +3303,41 @@ body.vscode-high-contrast-light .compass-source-metadata {
   }
 
   .architecture-nav {
-    max-height: 42vh;
+    max-height: 38vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .architecture-main {
+    padding: 10px 10px 24px;
+  }
+
+  .architecture-global-search {
+    margin-bottom: 14px;
+  }
+
+  .architecture-section-heading {
+    align-items: flex-start;
+  }
+
+  .architecture-flow-grid,
+  .architecture-symbol-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .architecture-flow-footer,
+  .workbench-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workbench-collection-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workbench-search {
+    width: 100%;
+    max-width: none;
   }
 }

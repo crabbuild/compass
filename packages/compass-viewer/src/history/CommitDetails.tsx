@@ -1,8 +1,7 @@
-import { GitCompareIcon, HammerIcon, NetworkIcon, SearchIcon } from "lucide-react";
+import { GitCompareIcon, SearchIcon } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import type {
-  HistoryBuildState,
   HistoryChangeCounts,
   HistoryEntry,
   HistoryOperationError
@@ -10,61 +9,46 @@ import type {
 
 export function CommitDetails({
   entry,
-  buildState,
   operationError,
   availableCommits,
-  onLoad,
-  onBuild,
   onCompare,
   onQuery,
   changeCounts
 }: {
   entry: HistoryEntry;
-  buildState?: HistoryBuildState | undefined;
   operationError?: HistoryOperationError | undefined;
   availableCommits: ReadonlySet<string>;
-  onLoad(): void;
-  onBuild(): void;
   onCompare(parent: string): void;
   onQuery(): void;
   changeCounts?: HistoryChangeCounts | undefined;
 }) {
-  const buildBusy = buildState?.status === "requesting" || buildState?.status === "running";
-  const buildLabel = buildState?.status === "requesting"
-    ? "Choosing profile…"
-    : buildState?.status === "running"
-      ? "Building…"
-      : buildState?.status === "failed"
-        ? "Retry build"
-        : "Build graph";
   const unavailableParents = entry.parents.filter((parent) => !availableCommits.has(parent));
   const comparisonUnavailable = !entry.presentationAvailable || unavailableParents.length > 0;
   return (
-    <section className="rounded-md border bg-card p-4 text-card-foreground">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold">{entry.subject || "(no subject)"}</h2>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">{entry.commit}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {entry.authorName} · {new Date(entry.authoredAtSeconds * 1000).toLocaleString()}
-          </p>
+    <section className="history-commit-details" aria-labelledby="history-selected-title">
+      <div className="history-commit-heading">
+        <div className="history-commit-copy">
+          <span className="history-eyebrow">Selected revision</span>
+          <h2 id="history-selected-title">{entry.subject || "(no subject)"}</h2>
+          <div className="history-commit-metadata">
+            <code title={entry.commit}>{entry.commit.slice(0, 12)}</code>
+            <span>{entry.authorName}</span>
+            <time dateTime={new Date(entry.authoredAtSeconds * 1000).toISOString()}>
+              {new Date(entry.authoredAtSeconds * 1000).toLocaleString()}
+            </time>
+          </div>
         </div>
-        <Badge variant={entry.graphState === "failed" ? "destructive" : "outline"}>
+        <Badge
+          className="history-state-badge"
+          variant={entry.graphState === "failed" ? "destructive" : "outline"}
+        >
           {entry.graphState.replaceAll("_", " ")}
         </Badge>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {entry.presentationAvailable && (
-          <Button size="sm" onClick={onLoad}><NetworkIcon /> Open graph</Button>
-        )}
+      <div className="history-commit-actions">
         {entry.presentationAvailable && (
           <Button size="sm" variant="outline" onClick={onQuery}>
             <SearchIcon /> Query this revision
-          </Button>
-        )}
-        {!entry.presentationAvailable && (
-          <Button size="sm" variant="outline" disabled={buildBusy} onClick={onBuild}>
-            <HammerIcon /> {buildLabel}
           </Button>
         )}
         {entry.parents.map((parent, index) => (
@@ -85,35 +69,38 @@ export function CommitDetails({
         ))}
       </div>
       {comparisonUnavailable && entry.parents.length > 0 && (
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="history-comparison-help">
           Comparison unavailable: {!entry.presentationAvailable
             ? "build this revision first."
             : "one or more parent graphs are not available."}
         </p>
       )}
-      {buildState?.status === "failed" && (
-        <p className="mt-3 text-sm text-destructive" role="alert">
-          Build failed: {buildState.message}
-        </p>
-      )}
       {operationError && (
-        <p className="mt-3 text-sm text-destructive" role="alert">
+        <p className="history-inline-error" role="alert">
           {operationError.operation}: {operationError.message}
         </p>
       )}
       {changeCounts && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs" aria-label="Structural change counts">
-          <Badge variant="secondary">
-            nodes +{changeCounts.counts.nodes.added} −{changeCounts.counts.nodes.removed} ~{changeCounts.counts.nodes.changed}
-          </Badge>
-          <Badge variant="secondary">
-            edges +{changeCounts.counts.edges.added} −{changeCounts.counts.edges.removed} ~{changeCounts.counts.edges.changed}
-          </Badge>
-          <Badge variant="secondary">
-            hyperedges +{changeCounts.counts.hyperedges.added} −{changeCounts.counts.hyperedges.removed} ~{changeCounts.counts.hyperedges.changed}
-          </Badge>
+        <div className="history-change-counts" aria-label="Structural change counts">
+          <ChangeCount label="nodes" counts={changeCounts.counts.nodes} />
+          <ChangeCount label="edges" counts={changeCounts.counts.edges} />
+          <ChangeCount label="hyperedges" counts={changeCounts.counts.hyperedges} />
         </div>
       )}
     </section>
+  );
+}
+
+function ChangeCount({
+  label,
+  counts
+}: {
+  label: string;
+  counts: { added: number; removed: number; changed: number };
+}) {
+  return (
+    <span>
+      <strong>{label}</strong> +{counts.added} −{counts.removed} ~{counts.changed}
+    </span>
   );
 }

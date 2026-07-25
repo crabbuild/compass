@@ -16,9 +16,11 @@ test("compiled graph webview centers its loader and honors reduced motion", asyn
     (content!.x + content!.width / 2) - (shell!.x + shell!.width / 2)
   )).toBeLessThan(2);
 
-  await expect(page.locator(".compass-load-node").first())
-    .toHaveCSS("animation-name", "none");
-  await expect(page.locator(".compass-load-edge").first())
+  const mark = await page.locator(".compass-load-mark").boundingBox();
+  expect(mark).not.toBeNull();
+  expect(mark!.width).toBe(48);
+  expect(mark!.height).toBe(48);
+  await expect(page.locator(".compass-load-progress i"))
     .toHaveCSS("animation-name", "none");
 });
 

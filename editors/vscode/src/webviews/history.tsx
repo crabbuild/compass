@@ -3,6 +3,7 @@ import {
   HistoryTimelineSchema,
   HistoryChangeCountsSchema,
   HistoryWorkspace,
+  WorkspaceState,
   GraphViewModelSchema,
   compareGraphs,
   type GraphViewModel,
@@ -33,6 +34,8 @@ let activeCommunityRequest = "";
 let semanticDiff: unknown;
 let repositoryId = "";
 let changeCounts: HistoryChangeCounts | undefined;
+let revisionLoadState: "idle" | "loading" | "ready" = "idle";
+let bootstrapError: string | undefined;
 const buildStates = new Map<string, HistoryBuildState>();
 const operationErrors = new Map<string, HistoryOperationError>();
 
@@ -50,6 +53,7 @@ function clearRevisionPresentation(): void {
   communityLoading = null;
   communityError = undefined;
   activeCommunityRequest = "";
+  revisionLoadState = "idle";
 }
 
 function requestChangeCounts(commit: string): void {
@@ -59,11 +63,23 @@ function requestChangeCounts(commit: string): void {
   }
 }
 
+function requestSelectedRevision(commit: string): void {
+  const entry = timeline?.entries.find((candidate) => candidate.commit === commit);
+  if (!entry?.presentationAvailable) {
+    revisionLoadState = "idle";
+    return;
+  }
+  revisionLoadState = "loading";
+  operationErrors.delete(commit);
+  postMessage({ type: "loadRevision", commit });
+}
+
 function selectCommit(commit: string): void {
   if (commit === selectedCommit) return;
   selectedCommit = commit;
   clearRevisionPresentation();
   requestChangeCounts(commit);
+  requestSelectedRevision(commit);
   render();
 }
 
@@ -72,11 +88,43 @@ function acceptsCommit(commit: unknown): commit is string {
 }
 
 function render(): void {
-  if (!timeline) return;
+  if (bootstrapError) {
+    root.render(
+      <main className="history-bootstrap">
+        <WorkspaceState
+          kind="error"
+          title="Codebase evolution is unavailable"
+          description={bootstrapError}
+          action={{
+            label: "Retry history",
+            onClick() {
+              bootstrapError = undefined;
+              render();
+              postMessage({ type: "retryTimeline" });
+            }
+          }}
+        />
+      </main>
+    );
+    return;
+  }
+  if (!timeline) {
+    root.render(
+      <main className="history-bootstrap">
+        <WorkspaceState
+          kind="running"
+          title="Loading commit history"
+          description="Compass is reading reachable commits and revision graph states."
+        />
+      </main>
+    );
+    return;
+  }
   root.render(
     <HistoryWorkspace
       timeline={timeline}
       selectedCommit={selectedCommit}
+      revisionLoadState={revisionLoadState}
       buildState={buildStates.get(selectedCommit)}
       operationError={operationErrors.get(selectedCommit)}
       onSelectCommit={selectCommit}
@@ -96,6 +144,7 @@ function render(): void {
       changeCounts={changeCounts}
       host={{
         loadRevision(commit) {
+          revisionLoadState = "loading";
           operationErrors.delete(commit);
           render();
           postMessage({ type: "loadRevision", commit });
@@ -146,6 +195,7 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
     const parsed = HistoryTimelineSchema.safeParse(message.timeline);
     if (parsed.success) {
       timeline = parsed.data;
+      bootstrapError = undefined;
       repositoryId = message.repositoryId;
       const retainedCommit = timeline.entries.some((entry) => entry.commit === selectedCommit)
         ? selectedCommit
@@ -160,7 +210,12 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
         clearRevisionPresentation();
       }
       requestChangeCounts(nextCommit);
+      if (nextCommit && graphCommit !== nextCommit) requestSelectedRevision(nextCommit);
     }
+  } else if (message?.type === "bootstrapError") {
+    bootstrapError = message.message;
+    timeline = undefined;
+    clearRevisionPresentation();
   } else if (message?.type === "graph") {
     if (!acceptsCommit(message.commit)) return;
     const parsed = GraphViewModelSchema.safeParse(message.graph);
@@ -176,6 +231,7 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       communityError = undefined;
       activeCommunityRequest = "";
       operationErrors.delete(message.commit);
+      revisionLoadState = "ready";
     }
   } else if (message?.type === "communityGraph") {
     if (!acceptsCommit(message.commit)) return;
@@ -216,6 +272,7 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
         semantic: message.semanticDiff
       };
       operationErrors.delete(message.commit);
+      revisionLoadState = "ready";
     }
   } else if (message?.type === "changeCounts") {
     if (!acceptsCommit(message.commit)) return;
@@ -238,6 +295,7 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
         operation: message.operation,
         message: message.message
       });
+      if (message.operation === "Load graph") revisionLoadState = "idle";
     }
   } else {
     return;
@@ -245,4 +303,5 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
   render();
 });
 
+render();
 postMessage({ type: "ready" });

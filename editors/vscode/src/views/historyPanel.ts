@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
+import type { HistoryTimeline } from "@compass/viewer";
 import { buildHistoryArgs } from "../history/buildArguments";
 import { loadSemanticDiff } from "../history/diffClient";
 import { loadChangeCounts } from "../history/changeCountsClient";
@@ -34,13 +35,12 @@ export async function openHistoryPanel(
     vscode.Uri.joinPath(storageRoot, "history", repositoryKey).fsPath,
     session
   );
-  await revisions.initialize();
-  let timeline = await loadTimeline(session);
+  let timeline: HistoryTimeline | undefined;
+  let initialization: Promise<void> | undefined;
   const graphNodeLimit = vscode.workspace
     .getConfiguration("compass")
     .get("graphNodeLimit", 5000);
   const countCache = new Map<string, Awaited<ReturnType<typeof loadChangeCounts>>>();
-  panel.webview.html = html(context, panel.webview);
   let disposed = false;
   let activePanelBuild: {
     command: ReturnType<RepositorySession["processes"]["startJsonl"]>;
@@ -48,6 +48,22 @@ export async function openHistoryPanel(
   } | undefined;
   const postMessage = (message: HistoryHostMessage): Thenable<boolean> =>
     disposed ? Promise.resolve(false) : panel.webview.postMessage(message);
+  const ensureInitialized = (): Promise<void> => {
+    initialization ??= revisions.initialize();
+    return initialization;
+  };
+  const sendTimeline = async (): Promise<void> => {
+    try {
+      await ensureInitialized();
+      timeline = await loadTimeline(session);
+      await postMessage({ type: "timeline", timeline, repositoryId: session.id });
+    } catch (error) {
+      initialization = undefined;
+      const detail = error instanceof Error ? error.message : String(error);
+      output.appendLine(`[history:error] ${detail}`);
+      await postMessage({ type: "bootstrapError", message: detail });
+    }
+  };
   panel.onDidDispose(() => {
     disposed = true;
     if (activePanelBuild) {
@@ -179,10 +195,11 @@ export async function openHistoryPanel(
   };
   panel.webview.onDidReceiveMessage(async (message) => {
     try {
-      if (message?.type === "ready") {
-        await postMessage({ type: "timeline", timeline, repositoryId: session.id });
+      if (message?.type === "ready" || message?.type === "retryTimeline") {
+        await sendTimeline();
       } else if (message?.type === "loadRevision" && typeof message.commit === "string") {
-        const entry = timeline.entries.find((candidate) => candidate.commit === message.commit);
+        const entry = timeline?.entries.find((candidate) => candidate.commit === message.commit);
+        if (!entry) throw new Error("Reload commit history before opening this revision.");
         const revision = await revisions.load(
           message.commit,
           graphNodeLimit,
@@ -230,8 +247,8 @@ export async function openHistoryPanel(
       } else if (message?.type === "compare"
         && typeof message.commit === "string"
         && typeof message.parent === "string") {
-        const currentEntry = timeline.entries.find((entry) => entry.commit === message.commit);
-        const parentEntry = timeline.entries.find((entry) => entry.commit === message.parent);
+        const currentEntry = timeline?.entries.find((entry) => entry.commit === message.commit);
+        const parentEntry = timeline?.entries.find((entry) => entry.commit === message.parent);
         if (!currentEntry?.presentationAvailable || !parentEntry?.presentationAvailable) {
           throw new Error("Both revisions must have graph available before comparison.");
         }
@@ -251,7 +268,7 @@ export async function openHistoryPanel(
           semanticDiff
         });
       } else if (message?.type === "queryRevision" && typeof message.commit === "string") {
-        const entry = timeline.entries.find((candidate) => candidate.commit === message.commit);
+        const entry = timeline?.entries.find((candidate) => candidate.commit === message.commit);
         if (!entry?.presentationAvailable) {
           throw new Error("Build this revision's graph before querying it.");
         }
@@ -298,6 +315,7 @@ export async function openHistoryPanel(
       });
     }
   });
+  panel.webview.html = html(context, panel.webview);
 }
 
 function conciseBuildError(message: string): string {
@@ -325,6 +343,6 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>Compass Evolution</title></head>
-<body><div id="root" role="status">Loading every reachable Git commit…</div>
+<body><div id="root"></div>
 <script nonce="${nonce}" src="${script}"></script></body></html>`;
 }

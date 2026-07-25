@@ -12,3 +12,7 @@ export * from "./history/HistoryWorkspace";
 export * from "./history/ComparisonOverlay";
 export * from "./history/state";
 export * from "./architecture/ArchitectureFlow";
+export * from "./lib/collectionView";
+export * from "./components/workbench/CollectionToolbar";
+export * from "./components/workbench/Pagination";
+export * from "./components/workbench/WorkspaceState";

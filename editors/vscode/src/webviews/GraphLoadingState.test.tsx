@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GraphLoadingState } from "./GraphLoadingState";
 
 describe("GraphLoadingState", () => {
-  it("announces mapping while keeping the constellation decorative", () => {
+  it("announces mapping while keeping the mark decorative", () => {
     const markup = renderToStaticMarkup(
       <GraphLoadingState
         state={{ kind: "loading" }}
@@ -52,5 +52,25 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("Resolving the function under your cursor");
     expect(markup).toContain("Tracing callers");
     expect(markup).toContain("Tracing callees");
+  });
+
+  it("renders a compact Architecture loader with a layout skeleton", () => {
+    const markup = renderToStaticMarkup(
+      <GraphLoadingState
+        state={{ kind: "loading" }}
+        variant="architecture"
+        loadingCopy={{
+          eyebrow: "Compass architecture",
+          title: "Deriving architecture flow",
+          steps: ["Reading graph", "Deriving subsystem flows", "Preparing symbol index"]
+        }}
+        onRetry={vi.fn()}
+        onShowOutput={vi.fn()}
+      />
+    );
+
+    expect(markup).toContain("compass-load-mark");
+    expect(markup).toContain("architecture-load-skeleton");
+    expect(markup).toContain("Deriving subsystem flows");
   });
 });

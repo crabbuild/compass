@@ -24,6 +24,12 @@ function render(): void {
         },
         cancel() {
           vscode.postMessage({ type: "cancel" });
+        },
+        openSource(source) {
+          vscode.postMessage({ type: "openSource", source });
+        },
+        openGraph() {
+          vscode.postMessage({ type: "openGraph" });
         }
       }}
     />
