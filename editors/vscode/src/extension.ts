@@ -101,6 +101,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await handleSetupAction(action);
     return false;
   };
+  const selectRepository = async (repositoryId?: string) => {
+    const requested = registry.byId(repositoryId);
+    if (requested) return requested;
+    const editor = vscode.window.activeTextEditor;
+    const fromEditor = editor ? registry.forEditor(editor) : undefined;
+    if (fromEditor) return fromEditor;
+    const sessions = registry.all();
+    if (sessions.length === 0) {
+      void vscode.window.showInformationMessage("Open a repository folder first.");
+      return undefined;
+    }
+    if (sessions.length === 1) return sessions[0];
+    const picked = await vscode.window.showQuickPick(
+      sessions.map((session) => ({
+        label: vscode.workspace.asRelativePath(session.root),
+        description: session.root,
+        session
+      })),
+      { placeHolder: "Choose the repository Compass should open" }
+    );
+    return picked?.session;
+  };
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("compass.status", statusTree),
     vscode.window.registerTreeDataProvider("compass.operations", operationsTree),
@@ -111,10 +133,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
         return;
       }
-      const session = registry.byId(repositoryId)
-        ?? registry.forEditor(vscode.window.activeTextEditor);
+      const session = await selectRepository(repositoryId);
       if (!session) {
-        void vscode.window.showInformationMessage("Open a repository folder first.");
         return;
       }
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.graph)) return;
@@ -146,21 +166,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showErrorMessage(`Compass call graph failed: ${message(error)}`);
       }
     }),
-    vscode.commands.registerCommand("compass.openArchitecture", async () => {
-      const session = registry.forEditor(vscode.window.activeTextEditor);
+    vscode.commands.registerCommand("compass.openArchitecture", async (repositoryId?: string) => {
+      const session = await selectRepository(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.architecture)) return;
       await openArchitecturePanel(context, session);
     }),
-    vscode.commands.registerCommand("compass.openQuery", async () => {
-      const session = registry.forEditor(vscode.window.activeTextEditor);
+    vscode.commands.registerCommand("compass.openQuery", async (repositoryId?: string) => {
+      const session = await selectRepository(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.query)) return;
       await openQueryPanel(context, session);
     }),
     vscode.commands.registerCommand("compass.openHistory", async (repositoryId?: string) => {
-      const session = registry.byId(repositoryId)
-        ?? registry.forEditor(vscode.window.activeTextEditor);
+      const session = await selectRepository(repositoryId);
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.history)) return;
       await openHistoryPanel(context, session, output);
