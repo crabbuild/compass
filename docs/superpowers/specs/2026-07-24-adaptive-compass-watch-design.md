@@ -1,7 +1,7 @@
 # Adaptive Compass Watch Design
 
-**Status:** Approved  
-**Date:** 2026-07-24  
+**Status:** Approved
+**Date:** 2026-07-24
 **Scope:** Native `compass watch`; Graphify compatibility behavior remains frozen
 
 ## Problem

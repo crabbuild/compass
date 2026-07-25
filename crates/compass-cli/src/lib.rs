@@ -31,10 +31,10 @@ use std::time::{Duration, Instant};
 
 use compass_core::{
     BuildOptions, BuildPurpose, BuildResult, BuildTimings, ClusterExistingOptions, ExportInputs,
-    LoadedGraph, SemanticLayer, WatchOptions, WatchStatus, build_graph_with_layers,
-    build_graph_with_layers_and_tiebreaker, cluster_existing_graph, default_graph_path,
-    diagnose_graph_file, format_diagnostic_json, format_diagnostic_report, merge_graphs,
-    watch_local_graph,
+    LoadedGraph, SemanticLayer, WatchBackend, WatchBuildReason, WatchOptions, WatchStatus,
+    build_graph_with_layers, build_graph_with_layers_and_tiebreaker, cluster_existing_graph,
+    default_graph_path, diagnose_graph_file, format_diagnostic_json, format_diagnostic_report,
+    merge_graphs, watch_local_graph,
 };
 use compass_files::{
     BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect, write_bytes_atomic,
@@ -456,7 +456,23 @@ fn mcp_help(frontend: McpFrontend) -> String {
 /// Signal registration lives at this process boundary rather than in
 /// `compass-core`, so embedders can provide their own cancellation mechanism.
 pub fn run_watch(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
-    run_watch_with_frontend(Frontend::Compass, arguments, stdout, stderr)
+    run_watch_with_frontend(Frontend::Compass, arguments, stdout, stderr, true)
+}
+
+/// Run Compass's watcher with terminal-aware status rendering.
+pub fn run_watch_with_terminal(
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    output_is_terminal: bool,
+) -> u8 {
+    run_watch_with_frontend(
+        Frontend::Compass,
+        arguments,
+        stdout,
+        stderr,
+        output_is_terminal,
+    )
 }
 
 /// Run the frozen Graphify watch frontend without requiring Python or watchdog.
@@ -465,7 +481,7 @@ pub fn run_graphify_watch(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> u8 {
-    run_watch_with_frontend(Frontend::Graphify, arguments, stdout, stderr)
+    run_watch_with_frontend(Frontend::Graphify, arguments, stdout, stderr, true)
 }
 
 fn run_watch_with_frontend(
@@ -473,6 +489,7 @@ fn run_watch_with_frontend(
     arguments: &[OsString],
     stdout: &mut impl Write,
     stderr: &mut impl Write,
+    output_is_terminal: bool,
 ) -> u8 {
     let args = arguments
         .iter()
@@ -497,7 +514,7 @@ fn run_watch_with_frontend(
         }
     };
     let result = watch_local_graph(&options, stop, |status| {
-        write_watch_status(frontend, status, stdout, stderr);
+        write_watch_status_mode(frontend, status, stdout, stderr, output_is_terminal);
     });
     match result {
         Ok(()) => 0,
@@ -508,13 +525,89 @@ fn run_watch_with_frontend(
     }
 }
 
+#[cfg(test)]
 fn write_watch_status(
     frontend: Frontend,
     status: WatchStatus,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) {
+    write_watch_status_mode(frontend, status, stdout, stderr, true);
+}
+
+fn write_watch_status_mode(
+    frontend: Frontend,
+    status: WatchStatus,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    output_is_terminal: bool,
+) {
+    let timestamp = (!output_is_terminal && frontend == Frontend::Compass)
+        .then(watch_timestamp)
+        .flatten();
+    macro_rules! native_line {
+        ($writer:expr, $($argument:tt)*) => {
+            if let Some(timestamp) = timestamp.as_deref() {
+                writeln!($writer, "[{timestamp}] {}", format_args!($($argument)*))
+            } else {
+                writeln!($writer, $($argument)*)
+            }
+        };
+    }
     match status {
+        WatchStatus::Starting {
+            root,
+            includes,
+            excludes,
+            output,
+        } => {
+            if frontend == Frontend::Compass {
+                let scope = if includes == 0 {
+                    format!("all eligible files, {excludes} exclude")
+                } else {
+                    format!("{includes} include, {excludes} exclude")
+                };
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] Starting {} (scope: {scope}; output: {})",
+                    root.display(),
+                    output.display()
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::Backend {
+            backend,
+            fallback_error,
+            poll_interval,
+        } => {
+            if frontend == Frontend::Compass {
+                match (backend, fallback_error) {
+                    (WatchBackend::Native, _) => {
+                        let _result = native_line!(
+                            stdout,
+                            "[compass watch] Native filesystem events active."
+                        );
+                    }
+                    (WatchBackend::Polling, Some(error)) => {
+                        let _result = native_line!(
+                            stderr,
+                            "[compass watch] Native watcher unavailable; polling every {}s: {error}",
+                            poll_interval.as_secs_f64()
+                        );
+                    }
+                    (WatchBackend::Polling, None) => {
+                        let _result = native_line!(
+                            stdout,
+                            "[compass watch] Polling every {}s.",
+                            poll_interval.as_secs_f64()
+                        );
+                    }
+                }
+                let _result = stdout.flush();
+                let _result = stderr.flush();
+            }
+        }
         WatchStatus::Watching { root, debounce } => {
             if frontend == Frontend::Graphify {
                 let _result = writeln!(
@@ -534,21 +627,52 @@ fn write_watch_status(
                 let _result = stdout.flush();
                 return;
             }
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Watching {} - press Ctrl+C to stop",
                 root.display()
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Deterministic changes rebuild locally; semantic media changes set needs_update."
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
-                "[compass watch] Debounce: {}s",
+                "[compass watch] Adaptive debounce: {}s",
                 debounce.as_secs_f64()
             );
             let _result = stdout.flush();
+        }
+        WatchStatus::Synchronizing => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(stdout, "[compass watch] Synchronizing current graph…");
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::Settling {
+            paths,
+            quiet_window,
+            maximum_window,
+        } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] {paths} path(s) changed; settling for {}s (maximum {}s)…",
+                    quiet_window.as_secs_f64(),
+                    maximum_window.as_secs_f64()
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::Building { reason } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] Building ({})…",
+                    watch_reason(reason)
+                );
+                let _result = stdout.flush();
+            }
         }
         WatchStatus::Batch {
             paths,
@@ -561,9 +685,9 @@ fn write_watch_status(
                 let _result = stdout.flush();
                 return;
             }
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
-                "\n[compass watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
+                "[compass watch] {} file(s) changed ({deterministic} deterministic, {semantic} semantic)",
                 paths.len()
             );
             let _result = stdout.flush();
@@ -595,7 +719,7 @@ fn write_watch_status(
                 let _result = stdout.flush();
                 return;
             }
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Rebuilt: {} nodes, {} edges, {} communities ({} extracted, {} cached)",
                 result.nodes,
@@ -604,17 +728,55 @@ fn write_watch_status(
                 result.files_extracted,
                 result.files_cached
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] {}",
                 format_program_analysis(&result)
             );
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] graph artifacts updated in {}",
                 result.output_dir.display()
             );
             let _result = stdout.flush();
+        }
+        WatchStatus::UpToDate { reason } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] Up to date after {}.",
+                    watch_reason(reason)
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::FollowUpQueued { paths } => {
+            if frontend == Frontend::Compass {
+                let _result = native_line!(
+                    stdout,
+                    "[compass watch] {paths} path(s) arrived during build; one follow-up queued."
+                );
+                let _result = stdout.flush();
+            }
+        }
+        WatchStatus::RetryScheduled {
+            delay,
+            error,
+            repeated,
+        } => {
+            if frontend == Frontend::Compass {
+                let suffix = if repeated > 1 {
+                    format!(" (same failure {repeated} times)")
+                } else {
+                    String::new()
+                };
+                let _result = native_line!(
+                    stderr,
+                    "[compass watch] Build failed; retrying in {}s: {error}{suffix}",
+                    delay.as_secs_f64()
+                );
+                let _result = stderr.flush();
+            }
         }
         WatchStatus::SemanticUpdateRequired { flag } => {
             if frontend == Frontend::Graphify {
@@ -643,7 +805,7 @@ fn write_watch_status(
                 let _result = stdout.flush();
                 return;
             }
-            let _result = writeln!(
+            let _result = native_line!(
                 stdout,
                 "[compass watch] Semantic media changed; update required. Flag written to {}",
                 flag.display()
@@ -656,7 +818,7 @@ fn write_watch_status(
                 let _result = stdout.flush();
                 return;
             }
-            let _result = writeln!(stderr, "[compass watch] Filesystem event error: {error}");
+            let _result = native_line!(stderr, "[compass watch] Filesystem event error: {error}");
             let _result = stderr.flush();
         }
         WatchStatus::RebuildError(error) => {
@@ -664,8 +826,15 @@ fn write_watch_status(
                 let _result = writeln!(stdout, "[graphify watch] Rebuild failed: {error}");
                 let _result = stdout.flush();
             } else {
-                let _result = writeln!(stderr, "[compass watch] Rebuild failed: {error}");
+                let _result = native_line!(stderr, "[compass watch] Rebuild failed: {error}");
                 let _result = stderr.flush();
+            }
+        }
+        WatchStatus::Finishing => {
+            if frontend == Frontend::Compass {
+                let _result =
+                    native_line!(stdout, "[compass watch] Finishing the active atomic build…");
+                let _result = stdout.flush();
             }
         }
         WatchStatus::Stopped => {
@@ -674,10 +843,29 @@ fn write_watch_status(
             } else {
                 "compass watch"
             };
-            let _result = writeln!(stdout, "\n[{label}] Stopped.");
+            let _result = if frontend == Frontend::Compass {
+                native_line!(stdout, "[{label}] Stopped.")
+            } else {
+                writeln!(stdout, "\n[{label}] Stopped.")
+            };
             let _result = stdout.flush();
         }
     }
+}
+
+fn watch_reason(reason: WatchBuildReason) -> &'static str {
+    match reason {
+        WatchBuildReason::Initial => "initial synchronization",
+        WatchBuildReason::Changes => "filesystem changes",
+        WatchBuildReason::Retry => "retry",
+        WatchBuildReason::Reconciliation => "periodic reconciliation",
+    }
+}
+
+fn watch_timestamp() -> Option<String> {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()
 }
 
 fn parse_watch_options(
@@ -701,12 +889,14 @@ fn parse_watch_options(
         }
         let mut options = WatchOptions::new(root);
         options.graphify_compatibility = true;
+        options.adaptive = false;
+        options.debounce = Duration::from_secs(3);
         options.force_polling = cfg!(target_os = "macos");
         return Ok(Some(options));
     }
     let mut root = None;
     let mut output_root = None;
-    let mut debounce = Duration::from_secs(3);
+    let mut debounce = Duration::from_millis(150);
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut gitignore = true;
@@ -3903,9 +4093,54 @@ mod mcp_option_tests {
         let mut stderr = Vec::new();
         write_watch_status(
             Frontend::Compass,
+            WatchStatus::Starting {
+                root: PathBuf::from("project"),
+                includes: 1,
+                excludes: 2,
+                output: PathBuf::from("project/compass-out"),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::Backend {
+                backend: WatchBackend::Native,
+                fallback_error: None,
+                poll_interval: Duration::from_millis(500),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::Synchronizing,
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
             WatchStatus::Watching {
                 root: PathBuf::from("project"),
                 debounce: Duration::from_millis(1500),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::Settling {
+                paths: 2,
+                quiet_window: Duration::from_millis(150),
+                maximum_window: Duration::from_millis(750),
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::Building {
+                reason: WatchBuildReason::Changes,
             },
             &mut stdout,
             &mut stderr,
@@ -3917,6 +4152,36 @@ mod mcp_option_tests {
                 deterministic: 1,
                 semantic: 1,
             },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::UpToDate {
+                reason: WatchBuildReason::Reconciliation,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::FollowUpQueued { paths: 1 },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::RetryScheduled {
+                delay: Duration::from_secs(2),
+                error: "temporarily blocked".to_owned(),
+                repeated: 1,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+        write_watch_status(
+            Frontend::Compass,
+            WatchStatus::Finishing,
             &mut stdout,
             &mut stderr,
         );
@@ -3955,13 +4220,33 @@ mod mcp_option_tests {
 
         let stdout = String::from_utf8(stdout)?;
         let stderr = String::from_utf8(stderr)?;
+        assert!(stdout.contains("Starting project (scope: 1 include, 2 exclude"));
+        assert!(stdout.contains("Native filesystem events active"));
+        assert!(stdout.contains("Synchronizing current graph"));
         assert!(stdout.contains("[compass watch] Watching project"));
+        assert!(stdout.contains("settling for 0.15s (maximum 0.75s)"));
+        assert!(stdout.contains("Building (filesystem changes)"));
         assert!(stdout.contains("2 file(s) changed (1 deterministic, 1 semantic)"));
         assert!(stdout.contains("3 nodes, 2 edges, 1 communities (1 extracted, 1 cached)"));
+        assert!(stdout.contains("Up to date after periodic reconciliation"));
+        assert!(stdout.contains("one follow-up queued"));
+        assert!(stdout.contains("Finishing the active atomic build"));
         assert!(stdout.contains("Flag written to project/compass-out/needs_update"));
         assert!(stdout.contains("[compass watch] Stopped."));
         assert!(stderr.contains("Filesystem event error: event failed"));
         assert!(stderr.contains("Rebuild failed: build failed"));
+        assert!(stderr.contains("retrying in 2s: temporarily blocked"));
+
+        let mut logged = Vec::new();
+        write_watch_status_mode(
+            Frontend::Compass,
+            WatchStatus::Synchronizing,
+            &mut logged,
+            &mut Vec::new(),
+            false,
+        );
+        let logged = String::from_utf8(logged)?;
+        assert!(logged.contains("Z] [compass watch] Synchronizing current graph"));
         Ok(())
     }
 
@@ -4217,6 +4502,14 @@ mod mcp_option_tests {
         assert_eq!(watch.build.output_root, Some(PathBuf::from("artifacts")));
         assert_eq!(watch.build.extra_excludes, ["target"]);
         assert!(watch.force_polling);
+        assert!(watch.adaptive);
+
+        let defaults = parse_watch_options(Frontend::Compass, &[])?.ok_or("unexpected help")?;
+        assert_eq!(defaults.debounce, Duration::from_millis(150));
+        assert!(defaults.adaptive);
+        let graphify = parse_watch_options(Frontend::Graphify, &[])?.ok_or("unexpected help")?;
+        assert_eq!(graphify.debounce, Duration::from_secs(3));
+        assert!(!graphify.adaptive);
 
         assert_eq!(
             command_cluster_only(Frontend::Compass, &["--help".to_owned()]).code,
