@@ -1,7 +1,7 @@
 ## compass
 
-Use the Compass knowledge graph at `compass-out/` before broad workspace
-searches. Run `compass query "<question>"` for scoped context, use
+When `compass-out/graph.json` exists, use the Compass knowledge graph before
+broad workspace searches. Run `compass query "<question>"` for scoped context, use
 `compass path "<source>" "<target>"` for dependency routes, and use
 `compass affected "<symbol>"` for change-review scope. Read
 `compass-out/GRAPH_REPORT.md` for broad architecture and navigate from

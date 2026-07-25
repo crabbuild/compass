@@ -1,6 +1,8 @@
 ## compass
 
-This project has a Compass knowledge graph at `compass-out/`.
+When `compass-out/graph.json` exists, use the Compass knowledge graph as the
+first navigation layer. If it is absent, ask before running `compass update .`
+unless the current task already requires building the graph.
 
 Rules:
 

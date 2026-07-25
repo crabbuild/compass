@@ -235,12 +235,24 @@ Read the [versioned history guide](docs/guides/versioned-history.md) and
 ### Connect a coding assistant
 
 ```bash
-compass install --project --platform codex
+compass install
 ```
 
-The installed Compass skill teaches supported assistants to start from the
-architecture report, request a focused subgraph, and open only the source files
-needed to verify an answer.
+Inside a Git repository, Compass detects installed coding agents and configures
+them at the repository root. Codex, Gemini CLI, OpenCode, Copilot, and generic
+Agent Skills clients share one portable `.agents/skills/compass` package;
+Claude Code, Kiro, and Cline use their native skill roots. Use repeatable
+`--platform` flags when you want explicit selection:
+
+```bash
+compass install --platform codex --platform claude
+compass install --all --dry-run
+compass install --user --format json
+```
+
+The skill teaches assistants to use an existing Compass graph as the first
+navigation layer, request a focused subgraph, and open only the source files
+needed to verify an answer. Installation does not build a graph.
 
 ```text
 architecture question

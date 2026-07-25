@@ -1,6 +1,10 @@
 ---
 name: compass
 description: "Use for questions about a codebase, its architecture, dependencies, history, change impact, or project artifacts—especially when compass-out exists or the user invokes /compass."
+compatibility: "Requires the Compass CLI; works with Agent Skills-compatible coding agents."
+metadata:
+  version: "1"
+  product: "compass"
 ---
 
 # Compass
