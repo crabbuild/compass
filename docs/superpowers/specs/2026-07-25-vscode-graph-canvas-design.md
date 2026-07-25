@@ -5,32 +5,38 @@
 ## Goal
 
 Give the Compass VS Code code graph the visual language and interaction quality
-of the richer Compass HTML export design preserved in `html.rs`, while keeping
+of the active Compass HTML export implemented in `html.rs`, while keeping
 the canvas native to VS Code themes. Let a user double-click a node in the code
 graph, call graph, or historical graph to open its source file at the exact
 recorded location.
 
 ## Product boundary
 
-The active HTML exporter and VS Code extension already render the same shared
-React `CompassGraph`. The implementation will rewrite that shared component
-and its `VisNetworkCanvas` rather than creating a VS Code-only copy or embedding
-an exported HTML document in the webview.
+On `main`, `compass export html` routes through `html_document`, `render`, and
+`page` in `crates/compass-output/src/html.rs`. That rich, self-contained canvas
+is active product behavior and remains the authoritative UX reference.
 
-This preserves one graph model, one layout implementation, and one interaction
-surface across:
+The extension foundation branch unintentionally replaced that route with
+`shared_viewer_html`, leaving `page` unused. The implementation must correct
+that regression:
 
-- `compass export html`;
-- the VS Code current graph;
-- VS Code historical graphs; and
-- the call graph adapter.
+- `compass export html` continues to use the existing `html.rs` renderer;
+- `compass export viewer-json` remains a separate, versioned data surface for
+  IDE consumers;
+- the VS Code current and historical graphs render the React `CompassGraph`;
+  and
+- the call graph continues to adapt its versioned response into
+  `CompassGraph`.
 
-The dormant `page` implementation in `crates/compass-output/src/html.rs` is the
-design reference, not a second runtime to revive.
+The VS Code canvas will reproduce the active export's design and interactions
+in React. It will not embed `graph.html`, load the export's remote script, or
+replace the active exporter with the React runtime. This keeps the standalone
+HTML contract stable while preserving VS Code source navigation, CSP, theme
+integration, and local-only assets.
 
 ## Visual design
 
-The shared React graph will adopt the reference export's principal visual
+The React graph will adopt the active export's principal visual
 elements:
 
 - a layered radial canvas with a subtle dotted texture;
@@ -59,11 +65,11 @@ Inside VS Code, every semantic surface uses VS Code CSS variables first:
 - editor and UI font variables for proportional and monospace text.
 
 The dark Compass export palette from `html.rs` supplies fallbacks when VS Code
-variables are unavailable. A standalone HTML export therefore retains the
-recognizable Compass dark appearance, while a VS Code webview follows the
-active light, dark, or high-contrast theme without a reload-specific fork.
-Community colors remain stable across hosts unless accessibility contrast
-requires an outline supplied by the host theme.
+variables are unavailable. The existing standalone HTML export keeps its fixed
+Compass appearance unchanged. A VS Code webview follows the active light,
+dark, or high-contrast theme without a separate component fork. Community
+colors remain stable across hosts unless accessibility contrast requires an
+outline supplied by the host theme.
 
 ## Canvas behavior
 
@@ -82,8 +88,9 @@ not own inspector state.
 - inspector metadata and connected-node navigation; and
 - source-open eligibility.
 
-The existing community overview produced for graphs above the node limit
-remains supported. Community drill-down is not added in this change because
+The existing community overview produced for IDE graphs above the node limit
+remains supported. The active HTML export retains its embedded community
+drill-down. Community drill-down is not added to the IDE in this change because
 the versioned viewer model does not contain the full hidden member subgraphs.
 Adding that payload would be a separate contract and performance decision.
 
@@ -113,8 +120,9 @@ second navigation implementation. Historical graphs also reuse
 The VS Code host continues to validate the message, confirm the repository
 identity, reject paths outside the repository, open the document in preview,
 convert byte or line coordinates to a VS Code range, reveal it, and select it.
-The export viewer keeps its existing host bridge and receives the same
-double-click behavior when its host supports source navigation.
+The standalone HTML export keeps its existing double-click community behavior.
+Source opening is an IDE-host interaction and is not added to the standalone
+export in this change.
 
 ## Viewer model
 
@@ -158,9 +166,14 @@ reset controls available.
 
 Implementation verification will cover:
 
+- `compass export html` still emits the active `html.rs` toolbar, sidebar,
+  hover cards, community drill-down, and fixed Compass palette;
+- HTML export no longer routes through `shared_viewer_html`;
+- `compass export viewer-json` remains versioned and independent from HTML
+  rendering;
 - the Rust viewer model serializes the optional presentation metadata;
 - old `/1` graph payloads still validate;
-- the shared canvas uses the reference ForceAtlas2 and edge options;
+- the React canvas uses the active export's ForceAtlas2 and edge options;
 - light, dark, and high-contrast VS Code tokens have valid fallbacks;
 - toolbar, inspector, hover card, community controls, and responsive layout
   render correctly;
