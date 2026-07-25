@@ -587,6 +587,25 @@ Managed integration/update probe.
 - `COMPASS_OUT` can change the default output root for several compatible
   command families; explicit `--out` is clearer in automation.
 
+## IDE and graph-inspection commands
+
+```text
+compass capabilities --format json
+compass export viewer-json --output PATH
+compass export callflow-json --output PATH
+compass program call-graph (--symbol SYMBOL | --source FILE --byte BYTE)
+  [--direction callers|callees|both] [--depth N] --format json
+compass history timeline [--rev REV] --format json
+compass history change-counts REV [--parent REV] --format json
+compass history export REV --format viewer-json --output PATH
+```
+
+`history timeline` is inspection-only and defaults to all commits reachable
+from local refs. `history change-counts` requires existing preferred
+realizations for both revisions and never builds them. Guided writers accept
+`--events jsonl`; stdout then contains `compass.ide.progress/1` events and
+human diagnostics move to stderr.
+
 ## Output and exit conventions
 
 Human text goes to stdout on success. Diagnostics go to stderr.

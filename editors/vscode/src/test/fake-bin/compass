@@ -1,0 +1,17 @@
+#!/usr/bin/env node
+const command = process.argv[2];
+if (command === "capabilities") {
+  process.stdout.write(JSON.stringify({
+    schema: "compass.ide.capabilities/1",
+    compass_version: "0.1.4-test",
+    contracts: {
+      graph_viewer: "compass.viewer.graph/1",
+      call_graph: "compass.program.call_graph/1",
+      history_timeline: "compass.history.timeline/1"
+    },
+    features: { update: true, watch: true, history: true }
+  }));
+  process.exit(0);
+}
+process.stderr.write(`unsupported fake Compass command: ${command}\n`);
+process.exit(2);

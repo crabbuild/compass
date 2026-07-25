@@ -25,7 +25,12 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
         compass_version: env!("CARGO_PKG_VERSION"),
         contracts: BTreeMap::from([
             ("graph_viewer", compass_output::GRAPH_VIEWER_SCHEMA),
+            ("callflow_viewer", compass_output::CALLFLOW_VIEWER_SCHEMA),
+            ("program_call_graph", compass_analysis::CALL_GRAPH_SCHEMA),
             ("progress", crate::ide_contract::PROGRESS_SCHEMA),
+            ("history_timeline", compass_history::HISTORY_TIMELINE_SCHEMA),
+            ("history_change_counts", "compass.history.change_counts/1"),
+            ("history_viewer_graph", "compass.history.viewer_graph/1"),
         ]),
         features: BTreeMap::from([
             ("init", true),

@@ -17,6 +17,8 @@ Don't publish credentials, private source code, exploit details, or other sensit
 ## Set up the workspace
 
 Compass requires Rust 1.97.1 or newer. The repository pins its toolchain and required components in `rust-toolchain.toml`.
+VS Code extension development additionally uses the Node/npm version recorded
+in the root `package.json`.
 
 ```bash
 git clone https://github.com/crabbuild/compass.git
@@ -28,6 +30,16 @@ Run the command-line interface from the workspace while developing:
 
 ```bash
 cargo run --locked -p compass-cli -- --help
+```
+
+For viewer and extension changes:
+
+```bash
+npm ci
+npm run typecheck:js
+npm run test:js
+npm run build
+node scripts/check_viewer_assets.mjs
 ```
 
 Python isn't required to build Compass. Differential compatibility tests need a sibling Graphify checkout and the interpreters described in [COMPATIBILITY.md](COMPATIBILITY.md).

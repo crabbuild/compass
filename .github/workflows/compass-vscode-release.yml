@@ -1,0 +1,43 @@
+name: Compass VS Code Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Extension version to package
+        required: true
+      confirm:
+        description: Type "package" to confirm
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  vsix:
+    if: inputs.confirm == 'package'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.13.1"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify requested version
+        run: test "$(node -p "require('./editors/vscode/package.json').version")" = "${{ inputs.version }}"
+      - run: npm run typecheck:js
+      - run: npm run test:js
+      - run: xvfb-run -a npm run test:integration -w compass-vscode
+      - run: node scripts/check_viewer_assets.mjs
+      - run: npm run package -w editors/vscode
+      - run: npm run smoke:vsix -w editors/vscode
+      - name: Record SHA-256
+        run: shasum -a 256 editors/vscode/*.vsix > editors/vscode/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compass-vscode-${{ inputs.version }}
+          path: |
+            editors/vscode/*.vsix
+            editors/vscode/SHA256SUMS

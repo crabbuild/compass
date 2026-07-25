@@ -1,0 +1,70 @@
+# Use Compass in VS Code
+
+The Compass extension is a local, workspace-hosted interface to the separately
+installed `compass` CLI. It works in desktop VS Code and on Remote SSH, WSL, and
+Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
+
+## Set up
+
+1. Install Compass and confirm `compass --version` works on the workspace host.
+2. Install the Compass VSIX.
+3. Open a trusted repository.
+4. If the extension cannot find Compass on `PATH`, choose **Select Compass
+   Binary** or set `compass.cliPath`.
+5. Open the Compass activity bar and run **Initialize Repository**.
+
+Initialization previews include and exclude globs before it writes
+`.compass/config.toml`. The extension never installs a CLI automatically.
+
+## Current graph
+
+Choose **Open Code Graph** to use the exact same versioned graph model and React
+viewer as `compass export html`. Search symbols and files, pause or resume the
+layout, filter communities, inspect connected nodes, and open source directly.
+Graphs above 5,000 nodes use Compass's community overview.
+
+## Calls and architecture
+
+Place the cursor inside a function and run **Open Call Graph from Cursor**.
+Compass resolves the cursor as a UTF-8 byte position, selects the innermost
+function, and expands callers, callees, or both with explicit depth and size
+bounds. Resolved, inferred, ambiguous, and unresolved calls use distinct labels
+and visual treatment. Unresolved calls never prove that another call is absent.
+
+Use **Open Architecture Flow** for the broader subsystem call-flow document,
+cross-community relationships, symbol lists, call tables, confidence, and
+source links.
+
+## Query
+
+Use **Query Codebase** for natural-language discovery or deterministic
+CompassQL. CompassQL parameters and limits are sent as literal process
+arguments. Use Cmd/Ctrl+Enter to run a query.
+
+## Evolution
+
+**Open Codebase Evolution** lists every commit reachable from all local refs.
+Use `--rev` at the CLI boundary when a consumer intentionally wants one
+reachable subgraph. Each commit
+has one clear state:
+
+- **Graph available** — an exact preferred realization can be opened.
+- **Not materialized** — no graph exists; selecting it does not start a build.
+- **Building** — an explicit history build is active.
+- **Failed** — the latest build attempt failed without affecting other commits.
+
+Choose **Build graph** to materialize a missing commit explicitly using the
+configured profile, a code-only build, or a profile inherited from another
+revision. Historical
+exports are validated against the full commit and realization identity, decoded
+in a three-entry memory cache, and removed from temporary storage after use.
+Choose a parent to see structural counts and Compass semantic findings. Queries
+can target the selected available revision; unavailable revisions stay
+disabled and are never materialized implicitly.
+
+## Security
+
+The extension is disabled for untrusted workspaces. It starts Compass with
+argument arrays and `shell: false`, bounds captured output, validates every
+versioned payload, rejects repository mismatches and path escapes, loads no
+remote webview resources, and sends no telemetry.

@@ -86,6 +86,7 @@ export function CompassGraph({ model, host }: Props) {
               <Input
                 className="pl-8"
                 type="search"
+                role="combobox"
                 value={state.query}
                 placeholder="Search nodes and files"
                 aria-label="Search graph nodes"

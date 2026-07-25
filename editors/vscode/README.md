@@ -1,0 +1,37 @@
+# Compass for VS Code
+
+Compass brings the local-first Compass code graph into VS Code. The extension
+uses the same React graph viewer and versioned models as Compass's offline
+exports.
+
+## Requirements
+
+Install the `compass` CLI separately on the same machine or remote extension
+host where VS Code opens the workspace. The extension never bundles a native
+binary and never sends telemetry.
+
+If `compass` is not on `PATH`, set **Compass: CLI Path** or choose **Select
+Compass Binary** from the guided setup.
+
+## Workflows
+
+- Initialize, update, and watch a repository from the Compass activity bar.
+- Explore the current graph and open source from a selected node.
+- Start a caller/callee graph from the function under the cursor and expand it
+  by depth while retaining resolved, inferred, ambiguous, and unresolved calls.
+- Read the broader architecture flow document in a separate editor tab.
+- Run natural-language queries or deterministic CompassQL.
+- Browse every reachable Git commit with graph states: graph available, not
+  materialized, building, or failed.
+- Explicitly build missing historical graphs, load exact revisions, and compare
+  a commit with any parent using structural and semantic findings.
+
+Compass runs only in trusted workspaces. Browser-only `vscode.dev` is not
+supported; Remote SSH, WSL, and Dev Containers run Compass on the remote
+extension host.
+
+## Privacy and safety
+
+All graph and query processing is local unless you explicitly configure a
+Compass semantic provider. Webviews contain only local assets. CLI processes
+are spawned with argument arrays and no shell.

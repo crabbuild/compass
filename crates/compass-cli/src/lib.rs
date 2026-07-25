@@ -47,9 +47,9 @@ use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
 use compass_output::{
     CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
-    TreeOptions, WikiOptions, export_obsidian, export_wiki, graph_view_model_document,
-    node_filenames, write_callflow_html, write_canvas, write_cypher, write_graphml, write_html,
-    write_svg, write_tree_html,
+    TreeOptions, WikiOptions, callflow_view_model, export_obsidian, export_wiki,
+    graph_view_model_document, node_filenames, write_callflow_html, write_canvas, write_cypher,
+    write_graphml, write_html, write_svg, write_tree_html,
 };
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, TraversalMode, format_affected, format_benchmark, query_graph_text,
@@ -166,6 +166,21 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
+    let events = if frontend == Frontend::Compass {
+        let mut os_args = args.iter().map(OsString::from).collect::<Vec<_>>();
+        match ide_contract::take_jsonl_events(&mut os_args) {
+            Ok(enabled) => {
+                args = os_args
+                    .into_iter()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect();
+                enabled
+            }
+            Err(error) => return Outcome::failure_with_code(error, 2),
+        }
+    } else {
+        false
+    };
     if frontend == Frontend::Compass {
         if let Some(outcome) = help::request(&args, HelpStyle::Plain) {
             return outcome;
@@ -178,6 +193,14 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         return Outcome::success(graphify_help());
     };
     args.remove(0);
+    let operation = if command == "history" {
+        args.first().map_or_else(
+            || command.clone(),
+            |subcommand| format!("{command}_{subcommand}"),
+        )
+    } else {
+        command.clone()
+    };
     let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
@@ -241,10 +264,82 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         )),
         _ => Outcome::failure(help::unknown_command(&command)),
     };
-    if frontend == Frontend::Compass {
+    let outcome = if frontend == Frontend::Compass {
         help::append_usage_hint(outcome, &command, &args)
     } else {
         outcome
+    };
+    if events {
+        ide_contract::progress_outcome(&operation, outcome)
+    } else {
+        outcome
+    }
+}
+
+pub fn run_watch_jsonl(
+    arguments: &[OsString],
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> u8 {
+    let operation_id = format!("watch-{}", std::process::id());
+    let mut writer = ide_contract::ProgressWriter::new(stdout);
+    if writer
+        .write(&ide_contract::ProgressEvent {
+            schema: ide_contract::PROGRESS_SCHEMA,
+            operation_id: &operation_id,
+            operation: "watch",
+            state: ide_contract::ProgressState::Started,
+            phase: "watching",
+            current: None,
+            total: None,
+            message: "Compass watch started",
+            terminal: false,
+        })
+        .is_err()
+    {
+        return 1;
+    }
+    let code = run_watch_with_frontend(
+        Frontend::Compass,
+        arguments,
+        &mut std::io::sink(),
+        stderr,
+        false,
+    );
+    let cancelled = PROCESS_CANCELLED.load(Ordering::Acquire);
+    let terminal = ide_contract::ProgressEvent {
+        schema: ide_contract::PROGRESS_SCHEMA,
+        operation_id: &operation_id,
+        operation: "watch",
+        state: if cancelled {
+            ide_contract::ProgressState::Cancelled
+        } else if code == 0 {
+            ide_contract::ProgressState::Succeeded
+        } else {
+            ide_contract::ProgressState::Failed
+        },
+        phase: if cancelled {
+            "cancelled"
+        } else if code == 0 {
+            "complete"
+        } else {
+            "failed"
+        },
+        current: None,
+        total: None,
+        message: if cancelled {
+            "Compass watch stopped"
+        } else if code == 0 {
+            "Compass watch completed"
+        } else {
+            "Compass watch failed"
+        },
+        terminal: true,
+    };
+    if writer.write(&terminal).is_err() {
+        1
+    } else {
+        code
     }
 }
 
@@ -3056,6 +3151,7 @@ fn command_export(args: &[String]) -> Outcome {
         "html"
             | "viewer-json"
             | "callflow-html"
+            | "callflow-json"
             | "obsidian"
             | "wiki"
             | "svg"
@@ -3219,10 +3315,14 @@ fn command_export(args: &[String]) -> Outcome {
                 no_viz = true;
                 index += 1;
             }
-            "-h" | "--help" if format == "callflow-html" => {
+            "-h" | "--help" if matches!(format, "callflow-html" | "callflow-json") => {
                 return Outcome::success(callflow_help());
             }
-            value if format == "callflow-html" && !value.starts_with('-') && !graph_explicit => {
+            value
+                if matches!(format, "callflow-html" | "callflow-json")
+                    && !value.starts_with('-')
+                    && !graph_explicit =>
+            {
                 let candidate = PathBuf::from(value);
                 graph_path = if candidate.file_name().and_then(|name| name.to_str())
                     == Some("graph.json")
@@ -3298,6 +3398,16 @@ fn command_export(args: &[String]) -> Outcome {
             max_diagram_nodes,
             max_diagram_edges,
         ),
+        "callflow-json" => export_callflow_json(
+            &inputs,
+            &graph_path,
+            sections_path.as_deref(),
+            &language,
+            max_sections,
+            diagram_scale,
+            max_diagram_nodes,
+            max_diagram_edges,
+        ),
         "obsidian" => export_obsidian_cli(&inputs, &obsidian_dir),
         "wiki" => export_wiki_cli(&inputs, output_dir),
         "svg" => write_svg(
@@ -3338,6 +3448,53 @@ fn command_export(args: &[String]) -> Outcome {
         Ok(output) => Outcome::success(output),
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn export_callflow_json(
+    inputs: &ExportInputs,
+    graph_path: &Path,
+    sections_path: Option<&Path>,
+    language: &str,
+    max_sections: usize,
+    diagram_scale: f64,
+    max_diagram_nodes: usize,
+    max_diagram_edges: usize,
+) -> Result<String, String> {
+    let sections = sections_path.map(load_sections).transpose()?;
+    let project = inputs
+        .document
+        .graph
+        .get("project_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            graph_path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "Project".to_owned());
+    let model = callflow_view_model(
+        &inputs.document,
+        &inputs.communities,
+        &CallflowOptions {
+            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+            sections: sections.as_deref(),
+            report: &inputs.report,
+            project_name: &project,
+            language,
+            max_sections,
+            diagram_scale,
+            max_diagram_nodes,
+            max_diagram_edges,
+            ..CallflowOptions::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    serde_json::to_string(&model).map_err(|error| error.to_string())
 }
 
 fn export_neo4j(

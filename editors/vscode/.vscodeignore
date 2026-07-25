@@ -1,0 +1,14 @@
+src/**
+node_modules/**
+**/*.map
+*.vsix
+esbuild.mjs
+tsconfig.json
+**/*.test.*
+**/fixtures/**
+**/traces/**
+dist/test/**
+dist/extension.js
+.vscode-test/**
+scripts/**
+.DS_Store

@@ -2,6 +2,7 @@
 
 mod backup;
 mod callflow;
+mod callflow_model;
 mod canvas;
 mod cql;
 mod cypher;
@@ -20,6 +21,11 @@ pub use backup::{BackupResult, backup_if_protected};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,
+};
+pub use callflow_model::{
+    CALLFLOW_VIEWER_SCHEMA, CallflowProvenance, CallflowStatistics, CallflowViewEdge,
+    CallflowViewLink, CallflowViewModel, CallflowViewNode, CallflowViewSection,
+    callflow_view_model,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};

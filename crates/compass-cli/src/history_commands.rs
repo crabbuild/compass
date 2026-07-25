@@ -4,9 +4,9 @@ use compass_core::{
     materialize_history_with_observer,
 };
 use compass_history::{
-    ArtifactClass, BuildProfile, ClaimedJob, CommitId, ExtractionFingerprint, GitTargetLimitation,
-    HistoryConfig, HistoryError, HistoryQueue, HistoryStore, JobRequest, JobState,
-    PublishedVersion, RealizationId, Repository,
+    ArtifactClass, BuildProfile, ChangeKind, ChangeSink, ClaimedJob, CommitId,
+    ExtractionFingerprint, GitTargetLimitation, GraphChange, HistoryConfig, HistoryError,
+    HistoryQueue, HistoryStore, JobRequest, JobState, PublishedVersion, RealizationId, Repository,
 };
 
 use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
@@ -19,7 +19,7 @@ pub(crate) fn help(frontend: Frontend) -> String {
         "graphify"
     };
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|viewer-json|compass-out --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -317,6 +317,12 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
     if matches!(args[0].as_str(), "build" | "rebuild") {
         return execute_build(&repository, &args[0], &args[1..]);
     }
+    if args[0] == "timeline" {
+        return execute_timeline(&repository, &args[1..]);
+    }
+    if args[0] == "change-counts" {
+        return execute_change_counts(&repository, &args[1..]);
+    }
     if args[0] == "gc" {
         return execute_gc(&repository, &args[1..]);
     }
@@ -596,6 +602,44 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             exact(&positionals, 1, "export requires REV")?;
             let output = output.ok_or_else(|| usage("export requires --output PATH"))?;
             let commit = repository.resolve(&positionals[0]).map_err(runtime)?;
+            if format == "viewer-json" {
+                let history = store(&repository)?;
+                let preferred = history
+                    .preferred(&commit)
+                    .map_err(runtime)?
+                    .ok_or_else(|| {
+                        runtime(format!(
+                            "revision {commit} is not materialized; build it explicitly first"
+                        ))
+                    })?;
+                history.validate(&preferred.id).map_err(runtime)?;
+                let artifacts = history.artifacts(&preferred.id).map_err(runtime)?;
+                let communities = communities_from_document(&artifacts.artifacts.document);
+                let labels = history_labels(artifacts.artifacts.labels.as_ref());
+                let graph = compass_output::graph_view_model_document(
+                    &artifacts.artifacts.document,
+                    &communities,
+                    format!("{} @ {}", repository.root().display(), commit),
+                    &compass_output::HtmlOptions {
+                        community_labels: (!labels.is_empty()).then_some(&labels),
+                        member_counts: None,
+                        node_limit: Some(5_000),
+                        learning_overlay: None,
+                    },
+                )
+                .map_err(runtime)?
+                .ok_or_else(|| runtime("historical graph has no renderable overview"))?;
+                let envelope = serde_json::json!({
+                    "schema": "compass.history.viewer_graph/1",
+                    "commit": commit,
+                    "realization": preferred.id,
+                    "fingerprint": preferred.version.extraction_fingerprint,
+                    "graph": graph,
+                });
+                let bytes = serde_json::to_vec(&envelope).map_err(runtime)?;
+                compass_files::write_bytes_atomic(&output, &bytes).map_err(runtime)?;
+                return Ok(format!("exported {} to {}", preferred.id, output.display()));
+            }
             let build_options = configured_build_options(&repository).map_err(runtime)?;
             let (history, preferred) =
                 resolve_or_materialize(&repository, commit, &build_options, false, false)
@@ -658,12 +702,279 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 )
                 .map_err(runtime)?;
             } else {
-                return Err(usage("export --format must be graph-json or compass-out"));
+                return Err(usage(
+                    "export --format must be graph-json, viewer-json, or compass-out",
+                ));
             }
             Ok(format!("exported {} to {}", preferred.id, output.display()))
         }
         other => Err(usage(format!("unknown history command {other}"))),
     }
+}
+
+#[derive(Default, serde::Serialize)]
+struct RecordChangeCounts {
+    added: u64,
+    removed: u64,
+    changed: u64,
+}
+
+#[derive(Default, serde::Serialize)]
+struct ChangeCounts {
+    nodes: RecordChangeCounts,
+    edges: RecordChangeCounts,
+    hyperedges: RecordChangeCounts,
+}
+
+impl ChangeSink for ChangeCounts {
+    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
+        let counts = match change.record {
+            compass_history::RecordKind::Node => &mut self.nodes,
+            compass_history::RecordKind::Edge => &mut self.edges,
+            compass_history::RecordKind::Hyperedge => &mut self.hyperedges,
+            _ => return Ok(()),
+        };
+        match change.change {
+            ChangeKind::Added => counts.added += 1,
+            ChangeKind::Removed => counts.removed += 1,
+            ChangeKind::Changed => counts.changed += 1,
+        }
+        Ok(())
+    }
+}
+
+fn execute_change_counts(
+    repository: &Repository,
+    args: &[String],
+) -> Result<String, CommandFailure> {
+    let mut revision = None;
+    let mut parent_revision = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--parent" => {
+                index += 1;
+                parent_revision = Some(
+                    args.get(index)
+                        .ok_or_else(|| usage("--parent requires a revision"))?
+                        .clone(),
+                );
+            }
+            "--format" => {
+                index += 1;
+                if args.get(index).map(String::as_str) != Some("json") {
+                    return Err(usage("history change-counts requires --format json"));
+                }
+            }
+            value if value.starts_with("--parent=") => {
+                parent_revision = Some(value[9..].to_owned());
+            }
+            value if value.starts_with("--format=") => {
+                if &value[9..] != "json" {
+                    return Err(usage("history change-counts requires --format json"));
+                }
+            }
+            value if value.starts_with('-') => {
+                return Err(usage(format!(
+                    "unknown history change-counts option {value}"
+                )));
+            }
+            value if revision.is_none() => revision = Some(value.to_owned()),
+            value => {
+                return Err(usage(format!(
+                    "history change-counts accepts one revision, unexpected: {value}"
+                )));
+            }
+        }
+        index += 1;
+    }
+    let revision = revision.ok_or_else(|| usage("history change-counts requires REV"))?;
+    let commit = repository.resolve(&revision).map_err(runtime)?;
+    let parent = if let Some(parent) = parent_revision {
+        repository.resolve(&parent).map_err(runtime)?
+    } else {
+        repository
+            .parents(&commit)
+            .map_err(runtime)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| runtime(format!("revision {commit} has no parent to compare")))?
+    };
+    let history = store(repository)?;
+    let current = history
+        .preferred(&commit)
+        .map_err(runtime)?
+        .ok_or_else(|| runtime(format!("revision {commit} is not materialized")))?;
+    let previous = history
+        .preferred(&parent)
+        .map_err(runtime)?
+        .ok_or_else(|| runtime(format!("parent revision {parent} is not materialized")))?;
+    history.validate(&current.id).map_err(runtime)?;
+    history.validate(&previous.id).map_err(runtime)?;
+    let mut counts = ChangeCounts::default();
+    history
+        .diff_records(
+            &previous.id,
+            &current.id,
+            &[
+                compass_history::RecordKind::Node,
+                compass_history::RecordKind::Edge,
+                compass_history::RecordKind::Hyperedge,
+            ],
+            &mut counts,
+        )
+        .map_err(runtime)?;
+    serde_json::to_string(&serde_json::json!({
+        "schema": "compass.history.change_counts/1",
+        "commit": commit,
+        "parent": parent,
+        "counts": counts,
+    }))
+    .map_err(runtime)
+}
+
+fn communities_from_document(
+    document: &compass_model::GraphDocument,
+) -> compass_graph::Communities {
+    let mut communities = compass_graph::Communities::new();
+    for node in &document.nodes {
+        let community = node
+            .attributes
+            .get("community")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as usize;
+        communities
+            .entry(community)
+            .or_default()
+            .push(node.id.clone());
+    }
+    communities
+}
+
+fn history_labels(labels: Option<&serde_json::Value>) -> std::collections::BTreeMap<usize, String> {
+    labels
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|labels| labels.iter())
+        .filter_map(|(community, label)| {
+            Some((community.parse().ok()?, label.as_str()?.to_owned()))
+        })
+        .collect()
+}
+
+fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
+    let mut revision = "HEAD".to_owned();
+    let mut revision_selected = false;
+    let mut format = "json".to_owned();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--rev" => {
+                index += 1;
+                revision = args
+                    .get(index)
+                    .ok_or_else(|| usage("--rev requires a revision"))?
+                    .clone();
+                revision_selected = true;
+            }
+            "--format" => {
+                index += 1;
+                format = args
+                    .get(index)
+                    .ok_or_else(|| usage("--format requires json"))?
+                    .clone();
+            }
+            value if value.starts_with("--rev=") => {
+                revision = value[6..].to_owned();
+                revision_selected = true;
+            }
+            value if value.starts_with("--format=") => format = value[9..].to_owned(),
+            value => return Err(usage(format!("unknown history timeline option {value}"))),
+        }
+        index += 1;
+    }
+    if format != "json" {
+        return Err(usage("history timeline requires --format json"));
+    }
+    let head = repository.resolve(&revision).map_err(runtime)?;
+    let mut commits = if revision_selected {
+        repository
+            .reachable_commits(&head, false)
+            .map_err(runtime)?
+    } else {
+        repository.all_reachable_commits().map_err(runtime)?
+    };
+    commits.reverse();
+    let history = HistoryStore::open_existing(repository).map_err(runtime)?;
+    let versions = history
+        .as_ref()
+        .map(|store| store.list(None))
+        .transpose()
+        .map_err(runtime)?
+        .unwrap_or_default();
+    let preferred = versions
+        .into_iter()
+        .filter(|version| version.preferred)
+        .map(|version| (version.version.git_commit.clone(), version))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let jobs = HistoryQueue::open_existing(repository)
+        .map_err(runtime)?
+        .map(|queue| queue.list())
+        .transpose()
+        .map_err(runtime)?
+        .unwrap_or_default()
+        .into_iter()
+        .fold(
+            std::collections::HashMap::<String, compass_history::JobRecord>::new(),
+            |mut latest, job| {
+                let replace = latest
+                    .get(job.commit.as_str())
+                    .is_none_or(|current| current.updated_at_millis < job.updated_at_millis);
+                if replace {
+                    latest.insert(job.commit.to_string(), job);
+                }
+                latest
+            },
+        );
+    let entries = commits
+        .into_iter()
+        .map(|commit| {
+            let metadata = repository.timeline_commit(&commit).map_err(runtime)?;
+            let version = preferred.get(commit.as_str());
+            let job = jobs.get(commit.as_str());
+            let graph_state = if version.is_some() {
+                "graph_available"
+            } else {
+                match job.map(|job| job.state) {
+                    Some(JobState::Queued | JobState::Building | JobState::Validating) => "building",
+                    Some(JobState::Failed | JobState::Incomplete) => "failed",
+                    Some(JobState::Published) | None => "not_materialized",
+                }
+            };
+            Ok(serde_json::json!({
+                "commit": metadata.commit,
+                "parents": metadata.parents,
+                "authorName": metadata.author_name,
+                "authorEmail": metadata.author_email,
+                "authoredAtSeconds": metadata.authored_at_seconds,
+                "subject": metadata.subject,
+                "graphState": graph_state,
+                "presentationAvailable": version.is_some(),
+                "realization": version.map(|version| version.id.as_hex()),
+                "fingerprint": version.map(|version| version.version.extraction_fingerprint.as_str()),
+                "job": job,
+            }))
+        })
+        .collect::<Result<Vec<_>, CommandFailure>>()?;
+    let config = HistoryConfig::load(repository).map_err(runtime)?;
+    serde_json::to_string(&serde_json::json!({
+        "schema": compass_history::HISTORY_TIMELINE_SCHEMA,
+        "repositoryId": repository.common_dir().to_string_lossy(),
+        "selectedHead": head,
+        "historyEnabled": config.enabled,
+        "entries": entries,
+    }))
+    .map_err(runtime)
 }
 
 fn execute_gc(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {

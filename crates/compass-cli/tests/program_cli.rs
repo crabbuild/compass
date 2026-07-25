@@ -212,6 +212,28 @@ fn program_commands_inspect_explain_and_query_canonical_ir() -> Result<(), Box<d
         "helper"
     );
 
+    let call_graph = run(
+        Frontend::Compass,
+        [
+            OsString::from("program"),
+            OsString::from("call-graph"),
+            OsString::from("--at"),
+            OsString::from(format!("src/lib.rs:{byte}")),
+            OsString::from("--direction"),
+            OsString::from("both"),
+            OsString::from("--depth"),
+            OsString::from("2"),
+            OsString::from("--program"),
+            OsString::from(program_arg.as_ref()),
+            OsString::from("--format=json"),
+        ],
+    );
+    assert_eq!(call_graph.code, 0, "{}", call_graph.stderr);
+    let call_graph_json: serde_json::Value = serde_json::from_str(&call_graph.stdout)?;
+    assert_eq!(call_graph_json["schema"], "compass.program.call_graph/1");
+    assert_eq!(call_graph_json["edges"][0]["resolution"], "resolved");
+    assert_eq!(call_graph_json["edges"][0]["callee"], "helper");
+
     let queried = run(
         Frontend::Compass,
         [

@@ -218,7 +218,7 @@ const PAGES: &[Page] = &[
         "program",
         "Inspect and query canonical Program IR",
         ["compass program <COMMAND> [OPTIONS]"],
-        "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
+        "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  call-graph                 Build a bounded caller/callee graph from --symbol or --at\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
     ),
     page!(
         "path",
@@ -326,7 +326,7 @@ const PAGES: &[Page] = &[
         "export",
         "Export or publish the graph in another format",
         ["compass export <FORMAT> [OPTIONS]"],
-        "Examples:\n  compass export html\n  compass export viewer-json --graph compass-out/graph.json\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
+        "Examples:\n  compass export html\n  compass export viewer-json --graph compass-out/graph.json\n  compass export callflow-json --graph compass-out/graph.json\n  compass export graphml --graph compass-out/graph.json\n  compass export neo4j --push bolt://localhost:7687\n\nTips:\n  Run `compass help export <format>` for format-specific options."
     ),
     page!(
         "export html",
@@ -985,7 +985,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 36);
+        assert_eq!(roots.len(), 37);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

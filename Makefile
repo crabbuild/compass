@@ -99,6 +99,20 @@ test: ## Run self-contained workspace tests
 	@printf "$(BOLD)Running native workspace tests...$(RESET)\n"
 	$(CARGO) test --workspace --exclude compass-parity --lib --bins --locked $(TEST_FLAGS)
 
+.PHONY: test-js
+test-js: ## Typecheck and test the shared viewer and editor integrations
+	npm ci
+	npm run typecheck:js
+	npm run test:js
+	node scripts/check_viewer_assets.mjs
+
+.PHONY: test-vscode
+test-vscode: ## Build and package-check the Compass VS Code extension
+	npm run build:viewer
+	npm run build:vscode
+	npm run package -w editors/vscode
+	npm run smoke:vsix -w editors/vscode
+
 .PHONY: test-all
 test-all: ## Run all tests (requires the documented Python oracle setup)
 	$(CARGO) test --workspace --all-targets --all-features --locked $(TEST_FLAGS)

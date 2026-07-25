@@ -72,19 +72,16 @@ export function registerBuildCommands(
         debounceSeconds: 0.4,
         poll: false
       }).join(" ")}`);
-      const command = session.processes.run(
+      const command = session.processes.startJsonl(
         session.root,
-        buildWatchArgs({ root: session.root, debounceSeconds: 0.4, poll: false })
+        buildWatchArgs({ root: session.root, debounceSeconds: 0.4, poll: false }),
+        (event) => output.appendLine(`[${event.phase}] ${event.message}`)
       );
-      session.watch = {
-        operationId: `watch:${session.id}`,
-        completed: command,
-        cancel() {
-          // Watch cancellation is upgraded by the JSONL process contract when supported.
+      session.watch = command;
+      void command.completed.finally(async () => {
+        if (session.watch?.operationId === command.operationId) {
+          session.watch = undefined;
         }
-      };
-      void command.finally(async () => {
-        session.watch = undefined;
         await refresh();
       });
       void vscode.window.showInformationMessage("Compass watch started.");
@@ -106,14 +103,19 @@ async function runGuided(
   }
   session.graphState = "building";
   await refresh();
-  const controller = new AbortController();
+  const command = session.processes.startJsonl(
+    session.root,
+    args,
+    (event) => output.appendLine(`[${event.phase}] ${event.message}`)
+  );
+  session.activeWriter = command;
   try {
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title, cancellable: true },
       async (_, token) => {
-        token.onCancellationRequested(() => controller.abort());
+        token.onCancellationRequested(() => command.cancel());
         output.appendLine(`> compass ${args.join(" ")}`);
-        return session.processes.run(session.root, args, controller.signal);
+        return command.completed;
       }
     );
     output.append(result.stdout);
@@ -124,6 +126,9 @@ async function runGuided(
     session.graphState = "failed";
     void vscode.window.showErrorMessage(`Compass failed: ${message(error)}`);
   } finally {
+    if (session.activeWriter?.operationId === command.operationId) {
+      session.activeWriter = undefined;
+    }
     await refresh();
   }
 }

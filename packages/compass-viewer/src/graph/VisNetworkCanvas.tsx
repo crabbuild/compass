@@ -223,6 +223,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       <div
         ref={containerRef}
         className="compass-canvas"
+        role="region"
         aria-label="Interactive Compass code graph"
       />
     );

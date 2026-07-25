@@ -329,6 +329,7 @@ fn source_line_range(location: &str) -> (Option<u64>, Option<u64>) {
     (start.parse().ok(), end.and_then(|end| end.parse().ok()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn node_tooltip(
     label: &str,
     symbol_kind: &str,
@@ -766,6 +767,7 @@ fn resolve_learning_source(source: &str, output_path: &Path) -> Option<std::path
 }
 
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn page(
     title: &str,
     stats: &str,

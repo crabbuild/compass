@@ -81,6 +81,16 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
         serde_json::from_slice::<serde_json::Value>(&status_json.stdout)?["store"],
         false
     );
+    let timeline = run(
+        compass,
+        directory.path(),
+        &["history", "timeline", "--format=json"],
+    )?;
+    assert!(timeline.status.success());
+    let timeline: serde_json::Value = serde_json::from_slice(&timeline.stdout)?;
+    assert_eq!(timeline["schema"], "compass.history.timeline/1");
+    assert_eq!(timeline["entries"].as_array().map(Vec::len), Some(1));
+    assert_eq!(timeline["entries"][0]["graphState"], "not_materialized");
     assert!(!directory.path().join(".git/compass").exists());
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::create(&repository)?;

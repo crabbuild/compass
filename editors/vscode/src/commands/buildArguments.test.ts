@@ -10,14 +10,16 @@ describe("Compass argument builders", () => {
       force: false
     })).toEqual([
       "init", "/repo", "--include", "src/**", "--exclude", "vendor/**",
-      "--exclude", "$(touch nope)", "--yes"
+      "--exclude", "$(touch nope)", "--yes", "--events", "jsonl"
     ]);
   });
 
   it("builds update and watch commands", () => {
     expect(buildUpdateArgs({ root: "/repo", noViz: true }))
-      .toEqual(["update", "/repo", "--no-viz"]);
+      .toEqual(["update", "/repo", "--no-viz", "--events", "jsonl"]);
     expect(buildWatchArgs({ root: "/repo", debounceSeconds: 0.4, poll: true }))
-      .toEqual(["watch", "/repo", "--debounce", "0.4", "--poll"]);
+      .toEqual([
+        "watch", "/repo", "--debounce", "0.4", "--poll", "--events", "jsonl"
+      ]);
   });
 });

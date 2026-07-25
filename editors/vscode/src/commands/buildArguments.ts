@@ -10,11 +10,11 @@ export function buildInitArgs(options: InitOptions): string[] {
   for (const include of options.includes) args.push("--include", include);
   for (const exclude of options.excludes) args.push("--exclude", exclude);
   if (options.force) args.push("--force");
-  return [...args, "--yes"];
+  return [...args, "--yes", "--events", "jsonl"];
 }
 
 export function buildUpdateArgs(options: { root: string; noViz?: boolean }): string[] {
-  return ["update", options.root, ...(options.noViz ? ["--no-viz"] : [])];
+  return ["update", options.root, ...(options.noViz ? ["--no-viz"] : []), "--events", "jsonl"];
 }
 
 export function buildWatchArgs(options: {
@@ -27,6 +27,8 @@ export function buildWatchArgs(options: {
     options.root,
     "--debounce",
     String(options.debounceSeconds),
-    ...(options.poll ? ["--poll"] : [])
+    ...(options.poll ? ["--poll"] : []),
+    "--events",
+    "jsonl"
   ];
 }

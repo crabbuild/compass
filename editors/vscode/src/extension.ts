@@ -4,6 +4,10 @@ import { discoverCompass } from "./cli/discovery";
 import { CompassProcessManager } from "./cli/processManager";
 import { registerBuildCommands } from "./commands/buildCommands";
 import { GraphPanel } from "./views/graphPanel";
+import { CallGraphPanel } from "./views/callGraphPanel";
+import { openArchitecturePanel } from "./views/architecturePanel";
+import { openQueryPanel } from "./views/queryPanel";
+import { openHistoryPanel } from "./views/historyPanel";
 import { OperationsTree } from "./views/operationsTree";
 import { StatusTree } from "./views/statusTree";
 import { createCompassStatusBar } from "./views/statusBar";
@@ -68,10 +72,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       await GraphPanel.open(context, session);
     }),
-    vscode.commands.registerCommand("compass.openCallGraph", () => unavailable("Call graph")),
-    vscode.commands.registerCommand("compass.openArchitecture", () => unavailable("Architecture flow")),
-    vscode.commands.registerCommand("compass.openQuery", () => unavailable("Query")),
-    vscode.commands.registerCommand("compass.openHistory", () => unavailable("Evolution"))
+    vscode.commands.registerCommand("compass.openCallGraph", async () => {
+      const editor = vscode.window.activeTextEditor;
+      const session = registry.forEditor(editor);
+      if (!editor || !session) {
+        void vscode.window.showInformationMessage(
+          "Place the cursor inside a repository function to open its call graph."
+        );
+        return;
+      }
+      try {
+        await CallGraphPanel.open(context, session, editor);
+      } catch (error) {
+        void vscode.window.showErrorMessage(`Compass call graph failed: ${message(error)}`);
+      }
+    }),
+    vscode.commands.registerCommand("compass.openArchitecture", async () => {
+      const session = registry.forEditor(vscode.window.activeTextEditor);
+      if (!session) return;
+      await openArchitecturePanel(context, session);
+    }),
+    vscode.commands.registerCommand("compass.openQuery", async () => {
+      const session = registry.forEditor(vscode.window.activeTextEditor);
+      if (!session) return;
+      await openQueryPanel(context, session);
+    }),
+    vscode.commands.registerCommand("compass.openHistory", async () => {
+      const session = registry.forEditor(vscode.window.activeTextEditor);
+      if (!session) return;
+      await openHistoryPanel(context, session, output);
+    })
   );
   registerBuildCommands(context, registry, output, refresh);
   statusBar.refresh();
@@ -102,10 +132,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {}
-
-function unavailable(feature: string): void {
-  void vscode.window.showInformationMessage(`${feature} is being prepared for this Compass build.`);
-}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

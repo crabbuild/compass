@@ -20,10 +20,19 @@ export class CompassProcessManager {
   ) {}
 
   run(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
-    const child = this.start(cwd, args);
-    const cancel = () => child.kill();
+    const command = this.startCommand(cwd, args);
+    const cancel = () => command.cancel();
     signal?.addEventListener("abort", cancel, { once: true });
-    return collect(child).finally(() => signal?.removeEventListener("abort", cancel));
+    return command.completed.finally(() => signal?.removeEventListener("abort", cancel));
+  }
+
+  startCommand(cwd: string, args: readonly string[]): RunningCommand {
+    const child = this.start(cwd, args);
+    return {
+      operationId: randomUUID(),
+      completed: collect(child),
+      cancel: () => child.kill()
+    };
   }
 
   async runJson<T>(

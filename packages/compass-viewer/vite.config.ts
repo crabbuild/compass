@@ -8,6 +8,9 @@ const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    "process.env.NODE_ENV": JSON.stringify("production")
+  },
   resolve: {
     alias: {
       "@": path.resolve(packageDirectory, "src")
@@ -22,7 +25,7 @@ export default defineConfig({
     },
     cssCodeSplit: false,
     sourcemap: false,
-    outDir: "dist",
+    outDir: process.env.COMPASS_VIEWER_OUT_DIR ?? "dist",
     emptyOutDir: true
   },
   test: {

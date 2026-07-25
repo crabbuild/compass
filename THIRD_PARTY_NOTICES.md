@@ -14,3 +14,12 @@ license, attribution, and trademark notices. A copy of the license is at
 This product is an independent implementation. It is not approved by or
 affiliated with Neo4j or the openCypher Implementers Group. “Cypher” is a
 registered trademark of Neo4j, Inc.
+
+## Lucide icons
+
+The Compass VS Code extension uses and adapts the Lucide Compass icon.
+Copyright Lucide Contributors. Licensed under the ISC License.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the copyright
+notice and this permission notice appear in all copies.
