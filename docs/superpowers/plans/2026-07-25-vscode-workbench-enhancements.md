@@ -18,7 +18,8 @@
 - Use existing extension commands as the single execution path for tree actions.
 - Preserve VS Code high-contrast themes and `prefers-reduced-motion`.
 - Preserve the stacked inspector layout below `760px`.
-- Run `graphify update .` from `/Users/haipingfu/graphify` after code changes.
+- Store repository graph artifacts only under `<repository>/compass-out/`.
+- Do not create or use a `graphify-out/` directory for this feature.
 
 ---
 
@@ -1060,17 +1061,16 @@ git commit -m "docs(vscode): explain repository operations and history"
 
 ---
 
-### Task 7: Full verification and graph refresh
+### Task 7: Full verification
 
 **Files:**
 - Modify if required by generated output: `crates/compass-output/assets/viewer/graph.js`
 - Modify if required by generated output: `crates/compass-output/assets/viewer/viewer.css`
 - Modify if required by generated output: `crates/compass-output/assets/viewer/manifest.json`
-- Refresh: `/Users/haipingfu/graphify/graphify-out/`
 
 **Interfaces:**
 - Consumes: the complete implementation from Tasks 1–6.
-- Produces: verified extension artifacts, current embedded viewer assets, and an updated Graphify knowledge graph.
+- Produces: verified extension artifacts and current embedded viewer assets.
 
 - [ ] **Step 1: Run all JavaScript unit tests and type checks**
 
@@ -1131,24 +1131,9 @@ git diff --stat
 Expected: only the planned source, tests, docs, package metadata, and generated
 viewer assets are modified; `git diff --check` prints nothing.
 
-- [ ] **Step 6: Refresh the root Graphify knowledge graph**
-
-Run:
-
-```bash
-cd /Users/haipingfu/graphify
-graphify update .
-```
-
-Expected: `graphify-out/GRAPH_REPORT.md`, `graphify-out/graph.json`, labels,
-manifest, and cache metadata reflect the code changes without API usage.
-
-- [ ] **Step 7: Commit final generated artifacts if the earlier commits did not capture them**
+- [ ] **Step 6: Commit final generated artifacts if the earlier commits did not capture them**
 
 ```bash
 git add crates/compass-output/assets/viewer/graph.js crates/compass-output/assets/viewer/viewer.css crates/compass-output/assets/viewer/manifest.json
 git diff --cached --quiet || git commit -m "chore(viewer): refresh embedded assets"
 ```
-
-Do not stage root `graphify-out/` unless that directory is already intentionally
-tracked by the root repository.

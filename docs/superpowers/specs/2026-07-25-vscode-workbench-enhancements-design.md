@@ -29,6 +29,10 @@ The implementation will reuse existing commands, graph hydration, and history
 workflows. It will not introduce a separate dashboard, silently build historical
 graphs, or change Compass CLI contracts.
 
+All repository graph artifacts remain Compass artifacts under
+`<repository>/compass-out/`. This feature does not create or use a
+`graphify-out/` directory.
+
 ## Experience Design
 
 ### Loading
@@ -171,7 +175,6 @@ Automated coverage will include:
 Verification will run the VS Code extension's type check, unit tests, production
 build, integration tests where supported, package creation, and VSIX smoke check.
 Viewer accessibility/parity tests relevant to the graph inspector will also run.
-After code changes, `graphify update .` will refresh the repository knowledge graph.
 
 ## Non-goals
 
