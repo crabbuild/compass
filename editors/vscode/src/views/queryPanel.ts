@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
+import { SourceLocationSchema } from "@compass/viewer/contracts/graph";
 import { buildCqlArgs, buildNaturalQueryArgs } from "../commands/queryArguments";
 import type { RepositorySession } from "../workspace/repositorySession";
+import { openGraphSource } from "./sourceNavigation";
 
 export async function openQueryPanel(
   context: vscode.ExtensionContext,
@@ -28,6 +30,22 @@ export async function openQueryPanel(
     }
     if (message?.type === "cancel") {
       active?.abort();
+      return;
+    }
+    if (message?.type === "openSource") {
+      const source = SourceLocationSchema.safeParse(message.source);
+      if (!source.success) return;
+      try {
+        await openGraphSource(session, session.id, source.data);
+      } catch (error) {
+        void vscode.window.showErrorMessage(
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      return;
+    }
+    if (message?.type === "openGraph") {
+      await vscode.commands.executeCommand("compass.openGraph", session.id);
       return;
     }
     if (message?.type !== "execute"

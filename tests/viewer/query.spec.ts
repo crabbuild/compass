@@ -32,3 +32,40 @@ test("query errors keep the editor available for recovery", async ({ page }) => 
   await page.getByRole("button", { name: "Revise query" }).click();
   await expect(editor).toBeFocused();
 });
+
+test("query modes use a full-width tab rail", async ({ page }) => {
+  await page.goto("/query.html");
+  const tabs = page.getByRole("tablist", { name: "Query mode" });
+  await expect(tabs).toBeVisible();
+  expect((await tabs.boundingBox())?.width).toBeGreaterThan(500);
+  await expect(page.getByRole("tab", { name: "Ask the codebase" }))
+    .toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "CompassQL" }).click();
+  await expect(page.getByRole("textbox", { name: "CompassQL query" })).toBeVisible();
+});
+
+test("traversal answers expose graph and source actions", async ({ page }) => {
+  await page.goto("/query.html?result=traversal");
+  await page.getByRole("textbox", { name: "Natural-language query" }).fill("What is Pipeline?");
+  await page.getByRole("button", { name: "Run query" }).click();
+
+  await expect(page.getByRole("heading", { name: "146 graph matches" })).toBeVisible();
+  await expect(page.getByText("Breadth-first · depth 2")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open code graph" })).toBeVisible();
+
+  await page.getByRole("button", {
+    name: "Open Pipeline at caching/util/src/Pipeline.scala line 154"
+  }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { openedQuerySource?: unknown }
+  ).openedQuerySource)).toEqual({
+    file: "caching/util/src/Pipeline.scala",
+    startLine: 154,
+    endLine: 154
+  });
+
+  await page.getByRole("button", { name: "Open code graph" }).click();
+  expect(await page.evaluate(() => (
+    window as typeof window & { openedQueryGraph?: boolean }
+  ).openedQueryGraph)).toBe(true);
+});

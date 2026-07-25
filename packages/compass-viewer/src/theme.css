@@ -1655,6 +1655,15 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-shell {
+  --query-surface: var(--vscode-editor-background, var(--background));
+  --query-surface-raised: var(
+    --vscode-editorWidget-background,
+    var(--vscode-sideBar-background, var(--card))
+  );
+  --query-border: var(--vscode-panel-border, var(--border));
+  --query-input: var(--vscode-input-background, var(--background));
+  --query-input-foreground: var(--vscode-input-foreground, var(--foreground));
+  --query-accent: var(--vscode-focusBorder, var(--ring));
   display: grid;
   grid-template-rows: auto 1fr;
   height: 100vh;
@@ -1665,9 +1674,9 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-header {
-  padding: 13px 16px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--vscode-editor-background, var(--background));
+  padding: 14px 18px 16px;
+  border-bottom: 1px solid var(--query-border);
+  background: var(--query-surface);
 }
 
 .query-heading-row {
@@ -1693,45 +1702,83 @@ body.vscode-high-contrast-light .compass-source-metadata {
 
 .query-mode {
   display: flex;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--vscode-editorWidget-background, var(--card));
+  width: 100%;
+  gap: 0;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--query-border);
+  background: transparent;
 }
 
 .query-mode button {
-  display: flex;
-  min-height: 26px;
+  position: relative;
+  display: grid;
+  min-width: min(280px, 50%);
+  min-height: 48px;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
+  gap: 8px;
+  padding: 7px 12px 8px;
   border: 0;
-  border-radius: 3px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
-  font-size: 11px;
+  text-align: left;
 }
 
 .query-mode button:hover {
+  background: var(--workbench-hover);
   color: var(--foreground);
 }
 
-.query-mode button[aria-pressed="true"] {
-  background: var(--vscode-list-activeSelectionBackground, var(--accent));
-  color: var(--vscode-list-activeSelectionForeground, var(--accent-foreground));
+.query-mode button[aria-selected="true"] {
+  border-bottom-color: var(--vscode-tab-activeBorder, var(--query-accent));
+  background: var(--vscode-tab-activeBackground, var(--query-surface-raised));
+  color: var(--vscode-tab-activeForeground, var(--foreground));
 }
 
 .query-mode svg {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
+}
+
+.query-mode button > span,
+.query-mode strong,
+.query-mode small {
+  display: block;
+  min-width: 0;
+}
+
+.query-mode strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.query-mode small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.3;
+  opacity: 0.78;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-composer-panel {
+  padding: 12px;
+  border: 1px solid var(--query-border);
+  border-top: 0;
+  background: var(--query-surface-raised);
 }
 
 .query-composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  margin-top: 12px;
 }
 
 .query-editor {
@@ -1743,17 +1790,22 @@ body.vscode-high-contrast-light .compass-source-metadata {
 .query-editor textarea {
   display: block;
   width: 100%;
-  min-height: 82px;
+  min-height: 96px;
   max-height: 260px;
   resize: vertical;
-  padding: 9px 11px 25px;
+  padding: 11px 12px 27px;
   border: 1px solid var(--vscode-input-border, var(--border));
   border-radius: 3px;
   outline: none;
-  background: var(--vscode-input-background, var(--input));
-  color: var(--vscode-input-foreground, var(--foreground));
-  font: 12px/1.5 var(--compass-font-mono);
+  background: var(--query-input);
+  color: var(--query-input-foreground);
+  font: 13px/1.55 var(--compass-font-sans);
   box-sizing: border-box;
+}
+
+.query-composer-panel[data-mode="cql"] .query-editor textarea {
+  font-family: var(--compass-font-mono);
+  font-size: 12px;
 }
 
 .query-editor textarea::placeholder,
@@ -1829,9 +1881,18 @@ body.vscode-high-contrast-light .compass-source-metadata {
 
 .query-examples {
   display: flex;
+  align-items: center;
   gap: 5px;
-  margin-top: 7px;
+  margin-top: 9px;
   overflow-x: auto;
+}
+
+.query-examples > span {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .query-examples button,
@@ -1864,7 +1925,7 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-result {
-  width: min(1100px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto;
 }
 
@@ -1912,6 +1973,188 @@ body.vscode-high-contrast-light .compass-source-metadata {
   font: 12px/1.6 var(--compass-font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.query-prose-result {
+  padding: 14px 16px;
+  border: 1px solid var(--query-border);
+  border-radius: 3px;
+  background: var(--query-surface-raised);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.query-prose-result p,
+.query-prose-result ul {
+  margin: 0;
+}
+
+.query-prose-result p + p,
+.query-prose-result p + ul,
+.query-prose-result ul + p {
+  margin-top: 10px;
+}
+
+.query-prose-result ul {
+  padding-left: 20px;
+}
+
+.query-traversal-result {
+  display: grid;
+  gap: 10px;
+}
+
+.query-traversal-summary {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--query-border);
+  border-left: 3px solid var(--query-accent);
+  background: var(--query-surface-raised);
+}
+
+.query-traversal-summary p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.query-result-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin-top: 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.query-result-metrics strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.query-graph-action {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: 11px var(--compass-font-sans);
+}
+
+.query-graph-action:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
+}
+
+.query-graph-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.query-node-results {
+  overflow: hidden;
+  border: 1px solid var(--query-border);
+  border-radius: 3px;
+  background: var(--query-surface);
+}
+
+.query-node-result {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(160px, 0.72fr) minmax(240px, 1.28fr);
+  gap: 9px;
+  align-items: center;
+  min-height: 48px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--query-border);
+}
+
+.query-node-result:last-child {
+  border-bottom: 0;
+}
+
+.query-node-result:hover {
+  background: var(--workbench-hover);
+}
+
+.query-node-result > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-symbolIcon-functionForeground, var(--query-accent));
+}
+
+.query-node-copy,
+.query-node-copy h3,
+.query-node-copy p {
+  min-width: 0;
+}
+
+.query-node-copy h3,
+.query-node-copy p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-node-copy h3 {
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.query-node-copy p {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.query-source-action {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--workbench-link);
+  font: 10px/1.4 var(--compass-font-mono);
+  text-align: left;
+}
+
+.query-source-action:hover {
+  border-color: var(--query-border);
+  background: var(--vscode-editorHoverWidget-background, var(--query-surface-raised));
+}
+
+.query-source-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-source-action small {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font: 10px var(--compass-font-mono);
+}
+
+.query-source-missing {
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  font: 10px var(--compass-font-mono);
 }
 
 .query-table {
@@ -1994,7 +2237,15 @@ body.vscode-high-contrast-light .query-text-result,
 body.vscode-high-contrast .query-json-result,
 body.vscode-high-contrast-light .query-json-result,
 body.vscode-high-contrast .query-table,
-body.vscode-high-contrast-light .query-table {
+body.vscode-high-contrast-light .query-table,
+body.vscode-high-contrast .query-composer-panel,
+body.vscode-high-contrast-light .query-composer-panel,
+body.vscode-high-contrast .query-prose-result,
+body.vscode-high-contrast-light .query-prose-result,
+body.vscode-high-contrast .query-traversal-summary,
+body.vscode-high-contrast-light .query-traversal-summary,
+body.vscode-high-contrast .query-node-results,
+body.vscode-high-contrast-light .query-node-results {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
@@ -2865,6 +3116,20 @@ body.vscode-high-contrast-light .history-change-counts span {
   color: var(--foreground);
 }
 
+.architecture-detail [data-slot="tabs-trigger"] > span {
+  min-width: 22px;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--muted-foreground));
+  font: 9px/1.4 var(--compass-font-mono);
+}
+
+.architecture-detail [data-slot="tabs-trigger"][data-state="active"] > span {
+  color: var(--vscode-badge-foreground, var(--foreground));
+}
+
 .architecture-detail [data-slot="tabs-trigger"]::after {
   bottom: -1px;
   background: var(--vscode-tab-activeBorder, var(--ring));
@@ -2905,8 +3170,9 @@ body.vscode-high-contrast-light .history-change-counts span {
 }
 
 .architecture-symbol-card h3 {
+  color: var(--vscode-editor-foreground, var(--foreground));
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .architecture-symbol-card p {

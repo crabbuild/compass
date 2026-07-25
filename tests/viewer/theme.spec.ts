@@ -67,6 +67,35 @@ test("high-contrast themes use the VS Code contrast border", async ({ page }) =>
   await expect(page.locator(".history-commit-details")).toHaveCSS("border-top-width", "2px");
 });
 
+test("Architecture symbol titles use editor foreground in light themes", async ({ page }) => {
+  await page.goto("/architecture.html");
+  await applyTheme(page, themeCases[0]);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--vscode-sideBar-foreground", "#f2f2f2");
+  });
+
+  await expect(page.locator(".architecture-symbol-card h3").first())
+    .toHaveCSS("color", "rgb(32, 32, 32)");
+});
+
+test("query result surfaces honor the high-contrast border token", async ({ page }) => {
+  await page.goto("/query.html?result=traversal");
+  await page.getByRole("textbox", { name: "Natural-language query" }).fill("What is Pipeline?");
+  await page.getByRole("button", { name: "Run query" }).click();
+  await applyTheme(page, {
+    bodyClass: "vscode-high-contrast",
+    background: "#000000",
+    foreground: "#ffffff",
+    sidebar: "#000000",
+    input: "#000000",
+    contrastBorder: "#ff00ff"
+  });
+
+  await expect(page.locator(".query-traversal-summary"))
+    .toHaveCSS("border-top-color", "rgb(255, 0, 255)");
+  await expect(page.locator(".query-node-results")).toHaveCSS("border-top-width", "2px");
+});
+
 test("loading respects reduced motion", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/architecture.html?delay=1");

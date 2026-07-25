@@ -1,8 +1,22 @@
 import * as esbuild from "esbuild";
+import { spawnSync } from "node:child_process";
 import { copyFile, mkdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 
 const watch = process.argv.includes("--watch");
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const assetBuild = spawnSync(
+  npm,
+  ["run", "build:viewer"],
+  {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
+    stdio: "inherit",
+    shell: false
+  }
+);
+if (assetBuild.status !== 0) process.exit(assetBuild.status ?? 1);
+
 const shared = {
   bundle: true,
   sourcemap: true,
@@ -63,7 +77,7 @@ if (watch) {
   await Promise.all(builds.map((options) => esbuild.build(options)));
   await mkdir("dist/webviews", { recursive: true });
   await copyFile(
-    "../../crates/compass-output/assets/viewer/viewer.css",
+    "../../packages/compass-viewer/dist/viewer.css",
     "dist/webviews/viewer.css"
   );
 }

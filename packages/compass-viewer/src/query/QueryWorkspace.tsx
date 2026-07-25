@@ -2,12 +2,19 @@ import { useMemo, useRef, useState } from "react";
 import {
   BracesIcon,
   Clock3Icon,
+  FileCode2Icon,
+  NetworkIcon,
   PlayIcon,
   SearchIcon,
   SquareIcon
 } from "lucide-react";
+import type { SourceLocation } from "../contracts/graph";
 import { WorkspaceState } from "../components/workbench/WorkspaceState";
-import { normalizeStructuredResult } from "./state";
+import {
+  normalizeStructuredResult,
+  parseNaturalQueryResult,
+  type NaturalQueryResult
+} from "./state";
 
 export type QueryMode = "natural" | "cql";
 export type QueryRequest = {
@@ -26,6 +33,8 @@ export type QueryResult = {
 export type QueryHost = {
   execute(request: QueryRequest): void;
   cancel(): void;
+  openSource(source: SourceLocation): void;
+  openGraph(): void;
 };
 
 const NATURAL_EXAMPLES = [
@@ -57,6 +66,10 @@ export function QueryWorkspace({
     () => result?.json === undefined ? undefined : normalizeStructuredResult(result.json),
     [result?.json]
   );
+  const naturalResult = useMemo(
+    () => result?.text === undefined ? undefined : parseNaturalQueryResult(result.text),
+    [result?.text]
+  );
   const execute = () => {
     const trimmed = query.trim();
     if (!trimmed || running) return;
@@ -80,81 +93,104 @@ export function QueryWorkspace({
             <span className="query-context">
               Compass query · {revision ? revision.slice(0, 12) : "working tree"}
             </span>
-            <h1>Ask the codebase</h1>
-          </div>
-          <div className="query-mode" role="group" aria-label="Query language">
-            <button
-              type="button"
-              aria-pressed={mode === "natural"}
-              onClick={() => setMode("natural")}
-            >
-              <SearchIcon aria-hidden="true" /> Natural language
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === "cql"}
-              onClick={() => setMode("cql")}
-            >
-              <BracesIcon aria-hidden="true" /> CompassQL
-            </button>
+            <h1>Query the codebase</h1>
           </div>
         </div>
-        <div className="query-composer">
-          <div className="query-editor">
-            <textarea
-              ref={editorRef}
-              value={query}
-              placeholder={mode === "natural"
-                ? "Ask how code, modules, or systems connect"
-                : "MATCH (n) RETURN n LIMIT 20"}
-              aria-label={mode === "natural" ? "Natural-language query" : "CompassQL query"}
-              aria-keyshortcuts="Control+Enter Meta+Enter"
-              spellCheck={mode === "natural"}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  execute();
-                }
-              }}
-            />
-            <span className="query-shortcut">
-              {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
-            </span>
-          </div>
+        <div className="query-mode" role="tablist" aria-label="Query mode">
           <button
+            id="query-mode-natural"
             type="button"
-            className="query-run"
-            aria-label={running ? "Cancel query" : "Run query"}
-            disabled={!running && !query.trim()}
-            onClick={running ? host.cancel : execute}
+            role="tab"
+            aria-selected={mode === "natural"}
+            aria-controls="query-composer-panel"
+            onClick={() => setMode("natural")}
           >
-            {running ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
-            {running ? "Cancel" : "Run"}
+            <SearchIcon aria-hidden="true" />
+            <span>
+              <strong>Ask the codebase</strong>
+              <small>Explore systems and relationships in plain language</small>
+            </span>
+          </button>
+          <button
+            id="query-mode-cql"
+            type="button"
+            role="tab"
+            aria-selected={mode === "cql"}
+            aria-controls="query-composer-panel"
+            onClick={() => setMode("cql")}
+          >
+            <BracesIcon aria-hidden="true" />
+            <span>
+              <strong>CompassQL</strong>
+              <small>Run precise, repeatable graph queries</small>
+            </span>
           </button>
         </div>
-        {mode === "cql" ? (
-          <label className="query-params">
-            <span>Parameters</span>
-            <input
-              value={params}
-              placeholder="kind=Function, module=api"
-              aria-label="CompassQL parameters"
-              onChange={(event) => setParams(event.target.value)}
-            />
-          </label>
-        ) : (
-          <div className="query-examples" aria-label="Example questions">
-            {NATURAL_EXAMPLES.map((example) => (
-              <button key={example} type="button" onClick={() => {
-                setQuery(example);
-                editorRef.current?.focus();
-              }}>
-                {example}
-              </button>
-            ))}
+        <div
+          id="query-composer-panel"
+          className="query-composer-panel"
+          data-mode={mode}
+          role="tabpanel"
+          aria-labelledby={`query-mode-${mode}`}
+        >
+          <div className="query-composer">
+            <div className="query-editor">
+              <textarea
+                ref={editorRef}
+                value={query}
+                placeholder={mode === "natural"
+                  ? "Ask how a subsystem works, where a symbol is used, or how two modules connect…"
+                  : "MATCH (n) RETURN n LIMIT 20"}
+                aria-label={mode === "natural" ? "Natural-language query" : "CompassQL query"}
+                aria-keyshortcuts="Control+Enter Meta+Enter"
+                spellCheck={mode === "natural"}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    execute();
+                  }
+                }}
+              />
+              <span className="query-shortcut">
+                {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
+              </span>
+            </div>
+            <button
+              type="button"
+              className="query-run"
+              aria-label={running ? "Cancel query" : "Run query"}
+              disabled={!running && !query.trim()}
+              onClick={running ? host.cancel : execute}
+            >
+              {running ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
+              {running ? "Cancel" : "Run"}
+            </button>
           </div>
-        )}
+          {mode === "cql" ? (
+            <label className="query-params">
+              <span>Parameters</span>
+              <input
+                value={params}
+                placeholder="kind=Function, module=api"
+                aria-label="CompassQL parameters"
+                onChange={(event) => setParams(event.target.value)}
+              />
+            </label>
+          ) : (
+            <div className="query-examples" aria-label="Example questions">
+              <span>Try</span>
+              {NATURAL_EXAMPLES.map((example) => (
+                <button key={example} type="button" onClick={() => {
+                  setQuery(example);
+                  editorRef.current?.focus();
+                }}>
+                  {example}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </header>
 
       <main className="query-results">
@@ -177,13 +213,19 @@ export function QueryWorkspace({
               <div>
                 <span>Result</span>
                 <h2 id="query-result-heading">
-                  {result.mode === "natural" ? "Codebase answer" : "CompassQL rows"}
+                  {naturalResult?.summary
+                    ? `${naturalResult.summary.total.toLocaleString()} graph matches`
+                    : result.mode === "natural" ? "Codebase answer" : "CompassQL rows"}
                 </h2>
               </div>
               <span><Clock3Icon aria-hidden="true" /> {result.durationMs.toLocaleString()} ms</span>
             </header>
             {result.text !== undefined ? (
-              <pre className="query-text-result">{result.text}</pre>
+              naturalResult && (naturalResult.summary || naturalResult.entries.length > 0) ? (
+                <TraversalResult result={naturalResult} host={host} />
+              ) : (
+                <ProseResult text={naturalResult?.prose ?? result.text} />
+              )
             ) : structured ? (
               <div className="query-table">
                 <table>
@@ -230,6 +272,112 @@ export function QueryWorkspace({
       </main>
     </div>
   );
+}
+
+function TraversalResult({
+  result,
+  host
+}: {
+  result: NaturalQueryResult;
+  host: QueryHost;
+}) {
+  const communities = new Set(
+    result.entries.map((entry) => entry.community).filter(Boolean)
+  ).size;
+  const strategy = result.summary?.strategy.toLocaleUpperCase() === "BFS"
+    ? "Breadth-first"
+    : result.summary?.strategy.toLocaleUpperCase() === "DFS"
+      ? "Depth-first"
+      : result.summary?.strategy;
+
+  return (
+    <div className="query-traversal-result">
+      <div className="query-traversal-summary">
+        <div>
+          {result.summary && (
+            <p>
+              {strategy} · depth {result.summary.depth}
+              {result.summary.starts.length > 0
+                ? ` · started at ${result.summary.starts.join(", ")}`
+                : ""}
+            </p>
+          )}
+          <div className="query-result-metrics" aria-label="Traversal summary">
+            <span><strong>{result.entries.length.toLocaleString()}</strong> listed</span>
+            <span><strong>{communities.toLocaleString()}</strong> communities</span>
+            <span>
+              <strong>
+                {result.entries.filter((entry) => entry.source).length.toLocaleString()}
+              </strong>{" "}
+              source links
+            </span>
+          </div>
+        </div>
+        <button type="button" className="query-graph-action" onClick={host.openGraph}>
+          <NetworkIcon aria-hidden="true" />
+          Open code graph
+        </button>
+      </div>
+      {result.prose && <ProseResult text={result.prose} />}
+      <div className="query-node-results" role="list" aria-label="Graph query matches">
+        {result.entries.map((entry, index) => (
+          <article
+            key={`${entry.kind}:${entry.label}:${entry.source?.file ?? index}`}
+            className="query-node-result"
+            role="listitem"
+          >
+            <FileCode2Icon aria-hidden="true" />
+            <div className="query-node-copy">
+              <h3 title={entry.label}>{entry.label}</h3>
+              <p>
+                {entry.kind.toLocaleLowerCase()}
+                {entry.community ? ` · ${entry.community}` : ""}
+              </p>
+            </div>
+            {entry.source ? (
+              <button
+                type="button"
+                className="query-source-action"
+                aria-label={sourceActionLabel(entry.label, entry.source)}
+                title={sourceActionLabel(entry.label, entry.source)}
+                onClick={() => host.openSource(entry.source!)}
+              >
+                <span>{entry.source.file}</span>
+                {entry.source.startLine && <small>L{entry.source.startLine}</small>}
+              </button>
+            ) : (
+              <span className="query-source-missing">Source not recorded</span>
+            )}
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProseResult({ text }: { text: string }) {
+  const blocks = text.trim().split(/\n{2,}/).filter(Boolean);
+  return (
+    <div className="query-prose-result">
+      {blocks.map((block, index) => {
+        const lines = block.split(/\r?\n/);
+        if (lines.every((line) => /^[-*]\s+/.test(line))) {
+          return (
+            <ul key={index}>
+              {lines.map((line) => <li key={line}>{line.replace(/^[-*]\s+/, "")}</li>)}
+            </ul>
+          );
+        }
+        return <p key={index}>{lines.join(" ")}</p>;
+      })}
+    </div>
+  );
+}
+
+function sourceActionLabel(label: string, source: SourceLocation): string {
+  return `Open ${label} at ${source.file}${
+    source.startLine ? ` line ${source.startLine}` : ""
+  }`;
 }
 
 function parseParams(value: string): Record<string, string> {

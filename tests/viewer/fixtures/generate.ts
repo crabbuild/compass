@@ -285,6 +285,14 @@ window.queryHostMessages=[];
 window.queryTimer=undefined;
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.queryHostMessages.push(message);
+  if(message.type==="openSource") {
+    window.openedQuerySource=message.source;
+    return;
+  }
+  if(message.type==="openGraph") {
+    window.openedQueryGraph=true;
+    return;
+  }
   if(message.type==="ready") {
     setTimeout(()=>window.postMessage({type:"state",running:false},"*"),0);
     return;
@@ -308,6 +316,15 @@ window.acquireVsCodeApi=()=>({postMessage(message){
           mode:message.request.mode,
           json:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]},
           durationMs:18
+        }
+      },"*");
+    } else if(params.get("result")==="traversal") {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          text:"Traversal: BFS depth=2 | Start: ['Pipeline'] | 146 nodes found\\n\\nNODE Pipeline [src=caching/util/src/Pipeline.scala loc=L154 community=Pipeline]\\nNODE .assert() [src=caching/util/src/AssertMacros.scala loc=L32 community=.iassert]\\nNODE String [src= loc= community=EtcdClient]",
+          durationMs:24
         }
       },"*");
     } else {

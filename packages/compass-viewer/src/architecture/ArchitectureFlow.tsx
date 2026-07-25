@@ -238,8 +238,12 @@ export function ArchitectureFlow({
               onValueChange={(value) => setActiveTab(value as "symbols" | "calls")}
             >
               <TabsList variant="line">
-                <TabsTrigger value="symbols">Symbols</TabsTrigger>
-                <TabsTrigger value="calls">Calls</TabsTrigger>
+                <TabsTrigger value="symbols">
+                  Symbols <span>{section.nodes.length.toLocaleString()}</span>
+                </TabsTrigger>
+                <TabsTrigger value="calls">
+                  Calls <span>{section.edges.length.toLocaleString()}</span>
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="symbols" className="architecture-tab-content">
                 <CollectionToolbar

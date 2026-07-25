@@ -15,11 +15,21 @@ const entries = listing.split(/\r?\n/).map((line) => line.trim().split(/\s+/).at
 for (const required of [
   "extension/dist/extension.cjs",
   "extension/dist/webviews/graph.js",
+  "extension/dist/webviews/viewer.css",
   "extension/dist/webviews/callGraph.js",
   "extension/dist/webviews/history.js",
   "extension/media/icon.png"
 ]) {
   if (!listing.includes(required)) throw new Error(`VSIX is missing ${required}`);
+}
+const viewerStyles = spawnSync(
+  "unzip",
+  ["-p", path.join(directory, vsix), "extension/dist/webviews/viewer.css"],
+  { encoding: "utf8", shell: false }
+);
+if (viewerStyles.status !== 0) throw new Error(viewerStyles.stderr);
+if (!viewerStyles.stdout.includes(".compass-source-card")) {
+  throw new Error("VSIX viewer stylesheet is stale: missing .compass-source-card");
 }
 if (entries.some((entry) => entry === "extension/compass" || entry === "extension/compass.exe")) {
   throw new Error("VSIX must not bundle the native Compass CLI");
