@@ -14,9 +14,9 @@ If `compass` is not on `PATH`, set **Compass: CLI Path** or choose **Select
 Compass Binary** from the guided setup.
 
 The CLI must support `compass capabilities --format json` and the versioned
-contracts advertised by the extension. If an older or Graphify-compatible
-binary is found first on `PATH`, Compass stops before running a workflow and
-offers **Select Compass Binary** instead of displaying raw CLI usage output.
+contracts advertised by the extension. If a non-Compass or incompatible binary
+is found first on `PATH`, Compass stops before running a workflow and offers
+**Select Compass Binary** instead of displaying raw CLI usage output.
 
 ## Workflows
 

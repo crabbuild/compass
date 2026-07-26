@@ -23,6 +23,7 @@ export const GraphNodeSchema = z.object({
   memberCount: z.number().int().nonnegative().optional(),
   learningStatus: z.string().optional(),
   learningStale: z.boolean().optional(),
+  change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
   source: SourceLocationSchema.optional(),
   color: z.object({
     background: z.string(),
@@ -35,6 +36,7 @@ export const GraphEdgeSchema = z.object({
   source: z.string().min(1),
   target: z.string().min(1),
   relation: z.string(),
+  change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
   confidence: z.enum(["extracted", "inferred", "ambiguous"]).optional()
 }).passthrough();
 

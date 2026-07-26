@@ -1,25 +1,153 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_files::{DetectOptions, IgnorePolicy, detect};
+use compass_graph::{Communities, god_nodes, score_communities, surprising_connections};
 use compass_history::{
-    BuildProfile, CommitId, CompletedGraphArtifacts, CorruptPreferredToken, ExtractionFingerprint,
-    ExtractionFingerprintInput, GraphArtifacts, HISTORY_GRAPH_SCHEMA, HistoryError, HistoryStore,
-    PublishRequest, PublishedVersion, RealizationId, Repository, WorktreeGuard,
+    BuildProfile, CommitId, CompletedGraphArtifacts, CompletionEvidence, CorruptPreferredToken,
+    ExtractionFingerprint, ExtractionFingerprintInput, GraphArtifacts, HISTORY_GRAPH_SCHEMA,
+    HistoryError, HistoryStore, PublishRequest, PublishedVersion, RealizationId, Repository,
+    WorktreeGuard,
 };
 use compass_languages::Registry;
+use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::program::current_provider_manifest;
 
 /// Build boundary used by both production extraction and deterministic materialization tests.
 pub trait CompleteGraphBuilder {
+    fn promote_current(
+        &self,
+        _repository_root: &Path,
+        _commit: &CommitId,
+    ) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
+        Ok(None)
+    }
+
     fn build(
         &self,
         checkout: &Path,
         output_root: &Path,
         seed: Option<&GraphArtifacts>,
     ) -> Result<CompletedGraphArtifacts, MaterializeError>;
+}
+
+/// Convert a verified mutable code-only snapshot into the canonical artifact
+/// shape produced by an exact historical extraction.
+pub fn normalize_current_code_only_snapshot(
+    mut artifacts: GraphArtifacts,
+    repository_root: &Path,
+    code_files: &[String],
+) -> Result<CompletedGraphArtifacts, MaterializeError> {
+    let mut communities = Communities::new();
+    for node in &mut artifacts.document.nodes {
+        let community = node
+            .attributes
+            .get("community")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                MaterializeError::Incomplete(format!(
+                    "current snapshot node {} has no valid community",
+                    node.id
+                ))
+            })?;
+        communities
+            .entry(community)
+            .or_default()
+            .push(node.id.clone());
+        node.attributes.remove("community_name");
+    }
+    for members in communities.values_mut() {
+        members.sort();
+    }
+    let cohesion = score_communities(&artifacts.document, &communities);
+    let gods = god_nodes(&artifacts.document, 10);
+    let surprises = surprising_connections(&artifacts.document, &communities, 5);
+    let analysis = json!({
+        "communities": communities
+            .iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect::<BTreeMap<_, _>>(),
+        "cohesion": cohesion
+            .iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect::<BTreeMap<_, _>>(),
+        "gods": gods,
+        "surprises": surprises,
+        "tokens": {"input": 0, "output": 0},
+    });
+    artifacts.analysis = Some(
+        serde_json::from_slice(&serde_json::to_vec(&analysis).map_err(HistoryError::from)?)
+            .map_err(HistoryError::from)?,
+    );
+    artifacts.labels = None;
+    if let Some(entries) = artifacts
+        .manifest
+        .as_mut()
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let root =
+            fs::canonicalize(repository_root).map_err(|source| compass_files::FileError::Io {
+                path: repository_root.to_path_buf(),
+                source,
+            })?;
+        let code_files = code_files
+            .iter()
+            .map(|file| {
+                Path::new(file)
+                    .strip_prefix(&root)
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                    .map_err(|_| {
+                        MaterializeError::Incomplete(format!(
+                            "code-only manifest path is outside repository: {file}"
+                        ))
+                    })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        entries.retain(|path, _| code_files.contains(path));
+        for entry in entries
+            .values_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            let ast_hash = entry
+                .get("ast_hash")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            entry.insert(
+                "semantic_hash".to_owned(),
+                serde_json::Value::String(ast_hash),
+            );
+        }
+    }
+    let completed = CompletedGraphArtifacts {
+        artifacts,
+        completion: CompletionEvidence {
+            extraction_succeeded: true,
+            allow_partial: false,
+            semantic_files_expected: 0,
+            semantic_files_completed: 0,
+            failed_chunks: 0,
+        },
+    };
+    completed.partition()?;
+    Ok(completed)
+}
+
+/// Resolve the provider inventory an exact build would fingerprint for this
+/// checkout and history profile.
+pub fn history_provider_manifest(
+    checkout: &Path,
+    profile: &BuildProfile,
+) -> Result<Vec<compass_ir::ProviderDescriptor>, MaterializeError> {
+    let checkout = fs::canonicalize(checkout).map_err(|source| compass_files::FileError::Io {
+        path: checkout.to_path_buf(),
+        source,
+    })?;
+    program_provider_manifest(&checkout, profile)
 }
 
 /// Inputs that identify one exact historical materialization attempt.
@@ -124,6 +252,14 @@ pub fn materialize_history_with_observer(
     if request.replace_corrupt && corrupt.is_none() {
         return Err(MaterializeError::ReplaceCorruptNotApplicable);
     }
+    if !request.rebuild
+        && corrupt.is_none()
+        && request.repository.resolve("HEAD")? == request.commit
+        && let Some(completed) =
+            builder.promote_current(request.repository.root(), &request.commit)?
+    {
+        return run_promoted_materialization(store, &request, observer, &activity, completed);
+    }
     let worktree = request.repository.detached_worktree(&request.commit)?;
     let result = run_materialization(
         store, builder, &request, observer, &activity, &worktree, corrupt,
@@ -138,6 +274,44 @@ pub fn materialize_history_with_observer(
             cleanup,
         }),
     }
+}
+
+fn run_promoted_materialization(
+    store: &HistoryStore,
+    request: &MaterializeRequest,
+    observer: &mut dyn MaterializeObserver,
+    activity: &compass_history::ActivityGuard,
+    completed: CompletedGraphArtifacts,
+) -> Result<PublishedVersion, MaterializeError> {
+    let providers = completed
+        .artifacts
+        .program
+        .as_ref()
+        .map(|program| program.program.providers.clone())
+        .unwrap_or_default();
+    let fingerprint =
+        resolve_fingerprint_with_providers(&request.profile, request.repository.root(), providers)?;
+    observer.resolved(&fingerprint)?;
+    observer.entered(MaterializeStage::Building)?;
+    observer.entered(MaterializeStage::Validating)?;
+    validate_promoted(&completed, &request.commit)?;
+    observer.entered(MaterializeStage::Publishing)?;
+    let prepared = store.prepare_publish_with_activity(
+        PublishRequest {
+            commit: request.commit.clone(),
+            parents: request.repository.parents(&request.commit)?,
+            profile: request.profile.clone(),
+            fingerprint,
+            artifacts: completed.artifacts,
+            completion: completed.completion,
+            make_preferred: true,
+        },
+        activity,
+    )?;
+    observer.candidate(prepared.id(), prepared.observed_preferred())?;
+    store
+        .commit_prepared_with_activity(prepared, activity)
+        .map_err(Into::into)
 }
 
 fn run_materialization(
@@ -247,15 +421,11 @@ fn compatible_seed(
         if &preferred.version.build_profile != profile {
             continue;
         }
-        match store.validate_with_activity(&preferred.id, activity) {
-            Ok(_) => {}
+        match store.artifacts_with_activity(&preferred.id, activity) {
+            Ok(artifacts) => return Ok(Some(artifacts)),
             Err(error) if error.is_catalog_corruption() => continue,
             Err(error) => return Err(error.into()),
         }
-        return store
-            .artifacts_with_activity(&preferred.id, activity)
-            .map(Some)
-            .map_err(Into::into);
     }
     Ok(None)
 }
@@ -263,6 +433,18 @@ fn compatible_seed(
 fn resolve_fingerprint(
     profile: &BuildProfile,
     checkout: &Path,
+) -> Result<ExtractionFingerprint, MaterializeError> {
+    resolve_fingerprint_with_providers(
+        profile,
+        checkout,
+        program_provider_manifest(checkout, profile)?,
+    )
+}
+
+fn resolve_fingerprint_with_providers(
+    profile: &BuildProfile,
+    checkout: &Path,
+    providers: Vec<compass_ir::ProviderDescriptor>,
 ) -> Result<ExtractionFingerprint, MaterializeError> {
     let mut input =
         ExtractionFingerprintInput::new(env!("CARGO_PKG_VERSION"), HISTORY_GRAPH_SCHEMA);
@@ -272,7 +454,7 @@ fn resolve_fingerprint(
         "commit_configuration_digest",
         &configuration_digest(checkout, profile_gitignore(profile))?,
     )?;
-    input.insert_program_provider_manifest(&program_provider_manifest(checkout, profile)?)?;
+    input.insert_program_provider_manifest(&providers)?;
     input.digest().map_err(Into::into)
 }
 
@@ -398,7 +580,6 @@ fn validate_completed(
     profile: &BuildProfile,
     worktree: &WorktreeGuard,
 ) -> Result<(), MaterializeError> {
-    completed.partition()?;
     let built_at = completed
         .artifacts
         .document
@@ -469,6 +650,25 @@ fn validate_completed(
                 )));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_promoted(
+    completed: &CompletedGraphArtifacts,
+    commit: &CommitId,
+) -> Result<(), MaterializeError> {
+    let built_at = completed
+        .artifacts
+        .document
+        .extras
+        .get("built_at_commit")
+        .and_then(serde_json::Value::as_str);
+    if built_at != Some(commit.as_str()) {
+        return Err(MaterializeError::Incomplete(format!(
+            "built_at_commit is {:?}, expected {commit}",
+            built_at
+        )));
     }
     Ok(())
 }

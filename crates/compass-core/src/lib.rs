@@ -17,7 +17,8 @@ pub use cluster_existing::{
 pub use diagnostics::{diagnose_graph_file, format_diagnostic_json, format_diagnostic_report};
 pub use history::{
     CompleteGraphBuilder, MaterializeError, MaterializeObserver, MaterializeRequest,
-    MaterializeStage, materialize_history, materialize_history_with_observer,
+    MaterializeStage, history_provider_manifest, materialize_history,
+    materialize_history_with_observer, normalize_current_code_only_snapshot,
 };
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{

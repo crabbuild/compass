@@ -110,6 +110,26 @@ test("late revision and derived responses cannot replace the selected commit", a
   await expect(page.getByText("Semantic change findings")).toHaveCount(0);
 });
 
+test("comparison replaces the full graph with a readable focused delta", async ({ page }) => {
+  await page.goto("/history.html");
+  await page.getByRole("option", { name: /Revision B graph/i }).click();
+  await expect(page.getByText(/Viewing graph for bbbbbbbbb/)).toBeVisible();
+
+  await page.getByRole("button", { name: /Compare parent 1/i }).click();
+
+  await expect(page.getByText("Comparison mode")).toBeVisible();
+  await expect(page.getByText(/Comparing bbbbbbbbb to aaaaaaaaa/)).toBeVisible();
+  await expect(page.getByLabel("Visible graph delta")).toContainText("nodes+0−0~1");
+  await expect(page.getByText(/Viewing changed subgraph for bbbbbbbbb/)).toBeVisible();
+  await expect(page.getByText("Cargo.toml")).toBeVisible();
+  await expect(page.getByText('+version = "3.1.7"')).toBeVisible();
+  await expect(page.getByText("Fixture comparison", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Exit comparison" }).click();
+  await expect(page.getByText("Comparison mode")).toHaveCount(0);
+  await expect(page.getByText(/Viewing graph for bbbbbbbbb/)).toBeVisible();
+});
+
 test("unavailable comparison explains how to recover", async ({ page }) => {
   await page.goto("/history.html");
   await page.getByRole("option", { name: /Revision C needs build/i }).click();

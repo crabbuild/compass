@@ -1494,6 +1494,129 @@ fn missing_code_only_commit_is_built_on_first_query() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn explicit_rebuild_ignores_the_mutable_current_snapshot() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct ExactService;\n",
+    )?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let initialized = run(compass, directory.path(), &["init", ".", "--yes"])?;
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+    let graph_path = directory.path().join("compass-out/graph.json");
+    let mut current: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
+    current["nodes"]
+        .as_array_mut()
+        .ok_or("current graph has no nodes")?
+        .push(json!({
+            "id": "mutable-current-only",
+            "label": "MutableCurrentOnly",
+            "source_file": "service.rs"
+        }));
+    compass_files::write_json_atomic(&graph_path, &current, false)?;
+
+    let rebuilt = run(
+        compass,
+        directory.path(),
+        &["history", "rebuild", "HEAD", "--code-only", "--format=json"],
+    )?;
+    assert!(
+        rebuilt.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
+    let commit = repository.resolve("HEAD")?;
+    let preferred = history
+        .preferred(&commit)?
+        .ok_or("missing preferred realization")?;
+    let exact = history.artifacts(&preferred.id)?;
+
+    assert!(
+        exact
+            .artifacts
+            .document
+            .nodes
+            .iter()
+            .all(|node| node.id != "mutable-current-only"),
+        "rebuild reused mutable compass-out content"
+    );
+    Ok(())
+}
+
+#[test]
+fn current_snapshot_promotion_matches_an_exact_rebuild() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(
+        directory.path().join("service.rs"),
+        "pub struct Service;\nimpl Service { pub fn run(&self) {} }\n",
+    )?;
+    std::fs::write(
+        directory.path().join("README.md"),
+        "# Service\n\nA semantic document outside the code-only manifest.\n",
+    )?;
+    git(directory.path(), &["add", "service.rs", "README.md"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let initialized = run(compass, directory.path(), &["init", ".", "--yes"])?;
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+    let promoted = run(
+        compass,
+        directory.path(),
+        &["history", "build", "HEAD", "--code-only", "--format=json"],
+    )?;
+    assert!(
+        promoted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&promoted.stderr)
+    );
+    let promoted: serde_json::Value = serde_json::from_slice(&promoted.stdout)?;
+    let rebuilt = run(
+        compass,
+        directory.path(),
+        &["history", "rebuild", "HEAD", "--code-only", "--format=json"],
+    )?;
+    assert!(
+        rebuilt.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let rebuilt: serde_json::Value = serde_json::from_slice(&rebuilt.stdout)?;
+
+    assert_eq!(
+        promoted["realization"], rebuilt["realization"],
+        "promoted current output differed from the exact checkout build"
+    );
+    Ok(())
+}
+
+#[test]
 fn build_rebuild_and_unseen_diff_publish_complete_realizations()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

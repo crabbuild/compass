@@ -100,16 +100,6 @@ pub(crate) fn resolve_or_materialize(
     .map_err(|error| error.to_string())?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(150);
     loop {
-        if !rebuild {
-            match history.preferred(&commit) {
-                Ok(Some(preferred)) if history.validate(&preferred.id).is_ok() => {
-                    return Ok((history, preferred));
-                }
-                Ok(_) => {}
-                Err(error) if error.is_catalog_corruption() => {}
-                Err(error) => return Err(error.to_string()),
-            }
-        }
         let job = queue
             .get(&job_id)
             .map_err(|error| error.to_string())?
@@ -1274,7 +1264,13 @@ fn run_claimed_job(
         }
     };
     let executable = std::env::current_exe().map_err(runtime)?;
-    let builder = options.builder(executable);
+    let working_tree_seed = repository
+        .resolve("HEAD")
+        .ok()
+        .filter(|head| head == &claimed.commit)
+        .map(|_| repository.root().join("compass-out"))
+        .filter(|path| path.join("graph.json").is_file());
+    let builder = options.builder(executable, working_tree_seed);
     let heartbeat_job = claimed.clone();
     let heartbeat_root = queue.root().to_path_buf();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel();

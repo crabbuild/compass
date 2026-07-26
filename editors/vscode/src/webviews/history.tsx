@@ -7,6 +7,7 @@ import {
   GraphViewModelSchema,
   compareGraphs,
   type GraphViewModel,
+  type GraphComparison,
   type HistoryBuildState,
   type HistoryChangeCounts,
   type HistoryOperationError,
@@ -32,6 +33,7 @@ let communityLoading: number | null = null;
 let communityError: string | undefined;
 let activeCommunityRequest = "";
 let semanticDiff: unknown;
+let comparison: (GraphComparison & { parent: string }) | undefined;
 let repositoryId = "";
 let changeCounts: HistoryChangeCounts | undefined;
 let revisionLoadState: "idle" | "loading" | "ready" = "idle";
@@ -52,6 +54,7 @@ function clearRevisionPresentation(): void {
   graphCommit = undefined;
   graphIdentity = undefined;
   semanticDiff = undefined;
+  comparison = undefined;
   changeCounts = undefined;
   communityDetail = undefined;
   communityLoading = null;
@@ -137,6 +140,7 @@ function render(): void {
       onSelectCommit={selectCommit}
       graph={graph}
       graphCommit={graphCommit}
+      comparison={comparison}
       communityDetail={communityDetail}
       communityLoading={communityLoading}
       communityError={communityError}
@@ -145,6 +149,12 @@ function render(): void {
         communityLoading = null;
         communityError = undefined;
         activeCommunityRequest = "";
+        render();
+      }}
+      onExitComparison={() => {
+        comparison = undefined;
+        semanticDiff = undefined;
+        requestChangeCounts(selectedCommit);
         render();
       }}
       semanticDiff={semanticDiff}
@@ -309,6 +319,10 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
     const current = GraphViewModelSchema.safeParse(message.currentGraph);
     const parent = GraphViewModelSchema.safeParse(message.parentGraph);
     if (current.success && parent.success) {
+      const parsedCounts = message.counts
+        ? HistoryChangeCountsSchema.safeParse(message.counts)
+        : undefined;
+      const exactCounts = parsedCounts?.success ? parsedCounts.data : undefined;
       graph = current.data;
       graphCommit = message.commit;
       graphIdentity = {
@@ -319,10 +333,22 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       communityLoading = null;
       communityError = undefined;
       activeCommunityRequest = "";
-      semanticDiff = {
-        structural: compareGraphs(parent.data, current.data),
-        semantic: message.semanticDiff
+      comparison = {
+        ...compareGraphs(parent.data, current.data),
+        ...(exactCounts
+          ? {
+              addedNodes: exactCounts.counts.nodes.added,
+              removedNodes: exactCounts.counts.nodes.removed,
+              changedNodes: exactCounts.counts.nodes.changed,
+              addedEdges: exactCounts.counts.edges.added,
+              removedEdges: exactCounts.counts.edges.removed,
+              changedEdges: exactCounts.counts.edges.changed
+            }
+          : {}),
+        parent: message.parent
       };
+      semanticDiff = message.semanticDiff;
+      if (exactCounts) changeCounts = exactCounts;
       operationErrors.delete(message.commit);
       revisionLoadState = "ready";
     }

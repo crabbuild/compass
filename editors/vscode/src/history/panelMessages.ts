@@ -81,6 +81,7 @@ export type HistoryHostMessage =
     currentGraph: GraphViewModel;
     parentGraph: GraphViewModel;
     semanticDiff: unknown;
+    counts?: HistoryChangeCounts;
   }
   | { type: "changeCounts"; commit: string; counts: HistoryChangeCounts }
   | { type: "buildRunning"; commit: string }

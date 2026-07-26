@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::{
-    GraphArtifacts, GraphVersion, HistoryError, PartitionedGraph, RealizationId,
+    CompletedGraphArtifacts, GraphVersion, HistoryError, PartitionedGraph, RealizationId,
     canonical_json_bytes, node_key,
 };
 
@@ -81,12 +81,26 @@ pub(crate) struct RealizationTrees<'a> {
     pub program_summaries: &'a Tree,
 }
 
+pub(crate) struct ValidatedTrees {
+    pub report: ValidationReport,
+    pub artifacts: CompletedGraphArtifacts,
+}
+
 pub(crate) fn validate_trees(
     manager: &Prolly<Arc<SqliteStore>>,
     id: &RealizationId,
     version: &GraphVersion,
     trees: RealizationTrees<'_>,
 ) -> Result<ValidationReport, HistoryError> {
+    validate_trees_with_artifacts(manager, id, version, trees).map(|validated| validated.report)
+}
+
+pub(crate) fn validate_trees_with_artifacts(
+    manager: &Prolly<Arc<SqliteStore>>,
+    id: &RealizationId,
+    version: &GraphVersion,
+    trees: RealizationTrees<'_>,
+) -> Result<ValidatedTrees, HistoryError> {
     let mut problems = Vec::new();
     if RealizationId::for_version(version)? != *id {
         problems.push(ValidationProblem::RealizationDigest);
@@ -179,21 +193,33 @@ pub(crate) fn validate_trees(
         program_facts,
         program_summaries,
     };
-    match GraphArtifacts::reconstruct(&partitioned) {
+    let artifacts = match CompletedGraphArtifacts::reconstruct(&partitioned) {
         Ok(artifacts) => {
-            validate_references(manager, trees.nodes, &artifacts.document, &mut problems)?
+            validate_references(
+                manager,
+                trees.nodes,
+                &artifacts.artifacts.document,
+                &mut problems,
+            )?;
+            Some(artifacts)
         }
-        Err(error) => problems.push(ValidationProblem::ArtifactRegistry(error.to_string())),
-    }
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(error.to_string()));
+            None
+        }
+    };
     if problems.is_empty() {
-        Ok(ValidationReport {
-            nodes: version.node_count,
-            edges: version.edge_count,
-            hyperedges: version.hyperedge_count,
-            analysis_records: version.analysis_count,
-            metadata_records: version.metadata_count,
-            program_fact_records: version.program_fact_count,
-            program_summary_records: version.program_summary_count,
+        Ok(ValidatedTrees {
+            report: ValidationReport {
+                nodes: version.node_count,
+                edges: version.edge_count,
+                hyperedges: version.hyperedge_count,
+                analysis_records: version.analysis_count,
+                metadata_records: version.metadata_count,
+                program_fact_records: version.program_fact_count,
+                program_summary_records: version.program_summary_count,
+            },
+            artifacts: artifacts.expect("valid reconstruction is present without problems"),
         })
     } else {
         Err(HistoryError::InvalidRealization(problems))

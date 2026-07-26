@@ -28,6 +28,7 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::erro
 #[derive(Default)]
 struct RecordingBuilder {
     seeds: Mutex<Vec<Option<String>>>,
+    promotion: Option<CompletedGraphArtifacts>,
 }
 
 impl RecordingBuilder {
@@ -37,9 +38,47 @@ impl RecordingBuilder {
             .map(|values| values.clone())
             .map_err(|error| MaterializeError::Builder(error.to_string()))
     }
+
+    fn promoting(commit: &CommitId) -> Result<Self, Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed": true,
+            "multigraph": false,
+            "nodes": [{"id":"promoted","label":"Promoted","source_file":"service.rs"}],
+            "links": [],
+            "built_at_commit": commit
+        }))?;
+        Ok(Self {
+            seeds: Mutex::default(),
+            promotion: Some(CompletedGraphArtifacts {
+                artifacts: GraphArtifacts {
+                    document,
+                    program: None,
+                    analysis: None,
+                    labels: None,
+                    manifest: Some(json!({"service.rs":{"ast_hash":"fixture"}})),
+                    authoritative_sidecars: Default::default(),
+                },
+                completion: CompletionEvidence {
+                    extraction_succeeded: true,
+                    allow_partial: false,
+                    semantic_files_expected: 0,
+                    semantic_files_completed: 0,
+                    failed_chunks: 0,
+                },
+            }),
+        })
+    }
 }
 
 impl CompleteGraphBuilder for RecordingBuilder {
+    fn promote_current(
+        &self,
+        _repository_root: &Path,
+        _commit: &CommitId,
+    ) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
+        Ok(self.promotion.clone())
+    }
+
     fn build(
         &self,
         checkout: &Path,
@@ -89,6 +128,66 @@ impl CompleteGraphBuilder for RecordingBuilder {
             },
         })
     }
+}
+
+#[test]
+fn current_snapshot_is_published_without_invoking_the_exact_builder()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+    let builder = RecordingBuilder::promoting(&commit)?;
+
+    let published = materialize_history(
+        &history,
+        &builder,
+        request(&repository, commit.clone(), false)?,
+    )?;
+
+    assert!(
+        builder.seeds()?.is_empty(),
+        "exact builder unexpectedly ran"
+    );
+    let artifacts = history.artifacts(&published.id)?;
+    assert_eq!(artifacts.artifacts.document.nodes[0].id, "promoted");
+    assert_eq!(published.version.git_commit, commit.to_string());
+    Ok(())
+}
+
+#[test]
+fn explicit_rebuild_bypasses_current_snapshot_promotion() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+    let builder = RecordingBuilder::promoting(&commit)?;
+
+    let published = materialize_history(&history, &builder, request(&repository, commit, true)?)?;
+
+    assert_eq!(builder.seeds()?, vec![None]);
+    let artifacts = history.artifacts(&published.id)?;
+    assert_eq!(artifacts.artifacts.document.nodes[0].id, "old");
+    Ok(())
 }
 
 fn request(
