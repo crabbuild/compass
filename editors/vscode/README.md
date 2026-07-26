@@ -51,6 +51,11 @@ repeating workflow actions under every folder.
 - **Initialize repository** and **Retry graph build** appear only when the
   current workspace state requires them.
 
+Choosing **Initialize repository** opens a dedicated setup wizard. Review the
+repository scope, add include or exclude rules when needed, and start the first
+index from the final review step. While Compass builds, the page shows the
+completed and total file count plus the file currently being indexed.
+
 **Refresh Compass Status** in the Workspace title reads repository state again.
 It never initializes, updates, or watches a graph.
 

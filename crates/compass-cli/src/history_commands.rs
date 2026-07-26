@@ -1666,7 +1666,14 @@ mod tests {
             "--".to_owned(),
             "-revision".to_owned(),
         ]);
-        let Ok((positionals, format, output, community, node_limit)) = result else {
+        let Ok(ParsedCommonOptions {
+            positionals,
+            format,
+            output,
+            community,
+            node_limit,
+        }) = result
+        else {
             assert!(result.is_ok());
             return;
         };

@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use compass_files::ProjectConfig;
 use compass_model::GraphDocument;
+use serde_json::Value;
 
 #[test]
 fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Error>> {
@@ -139,5 +140,63 @@ fn interactive_init_uses_the_same_validated_configuration() -> Result<(), Box<dy
     assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&stderr));
     let config = ProjectConfig::load(root.path())?.ok_or("missing interactive config")?;
     assert_eq!(config.build.include, ["src/"]);
+    Ok(())
+}
+
+#[test]
+fn jsonl_init_reports_each_indexed_file_against_the_total() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::create_dir(root.path().join("src"))?;
+    for index in 0..260 {
+        fs::write(
+            root.path().join(format!("src/file_{index:03}.rs")),
+            format!("pub fn file_{index:03}() {{}}\n"),
+        )?;
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "init",
+            ".",
+            "--include",
+            "src",
+            "--yes",
+            "--events",
+            "jsonl",
+        ])
+        .current_dir(root.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events = String::from_utf8(output.stdout)?
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let indexing = events
+        .iter()
+        .filter(|event| event["phase"] == "indexing")
+        .collect::<Vec<_>>();
+    assert_eq!(indexing.len(), 260);
+    for (index, event) in indexing.iter().enumerate() {
+        assert_eq!(event["current"], index + 1);
+        assert_eq!(event["total"], 260);
+    }
+    assert!(indexing.iter().all(|event| {
+        event["message"]
+            .as_str()
+            .is_some_and(|message| message.ends_with(".rs"))
+    }));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["terminal"] == true)
+            .count(),
+        1
+    );
     Ok(())
 }

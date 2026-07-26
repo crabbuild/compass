@@ -10,7 +10,7 @@ export default async function generate(): Promise<void> {
   await mkdir(output, { recursive: true });
   await cp(path.join(root, "packages/compass-viewer/dist/viewer.css"), path.join(output, "viewer.css"));
   await cp(path.join(root, "packages/compass-viewer/dist/graph.js"), path.join(output, "graph.js"));
-  for (const name of ["architecture", "callGraph", "history", "query"]) {
+  for (const name of ["architecture", "callGraph", "history", "initialize", "query"]) {
     await cp(
       path.join(root, `editors/vscode/dist/webviews/${name}.js`),
       path.join(output, `${name}.js`)
@@ -207,6 +207,7 @@ export default async function generate(): Promise<void> {
     )
   );
   await writeFile(path.join(output, "query.html"), queryHarness());
+  await writeFile(path.join(output, "initialize.html"), initializationHarness());
 }
 
 function graphLoadingHarness(): string {
@@ -339,6 +340,44 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     }
   },delay);
 }})</script><script src="/query.js"></script></body></html>`;
+}
+
+function initializationHarness(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass initialization fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+window.initializationHostMessages=[];
+window.initializationTimers=[];
+window.acquireVsCodeApi=()=>({postMessage(message){
+  window.initializationHostMessages.push(message);
+  if(message.type==="ready" || message.type==="reset") {
+    setTimeout(()=>window.postMessage({
+      type:"hydrate",
+      repositoryName:"compass",
+      repositoryRoot:"/workspace/compass",
+      configurationExists:new URLSearchParams(window.location.search).has("existing")
+    },"*"),0);
+    return;
+  }
+  if(message.type==="cancel") {
+    for(const timer of window.initializationTimers) clearTimeout(timer);
+    window.postMessage({type:"cancelled"},"*");
+    return;
+  }
+  if(message.type!=="start") return;
+  const progress=(delay,current,total,file)=>window.initializationTimers.push(setTimeout(
+    ()=>window.postMessage({
+      type:"progress",
+      event:{phase:"indexing",current,total,message:file}
+    },"*"),
+    delay
+  ));
+  progress(40,1,3,"src/commands/init.ts");
+  progress(440,2,3,"src/core/index.ts");
+  progress(840,3,3,"src/views/graph.ts");
+  window.initializationTimers.push(setTimeout(
+    ()=>window.postMessage({type:"succeeded",message:"compass is indexed and ready for graph exploration."},"*"),
+    1240
+  ));
+}})</script><script src="/initialize.js"></script></body></html>`;
 }
 
 function communityHarness(overview: unknown, detail: unknown): string {

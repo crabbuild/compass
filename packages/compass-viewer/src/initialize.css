@@ -1,0 +1,1065 @@
+.init-shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+  height: 100vh;
+  overflow: auto;
+  padding: clamp(28px, 5vw, 72px);
+  background:
+    linear-gradient(var(--compass-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--compass-grid) 1px, transparent 1px),
+    var(--background);
+  background-size: 32px 32px;
+  color: var(--foreground);
+}
+
+.init-header,
+.init-progress-header {
+  display: flex;
+  width: min(1080px, 100%);
+  margin: 0 auto clamp(26px, 4vw, 46px);
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.init-eyebrow {
+  margin: 0 0 8px;
+  color: var(--compass-focus);
+  font: 600 11px/1.3 var(--compass-font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.init-header h1,
+.init-progress-header h1,
+.init-result-card h1 {
+  margin: 0;
+  color: var(--foreground);
+  font: 600 clamp(28px, 4vw, 44px)/1.08 var(--compass-font-sans);
+  letter-spacing: -0.035em;
+}
+
+.init-header-copy,
+.init-progress-header p:not(.init-eyebrow),
+.init-result-card > p:not(.init-eyebrow) {
+  max-width: 650px;
+  margin: 13px 0 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.init-repository-badge {
+  display: flex;
+  min-width: 190px;
+  max-width: 320px;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  border: 1px solid var(--compass-line);
+  border-radius: 5px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+}
+
+.init-repository-badge > svg {
+  width: 16px;
+  color: var(--compass-focus);
+}
+
+.init-repository-badge span {
+  min-width: 0;
+}
+
+.init-repository-badge small,
+.init-repository-badge strong {
+  display: block;
+}
+
+.init-repository-badge small {
+  margin-bottom: 2px;
+  color: var(--compass-faint);
+  font: 10px/1.2 var(--compass-font-mono);
+  text-transform: uppercase;
+}
+
+.init-repository-badge strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.init-layout {
+  display: grid;
+  width: min(1080px, 100%);
+  min-height: 520px;
+  margin: 0 auto;
+  grid-template-columns: 245px minmax(0, 1fr);
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  box-shadow: 0 22px 55px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.24));
+}
+
+.init-step-nav {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 27px 20px 20px;
+  border-right: 1px solid var(--compass-line);
+  background: color-mix(in srgb, var(--compass-panel) 88%, var(--compass-canvas));
+}
+
+.init-step-nav ol,
+.init-runway,
+.init-rule-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.init-step-nav li {
+  position: relative;
+  padding-bottom: 10px;
+}
+
+.init-step-nav li:not(:last-child)::after {
+  position: absolute;
+  top: 34px;
+  bottom: -1px;
+  left: 15px;
+  width: 1px;
+  background: var(--compass-line);
+  content: "";
+}
+
+.init-step-nav li[data-state="complete"]::after {
+  background: color-mix(in srgb, var(--compass-success) 62%, var(--compass-line));
+}
+
+.init-step-nav button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 11px;
+  padding: 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+}
+
+.init-step-nav button:not(:disabled):hover {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.init-step-nav button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 1px;
+}
+
+.init-step-marker {
+  z-index: 1;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 50%;
+  background: var(--compass-panel);
+}
+
+.init-step-marker svg {
+  width: 13px;
+  height: 13px;
+}
+
+.init-step-nav li[data-state="active"] button {
+  color: var(--foreground);
+}
+
+.init-step-nav li[data-state="active"] .init-step-marker {
+  border-color: var(--compass-focus);
+  background: var(--compass-focus-soft);
+  color: var(--compass-focus);
+  box-shadow: 0 0 0 4px var(--compass-focus-soft);
+}
+
+.init-step-nav li[data-state="complete"] .init-step-marker {
+  border-color: var(--compass-success);
+  color: var(--compass-success);
+}
+
+.init-step-nav button small,
+.init-step-nav button strong {
+  display: block;
+}
+
+.init-step-nav button small {
+  margin-bottom: 2px;
+  color: var(--compass-faint);
+  font: 9px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.init-step-nav button strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.init-local-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--compass-line);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--compass-focus) 6%, transparent);
+}
+
+.init-local-note > svg {
+  width: 14px;
+  flex: 0 0 14px;
+  color: var(--compass-focus);
+}
+
+.init-local-note p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.init-local-note strong,
+.init-local-note code {
+  display: block;
+}
+
+.init-local-note strong {
+  margin-bottom: 2px;
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.init-local-note code {
+  margin-top: 4px;
+  color: var(--compass-focus);
+  font-family: var(--compass-font-mono);
+}
+
+.init-stage {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: clamp(28px, 5vw, 52px);
+}
+
+.init-stage-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.init-stage-heading > span {
+  padding-top: 5px;
+  color: var(--compass-focus);
+  font: 600 11px/1 var(--compass-font-mono);
+}
+
+.init-stage-heading h2 {
+  margin: 0;
+  color: var(--foreground);
+  font: 600 clamp(21px, 3vw, 28px)/1.2 var(--compass-font-sans);
+  letter-spacing: -0.025em;
+}
+
+.init-stage-heading p {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.init-scope-grid,
+.init-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.init-choice {
+  position: relative;
+  display: flex;
+  min-height: 125px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--compass-line);
+  border-radius: 6px;
+  background: var(--vscode-input-background, var(--background));
+  cursor: pointer;
+}
+
+.init-choice:hover {
+  border-color: color-mix(in srgb, var(--compass-focus) 48%, var(--compass-line));
+}
+
+.init-choice[data-selected="true"] {
+  border-color: var(--compass-focus);
+  background: var(--compass-focus-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--compass-focus) 30%, transparent);
+}
+
+.init-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.init-choice:has(input:focus-visible) {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.init-choice-radio {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  color: var(--compass-faint);
+}
+
+.init-choice-radio svg {
+  width: 16px;
+  fill: transparent;
+}
+
+.init-choice[data-selected="true"] .init-choice-radio svg {
+  fill: var(--compass-focus);
+  color: var(--compass-focus);
+  stroke-width: 4px;
+}
+
+.init-choice strong,
+.init-choice small {
+  display: block;
+}
+
+.init-choice strong {
+  margin: 1px 0 8px;
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.init-choice small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.init-facts {
+  display: grid;
+  margin: 22px 0 0;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  border: 1px solid var(--compass-line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.init-facts > div {
+  min-width: 0;
+  padding: 11px 13px;
+  background: color-mix(in srgb, var(--compass-panel) 82%, transparent);
+}
+
+.init-facts > div:not(:last-child) {
+  border-right: 1px solid var(--compass-line);
+}
+
+.init-facts dt,
+.init-review-row > span {
+  color: var(--compass-faint);
+  font: 9px/1.2 var(--compass-font-mono);
+  text-transform: uppercase;
+}
+
+.init-facts dt {
+  margin-bottom: 4px;
+}
+
+.init-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.init-facts code,
+.init-review-row code {
+  font-family: var(--compass-font-mono);
+}
+
+.init-fields {
+  gap: 18px;
+}
+
+.init-fields label > span {
+  display: block;
+  margin-bottom: 9px;
+}
+
+.init-fields label strong,
+.init-fields label small {
+  display: block;
+}
+
+.init-fields label strong {
+  margin-bottom: 3px;
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.init-fields label small {
+  color: var(--compass-faint);
+  font-size: 10px;
+}
+
+.init-fields textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 142px;
+  resize: vertical;
+  padding: 11px 12px;
+  border: 1px solid var(--vscode-input-border, var(--compass-line));
+  border-radius: 4px;
+  outline: none;
+  background: var(--vscode-input-background, var(--background));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: 11px/1.6 var(--compass-font-mono);
+}
+
+.init-fields textarea::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--compass-faint));
+}
+
+.init-fields textarea:focus {
+  border-color: var(--compass-focus);
+  outline: 1px solid var(--compass-focus);
+}
+
+.init-fields textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.init-validation {
+  margin: 12px 0 0;
+  color: var(--destructive);
+  font-size: 11px;
+}
+
+.init-stage-actions {
+  display: flex;
+  margin-top: auto;
+  padding-top: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.init-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 13px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font: 500 12px/1.3 var(--compass-font-sans);
+}
+
+.init-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.init-button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.init-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.init-button-primary {
+  border-color: var(--vscode-button-border, transparent);
+  background: var(--vscode-button-background, var(--primary));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+}
+
+.init-button-primary:not(:disabled):hover {
+  background: var(--vscode-button-hoverBackground, var(--primary));
+}
+
+.init-button-secondary {
+  border-color: var(--compass-line);
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+}
+
+.init-button-secondary:not(:disabled):hover,
+.init-button-quiet:hover {
+  border-color: var(--compass-line-strong);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.init-button-quiet {
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.init-button-build {
+  min-width: 170px;
+}
+
+.init-review {
+  border: 1px solid var(--compass-line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.init-review-row {
+  display: grid;
+  min-height: 42px;
+  grid-template-columns: 130px minmax(0, 1fr);
+  align-items: start;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.init-review-row:last-child {
+  border-bottom: 0;
+}
+
+.init-review-row > span {
+  align-self: stretch;
+  padding: 12px 13px;
+  background: color-mix(in srgb, var(--compass-panel) 76%, transparent);
+}
+
+.init-review-row > div {
+  min-width: 0;
+  padding: 11px 13px;
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.init-review-row code {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+
+.init-rule-default {
+  color: var(--muted-foreground);
+}
+
+.init-rule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.init-rule-list li {
+  padding: 3px 7px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: var(--vscode-input-background, var(--background));
+}
+
+.init-build-callout {
+  display: flex;
+  margin-top: 16px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 15px;
+  border-left: 2px solid var(--compass-focus);
+  background: var(--compass-focus-soft);
+}
+
+.init-build-callout > svg {
+  width: 17px;
+  flex: 0 0 17px;
+  color: var(--compass-focus);
+}
+
+.init-build-callout strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.init-build-callout p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.init-replace-confirmation {
+  display: flex;
+  margin-top: 10px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--compass-warning) 55%, var(--compass-line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--compass-warning) 8%, transparent);
+  cursor: pointer;
+}
+
+.init-replace-confirmation input {
+  margin: 2px 0 0;
+  accent-color: var(--compass-focus);
+}
+
+.init-replace-confirmation strong,
+.init-replace-confirmation small {
+  display: block;
+}
+
+.init-replace-confirmation strong {
+  margin-bottom: 3px;
+  color: var(--compass-warning);
+  font-size: 11px;
+}
+
+.init-replace-confirmation small {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.init-progress-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.init-progress-header {
+  align-items: center;
+}
+
+.init-running-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 46%, var(--compass-line));
+  border-radius: 999px;
+  background: var(--compass-focus-soft);
+  color: var(--compass-focus);
+  font: 600 10px/1 var(--compass-font-mono);
+  text-transform: uppercase;
+}
+
+.init-running-badge svg,
+.init-runway li[data-state="active"] .init-runway-marker svg {
+  animation: init-spin 1.2s linear infinite;
+}
+
+.init-progress-card {
+  width: min(880px, 100%);
+  box-sizing: border-box;
+  margin: auto;
+  padding: clamp(26px, 5vw, 48px);
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 7px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  box-shadow: 0 22px 55px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.24));
+}
+
+.init-progress-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.init-progress-summary small,
+.init-progress-summary strong {
+  display: block;
+}
+
+.init-progress-summary small {
+  margin-bottom: 7px;
+  color: var(--compass-faint);
+  font: 10px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.init-progress-summary strong {
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 580;
+}
+
+.init-progress-summary > span {
+  color: var(--compass-focus);
+  font: 600 24px/1 var(--compass-font-mono);
+}
+
+.init-progress-track {
+  position: relative;
+  height: 7px;
+  margin: 18px 0 22px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.init-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--workbench-progress);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--compass-focus) 50%, transparent);
+  transition: width 180ms ease-out;
+}
+
+.init-progress-track > span.is-indeterminate {
+  width: 28%;
+  animation: init-indeterminate 1.35s ease-in-out infinite;
+}
+
+.init-current-file {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--compass-line);
+  border-radius: 5px;
+  background: var(--vscode-input-background, var(--compass-canvas));
+}
+
+.init-current-file > svg {
+  width: 16px;
+  flex: 0 0 16px;
+  color: var(--compass-focus);
+}
+
+.init-current-file span {
+  min-width: 0;
+}
+
+.init-current-file small,
+.init-current-file code {
+  display: block;
+}
+
+.init-current-file small {
+  margin-bottom: 4px;
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+  text-transform: uppercase;
+}
+
+.init-current-file code {
+  overflow: hidden;
+  color: var(--foreground);
+  font: 11px/1.4 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.init-runway {
+  display: grid;
+  margin-top: 30px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.init-runway li {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.init-runway li:not(:last-child)::after {
+  position: absolute;
+  top: 13px;
+  right: 8px;
+  left: 27px;
+  height: 1px;
+  background: var(--compass-line);
+  content: "";
+}
+
+.init-runway li[data-state="complete"]::after {
+  background: color-mix(in srgb, var(--compass-success) 58%, var(--compass-line));
+}
+
+.init-runway-marker {
+  z-index: 1;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 50%;
+  background: var(--compass-panel);
+  color: var(--compass-faint);
+}
+
+.init-runway-marker svg {
+  width: 12px;
+  height: 12px;
+}
+
+.init-runway li[data-state="complete"] .init-runway-marker {
+  border-color: var(--compass-success);
+  color: var(--compass-success);
+}
+
+.init-runway li[data-state="active"] .init-runway-marker {
+  border-color: var(--compass-focus);
+  color: var(--compass-focus);
+  box-shadow: 0 0 0 4px var(--compass-focus-soft);
+}
+
+.init-runway li > span:last-child {
+  min-width: 0;
+  padding-right: 20px;
+}
+
+.init-runway strong,
+.init-runway small {
+  display: block;
+}
+
+.init-runway strong {
+  margin: 1px 0 4px;
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.init-runway small {
+  color: var(--compass-faint);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.init-progress-footer {
+  display: flex;
+  width: min(880px, 100%);
+  box-sizing: border-box;
+  margin: 22px auto 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.init-progress-footer p {
+  margin: 0;
+  color: var(--compass-faint);
+  font-size: 10px;
+}
+
+.init-result-shell {
+  display: grid;
+  place-items: center;
+}
+
+.init-result-card {
+  width: min(580px, 100%);
+  box-sizing: border-box;
+  padding: clamp(32px, 6vw, 60px);
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 7px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  box-shadow: 0 22px 55px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.24));
+  text-align: center;
+}
+
+.init-result-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 22px;
+  place-items: center;
+  border: 1px solid;
+  border-radius: 50%;
+}
+
+.init-result-icon svg {
+  width: 24px;
+}
+
+.init-result-icon-success {
+  border-color: var(--compass-success);
+  background: color-mix(in srgb, var(--compass-success) 10%, transparent);
+  color: var(--compass-success);
+}
+
+.init-result-icon-error {
+  border-color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.init-result-icon-cancelled {
+  border-color: var(--compass-warning);
+  background: color-mix(in srgb, var(--compass-warning) 10%, transparent);
+  color: var(--compass-warning);
+}
+
+.init-result-card .init-eyebrow {
+  text-align: center;
+}
+
+.init-result-card > p:not(.init-eyebrow) {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.init-result-actions {
+  display: flex;
+  margin-top: 26px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+}
+
+@keyframes init-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes init-indeterminate {
+  0% { transform: translateX(-120%); }
+  55% { transform: translateX(180%); }
+  100% { transform: translateX(320%); }
+}
+
+@media (max-width: 760px) {
+  .init-shell {
+    padding: 24px 18px;
+  }
+
+  .init-header,
+  .init-progress-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .init-repository-badge {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .init-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .init-step-nav {
+    padding: 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--compass-line);
+  }
+
+  .init-step-nav ol {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .init-step-nav li {
+    padding: 0;
+  }
+
+  .init-step-nav li:not(:last-child)::after {
+    top: 15px;
+    right: -8px;
+    bottom: auto;
+    left: 38px;
+    width: auto;
+    height: 1px;
+  }
+
+  .init-step-nav button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .init-step-nav button strong {
+    font-size: 10px;
+  }
+
+  .init-local-note {
+    display: none;
+  }
+
+  .init-scope-grid,
+  .init-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .init-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .init-facts > div:not(:last-child) {
+    border-right: 0;
+    border-bottom: 1px solid var(--compass-line);
+  }
+
+  .init-review-row {
+    grid-template-columns: 95px minmax(0, 1fr);
+  }
+
+  .init-runway {
+    grid-template-columns: 1fr;
+    gap: 13px;
+  }
+
+  .init-runway li:not(:last-child)::after {
+    top: 26px;
+    right: auto;
+    bottom: -13px;
+    left: 13px;
+    width: 1px;
+    height: auto;
+  }
+
+  .init-progress-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .init-running-badge svg,
+  .init-runway li[data-state="active"] .init-runway-marker svg,
+  .init-progress-track > span.is-indeterminate {
+    animation: none;
+  }
+
+  .init-progress-track > span {
+    transition: none;
+  }
+}

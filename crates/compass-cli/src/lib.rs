@@ -33,11 +33,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use compass_core::{
-    BuildOptions, BuildPurpose, BuildResult, BuildTimings, ClusterExistingOptions, ExportInputs,
-    LoadedGraph, SemanticLayer, WatchBackend, WatchBuildReason, WatchOptions, WatchStatus,
-    build_graph_with_layers, build_graph_with_layers_and_tiebreaker, cluster_existing_graph,
-    default_graph_path, diagnose_graph_file, format_diagnostic_json, format_diagnostic_report,
-    merge_graphs, watch_local_graph,
+    BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
+    ClusterExistingOptions, ExportInputs, LoadedGraph, SemanticLayer, WatchBackend,
+    WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
+    build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
+    cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
+    format_diagnostic_report, merge_graphs, watch_local_graph,
 };
 use compass_files::{BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect};
 use compass_global::{GlobalPaths, global_add};
@@ -62,7 +63,7 @@ use compass_semantic::{
 };
 
 pub use help::HelpStyle;
-pub use init_commands::run_init;
+pub use init_commands::{run_init, run_init_jsonl};
 
 static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
@@ -1410,10 +1411,24 @@ fn command_benchmark(args: &[String]) -> Outcome {
 }
 
 fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
-    command_build_with_validation(frontend, args, extract)
+    command_build_with_validation(frontend, args, extract, None)
 }
 
-fn command_build_with_validation(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
+pub(crate) fn command_build_with_file_progress(
+    frontend: Frontend,
+    args: &[String],
+    extract: bool,
+    progress: &(dyn Fn(BuildFileProgress) + Sync),
+) -> Outcome {
+    command_build_with_validation(frontend, args, extract, Some(progress))
+}
+
+fn command_build_with_validation(
+    frontend: Frontend,
+    args: &[String],
+    extract: bool,
+    file_progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+) -> Outcome {
     let started = Instant::now();
     let mut root = None;
     let mut output_root = None;
@@ -1794,6 +1809,7 @@ fn command_build_with_validation(frontend: Frontend, args: &[String], extract: b
             dedup_tiebreaker
                 .as_mut()
                 .map(|tiebreaker| tiebreaker as &mut dyn compass_graph::EntityTiebreaker),
+            None,
         )
         .map(|result| (result, Vec::new(), Duration::ZERO))
         .map_err(|error| error.to_string())
@@ -1805,6 +1821,7 @@ fn command_build_with_validation(frontend: Frontend, args: &[String], extract: b
             dedup_tiebreaker
                 .as_mut()
                 .map(|tiebreaker| tiebreaker as &mut dyn compass_graph::EntityTiebreaker),
+            file_progress,
         )
         .map(|result| (result, Vec::new(), Duration::ZERO))
         .map_err(|error| error.to_string())
@@ -2020,7 +2037,7 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
             ]
         },
     );
-    let result = command_build_with_validation(frontend, &build_args, false);
+    let result = command_build_with_validation(frontend, &build_args, false, None);
     if result.code != 0 {
         return result;
     }
@@ -2281,6 +2298,7 @@ fn build_semantic_graph(
         Some(&layer),
         auxiliary_fragments,
         tiebreaker,
+        None,
     )
     .map_err(|error| error.to_string())?;
     Ok((result, notes, semantic_elapsed))
@@ -2291,12 +2309,18 @@ fn build_graph_with_optional_tiebreaker(
     semantic: Option<&SemanticLayer>,
     supplemental: &[serde_json::Value],
     tiebreaker: Option<&mut dyn compass_graph::EntityTiebreaker>,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
 ) -> Result<BuildResult, compass_core::CoreError> {
     match tiebreaker {
         Some(tiebreaker) => {
             build_graph_with_layers_and_tiebreaker(options, semantic, supplemental, tiebreaker)
         }
-        None => build_graph_with_layers(options, semantic, supplemental),
+        None => match progress {
+            Some(progress) => {
+                build_graph_with_layers_and_progress(options, semantic, supplemental, progress)
+            }
+            None => build_graph_with_layers(options, semantic, supplemental),
+        },
     }
 }
 

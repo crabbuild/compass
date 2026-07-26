@@ -21,9 +21,9 @@ pub use history::{
 };
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
-    BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError, SemanticLayer,
-    build_graph_with_layers, build_graph_with_layers_and_tiebreaker, build_graph_with_semantic,
-    build_local_graph,
+    BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError,
+    SemanticLayer, build_graph_with_layers, build_graph_with_layers_and_progress,
+    build_graph_with_layers_and_tiebreaker, build_graph_with_semantic, build_local_graph,
 };
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,
