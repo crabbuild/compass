@@ -9,7 +9,7 @@ use prolly::{
 use prolly_store_sqlite::{SqliteStore, SqliteStoreConfig};
 
 use crate::keys::root_name;
-use crate::validate::{RealizationTrees, validate_trees};
+use crate::validate::{RealizationTrees, validate_trees, validate_trees_with_artifacts};
 use crate::{
     ActivityGuard, CommitId, GraphVersion, HistoryError, MaintenanceGuard, PublishRequest,
     PublishedVersion, RealizationId, Repository, StoredTree, StructuralSharing,
@@ -37,8 +37,6 @@ pub enum HistoryRecord {
 pub(crate) const STORE_FORMAT_ROOT: &[u8] = b"compass/store-format/v1";
 const STORE_FORMAT_KEY: &[u8] = b"format";
 const STORE_FORMAT_VALUE: &[u8] = br#"{"adapter":"prolly-store-sqlite","canonical_encoding":1,"graph_schema":"networkx-node-link/v1","history_schema":1,"typed_keys":1}"#;
-type Records = Vec<(Vec<u8>, Vec<u8>)>;
-
 /// Project-owned wrapper around the pinned SQLite Prolly adapter.
 pub struct HistoryStore {
     pub(crate) root: PathBuf,
@@ -694,18 +692,29 @@ impl HistoryStore {
         id: &RealizationId,
         _guard: &ActivityGuard,
     ) -> Result<crate::CompletedGraphArtifacts, HistoryError> {
-        self.validate_without_activity(id)?;
-        let partitioned = crate::PartitionedGraph {
-            nodes: self.read_tree(&self.load_realization_root(id, b"nodes")?)?,
-            edges: self.read_tree(&self.load_realization_root(id, b"edges")?)?,
-            hyperedges: self.read_tree(&self.load_realization_root(id, b"hyperedges")?)?,
-            analysis: self.read_tree(&self.load_realization_root(id, b"analysis")?)?,
-            metadata: self.read_tree(&self.load_realization_root(id, b"metadata")?)?,
-            program_facts: self.read_tree(&self.load_program_root(id, b"program-facts")?)?,
-            program_summaries: self
-                .read_tree(&self.load_program_root(id, b"program-summaries")?)?,
-        };
-        crate::CompletedGraphArtifacts::reconstruct(&partitioned)
+        let published = self.get_without_activity(id)?;
+        let nodes = self.load_realization_root(id, b"nodes")?;
+        let edges = self.load_realization_root(id, b"edges")?;
+        let hyperedges = self.load_realization_root(id, b"hyperedges")?;
+        let analysis = self.load_realization_root(id, b"analysis")?;
+        let metadata = self.load_realization_root(id, b"metadata")?;
+        let program_facts = self.load_program_root(id, b"program-facts")?;
+        let program_summaries = self.load_program_root(id, b"program-summaries")?;
+        validate_trees_with_artifacts(
+            &self.prolly,
+            id,
+            &published.version,
+            RealizationTrees {
+                nodes: &nodes,
+                edges: &edges,
+                hyperedges: &hyperedges,
+                analysis: &analysis,
+                metadata: &metadata,
+                program_facts: &program_facts,
+                program_summaries: &program_summaries,
+            },
+        )
+        .map(|validated| validated.artifacts)
     }
 
     /// Measure logical Prolly-node reuse between two complete realizations.
@@ -770,13 +779,6 @@ impl HistoryStore {
             builder.add(key, value);
         }
         builder.build().map_err(HistoryError::from)
-    }
-
-    fn read_tree(&self, tree: &Tree) -> Result<Records, HistoryError> {
-        self.prolly
-            .range(tree, &[], None)?
-            .map(|entry| entry.map_err(HistoryError::from))
-            .collect()
     }
 
     fn load_realization_root(

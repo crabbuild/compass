@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 
 use compass_core::{CompleteGraphBuilder, MaterializeError};
-use compass_files::{DetectOptions, IgnorePolicy, Manifest, detect};
+use compass_files::{DetectOptions, IgnorePolicy, Manifest, ManifestKind, detect};
 use compass_history::{
     BuildProfile, CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts,
     HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
@@ -105,9 +106,15 @@ impl HistoryBuildOptions {
         })
     }
 
-    pub(crate) fn builder(&self, executable: PathBuf) -> NativeCompleteGraphBuilder {
+    pub(crate) fn builder(
+        &self,
+        executable: PathBuf,
+        working_tree_seed: Option<PathBuf>,
+    ) -> NativeCompleteGraphBuilder {
         NativeCompleteGraphBuilder {
             executable,
+            working_tree_seed,
+            profile: self.profile.clone(),
             forwarded: self.forwarded.clone(),
             gitignore: self.gitignore,
             excludes: self.excludes.clone(),
@@ -841,6 +848,8 @@ fn resolve_provider(values: &mut HistoryBuildValues) -> Result<(), HistoryError>
 
 pub(crate) struct NativeCompleteGraphBuilder {
     executable: PathBuf,
+    working_tree_seed: Option<PathBuf>,
+    profile: BuildProfile,
     forwarded: Vec<String>,
     gitignore: bool,
     excludes: Vec<String>,
@@ -850,6 +859,70 @@ pub(crate) struct NativeCompleteGraphBuilder {
 }
 
 impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
+    fn promote_current(
+        &self,
+        repository_root: &Path,
+        commit: &compass_history::CommitId,
+    ) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
+        if !self.is_default_current_snapshot_profile() {
+            return Ok(None);
+        }
+        let Some(output_dir) = self.working_tree_seed.as_ref() else {
+            return Ok(None);
+        };
+        if !graph_stamp_matches(&output_dir.join("graph.json"), commit) {
+            return Ok(None);
+        }
+        let detection = detect(
+            repository_root,
+            &DetectOptions {
+                gitignore: self.gitignore,
+                ignore_policy: IgnorePolicy::HistoricalCommit,
+                extra_excludes: self.excludes.clone(),
+                output_name: "compass-out".to_owned(),
+                ..DetectOptions::default()
+            },
+        )?;
+        let manifest = Manifest::load(&output_dir.join("manifest.json"), Some(repository_root));
+        if !manifest.is_unchanged(&detection.files, ManifestKind::Ast) {
+            return Ok(None);
+        }
+        let Ok(completed) = CompletedGraphArtifacts::load(
+            output_dir,
+            CompletionEvidence {
+                extraction_succeeded: true,
+                allow_partial: false,
+                semantic_files_expected: 0,
+                semantic_files_completed: 0,
+                failed_chunks: 0,
+            },
+        ) else {
+            return Ok(None);
+        };
+        let Some(program) = completed.artifacts.program.as_ref() else {
+            return Ok(None);
+        };
+        let Ok(expected_providers) =
+            compass_core::history_provider_manifest(repository_root, &self.profile)
+        else {
+            return Ok(None);
+        };
+        if program.program.providers != expected_providers {
+            return Ok(None);
+        }
+        let code_files = detection
+            .files
+            .get("code")
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        Ok(compass_core::normalize_current_code_only_snapshot(
+            completed.artifacts,
+            repository_root,
+            code_files,
+        )
+        .ok())
+    }
+
     fn build(
         &self,
         checkout: &Path,
@@ -942,6 +1015,29 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         )
         .map_err(Into::into)
     }
+}
+
+impl NativeCompleteGraphBuilder {
+    fn is_default_current_snapshot_profile(&self) -> bool {
+        self.code_only
+            && self.gitignore
+            && self.excludes.is_empty()
+            && self.forwarded == ["--code-only", "--resolution", "1"].map(str::to_owned)
+    }
+}
+
+fn graph_stamp_matches(path: &Path, commit: &compass_history::CommitId) -> bool {
+    #[derive(serde::Deserialize)]
+    struct GraphStamp {
+        built_at_commit: Option<String>,
+    }
+
+    fs::File::open(path)
+        .ok()
+        .and_then(|file| serde_json::from_reader::<_, GraphStamp>(file).ok())
+        .and_then(|stamp| stamp.built_at_commit)
+        .as_deref()
+        == Some(commit.as_str())
 }
 
 fn seed_completion(seed: &GraphArtifacts) -> CompletionEvidence {
@@ -1040,6 +1136,134 @@ fn read_bounded(mut reader: impl Read) -> Result<String, std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use compass_history::CommitId;
+    use std::fs;
+
+    fn git(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(root)
+            .output()?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
+        }
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    }
+
+    fn current_snapshot_fixture()
+    -> Result<(tempfile::TempDir, CommitId, PathBuf), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        git(directory.path(), &["init", "--quiet"])?;
+        git(directory.path(), &["config", "user.name", "Compass Test"])?;
+        git(
+            directory.path(),
+            &["config", "user.email", "compass@example.invalid"],
+        )?;
+        fs::write(directory.path().join("service.rs"), "pub fn service() {}\n")?;
+        git(directory.path(), &["add", "service.rs"])?;
+        git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+        let commit = git(directory.path(), &["rev-parse", "HEAD"])?.parse::<CommitId>()?;
+        let mut build = compass_core::BuildOptions::new(directory.path());
+        build.force = true;
+        build.no_viz = true;
+        build.program_analysis = true;
+        build.built_at_commit = Some(commit.to_string());
+        let output = compass_core::build_local_graph(&build)?.output_dir;
+        Ok((directory, commit, output))
+    }
+
+    #[test]
+    fn native_builder_promotes_an_exact_current_code_only_snapshot()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (directory, commit, output) = current_snapshot_fixture()?;
+        let options =
+            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])?.options;
+        let builder = options.builder(
+            PathBuf::from("/definitely/not/a/compass-binary"),
+            Some(output),
+        );
+
+        let promoted = builder.promote_current(directory.path(), &commit)?;
+
+        assert!(
+            promoted.is_some_and(|completed| completed.artifacts.document.nodes.iter().any(
+                |node| node
+                    .attributes
+                    .get("source_file")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("service.rs")
+            ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn native_builder_rejects_a_stale_current_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+        let (directory, commit, output) = current_snapshot_fixture()?;
+        fs::write(directory.path().join("service.rs"), "pub fn changed() {}\n")?;
+        let options =
+            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])?.options;
+        let builder = options.builder(PathBuf::from("compass"), Some(output));
+
+        assert!(
+            builder
+                .promote_current(directory.path(), &commit)?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn native_builder_rejects_a_current_snapshot_without_program_inventory()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (directory, commit, output) = current_snapshot_fixture()?;
+        fs::remove_file(output.join("program.json"))?;
+        let options =
+            parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])?.options;
+        let builder = options.builder(
+            PathBuf::from("/definitely/not/a/compass-binary"),
+            Some(output),
+        );
+
+        assert!(
+            builder
+                .promote_current(directory.path(), &commit)?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn native_builder_rejects_current_snapshots_for_nondefault_structural_profiles()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (directory, commit, output) = current_snapshot_fixture()?;
+        for arguments in [
+            vec![
+                "HEAD".to_owned(),
+                "--code-only".to_owned(),
+                "--resolution=2".to_owned(),
+            ],
+            vec![
+                "HEAD".to_owned(),
+                "--code-only".to_owned(),
+                "--cargo".to_owned(),
+            ],
+        ] {
+            let options = parse_build_command("build", &arguments)?.options;
+            let builder = options.builder(
+                PathBuf::from("/definitely/not/a/compass-binary"),
+                Some(output.clone()),
+            );
+
+            assert!(
+                builder
+                    .promote_current(directory.path(), &commit)?
+                    .is_none(),
+                "profile unexpectedly reused the default current snapshot: {arguments:?}"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn build_parser_normalizes_profiles_and_rejects_partial_or_external_inputs()
