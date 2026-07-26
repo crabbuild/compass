@@ -58,7 +58,8 @@ compass update . --timing
   Program-supported tree-sitter source at most once.
 - Source edits preserve incremental AST and Program syntax reuse.
 - Performance evidence uses a release binary and the fixed Django commit.
-- After code changes, run `graphify update .`.
+- Do not run `graphify update .` as part of this work; qualification evidence
+  comes from the real Compass init/update commands below.
 
 ## File and responsibility map
 
@@ -849,7 +850,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 bash scripts/test_release_scripts.sh
-graphify update .
+DJANGO_ROOT=/Users/haipingfu/Github/django \
+  COMPASS_BIN=target/release/compass \
+  DJANGO_SAMPLES=3 \
+  bash scripts/qualify_django_performance.sh
 git diff --check
 git status --short
 ```
@@ -866,13 +870,13 @@ git add scripts/qualify_django_performance.sh \
 git commit -m "test(perf): gate Django indexing below five seconds"
 ```
 
-- [ ] Push and update PR #46:
+- [ ] Push and update draft PR #48:
 
 ```bash
 git push origin codex/fix-python-symbol-collisions
-gh pr edit 46 \
+gh pr edit 48 \
   --title "Fix repeated Python symbols and accelerate Django indexing"
-gh pr comment 46 --body-file "$qualification_summary"
+gh pr comment 48 --body-file "$qualification_summary"
 ```
 
 The PR evidence must include all nine samples, medians, maxima, exact commits,
@@ -899,8 +903,7 @@ evidence:
 | Safe fast path | Corruption, mismatch, and interrupted-state coverage |
 | Incremental reuse | Edited-source core pipeline coverage |
 | Repository quality | fmt, clippy, workspace tests, release-script tests |
-| Graph freshness | Successful `graphify update .` |
-| PR delivery | Pushed commits and PR #46 qualification evidence |
+| PR delivery | Pushed commits and PR #48 qualification evidence |
 
 Do not substitute a median-only pass, a warmed cold build, a no-cluster build,
 or a narrower fixture for the complete Django acceptance commands.

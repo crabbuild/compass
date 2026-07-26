@@ -352,7 +352,9 @@ and verification:
    their corresponding implementation changes.
 7. Run workspace formatting, linting, and tests.
 8. Run the Django qualification script against the release binary.
-9. Refresh the repository graph with `graphify update .`.
+
+`graphify update .` is explicitly outside this work. Runtime verification uses
+the actual Compass init and update commands on the Django checkout.
 
 Microbenchmarks guide optimization but cannot satisfy the acceptance gate. Only
 the complete release commands on the Django repository prove the target.
@@ -370,5 +372,4 @@ The work is complete when:
    match the approved baseline or an explained correctness fix;
 7. repeated builds produce canonical-equivalent public artifacts;
 8. corruption and interrupted-publication tests prove the fast path fails safe;
-9. focused and workspace verification pass; and
-10. the refreshed Graphify knowledge graph is current.
+9. focused, workspace, and Django Compass init/update verification pass.
