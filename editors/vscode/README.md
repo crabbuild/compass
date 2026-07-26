@@ -37,44 +37,40 @@ offers **Select Compass Binary** instead of displaying raw CLI usage output.
 
 ## Using the Compass activity bar
 
-### Repository
+### Workspace
 
-Repository shows the Compass state of every folder in the current VS Code
-workspace. Expand a repository to use the actions that match its current state:
+Workspace is the single command surface for Compass. Repository rows report
+**Graph ready**, **Not initialized**, **Building**, or **Build failed** without
+repeating workflow actions under every folder.
 
-- **Initialize repository** creates the first local graph in
-  `<repository>/compass-out/`.
-- **Open graph** opens the current code graph. Use the right inspector to search,
-  inspect connected nodes, filter communities, and open source. Drag the inspector
-  divider to resize it, or use its header control to collapse and expand it.
-- **Codebase evolution** opens Git and graph-build history.
-- **Update graph** retries a failed build.
+- **Explore** contains Code graph, Architecture flow, Call graph from cursor,
+  Ask codebase, and Codebase evolution.
+- **Maintain** contains Update graph and Watch for changes. It changes to
+  **Stop watching** while the current repository watcher is active.
+- **Active operations** appears only while a build or watcher is running.
+- **Initialize repository** and **Retry graph build** appear only when the
+  current workspace state requires them.
+
+**Refresh Compass Status** in the Workspace title reads repository state again.
+It never initializes, updates, or watches a graph.
+
+Open **Code graph** to inspect connected nodes, filter communities, search, and
+open source. Drag the inspector divider to resize it, or use its header control
+to collapse and expand it.
 
 Compass discovers the CLI automatically from the configured location and then
-from `PATH`. A CLI row appears only when the executable is missing or incompatible;
-a healthy CLI path does not occupy the Repository view.
+from `PATH`. A setup row appears only when the executable is missing or
+incompatible; a healthy CLI does not occupy the Workspace view.
 
-### Operations
-
-Operations is the command center. Its groups expose the workflows that can run for
-the current workspace:
-
-- **Build** — initialize a repository, update a graph, and start or stop watch.
-- **Explore** — open the graph, trace a call graph from the cursor, read the
-  architecture flow, or query the codebase.
-- **History** — open Codebase Evolution.
-- **Active operations** — see builds and watchers currently running. Select an
-  active watcher to stop it.
-
-In a multi-root workspace, Compass uses the repository attached to the clicked
-Repository action. Operations asks you to choose a repository when an action could
-apply to more than one folder.
+In a multi-root workspace, Compass uses the repository containing the active
+editor. If no repository is implied and more than one is eligible, Compass asks
+you to choose one.
 
 ### Git commits and revision graphs
 
-Open **Codebase evolution** from Repository, Operations, the Repository title bar,
-or the Command Palette. The left rail lists every reachable Git commit and shows
-whether its Compass graph is available, not materialized, building, or failed.
+Open **Codebase evolution** from **Workspace > Explore** or the Command Palette.
+The left rail lists every reachable Git commit and shows whether its Compass
+graph is available, not materialized, building, or failed.
 
 Select a commit, then:
 
