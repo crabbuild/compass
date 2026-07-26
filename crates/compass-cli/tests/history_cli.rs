@@ -116,7 +116,8 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     assert_eq!(incompatible_json.status.code(), Some(1));
     let incompatible_json: serde_json::Value = serde_json::from_slice(&incompatible_json.stdout)?;
     assert_eq!(incompatible_json["compatible"], false);
-    assert_eq!(incompatible_json["validation"]["valid"], false);
+    assert_eq!(incompatible_json["seal"]["valid"], false);
+    assert!(incompatible_json.get("validation").is_none());
     Ok(())
 }
 
@@ -903,9 +904,18 @@ fn history_commands_inspect_prefer_and_export_published_realizations()
     )?;
     assert!(status.status.success());
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&status.stdout)?["validation"]["valid"],
+        serde_json::from_slice::<serde_json::Value>(&status.stdout)?["seal"]["valid"],
         true
     );
+    let verified = run(
+        compass,
+        directory.path(),
+        &["history", "verify", &first.id.to_string(), "--format=json"],
+    )?;
+    assert!(verified.status.success());
+    let verified: serde_json::Value = serde_json::from_slice(&verified.stdout)?;
+    assert_eq!(verified["valid"], true);
+    assert_eq!(verified["realization"], first.id.to_string());
     assert_ne!(first.id, second.id);
     Ok(())
 }
@@ -1496,7 +1506,7 @@ fn missing_code_only_commit_is_built_on_first_query() -> Result<(), Box<dyn std:
     assert!(!directory.path().join("compass-out").exists());
     let status = run(compass, directory.path(), &["history", "status", "HEAD~1"])?;
     assert!(status.status.success());
-    assert!(String::from_utf8_lossy(&status.stdout).contains("validation: valid"));
+    assert!(String::from_utf8_lossy(&status.stdout).contains("seal: valid"));
     Ok(())
 }
 

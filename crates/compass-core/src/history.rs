@@ -379,14 +379,7 @@ fn observe_preferred(
     activity: &compass_history::ActivityGuard,
 ) -> Result<(Option<PublishedVersion>, Option<CorruptPreferredToken>), MaterializeError> {
     match store.preferred_with_activity(commit, activity) {
-        Ok(Some(published)) => match store.validate_with_activity(&published.id, activity) {
-            Ok(_) => Ok((Some(published), None)),
-            Err(error) if error.is_catalog_corruption() => {
-                let token = store.corrupt_preferred_token_with_activity(commit, activity)?;
-                Ok((None, Some(token)))
-            }
-            Err(error) => Err(error.into()),
-        },
+        Ok(Some(published)) => Ok((Some(published), None)),
         Ok(None) => Ok((None, None)),
         Err(original) if original.is_catalog_corruption() => {
             match store.corrupt_preferred_token_with_activity(commit, activity) {

@@ -15,7 +15,7 @@ use crate::{Frontend, Outcome};
 pub(crate) fn help(_frontend: Frontend) -> String {
     let prefix = "compass";
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  verify REV|REALIZATION [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -72,12 +72,7 @@ pub(crate) fn resolve_or_materialize(
     let existing = HistoryStore::open_existing(repository).map_err(|error| error.to_string())?;
     if !rebuild && let Some(history) = existing {
         match history.preferred(&commit) {
-            Ok(Some(preferred)) => {
-                history
-                    .validate(&preferred.id)
-                    .map_err(|error| error.to_string())?;
-                return Ok((history, preferred));
-            }
+            Ok(Some(preferred)) => return Ok((history, preferred)),
             Ok(None) => {}
             Err(error) => return Err(error.to_string()),
         }
@@ -275,6 +270,9 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
     if args[0] == "change-counts" {
         return execute_change_counts(&repository, &args[1..]);
     }
+    if args[0] == "verify" {
+        return execute_verify(&repository, &args[1..]);
+    }
     if args[0] == "gc" {
         return execute_gc(&repository, &args[1..]);
     }
@@ -365,12 +363,12 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                             "compatible":false,
                             "commit":commit,
                             "limitations":limitations,
-                            "validation":{"valid":false,"error":error.to_string()}
+                            "seal":{"valid":false,"mode":"manifest_and_direct_roots","error":error.to_string()}
                         })
                         .to_string()
                     } else {
                         format!(
-                            "history: {history_state}\nprofile: {}\nstore: incompatible\ncommit: {commit}\nlimitations: {limitation_text}\nvalidation: invalid",
+                            "history: {history_state}\nprofile: {}\nstore: incompatible\ncommit: {commit}\nlimitations: {limitation_text}\nseal: invalid",
                             config.profile_digest.as_deref().unwrap_or("none")
                         )
                     };
@@ -388,12 +386,12 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                             "commit":commit,
                             "limitations":limitations,
                             "preferred":serde_json::Value::Null,
-                            "validation":{"valid":false,"error":error.to_string()}
+                            "seal":{"valid":false,"mode":"manifest_and_direct_roots","error":error.to_string()}
                         })
                         .to_string()
                     } else {
                         format!(
-                            "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: unreadable\nvalidation: invalid",
+                            "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: unreadable\nseal: invalid",
                             config.profile_digest.as_deref().unwrap_or("none")
                         )
                     };
@@ -402,10 +400,6 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
             };
             if format == "json" {
                 let job = newest_job(&repository, &commit).map_err(runtime)?;
-                let validation = preferred
-                    .as_ref()
-                    .map(|value| history.validate(&value.id))
-                    .transpose();
                 let report = serde_json::json!({
                     "enabled":config.enabled,
                     "profile_digest":config.profile_digest,
@@ -415,20 +409,16 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                     "preferred":preferred.as_ref().map(|v|v.id.as_hex()),
                     "version":preferred.as_ref().map(|v|&v.version),
                     "job":job,
-                    "validation": match &validation {
-                        Ok(Some(_)) => serde_json::json!({"valid":true}),
-                        Ok(None) => serde_json::Value::Null,
-                        Err(error) => serde_json::json!({"valid":false,"error":error.to_string()}),
-                    }
+                    "seal": preferred.as_ref().map(|_| serde_json::json!({
+                        "valid":true,
+                        "mode":"manifest_and_direct_roots"
+                    }))
                 })
                 .to_string();
-                match validation {
-                    Ok(_) => Ok(report),
-                    Err(error) => Err(report_failure(report, error)),
-                }
+                Ok(report)
             } else if let Some(value) = preferred {
                 let mut prefix = format!(
-                    "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nprogram facts: {}\nprogram summaries: {}\nvalidation: valid",
+                    "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: {}\nfingerprint: {}\nnodes: {}\nedges: {}\nprogram facts: {}\nprogram summaries: {}\nseal: valid",
                     config.profile_digest.as_deref().unwrap_or("none"),
                     value.id,
                     value.version.extraction_fingerprint,
@@ -449,13 +439,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                         prefix.push_str(&format!("\ndiagnostic: {diagnostic}"));
                     }
                 }
-                match history.validate(&value.id) {
-                    Ok(_) => Ok(prefix),
-                    Err(error) => Err(report_failure(
-                        prefix.replacen("validation: valid", "validation: invalid", 1),
-                        error,
-                    )),
-                }
+                Ok(prefix)
             } else {
                 let mut report = format!(
                     "history: {history_state}\nprofile: {}\nstore: present\ncommit: {commit}\nlimitations: {limitation_text}\npreferred: none",
@@ -729,6 +713,80 @@ impl ChangeSink for ChangeCounts {
     }
 }
 
+fn execute_verify(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
+    let mut target = None;
+    let mut format = "text";
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--format" => {
+                index += 1;
+                format = args
+                    .get(index)
+                    .map(String::as_str)
+                    .ok_or_else(|| usage("--format requires text or json"))?;
+            }
+            value if value.starts_with("--format=") => format = &value[9..],
+            value if value.starts_with('-') => {
+                return Err(usage(format!("unknown history verify option {value}")));
+            }
+            value if target.is_none() => target = Some(value),
+            value => {
+                return Err(usage(format!(
+                    "history verify accepts one revision or realization, unexpected: {value}"
+                )));
+            }
+        }
+        index += 1;
+    }
+    if !matches!(format, "text" | "json") {
+        return Err(usage("--format must be text or json"));
+    }
+    let target = target.ok_or_else(|| usage("history verify requires REV or REALIZATION"))?;
+    let history = store(repository)?;
+    let published = if let Ok(commit) = repository.resolve(target) {
+        history
+            .preferred(&commit)
+            .map_err(runtime)?
+            .ok_or_else(|| runtime(format!("revision {commit} is not materialized")))?
+    } else {
+        let id = target.parse::<RealizationId>().map_err(runtime)?;
+        history.get(&id).map_err(runtime)?
+    };
+    let report = history.validate(&published.id).map_err(runtime)?;
+    if format == "json" {
+        serde_json::to_string(&serde_json::json!({
+            "schema":"compass.history.verification/1",
+            "valid":true,
+            "realization":published.id,
+            "commit":published.version.git_commit,
+            "records":{
+                "nodes":report.nodes,
+                "edges":report.edges,
+                "hyperedges":report.hyperedges,
+                "analysis":report.analysis_records,
+                "metadata":report.metadata_records,
+                "program_facts":report.program_fact_records,
+                "program_summaries":report.program_summary_records
+            }
+        }))
+        .map_err(runtime)
+    } else {
+        Ok(format!(
+            "verification: valid\nrealization: {}\ncommit: {}\nnodes: {}\nedges: {}\nhyperedges: {}\nanalysis records: {}\nmetadata records: {}\nprogram facts: {}\nprogram summaries: {}",
+            published.id,
+            published.version.git_commit,
+            report.nodes,
+            report.edges,
+            report.hyperedges,
+            report.analysis_records,
+            report.metadata_records,
+            report.program_fact_records,
+            report.program_summary_records
+        ))
+    }
+}
+
 fn execute_change_counts(
     repository: &Repository,
     args: &[String],
@@ -795,8 +853,6 @@ fn execute_change_counts(
         .preferred(&parent)
         .map_err(runtime)?
         .ok_or_else(|| runtime(format!("parent revision {parent} is not materialized")))?;
-    history.validate(&current.id).map_err(runtime)?;
-    history.validate(&previous.id).map_err(runtime)?;
     let mut counts = ChangeCounts::default();
     history
         .diff_records(
@@ -1490,18 +1546,12 @@ fn stored_profile(repository: &Repository, source: &str) -> Result<BuildProfile,
             .preferred(&commit)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("no preferred realization exists for {source}"))?;
-        history
-            .validate(&version.id)
-            .map_err(|error| error.to_string())?;
         return Ok(version.version.build_profile);
     }
     let id = source
         .parse::<RealizationId>()
         .map_err(|_| format!("--profile-from must name a revision or realization, got {source}"))?;
     let version = history.get(&id).map_err(|error| error.to_string())?;
-    history
-        .validate(&version.id)
-        .map_err(|error| error.to_string())?;
     Ok(version.version.build_profile)
 }
 
