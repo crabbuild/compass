@@ -335,19 +335,21 @@ The default Django root is `/Users/haipingfu/Github/django`, and callers can
 override it with `DJANGO_ROOT`. Destructive cleanup is limited to paths created
 inside the script's validated temporary directory.
 
-## Test strategy
+## Verification strategy
 
-Implementation follows red-green-refactor:
+Each coherent implementation task is followed by focused regression coverage
+and verification:
 
-1. Add combined-extraction equivalence tests and confirm they fail before the
-   combined API exists.
-2. Add source-read and parse-count instrumentation tests proving one cold pass.
-3. Add binary cache round-trip, corruption, version, and fallback tests.
-4. Add sealed-state fast-path tests for valid, missing, truncated, modified,
+1. Verify combined extraction is equivalent to the standalone graph and
+   Program extractors.
+2. Add source-read and parse-count instrumentation proving one cold pass.
+3. Cover binary cache round trips, corruption, versioning, and migration.
+4. Cover the sealed-state fast path for valid, missing, truncated, modified,
    option-mismatched, and interrupted generations.
-5. Add CLI tests for default totals, `--timing` on all build commands, and
-   failure durations.
-6. Run focused language, files, core, output, analysis, and CLI tests.
+5. Cover default totals, `--timing` on all build commands, and failure
+   durations.
+6. Run focused language, files, core, output, analysis, and CLI tests after
+   their corresponding implementation changes.
 7. Run workspace formatting, linting, and tests.
 8. Run the Django qualification script against the release binary.
 9. Refresh the repository graph with `graphify update .`.
