@@ -286,6 +286,12 @@ show their identifier and known relationships without implying unavailable
 metadata. If JavaScript is disabled, the exhaustive lists remain the
 authoritative fallback.
 
+Finding prose resolves retained entity identities to human-readable symbol
+names. This applies to subjects, dependency endpoints, affected consumers,
+witness-path hops, evidence record keys, and semantic before/after values.
+Raw stable IDs remain unchanged in JSON, alongside `entity_display_names`, so
+automation and exact traceability are preserved.
+
 After writing any HTML page, an interactive Compass CLI asks before opening it
 in the default browser; Enter or `n` leaves the page closed. Scripts, pipes,
 redirected commands, and CI never prompt or launch a browser.

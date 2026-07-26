@@ -70,6 +70,7 @@ pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, Seman
         apply_verification(input.test_evidence.tests_for(&finding.subject), finding);
     }
     add_verification_findings(&mut findings);
+    let entity_display_names = collect_entity_display_names(&input, &entities, &findings);
     let source_changes = input.source_deltas.to_vec();
     let graph_delta = input.graph_delta.clone();
     finalize_report(
@@ -82,6 +83,118 @@ pub fn compare(input: SemanticDiffInput<'_>) -> Result<SemanticDiffReport, Seman
         limitations,
         source_changes,
         graph_delta,
+        entity_display_names,
+    )
+}
+
+fn collect_entity_display_names(
+    input: &SemanticDiffInput<'_>,
+    entities: &[ChangedEntity],
+    findings: &[SemanticFinding],
+) -> BTreeMap<String, String> {
+    let mut names = BTreeMap::new();
+    for entity in entities {
+        for snapshot in [entity.old.as_ref(), entity.new.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            names.insert(
+                snapshot.function.symbol_id.clone(),
+                snapshot.function.name.clone(),
+            );
+        }
+    }
+    for node in input
+        .graph_delta
+        .added_nodes
+        .iter()
+        .chain(&input.graph_delta.removed_nodes)
+        .chain(&input.graph_delta.changed_nodes)
+    {
+        if !node.label.is_empty() {
+            names.insert(node.id.clone(), node.label.clone());
+        }
+    }
+
+    let mut candidates = BTreeSet::new();
+    for finding in findings {
+        candidates.insert(finding.subject.clone());
+        for consumer in &finding.affected_consumers {
+            candidates.insert(consumer.symbol_id.clone());
+            if consumer.display_name != consumer.symbol_id {
+                names.insert(consumer.symbol_id.clone(), consumer.display_name.clone());
+            }
+        }
+        for path in &finding.witness_paths {
+            candidates.insert(path.consumer.clone());
+            for hop in &path.hops {
+                candidates.insert(hop.source.clone());
+                candidates.insert(hop.target.clone());
+            }
+        }
+        for evidence in &finding.evidence {
+            if let Some(record_key) = &evidence.record_key {
+                candidates.insert(record_key.clone());
+            }
+        }
+        if let Some(before) = &finding.before {
+            collect_value_identities(before, None, &mut candidates);
+        }
+        if let Some(after) = &finding.after {
+            collect_value_identities(after, None, &mut candidates);
+        }
+    }
+
+    for candidate in candidates {
+        if names.contains_key(&candidate) {
+            continue;
+        }
+        let function = [SnapshotSide::New, SnapshotSide::Old]
+            .into_iter()
+            .find_map(|side| input.snapshots.function(side, &candidate).ok().flatten());
+        if let Some(function) = function {
+            names.insert(candidate, function.name);
+            continue;
+        }
+        let node = [SnapshotSide::New, SnapshotSide::Old]
+            .into_iter()
+            .find_map(|side| input.snapshots.node(side, &candidate).ok().flatten());
+        if let Some(node) = node {
+            let label = graph_label(&node, &candidate).to_owned();
+            if label != candidate {
+                names.insert(candidate, label);
+            }
+        }
+    }
+    names
+}
+
+fn collect_value_identities(value: &Value, field: Option<&str>, candidates: &mut BTreeSet<String>) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                collect_value_identities(value, field, candidates);
+            }
+        }
+        Value::Object(values) => {
+            for (key, value) in values {
+                collect_value_identities(value, Some(key), candidates);
+            }
+        }
+        Value::String(value)
+            if is_identity_field(field)
+                || (value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())) =>
+        {
+            candidates.insert(value.clone());
+        }
+        _ => {}
+    }
+}
+
+fn is_identity_field(field: Option<&str>) -> bool {
+    matches!(
+        field,
+        Some("id" | "source" | "target" | "symbol_id" | "record_key" | "resolved_calls")
     )
 }
 
@@ -1054,6 +1167,7 @@ fn finalize_report(
     mut limitations: Vec<String>,
     source_changes: Vec<compass_history::SourceFileDelta>,
     graph_delta: crate::GraphDelta,
+    entity_display_names: BTreeMap<String, String>,
 ) -> Result<SemanticDiffReport, SemanticDiffError> {
     if findings.len() > MAX_FINDINGS {
         return Err(SemanticDiffError::LimitExceeded {
@@ -1185,6 +1299,7 @@ fn finalize_report(
         collapsed_groups,
         source_changes,
         graph_delta,
+        entity_display_names,
         completeness: BTreeMap::from([
             ("identity".to_owned(), Completeness::Complete),
             ("source_delta".to_owned(), Completeness::Complete),
