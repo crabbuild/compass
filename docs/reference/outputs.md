@@ -353,6 +353,12 @@ and graph file signature. They are:
 
 Do not archive them as the only graph copy.
 
+Versioned history uses a repository-private `cache/v1` directory below the Git
+common directory. It contains verified-content extraction entries plus
+canonical semantic-diff and viewer projections. This is a hard-cutover cache:
+older layouts are ignored, not migrated. Everything below `cache/v1` is
+reproducible from Git commits and immutable realizations.
+
 ## Other exports
 
 `compass export` can produce:

@@ -38,11 +38,9 @@ code-only realization and one or more semantic realizations with different
 provider/model configuration.
 
 History graph schema `networkx-node-link/v1` records automatic multigraph
-promotion. This is a hard cutover: Compass accepts only the current v1 build
-profiles, realizations, and history stores. It does not migrate, normalize,
-list, query, or diff any other history contract. Archive or remove the
-repository's Compass history directory in the common Git directory, then build
-fresh v1 realizations.
+promotion. This release is a hard cutover for caches and operational state:
+Compass starts the new `cache/v1` namespace empty and never imports or reads
+legacy cache entries. The immutable realization schema itself is unchanged.
 
 ## 1. Inspect the command contract
 
@@ -56,8 +54,8 @@ compass diff --help
 History commands include:
 
 ```text
-enable   disable   status   build   rebuild
-list     show      prefer   export  gc
+enable   disable   status   verify  build   rebuild
+list     show      prefer   export  cache   gc
 ```
 
 Text output is for people. Commands that support `--format json` expose stable
@@ -129,9 +127,16 @@ first-parent lineage:
 compass history build main --all --first-parent
 ```
 
+The first request for an arbitrary, previously unseen revision is allowed to
+perform one bounded detached-worktree extraction. Later revisions reuse the
+repository-wide verified-content AST and Program cache, so unchanged files are
+not parsed again.
+
 Compass resolves the ref and build profile once, orders commits
-parent-before-child, and processes them sequentially. A rerun validates and
-skips preferred realizations that already match the selected profile. Failures
+parent-before-child, and processes them sequentially. A rerun seal-checks and
+skips preferred realizations that already match the selected profile. Use
+`compass history verify REV` when you need a full record-by-record integrity
+scan. Failures
 are recorded per commit without stopping later commits; the final report is
 still produced and the command exits `1` if any commit failed. Progress is
 written to stderr, while `--format json` writes one stable summary object to
@@ -390,6 +395,19 @@ Apply it explicitly:
 ```bash
 compass history gc --prune-non-preferred --yes
 ```
+
+Derived and extraction caches are disposable and have separate maintenance:
+
+```bash
+compass history cache status
+compass history cache gc --max-bytes 1073741824
+compass history cache gc --max-age-days 30 --yes
+```
+
+Cache GC is a dry run unless `--yes` is supplied. It never removes immutable
+realizations. Semantic diff reports and historical viewer projections are
+keyed by realization and engine/projection version; repeated reads therefore
+avoid graph traversal.
 
 Reported bytes and node rows are logical reclamation. GC does not promise that
 the SQLite file shrinks and does not run `VACUUM`.

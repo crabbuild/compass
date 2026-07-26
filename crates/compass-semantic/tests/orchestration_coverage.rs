@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use compass_files::Cache;
+use compass_files::{Cache, CacheOptions};
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, SemanticCacheSaveOptions,
     SemanticError, SemanticUnit, check_semantic_cache, effective_semantic_concurrency,
@@ -275,7 +275,7 @@ fn cached_corpus_pipeline_checkpoints_replays_and_filters_out_of_scope_entries()
     assert_eq!(replay.cache_misses, 0);
     assert_eq!(replay.fragment["nodes"].as_array().map(Vec::len), Some(2));
 
-    let mut cache = Cache::new(root, None)?;
+    let mut cache = Cache::open(root, CacheOptions::output_directory(None))?;
     let fragment = json!({
         "nodes":[
             {"id":"inside","source_file":first.to_string_lossy()},
@@ -397,7 +397,7 @@ fn slice_retry_cache_disabled_and_deep_partial_merges_cover_public_orchestration
         reconcile_semantic_scope(&mut malformed, std::slice::from_ref(&document), root).is_err()
     );
 
-    let mut cache = Cache::new(root, None)?;
+    let mut cache = Cache::open(root, CacheOptions::output_directory(None))?;
     let mut save_options = SemanticCacheSaveOptions::for_extraction(true);
     save_options.merge_existing = true;
     save_options.partial_source_files = vec![document.clone()];

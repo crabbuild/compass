@@ -27,15 +27,15 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::erro
 
 #[derive(Default)]
 struct RecordingBuilder {
-    seeds: Mutex<Vec<Option<String>>>,
+    builds: Mutex<usize>,
     promotion: Option<CompletedGraphArtifacts>,
 }
 
 impl RecordingBuilder {
-    fn seeds(&self) -> Result<Vec<Option<String>>, MaterializeError> {
-        self.seeds
+    fn builds(&self) -> Result<usize, MaterializeError> {
+        self.builds
             .lock()
-            .map(|values| values.clone())
+            .map(|value| *value)
             .map_err(|error| MaterializeError::Builder(error.to_string()))
     }
 
@@ -48,7 +48,7 @@ impl RecordingBuilder {
             "built_at_commit": commit
         }))?;
         Ok(Self {
-            seeds: Mutex::default(),
+            builds: Mutex::default(),
             promotion: Some(CompletedGraphArtifacts {
                 artifacts: GraphArtifacts {
                     document,
@@ -83,20 +83,12 @@ impl CompleteGraphBuilder for RecordingBuilder {
         &self,
         checkout: &Path,
         _output_root: &Path,
-        seed: Option<&GraphArtifacts>,
     ) -> Result<CompletedGraphArtifacts, MaterializeError> {
-        let seed_commit = seed.and_then(|artifacts| {
-            artifacts
-                .document
-                .extras
-                .get("built_at_commit")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        });
-        self.seeds
+        let mut builds = self
+            .builds
             .lock()
-            .map_err(|error| MaterializeError::Builder(error.to_string()))?
-            .push(seed_commit);
+            .map_err(|error| MaterializeError::Builder(error.to_string()))?;
+        *builds += 1;
         let commit = git(checkout, &["rev-parse", "HEAD"])
             .map_err(|error| MaterializeError::Builder(error.to_string()))?;
         let source = std::fs::read_to_string(checkout.join("service.rs"))
@@ -154,10 +146,7 @@ fn current_snapshot_is_published_without_invoking_the_exact_builder()
         request(&repository, commit.clone(), false)?,
     )?;
 
-    assert!(
-        builder.seeds()?.is_empty(),
-        "exact builder unexpectedly ran"
-    );
+    assert!(builder.builds()? == 0, "exact builder unexpectedly ran");
     let artifacts = history.artifacts(&published.id)?;
     assert_eq!(artifacts.artifacts.document.nodes[0].id, "promoted");
     assert_eq!(published.version.git_commit, commit.to_string());
@@ -184,7 +173,7 @@ fn explicit_rebuild_bypasses_current_snapshot_promotion() -> Result<(), Box<dyn 
 
     let published = materialize_history(&history, &builder, request(&repository, commit, true)?)?;
 
-    assert_eq!(builder.seeds()?, vec![None]);
+    assert_eq!(builder.builds()?, 1);
     let artifacts = history.artifacts(&published.id)?;
     assert_eq!(artifacts.artifacts.document.nodes[0].id, "old");
     Ok(())
@@ -207,7 +196,7 @@ fn request(
 }
 
 #[test]
-fn materializer_reuses_preferred_ancestor_and_publishes_target()
+fn materializer_builds_target_without_reconstructing_an_ancestor()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     git(directory.path(), &["init", "--quiet"])?;
@@ -249,7 +238,7 @@ fn materializer_reuses_preferred_ancestor_and_publishes_target()
     )?;
     assert_eq!(published.version.git_commit, target.to_string());
     assert!(published.preferred);
-    assert_eq!(builder.seeds()?, vec![None, Some(parent.to_string())]);
+    assert_eq!(builder.builds()?, 2);
     assert_eq!(
         phases,
         [
@@ -263,10 +252,10 @@ fn materializer_reuses_preferred_ancestor_and_publishes_target()
         Some(published.id.clone())
     );
 
-    let before = builder.seeds()?.len();
+    let before = builder.builds()?;
     let existing = materialize_history(&store, &builder, request(&repository, target, false)?)?;
     assert_eq!(existing.id, published.id);
-    assert_eq!(builder.seeds()?.len(), before);
+    assert_eq!(builder.builds()?, before);
 
     let mut invalid_recovery = request(&repository, parent, true)?;
     invalid_recovery.replace_corrupt = true;
@@ -285,7 +274,6 @@ fn incomplete_builder_output_is_never_published() -> Result<(), Box<dyn std::err
             &self,
             _checkout: &Path,
             _output_root: &Path,
-            _seed: Option<&GraphArtifacts>,
         ) -> Result<CompletedGraphArtifacts, MaterializeError> {
             Err(MaterializeError::Incomplete("fixture stopped".to_owned()))
         }
@@ -326,7 +314,6 @@ fn semantic_manifest_must_cover_each_exact_commit_source() -> Result<(), Box<dyn
             &self,
             checkout: &Path,
             _output_root: &Path,
-            _seed: Option<&GraphArtifacts>,
         ) -> Result<CompletedGraphArtifacts, MaterializeError> {
             let commit = git(checkout, &["rev-parse", "HEAD"])
                 .map_err(|error| MaterializeError::Builder(error.to_string()))?;
@@ -489,7 +476,6 @@ fn exact_tree_validation_rejects_commit_inventory_and_manifest_mismatches()
             &self,
             checkout: &Path,
             _output_root: &Path,
-            _seed: Option<&GraphArtifacts>,
         ) -> Result<CompletedGraphArtifacts, MaterializeError> {
             let commit = git(checkout, &["rev-parse", "HEAD"])
                 .map_err(|error| MaterializeError::Builder(error.to_string()))?;

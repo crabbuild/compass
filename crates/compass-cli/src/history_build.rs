@@ -8,8 +8,8 @@ use std::thread;
 use compass_core::{CompleteGraphBuilder, MaterializeError};
 use compass_files::{DetectOptions, IgnorePolicy, Manifest, ManifestKind, detect};
 use compass_history::{
-    BuildProfile, CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts,
-    HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
+    BuildProfile, CompletedGraphArtifacts, CompletionEvidence, HISTORY_GRAPH_SCHEMA, HistoryError,
+    MAX_DIAGNOSTIC_BYTES,
 };
 
 #[derive(Clone, Debug)]
@@ -110,10 +110,12 @@ impl HistoryBuildOptions {
         &self,
         executable: PathBuf,
         working_tree_seed: Option<PathBuf>,
+        shared_cache_root: Option<PathBuf>,
     ) -> NativeCompleteGraphBuilder {
         NativeCompleteGraphBuilder {
             executable,
             working_tree_seed,
+            shared_cache_root,
             profile: self.profile.clone(),
             forwarded: self.forwarded.clone(),
             gitignore: self.gitignore,
@@ -849,6 +851,7 @@ fn resolve_provider(values: &mut HistoryBuildValues) -> Result<(), HistoryError>
 pub(crate) struct NativeCompleteGraphBuilder {
     executable: PathBuf,
     working_tree_seed: Option<PathBuf>,
+    shared_cache_root: Option<PathBuf>,
     profile: BuildProfile,
     forwarded: Vec<String>,
     gitignore: bool,
@@ -927,11 +930,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         &self,
         checkout: &Path,
         output_root: &Path,
-        seed: Option<&GraphArtifacts>,
     ) -> Result<CompletedGraphArtifacts, MaterializeError> {
-        if let Some(seed) = seed {
-            seed.write_seed(&output_root.join("compass-out"), &seed_completion(seed))?;
-        }
         let mut command = Command::new(&self.executable);
         command
             .arg("extract")
@@ -947,6 +946,9 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             .envs(self.semantic_environment.iter().cloned())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(cache_root) = &self.shared_cache_root {
+            command.env("COMPASS_HISTORY_CACHE_ROOT", cache_root);
+        }
         for variable in [
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -1015,6 +1017,56 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         )
         .map_err(Into::into)
     }
+
+    fn default_viewer_projection(
+        &self,
+        completed: &CompletedGraphArtifacts,
+        repository_root: &Path,
+        commit: &compass_history::CommitId,
+    ) -> Result<Option<Vec<u8>>, MaterializeError> {
+        let mut communities = compass_graph::Communities::new();
+        for node in &completed.artifacts.document.nodes {
+            let community = node
+                .attributes
+                .get("community")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default() as usize;
+            communities
+                .entry(community)
+                .or_default()
+                .push(node.id.clone());
+        }
+        let labels = completed
+            .artifacts
+            .labels
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flat_map(|labels| labels.iter())
+            .filter_map(|(community, label)| {
+                Some((community.parse().ok()?, label.as_str()?.to_owned()))
+            })
+            .collect::<std::collections::BTreeMap<usize, String>>();
+        let options = compass_output::HtmlOptions {
+            community_labels: (!labels.is_empty()).then_some(&labels),
+            member_counts: None,
+            node_limit: Some(5_000),
+            learning_overlay: None,
+        };
+        let Some(graph) = compass_output::graph_view_model_document(
+            &completed.artifacts.document,
+            &communities,
+            format!("{} @ {}", repository_root.display(), commit),
+            &options,
+        )
+        .map_err(|error| MaterializeError::Builder(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        serde_json::to_vec(&graph)
+            .map(Some)
+            .map_err(|error| MaterializeError::Builder(error.to_string()))
+    }
 }
 
 impl NativeCompleteGraphBuilder {
@@ -1038,29 +1090,6 @@ fn graph_stamp_matches(path: &Path, commit: &compass_history::CommitId) -> bool 
         .and_then(|stamp| stamp.built_at_commit)
         .as_deref()
         == Some(commit.as_str())
-}
-
-fn seed_completion(seed: &GraphArtifacts) -> CompletionEvidence {
-    let completed = seed
-        .manifest
-        .as_ref()
-        .and_then(serde_json::Value::as_object)
-        .into_iter()
-        .flat_map(|manifest| manifest.values())
-        .filter(|entry| {
-            entry
-                .get("semantic_hash")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|hash| !hash.is_empty())
-        })
-        .count() as u64;
-    CompletionEvidence {
-        extraction_succeeded: true,
-        allow_partial: false,
-        semantic_files_expected: completed,
-        semantic_files_completed: completed,
-        failed_chunks: 0,
-    }
 }
 
 struct BoundedOutput {
@@ -1181,6 +1210,7 @@ mod tests {
         let builder = options.builder(
             PathBuf::from("/definitely/not/a/compass-binary"),
             Some(output),
+            None,
         );
 
         let promoted = builder.promote_current(directory.path(), &commit)?;
@@ -1203,7 +1233,7 @@ mod tests {
         fs::write(directory.path().join("service.rs"), "pub fn changed() {}\n")?;
         let options =
             parse_build_command("build", &["HEAD".to_owned(), "--code-only".to_owned()])?.options;
-        let builder = options.builder(PathBuf::from("compass"), Some(output));
+        let builder = options.builder(PathBuf::from("compass"), Some(output), None);
 
         assert!(
             builder
@@ -1223,6 +1253,7 @@ mod tests {
         let builder = options.builder(
             PathBuf::from("/definitely/not/a/compass-binary"),
             Some(output),
+            None,
         );
 
         assert!(
@@ -1253,6 +1284,7 @@ mod tests {
             let builder = options.builder(
                 PathBuf::from("/definitely/not/a/compass-binary"),
                 Some(output.clone()),
+                None,
             );
 
             assert!(

@@ -44,3 +44,18 @@ The release gate rejects:
 
 Local observations are diagnostic evidence. Promote a baseline only from a
 controlled Compass CI run with retained artifacts.
+
+## Versioned history qualification
+
+Build a release binary, then measure a clean real repository:
+
+```bash
+cargo build --release -p compass-cli
+scripts/qualify_history_real_repo.sh /path/to/repository OLD NEW
+```
+
+The qualification records cold/current extraction, cold/adjacent/no-op history
+builds, first/repeated semantic diff, first/repeated viewer projection, peak
+RSS, and deterministic output digests. Existing sealed realizations and cached
+diff/view projections are expected to be constant- or bounded-read paths;
+explicit `history verify` remains the full integrity scan.

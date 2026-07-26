@@ -9,11 +9,50 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{FileError, StatHashIndex, io_error, write_bytes_atomic, write_json_atomic};
+use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 const AST_EXTRACTOR_VERSION: &str = "0.9.21";
-const CACHE_ENCODING_VERSION: u32 = 1;
+const CACHE_ENCODING_VERSION: u32 = 2;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheLayout {
+    OutputDirectory,
+    SharedHistory,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheHashPolicy {
+    StatIndexed,
+    VerifiedContent,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CacheOptions<'a> {
+    pub storage_root: Option<&'a Path>,
+    pub layout: CacheLayout,
+    pub hash_policy: CacheHashPolicy,
+}
+
+impl<'a> CacheOptions<'a> {
+    #[must_use]
+    pub const fn output_directory(storage_root: Option<&'a Path>) -> Self {
+        Self {
+            storage_root,
+            layout: CacheLayout::OutputDirectory,
+            hash_policy: CacheHashPolicy::StatIndexed,
+        }
+    }
+
+    #[must_use]
+    pub const fn shared_history(storage_root: &'a Path) -> Self {
+        Self {
+            storage_root: Some(storage_root),
+            layout: CacheLayout::SharedHistory,
+            hash_policy: CacheHashPolicy::VerifiedContent,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheKind {
@@ -68,10 +107,10 @@ impl CacheKind {
 #[derive(Debug)]
 pub struct Cache {
     root: PathBuf,
-    cache_root: PathBuf,
-    output_name: String,
+    cache_base: PathBuf,
     extractor_version: String,
     hashes: StatHashIndex,
+    hash_policy: CacheHashPolicy,
     session_hashes: HashMap<PathBuf, SessionHash>,
     flush_hashes_on_drop: bool,
 }
@@ -84,20 +123,29 @@ struct SessionHash {
 }
 
 impl Cache {
-    pub fn new(root: impl AsRef<Path>, cache_root: Option<&Path>) -> Result<Self, FileError> {
+    pub fn open(root: impl AsRef<Path>, options: CacheOptions<'_>) -> Result<Self, FileError> {
         let root =
             fs::canonicalize(root.as_ref()).map_err(|source| io_error(root.as_ref(), source))?;
-        let cache_root = cache_root.map_or_else(|| root.clone(), Path::to_path_buf);
         let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-        let hashes = StatHashIndex::load(&cache_root, &output_name);
+        let storage_root = options
+            .storage_root
+            .map_or_else(|| root.clone(), Path::to_path_buf);
+        if options.layout == CacheLayout::SharedHistory && !storage_root.is_absolute() {
+            return Err(FileError::OutsideRoot(storage_root));
+        }
+        let cache_base = match options.layout {
+            CacheLayout::OutputDirectory => storage_root.join(&output_name).join("cache"),
+            CacheLayout::SharedHistory => storage_root.clone(),
+        };
+        let hashes = StatHashIndex::load(&storage_root, &output_name);
         let cache = Self {
             root,
-            cache_root,
-            output_name,
+            cache_base,
             extractor_version: AST_EXTRACTOR_VERSION.to_owned(),
             hashes,
+            hash_policy: options.hash_policy,
             session_hashes: HashMap::new(),
-            flush_hashes_on_drop: true,
+            flush_hashes_on_drop: options.hash_policy == CacheHashPolicy::StatIndexed,
         };
         cache.cleanup_stale_ast();
         Ok(cache)
@@ -117,23 +165,14 @@ impl Cache {
     }
 
     pub fn directory(&self, kind: &CacheKind, prompt_fingerprint: Option<&str>) -> PathBuf {
-        let mut directory = self.legacy_directory(kind, prompt_fingerprint);
-        if deterministic_binary_kind(kind) {
-            directory = directory.join(format!("e{CACHE_ENCODING_VERSION}"));
-        }
-        directory
-    }
-
-    fn legacy_directory(&self, kind: &CacheKind, prompt_fingerprint: Option<&str>) -> PathBuf {
-        let mut directory = self
-            .cache_root
-            .join(&self.output_name)
-            .join("cache")
-            .join(kind.directory_name());
+        let mut directory = self.cache_base.join(kind.directory_name());
         if matches!(kind, CacheKind::Ast) {
             directory = directory.join(format!("v{}", self.extractor_version));
         } else if let Some(fingerprint) = prompt_fingerprint {
             directory = directory.join(format!("p{fingerprint}"));
+        }
+        if deterministic_binary_kind(kind) {
+            directory = directory.join(format!("e{CACHE_ENCODING_VERSION}"));
         }
         directory
     }
@@ -143,7 +182,6 @@ impl Cache {
         path: &Path,
         kind: &CacheKind,
         prompt_fingerprint: Option<&str>,
-        allow_legacy: bool,
         allow_partial: bool,
     ) -> Result<Option<Value>, FileError> {
         let hash = self.content_hash(path)?;
@@ -160,20 +198,11 @@ impl Cache {
                 absolutize_source_files(&mut value, &self.root);
                 return Ok(Some(value));
             }
-            let legacy = self
-                .legacy_directory(kind, prompt_fingerprint)
-                .join(format!("{hash}.json"));
-            return load_json_value(&legacy, allow_partial, &self.root);
+            return Ok(None);
         }
-        let mut entry = self
+        let entry = self
             .directory(kind, prompt_fingerprint)
             .join(format!("{hash}.json"));
-        if !entry.exists() && prompt_fingerprint.is_some() && allow_legacy {
-            let legacy = self.directory(kind, None).join(format!("{hash}.json"));
-            if legacy.exists() {
-                entry = legacy;
-            }
-        }
         if !entry.exists() {
             return Ok(None);
         }
@@ -301,14 +330,7 @@ impl Cache {
         {
             return Ok(Some(value));
         }
-        let legacy = self
-            .legacy_directory(kind, None)
-            .join(format!("{key}.json"));
-        let bytes = match fs::read(legacy) {
-            Ok(bytes) => bytes,
-            Err(_) => return Ok(None),
-        };
-        Ok(serde_json::from_slice(&bytes).ok())
+        Ok(None)
     }
 
     /// Safely save a repository-relative Program IR cache value.
@@ -370,8 +392,7 @@ impl Cache {
             .iter()
             .map(|key| logical_key_hash(key))
             .collect::<BTreeSet<_>>();
-        Ok(prune_cache_entries(&self.directory(kind, None), &hashes)
-            + prune_cache_entries(&self.legacy_directory(kind, None), &hashes))
+        Ok(prune_cache_entries(&self.directory(kind, None), &hashes))
     }
 
     pub fn flush(&mut self) -> Result<(), FileError> {
@@ -379,28 +400,25 @@ impl Cache {
     }
 
     pub fn cached_files(&self) -> BTreeSet<String> {
-        let base = self.cache_root.join(&self.output_name).join("cache");
         let mut hashes = BTreeSet::new();
-        collect_cache_stems(&base, &mut hashes);
+        collect_cache_stems(&self.cache_base, &mut hashes);
         hashes
     }
 
     pub fn clear(&self) {
-        let base = self.cache_root.join(&self.output_name).join("cache");
-        clear_cache_entries(&base);
+        clear_cache_entries(&self.cache_base);
     }
 
     pub fn prune_semantic(&self, live_hashes: &BTreeSet<String>) -> usize {
-        let base = self.cache_root.join(&self.output_name).join("cache");
         let mut removed = 0;
         for kind in ["semantic", "semantic-deep"] {
-            removed += prune_cache_entries(&base.join(kind), live_hashes);
+            removed += prune_cache_entries(&self.cache_base.join(kind), live_hashes);
         }
         removed
     }
 
     fn cleanup_stale_ast(&self) {
-        let base = self.cache_root.join(&self.output_name).join("cache/ast");
+        let base = self.cache_base.join("ast");
         let current = format!("v{}", self.extractor_version);
         let Ok(entries) = fs::read_dir(&base) else {
             return;
@@ -426,7 +444,10 @@ impl Cache {
         {
             return Ok(cached.value.clone());
         }
-        let value = self.hashes.hash(path, &self.root)?;
+        let value = match self.hash_policy {
+            CacheHashPolicy::StatIndexed => self.hashes.hash(path, &self.root)?,
+            CacheHashPolicy::VerifiedContent => file_hash(path, &self.root)?,
+        };
         self.session_hashes.insert(
             path.to_path_buf(),
             SessionHash {

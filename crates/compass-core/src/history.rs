@@ -6,9 +6,9 @@ use compass_files::{DetectOptions, IgnorePolicy, detect};
 use compass_graph::{Communities, god_nodes, score_communities, surprising_connections};
 use compass_history::{
     BuildProfile, CommitId, CompletedGraphArtifacts, CompletionEvidence, CorruptPreferredToken,
-    ExtractionFingerprint, ExtractionFingerprintInput, GraphArtifacts, HISTORY_GRAPH_SCHEMA,
-    HistoryError, HistoryStore, PublishRequest, PublishedVersion, RealizationId, Repository,
-    WorktreeGuard,
+    DerivedCacheNamespace, ExtractionFingerprint, ExtractionFingerprintInput, GraphArtifacts,
+    HISTORY_GRAPH_SCHEMA, HistoryError, HistoryStore, PublishRequest, PublishedVersion,
+    RealizationId, Repository, WorktreeGuard,
 };
 use compass_languages::Registry;
 use serde_json::json;
@@ -30,8 +30,16 @@ pub trait CompleteGraphBuilder {
         &self,
         checkout: &Path,
         output_root: &Path,
-        seed: Option<&GraphArtifacts>,
     ) -> Result<CompletedGraphArtifacts, MaterializeError>;
+
+    fn default_viewer_projection(
+        &self,
+        _completed: &CompletedGraphArtifacts,
+        _repository_root: &Path,
+        _commit: &CommitId,
+    ) -> Result<Option<Vec<u8>>, MaterializeError> {
+        Ok(None)
+    }
 }
 
 /// Convert a verified mutable code-only snapshot into the canonical artifact
@@ -325,21 +333,14 @@ fn run_materialization(
 ) -> Result<PublishedVersion, MaterializeError> {
     let fingerprint = resolve_fingerprint(&request.profile, worktree.path())?;
     observer.resolved(&fingerprint)?;
-    let seed = compatible_seed(
-        store,
-        &request.repository,
-        &request.commit,
-        &request.profile,
-        activity,
-    )?;
     observer.entered(MaterializeStage::Building)?;
-    let completed = builder.build(
-        worktree.path(),
-        worktree.output_root(),
-        seed.as_ref().map(|value| &value.artifacts),
-    )?;
+    let completed = builder.build(worktree.path(), worktree.output_root())?;
     observer.entered(MaterializeStage::Validating)?;
     validate_completed(&completed, &request.commit, &request.profile, worktree)?;
+    let default_viewer = builder
+        .default_viewer_projection(&completed, request.repository.root(), &request.commit)
+        .ok()
+        .flatten();
     observer.entered(MaterializeStage::Publishing)?;
     let prepared = store.prepare_publish_with_activity(
         PublishRequest {
@@ -370,6 +371,30 @@ fn run_materialization(
             published.preferred = false;
         }
     }
+    if let Some(graph_bytes) = default_viewer
+        && let Ok(graph) = serde_json::from_slice::<serde_json::Value>(&graph_bytes)
+    {
+        let cache_key = json!({
+            "schema": "compass.history.viewer_key/1",
+            "realization": published.id.to_string(),
+            "viewer_schema": "compass.history.viewer_graph/1",
+            "projection_version": 1,
+            "node_limit": 5_000,
+            "community": serde_json::Value::Null,
+        });
+        let envelope = json!({
+            "schema": "compass.history.viewer_graph/1",
+            "commit": published.version.git_commit.clone(),
+            "realization": published.id.to_string(),
+            "fingerprint": published.version.extraction_fingerprint.clone(),
+            "graph": graph,
+        });
+        if let Ok(bytes) = compass_history::canonical_json_bytes(&envelope)
+            && let Ok(cache) = store.cache()
+        {
+            let _ = cache.write(DerivedCacheNamespace::Viewer, &cache_key, &bytes);
+        }
+    }
     Ok(published)
 }
 
@@ -390,37 +415,6 @@ fn observe_preferred(
         }
         Err(error) => Err(error.into()),
     }
-}
-
-fn compatible_seed(
-    store: &HistoryStore,
-    repository: &Repository,
-    target: &CommitId,
-    profile: &BuildProfile,
-    activity: &compass_history::ActivityGuard,
-) -> Result<Option<CompletedGraphArtifacts>, MaterializeError> {
-    for ancestor in repository.first_parent_ancestors(target)? {
-        let preferred = match store.preferred_with_activity(&ancestor, activity) {
-            Ok(preferred) => preferred,
-            Err(error) if error.is_catalog_corruption() => continue,
-            Err(error) => return Err(error.into()),
-        };
-        let Some(preferred) = preferred else {
-            continue;
-        };
-        // The provider manifest is commit-specific and therefore belongs in the
-        // realization fingerprint, but it must not disable incremental seeding.
-        // The builder revalidates the seed against the exact target checkout.
-        if &preferred.version.build_profile != profile {
-            continue;
-        }
-        match store.artifacts_with_activity(&preferred.id, activity) {
-            Ok(artifacts) => return Ok(Some(artifacts)),
-            Err(error) if error.is_catalog_corruption() => continue,
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(None)
 }
 
 fn resolve_fingerprint(

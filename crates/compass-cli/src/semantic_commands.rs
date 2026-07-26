@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_files::{Cache, write_text_atomic};
+use compass_files::{Cache, CacheOptions, write_text_atomic};
 use compass_semantic::{
     MAX_SEMANTIC_FRAGMENT_BYTES, check_semantic_cache_mode, load_validated_semantic_fragment,
 };
@@ -72,13 +72,13 @@ pub(super) fn command_cache_check(frontend: Frontend, args: &[String]) -> Outcom
             Ok(prompt) => Some(prompt),
             Err(error) => {
                 stderr = format!(
-                    "warning: could not read prompt file {}; using legacy cache namespace: {error}",
+                    "warning: could not read prompt file {}; using the default prompt namespace: {error}",
                     path.display()
                 );
                 None
             }
         });
-    let mut cache = match Cache::new(&root, None) {
+    let mut cache = match Cache::open(&root, CacheOptions::output_directory(None)) {
         Ok(cache) => cache,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
