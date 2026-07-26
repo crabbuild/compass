@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
+use ahash::{AHashMap, AHashSet};
 use compass_languages::{Extraction, RawCall, make_id};
 use compass_model::{EdgeRecord, NodeRecord};
 use rayon::prelude::*;
@@ -894,15 +895,27 @@ fn resolve_cross_file_calls_with_root_calls(
         .filter(|(source_file, _)| extension(source_file) == "py")
         .map(|(source_file, source)| (source_file.clone(), python_symbol_imports(source)))
         .collect::<HashMap<_, _>>();
-    resolve_python_import_guided_with_calls(extraction, sources, root, raw_calls, &python_imports);
+    let (import_edges, class_use_edges) = rayon::join(
+        || {
+            resolve_python_import_guided_with_calls(
+                extraction,
+                sources,
+                root,
+                raw_calls,
+                &python_imports,
+            )
+        },
+        || resolve_python_class_uses(extraction, sources, root, &python_imports),
+    );
+    extraction.edges.extend(import_edges);
     profile_internal("resolver Python import-guided calls", &mut profile_started);
-    resolve_python_class_uses(extraction, sources, root, &python_imports);
+    extraction.edges.extend(class_use_edges);
     profile_internal("resolver Python class uses", &mut profile_started);
-    let mut exact = HashMap::<String, Vec<String>>::new();
-    let mut folded = HashMap::<String, Vec<String>>::new();
-    let mut source_by_id = HashMap::<String, String>::new();
-    let mut file_by_source = HashMap::<String, String>::new();
-    let mut callable = HashSet::<String>::new();
+    let mut exact = AHashMap::<String, Vec<String>>::new();
+    let mut folded = AHashMap::<String, Vec<String>>::new();
+    let mut source_by_id = AHashMap::<String, String>::new();
+    let mut file_by_source = AHashMap::<String, String>::new();
+    let mut callable = AHashSet::<String>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
         source_by_id.insert(node.id.clone(), source.clone());
@@ -947,11 +960,11 @@ fn resolve_cross_file_calls_with_root_calls(
                 .get(source)
                 .map(|file_id| (id.clone(), file_id.clone()))
         })
-        .collect::<HashMap<_, _>>();
-    let mut symbol_imports = HashMap::<String, HashSet<String>>::new();
-    let mut module_imports = HashMap::<String, HashSet<String>>::new();
-    let mut existing = HashSet::new();
-    let mut call_like = HashSet::new();
+        .collect::<AHashMap<_, _>>();
+    let mut symbol_imports = AHashMap::<String, AHashSet<String>>::new();
+    let mut module_imports = AHashMap::<String, AHashSet<String>>::new();
+    let mut existing = AHashSet::new();
+    let mut call_like = AHashSet::new();
     for edge in &extraction.edges {
         existing.insert((edge.source.clone(), edge.target.clone()));
         if matches!(relation(edge), "calls" | "indirect_call") {
@@ -1084,16 +1097,24 @@ fn resolve_python_import_guided(
         .filter(|(source_file, _)| extension(source_file) == "py")
         .map(|(source_file, source)| (source_file.clone(), python_symbol_imports(source)))
         .collect::<HashMap<_, _>>();
-    resolve_python_import_guided_with_calls(extraction, sources, root, &raw_calls, &python_imports);
+    let edges = resolve_python_import_guided_with_calls(
+        extraction,
+        sources,
+        root,
+        &raw_calls,
+        &python_imports,
+    );
+    extraction.edges.extend(edges);
 }
 
 fn resolve_python_import_guided_with_calls(
-    extraction: &mut Extraction,
+    extraction: &Extraction,
     sources: &HashMap<String, String>,
     root: &Path,
     raw_calls: &[RawCall],
     python_imports: &HashMap<String, Vec<PythonImport>>,
-) {
+) -> Vec<EdgeRecord> {
+    let mut resolved_edges = Vec::new();
     let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
@@ -1173,7 +1194,7 @@ fn resolve_python_import_guided_with_calls(
             if candidates.len() == 1 {
                 let target = &candidates[0];
                 if known.insert((file_node.clone(), target.clone(), "imports".to_owned())) {
-                    extraction.edges.push(python_import_edge(
+                    resolved_edges.push(python_import_edge(
                         file_node,
                         target,
                         "imports",
@@ -1193,7 +1214,7 @@ fn resolve_python_import_guided_with_calls(
                 target.clone(),
                 "imports_from".to_owned(),
             )) {
-                extraction.edges.push(python_import_edge(
+                resolved_edges.push(python_import_edge(
                     file_node,
                     &target,
                     "imports_from",
@@ -1209,7 +1230,7 @@ fn resolve_python_import_guided_with_calls(
                 && let Some(target) = module_file
                 && known.insert((file_node.clone(), target.clone(), "re_exports".to_owned()))
             {
-                extraction.edges.push(python_import_edge(
+                resolved_edges.push(python_import_edge(
                     file_node,
                     &target,
                     "re_exports",
@@ -1275,8 +1296,9 @@ fn resolve_python_import_guided_with_calls(
         }
         let mut edge = resolved_edge(raw, target, "EXTRACTED", 1.0);
         edge.attributes.remove("confidence_score");
-        extraction.edges.push(edge);
+        resolved_edges.push(edge);
     }
+    resolved_edges
 }
 
 fn python_import_edge(
@@ -1348,11 +1370,12 @@ fn python_module_file(
 }
 
 fn resolve_python_class_uses(
-    extraction: &mut Extraction,
+    extraction: &Extraction,
     sources: &HashMap<String, String>,
     root: &Path,
     python_imports: &HashMap<String, Vec<PythonImport>>,
-) {
+) -> Vec<EdgeRecord> {
+    let mut resolved_edges = Vec::new();
     let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
     let mut local_classes = HashMap::<String, Vec<String>>::new();
     for node in &extraction.nodes {
@@ -1443,7 +1466,7 @@ fn resolve_python_class_uses(
                     Value::String(format!("L{}", imported.line)),
                 );
                 attributes.insert("weight".to_owned(), Value::from(0.8));
-                extraction.edges.push(EdgeRecord {
+                resolved_edges.push(EdgeRecord {
                     source: source_id.clone(),
                     target: target.clone(),
                     attributes,
@@ -1451,6 +1474,7 @@ fn resolve_python_class_uses(
             }
         }
     }
+    resolved_edges
 }
 
 #[cfg(test)]
@@ -1715,9 +1739,9 @@ fn python_module_source<'a>(
 
 fn candidate_calls(
     raw: &RawCall,
-    exact: &HashMap<String, Vec<String>>,
-    folded: &HashMap<String, Vec<String>>,
-    source_by_id: &HashMap<String, String>,
+    exact: &AHashMap<String, Vec<String>>,
+    folded: &AHashMap<String, Vec<String>>,
+    source_by_id: &AHashMap<String, String>,
 ) -> Vec<String> {
     let mut candidates = exact.get(&raw.callee).cloned().unwrap_or_default();
     if candidates.is_empty() && case_insensitive(&raw.source_file) {
@@ -1739,10 +1763,10 @@ fn candidate_calls(
 
 fn select_candidate(
     candidates: &[String],
-    symbol_imports: Option<&HashSet<String>>,
-    module_imports: Option<&HashSet<String>>,
-    file_by_id: &HashMap<String, String>,
-    source_by_id: &HashMap<String, String>,
+    symbol_imports: Option<&AHashSet<String>>,
+    module_imports: Option<&AHashSet<String>>,
+    file_by_id: &AHashMap<String, String>,
+    source_by_id: &AHashMap<String, String>,
     call_site_file: &str,
 ) -> Option<(String, bool)> {
     if candidates.len() == 1 {
@@ -1779,7 +1803,7 @@ fn select_candidate(
 
 fn disambiguate_candidates(
     candidates: &[String],
-    source_by_id: &HashMap<String, String>,
+    source_by_id: &AHashMap<String, String>,
     call_site_file: &str,
 ) -> Option<String> {
     if candidates.len() == 1 {
@@ -1795,7 +1819,7 @@ fn disambiguate_candidates(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let test_set = test_candidates.iter().collect::<HashSet<_>>();
+    let test_set = test_candidates.iter().collect::<AHashSet<_>>();
     let non_test_candidates = candidates
         .iter()
         .filter(|candidate| !test_set.contains(candidate))
@@ -1835,7 +1859,7 @@ fn disambiguate_candidates(
 
 fn path_proximity(
     candidates: &[String],
-    source_by_id: &HashMap<String, String>,
+    source_by_id: &AHashMap<String, String>,
     call_site_file: &str,
 ) -> Option<String> {
     if call_site_file.is_empty() {
@@ -2400,7 +2424,7 @@ mod tests {
     #[test]
     fn candidate_disambiguation_prefers_imports_tests_and_nearby_paths() {
         let candidates = vec!["prod".to_owned(), "test".to_owned()];
-        let sources = HashMap::from([
+        let sources = AHashMap::from([
             ("prod".to_owned(), "src/service.py".to_owned()),
             ("test".to_owned(), "tests/test_service.py".to_owned()),
         ]);
@@ -2414,7 +2438,7 @@ mod tests {
         );
 
         let nearby = vec!["same-dir".to_owned(), "far".to_owned()];
-        let nearby_sources = HashMap::from([
+        let nearby_sources = AHashMap::from([
             ("same-dir".to_owned(), "src/api/helper.py".to_owned()),
             ("far".to_owned(), "vendor/helper.py".to_owned()),
         ]);
@@ -2424,13 +2448,13 @@ mod tests {
         );
         assert_eq!(path_proximity(&nearby, &nearby_sources, ""), None);
 
-        let symbols = HashSet::from(["far".to_owned()]);
+        let symbols = AHashSet::from(["far".to_owned()]);
         assert_eq!(
             select_candidate(
                 &nearby,
                 Some(&symbols),
                 None,
-                &HashMap::new(),
+                &AHashMap::new(),
                 &nearby_sources,
                 "src/api/caller.py",
             ),

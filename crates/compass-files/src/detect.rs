@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -455,26 +456,27 @@ fn initial_ignore_patterns(
 }
 
 fn ignored(path: &Path, root: &Path, patterns: &[IgnorePattern]) -> bool {
-    let evaluate = |target: &Path| {
-        let mut result = false;
-        for pattern in patterns {
-            if pattern.matches(target) {
-                result = !pattern.negated;
-            }
-        }
-        result
-    };
     if let Ok(relative) = path.strip_prefix(root) {
         let mut ancestor = root.to_path_buf();
         let components = relative.components().collect::<Vec<_>>();
         for component in components.iter().take(components.len().saturating_sub(1)) {
             ancestor.push(component);
-            if evaluate(&ancestor) {
+            if ignored_target(&ancestor, patterns) {
                 return true;
             }
         }
     }
-    evaluate(path)
+    ignored_target(path, patterns)
+}
+
+fn ignored_target(path: &Path, patterns: &[IgnorePattern]) -> bool {
+    let mut ignored = false;
+    for pattern in patterns {
+        if pattern.matches(path) {
+            ignored = !pattern.negated;
+        }
+    }
+    ignored
 }
 
 fn is_noise_dir(path: &Path, output_name: &str) -> bool {
@@ -700,8 +702,22 @@ pub fn classify_file(path: &Path) -> Option<FileType> {
 }
 
 fn graphable_source(path: &Path) -> bool {
-    classify_file(path) == Some(FileType::Code)
-        && !SECRET_PRONE_EXTENSIONS.contains(&extension(path).as_str())
+    let ext = extension(path);
+    if SECRET_PRONE_EXTENSIONS.contains(&ext.as_str()) {
+        return false;
+    }
+    if is_package_manifest(path)
+        || path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with(".blade.php"))
+    {
+        return true;
+    }
+    if ext.is_empty() {
+        return shebang_is_code(path);
+    }
+    CODE_EXTENSIONS.contains(&ext.as_str())
 }
 
 fn generic_keyword_hit(name: &str) -> bool {
@@ -778,6 +794,7 @@ struct WalkState<'a> {
     options: &'a DetectOptions,
     patterns: Vec<IgnorePattern>,
     all_files: Vec<PathBuf>,
+    trusted_files: HashSet<PathBuf>,
     ignored: Vec<String>,
     walk_errors: Vec<String>,
     skipped_sensitive: Vec<String>,
@@ -820,28 +837,48 @@ impl WalkState<'_> {
                 if file_type.is_symlink() && !self.options.follow_symlinks {
                     continue;
                 }
-                let Ok(canonical) = fs::canonicalize(&path) else {
-                    continue;
-                };
-                if !canonical.starts_with(self.root) {
-                    self.skipped_sensitive.push(format!(
-                        "{} [symlink target outside scan root]",
-                        path.display()
-                    ));
-                    continue;
+                if file_type.is_symlink() {
+                    let Ok(canonical) = fs::canonicalize(&path) else {
+                        continue;
+                    };
+                    if !canonical.starts_with(self.root) {
+                        self.skipped_sensitive.push(format!(
+                            "{} [symlink target outside scan root]",
+                            path.display()
+                        ));
+                        continue;
+                    }
+                    if ancestors.contains(&canonical) {
+                        continue;
+                    }
+                    ancestors.push(canonical);
+                    self.walk(&path, ancestors);
+                    ancestors.pop();
+                } else {
+                    // A regular child directory reached from the canonical
+                    // root cannot escape it or create a traversal cycle.
+                    // Avoid a filesystem canonicalization for every directory.
+                    self.walk(&path, ancestors);
                 }
-                if ancestors.contains(&canonical) {
-                    continue;
-                }
-                ancestors.push(canonical);
-                self.walk(&path, ancestors);
-                ancestors.pop();
             } else if !SKIP_FILES.contains(
                 &path
                     .file_name()
                     .and_then(|value| value.to_str())
                     .unwrap_or_default(),
             ) {
+                if file_type.is_symlink() {
+                    let Ok(canonical) = fs::canonicalize(&path) else {
+                        continue;
+                    };
+                    if !canonical.starts_with(self.root) {
+                        self.skipped_sensitive.push(format!(
+                            "{} [symlink target outside scan root]",
+                            path.display()
+                        ));
+                        continue;
+                    }
+                }
+                self.trusted_files.insert(path.clone());
                 self.all_files.push(path);
             }
         }
@@ -863,6 +900,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         options,
         patterns,
         all_files: Vec::new(),
+        trusted_files: HashSet::new(),
         ignored: Vec::new(),
         walk_errors: Vec::new(),
         skipped_sensitive: Vec::new(),
@@ -887,16 +925,24 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
     let mut word_count_paths = Vec::new();
     let cache_root = options.cache_root.as_deref().unwrap_or(&root);
     let mut stat_index = StatHashIndex::load(cache_root, &options.output_name);
-    for path in state.all_files {
+    let classifications = state
+        .all_files
+        .par_iter()
+        .map(|path| classify_file(path))
+        .collect::<Vec<_>>();
+    for (path, file_type) in state.all_files.into_iter().zip(classifications) {
         let in_memory = path.starts_with(&memory);
-        if !in_memory && ignored(&path, &root, &state.patterns) {
+        // The walker already pruned ignored ancestor directories. Rechecking
+        // every ancestor for every discovered file repeats the same regex work
+        // quadratically with path depth; only file-targeted patterns remain.
+        if !in_memory && ignored_target(&path, &state.patterns) {
             state.ignored.push(path.to_string_lossy().into_owned());
             continue;
         }
         if !in_memory && !scope.allows(&path) {
             continue;
         }
-        if !path_is_under(&path, &root) {
+        if !state.trusted_files.contains(&path) && !path_is_under(&path, &root) {
             state.skipped_sensitive.push(format!(
                 "{} [symlink target outside scan root]",
                 path.display()
@@ -909,7 +955,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
                 .push(path.to_string_lossy().into_owned());
             continue;
         }
-        let Some(file_type) = classify_file(&path) else {
+        let Some(file_type) = file_type else {
             unclassified.push(path.to_string_lossy().into_owned());
             continue;
         };

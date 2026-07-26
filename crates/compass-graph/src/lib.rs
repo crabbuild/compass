@@ -6,7 +6,8 @@ mod dedup;
 
 pub use analyze::{
     DiffEdge, DiffNode, GodNode, GraphDiff, ImportCycle, SuggestedQuestion, SurpriseConnection,
-    find_import_cycles, god_nodes, graph_diff, suggest_questions, surprising_connections,
+    find_import_cycles, god_nodes, graph_diff, graph_insights, suggest_questions,
+    surprising_connections,
 };
 pub use cluster::{
     ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
@@ -17,10 +18,11 @@ pub use dedup::{
     deduplicate_entities_with_tiebreaker,
 };
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Instant;
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
@@ -56,7 +58,7 @@ pub fn build_with_tiebreaker(
         let result = deduplicate_entities_with_tiebreaker(
             &combined.nodes,
             &combined.edges,
-            &HashMap::new(),
+            &std::collections::HashMap::new(),
             tiebreaker,
         )?;
         combined.nodes = result.nodes;
@@ -79,7 +81,7 @@ pub fn build_owned_with_tiebreaker(
         let result = deduplicate_entities_with_tiebreaker(
             &extraction.nodes,
             &extraction.edges,
-            &HashMap::new(),
+            &std::collections::HashMap::new(),
             tiebreaker,
         )?;
         extraction.nodes = result.nodes;
@@ -228,7 +230,7 @@ fn build_from_owned_extraction(
     if !hyperedges.is_empty() {
         graph.insert("hyperedges".to_owned(), Value::Array(hyperedges));
     }
-    let links = networkx_edge_order(&nodes, &links, directed);
+    let links = networkx_edge_order(&nodes, links, directed);
     profile_internal("graph NetworkX edge ordering", &mut profile_started);
     let multigraph = has_parallel_edges(&links, directed);
     GraphDocument {
@@ -468,7 +470,7 @@ fn add_unambiguous_legacy_aliases(
     if needed.is_empty() {
         return;
     }
-    let mut nodes_by_source = HashMap::<String, Vec<&NodeRecord>>::new();
+    let mut nodes_by_source = std::collections::HashMap::<String, Vec<&NodeRecord>>::new();
     for node in nodes {
         let source = node.string("source_file");
         let path = Path::new(&source);
@@ -545,7 +547,7 @@ fn remap_endpoint(value: &str, remap: &HashMap<String, String>) -> String {
 
 fn networkx_edge_order(
     nodes: &[NodeRecord],
-    links: &[EdgeRecord],
+    links: Vec<EdgeRecord>,
     directed: bool,
 ) -> Vec<EdgeRecord> {
     let positions = nodes
@@ -567,10 +569,15 @@ fn networkx_edge_order(
         }
     }
 
+    let mut links = links.into_iter().map(Some).collect::<Vec<_>>();
     if directed {
         let mut output = Vec::with_capacity(links.len());
         for edge_indices in incident {
-            output.extend(edge_indices.into_iter().map(|index| links[index].clone()));
+            output.extend(
+                edge_indices
+                    .into_iter()
+                    .filter_map(|index| links[index].take()),
+            );
         }
         return output;
     }
@@ -579,7 +586,9 @@ fn networkx_edge_order(
     let mut visited = vec![false; nodes.len()];
     for (node_index, edge_indices) in incident.into_iter().enumerate() {
         for edge_index in edge_indices {
-            let edge = &links[edge_index];
+            let Some(edge) = links[edge_index].as_ref() else {
+                continue;
+            };
             let Some(&source) = positions.get(edge.source.as_str()) else {
                 continue;
             };
@@ -590,7 +599,9 @@ fn networkx_edge_order(
             if visited[other] {
                 continue;
             }
-            let mut emitted = edge.clone();
+            let Some(mut emitted) = links[edge_index].take() else {
+                continue;
+            };
             emitted.source.clone_from(&nodes[node_index].id);
             emitted.target.clone_from(&nodes[other].id);
             output.push(emitted);

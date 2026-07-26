@@ -15,6 +15,7 @@ categories.workspace = true
 compass-analysis = { path = "../compass-analysis", version = "0.1.4" }
 compass-ir = { path = "../compass-ir", version = "0.1.4" }
 compass-program = { path = "../compass-program", version = "0.1.4" }
+ahash.workspace = true
 rayon.workspace = true
 notify.workspace = true
 num_cpus.workspace = true

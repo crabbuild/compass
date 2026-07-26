@@ -4,14 +4,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, DetectOptions, Detection, IgnorePolicy, Manifest,
     ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
     ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
-    dedupe_edges, dedupe_nodes, god_nodes, label_communities_by_hub, remap_communities_to_previous,
-    score_communities, suggest_questions, surprising_connections,
+    dedupe_edges, dedupe_nodes, graph_insights, label_communities_by_hub,
+    remap_communities_to_previous, score_communities,
 };
 use compass_languages::{Engine, Extraction, Registry, file_stem, make_id};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
@@ -728,16 +729,36 @@ fn build_graph_inner(
         .collect::<Vec<_>>();
     merge_decl_def_classes(&mut ordered);
     profile_internal("declaration merge", &mut internal_started);
-    let ast_id_remap = if ast_extractions_are_portable(&ordered, &root) {
-        HashMap::new()
+    let ast_root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
+    let portable_check_started = Instant::now();
+    let ast_is_portable = ast_extractions_are_portable(&ordered, &root);
+    profile_internal_duration("portable AST precheck", portable_check_started.elapsed());
+    let ast_id_remap = if ast_is_portable {
+        AHashMap::new()
     } else {
+        let identity_map_started = Instant::now();
         let live_id_remap = ast_source_identity_map(&sources, &root);
-        collect_ast_id_remap(&ordered, &root, &live_id_remap)
+        profile_internal_duration(
+            "portable AST source identity map",
+            identity_map_started.elapsed(),
+        );
+        let remap_collection_started = Instant::now();
+        let remap = collect_ast_id_remap(&ordered, &root, &live_id_remap);
+        profile_internal_duration(
+            "portable AST remap collection",
+            remap_collection_started.elapsed(),
+        );
+        remap
     };
     if !ast_id_remap.is_empty() {
-        ordered
-            .par_iter_mut()
-            .for_each(|extraction| apply_ast_id_remap(extraction, &ast_id_remap));
+        let remap_application_started = Instant::now();
+        ordered.par_iter_mut().for_each(|extraction| {
+            apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
+        });
+        profile_internal_duration(
+            "portable AST remap application",
+            remap_application_started.elapsed(),
+        );
     }
     profile_internal("portable AST ID remapping", &mut internal_started);
     let read_source = |path: &PathBuf| {
@@ -765,7 +786,7 @@ fn build_graph_inner(
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
-    finalize_ast_extraction(&mut resolved, &root, &ast_id_remap);
+    finalize_ast_extraction(&mut resolved, &root);
     profile_internal("AST finalization", &mut internal_started);
     let ast_cache_elapsed = ast_cache_handle
         .join()
@@ -1099,6 +1120,7 @@ fn build_graph_inner(
     let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
     let graph_output = || -> Result<Duration, CoreError> {
         let started = Instant::now();
+        let mut output_profile_started = Instant::now();
         write_json(
             &document,
             &communities,
@@ -1112,31 +1134,35 @@ fn build_graph_inner(
                     .then_some(&labels),
             },
         )?;
+        profile_internal(
+            "graph.json borrowed publication",
+            &mut output_profile_started,
+        );
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
                 output_dir.join(".compass_root"),
                 &options.root.to_string_lossy(),
             )?;
             write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
+            profile_internal(
+                "graph root marker and overview publication",
+                &mut output_profile_started,
+            );
         }
         Ok(started.elapsed())
     };
     let graph_analyses = || -> Result<(bool, Duration), CoreError> {
         let started = Instant::now();
-        let ((cohesion, gods), (surprises, questions)) = rayon::join(
-            || {
-                rayon::join(
-                    || score_communities(&document, &communities),
-                    || god_nodes(&document, 10),
-                )
-            },
-            || {
-                rayon::join(
-                    || surprising_connections(&document, &communities, 5),
-                    || suggest_questions(&document, &communities, &labels, 10),
-                )
-            },
+        let analysis_compute_started = Instant::now();
+        let (cohesion, (gods, surprises, questions)) = rayon::join(
+            || score_communities(&document, &communities),
+            || graph_insights(&document, &communities, &labels, 10, 5, 10),
         );
+        profile_internal_duration(
+            "graph analyses computation",
+            analysis_compute_started.elapsed(),
+        );
+        let analysis_render_started = Instant::now();
         let tokens = semantic_tokens(semantic);
         let analysis = if options.purpose == BuildPurpose::Extract {
             json!({
@@ -1222,6 +1248,10 @@ fn build_graph_inner(
         } else {
             false
         };
+        profile_internal_duration(
+            "graph analysis and report rendering",
+            analysis_render_started.elapsed(),
+        );
         Ok((html_written, started.elapsed()))
     };
     let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
@@ -1423,14 +1453,7 @@ fn write_semantic_marker(
     Ok(())
 }
 
-fn finalize_ast_extraction(
-    extraction: &mut Extraction,
-    root: &Path,
-    ast_id_remap: &HashMap<String, String>,
-) {
-    if !ast_id_remap.is_empty() {
-        apply_ast_id_remap(extraction, ast_id_remap);
-    }
+fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
     let mut external_id_remap = HashMap::new();
     let mut canonical_sources = HashMap::<String, PathBuf>::new();
     for node in &mut extraction.nodes {
@@ -1476,28 +1499,34 @@ fn finalize_ast_extraction(
             }
         }
     }
-    for node in &mut extraction.nodes {
-        normalize_source_attribute_cached(&mut node.attributes, root, &mut canonical_sources);
-        node.attributes.remove("origin_file");
-        node.attributes.remove("_callable");
-        node.attributes.insert(
-            "_origin".to_owned(),
-            serde_json::Value::String("ast".to_owned()),
-        );
-    }
-    for edge in &mut extraction.edges {
-        normalize_source_attribute_cached(&mut edge.attributes, root, &mut canonical_sources);
-        edge.attributes.insert(
-            "_origin".to_owned(),
-            serde_json::Value::String("ast".to_owned()),
-        );
-    }
+    rayon::join(
+        || {
+            extraction.nodes.par_iter_mut().for_each(|node| {
+                normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
+                node.attributes.remove("origin_file");
+                node.attributes.remove("_callable");
+                node.attributes.insert(
+                    "_origin".to_owned(),
+                    serde_json::Value::String("ast".to_owned()),
+                );
+            });
+        },
+        || {
+            extraction.edges.par_iter_mut().for_each(|edge| {
+                normalize_source_attribute_cached(&mut edge.attributes, root, &canonical_sources);
+                edge.attributes.insert(
+                    "_origin".to_owned(),
+                    serde_json::Value::String("ast".to_owned()),
+                );
+            });
+        },
+    );
 }
 
 fn normalize_source_attribute_cached(
     attributes: &mut serde_json::Map<String, serde_json::Value>,
     root: &Path,
-    canonical_sources: &mut HashMap<String, PathBuf>,
+    canonical_sources: &HashMap<String, PathBuf>,
 ) {
     let Some(source) = attributes
         .get("source_file")
@@ -1509,9 +1538,13 @@ fn normalize_source_attribute_cached(
     if !path.is_absolute() {
         return;
     }
-    let canonical_path = canonical_sources
-        .entry(source.to_owned())
-        .or_insert_with(|| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+    let canonical_fallback;
+    let canonical_path = if let Some(canonical) = canonical_sources.get(source) {
+        canonical
+    } else {
+        canonical_fallback = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        &canonical_fallback
+    };
     let Ok(relative) = canonical_path.strip_prefix(root) else {
         return;
     };
@@ -1612,8 +1645,8 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
     }
 }
 
-fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
+fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> AHashMap<String, String> {
+    let mut aliases = AHashMap::with_capacity(sources.len().saturating_mul(2));
     for source in sources {
         let identity = if source.is_absolute()
             && source.starts_with(root)
@@ -1663,29 +1696,46 @@ fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool
 fn collect_ast_id_remap(
     extractions: &[Extraction],
     root: &Path,
-    live_id_remap: &HashMap<String, String>,
-) -> HashMap<String, String> {
-    // Python first rewrites every exact ID derived from a file that is really
-    // present in the detected corpus. This also catches references emitted by
-    // another extractor (for example an .lpk unit pointing at sample.pas), but
-    // deliberately leaves IDs for absent project references untouched.
-    let mut id_remap = live_id_remap.clone();
+    live_id_remap: &AHashMap<String, String>,
+) -> AHashMap<String, String> {
     let node_ids = extractions
         .iter()
         .flat_map(|extraction| extraction.nodes.iter())
         .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    let root_prefix = make_id(&[&root.to_string_lossy()]);
-    let root_marker = format!("{root_prefix}_");
+        .collect::<AHashSet<_>>();
+    let root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
+    collect_ast_id_remap_chunk(extractions, root, live_id_remap, &node_ids, &root_marker)
+}
+
+fn collect_ast_id_remap_chunk(
+    extractions: &[Extraction],
+    root: &Path,
+    live_id_remap: &AHashMap<String, String>,
+    node_ids: &AHashSet<&str>,
+    root_marker: &str,
+) -> AHashMap<String, String> {
+    // Python first rewrites every exact ID derived from a file that is really
+    // present in the detected corpus. This also catches references emitted by
+    // another extractor (for example an .lpk unit pointing at sample.pas), but
+    // deliberately leaves IDs for absent project references untouched.
+    let node_count = extractions
+        .iter()
+        .map(|extraction| extraction.nodes.len())
+        .sum();
+    let mut id_remap = AHashMap::with_capacity(node_count);
     let mut source_identities = HashMap::<String, (PathBuf, String, String)>::new();
     let mut remap_rooted_id = |id: &str| {
+        if let Some(portable) = live_id_remap.get(id) {
+            id_remap.insert(id.to_owned(), portable.clone());
+            return;
+        }
         // A rooted endpoint without a node is an unresolved file reference.
         // Root-prefixed IDs that do have nodes may instead be symbols whose
         // file-derived prefix happens to match the checkout path.
         if node_ids.contains(id) {
             return;
         }
-        if let Some(relative) = id.strip_prefix(&root_marker)
+        if let Some(relative) = id.strip_prefix(root_marker)
             && !relative.is_empty()
         {
             id_remap
@@ -1705,7 +1755,8 @@ fn collect_ast_id_remap(
     {
         // An exact alias for a detected file is stronger than a symbol-prefix
         // interpretation from the referring node's source file.
-        if id_remap.contains_key(&node.id) {
+        if let Some(portable) = live_id_remap.get(&node.id) {
+            id_remap.insert(node.id.clone(), portable.clone());
             continue;
         }
         let Some(source) = node
@@ -1788,25 +1839,34 @@ fn collect_ast_id_remap(
     id_remap
 }
 
-fn apply_ast_id_remap(extraction: &mut Extraction, id_remap: &HashMap<String, String>) {
-    for node in &mut extraction.nodes {
-        if let Some(canonical) = id_remap.get(&node.id) {
-            node.id.clone_from(canonical);
+fn apply_ast_id(id: &mut String, id_remap: &AHashMap<String, String>, root_marker: &str) {
+    if let Some(canonical) = id_remap.get(id) {
+        if id
+            .strip_prefix(root_marker)
+            .is_some_and(|relative| relative == canonical)
+        {
+            id.drain(..root_marker.len());
+        } else {
+            id.clone_from(canonical);
         }
     }
+}
+
+fn apply_ast_id_remap(
+    extraction: &mut Extraction,
+    id_remap: &AHashMap<String, String>,
+    root_marker: &str,
+) {
+    for node in &mut extraction.nodes {
+        apply_ast_id(&mut node.id, id_remap, root_marker);
+    }
     for edge in &mut extraction.edges {
-        if let Some(canonical) = id_remap.get(&edge.source) {
-            edge.source.clone_from(canonical);
-        }
-        if let Some(canonical) = id_remap.get(&edge.target) {
-            edge.target.clone_from(canonical);
-        }
+        apply_ast_id(&mut edge.source, id_remap, root_marker);
+        apply_ast_id(&mut edge.target, id_remap, root_marker);
     }
     if let Some(calls) = extraction.raw_calls.as_mut() {
         for call in calls {
-            if let Some(canonical) = id_remap.get(&call.caller_nid) {
-                call.caller_nid.clone_from(canonical);
-            }
+            apply_ast_id(&mut call.caller_nid, id_remap, root_marker);
         }
     }
 }
@@ -2669,7 +2729,11 @@ mod tests {
         let live_id_remap = ast_source_identity_map(std::slice::from_ref(&source), root);
         let id_remap =
             collect_ast_id_remap(std::slice::from_ref(&extraction), root, &live_id_remap);
-        apply_ast_id_remap(&mut extraction, &id_remap);
+        apply_ast_id_remap(
+            &mut extraction,
+            &id_remap,
+            &format!("{}_", make_id(&[&root.to_string_lossy()])),
+        );
 
         assert_eq!(extraction.nodes[0].id, "internal_timeformattype_string");
         assert_eq!(extraction.nodes[1].id, prefix_symbol_id);
@@ -2704,7 +2768,7 @@ mod tests {
             }],
             ..Extraction::default()
         };
-        finalize_ast_extraction(&mut extraction, &root, &HashMap::new());
+        finalize_ast_extraction(&mut extraction, &root);
         assert_eq!(extraction.nodes[0].id, "ext_core_core_csproj");
         assert_eq!(
             extraction.nodes[0].string("source_file"),

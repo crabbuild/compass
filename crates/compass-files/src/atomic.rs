@@ -149,6 +149,10 @@ struct AsciiJsonWriter<'a, W> {
 
 impl<W: Write> Write for AsciiJsonWriter<'_, W> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.is_ascii() {
+            self.inner.write_all(bytes)?;
+            return Ok(bytes.len());
+        }
         let text = std::str::from_utf8(bytes).map_err(|error| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
         })?;
