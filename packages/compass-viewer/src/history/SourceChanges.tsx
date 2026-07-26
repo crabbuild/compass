@@ -25,6 +25,13 @@ const DIFF_THEME_CSS = `:host {
   --diffs-line-height: 19px;
   --diffs-gap-inline: 6px;
   --diffs-min-number-column-width: 3ch;
+}
+
+[data-gutter],
+[data-content] {
+  grid-template-rows: none;
+  grid-auto-rows: minmax(var(--diffs-line-height, 19px), auto);
+  align-content: start;
 }`;
 const DIFF_LINE_HEIGHT = 19;
 const DIFF_HUNK_SEPARATOR_HEIGHT = 32;
