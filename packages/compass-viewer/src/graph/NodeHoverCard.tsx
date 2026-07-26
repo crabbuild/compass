@@ -32,6 +32,13 @@ export function NodeHoverCard({
         <strong>{node.label}</strong>
         <span>{(node.kind ?? "symbol").toLocaleUpperCase()}</span>
       </div>
+      {node.change && (
+        <span className="compass-change-badge" data-change={node.change}>
+          {node.change === "unchanged"
+            ? "Context"
+            : `${node.change[0]?.toLocaleUpperCase()}${node.change.slice(1)}`}
+        </span>
+      )}
       {node.memberCount !== undefined ? (
         <p>{node.memberCount.toLocaleString()} symbols</p>
       ) : (

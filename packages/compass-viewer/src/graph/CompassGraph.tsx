@@ -17,7 +17,21 @@ import {
 import { graphNodeActivation } from "./nodeActivation";
 import { NodeHoverCard, type GraphHover } from "./NodeHoverCard";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
-import { graphReducer, initialGraphState } from "./state";
+import {
+  graphReducer,
+  initialGraphState,
+  type GraphChangeType
+} from "./state";
+
+const CHANGE_TYPES: Array<{
+  value: GraphChangeType;
+  label: string;
+}> = [
+  { value: "added", label: "Added" },
+  { value: "removed", label: "Removed" },
+  { value: "changed", label: "Changed" },
+  { value: "unchanged", label: "Context" }
+];
 
 export type GraphHost = {
   openSource(source: SourceLocation): void;
@@ -96,6 +110,16 @@ function CompassGraphView({
   hostRef.current = host;
   const selected = model.nodes.find((node) => node.id === state.focusedNodeId);
   const hovered = hover ? model.nodes.find((node) => node.id === hover.nodeId) : undefined;
+  const comparisonMode = model.nodes.some((node) => node.change !== undefined)
+    || model.edges.some((edge) => edge.change !== undefined);
+  const changeCounts = useMemo(() => {
+    const counts = new Map<GraphChangeType, number>();
+    for (const node of model.nodes) {
+      const change = node.change ?? "unchanged";
+      counts.set(change, (counts.get(change) ?? 0) + 1);
+    }
+    return counts;
+  }, [model.nodes]);
   const neighbors = useMemo(() => {
     if (!selected) return [];
     const ids = new Set<string>();
@@ -160,6 +184,7 @@ function CompassGraphView({
           physicsRunning={state.physicsRunning}
           forceLabels={state.forceLabels}
           hiddenCommunities={state.hiddenCommunities}
+          hiddenChanges={state.hiddenChanges}
           onFocus={focus}
           onOpenSource={activateNode}
           onHover={setHover}
@@ -185,6 +210,28 @@ function CompassGraphView({
           })}
           onBack={onBackToOverview}
         />
+        {comparisonMode && (
+          <div className="compass-change-legend" aria-label="Graph change filters">
+            {CHANGE_TYPES
+              .filter(({ value }) => (changeCounts.get(value) ?? 0) > 0)
+              .map(({ value, label }) => {
+                const visible = !state.hiddenChanges.has(value);
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    data-change={value}
+                    aria-pressed={visible}
+                    onClick={() => dispatch({ type: "toggleChange", change: value })}
+                  >
+                    <span aria-hidden="true" />
+                    {label}
+                    <small>{changeCounts.get(value) ?? 0}</small>
+                  </button>
+                );
+              })}
+          </div>
+        )}
         {communityError && (
           <div
             className="absolute bottom-4 left-4 z-20 max-w-md rounded-md border border-destructive/50 bg-background/95 px-3 py-2 text-sm text-destructive shadow-lg"
@@ -211,6 +258,7 @@ function CompassGraphView({
         query={state.query}
         matches={matches}
         hiddenCommunities={state.hiddenCommunities}
+        comparisonMode={comparisonMode}
         onQueryChange={(query) => dispatch({ type: "search", query })}
         onFocus={focus}
         onOpenSource={host.openSource}

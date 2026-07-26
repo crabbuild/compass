@@ -882,6 +882,7 @@ button:not(:disabled),
 }
 
 .compass-tool-button:focus-visible,
+.compass-change-legend button:focus-visible,
 .compass-search-field input:focus-visible,
 .compass-search-item:focus-visible,
 .compass-inspector-action:focus-visible,
@@ -893,6 +894,69 @@ button:not(:disabled),
 .compass-community-item:focus-within {
   outline: 2px solid var(--compass-focus);
   outline-offset: 2px;
+}
+
+.compass-change-legend {
+  position: absolute;
+  z-index: 4;
+  top: 64px;
+  left: 12px;
+  display: flex;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+}
+
+.compass-change-legend button {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.compass-change-legend button:hover,
+.compass-change-legend button[aria-pressed="true"] {
+  border-color: var(--compass-line);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.compass-change-legend button[aria-pressed="false"] {
+  opacity: 0.42;
+}
+
+.compass-change-legend button > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, #6e7781);
+}
+
+.compass-change-legend button[data-change="added"] > span {
+  background: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.compass-change-legend button[data-change="removed"] > span {
+  background: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+.compass-change-legend button[data-change="changed"] > span {
+  background: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+
+.compass-change-legend button small {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
 }
 
 .compass-inspector-resizer {
@@ -1167,8 +1231,9 @@ button:not(:disabled),
   margin-bottom: 15px;
 }
 
-.compass-node-identity > span:last-child {
+.compass-node-identity > span:nth-child(2) {
   min-width: 0;
+  flex: 1;
 }
 
 .compass-node-identity strong,
@@ -1202,6 +1267,38 @@ button:not(:disabled),
   height: 36px;
   flex: 0 0 auto;
   border-radius: 5px;
+}
+
+.compass-change-badge {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--vscode-descriptionForeground, #6e7781);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.compass-node-identity .compass-change-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.compass-change-badge[data-change="added"] {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.compass-change-badge[data-change="removed"] {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+.compass-change-badge[data-change="changed"] {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
 }
 
 .compass-metadata-grid {
@@ -1419,6 +1516,33 @@ button:not(:disabled),
   margin-bottom: 10px;
 }
 
+.compass-community-panel[data-secondary="true"] {
+  flex: 0 1 auto;
+  padding-top: 12px;
+}
+
+.compass-community-panel details > summary {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.compass-community-panel details > summary span {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.compass-community-controls {
+  min-height: 0;
+}
+
 .compass-community-control,
 .compass-community-item {
   display: flex;
@@ -1496,6 +1620,10 @@ button:not(:disabled),
   font-size: 12px;
   line-height: 1.35;
   pointer-events: none;
+}
+
+.compass-node-hover-card > .compass-change-badge {
+  margin: 0;
 }
 
 .compass-hover-heading {
@@ -1720,7 +1848,7 @@ body.vscode-high-contrast-light .compass-source-metadata {
   gap: 8px;
   padding: 7px 12px 8px;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-top: 2px solid transparent;
   border-radius: 0;
   background: transparent;
   color: var(--muted-foreground);
@@ -1734,9 +1862,17 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-mode button[aria-selected="true"] {
-  border-bottom-color: var(--vscode-tab-activeBorder, var(--query-accent));
+  border-top-color: var(--vscode-tab-activeBorder, var(--query-accent));
   background: var(--vscode-tab-activeBackground, var(--query-surface-raised));
+  box-shadow:
+    inset 1px 0 var(--query-border),
+    inset -1px 0 var(--query-border);
   color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.query-mode button[aria-selected="true"] svg,
+.query-mode button[aria-selected="true"] strong {
+  opacity: 1;
 }
 
 .query-mode svg {
@@ -2288,6 +2424,12 @@ body.vscode-high-contrast-light .query-node-results {
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
 
+body.vscode-high-contrast .query-mode button[aria-selected="true"],
+body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
+  border: 2px solid var(--vscode-contrastBorder, var(--ring));
+  border-bottom: 0;
+}
+
 .history-shell {
   display: grid;
   grid-template-columns: minmax(270px, 340px) minmax(0, 1fr);
@@ -2699,33 +2841,47 @@ body.vscode-high-contrast-light .query-node-results {
   font: 10px/1.4 var(--compass-font-mono);
 }
 
-.history-comparison-legend > span {
-  display: inline-flex;
-  gap: 7px;
-  padding: 3px 6px;
+.history-delta-card {
+  display: grid;
+  min-width: 210px;
+  gap: 4px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 2px;
   background: var(--vscode-badge-background, var(--muted));
 }
 
-.history-comparison-legend strong {
-  color: var(--vscode-badge-foreground, var(--foreground));
+.history-delta-card > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
 }
 
-.history-comparison-legend i {
+.history-delta-card strong {
+  color: var(--vscode-badge-foreground, var(--foreground));
+  text-transform: capitalize;
+}
+
+.history-delta-card i {
   font-style: normal;
   font-weight: 600;
 }
 
-.history-comparison-legend i[data-change="added"] {
+.history-delta-card i small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.history-delta-card i[data-change="added"] {
   color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
 }
 
-.history-comparison-legend i[data-change="removed"] {
+.history-delta-card i[data-change="removed"] {
   color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
 }
 
-.history-comparison-legend i[data-change="changed"] {
+.history-delta-card i[data-change="changed"] {
   color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
 }
 
@@ -2779,8 +2935,70 @@ body.vscode-high-contrast-light .query-node-results {
   background: var(--vscode-textCodeBlock-background, var(--muted));
 }
 
+.history-diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.history-diff-layout {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.history-diff-toolbar button {
+  min-height: 25px;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.history-diff-layout button + button {
+  border-left: 1px solid var(--border);
+}
+
+.history-diff-toolbar button:hover:not(:disabled) {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.history-diff-toolbar button[aria-pressed="true"] {
+  background: var(--vscode-button-secondaryBackground, var(--muted));
+  color: var(--vscode-button-secondaryForeground, var(--foreground));
+}
+
+.history-diff-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.history-diff-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.history-diff-wrap input {
+  margin: 0;
+}
+
+.history-diff-expand {
+  margin-left: auto;
+  border: 1px solid var(--border) !important;
+  border-radius: 2px;
+}
+
 .history-source-changes summary {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 6px 8px;
@@ -2790,17 +3008,61 @@ body.vscode-high-contrast-light .query-node-results {
   font-size: 10px;
 }
 
-.history-source-changes summary code {
-  color: var(--vscode-textLink-foreground, var(--workbench-link));
-  font-family: var(--compass-font-mono);
+.history-source-path {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 
-.history-source-changes summary span {
+.history-source-path code {
+  overflow: hidden;
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font-family: var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-source-path small {
   color: var(--muted-foreground);
+  font-size: 9px;
   text-transform: capitalize;
 }
 
-.history-source-changes pre,
+.history-source-stats {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-family: var(--compass-font-mono);
+}
+
+.history-source-stats i {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.history-source-stats i[data-change="added"] {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.history-source-stats i[data-change="removed"] {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+.history-source-diff {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.history-diff-fallback > p {
+  margin: 0;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+
+.history-diff-fallback pre,
 .history-finding-list pre {
   max-height: 260px;
   margin: 0;
@@ -2885,8 +3147,18 @@ body.vscode-high-contrast .history-comparison,
 body.vscode-high-contrast-light .history-comparison,
 body.vscode-high-contrast .history-diff-evidence,
 body.vscode-high-contrast-light .history-diff-evidence,
+body.vscode-high-contrast .history-source-changes details,
+body.vscode-high-contrast-light .history-source-changes details,
 body.vscode-high-contrast .history-change-counts span,
 body.vscode-high-contrast-light .history-change-counts span {
+  border-color: var(--vscode-contrastBorder, var(--ring));
+  border-width: 2px;
+}
+
+body.vscode-high-contrast .compass-change-legend,
+body.vscode-high-contrast-light .compass-change-legend,
+body.vscode-high-contrast .compass-change-badge,
+body.vscode-high-contrast-light .compass-change-badge {
   border-color: var(--vscode-contrastBorder, var(--ring));
   border-width: 2px;
 }
@@ -2904,6 +3176,14 @@ body.vscode-high-contrast-light .history-change-counts span {
 
   .query-mode {
     align-self: flex-start;
+  }
+
+  .history-diff-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .history-diff-expand {
+    margin-left: 0;
   }
 
   .query-composer-footer {

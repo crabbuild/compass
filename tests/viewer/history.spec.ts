@@ -119,10 +119,20 @@ test("comparison replaces the full graph with a readable focused delta", async (
 
   await expect(page.getByText("Comparison mode")).toBeVisible();
   await expect(page.getByText(/Comparing bbbbbbbbb to aaaaaaaaa/)).toBeVisible();
-  await expect(page.getByLabel("Visible graph delta")).toContainText("nodes+0−0~1");
+  await expect(page.getByLabel("Visible graph delta")).toContainText(
+    "nodesAdded 0Removed 0Changed 1"
+  );
   await expect(page.getByText(/Viewing changed subgraph for bbbbbbbbb/)).toBeVisible();
   await expect(page.getByText("Cargo.toml")).toBeVisible();
-  await expect(page.getByText('+version = "3.1.7"')).toBeVisible();
+  await expect(page.locator(".history-source-diff")).toBeVisible();
+  await expect(
+    page.locator(".history-source-diff").getByText('version = "3.1.7"', { exact: false })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Split" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(page.getByLabel("Graph change filters")).toContainText("Changed2");
   await expect(page.getByText("Fixture comparison", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Exit comparison" }).click();

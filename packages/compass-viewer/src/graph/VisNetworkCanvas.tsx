@@ -10,6 +10,7 @@ import { DataSet, Network, type Edge, type Node, type Options } from "vis-networ
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
 import type { GraphHover } from "./NodeHoverCard";
 import { bindGraphNetworkEvents } from "./networkEvents";
+import type { GraphChangeType } from "./state";
 
 export type GraphCanvasHandle = {
   fit(): void;
@@ -22,11 +23,21 @@ type Props = {
   physicsRunning: boolean;
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
+  hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
   onOpenSource(nodeId: string): void;
   onHover(change: GraphHover | null): void;
   onClear(): void;
   onStabilized(): void;
+};
+
+type ComparisonPalette = Record<GraphChangeType, string>;
+
+const fallbackComparisonPalette: ComparisonPalette = {
+  added: "#2ea043",
+  removed: "#f85149",
+  changed: "#d29922",
+  unchanged: "#6e7781"
 };
 
 const options: Options = {
@@ -66,9 +77,12 @@ const options: Options = {
 export function graphNodeColor(
   model: GraphViewModel,
   node: GraphNode,
-  contrastBorder?: string
+  contrastBorder?: string,
+  comparisonPalette?: ComparisonPalette
 ) {
-  const background = node.color?.background
+  const background = node.change && comparisonPalette
+    ? comparisonPalette[node.change]
+    : node.color?.background
     ?? model.communities.find((candidate) => candidate.id === node.community)?.color
     ?? "#6688aa";
   return {
@@ -88,11 +102,26 @@ function edgeAppearance(confidence: string | undefined) {
   return { dashes: true, width: 1, opacity: 0.35 };
 }
 
-function comparisonEdgeColor(change: string | undefined, fallback: string): string {
-  if (change === "added") return "#2ea043";
-  if (change === "removed") return "#f85149";
-  if (change === "changed") return "#d29922";
-  return fallback;
+function comparisonEdgeAppearance(
+  change: GraphChangeType | undefined,
+  confidence: string | undefined,
+  fallback: string,
+  palette: ComparisonPalette
+) {
+  if (change === "added") {
+    return { color: palette.added, dashes: false, width: 2.5, opacity: 0.92 };
+  }
+  if (change === "removed") {
+    return { color: palette.removed, dashes: [6, 5], width: 2.3, opacity: 0.9 };
+  }
+  if (change === "changed") {
+    return { color: palette.changed, dashes: false, width: 3, opacity: 0.94 };
+  }
+  if (change === "unchanged") {
+    return { color: palette.unchanged, dashes: true, width: 1, opacity: 0.28 };
+  }
+  const appearance = edgeAppearance(confidence);
+  return { color: fallback, ...appearance };
 }
 
 function useThemeRevision(): number {
@@ -125,6 +154,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     physicsRunning,
     forceLabels,
     hiddenCommunities,
+    hiddenChanges,
     onFocus,
     onOpenSource,
     onHover,
@@ -149,6 +179,27 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => cssColor("--vscode-descriptionForeground", "#60728b"),
       [themeRevision]
     );
+    const comparisonPalette = useMemo<ComparisonPalette>(() => ({
+      added: cssColor("--vscode-gitDecoration-addedResourceForeground", "#2ea043"),
+      removed: cssColor("--vscode-gitDecoration-deletedResourceForeground", "#f85149"),
+      changed: cssColor("--vscode-gitDecoration-modifiedResourceForeground", "#d29922"),
+      unchanged: cssColor("--vscode-descriptionForeground", "#6e7781")
+    }), [themeRevision]);
+    const comparisonMode = useMemo(
+      () => model.nodes.some((node) => node.change !== undefined)
+        || model.edges.some((edge) => edge.change !== undefined),
+      [model.edges, model.nodes]
+    );
+    const automaticLabelIds = useMemo(() => new Set(
+      comparisonMode
+        ? model.nodes
+          .filter((node) => node.change !== "unchanged")
+          .sort((left, right) =>
+            (right.degree ?? 0) - (left.degree ?? 0) || left.id.localeCompare(right.id))
+          .slice(0, 12)
+          .map((node) => node.id)
+        : []
+    ), [comparisonMode, model.nodes]);
     const contrastBorder = useMemo(() => {
       const highContrast = document.body.classList.contains("vscode-high-contrast")
         || document.body.classList.contains("vscode-high-contrast-light");
@@ -157,24 +208,42 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         : undefined;
     }, [themeRevision]);
     const nodeData = useMemo(() => new DataSet<Node>(
-      model.nodes.map((node) => ({
-        id: node.id,
-        label: node.label,
-        color: graphNodeColor(model, node),
-        size: node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree),
-        font: {
-          color: "#eef5ff",
-          face: "system-ui",
-          size: (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
-        }
-      }))
+      model.nodes.map((node) => {
+        const baseSize = node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree);
+        const size = comparisonMode
+          ? node.change === "unchanged" ? baseSize * 0.72 : baseSize * 1.12
+          : baseSize;
+        return {
+          id: node.id,
+          label: node.label,
+          color: graphNodeColor(model, node, undefined, fallbackComparisonPalette),
+          size,
+          opacity: node.change === "unchanged" ? 0.42 : 1,
+          font: {
+            color: "#eef5ff",
+            face: "system-ui",
+            size: comparisonMode
+              ? automaticLabelIds.has(node.id) ? 12 : 0
+              : (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+          }
+        };
+      })
       // Styling changes are applied in place below so the Network, its paused
       // physics state, and its saved reset view survive theme and label changes.
-    ), [maxDegree, model]);
+    ), [
+      automaticLabelIds,
+      comparisonMode,
+      maxDegree,
+      model
+    ]);
     const edgeData = useMemo(() => new DataSet<Edge>(
       model.edges.map((edge) => {
-        const appearance = edgeAppearance(edge.confidence);
-        const color = comparisonEdgeColor(edge.change, "#60728b");
+        const appearance = comparisonEdgeAppearance(
+          edge.change,
+          edge.confidence,
+          "#60728b",
+          fallbackComparisonPalette
+        );
         return {
           id: edge.id,
           from: edge.source,
@@ -182,7 +251,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
           dashes: appearance.dashes,
           width: appearance.width,
-          color: { color, opacity: edge.change ? 0.88 : appearance.opacity }
+          color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
     ), [model.edges]);
@@ -236,7 +305,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     useEffect(() => {
       const hiddenNodes = new Set(
         model.nodes
-          .filter((node) => hiddenCommunities.has(node.community))
+          .filter((node) =>
+            hiddenCommunities.has(node.community)
+            || hiddenChanges.has(node.change ?? "unchanged"))
           .map((node) => node.id)
       );
       nodeData.update(model.nodes.map((node) => ({
@@ -247,7 +318,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: edge.id,
         hidden: hiddenNodes.has(edge.source) || hiddenNodes.has(edge.target)
       })));
-    }, [edgeData, hiddenCommunities, model.edges, model.nodes, nodeData]);
+    }, [
+      edgeData,
+      hiddenChanges,
+      hiddenCommunities,
+      model.edges,
+      model.nodes,
+      nodeData
+    ]);
 
     useEffect(() => {
       const network = networkRef.current;
@@ -258,11 +336,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       nodeData.update(model.nodes.map((node) => {
         const isFocused = node.id === focusedNodeId;
         const isVisible = !focusedNodeId || isFocused || connected.has(node.id);
+        const comparisonOpacity = node.change === "unchanged" ? 0.42 : 1;
         return {
           id: node.id,
-          opacity: isVisible ? 1 : 0.14,
+          opacity: !focusedNodeId
+            ? comparisonOpacity
+            : isVisible ? Math.max(comparisonOpacity, 0.72) : 0.08,
           borderWidth: isFocused ? 4 : contrastBorder ? 2.5 : 1.5,
-          color: graphNodeColor(model, node, contrastBorder),
+          color: graphNodeColor(model, node, contrastBorder, comparisonPalette),
           shadow: isFocused
             ? {
                 enabled: true,
@@ -277,17 +358,21 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       }));
       edgeData.update(model.edges.map((edge) => {
-        const appearance = edgeAppearance(edge.confidence);
-        const baseOpacity = edge.change ? 0.88 : appearance.opacity;
+        const appearance = comparisonEdgeAppearance(
+          edge.change,
+          edge.confidence,
+          edgeColor,
+          comparisonPalette
+        );
         const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
-        const color = comparisonEdgeColor(edge.change, edgeColor);
         return {
           id: edge.id,
+          dashes: appearance.dashes,
           color: {
-            color,
-            opacity: !focusedNodeId ? baseOpacity : connectedEdge ? 0.9 : 0.06
+            color: appearance.color,
+            opacity: !focusedNodeId ? appearance.opacity : connectedEdge ? 0.92 : 0.05
           },
-          width: connectedEdge ? Math.max(2.5, appearance.width) : appearance.width
+          width: connectedEdge ? Math.max(3, appearance.width) : appearance.width
         };
       }));
       if (focusedNodeId) {
@@ -303,6 +388,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       }
     }, [
       contrastBorder,
+      comparisonPalette,
       edgeColor,
       edgeData,
       focusedNodeId,
@@ -315,10 +401,25 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: node.id,
         font: {
           color: labelColor,
-          size: forceLabels || (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+          size: forceLabels
+            || node.id === focusedNodeId
+            || (comparisonMode
+              ? automaticLabelIds.has(node.id)
+              : (node.degree ?? 1) >= maxDegree * 0.15)
+            ? 12
+            : 0
         }
       })));
-    }, [forceLabels, labelColor, maxDegree, model.nodes, nodeData]);
+    }, [
+      automaticLabelIds,
+      comparisonMode,
+      focusedNodeId,
+      forceLabels,
+      labelColor,
+      maxDegree,
+      model.nodes,
+      nodeData
+    ]);
 
     useImperativeHandle(ref, () => ({
       fit() {

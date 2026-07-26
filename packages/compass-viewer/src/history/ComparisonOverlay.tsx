@@ -71,11 +71,13 @@ function Delta({
   changed: number;
 }) {
   return (
-    <span>
+    <span className="history-delta-card">
       <strong>{label}</strong>
-      <i data-change="added">+{added}</i>
-      <i data-change="removed">−{removed}</i>
-      <i data-change="changed">~{changed}</i>
+      <span>
+        <i data-change="added"><small>Added</small> {added}</i>
+        <i data-change="removed"><small>Removed</small> {removed}</i>
+        <i data-change="changed"><small>Changed</small> {changed}</i>
+      </span>
     </span>
   );
 }

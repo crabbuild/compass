@@ -1,8 +1,13 @@
+import type { GraphNode } from "../contracts/graph";
+
+export type GraphChangeType = NonNullable<GraphNode["change"]>;
+
 export type GraphState = {
   focusedNodeId: string | null;
   physicsRunning: boolean;
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
+  hiddenChanges: ReadonlySet<GraphChangeType>;
   query: string;
 };
 
@@ -14,6 +19,7 @@ export type GraphAction =
   | { type: "setLabels"; visible: boolean }
   | { type: "toggleCommunity"; communityId: number }
   | { type: "setHiddenCommunities"; communityIds: number[] }
+  | { type: "toggleChange"; change: GraphChangeType }
   | { type: "search"; query: string };
 
 export const initialGraphState: GraphState = {
@@ -21,6 +27,7 @@ export const initialGraphState: GraphState = {
   physicsRunning: true,
   forceLabels: false,
   hiddenCommunities: new Set<number>(),
+  hiddenChanges: new Set<GraphChangeType>(),
   query: ""
 };
 
@@ -53,5 +60,11 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
     }
     case "setHiddenCommunities":
       return { ...state, hiddenCommunities: new Set(action.communityIds) };
+    case "toggleChange": {
+      const hiddenChanges = new Set(state.hiddenChanges);
+      if (hiddenChanges.has(action.change)) hiddenChanges.delete(action.change);
+      else hiddenChanges.add(action.change);
+      return { ...state, hiddenChanges };
+    }
   }
 }

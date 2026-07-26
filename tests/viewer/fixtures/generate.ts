@@ -516,7 +516,7 @@ window.acquireVsCodeApi=()=>({postMessage(message){
           old_path:"Cargo.toml",
           new_path:"Cargo.toml",
           status:"modified",
-          patch:"-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\""
+          patch:"diff --git a/Cargo.toml b/Cargo.toml\\nindex 1111111..2222222 100644\\n--- a/Cargo.toml\\n+++ b/Cargo.toml\\n@@ -5 +5 @@\\n-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\"\\n"
         }],
         findings:[{summary:"Fixture comparison"}]
       }

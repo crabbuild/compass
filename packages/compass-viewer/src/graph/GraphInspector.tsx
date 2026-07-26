@@ -41,6 +41,22 @@ function sourceActionLabel(node: GraphNode, source: SourceLocation): string {
   return `Open source ${source.file}${range ? ` ${range.action}` : ""}`;
 }
 
+function changeLabel(change: GraphNode["change"]): string | undefined {
+  return change === "unchanged"
+    ? "Context"
+    : change ? `${change[0]?.toLocaleUpperCase()}${change.slice(1)}` : undefined;
+}
+
+function changeColor(change: GraphNode["change"]): string | undefined {
+  if (!change) return undefined;
+  return {
+    added: "var(--vscode-gitDecoration-addedResourceForeground, #2ea043)",
+    removed: "var(--vscode-gitDecoration-deletedResourceForeground, #f85149)",
+    changed: "var(--vscode-gitDecoration-modifiedResourceForeground, #d29922)",
+    unchanged: "var(--vscode-descriptionForeground, #6e7781)"
+  }[change];
+}
+
 export function GraphInspector({
   model,
   selected,
@@ -48,6 +64,7 @@ export function GraphInspector({
   query,
   matches,
   hiddenCommunities,
+  comparisonMode,
   onQueryChange,
   onFocus,
   onOpenSource,
@@ -63,6 +80,7 @@ export function GraphInspector({
   query: string;
   matches: GraphNode[];
   hiddenCommunities: ReadonlySet<number>;
+  comparisonMode: boolean;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation): void;
@@ -207,13 +225,19 @@ export function GraphInspector({
               <span
                 className="compass-node-swatch"
                 aria-hidden="true"
-                style={{ background: selected.color?.background
+                style={{ background: changeColor(selected.change)
+                  ?? selected.color?.background
                   ?? model.communities.find((item) => item.id === selected.community)?.color }}
               />
               <span>
                 <strong>{selected.label}</strong>
                 <small>{selected.kind ?? "Symbol"}</small>
               </span>
+              {changeLabel(selected.change) && (
+                <span className="compass-change-badge" data-change={selected.change}>
+                  {changeLabel(selected.change)}
+                </span>
+              )}
             </div>
             <dl className="compass-metadata-grid">
               <div>
@@ -313,8 +337,65 @@ export function GraphInspector({
         )}
       </section>
 
-      <section className="compass-community-panel" aria-labelledby="compass-communities-title">
-        <h2 id="compass-communities-title">Communities</h2>
+      <section
+        className="compass-community-panel"
+        aria-labelledby="compass-communities-title"
+        data-secondary={comparisonMode}
+      >
+        {comparisonMode ? (
+          <details>
+            <summary id="compass-communities-title">
+              Communities
+              <span>{model.communities.length}</span>
+            </summary>
+            <CommunityControls
+              model={model}
+              communityCounts={communityCounts}
+              hiddenCommunities={hiddenCommunities}
+              allVisible={allVisible}
+              onSetAllVisible={onSetAllVisible}
+              onToggleCommunity={onToggleCommunity}
+            />
+          </details>
+        ) : (
+          <>
+            <h2 id="compass-communities-title">Communities</h2>
+            <CommunityControls
+              model={model}
+              communityCounts={communityCounts}
+              hiddenCommunities={hiddenCommunities}
+              allVisible={allVisible}
+              onSetAllVisible={onSetAllVisible}
+              onToggleCommunity={onToggleCommunity}
+            />
+          </>
+        )}
+      </section>
+      <footer className="compass-graph-stats">
+        {model.stats.nodes.toLocaleString()} nodes · {model.stats.edges.toLocaleString()} edges ·{" "}
+        {model.stats.communities.toLocaleString()} communities
+      </footer>
+    </aside>
+  );
+}
+
+function CommunityControls({
+  model,
+  communityCounts,
+  hiddenCommunities,
+  allVisible,
+  onSetAllVisible,
+  onToggleCommunity
+}: {
+  model: GraphViewModel;
+  communityCounts: ReadonlyMap<number, number>;
+  hiddenCommunities: ReadonlySet<number>;
+  allVisible: boolean;
+  onSetAllVisible(visible: boolean): void;
+  onToggleCommunity(communityId: number): void;
+}) {
+  return (
+    <div className="compass-community-controls">
         <label className="compass-community-control">
           <input
             type="checkbox"
@@ -348,11 +429,6 @@ export function GraphInspector({
             );
           })}
         </div>
-      </section>
-      <footer className="compass-graph-stats">
-        {model.stats.nodes.toLocaleString()} nodes · {model.stats.edges.toLocaleString()} edges ·{" "}
-        {model.stats.communities.toLocaleString()} communities
-      </footer>
-    </aside>
+    </div>
   );
 }
