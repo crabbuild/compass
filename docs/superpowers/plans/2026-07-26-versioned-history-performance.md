@@ -34,7 +34,7 @@ shell/Python qualification tooling, existing VS Code Compass CLI integration.
 
 - The first request for an unseen arbitrary commit may perform one bounded exact
   extraction in the protected detached worktree.
-- A compatible, already-published realization must not perform full-tree
+- A matching, already-published realization must not perform full-tree
   validation, artifact reconstruction, or extraction.
 - `history.sqlite` remains the only authoritative realization store. Every file
   below `cache/v1` is disposable and reproducible.
@@ -50,6 +50,18 @@ shell/Python qualification tooling, existing VS Code Compass CLI integration.
   report IDs, source patches, and report ordering.
 - Preserve the current `compass.semantic_diff.report/1` and
   `compass.history.viewer_graph/1` public schemas.
+- Ship a hard cutover: no legacy cache reads, cache imports, on-read migrations,
+  deprecated Rust APIs, dual CLI fields, feature flags, or mixed old/new
+  execution paths.
+- Delete `Cache::new`, `legacy_directory`, legacy JSON/MessagePack fallback,
+  `allow_legacy`, legacy build-state validation, `HistoryStore::read_record`,
+  and store-owned diff entry points after migrating every workspace call site.
+- Start the new cache namespace empty. Ignore prior cache files; cache GC may
+  remove them.
+- Keep `HISTORY_SCHEMA_VERSION` unchanged because the authoritative Prolly
+  representation does not change. If implementation requires an authoritative
+  format change, bump the schema and reject old stores explicitly; do not write
+  a migration adapter.
 - Keep the VS Code extension on Compass CLI commands; do not introduce a
   Graphify runtime dependency.
 - Preserve all unrelated worktree changes. Stage only files named by the active
@@ -107,8 +119,10 @@ All work in this plan uses this repository-private layout:
 └── tmp/
 ```
 
-The existing `CacheKind` version subdirectories remain below these roots. Do not
-copy the current-tree `stat-index.json` into shared history storage.
+The `CacheKind` version subdirectories are recreated below these roots using
+only the new encoding. Do not copy, import, hard-link, or decode entries from
+the previous cache layout. Do not copy the current-tree `stat-index.json` into
+shared history storage.
 
 ## Stable production interfaces
 
@@ -193,7 +207,8 @@ builder or reader.
 
 ### Portable extraction cache mode
 
-Extend `crates/compass-files/src/cache.rs` with an explicit layout/hash policy:
+Replace the cache constructor/API in `crates/compass-files/src/cache.rs` with an
+explicit layout/hash policy:
 
 ```rust
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -215,8 +230,16 @@ pub struct CacheOptions<'a> {
 }
 ```
 
-Keep `Cache::new` as the current-tree compatibility constructor. Add a shared
-history constructor that:
+Expose one constructor:
+
+```rust
+pub fn open(root: impl AsRef<Path>, options: CacheOptions<'_>)
+    -> Result<Self, FileError>;
+```
+
+Migrate every workspace caller to `Cache::open` and delete `Cache::new`.
+`CacheLayout::OutputDirectory` creates the current-tree layout under the
+selected output root. `CacheLayout::SharedHistory`:
 
 - writes directly below `cache/v1`, without inserting
   `<output-name>/cache`;
@@ -225,6 +248,11 @@ history constructor that:
 - always reads the file bytes instead of trusting a persisted size/mtime index;
 - does not flush `StatHashIndex`;
 - retains repository-relative Program and AST values.
+
+Delete `legacy_directory`, the `allow_legacy` argument, legacy JSON decode
+branches, legacy Program fallback, and pruning of legacy paths. Bump the
+deterministic cache encoding namespace so old entries cannot be selected by the
+new code.
 
 The relative logical path stays in the identity because extracted graph and
 Program facts contain `source_file`. The absolute checkout root and mtime do
@@ -261,6 +289,19 @@ impl RealizationReader<'_> {
         &self,
         keys: impl IntoIterator<Item = HistoryRecordKey<'key>>,
     ) -> Result<Vec<Option<HistoryRecord>>, HistoryError>;
+
+    pub fn diff(
+        &self,
+        new: &RealizationReader<'_>,
+        sink: &mut dyn ChangeSink,
+    ) -> Result<(), HistoryError>;
+
+    pub fn diff_records(
+        &self,
+        new: &RealizationReader<'_>,
+        records: &[RecordKind],
+        sink: &mut dyn ChangeSink,
+    ) -> Result<(), HistoryError>;
 }
 ```
 
@@ -273,8 +314,9 @@ The reader:
 - decodes each requested record at most once;
 - retains the existing value-size and typed-schema checks.
 
-Keep `HistoryStore::read_record` as a compatibility wrapper around a temporary
-reader until all external callers migrate.
+Migrate all callers in the same cutover and delete
+`HistoryStore::read_record`, `HistoryStore::diff`, and
+`HistoryStore::diff_records`. There is no one-shot wrapper.
 
 ### Graph-only scan
 
@@ -343,18 +385,24 @@ of maintaining two subtly different algorithms.
 ### Modified production files
 
 - `crates/compass-files/src/cache.rs`
-  - Shared layout and verified-content hashing.
+  - Single new cache API, shared layout, verified-content hashing, and removal
+    of all legacy readers.
 - `crates/compass-files/src/lib.rs`
-  - Export cache options.
+  - Export only the new cache options.
+- `crates/compass-files/tests/contracts.rs`
+  - Replace old-constructor/legacy-fallback coverage with hard-cutover
+    rejection coverage.
 - `crates/compass-history/src/lib.rs`
   - Export cache, reader, and graph-scan contracts.
 - `crates/compass-history/src/store.rs`
-  - Cache accessor; compatibility `read_record`; no change to authoritative
-    publication validation.
+  - Cache accessor; deletion of one-shot record reads; no change to
+    authoritative publication validation.
 - `crates/compass-history/src/diff.rs`
-  - Reuse opened sealed realizations where appropriate.
+  - Move diff entry points to request-scoped readers and delete store-owned
+    diff APIs.
 - `crates/compass-core/src/pipeline.rs`
-  - Accept an explicit shared cache root for history extraction.
+  - Accept an explicit shared cache root; use only the new cache constructor;
+    remove legacy build-state validation.
 - `crates/compass-core/src/history.rs`
   - Remove full validation from the existing-realization path; remove complete
     ancestor artifact seeding after shared cache activation; carry a prepared
@@ -366,6 +414,10 @@ of maintaining two subtly different algorithms.
     cache maintenance.
 - `crates/compass-cli/src/semantic_diff_commands.rs`
   - Prefetched readers and report cache.
+- `crates/compass-cli/src/semantic_commands.rs`
+  - Move the semantic cache caller to the new constructor.
+- `crates/compass-semantic/src/orchestration.rs`
+  - Move semantic orchestration to the new constructor.
 - `crates/compass-semantic-diff/src/lib.rs`
   - Export a comparison-engine cache version constant.
 - `crates/compass-output/src/lib.rs`
@@ -379,6 +431,9 @@ of maintaining two subtly different algorithms.
 ### Modified tests and qualification
 
 - `crates/compass-files/src/cache.rs` unit tests.
+- `crates/compass-files/tests/contracts.rs`.
+- `crates/compass-semantic/src/tests.rs`.
+- `crates/compass-semantic/tests/orchestration_coverage.rs`.
 - `crates/compass-history/tests/publication.rs`.
 - `crates/compass-history/tests/diff.rs`.
 - `crates/compass-history/tests/maintenance.rs`.
@@ -442,8 +497,9 @@ to:
 }
 ```
 
-Do not claim every record was revalidated. Preserve incompatible-store,
-unreadable-manifest, missing-root, and preferred-pointer error behavior.
+Do not claim every record was revalidated. Emit only the new `seal` object; do
+not retain or alias the old `validation` field. Incompatible stores, unreadable
+manifests, missing roots, and preferred-pointer errors still fail closed.
 
 - [ ] **Step 3: Add explicit full verification**
 
@@ -512,6 +568,7 @@ git commit -m "perf: use sealed history fast paths"
 
 - Modify: `crates/compass-files/src/cache.rs`
 - Modify: `crates/compass-files/src/lib.rs`
+- Modify: `crates/compass-files/tests/contracts.rs`
 - Add: `crates/compass-history/src/cache.rs`
 - Modify: `crates/compass-history/src/lib.rs`
 - Modify: `crates/compass-history/src/store.rs`
@@ -519,10 +576,15 @@ git commit -m "perf: use sealed history fast paths"
 - Modify: `crates/compass-core/src/history.rs`
 - Modify: `crates/compass-cli/src/history_build.rs`
 - Modify: `crates/compass-cli/src/history_commands.rs`
+- Modify: `crates/compass-cli/src/semantic_commands.rs`
+- Modify: `crates/compass-semantic/src/orchestration.rs`
 
 **Coverage files:**
 
 - Modify: `crates/compass-files/src/cache.rs` tests
+- Modify: `crates/compass-files/tests/contracts.rs`
+- Modify: `crates/compass-semantic/src/tests.rs`
+- Modify: `crates/compass-semantic/tests/orchestration_coverage.rs`
 - Modify: `crates/compass-core/tests/history_materialize.rs`
 - Modify: `crates/compass-cli/tests/history_cli.rs`
 
@@ -541,11 +603,35 @@ every existing component before returning `HistoryCache`.
 Implement derived envelope primitives now, even though semantic diff and viewer
 will use them in later tasks. This keeps storage/security logic in one slice.
 
-- [ ] **Step 2: Implement `CacheLayout::SharedHistory` and verified hashing**
+- [ ] **Step 2: Cut every cache caller over to `Cache::open`**
 
-Refactor directory construction so current-tree `Cache::new` produces exactly
-the same paths as before. The shared constructor writes `CacheKind` directories
-directly below `cache/v1`.
+Implement `Cache::open(root, CacheOptions)` and migrate every `compass-files`
+cache caller in:
+
+- `compass-core/src/pipeline.rs`;
+- `compass-semantic/src/orchestration.rs`;
+- `compass-cli/src/semantic_commands.rs`;
+- their unit and integration tests.
+
+Delete `Cache::new`; do not leave a deprecated alias. Bump the deterministic
+encoding namespace and delete:
+
+- `legacy_directory`;
+- the `allow_legacy` load parameter;
+- JSON fallback for deterministic binary entries;
+- Program JSON fallback;
+- prompt-fingerprint fallback to an unversioned directory;
+- pruning of legacy directories.
+
+Remove `allow_legacy_validation` and the pre-build-state fast path from
+`compass-core/src/pipeline.rs`. An output without a valid current build state is
+rebuilt once under the new contract.
+
+`CacheLayout::OutputDirectory` is the sole current-tree layout.
+`CacheLayout::SharedHistory` writes `CacheKind` directories directly below
+`cache/v1`.
+
+- [ ] **Step 3: Implement verified shared-history hashing**
 
 For shared AST lookup:
 
@@ -560,10 +646,10 @@ Do not consult or flush `StatHashIndex` in this mode. Preserve existing
 MessagePack decode limits, partial-entry rules, source-path rebasing, and atomic
 writes.
 
-Program cache keys remain caller-owned logical keys and continue to include the
+Program cache keys remain caller-owned logical keys and include the
 IR/provider/analyzer/merger versions already encoded by `CacheKind`.
 
-- [ ] **Step 3: Pass the shared cache through the exact history builder**
+- [ ] **Step 4: Pass the shared cache through the exact history builder**
 
 Add `BuildOptions::cache_root: Option<PathBuf>`. Current-tree callers leave it
 `None`. In `NativeCompleteGraphBuilder`, store the validated history
@@ -578,9 +664,13 @@ Both graph extraction and the parallel Program worker must construct a shared
 history `Cache` using the same root. Temporary output remains under the worktree
 and is deleted normally; cache entries survive.
 
-- [ ] **Step 4: Remove complete ancestor seeding**
+Failure to create, validate, read, or write the shared extraction cache fails
+the history build with the exact cache path and cause. Do not fall back to the
+temporary output cache.
 
-After shared cache hits are active, remove `compatible_seed` and the
+- [ ] **Step 5: Remove complete ancestor seeding**
+
+Remove `compatible_seed` and the
 `seed: Option<&GraphArtifacts>` parameter from `CompleteGraphBuilder::build`.
 Delete `seed.write_seed(...)` from `NativeCompleteGraphBuilder`.
 
@@ -588,14 +678,19 @@ Do not replace it with another full `HistoryStore::artifacts` call. Historical
 clustering already ignores prior communities under `COMPASS_HISTORY_BUILD`, so
 the shared content cache contains the reusable state this build needs.
 
-Keep first-parent manifest selection only if it supplies a bounded compatibility
-decision. It must not open graph, metadata, analysis, or Program trees.
+Delete first-parent seed/manifest selection from materialization. Profile and
+fingerprint matching applies to the target realization only.
 
-- [ ] **Step 5: Add cache correctness and reuse coverage**
+- [ ] **Step 6: Add hard-cutover, correctness, and reuse coverage**
 
 After implementation, add tests proving:
 
-- the current-tree constructor retains its exact legacy directory layout;
+- every production cache call site uses `Cache::open`;
+- `Cache::new`, `legacy_directory`, `allow_legacy`, and
+  `allow_legacy_validation` are absent from the workspace;
+- legacy deterministic JSON and Program JSON files are ignored, not imported;
+- a current output without the new build state performs one rebuild and then
+  uses the new fast path;
 - two different checkout roots with identical relative path and bytes map to
   the same shared entry;
 - same size/mtime but different bytes cannot collide;
@@ -608,13 +703,15 @@ After implementation, add tests proving:
   `graph.json`/`program.json`;
 - the builder never calls `HistoryStore::artifacts` to obtain an ancestor seed.
 
-- [ ] **Step 6: Verify the slice**
+- [ ] **Step 7: Verify the slice**
 
 Run:
 
 ```bash
 cargo fmt --all -- --check
 cargo test -p compass-files cache
+cargo test -p compass-files --test contracts
+cargo test -p compass-semantic
 cargo test -p compass-core --test history_materialize
 cargo test -p compass-cli --test history_cli history_build
 cargo test -p compass-cli --test history_cli adjacent
@@ -634,11 +731,12 @@ COMPASS_BIN="$PWD/target/release/compass" \
 Expected: the second build reports unchanged files as cache hits, and the
 original checkout remains clean.
 
-- [ ] **Step 7: Commit only this slice**
+- [ ] **Step 8: Commit only this slice**
 
 ```bash
 git add crates/compass-files/src/cache.rs \
   crates/compass-files/src/lib.rs \
+  crates/compass-files/tests/contracts.rs \
   crates/compass-history/src/cache.rs \
   crates/compass-history/src/lib.rs \
   crates/compass-history/src/store.rs \
@@ -646,9 +744,13 @@ git add crates/compass-files/src/cache.rs \
   crates/compass-core/src/history.rs \
   crates/compass-cli/src/history_build.rs \
   crates/compass-cli/src/history_commands.rs \
+  crates/compass-cli/src/semantic_commands.rs \
+  crates/compass-semantic/src/orchestration.rs \
+  crates/compass-semantic/src/tests.rs \
+  crates/compass-semantic/tests/orchestration_coverage.rs \
   crates/compass-core/tests/history_materialize.rs \
   crates/compass-cli/tests/history_cli.rs
-git commit -m "perf: share historical extraction cache"
+git commit -m "perf: cut over to shared history cache"
 ```
 
 ---
@@ -673,6 +775,7 @@ git commit -m "perf: share historical extraction cache"
 
 - One seal check and one lazy root open per realization.
 - At most one decode per evidence record per comparison.
+- One reader-owned diff API with no one-shot/store-owned alternative.
 
 - [ ] **Step 1: Implement `RealizationReader`**
 
@@ -696,6 +799,9 @@ Map node keys to the manifest's `nodes_root`; lazily load only
 `program-facts`/`program-summaries` named roots when their first key is
 requested.
 
+After migrating callers, delete `HistoryStore::read_record`. Do not retain a
+deprecated method or temporary-reader wrapper.
+
 - [ ] **Step 2: Prefetch the first semantic evidence frontier**
 
 In `semantic_diff_commands.rs`, replace `HistorySnapshots { store, old, new }`
@@ -713,12 +819,15 @@ The `SnapshotReader` implementation reads from the memoized readers and may
 perform a bounded fallback lookup for evidence discovered later. It must not
 reopen a manifest or root.
 
-- [ ] **Step 3: Reuse sealed versions in root diff**
+- [ ] **Step 3: Move root diff onto `RealizationReader`**
 
-Where `diff_records` is invoked with existing readers, add an internal
-`diff_records_with_readers` or equivalent helper so node/edge diff and evidence
-lookups share the same sealed `PublishedVersion` objects and activity window.
-Keep the public `HistoryStore::diff_records` API as a wrapper.
+Implement `RealizationReader::diff` and
+`RealizationReader::diff_records`. Node/edge diff and evidence lookups share the
+same sealed `PublishedVersion` objects and activity window.
+
+Migrate history change counts, semantic diff, and all history tests. Delete
+`HistoryStore::diff` and `HistoryStore::diff_records`; do not leave forwarding
+wrappers.
 
 - [ ] **Step 4: Add operation-count and semantic parity tests**
 
@@ -732,9 +841,10 @@ After the production reader exists, add a test-only counter seam that records:
 Assert one manifest open per side, at most one open for each requested root,
 one decode per unique key, and zero artifact reconstructions.
 
-Run the same fixture through the old compatibility wrapper and the new reader;
-assert identical `SemanticDiffReport` canonical bytes, findings, stable IDs,
-source patches, completeness, and limitations.
+Compare the new reader path with checked canonical fixture bytes; assert
+identical `SemanticDiffReport` findings, stable IDs, source patches,
+completeness, and limitations. Add a source scan asserting the removed
+store-owned read/diff method names do not remain in production code.
 
 - [ ] **Step 5: Verify the slice**
 
@@ -975,8 +1085,9 @@ community. After the authoritative publication succeeds and the realization ID
 is known, write the projection under the final realization-derived key.
 
 Projection generation or cache publication failure must not roll back or mark
-an otherwise valid realization corrupt. Older realizations without a projection
-continue through the streaming miss path.
+an otherwise valid realization corrupt. Every missing projection uses the same
+streaming miss path; there is no realization-age check, lazy-upgrade branch, or
+migration marker.
 
 - [ ] **Step 5: Add projection parity and root-bound coverage**
 
@@ -988,8 +1099,8 @@ After implementation, assert:
 - a cache miss opens analysis/nodes/edges once and never opens hyperedges,
   metadata, Program facts, or Program summaries;
 - a cache hit opens no record roots;
-- old realizations lazily gain a projection without changing their realization
-  ID;
+- deleting any projection causes deterministic regeneration without changing
+  the realization ID;
 - corrupt projection bytes regenerate;
 - corrupt authoritative graph records fail closed;
 - default projection exists after a new successful build;
@@ -1009,7 +1120,8 @@ npm test -w compass-vscode
 npm run typecheck -w compass-vscode
 ```
 
-Expected: the CLI envelope schema and extension command contract are unchanged.
+Expected: the CLI envelope schema and extension command contract use only the
+new cutover behavior; no dual response or deprecated command path remains.
 
 - [ ] **Step 7: Commit only this slice**
 
@@ -1191,6 +1303,11 @@ ignored and are invoked during release qualification.
 Document:
 
 - first-ever arbitrary revision performs bounded extraction;
+- the release is a hard cutover with an empty new cache namespace;
+- old cache files and old build state are ignored rather than migrated;
+- there is no compatibility flag, cache importer, or dual CLI response;
+- authoritative realization schema remains current because its format did not
+  change;
 - repeated build/diff/view behavior;
 - `history verify` versus sealed `history status`;
 - `history cache status/gc`;
@@ -1397,6 +1514,13 @@ state instead of silently creating a different PR.
   closed.
 - [ ] Cache GC is explicit, dry-run by default, and cannot remove immutable
   history.
+- [ ] No legacy cache decoder, legacy directory lookup, `Cache::new`,
+  `allow_legacy`, `allow_legacy_validation`, `HistoryStore::read_record`,
+  `HistoryStore::diff`, or `HistoryStore::diff_records` remains.
+- [ ] Status emits only the new seal contract; no deprecated validation field
+  or compatibility alias remains.
+- [ ] The release has no feature flag, dual read/write, cache import, or
+  migration path.
 - [ ] CocoIndex and Podman source checkouts remain unchanged.
 - [ ] Release latency/RSS targets are recorded honestly.
 - [ ] Rust, VS Code, and viewer regression gates pass or unrelated failures are

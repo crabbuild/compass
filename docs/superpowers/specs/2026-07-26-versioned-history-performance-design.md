@@ -1,7 +1,7 @@
 # Versioned History Performance
 
 **Date:** 2026-07-26
-**Status:** Approved for implementation planning
+**Status:** Approved for implementation planning — hard cutover
 
 ## Summary
 
@@ -46,7 +46,7 @@ full history status/profile-validation path at approximately 189 seconds and
 
 1. Build an arbitrary exact Git commit using the same portable extraction
    acceleration available to current-tree indexing.
-2. Make an existing compatible realization a constant-sized manifest lookup,
+2. Make an existing matching realization a constant-sized manifest lookup,
    not a complete validation pass.
 3. Compare two materialized realizations without reconstructing either graph.
 4. Generate and reuse deterministic semantic-diff reports with bounded storage
@@ -64,6 +64,33 @@ full history status/profile-validation path at approximately 189 seconds and
 - Treat derived caches as authoritative.
 - Weaken publication validation or corruption recovery.
 - Change `compass.semantic_diff.report/1` in this performance phase.
+- Migrate, import, or continue reading legacy cache entries.
+- Preserve superseded internal Rust APIs, cache constructors, CLI response
+  fields, or mixed old/new execution paths.
+
+## Hard Cutover
+
+This performance architecture ships as one hard cutover:
+
+- all Compass cache call sites move to the new explicit cache options API;
+- the old `Cache::new` constructor, legacy directory lookup, legacy JSON
+  decoding, prompt-fingerprint fallback, and legacy build-state validation are
+  deleted;
+- all history consumers move to `RealizationReader`; the old one-shot
+  `HistoryStore::read_record` and store-owned diff APIs are deleted;
+- `history status` emits only the new seal contract, without deprecated
+  validation fields;
+- old extraction and derived cache entries are ignored and may be removed by
+  cache maintenance; no importer or on-read migration is implemented;
+- the complete implementation lands before release, with no feature flag,
+  compatibility mode, or dual-write period.
+
+The immutable Prolly realization format is unchanged because this performance
+work does not require a new authoritative representation. Reading an existing
+realization with the same `HISTORY_SCHEMA_VERSION` is therefore the normal
+current format, not a compatibility path. If implementation requires any
+authoritative format change, it must bump the store/history schema and reject
+the old format explicitly; it must not add a migration adapter.
 
 ## Latency and Memory Contract
 
@@ -95,7 +122,9 @@ Authoritative and derived state remain visibly separate:
 ├── cache/
 │   └── v1/
 │       ├── ast/
-│       ├── program/
+│       ├── program-syntax/
+│       ├── program-artifact/
+│       ├── program-merge/
 │       ├── semantic-diff/
 │       └── viewer/
 ├── jobs/
@@ -148,24 +177,22 @@ than deriving cache location from the temporary output directory. The builder:
 
 Temporary-worktree cleanup does not remove the shared cache.
 
-### Adjacent realization seeding
+### Adjacent realization reuse
 
 The current implementation reconstructs every authoritative tree from a
-compatible ancestor and writes a complete temporary `compass-out` seed.
-The optimized builder instead uses the ancestor manifest and shared
-content-addressed entries to identify unchanged work.
-
-Community continuity and other state that truly depends on the previous graph
-may be loaded from narrowly scoped records or an explicit compact seed artifact.
-It must not require reconstruction of metadata, Program facts, or unrelated
-sidecars.
+matching-profile ancestor and writes a complete temporary `compass-out` seed.
+The hard-cutover builder deletes ancestor artifact seeding entirely. Shared
+content-addressed AST and Program entries identify reusable work. Historical
+clustering is already deterministic and intentionally ignores prior
+communities, so no compact legacy seed path is retained.
 
 ### Current-tree interoperability
 
-Current-tree and history caches use the same portable entry encoding and identity.
-History may import or hard-link compatible entries into the private shared cache,
-but historical correctness never depends on a mutable current-tree cache. The
-existing exact-HEAD promotion path remains available.
+Current-tree and history extraction move together to the new explicit cache API
+and portable entry encoding. They use separate storage roots and do not import,
+hard-link, or decode the prior cache format. Historical correctness never
+depends on a mutable current-tree cache. Exact-HEAD promotion remains a current
+performance path, not a legacy adapter.
 
 ## Sealed Realization Fast Path
 
@@ -213,9 +240,10 @@ load graph records.
 
 ### Unseen adjacent commit
 
-The builder uses the closest compatible first-parent manifest and the shared
-cache. Source content already seen in any worktree or branch is reused. Only
-unseen or version-invalidated entries are parsed and analyzed.
+The builder uses the shared cache directly. Source content already seen in any
+worktree or branch under the new cache identity is reused. Only unseen or
+version-invalidated entries are parsed and analyzed. It does not inspect or
+reconstruct a first-parent realization.
 
 ### First unseen arbitrary commit
 
@@ -229,7 +257,7 @@ extraction. This operation is not required to be sub-second.
 
 The comparison path:
 
-1. resolves both exact commits and sealed compatible manifests;
+1. resolves both exact commits and sealed matching manifests;
 2. obtains the exact Git source delta;
 3. streams changed node and edge records through Prolly root comparison;
 4. derives the minimal set of Program modules, functions, summaries, reverse
@@ -273,9 +301,9 @@ The initial viewer request loads only this projection. Exact node, neighborhood,
 and community detail is read lazily from typed node/edge records. Program facts,
 semantic metadata, and authoritative sidecars are not loaded for an overview.
 
-Older valid realizations without a projection remain readable. Their first view
-streams the required graph roots once, writes a derived projection, and serves
-the result. They do not require realization rebuild or schema migration.
+Any projection miss streams the required graph roots once, writes a derived
+projection, and serves the result. This is the sole viewer miss path; there is
+no separate older-realization upgrade or migration branch.
 
 Viewer cache corruption causes regeneration. Authoritative graph corruption
 still fails closed.
@@ -302,10 +330,10 @@ accelerate other branches. Cache GC never deletes Prolly realization content.
 | Semantic-diff cache digest mismatch | Ignore and recompute |
 | Viewer projection mismatch | Ignore and regenerate |
 | Shared cache write race | Accept identical winner; retry or reuse |
-| Shared cache unavailable | Continue without cache when safe |
+| Shared cache unavailable | Fail the build with the exact cache path and cause |
 | Manifest digest/root mismatch | Fail closed and recommend full validation |
-| Full validation failure | Preserve corrupt-recovery workflow |
-| Temporary worktree cleanup failure | Report existing cleanup error contract |
+| Full validation failure | Enter the current corrupt-recovery workflow |
+| Temporary worktree cleanup failure | Report the cleanup error contract |
 
 ## Security
 
@@ -340,10 +368,13 @@ Counting storage adapters and focused integration seams assert:
 - Cache hit and miss builds produce identical canonical graph and Program bytes.
 - Cached and uncached semantic reports have identical SHA-256 digests.
 - Source patches and stable finding IDs are unchanged.
-- Existing realizations without derived caches lazily upgrade.
+- A projection miss uses the same graph-only regeneration path regardless of
+  realization age.
 - Corrupt derived entries regenerate.
 - Corrupt authoritative manifests or roots fail closed.
 - Parallel builders cannot publish mixed cache bytes or incomplete realizations.
+- Legacy cache files, legacy build state, old cache constructors, and old
+  history reader APIs are absent after cutover.
 
 ### Real-repository qualification
 
@@ -359,9 +390,9 @@ Release-mode benchmarks run on CocoIndex and Podman and capture:
 Each benchmark records current-tree cold and incremental extraction so historical
 build ratios use a same-machine, same-revision baseline.
 
-## Rollout
+## Delivery
 
-Implementation is staged so each step is independently useful:
+Implementation uses reviewable commits:
 
 1. sealed-manifest fast paths and explicit full-validation boundaries;
 2. shared portable history extraction cache;
@@ -370,8 +401,11 @@ Implementation is staged so each step is independently useful:
 5. historical viewer projections and lazy detail;
 6. cache lifecycle and real-repository release qualification.
 
-The rollout does not require mandatory full-history rebuilding. Derived caches
-populate lazily, while new realizations receive them during publication.
+All commits merge and release together. Intermediate commits are not supported
+deployment states. There is no feature flag, dual read, dual write, cache
+import, or compatibility window. The release starts with an empty new cache
+namespace and repopulates it on demand. Existing immutable realizations remain
+current-format data because the authoritative schema is unchanged.
 
 ## Acceptance Criteria
 
@@ -382,6 +416,8 @@ The work is complete when:
 2. ordinary no-op build, diff, and view paths do not call full reconstruction;
 3. adjacent commits reuse content across temporary worktrees;
 4. cached and uncached authoritative outputs are byte- or canonically identical;
-5. the existing history, semantic-diff, security, concurrency, and corruption
-   suites pass;
+5. the history, semantic-diff, security, concurrency, corruption, and explicit
+   hard-cutover suites pass;
 6. CocoIndex and Podman checkouts remain unchanged after qualification.
+7. no legacy cache decoder, directory fallback, compatibility constructor,
+   one-shot history reader, dual CLI field, or migration branch remains.
