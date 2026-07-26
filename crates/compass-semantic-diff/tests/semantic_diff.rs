@@ -8,8 +8,9 @@ use compass_languages::TreeSitterSyntaxProvider;
 use compass_model::NodeRecord;
 use compass_program::{FileInput, SyntaxProvider, merge_evidence};
 use compass_semantic_diff::{
-    ChangeDirection, Compatibility, DependencyDelta, GraphDelta, NoTestEvidence, REPORT_SCHEMA,
-    SemanticDiffError, SemanticDiffInput, SnapshotIdentity, SnapshotReader, SnapshotSide, compare,
+    ChangeDirection, Compatibility, Confidence, DependencyDelta, FindingType, GraphDelta,
+    NoTestEvidence, REPORT_SCHEMA, SemanticDiffError, SemanticDiffInput, SnapshotIdentity,
+    SnapshotReader, SnapshotSide, compare,
 };
 
 struct Fixtures {
@@ -386,6 +387,102 @@ fn graph_only_additions_and_removals_are_classified_before_digest_changes()
             .iter()
             .find(|finding| finding.subject == internal_hidden_id)
             .is_some_and(|finding| !finding.public_surface)
+    );
+    Ok(())
+}
+
+#[test]
+fn graph_fallback_explains_control_flow_patch_for_changed_function() -> Result<(), Box<dyn Error>> {
+    let node_id = "libpod_container_getcontainerinspectdata".to_owned();
+    let node = |implementation_hash: &str| NodeRecord {
+        id: node_id.clone(),
+        attributes: serde_json::Map::from_iter([
+            (
+                "label".to_owned(),
+                serde_json::json!(".getContainerInspectData()"),
+            ),
+            ("symbol_kind".to_owned(), serde_json::json!("method")),
+            (
+                "source_file".to_owned(),
+                serde_json::json!("libpod/container_inspect.go"),
+            ),
+            ("line_start".to_owned(), serde_json::json!(66)),
+            ("line_end".to_owned(), serde_json::json!(160)),
+            (
+                "implementation_hash".to_owned(),
+                serde_json::json!(implementation_hash),
+            ),
+        ]),
+    };
+    let fixtures = Fixtures {
+        old: analyze_typescript(b"")?,
+        new: analyze_typescript(b"")?,
+        old_nodes: BTreeMap::from([(node_id.clone(), node("old-body"))]),
+        new_nodes: BTreeMap::from([(node_id.clone(), node("new-body"))]),
+    };
+    let source_deltas = [SourceFileDelta {
+        old_path: Some("libpod/container_inspect.go".to_owned()),
+        new_path: Some("libpod/container_inspect.go".to_owned()),
+        status: SourceFileStatus::Modified,
+        hunks: vec![SourceHunk {
+            old_start: 80,
+            old_lines: 2,
+            new_start: 79,
+            new_lines: 0,
+        }],
+        patch: concat!(
+            "diff --git a/libpod/container_inspect.go b/libpod/container_inspect.go\n",
+            "--- a/libpod/container_inspect.go\n",
+            "+++ b/libpod/container_inspect.go\n",
+            "@@ -80,2 +79,0 @@ func (c *Container) getContainerInspectData(size bool, driverData *define.DriverData) (*define.InspectContainerData, error) {\n",
+            "-\t}\n",
+            "-\tif len(args) > 1 {\n",
+        )
+        .to_owned(),
+    }];
+    let report = compare(SemanticDiffInput {
+        old: SnapshotIdentity {
+            commit: "a".repeat(40),
+            realization: "old".to_owned(),
+            fingerprint: "f".repeat(64),
+        },
+        new: SnapshotIdentity {
+            commit: "b".repeat(40),
+            realization: "new".to_owned(),
+            fingerprint: "f".repeat(64),
+        },
+        source_deltas: &source_deltas,
+        changed_node_ids: std::slice::from_ref(&node_id),
+        dependency_deltas: &[],
+        graph_delta: &GraphDelta::default(),
+        snapshots: &fixtures,
+        test_evidence: &NoTestEvidence,
+    })?;
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.subject == node_id)
+        .ok_or("missing control-flow finding")?;
+    assert_eq!(finding.finding_type, FindingType::BehaviorChange);
+    assert_eq!(finding.compatibility, Compatibility::Behavioral);
+    assert_eq!(finding.confidence, Confidence::Exact);
+    assert!(
+        finding
+            .explanation
+            .contains("removed condition `if len(args) > 1`")
+    );
+    assert_eq!(
+        finding
+            .before
+            .as_ref()
+            .and_then(|value| value["conditions"].as_array())
+            .and_then(|values| values.first())
+            .and_then(serde_json::Value::as_str),
+        Some("if len(args) > 1")
+    );
+    assert_eq!(
+        finding.completeness.get("control_flow").copied(),
+        Some(compass_semantic_diff::Completeness::Partial)
     );
     Ok(())
 }

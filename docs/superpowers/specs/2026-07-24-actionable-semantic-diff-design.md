@@ -376,9 +376,11 @@ adapters cover Python, Rust, and TypeScript/JavaScript. Other languages report
 the exact before/after signature when available but use `indeterminate`
 compatibility until an adapter can prove more.
 
-An implementation hash is only a change detector. If the hash changes without
-sufficient Program IR, Compass reports an implementation change with incomplete
-semantic coverage; it does not narrate the behavior.
+An implementation hash is only a change detector. Without sufficient Program
+IR, Compass may narrate an exact changed branch condition only when a
+zero-context source hunk overlaps the changed function's recorded line span.
+That finding remains partial control-flow coverage. Other implementation-hash
+changes report incomplete semantic coverage without narrating the behavior.
 
 ## Relation semantics and bounded impact
 

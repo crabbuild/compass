@@ -29,7 +29,8 @@ export function registerBuildCommands(
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.initialize)) return;
       await openInitializationPanel(context, session, output, refresh);
     }),
-    vscode.commands.registerCommand("compass.update", async (repositoryId?: string) => {
+    vscode.commands.registerCommand("compass.update", async (target?: unknown) => {
+      const repositoryId = repositoryIdFromTarget(target);
       const session = await pick(
         repositoryId,
         (candidate) => candidate.graphState === "available" || candidate.graphState === "failed"
@@ -53,41 +54,75 @@ export function registerBuildCommands(
         refresh
       );
     }),
-    vscode.commands.registerCommand("compass.toggleWatch", async (repositoryId?: string) => {
-      const session = await pick(
-        repositoryId,
-        (candidate) => candidate.graphState === "available" || candidate.watch !== undefined
-      );
-      if (!session) return;
-      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.watch)) return;
-      if (session.watch) {
-        session.watch.cancel();
-        session.watch = undefined;
-        void vscode.window.showInformationMessage("Compass watch stopped.");
-        await refresh();
-        return;
-      }
-      output.appendLine(`> compass ${buildWatchArgs({
-        root: session.root,
-        debounceSeconds: 0.4,
-        poll: false
-      }).join(" ")}`);
-      const command = session.processes.startJsonl(
-        session.root,
-        buildWatchArgs({ root: session.root, debounceSeconds: 0.4, poll: false }),
-        (event) => output.appendLine(`[${event.phase}] ${event.message}`)
-      );
-      session.watch = command;
-      void command.completed.finally(async () => {
-        if (session.watch?.operationId === command.operationId) {
-          session.watch = undefined;
-        }
-        await refresh();
-      });
-      void vscode.window.showInformationMessage("Compass watch started.");
-      await refresh();
-    })
+    vscode.commands.registerCommand(
+      "compass.toggleWatch",
+      (target?: unknown) => setWatch(target)
+    ),
+    vscode.commands.registerCommand(
+      "compass.startWatch",
+      (target?: unknown) => setWatch(target, true)
+    ),
+    vscode.commands.registerCommand(
+      "compass.stopWatch",
+      (target?: unknown) => setWatch(target, false)
+    )
   );
+
+  async function setWatch(target: unknown, requestedState?: boolean): Promise<void> {
+    const repositoryId = repositoryIdFromTarget(target);
+    const session = await pick(
+      repositoryId,
+      (candidate) => candidate.graphState === "available" || candidate.watch !== undefined
+    );
+    if (!session) return;
+    if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.watch)) return;
+    if (requestedState === Boolean(session.watch)) return;
+    if (session.watch) {
+      session.watch.cancel();
+      session.watch = undefined;
+      void vscode.window.showInformationMessage("Compass watch stopped.");
+      await refresh();
+      return;
+    }
+    const configuration = vscode.workspace.getConfiguration(
+      "compass",
+      vscode.Uri.file(session.root)
+    );
+    const debounceSeconds = configuration.get<number>("watch.debounceSeconds", 0.4);
+    const poll = configuration.get<boolean>("watch.poll", false);
+    output.appendLine(`> compass ${buildWatchArgs({
+      root: session.root,
+      debounceSeconds,
+      poll
+    }).join(" ")}`);
+    const command = session.processes.startJsonl(
+      session.root,
+      buildWatchArgs({ root: session.root, debounceSeconds, poll }),
+      (event) => output.appendLine(`[${event.phase}] ${event.message}`)
+    );
+    session.watch = command;
+    void command.completed.finally(async () => {
+      if (session.watch?.operationId === command.operationId) {
+        session.watch = undefined;
+      }
+      await refresh();
+    });
+    void vscode.window.showInformationMessage("Compass watch started.");
+    await refresh();
+  }
+}
+
+function repositoryIdFromTarget(target: unknown): string | undefined {
+  if (typeof target === "string") return target;
+  if (
+    typeof target === "object"
+    && target !== null
+    && "repositoryId" in target
+    && typeof target.repositoryId === "string"
+  ) {
+    return target.repositoryId;
+  }
+  return undefined;
 }
 
 async function runGuided(

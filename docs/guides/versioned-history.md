@@ -267,11 +267,15 @@ exact source patch and the meaningful code-graph delta in the same report. The
 graph visualization focuses on the changed subgraph; its node/edge lists and
 embedded JSON remain exhaustive.
 
-Semantic diff requires Program IR v1 evidence. Rebuild older realizations with
-the current Compass binary before comparing them. Static test mapping may
-recommend resolved test callers, but `partial` or `unknown` evidence never
-claims safety or a test gap. AI-generated summaries and hosted PR delivery are
-outside this deterministic MVP.
+Program IR v1 provides the richest behavior evidence. For graph-only languages,
+Compass can also report changed branch conditions when an exact zero-context
+source hunk overlaps the changed function's recorded line span. That evidence
+is exact but deliberately marked as partial control-flow coverage; unrelated
+body-hash changes remain indeterminate. Rebuild older realizations with the
+current Compass binary before comparing them. Static test mapping may recommend
+resolved test callers, but `partial` or `unknown` evidence never claims safety
+or a test gap. AI-generated summaries and hosted PR delivery are outside this
+deterministic MVP.
 
 ### Profile compatibility
 

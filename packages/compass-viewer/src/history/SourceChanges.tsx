@@ -1,4 +1,4 @@
-import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
+import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   Component,
@@ -18,24 +18,6 @@ export type SourceChange = {
 };
 
 type DiffStyle = "split" | "unified";
-
-const DIFF_THEME_CSS = `:host {
-  --diffs-font-family: var(--compass-font-mono);
-  --diffs-font-size: 11px;
-  --diffs-line-height: 19px;
-  --diffs-gap-inline: 6px;
-  --diffs-min-number-column-width: 3ch;
-}
-
-[data-gutter],
-[data-content] {
-  grid-template-rows: none;
-  grid-auto-rows: minmax(var(--diffs-line-height, 19px), auto);
-  align-content: start;
-}`;
-const DIFF_LINE_HEIGHT = 19;
-const DIFF_HUNK_SEPARATOR_HEIGHT = 32;
-const DIFF_VERTICAL_PADDING = 16;
 
 export function SourceChanges({ changes }: { changes: SourceChange[] }) {
   const [preferredStyle, setPreferredStyle] = useState<DiffStyle>("split");
@@ -204,10 +186,7 @@ function SourcePatch({
         fileDiff={parsed.fileDiff}
         disableWorkerPool
         className="history-source-diff"
-        style={{
-          ...themeStyle,
-          minHeight: minimumDiffHeight(parsed.fileDiff, style)
-        }}
+        style={themeStyle}
         options={{
           theme: themeType === "light" ? "pierre-light" : "pierre-dark",
           themeType,
@@ -216,27 +195,11 @@ function SourcePatch({
           hunkSeparators: "metadata",
           lineDiffType: "word-alt",
           overflow: wrap ? "wrap" : "scroll",
-          disableFileHeader: true,
-          unsafeCSS: DIFF_THEME_CSS
+          disableFileHeader: true
         }}
       />
     </DiffErrorBoundary>
   );
-}
-
-export function minimumDiffHeight(
-  fileDiff: FileDiffMetadata,
-  style: DiffStyle
-): number {
-  const lineCount = fileDiff.hunks.reduce(
-    (total, hunk) => total + (
-      style === "split" ? hunk.splitLineCount : hunk.unifiedLineCount
-    ),
-    0
-  );
-  return lineCount * DIFF_LINE_HEIGHT
-    + fileDiff.hunks.length * DIFF_HUNK_SEPARATOR_HEIGHT
-    + DIFF_VERTICAL_PADDING;
 }
 
 function PatchFallback({ patch }: { patch: string }) {
@@ -339,6 +302,11 @@ function useVscodeDiffTheme(): {
     );
     return {
       colorScheme: theme,
+      "--diffs-font-family": "var(--compass-font-mono)",
+      "--diffs-font-size": "11px",
+      "--diffs-line-height": "19px",
+      "--diffs-gap-inline": "6px",
+      "--diffs-min-number-column-width": "3ch",
       "--diffs-light-bg": background,
       "--diffs-dark-bg": background,
       "--diffs-light": foreground,

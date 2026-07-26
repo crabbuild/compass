@@ -122,7 +122,6 @@ test("comparison replaces the full graph with a readable focused delta", async (
   await expect(page.getByLabel("Visible graph delta")).toContainText(
     "nodesAdded 0Removed 0Changed 1"
   );
-  await expect(page.getByText(/Viewing changed subgraph for bbbbbbbbb/)).toBeVisible();
   await expect(page.getByText("Cargo.toml")).toBeVisible();
   await expect(page.locator(".history-source-diff")).toBeVisible();
   await expect(
@@ -132,11 +131,36 @@ test("comparison replaces the full graph with a readable focused delta", async (
     page.locator(".history-source-diff").getByText('name = "compass"', { exact: false }).first()
   ).toBeVisible();
   await expect(page.locator(".history-source-diff [data-line]")).toHaveCount(6);
+  const diffLayout = await page.locator(".history-source-diff").evaluate((element) => {
+    const shadowRoot = element.shadowRoot;
+    const gutter = shadowRoot?.querySelector<HTMLElement>("[data-gutter]");
+    const content = shadowRoot?.querySelector<HTMLElement>("[data-content]");
+    const lineTops = [...(shadowRoot?.querySelectorAll<HTMLElement>(
+      "[data-additions] [data-line]"
+    ) ?? [])].map((line) => line.getBoundingClientRect().top);
+    return {
+      gutterDisplay: gutter ? getComputedStyle(gutter).display : null,
+      contentDisplay: content ? getComputedStyle(content).display : null,
+      distinctLineTops: new Set(lineTops).size,
+      height: element.getBoundingClientRect().height
+    };
+  });
+  expect(diffLayout).toMatchObject({
+    gutterDisplay: "grid",
+    contentDisplay: "grid",
+    distinctLineTops: 3
+  });
+  expect(diffLayout.height).toBeGreaterThan(75);
   await expect(page.getByRole("button", { name: "Split" })).toHaveAttribute(
     "aria-pressed",
     "true"
   );
+
+  await page.getByRole("tab", { name: /Changed graph/ }).click();
+  await expect(page.getByText(/Viewing changed subgraph for bbbbbbbbb/)).toBeVisible();
   await expect(page.getByLabel("Graph change filters")).toContainText("Changed2");
+
+  await page.getByRole("tab", { name: /Semantic findings/ }).click();
   await expect(page.getByText("Fixture comparison", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Exit comparison" }).click();
