@@ -275,6 +275,11 @@ whole sampled graph. The inspector can also follow relationships to nodes
 outside the bounded visual sample, while the lists below retain every graph
 change.
 
+Finding details use symbol names in call explanations, witness paths, evidence,
+and before/after summaries whenever the retained snapshots provide a name.
+The embedded JSON keeps the stable identities and provides the corresponding
+`entity_display_names` lookup.
+
 Program IR v1 provides the richest behavior evidence. For graph-only languages,
 Compass can also report changed branch conditions when an exact zero-context
 source hunk overlaps the changed function's recorded line span. That evidence

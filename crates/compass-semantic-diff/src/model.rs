@@ -243,6 +243,8 @@ pub struct SemanticDiffReport {
     pub collapsed_groups: Vec<CollapsedGroup>,
     pub source_changes: Vec<compass_history::SourceFileDelta>,
     pub graph_delta: GraphDelta,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub entity_display_names: BTreeMap<String, String>,
     pub completeness: BTreeMap<String, Completeness>,
     pub limitations: Vec<String>,
 }

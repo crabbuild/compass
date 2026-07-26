@@ -458,6 +458,13 @@ fn graph_fallback_explains_control_flow_patch_for_changed_function() -> Result<(
         snapshots: &fixtures,
         test_evidence: &NoTestEvidence,
     })?;
+    assert_eq!(
+        report
+            .entity_display_names
+            .get(&node_id)
+            .map(String::as_str),
+        Some(".getContainerInspectData()")
+    );
     let finding = report
         .findings
         .iter()

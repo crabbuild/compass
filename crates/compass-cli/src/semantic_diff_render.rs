@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use compass_history::{SourceFileDelta, SourceFileStatus};
@@ -11,6 +11,59 @@ const PIERRE_DIFFS_JS: &str = include_str!("../assets/vendor/pierre-diffs-v1.2.1
 const SEMANTIC_DIFF_GRAPH_CSS: &str = include_str!("../assets/semantic-diff-graph.css");
 const SEMANTIC_DIFF_GRAPH_JS: &str = include_str!("../assets/semantic-diff-graph.js");
 
+struct EntityNames<'a> {
+    names: &'a BTreeMap<String, String>,
+    replacements: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> EntityNames<'a> {
+    fn new(names: &'a BTreeMap<String, String>) -> Self {
+        let mut replacements = names
+            .iter()
+            .filter(|(identity, name)| identity.as_str() != name.as_str())
+            .map(|(identity, name)| (identity.as_str(), name.as_str()))
+            .collect::<Vec<_>>();
+        replacements.sort_by_key(|(identity, _)| std::cmp::Reverse(identity.len()));
+        Self {
+            names,
+            replacements,
+        }
+    }
+
+    fn get<'b>(&'b self, identity: &'b str) -> &'b str {
+        self.names
+            .get(identity)
+            .map(String::as_str)
+            .unwrap_or(identity)
+    }
+
+    fn text(&self, value: &str) -> String {
+        let mut rendered = value.to_owned();
+        for (identity, name) in &self.replacements {
+            if rendered.contains(identity) {
+                rendered = rendered.replace(identity, name);
+            }
+        }
+        rendered
+    }
+
+    fn json(&self, value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Array(values) => {
+                serde_json::Value::Array(values.iter().map(|value| self.json(value)).collect())
+            }
+            serde_json::Value::Object(values) => serde_json::Value::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), self.json(value)))
+                    .collect(),
+            ),
+            serde_json::Value::String(value) => serde_json::Value::String(self.text(value)),
+            value => value.clone(),
+        }
+    }
+}
+
 pub(crate) struct RenderOptions<'a> {
     pub include_routine: bool,
     pub max_findings_per_section: Option<usize>,
@@ -21,13 +74,14 @@ pub(crate) fn render_text(
     report: &SemanticDiffReport,
     options: &RenderOptions<'_>,
 ) -> Result<String, SemanticDiffError> {
+    let entity_names = EntityNames::new(&report.entity_display_names);
     if let Some(id) = options.explain {
         let finding = report
             .findings
             .iter()
             .find(|finding| finding.id == id)
             .ok_or_else(|| SemanticDiffError::FindingNotFound(id.to_owned()))?;
-        return Ok(render_finding_detail(finding));
+        return Ok(render_finding_detail(finding, &entity_names));
     }
     let collapsed = report
         .collapsed_groups
@@ -109,8 +163,13 @@ pub(crate) fn render_text(
             5
         };
         for group in report.feature_groups.iter().take(group_limit) {
-            let _ = writeln!(output, "  {} ({})", group.headline, group.id);
-            let _ = writeln!(output, "    {}", group.summary);
+            let _ = writeln!(
+                output,
+                "  {} ({})",
+                entity_names.text(&group.headline),
+                group.id
+            );
+            let _ = writeln!(output, "    {}", entity_names.text(&group.summary));
         }
         if report.feature_groups.len() > group_limit {
             let _ = writeln!(
@@ -128,6 +187,7 @@ pub(crate) fn render_text(
             .copied()
             .filter(|finding| finding.public_surface),
         options.max_findings_per_section,
+        &entity_names,
     );
     render_section(
         &mut output,
@@ -139,6 +199,7 @@ pub(crate) fn render_text(
             ) && !finding.public_surface
         }),
         options.max_findings_per_section,
+        &entity_names,
     );
     render_section(
         &mut output,
@@ -154,6 +215,7 @@ pub(crate) fn render_text(
                 )
         }),
         options.max_findings_per_section,
+        &entity_names,
     );
     render_section(
         &mut output,
@@ -171,6 +233,7 @@ pub(crate) fn render_text(
                 )
         }),
         options.max_findings_per_section,
+        &entity_names,
     );
     if !options.include_routine {
         let count = report
@@ -222,6 +285,7 @@ pub(crate) fn render_html(
     report: &SemanticDiffReport,
     options: &RenderOptions<'_>,
 ) -> Result<String, SemanticDiffError> {
+    let entity_names = EntityNames::new(&report.entity_display_names);
     let findings = if let Some(id) = options.explain {
         vec![
             report
@@ -478,8 +542,8 @@ footer{color:var(--muted);border-top:1px solid var(--border);margin-top:40px;pad
                 output,
                 "<article class=\"feature\" id=\"{}\"><h3>{}</h3><p>{}</p>",
                 html_attr(&group.id),
-                html_escape(&group.headline),
-                html_escape(&group.summary)
+                html_escape(&entity_names.text(&group.headline)),
+                html_escape(&entity_names.text(&group.summary))
             );
             if !group.source_files.is_empty() {
                 let _ = write!(
@@ -504,7 +568,12 @@ footer{color:var(--muted);border-top:1px solid var(--border);margin-top:40px;pad
     );
 
     for finding in findings {
-        render_html_finding(&mut output, finding, collapsed.contains(&finding.id));
+        render_html_finding(
+            &mut output,
+            finding,
+            collapsed.contains(&finding.id),
+            &entity_names,
+        );
     }
     output.push_str(
         "</div><div class=\"empty\" id=\"empty\">No findings match these filters.</div></section>",
@@ -909,7 +978,12 @@ fn source_line_class(line: &str) -> &'static str {
     }
 }
 
-fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed_routine: bool) {
+fn render_html_finding(
+    output: &mut String,
+    finding: &SemanticFinding,
+    collapsed_routine: bool,
+    entity_names: &EntityNames<'_>,
+) {
     let break_class = matches!(
         finding.compatibility,
         Compatibility::ProvenBreak | Compatibility::PossibleBreak
@@ -927,7 +1001,7 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
         html_attr(&finding.id),
         finding_type_name(finding.finding_type),
         collapsed_routine || finding.routine,
-        html_escape(&finding.headline),
+        html_escape(&entity_names.text(&finding.headline)),
         compatibility_css(finding.compatibility),
         html_escape(compatibility_name(finding.compatibility)),
         html_escape(confidence_name(finding.confidence)),
@@ -941,10 +1015,10 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
     let _ = write!(
         output,
         "<h4>What changed</h4><p>{}</p><h4>Reviewer action</h4><p class=\"action\">{}</p><h4>Verification</h4><p><strong>{}</strong> — {}</p>",
-        html_escape(&finding.explanation),
-        html_escape(&finding.reviewer_action),
+        html_escape(&entity_names.text(&finding.explanation)),
+        html_escape(&entity_names.text(&finding.reviewer_action)),
         html_escape(verification_name(finding.verification.state)),
-        html_escape(&finding.verification.reason)
+        html_escape(&entity_names.text(&finding.verification.reason))
     );
     if !finding.verification.exact_tests.is_empty()
         || !finding.verification.recommended_tests.is_empty()
@@ -954,14 +1028,14 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
             let _ = write!(
                 output,
                 "<li>Mapped test: <code>{}</code></li>",
-                html_escape(test)
+                html_escape(&entity_names.text(test))
             );
         }
         for test in &finding.verification.recommended_tests {
             let _ = write!(
                 output,
                 "<li>Recommended test: <code>{}</code></li>",
-                html_escape(test)
+                html_escape(&entity_names.text(test))
             );
         }
         output.push_str("</ul>");
@@ -972,7 +1046,7 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
             let _ = write!(
                 output,
                 "<li><code>{}</code> · distance {}{}</li>",
-                html_escape(&consumer.display_name),
+                html_escape(entity_names.get(&consumer.symbol_id)),
                 consumer.distance,
                 if consumer.source_file.is_empty() {
                     String::new()
@@ -989,13 +1063,20 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
             let hops = path
                 .hops
                 .iter()
-                .map(|hop| format!("{} {} {}", hop.source, hop.relation, hop.target))
+                .map(|hop| {
+                    format!(
+                        "{} {} {}",
+                        entity_names.get(&hop.source),
+                        hop.relation,
+                        entity_names.get(&hop.target)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" → ");
             let _ = write!(
                 output,
                 "<li><code>{}</code>: {}</li>",
-                html_escape(&path.consumer),
+                html_escape(entity_names.get(&path.consumer)),
                 html_escape(&hops)
             );
         }
@@ -1012,7 +1093,7 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
             let record = evidence
                 .record_key
                 .as_deref()
-                .map(|key| format!(" · {}", html_escape(key)))
+                .map(|key| format!(" · {}", html_escape(entity_names.get(key))))
                 .unwrap_or_default();
             let _ = write!(
                 output,
@@ -1026,8 +1107,8 @@ fn render_html_finding(output: &mut String, finding: &SemanticFinding, collapsed
     }
     for (label, value) in [("Before", &finding.before), ("After", &finding.after)] {
         if let Some(value) = value {
-            let rendered =
-                serde_json::to_string_pretty(value).unwrap_or_else(|_| "unavailable".to_owned());
+            let rendered = serde_json::to_string_pretty(&entity_names.json(value))
+                .unwrap_or_else(|_| "unavailable".to_owned());
             let _ = write!(
                 output,
                 "<h4>{label}</h4><pre>{}</pre>",
@@ -1087,6 +1168,7 @@ fn render_section<'a>(
     title: &str,
     findings: impl Iterator<Item = &'a SemanticFinding>,
     limit: Option<usize>,
+    entity_names: &EntityNames<'_>,
 ) {
     let findings = findings.collect::<Vec<_>>();
     if findings.is_empty() {
@@ -1107,16 +1189,16 @@ fn render_section<'a>(
             "  [{} / {}] {} ({})",
             compatibility_name(finding.compatibility),
             confidence_name(finding.confidence),
-            finding.headline,
+            entity_names.text(&finding.headline),
             finding.id
         );
-        let _ = writeln!(output, "    {}", finding.explanation);
+        let _ = writeln!(output, "    {}", entity_names.text(&finding.explanation));
         if !finding.affected_consumers.is_empty() {
             let names = finding
                 .affected_consumers
                 .iter()
                 .take(5)
-                .map(|consumer| consumer.display_name.as_str())
+                .map(|consumer| entity_names.get(&consumer.symbol_id))
                 .collect::<Vec<_>>()
                 .join(", ");
             let _ = writeln!(
@@ -1129,7 +1211,11 @@ fn render_section<'a>(
                 }
             );
         }
-        let _ = writeln!(output, "    Review: {}", finding.reviewer_action);
+        let _ = writeln!(
+            output,
+            "    Review: {}",
+            entity_names.text(&finding.reviewer_action)
+        );
     }
     let hidden = total.saturating_sub(shown);
     if hidden > 0 {
@@ -1141,22 +1227,35 @@ fn render_section<'a>(
     }
 }
 
-fn render_finding_detail(finding: &SemanticFinding) -> String {
+fn render_finding_detail(finding: &SemanticFinding, entity_names: &EntityNames<'_>) -> String {
     let mut output = String::new();
-    let _ = writeln!(output, "{} ({})", finding.headline, finding.id);
+    let _ = writeln!(
+        output,
+        "{} ({})",
+        entity_names.text(&finding.headline),
+        finding.id
+    );
     let _ = writeln!(
         output,
         "Classification: {} / {}",
         compatibility_name(finding.compatibility),
         confidence_name(finding.confidence)
     );
-    let _ = writeln!(output, "What changed: {}", finding.explanation);
-    let _ = writeln!(output, "Reviewer action: {}", finding.reviewer_action);
+    let _ = writeln!(
+        output,
+        "What changed: {}",
+        entity_names.text(&finding.explanation)
+    );
+    let _ = writeln!(
+        output,
+        "Reviewer action: {}",
+        entity_names.text(&finding.reviewer_action)
+    );
     let _ = writeln!(
         output,
         "Verification: {} — {}",
         verification_name(finding.verification.state),
-        finding.verification.reason
+        entity_names.text(&finding.verification.reason)
     );
     if !finding.affected_consumers.is_empty() {
         output.push_str("Affected consumers:\n");
@@ -1164,8 +1263,28 @@ fn render_finding_detail(finding: &SemanticFinding) -> String {
             let _ = writeln!(
                 output,
                 "  - {} (distance {})",
-                consumer.display_name, consumer.distance
+                entity_names.get(&consumer.symbol_id),
+                consumer.distance
             );
+        }
+    }
+    if !finding.witness_paths.is_empty() {
+        output.push_str("Witness paths:\n");
+        for path in &finding.witness_paths {
+            let hops = path
+                .hops
+                .iter()
+                .map(|hop| {
+                    format!(
+                        "{} {} {}",
+                        entity_names.get(&hop.source),
+                        hop.relation,
+                        entity_names.get(&hop.target)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let _ = writeln!(output, "  - {}: {hops}", entity_names.get(&path.consumer));
         }
     }
     if !finding.evidence.is_empty() {
@@ -1173,11 +1292,16 @@ fn render_finding_detail(finding: &SemanticFinding) -> String {
         for evidence in &finding.evidence {
             let _ = writeln!(
                 output,
-                "  - {} {}..{} [{}]",
+                "  - {} {}..{} [{}]{}",
                 evidence.source_file,
                 evidence.start_byte.unwrap_or(0),
                 evidence.end_byte.unwrap_or(0),
-                evidence.capability
+                evidence.capability,
+                evidence
+                    .record_key
+                    .as_deref()
+                    .map(|key| format!(" · {}", entity_names.get(key)))
+                    .unwrap_or_default()
             );
         }
     }
@@ -1234,12 +1358,13 @@ mod tests {
 
     use compass_history::{SourceFileDelta, SourceFileStatus};
     use compass_semantic_diff::{
-        CollapsedGroup, Comparison, Compatibility, Completeness, Confidence, FindingOrigin,
-        FindingType, GraphDelta, GraphEdgeDelta, GraphNodeDelta, SemanticDiffReport,
-        SemanticFinding, Verification, VerificationState,
+        AffectedConsumer, CollapsedGroup, Comparison, Compatibility, Completeness, Confidence,
+        EvidenceRef, FindingOrigin, FindingType, GraphDelta, GraphEdgeDelta, GraphNodeDelta,
+        SemanticDiffReport, SemanticFinding, Verification, VerificationState, WitnessHop,
+        WitnessPath,
     };
 
-    use super::{RenderOptions, render_html, render_section};
+    use super::{EntityNames, RenderOptions, render_html, render_section};
 
     fn finding(index: usize, compatibility: Compatibility) -> SemanticFinding {
         SemanticFinding {
@@ -1275,13 +1400,27 @@ mod tests {
         let findings = (0..23)
             .map(|index| finding(index, Compatibility::Behavioral))
             .collect::<Vec<_>>();
+        let display_names = BTreeMap::new();
+        let entity_names = EntityNames::new(&display_names);
         let mut limited = String::new();
-        render_section(&mut limited, "Changes", findings.iter(), Some(20));
+        render_section(
+            &mut limited,
+            "Changes",
+            findings.iter(),
+            Some(20),
+            &entity_names,
+        );
         assert!(limited.contains("… 3 more findings (use --limit 23 or --all)"));
         assert!(!limited.contains("finding 22"));
 
         let mut exhaustive = String::new();
-        render_section(&mut exhaustive, "Changes", findings.iter(), None);
+        render_section(
+            &mut exhaustive,
+            "Changes",
+            findings.iter(),
+            None,
+            &entity_names,
+        );
         assert!(exhaustive.contains("finding 22"));
         assert!(!exhaustive.contains("more findings"));
     }
@@ -1293,8 +1432,16 @@ mod tests {
             finding(1, Compatibility::Behavioral),
             finding(2, Compatibility::ProvenBreak),
         ];
+        let display_names = BTreeMap::new();
+        let entity_names = EntityNames::new(&display_names);
         let mut output = String::new();
-        render_section(&mut output, "Changes", findings.iter(), Some(1));
+        render_section(
+            &mut output,
+            "Changes",
+            findings.iter(),
+            Some(1),
+            &entity_names,
+        );
         assert!(output.contains("finding 0"));
         assert!(output.contains("finding 2"));
         assert!(output.contains("… 1 more finding"));
@@ -1303,7 +1450,36 @@ mod tests {
     #[test]
     fn html_report_is_standalone_exhaustive_and_escapes_report_data() {
         let mut routine = finding(1, Compatibility::Behavioral);
-        routine.headline = "changed </script><b>unsafe</b>".to_owned();
+        let subject_id = "a".repeat(64);
+        let caller_id = "b".repeat(64);
+        let callee_id = "c".repeat(64);
+        routine.subject = subject_id.clone();
+        routine.headline = format!("{subject_id} changed </script><b>unsafe</b>");
+        routine.explanation = format!("added resolved calls: {callee_id}");
+        routine.before = Some(serde_json::json!({"resolved_calls": [callee_id]}));
+        routine.affected_consumers = vec![AffectedConsumer {
+            symbol_id: caller_id.clone(),
+            display_name: "raw fallback".to_owned(),
+            source_file: "caller.rs".to_owned(),
+            distance: 1,
+        }];
+        routine.witness_paths = vec![WitnessPath {
+            consumer: caller_id.clone(),
+            confidence: Confidence::Exact,
+            hops: vec![WitnessHop {
+                source: caller_id.clone(),
+                relation: "calls".to_owned(),
+                target: subject_id.clone(),
+                confidence: Confidence::Exact,
+            }],
+        }];
+        routine.evidence = vec![EvidenceRef {
+            source_file: "new.rs".to_owned(),
+            start_byte: Some(1),
+            end_byte: Some(2),
+            record_key: Some(subject_id.clone()),
+            capability: "behavior".to_owned(),
+        }];
         routine.routine = true;
         let mut completeness = BTreeMap::new();
         completeness.insert("call_resolution".to_owned(), Completeness::Partial);
@@ -1346,6 +1522,11 @@ mod tests {
                 }],
                 ..GraphDelta::default()
             },
+            entity_display_names: BTreeMap::from([
+                (subject_id, "Target::execute".to_owned()),
+                (caller_id, "Caller::run".to_owned()),
+                (callee_id, "Dependency::load".to_owned()),
+            ]),
             completeness,
             limitations: vec!["test mapping partial".to_owned()],
         };
@@ -1365,7 +1546,11 @@ mod tests {
         assert!(html.contains("id=\"semantic-diff-data\""));
         assert!(html.contains("compass.semantic_diff.report/1"));
         assert!(html.contains("data-routine=\"true\""));
-        assert!(html.contains("changed &lt;/script&gt;&lt;b&gt;unsafe&lt;/b&gt;"));
+        assert!(html.contains("Target::execute changed &lt;/script&gt;&lt;b&gt;unsafe&lt;/b&gt;"));
+        assert!(html.contains("added resolved calls: Dependency::load"));
+        assert!(html.contains("<code>Caller::run</code>: Caller::run calls Target::execute"));
+        assert!(html.contains("behavior · Target::execute"));
+        assert!(html.contains("&quot;Dependency::load&quot;"));
         assert!(html.contains("\\u003c/script\\u003e"));
         assert!(html.contains("id=\"code\""));
         assert!(html.contains("old.rs → new.rs"));
