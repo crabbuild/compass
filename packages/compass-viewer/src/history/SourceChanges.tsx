@@ -1,4 +1,4 @@
-import { parsePatchFiles } from "@pierre/diffs";
+import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   Component,
@@ -26,6 +26,9 @@ const DIFF_THEME_CSS = `:host {
   --diffs-gap-inline: 6px;
   --diffs-min-number-column-width: 3ch;
 }`;
+const DIFF_LINE_HEIGHT = 19;
+const DIFF_HUNK_SEPARATOR_HEIGHT = 32;
+const DIFF_VERTICAL_PADDING = 16;
 
 export function SourceChanges({ changes }: { changes: SourceChange[] }) {
   const [preferredStyle, setPreferredStyle] = useState<DiffStyle>("split");
@@ -194,7 +197,10 @@ function SourcePatch({
         fileDiff={parsed.fileDiff}
         disableWorkerPool
         className="history-source-diff"
-        style={themeStyle}
+        style={{
+          ...themeStyle,
+          minHeight: minimumDiffHeight(parsed.fileDiff, style)
+        }}
         options={{
           theme: themeType === "light" ? "pierre-light" : "pierre-dark",
           themeType,
@@ -209,6 +215,21 @@ function SourcePatch({
       />
     </DiffErrorBoundary>
   );
+}
+
+export function minimumDiffHeight(
+  fileDiff: FileDiffMetadata,
+  style: DiffStyle
+): number {
+  const lineCount = fileDiff.hunks.reduce(
+    (total, hunk) => total + (
+      style === "split" ? hunk.splitLineCount : hunk.unifiedLineCount
+    ),
+    0
+  );
+  return lineCount * DIFF_LINE_HEIGHT
+    + fileDiff.hunks.length * DIFF_HUNK_SEPARATOR_HEIGHT
+    + DIFF_VERTICAL_PADDING;
 }
 
 function PatchFallback({ patch }: { patch: string }) {

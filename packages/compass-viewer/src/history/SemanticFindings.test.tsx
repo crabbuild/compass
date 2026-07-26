@@ -1,8 +1,9 @@
+import { parsePatchFiles } from "@pierre/diffs";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 import { SemanticFindings } from "./SemanticFindings";
-import { normalizeSourcePatch } from "./SourceChanges";
+import { minimumDiffHeight, normalizeSourcePatch } from "./SourceChanges";
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -23,6 +24,26 @@ describe("SemanticFindings", () => {
       + "+++ b/config/files.go\n"
       + "@@ -2,2 +2,2 @@"
     );
+  });
+
+  it("reserves enough height for every compact diff hunk", () => {
+    const patch = [
+      "diff --git a/example.ts b/example.ts",
+      "--- a/example.ts",
+      "+++ b/example.ts",
+      "@@ -1,0 +1,2 @@",
+      "+const first = true;",
+      "+const second = true;",
+      "@@ -4 +6 @@",
+      "-const value = 1;",
+      "+const value = 2;",
+      ""
+    ].join("\n");
+    const fileDiff = parsePatchFiles(patch, "height-test", true)[0]?.files?.[0];
+
+    expect(fileDiff).toBeDefined();
+    expect(minimumDiffHeight(fileDiff!, "split")).toBe(137);
+    expect(minimumDiffHeight(fileDiff!, "unified")).toBe(156);
   });
 
   it("renders source-only changes as readable evidence instead of a raw report dump", () => {
