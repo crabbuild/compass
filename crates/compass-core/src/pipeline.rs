@@ -17,7 +17,7 @@ use compass_languages::{Engine, Extraction, Registry, file_stem, make_id};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
     DetectionSummary, HtmlOptions, JsonExportOptions, OutputError, ReportOptions, TokenCost,
-    generate_report, write_html, write_json,
+    generate_report, graph_view_model_document, write_html, write_json,
 };
 use compass_resolve::{merge_decl_def_classes, resolve_owned_with_root};
 use rayon::prelude::*;
@@ -67,6 +67,9 @@ pub enum BuildPurpose {
 }
 
 const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
+const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
+const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/1";
+const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct OutputStats {
@@ -417,6 +420,9 @@ fn build_graph_inner(
         if options.no_viz {
             remove_if_exists(&output_dir.join("graph.html"))?;
         }
+        if options.no_cluster {
+            remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+        }
         remove_if_exists(&output_dir.join("needs_update"))?;
         guard.commit()?;
         return Ok(BuildResult {
@@ -721,6 +727,7 @@ fn build_graph_inner(
             options.purpose,
             tokens,
         )?;
+        remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         save_output_stats(&output_dir, nodes.len(), edges.len(), 0, false)?;
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
@@ -907,6 +914,7 @@ fn build_graph_inner(
             output_dir.join(".compass_root"),
             &options.root.to_string_lossy(),
         )?;
+        write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
     }
 
     let mut html_written = false;
@@ -1952,9 +1960,51 @@ fn update_artifacts_complete(output_dir: &Path) -> bool {
         "GRAPH_REPORT.md",
         ".compass_labels.json",
         ".compass_root",
+        GRAPH_OVERVIEW_FILE,
     ]
     .into_iter()
     .all(|name| output_dir.join(name).is_file())
+}
+
+pub(crate) fn write_graph_overview_artifact(
+    document: &GraphDocument,
+    communities: &compass_graph::Communities,
+    labels: &BTreeMap<usize, String>,
+    output_dir: &Path,
+) -> Result<(), CoreError> {
+    let overview_path = output_dir.join(GRAPH_OVERVIEW_FILE);
+    let overview = graph_view_model_document(
+        document,
+        communities,
+        output_dir.join("graph.json"),
+        &HtmlOptions {
+            community_labels: (!labels.is_empty()).then_some(labels),
+            node_limit: Some(GRAPH_OVERVIEW_NODE_LIMIT),
+            ..HtmlOptions::default()
+        },
+    )?;
+    if let Some(model) = overview {
+        let graph_path = output_dir.join("graph.json");
+        let source_graph_bytes = fs::metadata(&graph_path)
+            .map_err(|source| compass_files::FileError::Io {
+                path: graph_path,
+                source,
+            })?
+            .len();
+        write_json_atomic(
+            &overview_path,
+            &json!({
+                "schema": GRAPH_OVERVIEW_SCHEMA,
+                "sourceGraphBytes": source_graph_bytes,
+                "nodeLimit": GRAPH_OVERVIEW_NODE_LIMIT,
+                "model": model,
+            }),
+            false,
+        )?;
+    } else {
+        remove_if_exists(&overview_path)?;
+    }
+    Ok(())
 }
 
 fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<OutputStats> {
@@ -2363,6 +2413,19 @@ mod tests {
         assert!(cold.timings.export > Duration::ZERO);
         assert!(cold.nodes > 0);
         assert!(cold.output_dir.join("graph.json").is_file());
+        let overview_path = cold.output_dir.join("graph-overview.json");
+        assert!(
+            overview_path.is_file(),
+            "clustered updates should prepare the VS Code graph overview even with --no-viz"
+        );
+        let overview: Value = serde_json::from_slice(&fs::read(&overview_path)?)?;
+        assert_eq!(overview["schema"], "compass.graph-overview/1");
+        assert_eq!(overview["nodeLimit"], 5_000);
+        assert_eq!(
+            overview["sourceGraphBytes"],
+            fs::metadata(cold.output_dir.join("graph.json"))?.len()
+        );
+        assert_eq!(overview["model"]["schema"], "compass.viewer.graph/1");
         assert!(cold.output_dir.join("manifest.json").is_file());
         assert!(!cold.output_dir.join(".compass_incomplete").exists());
         let cold_graph = GraphDocument::load(&cold.output_dir.join("graph.json"))?;

@@ -40,3 +40,15 @@ test("compiled graph webview exposes working recovery actions", async ({ page })
     "showOutput"
   ]);
 });
+
+test("compiled graph webview explains one-time preparation for a large graph", async ({
+  page
+}) => {
+  await page.goto("/loading.html?large=1");
+
+  await expect(
+    page.getByRole("heading", { name: "Preparing a large code graph" })
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("42.2 MB");
+  await expect(page.getByRole("status")).toContainText("Building overview");
+});

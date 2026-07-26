@@ -16,7 +16,7 @@ use compass_output::{
 };
 use serde_json::{Value, json};
 
-use crate::pipeline::{git_commit, remove_if_exists};
+use crate::pipeline::{git_commit, remove_if_exists, write_graph_overview_artifact};
 use crate::{CoreError, load_learning_for_report};
 
 #[derive(Clone, Debug)]
@@ -232,6 +232,7 @@ where
         options.output_dir.join(".compass_labels.json.sig"),
         &signatures,
     )?;
+    write_graph_overview_artifact(&document, &communities, &labels, &options.output_dir)?;
     let html_path = options.output_dir.join("graph.html");
     let html_written = if options.no_viz {
         remove_if_exists(&html_path)?;

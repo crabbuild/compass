@@ -7,8 +7,17 @@ import {
 import type { RepositorySession } from "../workspace/repositorySession";
 import { GraphToHostMessageSchema } from "../transport/messages";
 import { currentGraphExportArgs } from "./communityArguments";
+import {
+  graphOverviewCachePath,
+  graphSourceInfo,
+  loadCachedGraphOverview,
+  loadPreparedGraphOverview,
+  writeCachedGraphOverview
+} from "./graphOverview";
 import { CurrentGraphSnapshot } from "./graphSnapshot";
 import { openGraphSource } from "./sourceNavigation";
+
+const LARGE_GRAPH_BYTES = 8 * 1024 * 1024;
 
 export class GraphPanel {
   static async open(
@@ -34,6 +43,7 @@ export class GraphPanel {
   private readonly controller = new AbortController();
   private readonly communityCache = new Map<number, GraphViewModel>();
   private readonly snapshot = new CurrentGraphSnapshot();
+  private snapshotReady: Promise<string> | undefined;
   private overview: GraphViewModel | undefined;
 
   private constructor(
@@ -76,23 +86,47 @@ export class GraphPanel {
 
   private async hydrate(): Promise<void> {
     try {
-      const graphPath = await this.snapshot.replace(this.session.graphPath);
-      const model = await this.session.processes.runJson(
+      const nodeLimit = vscode.workspace
+        .getConfiguration("compass")
+        .get("graphNodeLimit", 5000);
+      const source = await graphSourceInfo(this.session.graphPath);
+      this.snapshotReady = this.snapshot.replace(this.session.graphPath);
+      const storageRoot = this.context.storageUri ?? this.context.globalStorageUri;
+      const cachePath = graphOverviewCachePath(storageRoot.fsPath, this.session.id);
+      const model =
+        await loadPreparedGraphOverview(this.session.graphPath, nodeLimit) ??
+        await loadCachedGraphOverview(cachePath, this.session.graphPath, nodeLimit);
+
+      if (model) {
+        await this.publishOverview(model);
+        return;
+      }
+
+      if (source.bytes >= LARGE_GRAPH_BYTES) {
+        await this.postLoadStatus(source.bytes, "snapshotting");
+      }
+      const graphPath = await this.snapshotReady;
+      if (source.bytes >= LARGE_GRAPH_BYTES) {
+        await this.postLoadStatus(source.bytes, "exporting");
+      }
+      const exported = await this.session.processes.runJson(
         this.session.root,
-        currentGraphExportArgs(
-          graphPath,
-          vscode.workspace.getConfiguration("compass").get("graphNodeLimit", 5000)
-        ),
+        currentGraphExportArgs(graphPath, nodeLimit),
         GraphViewModelSchema,
         this.controller.signal
       );
-      this.overview = this.withRepositoryTitle(model);
-      this.communityCache.clear();
-      await this.panel.webview.postMessage({
-        type: "hydrateGraph",
-        requestId: randomUUID(),
-        repositoryId: this.session.id,
-        model: this.overview
+      await this.publishOverview(exported);
+      void writeCachedGraphOverview(
+        cachePath,
+        this.session.graphPath,
+        nodeLimit,
+        exported
+      ).catch((error) => {
+        this.output.appendLine(
+          `[graph] Could not cache graph overview: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
       });
     } catch (error) {
       await this.panel.webview.postMessage({
@@ -124,7 +158,7 @@ export class GraphPanel {
       }
       let model = this.communityCache.get(communityId);
       if (!model) {
-        const graphPath = this.snapshot.graphPath;
+        const graphPath = await this.snapshotReady;
         if (!graphPath) throw new Error("The graph snapshot is no longer available.");
         model = await this.session.processes.runJson(
           this.session.root,
@@ -165,6 +199,29 @@ export class GraphPanel {
       ...model,
       title: vscode.workspace.asRelativePath(this.session.graphPath)
     };
+  }
+
+  private async publishOverview(model: GraphViewModel): Promise<void> {
+    this.overview = this.withRepositoryTitle(model);
+    this.communityCache.clear();
+    await this.panel.webview.postMessage({
+      type: "hydrateGraph",
+      requestId: randomUUID(),
+      repositoryId: this.session.id,
+      model: this.overview
+    });
+  }
+
+  private async postLoadStatus(
+    graphBytes: number,
+    phase: "snapshotting" | "exporting"
+  ): Promise<void> {
+    await this.panel.webview.postMessage({
+      type: "graphLoadStatus",
+      mode: "large",
+      graphBytes,
+      phase
+    });
   }
 
   private html(): string {

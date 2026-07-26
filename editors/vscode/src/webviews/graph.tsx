@@ -5,7 +5,10 @@ import {
   type InspectorLayout
 } from "@compass/viewer";
 import { HostToGraphMessageSchema } from "../transport/messages";
-import { GraphLoadingState } from "./GraphLoadingState";
+import {
+  GraphLoadingState,
+  type GraphLoadingCopy
+} from "./GraphLoadingState";
 
 type WebviewState = {
   inspector?: InspectorLayout;
@@ -26,6 +29,7 @@ let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
 let communityLoading: number | null = null;
 let communityError: string | undefined;
 let activeCommunityRequest = "";
+let loadingCopy: GraphLoadingCopy | undefined;
 
 function resetGraphState(): void {
   overview = undefined;
@@ -45,6 +49,7 @@ function renderLoading(): void {
   root.render(
     <GraphLoadingState
       state={{ kind: "loading" }}
+      {...(loadingCopy ? { loadingCopy } : {})}
       onRetry={retryHydration}
       onShowOutput={() => vscode.postMessage({ type: "showOutput" })}
     />
@@ -110,6 +115,17 @@ window.addEventListener("message", (event) => {
     renderError(parsed.data.message);
     return;
   }
+  if (parsed.data.type === "graphLoadStatus") {
+    loadingCopy = {
+      eyebrow: `Compass code graph · ${formatBytes(parsed.data.graphBytes)}`,
+      title: "Preparing a large code graph",
+      steps: parsed.data.phase === "snapshotting"
+        ? ["Securing snapshot", "Building overview", "Opening explorer"]
+        : ["Snapshot ready", "Building overview", "Opening explorer"]
+    };
+    renderLoading();
+    return;
+  }
   if (parsed.data.type === "hydrateGraph") {
     repositoryId = parsed.data.repositoryId;
     overview = parsed.data.model;
@@ -134,3 +150,8 @@ window.addEventListener("message", (event) => {
 
 renderLoading();
 vscode.postMessage({ type: "ready" });
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

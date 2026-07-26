@@ -9,6 +9,12 @@ export const HostToGraphMessageSchema = z.discriminatedUnion("type", [
     model: GraphViewModelSchema
   }),
   z.object({
+    type: z.literal("graphLoadStatus"),
+    mode: z.literal("large"),
+    graphBytes: z.number().int().nonnegative(),
+    phase: z.enum(["snapshotting", "exporting"])
+  }),
+  z.object({
     type: z.literal("communityGraph"),
     requestId: z.string(),
     repositoryId: z.string(),
