@@ -545,6 +545,13 @@ fn discover_artifacts(root: &Path, options: &BuildOptions) -> Result<Vec<Artifac
     Ok(by_digest.into_values().collect())
 }
 
+pub(crate) fn program_artifact_count(
+    root: &Path,
+    options: &BuildOptions,
+) -> Result<usize, CoreError> {
+    Ok(discover_artifacts(root, options)?.len())
+}
+
 fn hash_file(path: &Path) -> Result<(String, u64), CoreError> {
     let mut file = File::open(path).map_err(|source| FileError::Io {
         path: path.to_path_buf(),

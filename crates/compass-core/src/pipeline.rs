@@ -24,7 +24,10 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::program::{ProgramBuild, build_program, load_current_program, write_program};
+use crate::build_state::{BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified};
+use crate::program::{
+    ProgramBuild, build_program, load_current_program, program_artifact_count, write_program,
+};
 use crate::raw_guard::enforce_incomplete_raw_guard;
 
 #[derive(Clone, Debug)]
@@ -219,6 +222,8 @@ pub enum CoreError {
     ProgramIr(#[from] compass_ir::IrError),
     #[error("invalid Program IR input: {0}")]
     InvalidProgramInput(String),
+    #[error("invalid completed-build state: {0}")]
+    InvalidBuildState(String),
 }
 
 /// Run the complete deterministic local graph pipeline without invoking Python,
@@ -317,7 +322,11 @@ fn build_graph_inner(
         path: output_dir.clone(),
         source,
     })?;
+    let prior_build_complete = BuildGuard::ensure_complete(&output_dir).is_ok();
     let guard = BuildGuard::begin(&output_dir)?;
+    if options.force || !prior_build_complete {
+        remove_if_exists(&output_dir.join(BUILD_STATE_FILE))?;
+    }
     let manifest_path = output_dir.join("manifest.json");
     let prior_manifest = Manifest::load(&manifest_path, Some(&root));
     let has_confirmed_deletion = prior_manifest
@@ -400,10 +409,64 @@ fn build_graph_inner(
     let manifest_unchanged = options.purpose == BuildPurpose::Update
         && !options.force
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
+    let build_profile = build_profile(options);
+    let has_program_artifacts =
+        options.program_analysis && program_artifact_count(&root, options)? != 0;
+    let build_state_present = output_dir.join(BUILD_STATE_FILE).is_file();
+    let verified_state = if semantic.is_none() && supplemental.is_empty() && manifest_unchanged {
+        load_verified(
+            &output_dir,
+            &build_profile,
+            &manifest_path,
+            prior_build_complete,
+        )?
+    } else {
+        None
+    };
+    let allow_legacy_validation = prior_build_complete
+        && (!build_state_present || (has_program_artifacts && verified_state.is_some()));
+    if !has_program_artifacts {
+        let verified = verified_state;
+        if let Some(state) = verified.filter(|state| state.stats.files == sources.len()) {
+            if options.no_viz {
+                remove_if_exists(&output_dir.join("graph.html"))?;
+            }
+            if options.no_cluster {
+                remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+            }
+            remove_if_exists(&output_dir.join("needs_update"))?;
+            guard.commit()?;
+            return Ok(BuildResult {
+                root,
+                output_dir: output_dir.clone(),
+                detection,
+                files_considered: state.stats.files,
+                files_extracted: 0,
+                files_cached: state.stats.files,
+                empty_files: Vec::new(),
+                nodes: state.stats.nodes,
+                edges: state.stats.edges,
+                communities: state.stats.communities,
+                html_written: output_dir.join("graph.html").is_file(),
+                outputs_changed: false,
+                program_modules: state.stats.program_modules,
+                program_summaries: state.stats.program_summaries,
+                program_syntax_analyzed: 0,
+                program_syntax_reused: state.stats.program_modules,
+                program_artifacts_loaded: 0,
+                program_artifacts_reused: 0,
+                program_artifact_documents_analyzed: 0,
+                program_artifact_documents_reused: 0,
+                program_conflicts: state.stats.program_conflicts,
+                timings,
+            });
+        }
+    }
     let unchanged_program = if options.program_analysis
         && semantic.is_none()
         && supplemental.is_empty()
         && manifest_unchanged
+        && allow_legacy_validation
     {
         load_current_program(&root, &sources, options, &output_dir)?
     } else {
@@ -412,6 +475,7 @@ fn build_graph_inner(
     if semantic.is_none()
         && supplemental.is_empty()
         && manifest_unchanged
+        && allow_legacy_validation
         && (!options.program_analysis || unchanged_program.is_some())
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
     {
@@ -422,6 +486,16 @@ fn build_graph_inner(
             remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         }
         remove_if_exists(&output_dir.join("needs_update"))?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            stats.nodes,
+            stats.edges,
+            stats.communities,
+            unchanged_program.as_ref(),
+        )?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -681,6 +755,16 @@ fn build_graph_inner(
             semantic,
         )?;
         write_program_output(&output_dir, program.as_ref())?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            document.nodes.len(),
+            document.links.len(),
+            0,
+            program.as_ref(),
+        )?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -748,6 +832,16 @@ fn build_graph_inner(
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
         write_program_output(&output_dir, program.as_ref())?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            nodes.len(),
+            edges.len(),
+            0,
+            program.as_ref(),
+        )?;
         guard.commit()?;
         timings.publish = stage_started.elapsed();
         return Ok(BuildResult {
@@ -830,6 +924,16 @@ fn build_graph_inner(
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
         write_program_output(&output_dir, program.as_ref())?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            document.nodes.len(),
+            document.links.len(),
+            communities,
+            program.as_ref(),
+        )?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -1029,6 +1133,16 @@ fn build_graph_inner(
         communities.len(),
         true,
     )?;
+    publish_build_state(
+        options,
+        &output_dir,
+        &manifest_path,
+        sources.len(),
+        document.nodes.len(),
+        document.links.len(),
+        communities.len(),
+        program.as_ref(),
+    )?;
     guard.commit()?;
     Ok(BuildResult {
         root,
@@ -1082,6 +1196,78 @@ fn program_modules(program: Option<&ProgramBuild>) -> usize {
 
 fn program_summaries(program: Option<&ProgramBuild>) -> usize {
     program.map_or(0, |program| program.analysis.summaries.len())
+}
+
+fn program_providers(program: Option<&ProgramBuild>) -> usize {
+    program.map_or(0, |program| program.analysis.program.providers.len())
+}
+
+fn build_profile(options: &BuildOptions) -> BuildProfile {
+    BuildProfile {
+        purpose: match options.purpose {
+            BuildPurpose::Update => "update",
+            BuildPurpose::Extract => "extract",
+        }
+        .to_owned(),
+        no_cluster: options.no_cluster,
+        no_viz: options.no_viz,
+        resolution: options.resolution,
+        exclude_hubs: options.exclude_hubs,
+        program_analysis: options.program_analysis,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_build_state(
+    options: &BuildOptions,
+    output_dir: &Path,
+    manifest_path: &Path,
+    files: usize,
+    nodes: usize,
+    edges: usize,
+    communities: usize,
+    program: Option<&ProgramBuild>,
+) -> Result<(), CoreError> {
+    let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
+    match options.purpose {
+        BuildPurpose::Update => {
+            required.push(output_dir.join(".compass_root"));
+            if !options.no_cluster {
+                required.extend([
+                    output_dir.join(GRAPH_OVERVIEW_FILE),
+                    output_dir.join(".compass_labels.json"),
+                    output_dir.join("GRAPH_REPORT.md"),
+                ]);
+            }
+        }
+        BuildPurpose::Extract if !options.no_cluster => {
+            required.push(output_dir.join(".compass_analysis.json"));
+        }
+        BuildPurpose::Extract => {}
+    }
+    for optional in ["graph.html", ".compass_semantic_marker"] {
+        let path = output_dir.join(optional);
+        if path.is_file() {
+            required.push(path);
+        }
+    }
+    let state = BuildState::capture(
+        output_dir,
+        build_profile(options),
+        manifest_path,
+        &required,
+        SavedStats {
+            files,
+            nodes,
+            edges,
+            communities,
+            program_modules: program_modules(program),
+            program_summaries: program_summaries(program),
+            program_providers: program_providers(program),
+            program_conflicts: program.map_or(0, |program| program.conflicts),
+        },
+    )?;
+    state.save(output_dir)
 }
 
 #[cfg(target_os = "macos")]
