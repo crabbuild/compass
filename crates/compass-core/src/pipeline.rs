@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use compass_files::{
@@ -131,6 +132,13 @@ pub struct BuildResult {
     pub timings: BuildTimings,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuildFileProgress {
+    pub current: usize,
+    pub total: usize,
+    pub path: PathBuf,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BuildTimings {
     pub detect: Duration,
@@ -215,7 +223,7 @@ pub enum CoreError {
 /// Run the complete deterministic local graph pipeline without invoking Python,
 /// an LLM, a network service, or a dynamically installed grammar.
 pub fn build_local_graph(options: &BuildOptions) -> Result<BuildResult, CoreError> {
-    build_graph(options, None, &[], None)
+    build_graph(options, None, &[], None, None)
 }
 
 /// Merge a completed semantic provider result into the native graph pipeline.
@@ -223,7 +231,7 @@ pub fn build_graph_with_semantic(
     options: &BuildOptions,
     semantic: &SemanticLayer,
 ) -> Result<BuildResult, CoreError> {
-    build_graph(options, Some(semantic), &[], None)
+    build_graph(options, Some(semantic), &[], None, None)
 }
 
 /// Merge deterministic supplemental facts, such as Cargo or database schema
@@ -239,7 +247,22 @@ pub fn build_graph_with_layers(
         .map(serde_json::from_value)
         .collect::<Result<Vec<Extraction>, _>>()
         .map_err(CoreError::InvalidSupplementalFragment)?;
-    build_graph(options, semantic, &supplemental, None)
+    build_graph(options, semantic, &supplemental, None, None)
+}
+
+pub fn build_graph_with_layers_and_progress(
+    options: &BuildOptions,
+    semantic: Option<&SemanticLayer>,
+    supplemental: &[serde_json::Value],
+    progress: &(dyn Fn(BuildFileProgress) + Sync),
+) -> Result<BuildResult, CoreError> {
+    let supplemental = supplemental
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<Extraction>, _>>()
+        .map_err(CoreError::InvalidSupplementalFragment)?;
+    build_graph(options, semantic, &supplemental, None, Some(progress))
 }
 
 pub fn build_graph_with_layers_and_tiebreaker(
@@ -254,7 +277,7 @@ pub fn build_graph_with_layers_and_tiebreaker(
         .map(serde_json::from_value)
         .collect::<Result<Vec<Extraction>, _>>()
         .map_err(CoreError::InvalidSupplementalFragment)?;
-    build_graph(options, semantic, &supplemental, Some(tiebreaker))
+    build_graph(options, semantic, &supplemental, Some(tiebreaker), None)
 }
 
 fn build_graph(
@@ -262,8 +285,9 @@ fn build_graph(
     semantic: Option<&SemanticLayer>,
     supplemental: &[Extraction],
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
 ) -> Result<BuildResult, CoreError> {
-    build_graph_inner(options, semantic, supplemental, tiebreaker)
+    build_graph_inner(options, semantic, supplemental, tiebreaker, progress)
 }
 
 fn build_graph_inner(
@@ -271,6 +295,7 @@ fn build_graph_inner(
     semantic: Option<&SemanticLayer>,
     supplemental: &[Extraction],
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
 ) -> Result<BuildResult, CoreError> {
     let mut timings = BuildTimings::default();
     let mut stage_started = Instant::now();
@@ -470,6 +495,8 @@ fn build_graph_inner(
     // Stay sequential below the measured crossover. Larger corpora use an
     // explicit local pool so an embedding application's global Rayon settings
     // cannot silently serialize cold extraction.
+    let completed_files = Mutex::new(0_usize);
+    let total_files = missing.len();
     let extract_source =
         |engine: &mut Engine, path: &PathBuf| -> Result<_, compass_languages::ExtractError> {
             let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
@@ -477,6 +504,17 @@ fn build_graph_inner(
                 source,
             })?;
             let extraction = engine.extract_source(path, &bytes)?;
+            if let Some(progress) = progress {
+                let mut completed = completed_files
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *completed += 1;
+                progress(BuildFileProgress {
+                    current: *completed,
+                    total: total_files,
+                    path: path.clone(),
+                });
+            }
             let source = (
                 path.to_string_lossy().into_owned(),
                 String::from_utf8_lossy(&bytes).into_owned(),

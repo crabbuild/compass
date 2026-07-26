@@ -30,27 +30,12 @@ fn main() -> ExitCode {
         let input_is_terminal = stdin.is_terminal();
         let mut locked = stdin.lock();
         if events {
-            let mut human_stdout = Vec::new();
-            let mut human_stderr = Vec::new();
-            let code = compass_cli::run_init(
+            return ExitCode::from(compass_cli::run_init_jsonl(
                 &arguments[1..],
                 &mut locked,
-                &mut human_stdout,
-                &mut human_stderr,
-                input_is_terminal,
-            );
-            let outcome = compass_cli::ide_contract::progress_outcome(
-                "init",
-                compass_cli::Outcome::from_command_output(
-                    code,
-                    String::from_utf8_lossy(&human_stdout).into_owned(),
-                    String::from_utf8_lossy(&human_stderr).into_owned(),
-                ),
-            );
-            return ExitCode::from(compass_cli::write_outcome(
-                &outcome,
-                &mut io::stdout(),
+                io::stdout(),
                 &mut io::stderr(),
+                input_is_terminal,
             ));
         }
         return ExitCode::from(compass_cli::run_init(

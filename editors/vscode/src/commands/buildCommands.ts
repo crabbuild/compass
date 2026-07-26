@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { COMPASS_REQUIREMENTS, type CapabilityRequirement } from "../cli/compatibility";
-import { buildInitArgs, buildUpdateArgs, buildWatchArgs } from "./buildArguments";
+import { buildUpdateArgs, buildWatchArgs } from "./buildArguments";
+import { openInitializationPanel } from "../views/initializationPanel";
 import type { RepositorySession } from "../workspace/repositorySession";
 import type { SessionRegistry } from "../workspace/sessionRegistry";
 
@@ -26,28 +27,7 @@ export function registerBuildCommands(
       );
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.initialize)) return;
-      const includes = await vscode.window.showInputBox({
-        title: "Compass: Initialize Repository",
-        prompt: "Include globs, comma separated (leave empty for everything)"
-      });
-      if (includes === undefined) return;
-      const excludes = await vscode.window.showInputBox({
-        title: "Compass: Initialize Repository",
-        prompt: "Exclude globs, comma separated"
-      });
-      if (excludes === undefined) return;
-      const confirmed = await vscode.window.showWarningMessage(
-        `Initialize Compass in ${session.root}?`,
-        { modal: true, detail: `Includes: ${includes || "all"}\nExcludes: ${excludes || "none"}` },
-        "Initialize"
-      );
-      if (confirmed !== "Initialize") return;
-      await runGuided(session, buildInitArgs({
-        root: session.root,
-        includes: splitGlobs(includes),
-        excludes: splitGlobs(excludes),
-        force: false
-      }), "Initializing Compass", output, refresh);
+      await openInitializationPanel(context, session, output, refresh);
     }),
     vscode.commands.registerCommand("compass.update", async (repositoryId?: string) => {
       const session = await pick(
@@ -176,10 +156,6 @@ async function pickRepository(
     { placeHolder: "Choose the repository Compass should modify" }
   );
   return picked?.session;
-}
-
-function splitGlobs(value: string): string[] {
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function message(error: unknown): string {

@@ -62,7 +62,8 @@ const builds = [
       callGraph: "src/webviews/callGraph.tsx",
       architecture: "src/webviews/architecture.tsx",
       query: "src/webviews/query.tsx",
-      history: "src/webviews/history.tsx"
+      history: "src/webviews/history.tsx",
+      initialize: "src/webviews/initialize.tsx"
     },
     outdir: "dist/webviews",
     format: "iife",

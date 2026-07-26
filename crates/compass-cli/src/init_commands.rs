@@ -2,12 +2,14 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use compass_files::{
     BuildScope, DetectOptions, PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig, ScopeMatcher, detect,
 };
 
-use crate::{Frontend, command_build, write_outcome};
+use crate::ide_contract::{PROGRESS_SCHEMA, ProgressEvent, ProgressState, ProgressWriter};
+use crate::{Frontend, Outcome, command_build, command_build_with_file_progress, write_outcome};
 
 struct InitOptions {
     root: PathBuf,
@@ -23,6 +25,139 @@ pub fn run_init(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
     input_is_terminal: bool,
+) -> u8 {
+    run_init_with_builder(
+        arguments,
+        input,
+        stdout,
+        stderr,
+        input_is_terminal,
+        |_, build_arguments| command_build(Frontend::Compass, build_arguments, false),
+    )
+}
+
+pub fn run_init_jsonl<W: Write + Send>(
+    arguments: &[OsString],
+    input: &mut impl BufRead,
+    stdout: W,
+    stderr: &mut impl Write,
+    input_is_terminal: bool,
+) -> u8 {
+    let operation_id = format!("init-{}", std::process::id());
+    let writer = Mutex::new(ProgressWriter::new(stdout));
+    let progress_error = Mutex::new(None::<String>);
+    if writer
+        .lock()
+        .map_err(|_| ())
+        .and_then(|mut writer| {
+            writer
+                .write(&ProgressEvent {
+                    schema: PROGRESS_SCHEMA,
+                    operation_id: &operation_id,
+                    operation: "init",
+                    state: ProgressState::Started,
+                    phase: "configuring",
+                    current: None,
+                    total: None,
+                    message: "Preparing repository scope",
+                    terminal: false,
+                })
+                .map_err(|_| ())
+        })
+        .is_err()
+    {
+        return 1;
+    }
+
+    let mut human_stdout = Vec::new();
+    let mut human_stderr = Vec::new();
+    let code = run_init_with_builder(
+        arguments,
+        input,
+        &mut human_stdout,
+        &mut human_stderr,
+        input_is_terminal,
+        |root, build_arguments| {
+            let report = |progress: compass_core::BuildFileProgress| {
+                let path = progress
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&progress.path)
+                    .to_string_lossy()
+                    .into_owned();
+                let result = writer
+                    .lock()
+                    .map_err(|_| "progress writer lock was poisoned".to_owned())
+                    .and_then(|mut writer| {
+                        writer
+                            .write(&ProgressEvent {
+                                schema: PROGRESS_SCHEMA,
+                                operation_id: &operation_id,
+                                operation: "init",
+                                state: ProgressState::Running,
+                                phase: "indexing",
+                                current: u64::try_from(progress.current).ok(),
+                                total: u64::try_from(progress.total).ok(),
+                                message: &path,
+                                terminal: false,
+                            })
+                            .map_err(|error| error.to_string())
+                    });
+                if let Err(error) = result
+                    && let Ok(mut slot) = progress_error.lock()
+                    && slot.is_none()
+                {
+                    *slot = Some(error);
+                }
+            };
+            command_build_with_file_progress(Frontend::Compass, build_arguments, false, &report)
+        },
+    );
+    let _ = stderr.write_all(&human_stdout);
+    let _ = stderr.write_all(&human_stderr);
+    if let Ok(slot) = progress_error.lock()
+        && slot.is_some()
+    {
+        return 1;
+    }
+    let terminal = ProgressEvent {
+        schema: PROGRESS_SCHEMA,
+        operation_id: &operation_id,
+        operation: "init",
+        state: if code == 0 {
+            ProgressState::Succeeded
+        } else {
+            ProgressState::Failed
+        },
+        phase: if code == 0 { "complete" } else { "failed" },
+        current: None,
+        total: None,
+        message: if code == 0 {
+            "Compass index is ready"
+        } else {
+            "Compass initialization failed"
+        },
+        terminal: true,
+    };
+    if writer
+        .lock()
+        .map_err(|_| ())
+        .and_then(|mut writer| writer.write(&terminal).map_err(|_| ()))
+        .is_err()
+    {
+        1
+    } else {
+        code
+    }
+}
+
+fn run_init_with_builder(
+    arguments: &[OsString],
+    input: &mut impl BufRead,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    input_is_terminal: bool,
+    build: impl FnOnce(&Path, &[String]) -> Outcome,
 ) -> u8 {
     let args = arguments
         .iter()
@@ -162,10 +297,9 @@ pub fn run_init(
         let _ = writeln!(stderr, "error: {error}");
         return 1;
     }
-    let outcome = command_build(
-        Frontend::Compass,
+    let outcome = build(
+        &root,
         &[root.to_string_lossy().into_owned(), "--force".to_owned()],
-        false,
     );
     if outcome.code != 0 {
         let _ = writeln!(
