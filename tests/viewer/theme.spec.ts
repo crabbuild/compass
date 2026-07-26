@@ -83,6 +83,12 @@ test("history comparison and source diffs follow the light VS Code theme", async
     .toHaveCSS("background-color", "rgb(244, 244, 244)");
   await expect(page.locator(".history-source-diff"))
     .toHaveCSS("color-scheme", "light");
+  await expect(page.locator(".compass-graph-stage"))
+    .toHaveAttribute("data-comparison", "true");
+  await expect(page.locator(".compass-graph-stage"))
+    .toHaveCSS("background-color", "rgb(244, 244, 244)");
+  await expect(page.locator(".compass-graph-stage"))
+    .toHaveCSS("background-image", "none");
 });
 
 test("Architecture symbol titles use editor foreground in light themes", async ({ page }) => {

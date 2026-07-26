@@ -783,6 +783,14 @@ button:not(:disabled),
   background-size: 22px 22px;
 }
 
+.compass-graph-stage[data-comparison="true"] {
+  background: var(--vscode-editor-background, var(--compass-canvas));
+}
+
+.compass-graph-stage[data-comparison="true"]::after {
+  opacity: 0.09;
+}
+
 .compass-canvas {
   position: absolute;
   inset: 0;
@@ -939,19 +947,39 @@ button:not(:disabled),
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--vscode-descriptionForeground, #6e7781);
+  border: 1px solid var(--vscode-descriptionForeground, #6e7781);
+  background: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #6e7781) 18%,
+    var(--vscode-editor-background, var(--background))
+  );
 }
 
 .compass-change-legend button[data-change="added"] > span {
-  background: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+  border-color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+  background: color-mix(
+    in srgb,
+    var(--vscode-gitDecoration-addedResourceForeground, #2ea043) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
 }
 
 .compass-change-legend button[data-change="removed"] > span {
-  background: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+  border-color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+  background: color-mix(
+    in srgb,
+    var(--vscode-gitDecoration-deletedResourceForeground, #f85149) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
 }
 
 .compass-change-legend button[data-change="changed"] > span {
-  background: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+  border-color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+  background: color-mix(
+    in srgb,
+    var(--vscode-gitDecoration-modifiedResourceForeground, #d29922) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
 }
 
 .compass-change-legend button small {

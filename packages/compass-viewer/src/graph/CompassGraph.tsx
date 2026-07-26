@@ -176,7 +176,10 @@ function CompassGraphView({
         "--compass-inspector-width": `${inspectorLayout.width}px`
       } as CSSProperties}
     >
-      <main className="compass-graph-stage">
+      <main
+        className="compass-graph-stage"
+        data-comparison={comparisonMode ? "true" : "false"}
+      >
         <VisNetworkCanvas
           ref={canvasRef}
           model={model}
