@@ -10,6 +10,7 @@ import { DataSet, Network, type Edge, type Node, type Options } from "vis-networ
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
 import type { GraphHover } from "./NodeHoverCard";
 import { bindGraphNetworkEvents } from "./networkEvents";
+import type { GraphChangeType } from "./state";
 
 export type GraphCanvasHandle = {
   fit(): void;
@@ -22,6 +23,7 @@ type Props = {
   physicsRunning: boolean;
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
+  hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
   onOpenSource(nodeId: string): void;
   onHover(change: GraphHover | null): void;
@@ -29,7 +31,21 @@ type Props = {
   onStabilized(): void;
 };
 
-const options: Options = {
+type ComparisonColor = {
+  background: string;
+  border: string;
+};
+
+type ComparisonPalette = Record<GraphChangeType, ComparisonColor>;
+
+const fallbackComparisonPalette: ComparisonPalette = {
+  added: { background: "#163d24", border: "#56d364" },
+  removed: { background: "#4b1f24", border: "#ff7b72" },
+  changed: { background: "#3d3015", border: "#d7a72b" },
+  unchanged: { background: "#29313b", border: "#8b949e" }
+};
+
+const defaultOptions: Options = {
   autoResize: true,
   interaction: {
     hover: true,
@@ -63,17 +79,63 @@ const options: Options = {
   }
 };
 
+const comparisonOptions: Options = {
+  autoResize: true,
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: { enabled: true }
+  },
+  layout: {
+    improvedLayout: true,
+    randomSeed: 17
+  },
+  nodes: {
+    borderWidth: 2,
+    shape: "dot"
+  },
+  edges: {
+    arrows: { to: { enabled: true, scaleFactor: 0.38 } },
+    smooth: { enabled: true, type: "continuous", roundness: 0.14 },
+    selectionWidth: 3
+  },
+  physics: {
+    enabled: true,
+    solver: "barnesHut",
+    stabilization: { enabled: true, iterations: 520, fit: true, updateInterval: 25 },
+    maxVelocity: 35,
+    minVelocity: 0.55,
+    barnesHut: {
+      theta: 0.45,
+      gravitationalConstant: -12000,
+      centralGravity: 0.12,
+      springLength: 180,
+      springConstant: 0.025,
+      damping: 0.3,
+      avoidOverlap: 0.85
+    }
+  }
+};
+
 export function graphNodeColor(
   model: GraphViewModel,
   node: GraphNode,
-  contrastBorder?: string
+  contrastBorder?: string,
+  comparisonPalette?: ComparisonPalette
 ) {
-  const background = node.color?.background
+  const comparisonColor = node.change && comparisonPalette
+    ? comparisonPalette[node.change]
+    : undefined;
+  const background = comparisonColor
+    ? comparisonColor.background
+    : node.color?.background
     ?? model.communities.find((candidate) => candidate.id === node.community)?.color
     ?? "#6688aa";
   return {
     background,
-    border: contrastBorder ?? node.color?.border ?? background
+    border: contrastBorder ?? comparisonColor?.border ?? node.color?.border ?? background
   };
 }
 
@@ -88,11 +150,67 @@ function edgeAppearance(confidence: string | undefined) {
   return { dashes: true, width: 1, opacity: 0.35 };
 }
 
-function comparisonEdgeColor(change: string | undefined, fallback: string): string {
-  if (change === "added") return "#2ea043";
-  if (change === "removed") return "#f85149";
-  if (change === "changed") return "#d29922";
-  return fallback;
+function comparisonEdgeAppearance(
+  change: GraphChangeType | undefined,
+  confidence: string | undefined,
+  fallback: string,
+  palette: ComparisonPalette
+) {
+  if (change === "added") {
+    return { color: palette.added.border, dashes: false, width: 1.7, opacity: 0.6 };
+  }
+  if (change === "removed") {
+    return { color: palette.removed.border, dashes: [6, 5], width: 1.6, opacity: 0.56 };
+  }
+  if (change === "changed") {
+    return { color: palette.changed.border, dashes: false, width: 1.65, opacity: 0.48 };
+  }
+  if (change === "unchanged") {
+    return { color: palette.unchanged.border, dashes: true, width: 1, opacity: 0.2 };
+  }
+  const appearance = edgeAppearance(confidence);
+  return { color: fallback, ...appearance };
+}
+
+function comparisonEdgeCurve(change: GraphChangeType | undefined) {
+  if (change === "added") {
+    return { enabled: true, type: "curvedCW" as const, roundness: 0.13 };
+  }
+  if (change === "removed") {
+    return { enabled: true, type: "curvedCCW" as const, roundness: 0.13 };
+  }
+  return { enabled: true, type: "continuous" as const, roundness: 0.1 };
+}
+
+function seedComparisonPositions(nodes: GraphNode[]): ReadonlyMap<string, { x: number; y: number }> {
+  const groups = new Map<GraphChangeType, GraphNode[]>();
+  for (const node of [...nodes].sort((left, right) => left.id.localeCompare(right.id))) {
+    const change = node.change ?? "unchanged";
+    const group = groups.get(change) ?? [];
+    group.push(node);
+    groups.set(change, group);
+  }
+  const laneOffset: Record<GraphChangeType, number> = {
+    added: -300,
+    changed: 0,
+    removed: 300,
+    unchanged: 0
+  };
+  const positions = new Map<string, { x: number; y: number }>();
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (const [change, group] of groups) {
+    group.forEach((node, index) => {
+      const angle = index * goldenAngle;
+      const radius = change === "unchanged"
+        ? 210 + Math.sqrt(index) * 34
+        : 42 + Math.sqrt(index) * 40;
+      positions.set(node.id, {
+        x: laneOffset[change] + Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
+      });
+    });
+  }
+  return positions;
 }
 
 function useThemeRevision(): number {
@@ -118,6 +236,56 @@ function useThemeRevision(): number {
   return revision;
 }
 
+function parseRgb(color: string): [number, number, number] | undefined {
+  const hex = color.match(/^#([\da-f]{3}|[\da-f]{6})$/i)?.[1];
+  if (hex) {
+    const normalized = hex.length === 3
+      ? [...hex].map((value) => `${value}${value}`).join("")
+      : hex;
+    return [
+      Number.parseInt(normalized.slice(0, 2), 16),
+      Number.parseInt(normalized.slice(2, 4), 16),
+      Number.parseInt(normalized.slice(4, 6), 16)
+    ];
+  }
+  const rgb = color.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  if (!rgb) return undefined;
+  return [
+    Number.parseFloat(rgb[1] ?? "0"),
+    Number.parseFloat(rgb[2] ?? "0"),
+    Number.parseFloat(rgb[3] ?? "0")
+  ];
+}
+
+function blendColor(background: string, foreground: string, foregroundRatio: number): string {
+  const backgroundRgb = parseRgb(background);
+  const foregroundRgb = parseRgb(foreground);
+  if (!backgroundRgb || !foregroundRgb) return foreground;
+  const values = backgroundRgb.map((value, index) =>
+    Math.round(value * (1 - foregroundRatio) + foregroundRgb[index]! * foregroundRatio));
+  return `rgb(${values[0]}, ${values[1]}, ${values[2]})`;
+}
+
+function isDarkColor(color: string): boolean {
+  const rgb = parseRgb(color);
+  if (!rgb) return true;
+  return (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000 < 145;
+}
+
+function comparisonColor(
+  background: string,
+  border: string,
+  dark: boolean,
+  context = false
+): ComparisonColor {
+  return {
+    background: blendColor(background, border, context
+      ? dark ? 0.18 : 0.1
+      : dark ? 0.26 : 0.14),
+    border
+  };
+}
+
 export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
   function VisNetworkCanvas({
     model,
@@ -125,6 +293,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     physicsRunning,
     forceLabels,
     hiddenCommunities,
+    hiddenChanges,
     onFocus,
     onOpenSource,
     onHover,
@@ -149,6 +318,61 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => cssColor("--vscode-descriptionForeground", "#60728b"),
       [themeRevision]
     );
+    const comparisonPalette = useMemo<ComparisonPalette>(() => {
+      const background = cssColor("--vscode-editor-background", "#08111f");
+      const dark = isDarkColor(background);
+      return {
+        added: comparisonColor(
+          background,
+          cssColor(
+            "--vscode-gitDecoration-addedResourceForeground",
+            dark ? "#56d364" : "#1a7f37"
+          ),
+          dark
+        ),
+        removed: comparisonColor(
+          background,
+          cssColor(
+            "--vscode-gitDecoration-deletedResourceForeground",
+            dark ? "#ff7b72" : "#cf222e"
+          ),
+          dark
+        ),
+        changed: comparisonColor(
+          background,
+          cssColor(
+            "--vscode-gitDecoration-modifiedResourceForeground",
+            dark ? "#d7a72b" : "#9a6700"
+          ),
+          dark
+        ),
+        unchanged: comparisonColor(
+          background,
+          cssColor("--vscode-descriptionForeground", dark ? "#8b949e" : "#656d76"),
+          dark,
+          true
+        )
+      };
+    }, [themeRevision]);
+    const comparisonMode = useMemo(
+      () => model.nodes.some((node) => node.change !== undefined)
+        || model.edges.some((edge) => edge.change !== undefined),
+      [model.edges, model.nodes]
+    );
+    const automaticLabelIds = useMemo(() => new Set(
+      comparisonMode
+        ? model.nodes
+          .filter((node) => node.change !== "unchanged")
+          .sort((left, right) =>
+            (right.degree ?? 0) - (left.degree ?? 0) || left.id.localeCompare(right.id))
+          .slice(0, 12)
+          .map((node) => node.id)
+        : []
+    ), [comparisonMode, model.nodes]);
+    const comparisonPositions = useMemo(
+      () => comparisonMode ? seedComparisonPositions(model.nodes) : new Map(),
+      [comparisonMode, model.nodes]
+    );
     const contrastBorder = useMemo(() => {
       const highContrast = document.body.classList.contains("vscode-high-contrast")
         || document.body.classList.contains("vscode-high-contrast-light");
@@ -157,24 +381,47 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         : undefined;
     }, [themeRevision]);
     const nodeData = useMemo(() => new DataSet<Node>(
-      model.nodes.map((node) => ({
-        id: node.id,
-        label: node.label,
-        color: graphNodeColor(model, node),
-        size: node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree),
-        font: {
-          color: "#eef5ff",
-          face: "system-ui",
-          size: (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
-        }
-      }))
+      model.nodes.map((node) => {
+        const baseSize = node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree);
+        const size = comparisonMode
+          ? node.change === "unchanged"
+            ? 7 + 5 * Math.sqrt((node.degree ?? 1) / maxDegree)
+            : 11 + 12 * Math.sqrt((node.degree ?? 1) / maxDegree)
+          : baseSize;
+        const position = comparisonPositions.get(node.id);
+        return {
+          id: node.id,
+          label: node.label,
+          color: graphNodeColor(model, node, undefined, fallbackComparisonPalette),
+          size,
+          ...(position ?? {}),
+          opacity: node.change === "unchanged" ? 0.58 : 1,
+          font: {
+            color: "#eef5ff",
+            face: "system-ui",
+            size: comparisonMode
+              ? automaticLabelIds.has(node.id) ? 12 : 0
+              : (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+          }
+        };
+      })
       // Styling changes are applied in place below so the Network, its paused
       // physics state, and its saved reset view survive theme and label changes.
-    ), [maxDegree, model]);
+    ), [
+      automaticLabelIds,
+      comparisonMode,
+      comparisonPositions,
+      maxDegree,
+      model
+    ]);
     const edgeData = useMemo(() => new DataSet<Edge>(
       model.edges.map((edge) => {
-        const appearance = edgeAppearance(edge.confidence);
-        const color = comparisonEdgeColor(edge.change, "#60728b");
+        const appearance = comparisonEdgeAppearance(
+          edge.change,
+          edge.confidence,
+          "#60728b",
+          fallbackComparisonPalette
+        );
         return {
           id: edge.id,
           from: edge.source,
@@ -182,10 +429,11 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
           dashes: appearance.dashes,
           width: appearance.width,
-          color: { color, opacity: edge.change ? 0.88 : appearance.opacity }
+          ...(comparisonMode ? { smooth: comparisonEdgeCurve(edge.change) } : {}),
+          color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
-    ), [model.edges]);
+    ), [comparisonMode, model.edges]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -194,7 +442,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       const network = new Network(container, {
         nodes: nodeData,
         edges: edgeData
-      }, options);
+      }, comparisonMode ? comparisonOptions : defaultOptions);
       network.setOptions({ physics: { enabled: physicsRunningRef.current } });
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
@@ -218,6 +466,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [
       edgeData,
       nodeData,
+      comparisonMode,
       onClear,
       onFocus,
       onHover,
@@ -236,7 +485,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     useEffect(() => {
       const hiddenNodes = new Set(
         model.nodes
-          .filter((node) => hiddenCommunities.has(node.community))
+          .filter((node) =>
+            hiddenCommunities.has(node.community)
+            || hiddenChanges.has(node.change ?? "unchanged"))
           .map((node) => node.id)
       );
       nodeData.update(model.nodes.map((node) => ({
@@ -247,7 +498,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: edge.id,
         hidden: hiddenNodes.has(edge.source) || hiddenNodes.has(edge.target)
       })));
-    }, [edgeData, hiddenCommunities, model.edges, model.nodes, nodeData]);
+    }, [
+      edgeData,
+      hiddenChanges,
+      hiddenCommunities,
+      model.edges,
+      model.nodes,
+      nodeData
+    ]);
 
     useEffect(() => {
       const network = networkRef.current;
@@ -258,17 +516,22 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       nodeData.update(model.nodes.map((node) => {
         const isFocused = node.id === focusedNodeId;
         const isVisible = !focusedNodeId || isFocused || connected.has(node.id);
+        const comparisonOpacity = node.change === "unchanged" ? 0.58 : 1;
         return {
           id: node.id,
-          opacity: isVisible ? 1 : 0.14,
+          opacity: !focusedNodeId
+            ? comparisonOpacity
+            : isVisible ? Math.max(comparisonOpacity, 0.72) : 0.08,
           borderWidth: isFocused ? 4 : contrastBorder ? 2.5 : 1.5,
-          color: graphNodeColor(model, node, contrastBorder),
+          color: graphNodeColor(model, node, contrastBorder, comparisonPalette),
           shadow: isFocused
             ? {
                 enabled: true,
-                color: node.color?.background
-                  ?? model.communities.find((item) => item.id === node.community)?.color
-                  ?? "#76b7ff",
+                color: node.change
+                  ? comparisonPalette[node.change].border
+                  : node.color?.background
+                    ?? model.communities.find((item) => item.id === node.community)?.color
+                    ?? "#76b7ff",
                 size: 24,
                 x: 0,
                 y: 0
@@ -277,17 +540,21 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       }));
       edgeData.update(model.edges.map((edge) => {
-        const appearance = edgeAppearance(edge.confidence);
-        const baseOpacity = edge.change ? 0.88 : appearance.opacity;
+        const appearance = comparisonEdgeAppearance(
+          edge.change,
+          edge.confidence,
+          edgeColor,
+          comparisonPalette
+        );
         const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
-        const color = comparisonEdgeColor(edge.change, edgeColor);
         return {
           id: edge.id,
+          dashes: appearance.dashes,
           color: {
-            color,
-            opacity: !focusedNodeId ? baseOpacity : connectedEdge ? 0.9 : 0.06
+            color: appearance.color,
+            opacity: !focusedNodeId ? appearance.opacity : connectedEdge ? 0.92 : 0.05
           },
-          width: connectedEdge ? Math.max(2.5, appearance.width) : appearance.width
+          width: connectedEdge ? Math.max(3, appearance.width) : appearance.width
         };
       }));
       if (focusedNodeId) {
@@ -303,6 +570,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       }
     }, [
       contrastBorder,
+      comparisonPalette,
       edgeColor,
       edgeData,
       focusedNodeId,
@@ -315,10 +583,25 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: node.id,
         font: {
           color: labelColor,
-          size: forceLabels || (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+          size: forceLabels
+            || node.id === focusedNodeId
+            || (comparisonMode
+              ? automaticLabelIds.has(node.id)
+              : (node.degree ?? 1) >= maxDegree * 0.15)
+            ? 12
+            : 0
         }
       })));
-    }, [forceLabels, labelColor, maxDegree, model.nodes, nodeData]);
+    }, [
+      automaticLabelIds,
+      comparisonMode,
+      focusedNodeId,
+      forceLabels,
+      labelColor,
+      maxDegree,
+      model.nodes,
+      nodeData
+    ]);
 
     useImperativeHandle(ref, () => ({
       fit() {

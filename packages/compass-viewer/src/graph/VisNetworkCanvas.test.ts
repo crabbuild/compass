@@ -32,4 +32,16 @@ describe("graphNodeColor", () => {
       border: "#ffffff"
     });
   });
+
+  it("uses separate soft fills and strong borders for comparison status colors", () => {
+    expect(graphNodeColor(model, { ...node, change: "changed" }, undefined, {
+      added: { background: "#dafbe1", border: "#1a7f37" },
+      removed: { background: "#ffebe9", border: "#cf222e" },
+      changed: { background: "#f7edcf", border: "#9a6700" },
+      unchanged: { background: "#e7e9eb", border: "#656d76" }
+    })).toEqual({
+      background: "#f7edcf",
+      border: "#9a6700"
+    });
+  });
 });

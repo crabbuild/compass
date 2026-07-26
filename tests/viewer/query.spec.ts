@@ -38,9 +38,19 @@ test("query modes use a full-width tab rail", async ({ page }) => {
   const tabs = page.getByRole("tablist", { name: "Query mode" });
   await expect(tabs).toBeVisible();
   expect((await tabs.boundingBox())?.width).toBeGreaterThan(500);
-  await expect(page.getByRole("tab", { name: "Ask the codebase" }))
-    .toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "CompassQL" }).click();
+  const natural = page.getByRole("tab", { name: "Ask the codebase" });
+  const cql = page.getByRole("tab", { name: "CompassQL" });
+  await expect(natural).toHaveAttribute("aria-selected", "true");
+  expect(await natural.evaluate((element) => getComputedStyle(element).borderTopColor))
+    .not.toBe("rgba(0, 0, 0, 0)");
+  expect(await cql.evaluate((element) => getComputedStyle(element).borderTopColor))
+    .toBe("rgba(0, 0, 0, 0)");
+  await cql.click();
+  await expect(cql).toHaveAttribute("aria-selected", "true");
+  expect(await cql.evaluate((element) => getComputedStyle(element).borderTopColor))
+    .not.toBe("rgba(0, 0, 0, 0)");
+  expect(await natural.evaluate((element) => getComputedStyle(element).borderTopColor))
+    .toBe("rgba(0, 0, 0, 0)");
   await expect(page.getByRole("textbox", { name: "CompassQL query" })).toBeVisible();
 });
 

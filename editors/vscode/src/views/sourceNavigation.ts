@@ -40,9 +40,14 @@ export async function openGraphSource(
   const start = source.startByte !== undefined
     ? document.positionAt(source.startByte)
     : new vscode.Position(Math.max(0, (source.startLine ?? 1) - 1), 0);
-  const end = source.endByte !== undefined
-    ? document.positionAt(source.endByte)
-    : new vscode.Position(Math.max(start.line, (source.endLine ?? source.startLine ?? 1) - 1), 0);
+  const recordedEndLine = source.endLine ?? source.startLine;
+  const end = recordedEndLine !== undefined
+    ? document.validatePosition(
+      new vscode.Position(Math.max(start.line, recordedEndLine), 0)
+    )
+    : source.endByte !== undefined
+      ? document.positionAt(source.endByte)
+      : start;
   editor.revealRange(new vscode.Range(start, end), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
   editor.selection = new vscode.Selection(start, end);
 }

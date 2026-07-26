@@ -71,11 +71,13 @@ function Delta({
   changed: number;
 }) {
   return (
-    <span>
+    <span className="history-delta-card">
       <strong>{label}</strong>
-      <i data-change="added">+{added}</i>
-      <i data-change="removed">−{removed}</i>
-      <i data-change="changed">~{changed}</i>
+      <span>
+        <i data-change="added"><small>Added</small> {added}</i>
+        <i data-change="removed"><small>Removed</small> {removed}</i>
+        <i data-change="changed"><small>Changed</small> {changed}</i>
+      </span>
     </span>
   );
 }
@@ -165,7 +167,7 @@ function addNode(
   node: GraphNode | undefined,
   change: "added" | "removed" | "changed"
 ): void {
-  if (node) nodes.set(node.id, { ...node, change, color: comparisonColor(change) });
+  if (node) nodes.set(node.id, { ...node, change });
 }
 
 function addContextNode(
@@ -178,17 +180,6 @@ function addContextNode(
   const node = current.get(id) ?? parent.get(id);
   if (node) nodes.set(id, {
     ...node,
-    change: "unchanged",
-    color: comparisonColor("unchanged")
+    change: "unchanged"
   });
-}
-
-function comparisonColor(change: "added" | "removed" | "changed" | "unchanged") {
-  const background = {
-    added: "#2ea043",
-    removed: "#f85149",
-    changed: "#d29922",
-    unchanged: "#6e7781"
-  }[change];
-  return { background, border: background };
 }

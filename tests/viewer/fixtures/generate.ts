@@ -516,7 +516,7 @@ window.acquireVsCodeApi=()=>({postMessage(message){
           old_path:"Cargo.toml",
           new_path:"Cargo.toml",
           status:"modified",
-          patch:"-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\""
+          patch:"@@ -3,3 +3,3 @@ [package]\\n name = \\"compass\\"\\n-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\"\\n edition = \\"2021\\"\\n"
         }],
         findings:[{summary:"Fixture comparison"}]
       }

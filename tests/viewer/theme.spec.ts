@@ -67,6 +67,34 @@ test("high-contrast themes use the VS Code contrast border", async ({ page }) =>
   await expect(page.locator(".history-commit-details")).toHaveCSS("border-top-width", "2px");
 });
 
+test("history comparison and source diffs follow the light VS Code theme", async ({ page }) => {
+  await page.goto("/history.html");
+  await page.getByRole("option", { name: /Revision B graph/i }).click();
+  await page.getByRole("button", { name: /Compare parent 1/i }).click();
+  await expect(page.locator(".history-source-diff")).toBeVisible();
+
+  await applyTheme(page, themeCases[0]);
+
+  await expect(page.locator(".history-comparison"))
+    .toHaveCSS("background-color", "rgb(244, 244, 244)");
+  await expect(page.locator(".history-comparison"))
+    .toHaveCSS("color", "rgb(32, 32, 32)");
+  await expect(page.locator(".history-source-diff"))
+    .toHaveCSS("background-color", "rgb(244, 244, 244)");
+  await expect(page.locator(".history-source-diff"))
+    .toHaveCSS("color-scheme", "light");
+  await expect(page.getByRole("button", { name: "Split" }))
+    .toHaveCSS("background-color", "rgb(244, 244, 244)");
+  await expect(page.getByRole("button", { name: "Split" }))
+    .toHaveCSS("color", "rgb(32, 32, 32)");
+  await expect(page.locator(".compass-graph-stage"))
+    .toHaveAttribute("data-comparison", "true");
+  await expect(page.locator(".compass-graph-stage"))
+    .toHaveCSS("background-color", "rgb(244, 244, 244)");
+  await expect(page.locator(".compass-graph-stage"))
+    .toHaveCSS("background-image", "none");
+});
+
 test("Architecture symbol titles use editor foreground in light themes", async ({ page }) => {
   await page.goto("/architecture.html");
   await applyTheme(page, themeCases[0]);

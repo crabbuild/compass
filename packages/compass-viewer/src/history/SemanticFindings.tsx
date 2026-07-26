@@ -1,5 +1,6 @@
 import { FileDiffIcon, SparklesIcon } from "lucide-react";
 import { Badge } from "../components/ui/badge";
+import { SourceChanges, type SourceChange } from "./SourceChanges";
 
 export function SemanticFindings({ report }: { report: unknown }) {
   const value = report && typeof report === "object"
@@ -17,19 +18,7 @@ export function SemanticFindings({ report }: { report: unknown }) {
         <Badge variant="secondary">{sourceChanges.length}</Badge>
       </div>
       {sourceChanges.length > 0 ? (
-        <div className="history-source-changes">
-          {sourceChanges.map((change, index) => (
-            <details key={`${change.new_path ?? change.old_path}-${index}`} open>
-              <summary>
-                <code>{change.new_path ?? change.old_path ?? "(unknown path)"}</code>
-                <span>{change.status ?? "changed"}</span>
-              </summary>
-              {change.patch
-                ? <pre>{change.patch}</pre>
-                : <p>Compass recorded this file change without an inline patch.</p>}
-            </details>
-          ))}
-        </div>
+        <SourceChanges changes={sourceChanges} />
       ) : (
         <p className="history-diff-empty">No source patch was reported for this comparison.</p>
       )}
@@ -59,15 +48,12 @@ export function SemanticFindings({ report }: { report: unknown }) {
   );
 }
 
-type SourceChange = {
-  old_path?: string;
-  new_path?: string;
-  status?: string;
-  patch?: string;
-};
-
 function isSourceChange(value: unknown): value is SourceChange {
-  return value !== null && typeof value === "object";
+  if (value === null || typeof value !== "object") return false;
+  const change = value as Record<string, unknown>;
+  return ["old_path", "new_path", "status", "patch"].every(
+    (key) => change[key] === undefined || typeof change[key] === "string"
+  );
 }
 
 function findingSummary(finding: unknown, index: number): string {
