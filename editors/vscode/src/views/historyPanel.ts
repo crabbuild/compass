@@ -526,7 +526,7 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   const nonce = randomUUID().replaceAll("-", "");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; style-src-attr 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>Compass Evolution</title></head>
 <body><div id="root"></div>
 <script nonce="${nonce}" src="${script}"></script></body></html>`;

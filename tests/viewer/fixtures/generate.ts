@@ -414,7 +414,7 @@ function historyHarness(
   graphs: Record<string, unknown>,
   detail: unknown
 ): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass history fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass history fixture</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self' 'unsafe-inline';"><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
 window.historyHostMessages=[];
