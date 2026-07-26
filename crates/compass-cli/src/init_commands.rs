@@ -9,7 +9,10 @@ use compass_files::{
 };
 
 use crate::ide_contract::{PROGRESS_SCHEMA, ProgressEvent, ProgressState, ProgressWriter};
-use crate::{Frontend, Outcome, command_build, command_build_with_file_progress, write_outcome};
+use crate::{
+    BuildOperation, Frontend, Outcome, command_build, command_build_with_file_progress,
+    write_outcome,
+};
 
 struct InitOptions {
     root: PathBuf,
@@ -17,6 +20,7 @@ struct InitOptions {
     excludes: Vec<String>,
     yes: bool,
     force: bool,
+    timing: bool,
 }
 
 pub fn run_init(
@@ -32,7 +36,9 @@ pub fn run_init(
         stdout,
         stderr,
         input_is_terminal,
-        |_, build_arguments| command_build(Frontend::Compass, build_arguments, false),
+        |_, build_arguments| {
+            command_build(Frontend::Compass, build_arguments, BuildOperation::Init)
+        },
     )
 }
 
@@ -110,7 +116,12 @@ pub fn run_init_jsonl<W: Write + Send>(
                     *slot = Some(error);
                 }
             };
-            command_build_with_file_progress(Frontend::Compass, build_arguments, false, &report)
+            command_build_with_file_progress(
+                Frontend::Compass,
+                build_arguments,
+                BuildOperation::Init,
+                &report,
+            )
         },
     );
     let _ = stderr.write_all(&human_stdout);
@@ -297,10 +308,11 @@ fn run_init_with_builder(
         let _ = writeln!(stderr, "error: {error}");
         return 1;
     }
-    let outcome = build(
-        &root,
-        &[root.to_string_lossy().into_owned(), "--force".to_owned()],
-    );
+    let mut build_arguments = vec![root.to_string_lossy().into_owned(), "--force".to_owned()];
+    if options.timing {
+        build_arguments.push("--timing".to_owned());
+    }
+    let outcome = build(&root, &build_arguments);
     if outcome.code != 0 {
         let _ = writeln!(
             stderr,
@@ -370,6 +382,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         excludes: Vec::new(),
         yes: false,
         force: false,
+        timing: false,
     };
     let mut root_seen = false;
     let mut index = 0;
@@ -377,6 +390,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         match args[index].as_str() {
             "--yes" => options.yes = true,
             "--force" => options.force = true,
+            "--timing" => options.timing = true,
             "--include" | "--exclude" => {
                 let name = args[index].clone();
                 index += 1;

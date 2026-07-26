@@ -145,12 +145,10 @@ pub struct BuildFileProgress {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BuildTimings {
     pub detect: Duration,
-    pub ast_extract: Duration,
-    pub build: Duration,
-    pub cluster: Duration,
-    pub analyze: Duration,
-    pub export: Duration,
-    pub write: Duration,
+    pub deterministic_extract: Duration,
+    pub graph_assembly: Duration,
+    pub program_analysis: Duration,
+    pub publish: Duration,
 }
 
 /// Validated semantic output to merge into one atomic graph build.
@@ -461,10 +459,12 @@ fn build_graph_inner(
 
     let cache_root = (output_root != root).then_some(output_root.as_path());
     let mut cache = Cache::new(&root, cache_root)?;
+    let program_started = Instant::now();
     let program = options
         .program_analysis
         .then(|| build_program(&root, &sources, options, &cache))
         .transpose()?;
+    timings.program_analysis = program_started.elapsed();
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
     if !options.force {
@@ -612,7 +612,9 @@ fn build_graph_inner(
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
     drop(source_text);
     finalize_ast_extraction(&mut resolved, &root, &ast_id_remap);
-    timings.ast_extract = stage_started.elapsed();
+    timings.deterministic_extract = stage_started
+        .elapsed()
+        .saturating_sub(timings.program_analysis);
     stage_started = Instant::now();
     if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
@@ -747,7 +749,7 @@ fn build_graph_inner(
         remove_if_exists(&output_dir.join("needs_update"))?;
         write_program_output(&output_dir, program.as_ref())?;
         guard.commit()?;
-        timings.write = stage_started.elapsed();
+        timings.publish = stage_started.elapsed();
         return Ok(BuildResult {
             root,
             output_dir,
@@ -790,7 +792,7 @@ fn build_graph_inner(
         Some(&root),
         tiebreaker,
     )?;
-    timings.build = stage_started.elapsed();
+    timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
@@ -886,7 +888,7 @@ fn build_graph_inner(
     } else {
         remap_communities_to_previous(&current, &previous)
     };
-    timings.cluster = stage_started.elapsed();
+    timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
     let commit = options.built_at_commit.clone().or_else(|| {
@@ -941,7 +943,7 @@ fn build_graph_inner(
                 "questions": questions,
             })
         };
-        timings.analyze = stage_started.elapsed();
+        timings.graph_assembly += stage_started.elapsed();
         stage_started = Instant::now();
         if options.purpose == BuildPurpose::Extract {
             write_json_atomic(output_dir.join(".compass_analysis.json"), &analysis, true)?;
@@ -1018,7 +1020,7 @@ fn build_graph_inner(
         &root,
         semantic,
     )?;
-    timings.export = stage_started.elapsed();
+    timings.publish = stage_started.elapsed();
     write_program_output(&output_dir, program.as_ref())?;
     save_output_stats(
         &output_dir,
@@ -2406,11 +2408,9 @@ mod tests {
         assert_eq!(cold.files_considered, 2);
         assert_eq!(cold.files_extracted, 2);
         assert!(cold.timings.detect > Duration::ZERO);
-        assert!(cold.timings.ast_extract > Duration::ZERO);
-        assert!(cold.timings.build > Duration::ZERO);
-        assert!(cold.timings.cluster > Duration::ZERO);
-        assert!(cold.timings.analyze > Duration::ZERO);
-        assert!(cold.timings.export > Duration::ZERO);
+        assert!(cold.timings.deterministic_extract > Duration::ZERO);
+        assert!(cold.timings.graph_assembly > Duration::ZERO);
+        assert!(cold.timings.publish > Duration::ZERO);
         assert!(cold.nodes > 0);
         assert!(cold.output_dir.join("graph.json").is_file());
         let overview_path = cold.output_dir.join("graph-overview.json");

@@ -17,7 +17,7 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
     fs::write(root.path().join("tools/task.rs"), "pub fn excluded() {}\n")?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["init", ".", "--include", "src", "--yes"])
+        .args(["init", ".", "--include", "src", "--yes", "--timing"])
         .current_dir(root.path())
         .env_remove("COMPASS_OUT")
         .output()?;
@@ -25,6 +25,16 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
         output.status.success(),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Compass init completed in "),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("[compass timing] deterministic extract:"),
+        "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(root.path().join(".compass/config.toml").is_file());
@@ -85,10 +95,20 @@ fn update_reuses_scope_and_invalid_config_never_widens_it() -> Result<(), Box<dy
         "pub fn newly_excluded() {}\n",
     )?;
     let update = Command::new(env!("CARGO_BIN_EXE_compass"))
-        .args(["update", "."])
+        .args(["update", ".", "--timing"])
         .current_dir(root.path())
         .output()?;
     assert!(update.status.success());
+    assert!(
+        String::from_utf8_lossy(&update.stdout).contains("Compass update completed in "),
+        "stdout: {}",
+        String::from_utf8_lossy(&update.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&update.stderr).contains("[compass timing] total:"),
+        "stderr: {}",
+        String::from_utf8_lossy(&update.stderr)
+    );
     let graph = GraphDocument::load(&root.path().join("compass-out/graph.json"))?;
     assert!(
         !graph
