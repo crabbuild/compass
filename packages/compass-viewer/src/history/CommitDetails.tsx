@@ -81,13 +81,27 @@ export function CommitDetails({
         </p>
       )}
       {changeCounts && (
-        <div className="history-change-counts" aria-label="Structural change counts">
-          <ChangeCount label="nodes" counts={changeCounts.counts.nodes} />
-          <ChangeCount label="edges" counts={changeCounts.counts.edges} />
-          <ChangeCount label="hyperedges" counts={changeCounts.counts.hyperedges} />
-        </div>
+        <>
+          <div className="history-change-counts" aria-label="Structural change counts">
+            <ChangeCount label="nodes" counts={changeCounts.counts.nodes} />
+            <ChangeCount label="edges" counts={changeCounts.counts.edges} />
+            <ChangeCount label="hyperedges" counts={changeCounts.counts.hyperedges} />
+          </div>
+          {isEmptyChangeCounts(changeCounts) && (
+            <p className="history-change-counts-help">
+              No structural changes from the first parent. Source or configuration changes may
+              still exist; compare the revisions to inspect them.
+            </p>
+          )}
+        </>
       )}
     </section>
+  );
+}
+
+function isEmptyChangeCounts(changeCounts: HistoryChangeCounts): boolean {
+  return Object.values(changeCounts.counts).every(
+    (counts) => counts.added === 0 && counts.removed === 0 && counts.changed === 0
   );
 }
 

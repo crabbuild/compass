@@ -493,7 +493,25 @@ window.acquireVsCodeApi=()=>({postMessage(message){
       fingerprint:"f-"+message.commit.slice(0,1),
       currentGraph:window.historyGraphs[message.commit],
       parentGraph:window.historyGraphs[message.parent],
-      semanticDiff:{findings:[{summary:"Fixture comparison"}]}
+      counts:{
+        schema:"compass.history.change_counts/1",
+        commit:message.commit,
+        parent:message.parent,
+        counts:{
+          nodes:{added:0,removed:0,changed:1},
+          edges:{added:0,removed:0,changed:0},
+          hyperedges:{added:0,removed:0,changed:0}
+        }
+      },
+      semanticDiff:{
+        source_changes:[{
+          old_path:"Cargo.toml",
+          new_path:"Cargo.toml",
+          status:"modified",
+          patch:"-version = \\"3.1.6\\"\\n+version = \\"3.1.7\\""
+        }],
+        findings:[{summary:"Fixture comparison"}]
+      }
     },"*"),0);
   } else if(message.type==="buildRevision") {
     const scenario=new URLSearchParams(window.location.search).get("build") || "cancel";

@@ -2586,6 +2586,13 @@ body.vscode-high-contrast-light .query-node-results {
   margin-top: 12px;
 }
 
+.history-change-counts-help {
+  margin: -0.15rem 0 0;
+  color: var(--vscode-descriptionForeground, #9aa7b7);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .history-commit-actions:empty {
   display: none;
 }
@@ -2621,6 +2628,201 @@ body.vscode-high-contrast-light .query-node-results {
 
 .history-change-counts strong {
   font-weight: 600;
+}
+
+.history-comparison,
+.history-diff-evidence {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  background: var(--vscode-editorWidget-background, var(--card));
+}
+
+.history-comparison {
+  box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+
+.history-comparison-heading {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 11px 12px 9px;
+}
+
+.history-comparison-heading > svg,
+.history-diff-heading > svg {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+
+.history-comparison-heading h2 {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.history-comparison-heading code {
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font-family: var(--compass-font-mono);
+}
+
+.history-comparison-heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.history-comparison-heading button:hover {
+  border-color: var(--vscode-focusBorder, var(--ring));
+  background: var(--workbench-hover);
+}
+
+.history-comparison-heading button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.history-comparison-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 10px 38px;
+  font: 10px/1.4 var(--compass-font-mono);
+}
+
+.history-comparison-legend > span {
+  display: inline-flex;
+  gap: 7px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--vscode-badge-background, var(--muted));
+}
+
+.history-comparison-legend strong {
+  color: var(--vscode-badge-foreground, var(--foreground));
+}
+
+.history-comparison-legend i {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.history-comparison-legend i[data-change="added"] {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.history-comparison-legend i[data-change="removed"] {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+.history-comparison-legend i[data-change="changed"] {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+
+.history-comparison-empty {
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px 10px 38px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-comparison-empty strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.history-diff-evidence {
+  padding: 11px 12px 12px;
+}
+
+.history-diff-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.history-diff-heading h2 {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.history-semantic-heading {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.history-source-changes,
+.history-finding-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.history-source-changes details,
+.history-finding-list article {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--vscode-textCodeBlock-background, var(--muted));
+}
+
+.history-source-changes summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--background));
+  font-size: 10px;
+}
+
+.history-source-changes summary code {
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font-family: var(--compass-font-mono);
+}
+
+.history-source-changes summary span {
+  color: var(--muted-foreground);
+  text-transform: capitalize;
+}
+
+.history-source-changes pre,
+.history-finding-list pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font: 10px/1.5 var(--compass-font-mono);
+  white-space: pre;
+}
+
+.history-source-changes p,
+.history-diff-empty {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.history-finding-list article > strong {
+  display: block;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
 }
 
 .history-graph-frame {
@@ -2679,6 +2881,10 @@ body.vscode-high-contrast .history-commit-details,
 body.vscode-high-contrast-light .history-commit-details,
 body.vscode-high-contrast .history-graph-frame,
 body.vscode-high-contrast-light .history-graph-frame,
+body.vscode-high-contrast .history-comparison,
+body.vscode-high-contrast-light .history-comparison,
+body.vscode-high-contrast .history-diff-evidence,
+body.vscode-high-contrast-light .history-diff-evidence,
 body.vscode-high-contrast .history-change-counts span,
 body.vscode-high-contrast-light .history-change-counts span {
   border-color: var(--vscode-contrastBorder, var(--ring));

@@ -88,6 +88,13 @@ function edgeAppearance(confidence: string | undefined) {
   return { dashes: true, width: 1, opacity: 0.35 };
 }
 
+function comparisonEdgeColor(change: string | undefined, fallback: string): string {
+  if (change === "added") return "#2ea043";
+  if (change === "removed") return "#f85149";
+  if (change === "changed") return "#d29922";
+  return fallback;
+}
+
 function useThemeRevision(): number {
   const [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -167,6 +174,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const edgeData = useMemo(() => new DataSet<Edge>(
       model.edges.map((edge) => {
         const appearance = edgeAppearance(edge.confidence);
+        const color = comparisonEdgeColor(edge.change, "#60728b");
         return {
           id: edge.id,
           from: edge.source,
@@ -174,7 +182,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
           dashes: appearance.dashes,
           width: appearance.width,
-          color: { color: "#60728b", opacity: appearance.opacity }
+          color: { color, opacity: edge.change ? 0.88 : appearance.opacity }
         };
       })
     ), [model.edges]);
@@ -270,12 +278,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       }));
       edgeData.update(model.edges.map((edge) => {
         const appearance = edgeAppearance(edge.confidence);
+        const baseOpacity = edge.change ? 0.88 : appearance.opacity;
         const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
+        const color = comparisonEdgeColor(edge.change, edgeColor);
         return {
           id: edge.id,
           color: {
-            color: edgeColor,
-            opacity: !focusedNodeId ? appearance.opacity : connectedEdge ? 0.9 : 0.06
+            color,
+            opacity: !focusedNodeId ? baseOpacity : connectedEdge ? 0.9 : 0.06
           },
           width: connectedEdge ? Math.max(2.5, appearance.width) : appearance.width
         };

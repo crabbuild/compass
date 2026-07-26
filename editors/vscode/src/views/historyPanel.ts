@@ -203,6 +203,7 @@ export async function openHistoryPanel(
 
     let command: ReturnType<RepositorySession["processes"]["startJsonl"]> | undefined;
     let buildAttempt: typeof activePanelBuild;
+    let reportBuildProgress: ((message: string) => void) | undefined;
     try {
       if (session.activeWriter) {
         throw new Error("Another Compass write operation started while choosing the history profile.");
@@ -215,7 +216,10 @@ export async function openHistoryPanel(
           firstParent: false,
           profile: selectedProfile
         }),
-        (event) => output.appendLine(`[history:${event.phase}] ${event.message}`)
+        (event) => {
+          output.appendLine(`[history:${event.phase}] ${event.message}`);
+          reportBuildProgress?.(event.message);
+        }
       );
       command = runningCommand;
       buildAttempt = { command: runningCommand, cancelled: false };
@@ -228,12 +232,17 @@ export async function openHistoryPanel(
           title: `Building Compass graph for ${commit.slice(0, 9)}`,
           cancellable: true
         },
-        async (_, token) => {
+        async (progress, token) => {
+          reportBuildProgress = (message) => progress.report({ message });
           token.onCancellationRequested(() => {
             if (buildAttempt) buildAttempt.cancelled = true;
             runningCommand.cancel();
           });
-          return runningCommand.completed;
+          try {
+            return await runningCommand.completed;
+          } finally {
+            reportBuildProgress = undefined;
+          }
         }
       );
       if (buildAttempt.cancelled || disposed) {
@@ -426,10 +435,11 @@ export async function openHistoryPanel(
         if (!currentEntry?.presentationAvailable || !parentEntry?.presentationAvailable) {
           throw new Error("Both revisions must have graph available before comparison.");
         }
-        const [current, parent, semanticDiff] = await Promise.all([
+        const [current, parent, semanticDiff, counts] = await Promise.all([
           revisions.load(message.commit, graphNodeLimit, historyIdentity(currentEntry)),
           revisions.load(message.parent, graphNodeLimit, historyIdentity(parentEntry)),
-          loadSemanticDiff(session, message.parent, message.commit)
+          loadSemanticDiff(session, message.parent, message.commit),
+          loadChangeCounts(session, message.commit, message.parent)
         ]);
         await postMessage({
           type: "comparison",
@@ -439,7 +449,8 @@ export async function openHistoryPanel(
           fingerprint: current.fingerprint,
           currentGraph: current.graph,
           parentGraph: parent.graph,
-          semanticDiff
+          semanticDiff,
+          counts
         });
       } else if (message?.type === "queryRevision" && typeof message.commit === "string") {
         const entry = timeline?.entries.find((candidate) => candidate.commit === message.commit);

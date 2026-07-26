@@ -11,6 +11,7 @@ import type {
 } from "../contracts/history";
 import { CommitDetails } from "./CommitDetails";
 import { CommitRail } from "./CommitRail";
+import { ComparisonOverlay, type GraphComparison } from "./ComparisonOverlay";
 import { SemanticFindings } from "./SemanticFindings";
 
 export type HistoryHost = {
@@ -28,6 +29,7 @@ export type HistoryHost = {
 export function HistoryWorkspace({
   timeline,
   graph,
+  comparison,
   semanticDiff,
   changeCounts,
   graphCommit,
@@ -35,6 +37,7 @@ export function HistoryWorkspace({
   communityLoading,
   communityError,
   onBackToOverview,
+  onExitComparison,
   selectedCommit,
   revisionLoadState,
   enableState,
@@ -47,6 +50,7 @@ export function HistoryWorkspace({
 }: {
   timeline: HistoryTimeline;
   graph?: GraphViewModel | undefined;
+  comparison?: (GraphComparison & { parent: string }) | undefined;
   semanticDiff?: unknown;
   changeCounts?: HistoryChangeCounts | undefined;
   graphCommit?: string | undefined;
@@ -54,6 +58,7 @@ export function HistoryWorkspace({
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
+  onExitComparison?: (() => void) | undefined;
   selectedCommit: string;
   revisionLoadState: "idle" | "loading" | "ready";
   enableState?: HistoryBuildState | undefined;
@@ -80,7 +85,8 @@ export function HistoryWorkspace({
       .map((entry) => entry.commit)),
     [timeline.entries]
   );
-  const visibleGraph = graph && graphCommit === selected?.commit ? graph : undefined;
+  const visibleGraph = comparison?.graph
+    ?? (graph && graphCommit === selected?.commit ? graph : undefined);
   const loadedEntries = timeline.entries.length;
   const countLabel = timeline.hasMore
     ? `${loadedEntries.toLocaleString()} loaded commits`
@@ -199,11 +205,28 @@ export function HistoryWorkspace({
               onQuery={() => host.queryRevision(selected.commit)}
               changeCounts={changeCounts?.commit === selected.commit ? changeCounts : undefined}
             />
+            {comparison && (
+              <ComparisonOverlay
+                comparison={comparison}
+                commit={selected.commit}
+                parent={comparison.parent}
+                onExit={() => onExitComparison?.()}
+              />
+            )}
+            {comparison && semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
             <div className="history-graph-frame">
-              {visibleGraph ? (
+              {comparison && comparison.graph.nodes.length === 0
+                && comparison.graph.edges.length === 0 ? (
+                <WorkspaceState
+                  kind="empty"
+                  title="No graph delta to draw"
+                  description="This comparison changes source or configuration without changing visible graph topology."
+                />
+              ) : visibleGraph ? (
                 <div className="history-graph-ready">
                   <div className="history-graph-status" role="status">
-                    Viewing graph for <span>{selected.commit.slice(0, 9)}</span>
+                    {comparison ? "Viewing changed subgraph for " : "Viewing graph for "}
+                    <span>{selected.commit.slice(0, 9)}</span>
                   </div>
                   <div className="history-graph-canvas">
                     <CompassGraph
@@ -283,7 +306,7 @@ export function HistoryWorkspace({
                 />
               )}
             </div>
-            {semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
+            {!comparison && semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
           </>
         )}
       </main>
