@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::SemanticDiffError;
+use crate::logic::LogicDeltaIndex;
 use crate::model::{
     AffectedConsumer, CLASSIFIER_VERSION, ChangeDirection, ChangedEntity, CollapsedGroup,
     Comparison, Compatibility, Completeness, Confidence, DependencyDelta, EntitySnapshot,
@@ -645,6 +646,7 @@ fn classify_graph_fallbacks(
     findings: &mut Vec<SemanticFinding>,
     limitations: &mut Vec<String>,
 ) -> Result<(), SemanticDiffError> {
+    let logic_deltas = LogicDeltaIndex::new(input.source_deltas);
     for node_id in input.changed_node_ids {
         if matched.contains(node_id) {
             continue;
@@ -694,19 +696,45 @@ fn classify_graph_fallbacks(
                 "Inspect the source-level signature change.",
             ));
         } else if old_body != new_body && (old_body.is_some() || new_body.is_some()) {
-            findings.push(base_finding(
-                FindingType::BehaviorChange,
-                node_id,
-                FindingOrigin::Direct,
-                format!("{node_id} implementation changed"),
-                "An implementation digest changed without supported semantic evidence.",
-                Compatibility::Indeterminate,
-                Confidence::Unknown,
-                old_body.map(|value| json!({"body_digest": value})),
-                new_body.map(|value| json!({"body_digest": value})),
-                node_evidence(old.as_ref().or(new.as_ref()), node_id, "implementation"),
-                "Inspect the body-only change.",
-            ));
+            if let Some(logic) = logic_deltas.for_nodes(old.as_ref(), new.as_ref()) {
+                let mut finding = base_finding(
+                    FindingType::BehaviorChange,
+                    node_id,
+                    FindingOrigin::Direct,
+                    format!("{node_id} control flow changed"),
+                    logic.explanation(),
+                    Compatibility::Behavioral,
+                    Confidence::Exact,
+                    Some(json!({
+                        "body_digest": old_body,
+                        "conditions": logic.removed_conditions,
+                    })),
+                    Some(json!({
+                        "body_digest": new_body,
+                        "conditions": logic.added_conditions,
+                    })),
+                    node_evidence(old.as_ref().or(new.as_ref()), node_id, "control_flow"),
+                    "Review the changed branch condition and its boundary behavior.",
+                );
+                finding
+                    .completeness
+                    .insert("control_flow".to_owned(), Completeness::Partial);
+                findings.push(finding);
+            } else {
+                findings.push(base_finding(
+                    FindingType::BehaviorChange,
+                    node_id,
+                    FindingOrigin::Direct,
+                    format!("{node_id} implementation changed"),
+                    "An implementation digest changed without supported semantic evidence.",
+                    Compatibility::Indeterminate,
+                    Confidence::Unknown,
+                    old_body.map(|value| json!({"body_digest": value})),
+                    new_body.map(|value| json!({"body_digest": value})),
+                    node_evidence(old.as_ref().or(new.as_ref()), node_id, "implementation"),
+                    "Inspect the body-only change.",
+                ));
+            }
         }
     }
     Ok(())

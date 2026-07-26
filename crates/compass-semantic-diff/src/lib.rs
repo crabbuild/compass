@@ -2,6 +2,7 @@
 
 mod engine;
 mod error;
+mod logic;
 mod model;
 mod verification;
 
