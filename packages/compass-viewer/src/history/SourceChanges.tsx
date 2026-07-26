@@ -19,42 +19,6 @@ export type SourceChange = {
 
 type DiffStyle = "split" | "unified";
 
-const DIFF_THEME_CSS = `:host {
-  --diffs-font-family: var(--compass-font-mono);
-  --diffs-font-size: 11px;
-  --diffs-line-height: 19px;
-  --diffs-gap-inline: 6px;
-  --diffs-min-number-column-width: 3ch;
-}
-
-[data-gutter],
-[data-content] {
-  display: contents !important;
-}
-
-[data-gutter] > * {
-  grid-column: 1;
-}
-
-[data-content] > * {
-  grid-column: 2;
-  min-width: 0;
-}
-
-[data-diff-type="split"][data-overflow="wrap"] [data-additions] [data-gutter] > * {
-  grid-column: 3;
-}
-
-[data-diff-type="split"][data-overflow="wrap"] [data-additions] [data-content] > * {
-  grid-column: 4;
-}
-
-[data-overflow="scroll"] [data-gutter] > * {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-}`;
-
 export function SourceChanges({ changes }: { changes: SourceChange[] }) {
   const [preferredStyle, setPreferredStyle] = useState<DiffStyle>("split");
   const [wrap, setWrap] = useState(false);
@@ -231,8 +195,7 @@ function SourcePatch({
           hunkSeparators: "metadata",
           lineDiffType: "word-alt",
           overflow: wrap ? "wrap" : "scroll",
-          disableFileHeader: true,
-          unsafeCSS: DIFF_THEME_CSS
+          disableFileHeader: true
         }}
       />
     </DiffErrorBoundary>
@@ -339,6 +302,11 @@ function useVscodeDiffTheme(): {
     );
     return {
       colorScheme: theme,
+      "--diffs-font-family": "var(--compass-font-mono)",
+      "--diffs-font-size": "11px",
+      "--diffs-line-height": "19px",
+      "--diffs-gap-inline": "6px",
+      "--diffs-min-number-column-width": "3ch",
       "--diffs-light-bg": background,
       "--diffs-dark-bg": background,
       "--diffs-light": foreground,
