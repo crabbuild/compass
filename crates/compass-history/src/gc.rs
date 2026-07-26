@@ -7,7 +7,6 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::config::now_millis;
-use crate::durable::remove_file_durable;
 use crate::store::{STORE_FORMAT_ROOT, reject_directory, reject_symlink};
 use crate::{HistoryError, HistoryQueue, HistoryStore, JobState, RealizationId};
 
@@ -248,21 +247,19 @@ impl HistoryStore {
     }
 
     fn delete_expired_jobs(&self, names: &[String]) -> Result<usize, HistoryError> {
-        let root = self.root.join("jobs");
-        let mut deleted = 0;
+        if names.is_empty() {
+            return Ok(0);
+        }
+        let queue = HistoryQueue::open_root_existing(&self.root)?.ok_or_else(|| {
+            HistoryError::OperationalState(
+                "history queue disappeared before job cleanup".to_owned(),
+            )
+        })?;
         for name in names {
             validate_cleanup_name(name, ".json")?;
-            let path = root.join(name);
-            if path.parent() != Some(root.as_path()) {
-                return Err(HistoryError::UnsafePath {
-                    path,
-                    reason: "job cleanup target escaped its root".to_owned(),
-                });
-            }
-            remove_file_durable(&path)?;
-            deleted += 1;
         }
-        Ok(deleted)
+        // Queue writers use the same lock across invalidation, deletion, and index rebuild.
+        queue.delete_job_records(names)
     }
 
     fn delete_expired_temp_directories(&self, names: &[String]) -> Result<usize, HistoryError> {

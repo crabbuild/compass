@@ -7,6 +7,8 @@ import type {
 
 export type HistoryOperation =
   | "Load history"
+  | "Load more history"
+  | "Enable history"
   | "Load graph"
   | "Build graph"
   | "Compare revisions"
@@ -18,6 +20,8 @@ export type HistoryOperation =
 export type HistoryWebviewMessage =
   | { type: "ready" }
   | { type: "retryTimeline" }
+  | { type: "loadMoreTimeline" }
+  | { type: "enableHistory" }
   | { type: "loadRevision"; commit: string }
   | { type: "buildRevision"; commit: string }
   | { type: "compare"; commit: string; parent: string }
@@ -39,8 +43,14 @@ export type HistoryWebviewMessage =
   };
 
 export type HistoryHostMessage =
-  | { type: "timeline"; timeline: HistoryTimeline; repositoryId: string }
+  | { type: "timeline"; timeline: HistoryTimeline; repositoryId: string; generation: number }
+  | { type: "timelinePage"; timeline: HistoryTimeline; repositoryId: string; generation: number }
+  | { type: "timelinePageError"; message: string; generation: number }
   | { type: "bootstrapError"; message: string }
+  | { type: "enableRunning" }
+  | { type: "enableSucceeded" }
+  | { type: "enableCancelled" }
+  | { type: "enableFailed"; message: string }
   | {
     type: "graph";
     commit: string;
@@ -90,6 +100,8 @@ export function historyOperationFor(message: unknown): HistoryOperation {
     : undefined;
   switch (type) {
     case "retryTimeline": return "Load history";
+    case "loadMoreTimeline": return "Load more history";
+    case "enableHistory": return "Enable history";
     case "loadRevision": return "Load graph";
     case "buildRevision": return "Build graph";
     case "compare": return "Compare revisions";

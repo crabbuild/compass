@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHistoryArgs } from "./buildArguments";
+import { buildEnableHistoryArgs, buildHistoryArgs } from "./buildArguments";
 
 describe("history build arguments", () => {
   it("supports configured, code-only, and inherited profiles with JSONL events", () => {
@@ -18,5 +18,14 @@ describe("history build arguments", () => {
       firstParent: false,
       profile: { kind: "code-only" }
     })).toContain("--code-only");
+  });
+
+  it("enables either a local code-only profile or the CLI default profile", () => {
+    expect(buildEnableHistoryArgs("code-only")).toEqual([
+      "history", "enable", "--code-only"
+    ]);
+    expect(buildEnableHistoryArgs("default")).toEqual([
+      "history", "enable"
+    ]);
   });
 });

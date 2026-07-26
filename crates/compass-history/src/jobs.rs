@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::{now_millis, operational_root};
-use crate::durable::{read_json_bounded, write_json_atomic};
+use crate::durable::{read_json_bounded, remove_file_durable, write_json_atomic};
 use crate::leases;
 use crate::store::{create_owner_dir, reject_directory, reject_symlink};
 use crate::validate::exceeds_limit;
@@ -86,8 +87,19 @@ pub struct JobRequest {
 pub struct HistoryQueue {
     root: PathBuf,
     jobs: PathBuf,
+    latest: PathBuf,
     leases: PathBuf,
     lock_root: PathBuf,
+}
+
+#[derive(Deserialize, Serialize)]
+struct LatestJobPointer {
+    id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct LatestIndexState {
+    complete: bool,
 }
 
 impl HistoryQueue {
@@ -95,17 +107,22 @@ impl HistoryQueue {
     pub fn open(root: &Path) -> Result<Self, HistoryError> {
         create_owner_dir(root)?;
         let jobs = root.join("jobs");
+        let latest = root.join("latest");
         let leases = root.join("leases");
         let lock_root = root.join("locks");
         create_owner_dir(&jobs)?;
+        create_owner_dir(&latest)?;
         create_owner_dir(&leases)?;
         create_owner_dir(&lock_root)?;
-        Ok(Self {
+        let queue = Self {
             root: root.to_path_buf(),
             jobs,
+            latest,
             leases,
             lock_root,
-        })
+        };
+        queue.ensure_latest_index()?;
+        Ok(queue)
     }
 
     pub fn for_repository(repository: &Repository) -> Result<Self, HistoryError> {
@@ -132,12 +149,19 @@ impl HistoryQueue {
         }
         let leases = root.join("leases");
         let lock_root = root.join("locks");
+        let latest = root.join("latest");
         reject_directory(&jobs)?;
+        if latest.exists() {
+            reject_directory(&latest)?;
+        } else {
+            reject_symlink(&latest, true)?;
+        }
         reject_directory(&leases)?;
         reject_directory(&lock_root)?;
         Ok(Some(Self {
             root,
             jobs,
+            latest,
             leases,
             lock_root,
         }))
@@ -206,7 +230,7 @@ impl HistoryQueue {
             created_at_millis,
             updated_at_millis: created_at_millis,
         };
-        write_json_atomic(&self.job_path(&id)?, &record)?;
+        self.write_job(&record)?;
         Ok(id)
     }
 
@@ -222,6 +246,58 @@ impl HistoryQueue {
     pub fn list(&self) -> Result<Vec<JobRecord>, HistoryError> {
         let _lock = QueueLock::acquire(&self.lock_root)?;
         self.list_unlocked()
+    }
+
+    /// Load only the latest indexed job for each requested commit.
+    ///
+    /// Legacy queues are scanned once to populate the derived index. Subsequent calls read one
+    /// pointer per requested commit, and a damaged or stale index is repaired from job records.
+    pub fn latest_for_commits(&self, commits: &[CommitId]) -> Result<Vec<JobRecord>, HistoryError> {
+        if self.latest_index_complete()
+            && let Some(jobs) = self.read_latest_index(commits)
+        {
+            return Ok(jobs);
+        }
+
+        let latest = self.list_unlocked()?.into_iter().fold(
+            HashMap::<CommitId, JobRecord>::new(),
+            |mut latest, job| {
+                let replace = latest
+                    .get(&job.commit)
+                    .is_none_or(|current| job_is_newer(&job, current));
+                if replace {
+                    latest.insert(job.commit.clone(), job);
+                }
+                latest
+            },
+        );
+        Ok(commits
+            .iter()
+            .filter_map(|commit| latest.get(commit).cloned())
+            .collect())
+    }
+
+    fn read_latest_index(&self, commits: &[CommitId]) -> Option<Vec<JobRecord>> {
+        if !self.latest.is_dir() {
+            return None;
+        }
+        let mut jobs = Vec::with_capacity(commits.len());
+        for commit in commits {
+            let path = self.latest.join(format!("{commit}.json"));
+            if !path.exists() {
+                if reject_symlink(&path, true).is_err() {
+                    return None;
+                }
+                continue;
+            }
+            let pointer: LatestJobPointer = read_json_bounded(&path).ok()?;
+            let job = self.get(&pointer.id).ok()??;
+            if &job.commit != commit {
+                return None;
+            }
+            jobs.push(job);
+        }
+        Some(jobs)
     }
 
     pub fn claim_next(&self) -> Result<Option<ClaimedJob>, HistoryError> {
@@ -244,7 +320,7 @@ impl HistoryQueue {
             job.lease_generation = lease.generation();
             job.updated_at_millis = now_millis();
             job.diagnostic = None;
-            write_json_atomic(&self.job_path(&job.id)?, &job)?;
+            self.write_job(&job)?;
             return Ok(Some(ClaimedJob { record: job, lease }));
         }
         Ok(None)
@@ -273,7 +349,7 @@ impl HistoryQueue {
         job.lease_generation = lease.generation();
         job.updated_at_millis = now_millis();
         job.diagnostic = None;
-        write_json_atomic(&self.job_path(&job.id)?, &job)?;
+        self.write_job(&job)?;
         Ok(Some(ClaimedJob { record: job, lease }))
     }
 
@@ -299,7 +375,7 @@ impl HistoryQueue {
         current.state = state;
         current.updated_at_millis = now_millis();
         current.diagnostic = diagnostic.map(redact_diagnostic);
-        write_json_atomic(&self.job_path(&current.id)?, &current)?;
+        self.write_job(&current)?;
         Ok(current)
     }
 
@@ -330,7 +406,7 @@ impl HistoryQueue {
             current.observed_preferred = observed_preferred;
         }
         current.updated_at_millis = now_millis();
-        write_json_atomic(&self.job_path(&current.id)?, &current)?;
+        self.write_job(&current)?;
         Ok(current)
     }
 
@@ -358,7 +434,7 @@ impl HistoryQueue {
         record.updated_at_millis = now_millis();
         record.diagnostic = diagnostic.map(redact_diagnostic);
         record.preferred = preferred;
-        write_json_atomic(&self.job_path(&record.id)?, &record)?;
+        self.write_job(&record)?;
         leases::release(&claimed.lease)?;
         Ok(record)
     }
@@ -418,6 +494,153 @@ impl HistoryQueue {
         Ok(job)
     }
 
+    fn write_job(&self, job: &JobRecord) -> Result<(), HistoryError> {
+        let restore_complete = self.invalidate_latest_index()?;
+        write_json_atomic(&self.job_path(&job.id)?, job)?;
+        // Latest-job pointers are a repairable cache. Once the authoritative record is durable,
+        // cache maintenance must not make a state transition appear to have failed or retain a
+        // worker lease that should have been released.
+        let _index_result = self.update_latest_index(job, restore_complete);
+        Ok(())
+    }
+
+    pub(crate) fn invalidate_latest_index(&self) -> Result<bool, HistoryError> {
+        let was_complete = self.latest_index_complete();
+        // This must become durable before the authoritative job write. If the process stops
+        // after that write but before its pointer is published, readers will scan job records
+        // instead of trusting a stale complete index.
+        self.write_latest_index_state(false)?;
+        Ok(was_complete)
+    }
+
+    fn update_latest_index(
+        &self,
+        job: &JobRecord,
+        restore_complete: bool,
+    ) -> Result<(), HistoryError> {
+        create_owner_dir(&self.latest)?;
+        let pointer_path = self.latest.join(format!("{}.json", job.commit));
+        let replace = if pointer_path.exists() {
+            let pointer: LatestJobPointer = read_json_bounded(&pointer_path)?;
+            self.get(&pointer.id)?
+                .is_none_or(|current| job_is_newer(job, &current))
+        } else {
+            reject_symlink(&pointer_path, true)?;
+            true
+        };
+        if replace {
+            write_json_atomic(&pointer_path, &LatestJobPointer { id: job.id.clone() })?;
+        }
+        if restore_complete {
+            self.write_latest_index_state(true)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ensure_latest_index(&self) -> Result<(), HistoryError> {
+        if self.latest_index_complete() {
+            return Ok(());
+        }
+        let _lock = QueueLock::acquire(&self.lock_root)?;
+        if self.latest_index_complete() {
+            return Ok(());
+        }
+        self.rebuild_latest_index_from_jobs()
+    }
+
+    pub(crate) fn delete_job_records(&self, names: &[String]) -> Result<usize, HistoryError> {
+        let paths = names
+            .iter()
+            .map(|name| {
+                let id = name.strip_suffix(".json").ok_or_else(|| {
+                    HistoryError::OperationalState("invalid job cleanup target".to_owned())
+                })?;
+                let path = self.job_path(id)?;
+                if path.file_name().and_then(|value| value.to_str()) != Some(name) {
+                    return Err(HistoryError::OperationalState(
+                        "invalid job cleanup target".to_owned(),
+                    ));
+                }
+                Ok(path)
+            })
+            .collect::<Result<Vec<_>, HistoryError>>()?;
+        let _lock = QueueLock::acquire(&self.lock_root)?;
+        self.invalidate_latest_index()?;
+        for path in &paths {
+            remove_file_durable(path)?;
+        }
+        self.rebuild_latest_index_from_jobs()?;
+        Ok(paths.len())
+    }
+
+    fn rebuild_latest_index_from_jobs(&self) -> Result<(), HistoryError> {
+        let latest = self.list_unlocked()?.into_iter().fold(
+            HashMap::<CommitId, JobRecord>::new(),
+            |mut latest, job| {
+                let replace = latest
+                    .get(&job.commit)
+                    .is_none_or(|current| job_is_newer(&job, current));
+                if replace {
+                    latest.insert(job.commit.clone(), job);
+                }
+                latest
+            },
+        );
+        self.rebuild_latest_index(&latest)
+    }
+
+    fn rebuild_latest_index(
+        &self,
+        latest: &HashMap<CommitId, JobRecord>,
+    ) -> Result<(), HistoryError> {
+        self.write_latest_index_state(false)?;
+        create_owner_dir(&self.latest)?;
+        for job in latest.values() {
+            write_json_atomic(
+                &self.latest.join(format!("{}.json", job.commit)),
+                &LatestJobPointer { id: job.id.clone() },
+            )?;
+        }
+        for entry in fs::read_dir(&self.latest)
+            .map_err(|source| crate::error::io_error(&self.latest, source))?
+        {
+            let entry = entry.map_err(|source| crate::error::io_error(&self.latest, source))?;
+            let path = entry.path();
+            let Some(commit) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<CommitId>().ok())
+            else {
+                continue;
+            };
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+                && !latest.contains_key(&commit)
+            {
+                remove_file_durable(&path)?;
+            }
+        }
+        self.write_latest_index_state(true)
+    }
+
+    fn latest_index_complete(&self) -> bool {
+        let path = self.latest_index_state_path();
+        path.exists()
+            && read_json_bounded::<LatestIndexState>(&path).is_ok_and(|state| state.complete)
+    }
+
+    fn write_latest_index_state(&self, complete: bool) -> Result<(), HistoryError> {
+        write_json_atomic(
+            &self.latest_index_state_path(),
+            &LatestIndexState { complete },
+        )
+    }
+
+    fn latest_index_state_path(&self) -> PathBuf {
+        self.root.join("latest-index.json")
+    }
+
     fn job_path(&self, id: &str) -> Result<PathBuf, HistoryError> {
         if id.len() != 64
             || !id
@@ -433,6 +656,18 @@ impl HistoryQueue {
         self.leases
             .join(format!("{}-{}.lease", job.commit, job.profile_digest))
     }
+}
+
+fn job_is_newer(candidate: &JobRecord, current: &JobRecord) -> bool {
+    (
+        candidate.updated_at_millis,
+        candidate.created_at_millis,
+        &candidate.id,
+    ) >= (
+        current.updated_at_millis,
+        current.created_at_millis,
+        &current.id,
+    )
 }
 
 fn valid_transition(old: JobState, new: JobState) -> bool {

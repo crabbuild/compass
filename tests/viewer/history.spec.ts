@@ -173,3 +173,59 @@ test("history bootstrap failure offers a working retry", async ({ page }) => {
     return messages.filter((message) => message.type === "retryTimeline").length;
   })).toBe(1);
 });
+
+test("timeline loads another cached page on demand", async ({ page }) => {
+  await page.goto("/history.html?pagination=true");
+  await expect(page.getByText("2 loaded commits")).toBeVisible();
+  await page.getByRole("button", { name: "Load more commits" }).click();
+  await expect(page.getByText("3 reachable commits")).toBeVisible();
+  await expect(page.getByRole("option", { name: /Revision C needs build/i })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.filter((message) => message.type === "loadMoreTimeline").length;
+  })).toBe(1);
+});
+
+test("a late commit page cannot overwrite a newer timeline generation", async ({ page }) => {
+  await page.goto("/history.html?pagination=true");
+  await page.getByRole("button", { name: "Load more commits" }).click();
+  await page.evaluate(() => {
+    const fixture = window as typeof window & {
+      fixtureTimeline: { entries: unknown[] };
+      historyGeneration: number;
+      emitHistoryMessage(message: unknown): void;
+    };
+    fixture.historyGeneration = 2;
+    fixture.emitHistoryMessage({
+      type: "timeline",
+      repositoryId: "fixture",
+      generation: 2,
+      timeline: {
+        ...fixture.fixtureTimeline,
+        totalEntries: null,
+        hasMore: true,
+        nextCursor: "new-cursor",
+        entries: fixture.fixtureTimeline.entries.slice(0, 2)
+      }
+    });
+  });
+  await page.waitForTimeout(120);
+  await expect(page.getByRole("option", { name: /Revision C needs build/i })).toHaveCount(0);
+  await expect(page.getByText("2 loaded commits")).toBeVisible();
+});
+
+test("disabled history can be enabled from Codebase Evolution", async ({ page }) => {
+  await page.goto("/history.html?historyEnabled=false");
+  await expect(page.getByText("Revision graphs are not enabled")).toBeVisible();
+  await page.getByRole("button", { name: "Enable revision graphs" }).click();
+  await expect(page.getByRole("status")).toContainText("Enabling revision graphs");
+  await expect(page.getByText(/Viewing graph for aaaaaaaaa/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.filter((message) => message.type === "enableHistory").length;
+  })).toBe(1);
+});

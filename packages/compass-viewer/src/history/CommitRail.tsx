@@ -7,10 +7,16 @@ const ROW_HEIGHT = 68;
 export function CommitRail({
   entries,
   selected,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onSelect
 }: {
   entries: HistoryEntry[];
   selected: string;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?(): void;
   onSelect(commit: string): void;
 }) {
   const [scrollTop, setScrollTop] = useState(0);
@@ -35,7 +41,17 @@ export function CommitRail({
       aria-label="Git commit timeline"
       tabIndex={0}
       className="history-rail"
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => {
+        const rail = event.currentTarget;
+        setScrollTop(rail.scrollTop);
+        if (
+          hasMore
+          && !loadingMore
+          && rail.scrollHeight - rail.scrollTop - rail.clientHeight <= ROW_HEIGHT * 5
+        ) {
+          onLoadMore?.();
+        }
+      }}
       onKeyDown={(event) => {
         const index = entries.findIndex((entry) => entry.commit === selected);
         const next = entries[index + 1];

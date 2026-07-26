@@ -136,8 +136,9 @@ fn cleanup_respects_age_terminal_state_and_live_leases() -> Result<(), Box<dyn s
     let history = HistoryStore::create(&fixture.repository)?;
     let queue = HistoryQueue::for_repository(&fixture.repository)?;
     let profile = BuildProfile::default();
+    let old_commit = "1111111111111111111111111111111111111111".parse()?;
     let old_terminal = queue.enqueue(JobRequest {
-        commit: "1111111111111111111111111111111111111111".parse()?,
+        commit: old_commit,
         profile: profile.clone(),
     })?;
     let claimed = queue.claim_or_join(&old_terminal)?.ok_or("claim")?;
@@ -171,6 +172,15 @@ fn cleanup_respects_age_terminal_state_and_live_leases() -> Result<(), Box<dyn s
     assert!(queue.get(&old_terminal)?.is_none());
     assert!(queue.get(&young_terminal)?.is_some());
     assert!(queue.get(&active)?.is_some());
+    assert!(
+        !queue
+            .root()
+            .join("latest/1111111111111111111111111111111111111111.json")
+            .exists()
+    );
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(queue.root().join("latest-index.json"))?)?;
+    assert_eq!(index["complete"], true);
     assert!(!stale.exists());
     Ok(())
 }

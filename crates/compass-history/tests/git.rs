@@ -111,6 +111,45 @@ fn reachable_commits_are_parent_first_and_can_follow_only_first_parents()
 }
 
 #[test]
+fn timeline_commits_preserve_requested_order_in_one_batch() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("fixture"), "one")?;
+    git(directory.path(), &["add", "fixture"])?;
+    git(
+        directory.path(),
+        &["commit", "--quiet", "-m", "first subject"],
+    )?;
+    let repository = Repository::discover(directory.path())?;
+    let first = repository.resolve("HEAD")?;
+    std::fs::write(directory.path().join("fixture"), "two")?;
+    git(directory.path(), &["add", "fixture"])?;
+    git(
+        directory.path(),
+        &["commit", "--quiet", "-m", "second subject"],
+    )?;
+    let second = repository.resolve("HEAD")?;
+
+    let timeline = repository.timeline_commits(&[second.clone(), first.clone()])?;
+
+    assert_eq!(
+        timeline
+            .iter()
+            .map(|entry| (&entry.commit, entry.subject.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(&second, "second subject"), (&first, "first subject")]
+    );
+    assert_eq!(timeline[0].parents, vec![first]);
+    Ok(())
+}
+
+#[test]
 fn sha256_repository_ids_are_accepted_when_git_supports_them()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

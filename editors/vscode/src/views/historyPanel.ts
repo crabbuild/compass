@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { HistoryTimeline } from "@compass/viewer";
-import { buildHistoryArgs } from "../history/buildArguments";
+import { buildEnableHistoryArgs, buildHistoryArgs } from "../history/buildArguments";
 import { loadSemanticDiff } from "../history/diffClient";
 import { loadChangeCounts } from "../history/changeCountsClient";
 import { RevisionStore } from "../history/revisionStore";
@@ -13,6 +13,8 @@ import {
 import type { RepositorySession } from "../workspace/repositorySession";
 import { openGraphSource } from "./sourceNavigation";
 import { openQueryPanel } from "./queryPanel";
+
+const TIMELINE_PAGE_SIZE = 100;
 
 export async function openHistoryPanel(
   context: vscode.ExtensionContext,
@@ -37,6 +39,8 @@ export async function openHistoryPanel(
   );
   let timeline: HistoryTimeline | undefined;
   let initialization: Promise<void> | undefined;
+  let timelinePageLoading = false;
+  let timelineGeneration = 0;
   const graphNodeLimit = vscode.workspace
     .getConfiguration("compass")
     .get("graphNodeLimit", 5000);
@@ -52,17 +56,90 @@ export async function openHistoryPanel(
     initialization ??= revisions.initialize();
     return initialization;
   };
+  const pagedTimeline = session.capabilities?.features.history_timeline_pagination === true;
   const sendTimeline = async (): Promise<void> => {
+    const generation = ++timelineGeneration;
     try {
       await ensureInitialized();
-      timeline = await loadTimeline(session);
-      await postMessage({ type: "timeline", timeline, repositoryId: session.id });
+      const loaded = await loadTimeline(
+        session,
+        pagedTimeline ? { limit: TIMELINE_PAGE_SIZE } : undefined
+      );
+      if (generation !== timelineGeneration) return;
+      timeline = loaded;
+      await postMessage({ type: "timeline", timeline, repositoryId: session.id, generation });
     } catch (error) {
+      if (generation !== timelineGeneration) return;
       initialization = undefined;
       const detail = error instanceof Error ? error.message : String(error);
       output.appendLine(`[history:error] ${detail}`);
       await postMessage({ type: "bootstrapError", message: detail });
     }
+  };
+  const sendMoreTimeline = async (): Promise<void> => {
+    if (timelinePageLoading || !pagedTimeline || !timeline?.hasMore) return;
+    const cursor = timeline.nextCursor ?? timeline.entries.at(-1)?.commit;
+    if (!cursor) return;
+    const generation = timelineGeneration;
+    timelinePageLoading = true;
+    try {
+      const page = await loadTimeline(session, {
+        limit: TIMELINE_PAGE_SIZE,
+        after: cursor
+      });
+      if (generation !== timelineGeneration || !timeline) return;
+      const loaded = new Set(timeline.entries.map((entry) => entry.commit));
+      timeline = {
+        ...page,
+        entries: [
+          ...timeline.entries,
+          ...page.entries.filter((entry) => !loaded.has(entry.commit))
+        ]
+      };
+      await postMessage({
+        type: "timelinePage",
+        timeline: page,
+        repositoryId: session.id,
+        generation
+      });
+    } catch (error) {
+      if (generation !== timelineGeneration) return;
+      const detail = error instanceof Error ? error.message : String(error);
+      output.appendLine(`[history:error] ${detail}`);
+      if (detail.includes("snapshot changed") || detail.includes("cursor is invalid")) {
+        await sendTimeline();
+      } else {
+        await postMessage({ type: "timelinePageError", message: detail, generation });
+      }
+    } finally {
+      timelinePageLoading = false;
+    }
+  };
+  const refreshTimelineEntry = async (commit: string): Promise<void> => {
+    const generation = ++timelineGeneration;
+    let refreshedTimeline: HistoryTimeline;
+    if (!pagedTimeline) {
+      refreshedTimeline = await loadTimeline(session);
+    } else {
+      const refreshed = await loadTimeline(session, {
+        limit: 1,
+        revision: commit
+      });
+      const entry = refreshed.entries.find((candidate) => candidate.commit === commit);
+      if (timeline && entry) {
+        refreshedTimeline = {
+          ...timeline,
+          historyEnabled: refreshed.historyEnabled,
+          entries: timeline.entries.map((candidate) =>
+            candidate.commit === commit ? entry : candidate)
+        };
+      } else {
+        refreshedTimeline = refreshed;
+      }
+    }
+    if (generation !== timelineGeneration) return;
+    timeline = refreshedTimeline;
+    await postMessage({ type: "timeline", timeline, repositoryId: session.id, generation });
   };
   panel.onDidDispose(() => {
     disposed = true;
@@ -168,9 +245,17 @@ export async function openHistoryPanel(
       if (result.code !== 0) {
         throw new Error(result.stderr || `Compass exited with ${result.code}`);
       }
-      timeline = await loadTimeline(session);
-      await postMessage({ type: "timeline", timeline, repositoryId: session.id });
       await postMessage({ type: "buildSucceeded", commit });
+      try {
+        await refreshTimelineEntry(commit);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        output.appendLine(`[history:error] ${detail}`);
+        await postMessage({
+          type: "bootstrapError",
+          message: `The revision graph was built, but commit history could not be refreshed: ${detail}`
+        });
+      }
     } catch (error) {
       if (command && !buildAttempt?.cancelled) command.cancel();
       if (buildAttempt?.cancelled || disposed) {
@@ -193,10 +278,99 @@ export async function openHistoryPanel(
       }
     }
   };
+  const enableHistory = async (): Promise<void> => {
+    if (session.activeWriter) {
+      await postMessage({
+        type: "enableFailed",
+        message: "Another Compass write operation is already running."
+      });
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      [
+        {
+          label: "Code only",
+          description: "Recommended · local AST and inferred evidence; no model credentials",
+          value: "code-only" as const
+        },
+        {
+          label: "Compass default profile",
+          description: "Let the CLI resolve its configured provider; may be local or non-semantic",
+          value: "default" as const
+        }
+      ],
+      { title: "Enable Compass revision graphs" }
+    );
+    if (disposed) return;
+    if (!picked) {
+      await postMessage({ type: "enableCancelled" });
+      return;
+    }
+    if (session.activeWriter) {
+      await postMessage({
+        type: "enableFailed",
+        message: "Another Compass write operation started while choosing the history profile."
+      });
+      return;
+    }
+    const args = buildEnableHistoryArgs(picked.value);
+    const command = session.processes.startCommand(session.root, args);
+    let cancelled = false;
+    session.activeWriter = command;
+    await postMessage({ type: "enableRunning" });
+    try {
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Enabling Compass revision graphs",
+          cancellable: true
+        },
+        async (_, token) => {
+          token.onCancellationRequested(() => {
+            cancelled = true;
+            command.cancel();
+          });
+          output.appendLine(`> compass ${args.join(" ")}`);
+          return command.completed;
+        }
+      );
+      output.append(result.stdout);
+      output.append(result.stderr);
+      if (result.code !== 0) {
+        if (cancelled || disposed) {
+          await postMessage({ type: "enableCancelled" });
+          return;
+        }
+        throw new Error(result.stderr || `Compass exited with ${result.code}`);
+      }
+      if (disposed) return;
+      await postMessage({ type: "enableSucceeded" });
+      await sendTimeline();
+    } catch (error) {
+      if (cancelled || disposed) {
+        await postMessage({ type: "enableCancelled" });
+      } else {
+        const detail = error instanceof Error ? error.message : String(error);
+        output.appendLine(`[history:error] ${detail}`);
+        await postMessage({
+          type: "enableFailed",
+          message: conciseBuildError(detail)
+        });
+      }
+    } finally {
+      if (session.activeWriter?.operationId === command.operationId) {
+        session.activeWriter = undefined;
+      }
+    }
+  };
   panel.webview.onDidReceiveMessage(async (message) => {
     try {
       if (message?.type === "ready" || message?.type === "retryTimeline") {
         await sendTimeline();
+      } else if (message?.type === "loadMoreTimeline") {
+        await sendMoreTimeline();
+      } else if (message?.type === "enableHistory") {
+        await enableHistory();
       } else if (message?.type === "loadRevision" && typeof message.commit === "string") {
         const entry = timeline?.entries.find((candidate) => candidate.commit === message.commit);
         if (!entry) throw new Error("Reload commit history before opening this revision.");

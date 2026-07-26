@@ -3,8 +3,10 @@ import type { HistoryHostMessage } from "./panelMessages";
 import { historyOperationFor } from "./panelMessages";
 
 describe("history panel messages", () => {
-  it("labels retryTimeline as history loading", () => {
+  it("labels timeline and enablement operations", () => {
     expect(historyOperationFor({ type: "retryTimeline" })).toBe("Load history");
+    expect(historyOperationFor({ type: "loadMoreTimeline" })).toBe("Load more history");
+    expect(historyOperationFor({ type: "enableHistory" })).toBe("Enable history");
   });
 
   it("supports recoverable bootstrap failures", () => {

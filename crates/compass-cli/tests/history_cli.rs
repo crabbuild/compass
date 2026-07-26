@@ -121,6 +121,84 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
 }
 
 #[test]
+fn timeline_pages_newest_commits_with_a_stable_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    for subject in ["first", "second", "third"] {
+        std::fs::write(directory.path().join("fixture"), subject)?;
+        git(directory.path(), &["add", "fixture"])?;
+        git(directory.path(), &["commit", "--quiet", "-m", subject])?;
+    }
+    let compass = env!("CARGO_BIN_EXE_compass");
+    let first_page = run(
+        compass,
+        directory.path(),
+        &["history", "timeline", "--limit", "2", "--format=json"],
+    )?;
+    assert!(
+        first_page.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first_page.stderr)
+    );
+    let first_page: serde_json::Value = serde_json::from_slice(&first_page.stdout)?;
+    assert_eq!(first_page["totalEntries"], serde_json::Value::Null);
+    assert_eq!(first_page["hasMore"], true);
+    assert_eq!(first_page["entries"][0]["subject"], "third");
+    assert_eq!(first_page["entries"][1]["subject"], "second");
+    let cursor = first_page["nextCursor"].as_str().ok_or("missing cursor")?;
+
+    let second_page = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "timeline",
+            "--limit",
+            "2",
+            "--after",
+            cursor,
+            "--format=json",
+        ],
+    )?;
+    assert!(second_page.status.success());
+    let second_page: serde_json::Value = serde_json::from_slice(&second_page.stdout)?;
+    assert_eq!(second_page["totalEntries"], 3);
+    assert_eq!(second_page["hasMore"], false);
+    assert_eq!(second_page["nextCursor"], serde_json::Value::Null);
+    assert_eq!(second_page["entries"].as_array().map(Vec::len), Some(1));
+    assert_eq!(second_page["entries"][0]["subject"], "first");
+
+    std::fs::write(directory.path().join("fixture"), "fourth")?;
+    git(directory.path(), &["add", "fixture"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "fourth"])?;
+    let stale_page = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "timeline",
+            "--limit",
+            "2",
+            "--after",
+            cursor,
+            "--format=json",
+        ],
+    )?;
+    assert_eq!(stale_page.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&stale_page.stderr).contains("snapshot changed"),
+        "{}",
+        String::from_utf8_lossy(&stale_page.stderr)
+    );
+    Ok(())
+}
+
+#[test]
 fn enable_disable_are_explicit_idempotent_and_invalid_profiles_roll_back()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
