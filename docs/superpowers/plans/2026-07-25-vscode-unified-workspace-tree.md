@@ -126,8 +126,9 @@ Keep it expanded and use the repository basename as the child description:
 }
 ```
 
-Writer rows are status-only with `sync~spin`. Watch rows execute
-`compass.toggleWatch` with the exact repository ID.
+Writer and watch rows are status-only. Writer rows use `sync~spin`; watcher rows
+use `eye`. Start/stop control remains solely in Maintain so no command appears
+twice.
 
 - [ ] **Step 3: Implement state-specific recovery and unique workflow groups**
 
@@ -264,6 +265,7 @@ export class WorkspaceTree implements vscode.TreeDataProvider<TreeNode> {
 
 - Adds command: `compass.refreshWorkspace`.
 - Removes contributed view: `compass.operations`.
+- Restricts Initialize and Update repository pickers to relevant graph states.
 
 - [ ] **Step 1: Create the single Workspace provider**
 
@@ -322,7 +324,10 @@ if (fromEditor) return fromEditor;
 ```
 
 This gives maintenance and recovery actions the same context resolution as
-Explore commands.
+Explore commands. Extend `pickRepository` with an optional state predicate and
+use it to limit Initialize to `not-materialized` repositories and Update to
+`available` or `failed` repositories. Apply explicit ID, active editor, only
+candidate, and filtered picker resolution in that order.
 
 - [ ] **Step 4: Contribute one view and one title command**
 

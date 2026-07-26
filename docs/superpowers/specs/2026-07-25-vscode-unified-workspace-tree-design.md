@@ -115,8 +115,8 @@ action appears after repository status. Codebase evolution remains available.
 ### Watch active
 
 Active operations appears expanded with Watching for changes. Maintain changes
-its watch action to Stop watching. Selecting the active watcher also retains the
-existing stop behavior.
+its watch action to Stop watching. Active-operation rows are status-only so the
+start/stop workflow appears exactly once.
 
 ### CLI missing or incompatible
 
@@ -216,6 +216,8 @@ No new persistent repository selector is introduced.
 - Tooltips explain failures and recovery actions without crowding the tree.
 - Commands validate current state when invoked and do not trust potentially stale
   tree presentation.
+- Initialization and retry actions restrict repository selection to repositories
+  in the corresponding missing or failed state.
 - The refresh action is explicitly read-only.
 
 ## Documentation
