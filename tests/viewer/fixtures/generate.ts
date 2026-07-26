@@ -219,6 +219,14 @@ window.acquireVsCodeApi=()=>({
   setState(state){window.webviewState=state},
   postMessage(message){
     window.hostMessages.push(message);
+    if(new URLSearchParams(window.location.search).has("large") && message.type==="ready") {
+      setTimeout(()=>window.postMessage({
+        type:"graphLoadStatus",
+        mode:"large",
+        graphBytes:44275915,
+        phase:"exporting"
+      },"*"),0);
+    }
     if(new URLSearchParams(window.location.search).has("error") && (message.type==="ready" || message.type==="retry")) {
       setTimeout(()=>window.postMessage({type:"error",message:"The graph export could not be read."},"*"),0);
     }

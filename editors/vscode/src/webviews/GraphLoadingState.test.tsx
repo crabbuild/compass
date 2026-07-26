@@ -54,6 +54,25 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("Tracing callees");
   });
 
+  it("explains when a large graph needs one-time preparation", () => {
+    const markup = renderToStaticMarkup(
+      <GraphLoadingState
+        state={{ kind: "loading" }}
+        loadingCopy={{
+          eyebrow: "Compass code graph · 42.2 MB",
+          title: "Preparing a large code graph",
+          steps: ["Reading graph", "Building overview", "Opening explorer"]
+        }}
+        onRetry={vi.fn()}
+        onShowOutput={vi.fn()}
+      />
+    );
+
+    expect(markup).toContain("Preparing a large code graph");
+    expect(markup).toContain("42.2 MB");
+    expect(markup).toContain("Building overview");
+  });
+
   it("renders a compact Architecture loader with a layout skeleton", () => {
     const markup = renderToStaticMarkup(
       <GraphLoadingState

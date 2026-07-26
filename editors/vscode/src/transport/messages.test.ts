@@ -39,4 +39,19 @@ describe("community graph messages", () => {
       message: "failed"
     }).success).toBe(false);
   });
+
+  it("accepts large graph preparation progress", () => {
+    expect(HostToGraphMessageSchema.safeParse({
+      type: "graphLoadStatus",
+      mode: "large",
+      graphBytes: 44_275_915,
+      phase: "exporting"
+    }).success).toBe(true);
+    expect(HostToGraphMessageSchema.safeParse({
+      type: "graphLoadStatus",
+      mode: "large",
+      graphBytes: -1,
+      phase: "exporting"
+    }).success).toBe(false);
+  });
 });
