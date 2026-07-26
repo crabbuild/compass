@@ -8,6 +8,8 @@ test("renders a bounded collision-free capsule graph safely", async ({ page }) =
   const nodes = page.locator("#graph-canvas [data-node-id]");
   await expect(nodes).toHaveCount(42);
   await expect(page.locator('[data-node-id="changed-core"] .graph-node-label')).toBeVisible();
+  await expect(page.locator('[data-node-id="added-leaf"] .graph-node-label')).toBeVisible();
+  await expect(page.locator('[data-node-id="removed-caller"] .graph-node-label')).toBeVisible();
   await expect(page.locator("#graph-canvas img")).toHaveCount(0);
   await expect(page.locator("body img")).toHaveCount(0);
   await expect(page.locator("#graph-note")).toContainText("42 of");

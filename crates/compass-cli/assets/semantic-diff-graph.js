@@ -89,16 +89,24 @@
   }
 
   function rankVisualNodes(model) {
-    return [...model.nodes.values()].sort((left, right) => {
-      const directDifference =
-        Number(right.status !== "context") - Number(left.status !== "context");
-      if (directDifference) return directDifference;
-      const statusDifference =
-        STATUS_PRIORITY[right.status] - STATUS_PRIORITY[left.status];
-      if (statusDifference) return statusDifference;
+    const rankWithinStatus = (left, right) => {
       const degreeDifference = right.degree - left.degree;
       return degreeDifference || left.id.localeCompare(right.id);
-    });
+    };
+    const nodes = [...model.nodes.values()];
+    const buckets = ["changed", "added", "removed"].map((status) =>
+      nodes.filter((node) => node.status === status).sort(rankWithinStatus)
+    );
+    const ranked = [];
+    for (let index = 0; buckets.some((bucket) => index < bucket.length); index += 1) {
+      for (const bucket of buckets) {
+        if (index < bucket.length) ranked.push(bucket[index]);
+      }
+    }
+    ranked.push(
+      ...nodes.filter((node) => node.status === "context").sort(rankWithinStatus)
+    );
+    return ranked;
   }
 
   function displayLabel(node) {

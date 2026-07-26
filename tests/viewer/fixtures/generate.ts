@@ -282,13 +282,22 @@ function semanticDiffGraphHarness(): string {
           changed_fields: []
         }
       ],
-      removed_nodes: [{
-        id: "removed-caller",
-        label: "removed-caller",
-        kind: "function",
-        source_file: "src/caller.ts",
-        changed_fields: []
-      }],
+      removed_nodes: [
+        {
+          id: "removed-caller",
+          label: "removed-caller",
+          kind: "function",
+          source_file: "src/caller.ts",
+          changed_fields: []
+        },
+        ...Array.from({ length: 44 }, (_, index) => ({
+          id: `removed-overflow-${String(index).padStart(2, "0")}`,
+          label: `removed-overflow-${String(index).padStart(2, "0")}`,
+          kind: "function",
+          source_file: "src/removed.ts",
+          changed_fields: []
+        }))
+      ],
       changed_edges: [{
         source: "removed-caller",
         target: "changed-core",
