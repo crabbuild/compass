@@ -128,6 +128,10 @@ test("comparison replaces the full graph with a readable focused delta", async (
   await expect(
     page.locator(".history-source-diff").getByText('version = "3.1.7"', { exact: false })
   ).toBeVisible();
+  await expect(
+    page.locator(".history-source-diff").getByText('name = "compass"', { exact: false }).first()
+  ).toBeVisible();
+  await expect(page.locator(".history-source-diff [data-line]")).toHaveCount(6);
   await expect(page.getByRole("button", { name: "Split" })).toHaveAttribute(
     "aria-pressed",
     "true"

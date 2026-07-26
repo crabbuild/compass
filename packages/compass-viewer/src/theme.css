@@ -2776,11 +2776,12 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 .history-diff-evidence {
   margin-top: 12px;
   border: 1px solid var(--border);
-  background: var(--vscode-editorWidget-background, var(--card));
+  background: var(--vscode-editor-background, var(--background));
+  color: var(--vscode-editor-foreground, var(--foreground));
 }
 
 .history-comparison {
-  box-shadow: inset 3px 0 0 var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder, var(--ring));
 }
 
 .history-comparison-heading {
@@ -2796,17 +2797,19 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   width: 15px;
   height: 15px;
   margin-top: 2px;
-  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+  color: var(--vscode-focusBorder, var(--ring));
 }
 
 .history-comparison-heading h2 {
   margin: 2px 0 0;
+  color: var(--vscode-editor-foreground, var(--foreground));
   font-size: 13px;
   font-weight: 600;
 }
 
 .history-comparison-heading code {
   color: var(--vscode-textLink-foreground, var(--workbench-link));
+  background: transparent;
   font-family: var(--compass-font-mono);
 }
 
@@ -2843,12 +2846,17 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 
 .history-delta-card {
   display: grid;
-  min-width: 210px;
+  min-width: 200px;
   gap: 4px;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 2px;
-  background: var(--vscode-badge-background, var(--muted));
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-foreground, var(--foreground)) 5%,
+    var(--vscode-editor-background, var(--background))
+  );
+  color: var(--vscode-editor-foreground, var(--foreground));
 }
 
 .history-delta-card > span {
@@ -2858,7 +2866,7 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 }
 
 .history-delta-card strong {
-  color: var(--vscode-badge-foreground, var(--foreground));
+  color: var(--vscode-editor-foreground, var(--foreground));
   text-transform: capitalize;
 }
 
@@ -2932,7 +2940,8 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 2px;
-  background: var(--vscode-textCodeBlock-background, var(--muted));
+  background: var(--vscode-editor-background, var(--background));
+  color: var(--vscode-editor-foreground, var(--foreground));
 }
 
 .history-diff-toolbar {
@@ -3051,8 +3060,11 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 
 .history-source-diff {
   display: block;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
+  contain: inline-size;
+  background: var(--vscode-editor-background, var(--background));
 }
 
 .history-diff-fallback > p {
@@ -3126,6 +3138,7 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 .history-graph-canvas {
   position: relative;
   flex: 1;
+  isolation: isolate;
 }
 
 .history-graph-canvas .compass-workspace {

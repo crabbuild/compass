@@ -40,7 +40,7 @@ const fallbackComparisonPalette: ComparisonPalette = {
   unchanged: "#6e7781"
 };
 
-const options: Options = {
+const defaultOptions: Options = {
   autoResize: true,
   interaction: {
     hover: true,
@@ -70,6 +70,46 @@ const options: Options = {
       springConstant: 0.08,
       damping: 0.4,
       avoidOverlap: 0.8
+    }
+  }
+};
+
+const comparisonOptions: Options = {
+  autoResize: true,
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: { enabled: true }
+  },
+  layout: {
+    improvedLayout: true,
+    randomSeed: 17
+  },
+  nodes: {
+    borderWidth: 2,
+    shape: "dot"
+  },
+  edges: {
+    arrows: { to: { enabled: true, scaleFactor: 0.38 } },
+    smooth: { enabled: true, type: "continuous", roundness: 0.14 },
+    selectionWidth: 3
+  },
+  physics: {
+    enabled: true,
+    solver: "barnesHut",
+    stabilization: { enabled: true, iterations: 520, fit: true, updateInterval: 25 },
+    maxVelocity: 35,
+    minVelocity: 0.55,
+    barnesHut: {
+      theta: 0.45,
+      gravitationalConstant: -12000,
+      centralGravity: 0.12,
+      springLength: 180,
+      springConstant: 0.025,
+      damping: 0.3,
+      avoidOverlap: 0.85
     }
   }
 };
@@ -109,19 +149,60 @@ function comparisonEdgeAppearance(
   palette: ComparisonPalette
 ) {
   if (change === "added") {
-    return { color: palette.added, dashes: false, width: 2.5, opacity: 0.92 };
+    return { color: palette.added, dashes: false, width: 1.9, opacity: 0.7 };
   }
   if (change === "removed") {
-    return { color: palette.removed, dashes: [6, 5], width: 2.3, opacity: 0.9 };
+    return { color: palette.removed, dashes: [6, 5], width: 1.8, opacity: 0.66 };
   }
   if (change === "changed") {
-    return { color: palette.changed, dashes: false, width: 3, opacity: 0.94 };
+    return { color: palette.changed, dashes: false, width: 2.3, opacity: 0.78 };
   }
   if (change === "unchanged") {
-    return { color: palette.unchanged, dashes: true, width: 1, opacity: 0.28 };
+    return { color: palette.unchanged, dashes: true, width: 1, opacity: 0.2 };
   }
   const appearance = edgeAppearance(confidence);
   return { color: fallback, ...appearance };
+}
+
+function comparisonEdgeCurve(change: GraphChangeType | undefined) {
+  if (change === "added") {
+    return { enabled: true, type: "curvedCW" as const, roundness: 0.13 };
+  }
+  if (change === "removed") {
+    return { enabled: true, type: "curvedCCW" as const, roundness: 0.13 };
+  }
+  return { enabled: true, type: "continuous" as const, roundness: 0.1 };
+}
+
+function seedComparisonPositions(nodes: GraphNode[]): ReadonlyMap<string, { x: number; y: number }> {
+  const groups = new Map<GraphChangeType, GraphNode[]>();
+  for (const node of [...nodes].sort((left, right) => left.id.localeCompare(right.id))) {
+    const change = node.change ?? "unchanged";
+    const group = groups.get(change) ?? [];
+    group.push(node);
+    groups.set(change, group);
+  }
+  const laneOffset: Record<GraphChangeType, number> = {
+    added: -300,
+    changed: 0,
+    removed: 300,
+    unchanged: 0
+  };
+  const positions = new Map<string, { x: number; y: number }>();
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (const [change, group] of groups) {
+    group.forEach((node, index) => {
+      const angle = index * goldenAngle;
+      const radius = change === "unchanged"
+        ? 210 + Math.sqrt(index) * 34
+        : 42 + Math.sqrt(index) * 40;
+      positions.set(node.id, {
+        x: laneOffset[change] + Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
+      });
+    });
+  }
+  return positions;
 }
 
 function useThemeRevision(): number {
@@ -200,6 +281,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           .map((node) => node.id)
         : []
     ), [comparisonMode, model.nodes]);
+    const comparisonPositions = useMemo(
+      () => comparisonMode ? seedComparisonPositions(model.nodes) : new Map(),
+      [comparisonMode, model.nodes]
+    );
     const contrastBorder = useMemo(() => {
       const highContrast = document.body.classList.contains("vscode-high-contrast")
         || document.body.classList.contains("vscode-high-contrast-light");
@@ -211,13 +296,17 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       model.nodes.map((node) => {
         const baseSize = node.size ?? Math.min(40, 10 + 30 * (node.degree ?? 1) / maxDegree);
         const size = comparisonMode
-          ? node.change === "unchanged" ? baseSize * 0.72 : baseSize * 1.12
+          ? node.change === "unchanged"
+            ? 7 + 5 * Math.sqrt((node.degree ?? 1) / maxDegree)
+            : 11 + 12 * Math.sqrt((node.degree ?? 1) / maxDegree)
           : baseSize;
+        const position = comparisonPositions.get(node.id);
         return {
           id: node.id,
           label: node.label,
           color: graphNodeColor(model, node, undefined, fallbackComparisonPalette),
           size,
+          ...(position ?? {}),
           opacity: node.change === "unchanged" ? 0.42 : 1,
           font: {
             color: "#eef5ff",
@@ -233,6 +322,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     ), [
       automaticLabelIds,
       comparisonMode,
+      comparisonPositions,
       maxDegree,
       model
     ]);
@@ -251,10 +341,11 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
           dashes: appearance.dashes,
           width: appearance.width,
+          ...(comparisonMode ? { smooth: comparisonEdgeCurve(edge.change) } : {}),
           color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
-    ), [model.edges]);
+    ), [comparisonMode, model.edges]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -263,7 +354,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       const network = new Network(container, {
         nodes: nodeData,
         edges: edgeData
-      }, options);
+      }, comparisonMode ? comparisonOptions : defaultOptions);
       network.setOptions({ physics: { enabled: physicsRunningRef.current } });
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
@@ -287,6 +378,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [
       edgeData,
       nodeData,
+      comparisonMode,
       onClear,
       onFocus,
       onHover,

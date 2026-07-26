@@ -2,8 +2,29 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 import { SemanticFindings } from "./SemanticFindings";
+import { normalizeSourcePatch } from "./SourceChanges";
+
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 
 describe("SemanticFindings", () => {
+  it("normalizes GitHub hunk fragments into a complete one-file patch", () => {
+    expect(normalizeSourcePatch({
+      old_path: "config/files.go",
+      new_path: "config/files.go",
+      status: "modified",
+      patch: "@@ -2,2 +2,2 @@\n-old\n+new\n"
+    })).toContain(
+      "diff --git a/config/files.go b/config/files.go\n"
+      + "--- a/config/files.go\n"
+      + "+++ b/config/files.go\n"
+      + "@@ -2,2 +2,2 @@"
+    );
+  });
+
   it("renders source-only changes as readable evidence instead of a raw report dump", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -32,7 +53,7 @@ describe("SemanticFindings", () => {
 
     expect(container.querySelector("h2")?.textContent).toBe("Source changes");
     expect(container.textContent).toContain("Cargo.toml");
-    expect(container.textContent).toContain("version = \"3.1.7\"");
+    expect(container.textContent).toContain("+1−1");
     expect(container.textContent).toContain("No semantic graph findings for this comparison.");
     expect(container.textContent).not.toContain("\"source_changes\"");
     root.unmount();

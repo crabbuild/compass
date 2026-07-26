@@ -1,10 +1,11 @@
 import { parsePatchFiles } from "@pierre/diffs";
-import { PatchDiff } from "@pierre/diffs/react";
+import { FileDiff } from "@pierre/diffs/react";
 import {
   Component,
   useEffect,
   useMemo,
   useState,
+  type CSSProperties,
   type ErrorInfo,
   type ReactNode
 } from "react";
@@ -22,18 +23,8 @@ const DIFF_THEME_CSS = `:host {
   --diffs-font-family: var(--compass-font-mono);
   --diffs-font-size: 11px;
   --diffs-line-height: 19px;
-  --diffs-dark-bg: var(--vscode-textCodeBlock-background, #0f141b);
-  --diffs-light-bg: var(--vscode-textCodeBlock-background, #f6f8fa);
-  --diffs-added-dark: var(--vscode-gitDecoration-addedResourceForeground, #65bd84);
-  --diffs-added-light: var(--vscode-gitDecoration-addedResourceForeground, #1a7f37);
-  --diffs-deleted-dark: var(--vscode-gitDecoration-deletedResourceForeground, #ff7b86);
-  --diffs-deleted-light: var(--vscode-gitDecoration-deletedResourceForeground, #cf222e);
-  --diffs-modified-dark: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
-  --diffs-modified-light: var(--vscode-gitDecoration-modifiedResourceForeground, #9a6700);
-  --diffs-bg-context-override: var(--vscode-editor-background);
-  --diffs-bg-context-gutter-override: var(--vscode-editorGutter-background);
-  --diffs-bg-separator-override: var(--vscode-editorGroupHeader-tabsBackground);
-  --diffs-fg-number-override: var(--vscode-editorLineNumber-foreground);
+  --diffs-gap-inline: 6px;
+  --diffs-min-number-column-width: 3ch;
 }`;
 
 export function SourceChanges({ changes }: { changes: SourceChange[] }) {
@@ -129,7 +120,7 @@ export function SourceChanges({ changes }: { changes: SourceChange[] }) {
               </summary>
               {open && (
                 <SourcePatch
-                  patch={change.patch}
+                  change={change}
                   cacheKey={`compass-history-${index}`}
                   style={style}
                   wrap={wrap}
@@ -165,43 +156,47 @@ function ChangeStats({ patch }: { patch: string | undefined }) {
 }
 
 function SourcePatch({
-  patch,
+  change,
   cacheKey,
   style,
   wrap
 }: {
-  patch: string | undefined;
+  change: SourceChange;
   cacheKey: string;
   style: DiffStyle;
   wrap: boolean;
 }) {
-  const validation = useMemo(() => {
+  const parsed = useMemo(() => {
+    const patch = normalizeSourcePatch(change);
     if (!patch) return { valid: false, reason: "missing" } as const;
     try {
       const files = parsePatchFiles(patch, cacheKey, true)
         .flatMap((parsed) => parsed.files ?? []);
-      return files.length
-        ? { valid: true } as const
+      const fileDiff = files[0];
+      return files.length === 1 && fileDiff
+        ? { valid: true, fileDiff } as const
         : { valid: false, reason: "unparseable" } as const;
     } catch {
       return { valid: false, reason: "unparseable" } as const;
     }
-  }, [cacheKey, patch]);
-  const themeType = useVscodeThemeType();
+  }, [cacheKey, change]);
+  const { themeType, style: themeStyle } = useVscodeDiffTheme();
 
-  if (!patch) {
+  if (!change.patch) {
     return <p>Compass recorded this file change without an inline patch.</p>;
   }
-  if (!validation.valid) return <PatchFallback patch={patch} />;
+  if (!parsed.valid) return <PatchFallback patch={change.patch} />;
 
   return (
-    <DiffErrorBoundary fallback={<PatchFallback patch={patch} />}>
-      <PatchDiff
-        patch={patch}
+    <DiffErrorBoundary fallback={<PatchFallback patch={change.patch} />}>
+      <FileDiff
+        key={`${cacheKey}-${themeType}`}
+        fileDiff={parsed.fileDiff}
         disableWorkerPool
         className="history-source-diff"
+        style={themeStyle}
         options={{
-          theme: { dark: "pierre-dark", light: "pierre-light" },
+          theme: themeType === "light" ? "pierre-light" : "pierre-dark",
           themeType,
           diffStyle: style,
           diffIndicators: "classic",
@@ -209,7 +204,6 @@ function SourcePatch({
           lineDiffType: "word-alt",
           overflow: wrap ? "wrap" : "scroll",
           disableFileHeader: true,
-          disableVirtualizationBuffers: true,
           unsafeCSS: DIFF_THEME_CSS
         }}
       />
@@ -226,20 +220,118 @@ function PatchFallback({ patch }: { patch: string }) {
   );
 }
 
-function useVscodeThemeType(): "light" | "dark" {
+export function normalizeSourcePatch(change: SourceChange): string | undefined {
+  const patch = change.patch?.trimEnd();
+  if (!patch) return undefined;
+  if (patch.startsWith("diff --git ")) return `${patch}\n`;
+  if (/^--- .+\n\+\+\+ /m.test(patch)) return `${patch}\n`;
+
+  const oldPath = change.old_path ?? change.new_path ?? "unknown";
+  const newPath = change.new_path ?? change.old_path ?? "unknown";
+  const status = change.status?.toLocaleLowerCase();
+  const oldHeader = status === "added" || status === "new"
+    ? "/dev/null"
+    : `a/${oldPath}`;
+  const newHeader = status === "deleted" || status === "removed"
+    ? "/dev/null"
+    : `b/${newPath}`;
+  const hunk = patch.startsWith("@@ ")
+    ? patch
+    : `${syntheticHunkHeader(patch)}\n${patch}`;
+  return [
+    `diff --git a/${oldPath} b/${newPath}`,
+    `--- ${oldHeader}`,
+    `+++ ${newHeader}`,
+    hunk,
+    ""
+  ].join("\n");
+}
+
+function syntheticHunkHeader(patch: string): string {
+  let oldLines = 0;
+  let newLines = 0;
+  for (const line of patch.split("\n")) {
+    if (!line.startsWith("+")) oldLines += 1;
+    if (!line.startsWith("-")) newLines += 1;
+  }
+  return `@@ -1,${oldLines} +1,${newLines} @@`;
+}
+
+function useVscodeDiffTheme(): {
+  themeType: "light" | "dark";
+  style: CSSProperties;
+} {
   const read = () => (
     document.body.classList.contains("vscode-light")
+    || document.documentElement.classList.contains("vscode-light")
     || document.body.classList.contains("vscode-high-contrast-light")
+    || document.documentElement.classList.contains("vscode-high-contrast-light")
       ? "light"
       : "dark"
   );
   const [theme, setTheme] = useState<"light" | "dark">(read);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(read()));
-    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    const refresh = () => {
+      setTheme(read());
+      setRevision((current) => current + 1);
+    };
+    const observer = new MutationObserver(refresh);
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "style"]
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"]
+    });
     return () => observer.disconnect();
   }, []);
-  return theme;
+  const style = useMemo(() => {
+    const light = theme === "light";
+    const background = cssToken("--vscode-editor-background", light ? "#ffffff" : "#0f141b");
+    const foreground = cssToken("--vscode-editor-foreground", light ? "#24292f" : "#e6edf3");
+    const gutter = cssToken("--vscode-editorGutter-background", background);
+    const separator = cssToken("--vscode-editorGroupHeader-tabsBackground", background);
+    const lineNumber = cssToken(
+      "--vscode-editorLineNumber-foreground",
+      light ? "#656d76" : "#8b949e"
+    );
+    const added = cssToken(
+      "--vscode-gitDecoration-addedResourceForeground",
+      light ? "#1a7f37" : "#65bd84"
+    );
+    const removed = cssToken(
+      "--vscode-gitDecoration-deletedResourceForeground",
+      light ? "#cf222e" : "#ff7b86"
+    );
+    const modified = cssToken(
+      "--vscode-gitDecoration-modifiedResourceForeground",
+      light ? "#9a6700" : "#d29922"
+    );
+    return {
+      colorScheme: theme,
+      "--diffs-light-bg": background,
+      "--diffs-dark-bg": background,
+      "--diffs-light": foreground,
+      "--diffs-dark": foreground,
+      "--diffs-bg-context-override": background,
+      "--diffs-bg-context-gutter-override": gutter,
+      "--diffs-bg-separator-override": separator,
+      "--diffs-fg-number-override": lineNumber,
+      "--diffs-light-addition-color": added,
+      "--diffs-dark-addition-color": added,
+      "--diffs-light-deletion-color": removed,
+      "--diffs-dark-deletion-color": removed,
+      "--diffs-light-modified-color": modified,
+      "--diffs-dark-modified-color": modified
+    } as CSSProperties;
+  }, [revision, theme]);
+  return { themeType: theme, style };
+}
+
+function cssToken(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
 class DiffErrorBoundary extends Component<{
