@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use compass_ir::{
@@ -17,6 +17,7 @@ pub(super) fn extract(
     let mut collector = Collector {
         descriptor,
         input,
+        function_occurrences: HashMap::new(),
         functions: Vec::new(),
         evidence: Vec::new(),
     };
@@ -27,6 +28,7 @@ pub(super) fn extract(
 struct Collector<'a> {
     descriptor: ProviderDescriptor,
     input: &'a FileInput<'a>,
+    function_occurrences: HashMap<String, u32>,
     functions: Vec<FunctionIr>,
     evidence: Vec<compass_ir::EvidenceRecord>,
 }
@@ -78,7 +80,7 @@ impl Collector<'_> {
             |owner| format!("{owner}.{short_name}"),
         );
         let signature = signature_bytes(self.input.source, node);
-        let symbol_id = hex_sha256(
+        let base_symbol_id = hex_sha256(
             format!(
                 "{}\0{}\0{}",
                 self.input.source_file,
@@ -87,6 +89,7 @@ impl Collector<'_> {
             )
             .as_bytes(),
         );
+        let symbol_id = unique_symbol_id(base_symbol_id, &mut self.function_occurrences);
         let definition = evidence_record(
             &self.descriptor.id,
             Some(self.input.source_file),
@@ -453,6 +456,17 @@ fn contains_token(source: &[u8], expected: &str) -> bool {
         .unwrap_or_default()
         .split(|character: char| !character.is_alphanumeric() && character != '_')
         .any(|token| token == expected)
+}
+
+fn unique_symbol_id(base: String, occurrences: &mut HashMap<String, u32>) -> String {
+    let occurrence = occurrences.entry(base.clone()).or_default();
+    let symbol = if *occurrence == 0 {
+        base.clone()
+    } else {
+        hex_sha256(format!("{base}\0{occurrence}").as_bytes())
+    };
+    *occurrence = occurrence.saturating_add(1);
+    symbol
 }
 
 fn signature_bytes<'a>(source: &'a [u8], node: Node<'_>) -> &'a [u8] {

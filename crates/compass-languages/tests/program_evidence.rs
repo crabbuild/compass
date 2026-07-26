@@ -133,6 +133,30 @@ fn repeated_signatures_in_distinct_lexical_scopes_have_unique_syntax_symbols()
 }
 
 #[test]
+fn python_conditional_redefinitions_have_unique_syntax_symbols() -> Result<(), Box<dyn Error>> {
+    let source = b"try:\n    def mogrify(sql, params, connection):\n        return first(sql)\nexcept ImportError:\n    def mogrify(sql, params, connection):\n        return second(sql)\n";
+    let batch = TreeSitterSyntaxProvider::default()
+        .analyze_file(FileInput {
+            source_file: "django/db/backends/postgresql/psycopg_any.py",
+            language: "python",
+            source,
+        })?
+        .ok_or("missing Python batch")?;
+    let functions = &batch.modules[0].functions;
+    assert_eq!(functions.len(), 2);
+    assert_eq!(
+        functions
+            .iter()
+            .map(|function| function.symbol_id.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        functions.len()
+    );
+    merge_evidence(vec![batch])?.validate()?;
+    Ok(())
+}
+
+#[test]
 fn syntax_merge_resolves_unique_local_calls() -> Result<(), Box<dyn Error>> {
     let batch = TreeSitterSyntaxProvider::default()
         .analyze_file(FileInput {
