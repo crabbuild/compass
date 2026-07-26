@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{CommitId, HistoryError, TimelineCommit};
 
@@ -237,53 +238,101 @@ impl Repository {
             .collect()
     }
 
-    /// Return presentation metadata for one exact commit without touching the worktree.
-    pub fn timeline_commit(&self, commit: &CommitId) -> Result<TimelineCommit, HistoryError> {
+    /// Return a bounded newest-first page reachable from one exact tip.
+    pub fn reachable_commit_page(
+        &self,
+        tip: &CommitId,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitId>, HistoryError> {
+        let max_count = format!("--max-count={limit}");
+        let skip = format!("--skip={skip}");
         let output = git_output(
             &self.root,
             &[
-                "show",
-                "-s",
-                "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s",
+                "rev-list",
+                "--topo-order",
+                &max_count,
+                &skip,
                 "--end-of-options",
-                commit.as_str(),
+                tip.as_str(),
             ],
         )?;
-        let text = std::str::from_utf8(&output).map_err(|error| {
-            HistoryError::Git(format!("Git returned non-UTF-8 history: {error}"))
-        })?;
-        let fields = text.trim_end().split('\0').collect::<Vec<_>>();
-        if fields.len() != 6 {
-            return Err(HistoryError::Git(
-                "Git returned malformed timeline metadata".to_owned(),
-            ));
+        parse_commit_lines(&output)
+    }
+
+    /// Return a bounded newest-first page reachable from current local references.
+    pub fn all_reachable_commit_page(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitId>, HistoryError> {
+        let max_count = format!("--max-count={limit}");
+        let skip = format!("--skip={skip}");
+        let output = git_output(
+            &self.root,
+            &["rev-list", "--topo-order", &max_count, &skip, "--all"],
+        )?;
+        parse_commit_lines(&output)
+    }
+
+    /// Hash the current local reference tips so a stateless page cursor can reject ref changes.
+    pub fn reference_snapshot(&self) -> Result<String, HistoryError> {
+        let output = git_output(&self.root, &["show-ref", "--head"])?;
+        Ok(format!("{:x}", Sha256::digest(output)))
+    }
+
+    /// Return presentation metadata for one exact commit without touching the worktree.
+    pub fn timeline_commit(&self, commit: &CommitId) -> Result<TimelineCommit, HistoryError> {
+        self.timeline_commits(std::slice::from_ref(commit))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| HistoryError::Git(format!("Git did not return commit {commit}")))
+    }
+
+    /// Return presentation metadata for exact commits using bounded batched Git processes.
+    pub fn timeline_commits(
+        &self,
+        commits: &[CommitId],
+    ) -> Result<Vec<TimelineCommit>, HistoryError> {
+        const BATCH_SIZE: usize = 256;
+        let mut metadata = std::collections::HashMap::with_capacity(commits.len());
+        for batch in commits.chunks(BATCH_SIZE) {
+            let mut arguments = vec![
+                "log",
+                "--no-walk=unsorted",
+                "-z",
+                "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s",
+                "--end-of-options",
+            ];
+            arguments.extend(batch.iter().map(CommitId::as_str));
+            let output = git_output(&self.root, &arguments)?;
+            let text = std::str::from_utf8(&output).map_err(|error| {
+                HistoryError::Git(format!("Git returned non-UTF-8 history: {error}"))
+            })?;
+            let mut fields = text.split('\0').collect::<Vec<_>>();
+            if fields.last() == Some(&"") {
+                fields.pop();
+            }
+            if fields.len() != batch.len() * 6 {
+                return Err(HistoryError::Git(
+                    "Git returned malformed timeline metadata".to_owned(),
+                ));
+            }
+            for fields in fields.chunks_exact(6) {
+                let entry = parse_timeline_fields(fields)?;
+                metadata.insert(entry.commit.to_string(), entry);
+            }
         }
-        let commit = fields[0]
-            .parse()
-            .map_err(|_| HistoryError::Git("Git returned an invalid commit ID".to_owned()))?;
-        let parents = if fields[1].is_empty() {
-            Vec::new()
-        } else {
-            fields[1]
-                .split_ascii_whitespace()
-                .map(|value| {
-                    value.parse().map_err(|_| {
-                        HistoryError::Git(format!("Git returned invalid parent ID {value}"))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let authored_at_seconds = fields[4].parse().map_err(|_| {
-            HistoryError::Git("Git returned an invalid author timestamp".to_owned())
-        })?;
-        Ok(TimelineCommit {
-            commit,
-            parents,
-            author_name: fields[2].to_owned(),
-            author_email: fields[3].to_owned(),
-            authored_at_seconds,
-            subject: fields[5].to_owned(),
-        })
+        commits
+            .iter()
+            .map(|commit| {
+                metadata
+                    .get(commit.as_str())
+                    .cloned()
+                    .ok_or_else(|| HistoryError::Git(format!("Git did not return commit {commit}")))
+            })
+            .collect()
     }
 
     /// Inspect committed-tree and repository filter limitations without creating a worktree.
@@ -392,6 +441,47 @@ impl Repository {
         guard.limitations = target_limitations(&guard.path)?;
         Ok(guard)
     }
+}
+
+fn parse_commit_lines(output: &[u8]) -> Result<Vec<CommitId>, HistoryError> {
+    std::str::from_utf8(output)
+        .map_err(|error| HistoryError::Git(format!("Git returned non-UTF-8 history: {error}")))?
+        .lines()
+        .map(|value| {
+            value.parse().map_err(|_| {
+                HistoryError::Git(format!("Git returned invalid reachable commit ID {value}"))
+            })
+        })
+        .collect()
+}
+
+fn parse_timeline_fields(fields: &[&str]) -> Result<TimelineCommit, HistoryError> {
+    let commit = fields[0]
+        .parse()
+        .map_err(|_| HistoryError::Git("Git returned an invalid commit ID".to_owned()))?;
+    let parents = if fields[1].is_empty() {
+        Vec::new()
+    } else {
+        fields[1]
+            .split_ascii_whitespace()
+            .map(|value| {
+                value.parse().map_err(|_| {
+                    HistoryError::Git(format!("Git returned invalid parent ID {value}"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let authored_at_seconds = fields[4]
+        .parse()
+        .map_err(|_| HistoryError::Git("Git returned an invalid author timestamp".to_owned()))?;
+    Ok(TimelineCommit {
+        commit,
+        parents,
+        author_name: fields[2].to_owned(),
+        author_email: fields[3].to_owned(),
+        authored_at_seconds,
+        subject: fields[5].to_owned(),
+    })
 }
 
 fn parse_name_status(bytes: &[u8]) -> Result<Vec<SourceFileDelta>, HistoryError> {

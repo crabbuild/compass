@@ -36,6 +36,10 @@ let repositoryId = "";
 let changeCounts: HistoryChangeCounts | undefined;
 let revisionLoadState: "idle" | "loading" | "ready" = "idle";
 let bootstrapError: string | undefined;
+let loadingMore = false;
+let loadMoreError: string | undefined;
+let enableState: HistoryBuildState | undefined;
+let timelineGeneration = 0;
 const buildStates = new Map<string, HistoryBuildState>();
 const operationErrors = new Map<string, HistoryOperationError>();
 
@@ -58,14 +62,14 @@ function clearRevisionPresentation(): void {
 
 function requestChangeCounts(commit: string): void {
   const entry = timeline?.entries.find((candidate) => candidate.commit === commit);
-  if (entry?.presentationAvailable && entry.parents.length > 0) {
+  if (timeline?.historyEnabled && entry?.presentationAvailable && entry.parents.length > 0) {
     postMessage({ type: "changeCounts", commit });
   }
 }
 
 function requestSelectedRevision(commit: string): void {
   const entry = timeline?.entries.find((candidate) => candidate.commit === commit);
-  if (!entry?.presentationAvailable) {
+  if (!timeline?.historyEnabled || !entry?.presentationAvailable) {
     revisionLoadState = "idle";
     return;
   }
@@ -125,6 +129,9 @@ function render(): void {
       timeline={timeline}
       selectedCommit={selectedCommit}
       revisionLoadState={revisionLoadState}
+      enableState={enableState}
+      loadingMore={loadingMore}
+      loadMoreError={loadMoreError}
       buildState={buildStates.get(selectedCommit)}
       operationError={operationErrors.get(selectedCommit)}
       onSelectCommit={selectCommit}
@@ -143,6 +150,18 @@ function render(): void {
       semanticDiff={semanticDiff}
       changeCounts={changeCounts}
       host={{
+        enableHistory() {
+          enableState = { status: "requesting" };
+          render();
+          postMessage({ type: "enableHistory" });
+        },
+        loadMore() {
+          if (loadingMore || !timeline?.hasMore) return;
+          loadingMore = true;
+          loadMoreError = undefined;
+          render();
+          postMessage({ type: "loadMoreTimeline" });
+        },
         loadRevision(commit) {
           revisionLoadState = "loading";
           operationErrors.delete(commit);
@@ -192,10 +211,15 @@ function render(): void {
 window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => {
   const message = event.data;
   if (message?.type === "timeline") {
+    if (message.generation < timelineGeneration) return;
     const parsed = HistoryTimelineSchema.safeParse(message.timeline);
     if (parsed.success) {
+      timelineGeneration = message.generation;
       timeline = parsed.data;
       bootstrapError = undefined;
+      loadingMore = false;
+      loadMoreError = undefined;
+      enableState = undefined;
       repositoryId = message.repositoryId;
       const retainedCommit = timeline.entries.some((entry) => entry.commit === selectedCommit)
         ? selectedCommit
@@ -212,10 +236,38 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       requestChangeCounts(nextCommit);
       if (nextCommit && graphCommit !== nextCommit) requestSelectedRevision(nextCommit);
     }
+  } else if (message?.type === "timelinePage") {
+    const parsed = HistoryTimelineSchema.safeParse(message.timeline);
+    if (parsed.success
+      && timeline
+      && message.repositoryId === repositoryId
+      && message.generation === timelineGeneration) {
+      const loaded = new Set(timeline.entries.map((entry) => entry.commit));
+      timeline = {
+        ...parsed.data,
+        entries: [
+          ...timeline.entries,
+          ...parsed.data.entries.filter((entry) => !loaded.has(entry.commit))
+        ]
+      };
+      loadingMore = false;
+      loadMoreError = undefined;
+    }
+  } else if (message?.type === "timelinePageError") {
+    if (message.generation === timelineGeneration) {
+      loadingMore = false;
+      loadMoreError = message.message;
+    }
   } else if (message?.type === "bootstrapError") {
     bootstrapError = message.message;
     timeline = undefined;
     clearRevisionPresentation();
+  } else if (message?.type === "enableRunning") {
+    enableState = { status: "running" };
+  } else if (message?.type === "enableSucceeded" || message?.type === "enableCancelled") {
+    enableState = undefined;
+  } else if (message?.type === "enableFailed") {
+    enableState = { status: "failed", message: message.message };
   } else if (message?.type === "graph") {
     if (!acceptsCommit(message.commit)) return;
     const parsed = GraphViewModelSchema.safeParse(message.graph);

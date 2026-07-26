@@ -70,7 +70,14 @@ you to choose one.
 
 Open **Codebase evolution** from **Workspace > Explore** or the Command Palette.
 The left rail lists every reachable Git commit and shows whether its Compass
-graph is available, not materialized, building, or failed.
+graph is available, not materialized, building, or failed. Compass opens the
+newest 100 commits first and loads more as you scroll; loaded pages remain
+cached while the Codebase Evolution panel is open.
+
+If revision graphs are disabled, choose **Enable revision graphs** inside
+Codebase Evolution, then select either the recommended local **Code only**
+profile or the **Compass default profile** resolved by the CLI. The timeline
+reloads automatically after enablement.
 
 Select a commit, then:
 

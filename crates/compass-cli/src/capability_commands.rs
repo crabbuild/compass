@@ -40,6 +40,7 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
             ("program", true),
             ("query", true),
             ("history", true),
+            ("history_timeline_pagination", true),
             ("semantic_diff", true),
             ("community_detail", true),
         ]),

@@ -390,6 +390,21 @@ impl HistoryStore {
         self.preferred_with_activity(commit, &guard)
     }
 
+    /// Load preferred realizations for exact commits under one shared activity guard.
+    pub fn preferred_many(
+        &self,
+        commits: &[CommitId],
+    ) -> Result<Vec<PublishedVersion>, HistoryError> {
+        let _guard = self.activity()?;
+        let mut versions = Vec::with_capacity(commits.len());
+        for commit in commits {
+            if let Some(version) = self.preferred_without_activity(commit)? {
+                versions.push(version);
+            }
+        }
+        Ok(versions)
+    }
+
     pub fn preferred_with_activity(
         &self,
         commit: &CommitId,

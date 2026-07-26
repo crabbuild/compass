@@ -15,7 +15,7 @@ use crate::{Frontend, Outcome};
 pub(crate) fn help(_frontend: Frontend) -> String {
     let prefix = "compass";
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -862,6 +862,8 @@ fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, 
     let mut revision = "HEAD".to_owned();
     let mut revision_selected = false;
     let mut format = "json".to_owned();
+    let mut limit = None;
+    let mut after = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -885,6 +887,28 @@ fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, 
                 revision_selected = true;
             }
             value if value.starts_with("--format=") => format = value[9..].to_owned(),
+            "--limit" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| usage("--limit requires a value"))?;
+                limit = Some(parse_timeline_limit(value)?);
+            }
+            value if value.starts_with("--limit=") => {
+                limit = Some(parse_timeline_limit(&value[8..])?);
+            }
+            "--after" => {
+                index += 1;
+                after = Some(
+                    args.get(index)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| usage("--after requires a cursor"))?
+                        .clone(),
+                );
+            }
+            value if value.starts_with("--after=") && value.len() > 8 => {
+                after = Some(value[8..].to_owned());
+            }
             value => return Err(usage(format!("unknown history timeline option {value}"))),
         }
         index += 1;
@@ -892,30 +916,72 @@ fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, 
     if format != "json" {
         return Err(usage("history timeline requires --format json"));
     }
+    if after.is_some() && limit.is_none() {
+        return Err(usage("history timeline --after requires --limit"));
+    }
     let head = repository.resolve(&revision).map_err(runtime)?;
-    let mut commits = if revision_selected {
-        repository
-            .reachable_commits(&head, false)
-            .map_err(runtime)?
+    let snapshot = if revision_selected {
+        format!("revision-{}", head.as_str())
     } else {
-        repository.all_reachable_commits().map_err(runtime)?
+        repository.reference_snapshot().map_err(runtime)?
     };
-    commits.reverse();
+    let start = after
+        .as_deref()
+        .map(parse_timeline_cursor)
+        .transpose()?
+        .map(|cursor| {
+            if cursor.snapshot != snapshot {
+                Err(usage(
+                    "history timeline snapshot changed; reload the timeline",
+                ))
+            } else {
+                Ok(cursor.offset)
+            }
+        })
+        .transpose()?
+        .unwrap_or(0);
+    let (commits, has_more) = if let Some(limit) = limit {
+        let request_limit = limit.saturating_add(1);
+        let mut page = if revision_selected {
+            repository
+                .reachable_commit_page(&head, start, request_limit)
+                .map_err(runtime)?
+        } else {
+            repository
+                .all_reachable_commit_page(start, request_limit)
+                .map_err(runtime)?
+        };
+        let has_more = page.len() > limit;
+        page.truncate(limit);
+        (page, has_more)
+    } else {
+        let mut commits = if revision_selected {
+            repository
+                .reachable_commits(&head, false)
+                .map_err(runtime)?
+        } else {
+            repository.all_reachable_commits().map_err(runtime)?
+        };
+        commits.reverse();
+        (commits, false)
+    };
+    let end = start.saturating_add(commits.len());
+    let total_entries = (!has_more).then_some(end);
+    let next_cursor = has_more.then(|| timeline_cursor(&snapshot, end));
     let history = HistoryStore::open_existing(repository).map_err(runtime)?;
     let versions = history
         .as_ref()
-        .map(|store| store.list(None))
+        .map(|store| store.preferred_many(&commits))
         .transpose()
         .map_err(runtime)?
         .unwrap_or_default();
     let preferred = versions
         .into_iter()
-        .filter(|version| version.preferred)
         .map(|version| (version.version.git_commit.clone(), version))
         .collect::<std::collections::BTreeMap<_, _>>();
     let jobs = HistoryQueue::open_existing(repository)
         .map_err(runtime)?
-        .map(|queue| queue.list())
+        .map(|queue| queue.latest_for_commits(&commits))
         .transpose()
         .map_err(runtime)?
         .unwrap_or_default()
@@ -932,10 +998,11 @@ fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, 
                 latest
             },
         );
+    let metadata = repository.timeline_commits(&commits).map_err(runtime)?;
     let entries = commits
         .into_iter()
-        .map(|commit| {
-            let metadata = repository.timeline_commit(&commit).map_err(runtime)?;
+        .zip(metadata)
+        .map(|(commit, metadata)| {
             let version = preferred.get(commit.as_str());
             let job = jobs.get(commit.as_str());
             let graph_state = if version.is_some() {
@@ -968,9 +1035,59 @@ fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, 
         "repositoryId": repository.common_dir().to_string_lossy(),
         "selectedHead": head,
         "historyEnabled": config.enabled,
+        "totalEntries": total_entries,
+        "hasMore": has_more,
+        "nextCursor": next_cursor,
         "entries": entries,
     }))
     .map_err(runtime)
+}
+
+fn parse_timeline_limit(value: &str) -> Result<usize, CommandFailure> {
+    let limit = value
+        .parse::<usize>()
+        .map_err(|_| usage("history timeline --limit must be a positive integer"))?;
+    if !(1..=1000).contains(&limit) {
+        return Err(usage("history timeline --limit must be between 1 and 1000"));
+    }
+    Ok(limit)
+}
+
+struct TimelineCursor {
+    snapshot: String,
+    offset: usize,
+}
+
+fn timeline_cursor(snapshot: &str, offset: usize) -> String {
+    format!("v1:{snapshot}:{offset}")
+}
+
+fn parse_timeline_cursor(value: &str) -> Result<TimelineCursor, CommandFailure> {
+    let mut fields = value.split(':');
+    let version = fields.next();
+    let snapshot = fields.next();
+    let offset = fields.next();
+    if version != Some("v1")
+        || snapshot.is_none_or(|snapshot| {
+            snapshot.is_empty()
+                || snapshot.len() > 80
+                || !snapshot
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        || fields.next().is_some()
+    {
+        return Err(usage(
+            "history timeline cursor is invalid; reload the timeline",
+        ));
+    }
+    let offset = offset
+        .and_then(|offset| offset.parse::<usize>().ok())
+        .ok_or_else(|| usage("history timeline cursor is invalid; reload the timeline"))?;
+    Ok(TimelineCursor {
+        snapshot: snapshot.unwrap_or_default().to_owned(),
+        offset,
+    })
 }
 
 fn execute_gc(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {

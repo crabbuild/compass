@@ -14,6 +14,8 @@ import { CommitRail } from "./CommitRail";
 import { SemanticFindings } from "./SemanticFindings";
 
 export type HistoryHost = {
+  enableHistory(): void;
+  loadMore(): void;
   loadRevision(commit: string): void;
   buildRevision(commit: string): void;
   compare(commit: string, parent: string): void;
@@ -35,6 +37,9 @@ export function HistoryWorkspace({
   onBackToOverview,
   selectedCommit,
   revisionLoadState,
+  enableState,
+  loadingMore = false,
+  loadMoreError,
   buildState,
   operationError,
   onSelectCommit,
@@ -51,6 +56,9 @@ export function HistoryWorkspace({
   onBackToOverview?: (() => void) | undefined;
   selectedCommit: string;
   revisionLoadState: "idle" | "loading" | "ready";
+  enableState?: HistoryBuildState | undefined;
+  loadingMore?: boolean | undefined;
+  loadMoreError?: string | undefined;
   buildState?: HistoryBuildState | undefined;
   operationError?: HistoryOperationError | undefined;
   onSelectCommit(commit: string): void;
@@ -73,6 +81,10 @@ export function HistoryWorkspace({
     [timeline.entries]
   );
   const visibleGraph = graph && graphCommit === selected?.commit ? graph : undefined;
+  const loadedEntries = timeline.entries.length;
+  const countLabel = timeline.hasMore
+    ? `${loadedEntries.toLocaleString()} loaded commits`
+    : `${(timeline.totalEntries ?? loadedEntries).toLocaleString()} reachable commits`;
 
   return (
     <div className="history-shell">
@@ -82,7 +94,7 @@ export function HistoryWorkspace({
             <HistoryIcon aria-hidden="true" />
             <div>
               <h1>Codebase evolution</h1>
-              <p>{timeline.entries.length.toLocaleString()} reachable commits</p>
+              <p>{countLabel}</p>
             </div>
           </div>
           <label className="history-search">
@@ -91,7 +103,9 @@ export function HistoryWorkspace({
             <input
               type="search"
               value={query}
-              placeholder="Search commits and graph states"
+              placeholder={timeline.hasMore
+                ? "Search loaded commits and graph states"
+                : "Search commits and graph states"}
               aria-label="Search commit history"
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -114,17 +128,56 @@ export function HistoryWorkspace({
         <CommitRail
           entries={entries}
           selected={selected?.commit ?? ""}
+          hasMore={timeline.hasMore ?? false}
+          loadingMore={loadingMore}
+          onLoadMore={host.loadMore}
           onSelect={onSelectCommit}
         />
+        {timeline.hasMore && (
+          <div className="history-pagination" role={loadingMore ? "status" : undefined}>
+            {loadingMore ? (
+              "Loading more commits…"
+            ) : (
+              <>
+                {loadMoreError && <span role="alert">{loadMoreError}</span>}
+                <button type="button" className="workbench-button" onClick={host.loadMore}>
+                  {loadMoreError ? "Retry loading commits" : "Load more commits"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </aside>
 
       <main className="history-content">
         {!timeline.historyEnabled ? (
-          <WorkspaceState
-            kind="unavailable"
-            title="Revision graphs are not enabled"
-            description="Enable a Compass history profile for this repository, then reload Codebase Evolution."
-          />
+          enableState?.status === "requesting" ? (
+            <WorkspaceState
+              kind="running"
+              title="Choosing a history profile"
+              description="Select the profile Compass should use for future revision graphs."
+            />
+          ) : enableState?.status === "running" ? (
+            <WorkspaceState
+              kind="running"
+              title="Enabling revision graphs"
+              description="Compass is saving the repository history profile and installing its managed hook."
+            />
+          ) : enableState?.status === "failed" ? (
+            <WorkspaceState
+              kind="error"
+              title="Revision graphs could not be enabled"
+              description={enableState.message}
+              action={{ label: "Retry enablement", onClick: host.enableHistory }}
+            />
+          ) : (
+            <WorkspaceState
+              kind="unavailable"
+              title="Revision graphs are not enabled"
+              description="Choose a local code-only profile or use the semantic provider detected by Compass."
+              action={{ label: "Enable revision graphs", onClick: host.enableHistory }}
+            />
+          )
         ) : !selected ? (
           <WorkspaceState
             kind="empty"

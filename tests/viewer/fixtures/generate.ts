@@ -372,6 +372,7 @@ window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
 window.historyHostMessages=[];
 window.historyBootstrapAttempts=0;
+window.historyGeneration=0;
 window.emitHistoryMessage=(message)=>window.postMessage(message,"*");
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.historyHostMessages.push(message);
@@ -381,8 +382,32 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     if(scenario==="error" && window.historyBootstrapAttempts===1) {
       setTimeout(()=>window.postMessage({type:"bootstrapError",message:"Fixture history unavailable"},"*"),40);
     } else {
-      setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*"),40);
+      window.historyGeneration+=1;
+      const parameters=new URLSearchParams(window.location.search);
+      const paginated=parameters.get("pagination")==="true";
+      const baseTimeline=parameters.get("historyEnabled")==="false"
+        ? {...window.fixtureTimeline,historyEnabled:false}
+        : window.fixtureTimeline;
+      const initialTimeline=paginated
+        ? {...baseTimeline,totalEntries:null,hasMore:true,nextCursor:"fixture-cursor",entries:baseTimeline.entries.slice(0,2)}
+        : baseTimeline;
+      setTimeout(()=>window.postMessage({type:"timeline",repositoryId:"fixture",generation:window.historyGeneration,timeline:initialTimeline},"*"),40);
     }
+  } else if(message.type==="loadMoreTimeline") {
+    const pageGeneration=window.historyGeneration;
+    setTimeout(()=>window.postMessage({
+      type:"timelinePage",
+      repositoryId:"fixture",
+      generation:pageGeneration,
+      timeline:{...window.fixtureTimeline,totalEntries:window.fixtureTimeline.entries.length,hasMore:false,nextCursor:null,entries:window.fixtureTimeline.entries.slice(2)}
+    },"*"),40);
+  } else if(message.type==="enableHistory") {
+    setTimeout(()=>window.postMessage({type:"enableRunning"},"*"),20);
+    setTimeout(()=>{
+      window.historyGeneration+=1;
+      window.postMessage({type:"timeline",repositoryId:"fixture",generation:window.historyGeneration,timeline:{...window.fixtureTimeline,historyEnabled:true}},"*");
+      window.postMessage({type:"enableSucceeded"},"*");
+    },120);
   } else if(message.type==="loadRevision") {
     const loadScenario=new URLSearchParams(window.location.search).get("load");
     const delay=loadScenario==="slow" ? 500 : message.commit.startsWith("a") ? 180 : 120;
@@ -443,7 +468,8 @@ window.acquireVsCodeApi=()=>({postMessage(message){
         setTimeout(()=>{
           const entry=window.fixtureTimeline.entries.find(candidate=>candidate.commit===message.commit);
           Object.assign(entry,{graphState:"graph_available",presentationAvailable:true,realization:"rc",fingerprint:"fc"});
-          window.postMessage({type:"timeline",repositoryId:"fixture",timeline:window.fixtureTimeline},"*");
+          window.historyGeneration+=1;
+          window.postMessage({type:"timeline",repositoryId:"fixture",generation:window.historyGeneration,timeline:window.fixtureTimeline},"*");
           window.postMessage({type:"buildSucceeded",commit:message.commit},"*");
         },220);
       }

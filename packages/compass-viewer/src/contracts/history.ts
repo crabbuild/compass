@@ -12,6 +12,9 @@ export const HistoryTimelineSchema = z.object({
   repositoryId: z.string(),
   selectedHead: z.string(),
   historyEnabled: z.boolean(),
+  totalEntries: z.number().int().nonnegative().nullable().optional(),
+  hasMore: z.boolean().optional(),
+  nextCursor: z.string().nullable().optional(),
   entries: z.array(z.object({
     commit: z.string(),
     parents: z.array(z.string()),

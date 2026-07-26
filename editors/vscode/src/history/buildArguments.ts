@@ -19,3 +19,11 @@ export function buildHistoryArgs(options: {
     "jsonl"
   ];
 }
+
+export function buildEnableHistoryArgs(profile: "code-only" | "default"): string[] {
+  return [
+    "history",
+    "enable",
+    ...(profile === "code-only" ? ["--code-only"] : [])
+  ];
+}
