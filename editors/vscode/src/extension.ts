@@ -13,9 +13,8 @@ import { CallGraphPanel } from "./views/callGraphPanel";
 import { openArchitecturePanel } from "./views/architecturePanel";
 import { openQueryPanel } from "./views/queryPanel";
 import { openHistoryPanel } from "./views/historyPanel";
-import { OperationsTree } from "./views/operationsTree";
-import { StatusTree } from "./views/statusTree";
 import { createCompassStatusBar } from "./views/statusBar";
+import { WorkspaceTree } from "./views/workspaceTree";
 import { SessionRegistry } from "./workspace/sessionRegistry";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -42,13 +41,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }));
   }
 
-  const statusTree = new StatusTree(registry, discovery);
-  const operationsTree = new OperationsTree(registry);
+  const workspaceTree = new WorkspaceTree(registry, discovery);
   const statusBar = createCompassStatusBar(context, registry);
   const refresh = async () => {
     await registry.refresh();
-    statusTree.refresh();
-    operationsTree.refresh();
+    workspaceTree.refresh();
     statusBar.refresh();
   };
   const selectCompassBinary = async () => {
@@ -124,9 +121,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return picked?.session;
   };
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider("compass.status", statusTree),
-    vscode.window.registerTreeDataProvider("compass.operations", operationsTree),
+    vscode.window.registerTreeDataProvider("compass.status", workspaceTree),
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
+    vscode.commands.registerCommand("compass.refreshWorkspace", refresh),
     vscode.commands.registerCommand("compass.selectCli", selectCompassBinary),
     vscode.commands.registerCommand("compass.openGraph", async (repositoryId?: string) => {
       if (!vscode.workspace.isTrusted) {

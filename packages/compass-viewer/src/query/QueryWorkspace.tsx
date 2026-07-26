@@ -134,50 +134,57 @@ export function QueryWorkspace({
           aria-labelledby={`query-mode-${mode}`}
         >
           <div className="query-composer">
-            <div className="query-editor">
-              <textarea
-                ref={editorRef}
-                value={query}
-                placeholder={mode === "natural"
-                  ? "Ask how a subsystem works, where a symbol is used, or how two modules connect…"
-                  : "MATCH (n) RETURN n LIMIT 20"}
-                aria-label={mode === "natural" ? "Natural-language query" : "CompassQL query"}
-                aria-keyshortcuts="Control+Enter Meta+Enter"
-                spellCheck={mode === "natural"}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                    event.preventDefault();
-                    execute();
-                  }
-                }}
-              />
-              <span className="query-shortcut">
-                {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
-              </span>
+            <div className="query-editor-shell">
+              <div className="query-editor">
+                <textarea
+                  ref={editorRef}
+                  value={query}
+                  placeholder={mode === "natural"
+                    ? "Ask how a subsystem works, where a symbol is used, or how two modules connect…"
+                    : "MATCH (n) RETURN n LIMIT 20"}
+                  aria-label={mode === "natural" ? "Natural-language query" : "CompassQL query"}
+                  aria-keyshortcuts="Control+Enter Meta+Enter"
+                  spellCheck={mode === "natural"}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                      event.preventDefault();
+                      execute();
+                    }
+                  }}
+                />
+              </div>
+              <div className="query-composer-footer">
+                {mode === "cql" && (
+                  <label className="query-params">
+                    <span>Parameters</span>
+                    <input
+                      value={params}
+                      placeholder="kind=Function, module=api"
+                      aria-label="CompassQL parameters"
+                      onChange={(event) => setParams(event.target.value)}
+                    />
+                  </label>
+                )}
+                <div className="query-footer-actions">
+                  <span className="query-shortcut">
+                    {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
+                  </span>
+                  <button
+                    type="button"
+                    className="query-run"
+                    aria-label={running ? "Cancel query" : "Run query"}
+                    disabled={!running && !query.trim()}
+                    onClick={running ? host.cancel : execute}
+                  >
+                    {running ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
+                    {running ? "Cancel" : "Run"}
+                  </button>
+                </div>
+              </div>
             </div>
-            <button
-              type="button"
-              className="query-run"
-              aria-label={running ? "Cancel query" : "Run query"}
-              disabled={!running && !query.trim()}
-              onClick={running ? host.cancel : execute}
-            >
-              {running ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
-              {running ? "Cancel" : "Run"}
-            </button>
           </div>
-          {mode === "cql" ? (
-            <label className="query-params">
-              <span>Parameters</span>
-              <input
-                value={params}
-                placeholder="kind=Function, module=api"
-                aria-label="CompassQL parameters"
-                onChange={(event) => setParams(event.target.value)}
-              />
-            </label>
-          ) : (
+          {mode === "natural" && (
             <div className="query-examples" aria-label="Example questions">
               <span>Try</span>
               {NATURAL_EXAMPLES.map((example) => (

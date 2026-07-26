@@ -2,9 +2,9 @@ import * as vscode from "vscode";
 import type { CompassDiscovery } from "../cli/discovery";
 import type { SessionRegistry } from "../workspace/sessionRegistry";
 import { treeItemFromNode } from "./treeItem";
-import { buildRepositoryTree, type TreeNode } from "./treeModel";
+import { buildWorkspaceTree, type TreeNode } from "./treeModel";
 
-export class StatusTree implements vscode.TreeDataProvider<TreeNode> {
+export class WorkspaceTree implements vscode.TreeDataProvider<TreeNode> {
   private readonly changes = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changes.event;
 
@@ -23,6 +23,6 @@ export class StatusTree implements vscode.TreeDataProvider<TreeNode> {
 
   getChildren(node?: TreeNode): TreeNode[] {
     if (node) return node.children ?? [];
-    return buildRepositoryTree(this.discovery, this.registry.all());
+    return buildWorkspaceTree(this.discovery, this.registry.all());
   }
 }

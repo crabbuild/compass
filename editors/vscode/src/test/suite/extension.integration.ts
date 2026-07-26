@@ -10,6 +10,7 @@ suite("Compass extension", () => {
     for (const command of [
       "compass.initialize",
       "compass.update",
+      "compass.refreshWorkspace",
       "compass.toggleWatch",
       "compass.openGraph",
       "compass.openCallGraph",
@@ -24,11 +25,17 @@ suite("Compass extension", () => {
       command: string;
       when: string;
     }>;
-    assert.ok(
-      viewTitle.some((item) =>
-        item.command === "compass.openHistory" && item.when === "view == compass.status"
-      ),
-      "Codebase Evolution is available from the Repository title"
+    assert.deepEqual(
+      extension.packageJSON.contributes.views.compass.map((view: { id: string }) => view.id),
+      ["compass.status"],
+      "Compass contributes one Workspace view"
     );
+    assert.deepEqual(
+      viewTitle.filter((item) => item.when === "view == compass.status")
+        .map((item) => item.command),
+      ["compass.refreshWorkspace"],
+      "Workspace exposes one read-only title action"
+    );
+    await vscode.commands.executeCommand("compass.refreshWorkspace");
   });
 });

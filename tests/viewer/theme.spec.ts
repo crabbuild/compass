@@ -96,6 +96,19 @@ test("query result surfaces honor the high-contrast border token", async ({ page
   await expect(page.locator(".query-node-results")).toHaveCSS("border-top-width", "2px");
 });
 
+test("query composer focus follows the VS Code focus token", async ({ page }) => {
+  await page.goto("/query.html");
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--vscode-focusBorder", "#ff00ff");
+  });
+  await page.getByRole("textbox", { name: "Natural-language query" }).focus();
+
+  await expect(page.locator(".query-editor-shell"))
+    .toHaveCSS("border-top-color", "rgb(255, 0, 255)");
+  await expect(page.locator(".query-editor-shell"))
+    .toHaveCSS("outline-color", "rgb(255, 0, 255)");
+});
+
 test("loading respects reduced motion", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/architecture.html?delay=1");

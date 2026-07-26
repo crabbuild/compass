@@ -1776,15 +1776,26 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  display: block;
+}
+
+.query-editor-shell {
+  overflow: hidden;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  background: var(--query-input);
+  color: var(--query-input-foreground);
+}
+
+.query-editor-shell:focus-within {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
 }
 
 .query-editor {
   position: relative;
   min-width: 0;
-  flex: 1;
 }
 
 .query-editor textarea {
@@ -1793,12 +1804,12 @@ body.vscode-high-contrast-light .compass-source-metadata {
   min-height: 96px;
   max-height: 260px;
   resize: vertical;
-  padding: 11px 12px 27px;
-  border: 1px solid var(--vscode-input-border, var(--border));
-  border-radius: 3px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 0;
   outline: none;
   background: var(--query-input);
-  color: var(--query-input-foreground);
+  color: inherit;
   font: 13px/1.55 var(--compass-font-sans);
   box-sizing: border-box;
 }
@@ -1813,19 +1824,35 @@ body.vscode-high-contrast-light .compass-source-metadata {
   color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
 }
 
-.query-editor textarea:focus-visible,
 .query-params input:focus-visible {
   border-color: var(--ring);
   outline: 1px solid var(--ring);
   outline-offset: -1px;
 }
 
+.query-composer-footer {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 6px 5px 10px;
+  border-top: 1px solid var(--query-border);
+  background: var(--query-surface);
+}
+
+.query-footer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .query-shortcut {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
   color: var(--vscode-disabledForeground, var(--compass-faint));
   font: 10px/1 var(--compass-font-sans);
+  white-space: nowrap;
 }
 
 .query-run {
@@ -1859,16 +1886,24 @@ body.vscode-high-contrast-light .compass-source-metadata {
 }
 
 .query-params {
-  display: grid;
-  grid-template-columns: auto minmax(160px, 420px);
+  display: flex;
+  min-width: 0;
+  max-width: 620px;
+  flex: 1 1 520px;
   gap: 8px;
   align-items: center;
-  margin-top: 7px;
   color: var(--muted-foreground);
   font-size: 10px;
 }
 
+.query-params > span {
+  flex: 0 0 auto;
+}
+
 .query-params input {
+  min-width: 0;
+  max-width: 520px;
+  flex: 1 1 260px;
   height: 28px;
   padding: 3px 8px;
   border: 1px solid var(--vscode-input-border, var(--border));
@@ -2240,6 +2275,8 @@ body.vscode-high-contrast .query-table,
 body.vscode-high-contrast-light .query-table,
 body.vscode-high-contrast .query-composer-panel,
 body.vscode-high-contrast-light .query-composer-panel,
+body.vscode-high-contrast .query-editor-shell,
+body.vscode-high-contrast-light .query-editor-shell,
 body.vscode-high-contrast .query-prose-result,
 body.vscode-high-contrast-light .query-prose-result,
 body.vscode-high-contrast .query-traversal-summary,
@@ -2647,8 +2684,22 @@ body.vscode-high-contrast-light .history-change-counts span {
     align-self: flex-start;
   }
 
-  .query-run {
-    align-self: flex-end;
+  .query-composer-footer {
+    flex-wrap: wrap;
+  }
+
+  .query-params {
+    max-width: none;
+    flex: 1 0 100%;
+  }
+
+  .query-params input {
+    max-width: none;
+  }
+
+  .query-footer-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .query-examples {
@@ -2735,6 +2786,19 @@ body.vscode-high-contrast-light .history-change-counts span {
   .history-graph-canvas .compass-workspace {
     height: auto;
     min-height: max(720px, 102vh);
+  }
+}
+
+@media (max-width: 420px) {
+  .query-params {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .query-params input {
+    flex: 0 0 auto;
+    width: 100%;
   }
 }
 

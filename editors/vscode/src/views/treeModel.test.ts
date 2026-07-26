@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildOperationsTree,
-  buildRepositoryTree,
-  type SessionTreeSnapshot
+  buildWorkspaceTree,
+  type SessionTreeSnapshot,
+  type TreeNode
 } from "./treeModel";
+
+const discovery = {
+  kind: "found" as const,
+  executable: "/usr/local/bin/compass"
+};
 
 const available: SessionTreeSnapshot = {
   id: "repository-1",
@@ -12,122 +17,158 @@ const available: SessionTreeSnapshot = {
   capabilityError: undefined
 };
 
-describe("buildRepositoryTree", () => {
-  it("hides a healthy CLI and exposes repository graph actions", () => {
-    const nodes = buildRepositoryTree(
-      { kind: "found", executable: "/usr/local/bin/compass" },
-      [available]
-    );
+describe("buildWorkspaceTree", () => {
+  it("shows repository status and each healthy workflow exactly once", () => {
+    const nodes = buildWorkspaceTree(discovery, [available]);
 
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0]).toMatchObject({
-      label: "repo",
-      description: "Graph available",
-      tooltip: "/work/repo",
-      expanded: true
-    });
-    expect(nodes[0]?.children?.map((node) => node.command)).toEqual([
-      "compass.openGraph",
-      "compass.openHistory"
+    expect(nodes.map((node) => node.label)).toEqual([
+      "repo",
+      "Explore",
+      "Maintain"
     ]);
-    expect(nodes[0]?.children?.[0]?.commandArguments).toEqual(["repository-1"]);
+    expect(nodes[0]).toMatchObject({
+      description: "Graph ready",
+      tooltip: "/work/repo"
+    });
+    expect(nodes[0]?.children).toBeUndefined();
+    expect(nodes[1]?.expanded).toBe(true);
+    expect(nodes[1]?.children?.map((node) => [node.label, node.command])).toEqual([
+      ["Code graph", "compass.openGraph"],
+      ["Architecture flow", "compass.openArchitecture"],
+      ["Call graph from cursor", "compass.openCallGraph"],
+      ["Ask codebase", "compass.openQuery"],
+      ["Codebase evolution", "compass.openHistory"]
+    ]);
+    expect(nodes[2]?.expanded).toBeUndefined();
+    expect(nodes[2]?.children?.map((node) => [node.label, node.command])).toEqual([
+      ["Update graph", "compass.update"],
+      ["Watch for changes", "compass.toggleWatch"]
+    ]);
+    expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
 
-  it("shows CLI setup only when discovery or compatibility needs attention", () => {
-    const missing = buildRepositoryTree(
-      { kind: "missing", searched: ["/usr/bin/compass"] },
-      [{ ...available, graphState: "not-materialized" }]
-    );
-    expect(missing[0]).toMatchObject({
-      label: "Compass CLI needs attention",
-      description: "Not found",
-      command: "compass.selectCli"
-    });
-    expect(missing[1]?.children?.[0]?.command).toBe("compass.initialize");
-
-    const incompatible = buildRepositoryTree(
-      { kind: "found", executable: "/usr/local/bin/compass" },
-      [{ ...available, capabilityError: "capability contract is too old" }]
-    );
-    expect(incompatible[0]).toMatchObject({
-      description: "Incompatible",
-      tooltip: "capability contract is too old",
-      command: "compass.selectCli"
-    });
-  });
-
-  it("offers a targeted retry after a failed build", () => {
-    const nodes = buildRepositoryTree(
-      { kind: "found", executable: "/usr/local/bin/compass" },
-      [{ ...available, graphState: "failed" }]
-    );
-
-    expect(nodes[0]?.description).toBe("Build failed");
-    expect(nodes[0]?.children?.[0]).toMatchObject({
-      label: "Update graph",
-      command: "compass.update",
-      commandArguments: ["repository-1"]
-    });
-  });
-});
-
-describe("buildOperationsTree", () => {
-  it("places active work first and exposes every available workflow", () => {
-    const nodes = buildOperationsTree([{
+  it("keeps active operations status-only and moves stop control to Maintain", () => {
+    const nodes = buildWorkspaceTree(discovery, [{
       ...available,
       activeWriter: { operationId: "build-1" },
       watch: { operationId: "watch-1" }
     }]);
 
     expect(nodes.map((node) => node.label)).toEqual([
+      "repo",
       "Active operations",
-      "Build",
       "Explore",
-      "History"
+      "Maintain"
     ]);
-    expect(nodes[0]?.children?.map((node) => node.label)).toEqual([
-      "Building graph",
-      "Watching for changes"
+    expect(nodes[1]).toMatchObject({ description: "2", expanded: true });
+    expect(nodes[1]?.children?.map((node) => ({
+      label: node.label,
+      description: node.description,
+      command: node.command
+    }))).toEqual([
+      { label: "Building graph", description: "repo", command: undefined },
+      { label: "Watching for changes", description: "repo", command: undefined }
     ]);
-    expect(nodes[0]?.children?.[1]?.commandArguments).toEqual(["repository-1"]);
-    expect(nodes[1]?.children?.map((node) => [node.label, node.command])).toEqual([
-      ["Update graph", "compass.update"],
-      ["Stop watch", "compass.toggleWatch"]
-    ]);
-    expect(nodes[2]?.children?.map((node) => node.command)).toEqual([
-      "compass.openGraph",
-      "compass.openCallGraph",
-      "compass.openArchitecture",
-      "compass.openQuery"
-    ]);
-    expect(nodes[3]?.children?.[0]?.command).toBe("compass.openHistory");
+    expect(nodes[3]?.children?.at(-1)?.label).toBe("Stop watching");
+    expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
 
-  it("offers initialization and history before the first graph exists", () => {
-    const nodes = buildOperationsTree([{
+  it("offers one initialization action before the first graph", () => {
+    const nodes = buildWorkspaceTree(discovery, [{
       ...available,
       graphState: "not-materialized"
     }]);
 
-    expect(nodes.map((node) => node.label)).toEqual(["Build", "History"]);
-    expect(nodes[0]?.children?.map((node) => node.command)).toEqual([
-      "compass.initialize"
+    expect(nodes.map((node) => node.label)).toEqual([
+      "repo",
+      "Initialize repository",
+      "Explore"
     ]);
-    expect(nodes[1]?.children?.[0]?.command).toBe("compass.openHistory");
+    expect(nodes[0]?.description).toBe("Not initialized");
+    expect(nodes[1]?.command).toBe("compass.initialize");
+    expect(nodes[2]?.children?.map((node) => node.label)).toEqual([
+      "Codebase evolution"
+    ]);
+    expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
 
-  it("uses an unambiguous watch label for multiple repositories", () => {
-    const nodes = buildOperationsTree([
+  it("offers one targeted retry after a failed graph build", () => {
+    const nodes = buildWorkspaceTree(discovery, [{
+      ...available,
+      graphState: "failed"
+    }]);
+
+    expect(nodes.map((node) => node.label)).toEqual([
+      "repo",
+      "Retry graph build",
+      "Explore"
+    ]);
+    expect(nodes[0]?.description).toBe("Build failed");
+    expect(nodes[1]?.command).toBe("compass.update");
+    expect(commands(nodes).filter((command) => command === "compass.update")).toHaveLength(1);
+  });
+
+  it("focuses the tree on setup when the CLI is missing or incompatible", () => {
+    const missing = buildWorkspaceTree(
+      { kind: "missing", searched: ["/usr/bin/compass"] },
+      [available]
+    );
+    expect(missing.map((node) => node.label)).toEqual([
+      "Compass CLI needs attention",
+      "repo"
+    ]);
+    expect(missing[0]).toMatchObject({
+      description: "Not found",
+      command: "compass.selectCli"
+    });
+
+    const incompatible = buildWorkspaceTree(discovery, [{
+      ...available,
+      capabilityError: "capability contract is too old"
+    }]);
+    expect(incompatible.map((node) => node.label)).toEqual([
+      "Compass CLI needs attention",
+      "repo"
+    ]);
+    expect(incompatible[0]).toMatchObject({
+      description: "Incompatible",
+      tooltip: "capability contract is too old"
+    });
+  });
+
+  it("offers a quiet native action when no repository is open", () => {
+    const nodes = buildWorkspaceTree(discovery, []);
+
+    expect(nodes).toEqual([expect.objectContaining({
+      label: "Open a repository folder",
+      icon: "folder-opened",
+      command: "vscode.openFolder"
+    })]);
+  });
+
+  it("keeps multi-root status explicit without repeating global workflows", () => {
+    const nodes = buildWorkspaceTree(discovery, [
       available,
       {
         ...available,
         id: "repository-2",
         root: "/work/other",
-        watch: { operationId: "watch-2" }
+        graphState: "failed"
       }
     ]);
-    const build = nodes.find((node) => node.label === "Build");
-    expect(build?.children?.find((node) => node.command === "compass.toggleWatch")?.label)
-      .toBe("Start or stop watch");
+
+    expect(nodes.filter((node) => node.id.startsWith("repository:")).map((node) => node.label))
+      .toEqual(["repo", "other"]);
+    expect(nodes.filter((node) => node.label === "Explore")).toHaveLength(1);
+    expect(nodes.filter((node) => node.label === "Maintain")).toHaveLength(1);
+    expect(commands(nodes).filter((command) => command === "compass.update")).toHaveLength(1);
+    expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
 });
+
+function commands(nodes: readonly TreeNode[]): string[] {
+  return nodes.flatMap((node) => [
+    ...(node.command ? [node.command] : []),
+    ...commands(node.children ?? [])
+  ]);
+}

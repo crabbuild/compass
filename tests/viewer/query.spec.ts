@@ -44,6 +44,53 @@ test("query modes use a full-width tab rail", async ({ page }) => {
   await expect(page.getByRole("textbox", { name: "CompassQL query" })).toBeVisible();
 });
 
+test("CompassQL actions and parameters share the bottom composer footer", async ({ page }) => {
+  await page.goto("/query.html");
+  await page.getByRole("tab", { name: "CompassQL" }).click();
+
+  const shell = await page.locator(".query-editor-shell").boundingBox();
+  const editor = await page.getByRole("textbox", { name: "CompassQL query" }).boundingBox();
+  const params = await page.getByRole("textbox", { name: "CompassQL parameters" })
+    .boundingBox();
+  const run = await page.getByRole("button", { name: "Run query" }).boundingBox();
+
+  expect(shell).not.toBeNull();
+  expect(editor).not.toBeNull();
+  expect(params).not.toBeNull();
+  expect(run).not.toBeNull();
+  expect(params!.x).toBeLessThan(run!.x);
+  expect(run!.y).toBeGreaterThan(editor!.y + editor!.height);
+  expect(run!.y + run!.height).toBeLessThanOrEqual(shell!.y + shell!.height);
+});
+
+test("narrow CompassQL composer preserves parameters and the bottom action", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/query.html");
+  await page.getByRole("tab", { name: "CompassQL" }).click();
+
+  const editor = page.getByRole("textbox", { name: "CompassQL query" });
+  const params = page.getByRole("textbox", { name: "CompassQL parameters" });
+  const run = page.getByRole("button", { name: "Run query" });
+  await expect(editor).toBeVisible();
+  await expect(params).toBeVisible();
+  await expect(run).toBeVisible();
+
+  const editorBox = await editor.boundingBox();
+  const paramsBox = await params.boundingBox();
+  const runBox = await run.boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(paramsBox).not.toBeNull();
+  expect(runBox).not.toBeNull();
+  expect(paramsBox!.height).toBeLessThanOrEqual(32);
+  expect(paramsBox!.width).toBeGreaterThan(200);
+  expect(runBox!.y).toBeGreaterThan(editorBox!.y + editorBox!.height);
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth
+  )).toBe(true);
+});
+
 test("traversal answers expose graph and source actions", async ({ page }) => {
   await page.goto("/query.html?result=traversal");
   await page.getByRole("textbox", { name: "Natural-language query" }).fill("What is Pipeline?");
