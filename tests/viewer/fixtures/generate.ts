@@ -10,6 +10,14 @@ export default async function generate(): Promise<void> {
   await mkdir(output, { recursive: true });
   await cp(path.join(root, "packages/compass-viewer/dist/viewer.css"), path.join(output, "viewer.css"));
   await cp(path.join(root, "packages/compass-viewer/dist/graph.js"), path.join(output, "graph.js"));
+  await cp(
+    path.join(root, "crates/compass-cli/assets/semantic-diff-graph.css"),
+    path.join(output, "semantic-diff-graph.css")
+  );
+  await cp(
+    path.join(root, "crates/compass-cli/assets/semantic-diff-graph.js"),
+    path.join(output, "semantic-diff-graph.js")
+  );
   for (const name of ["architecture", "callGraph", "history", "initialize", "query"]) {
     await cp(
       path.join(root, `editors/vscode/dist/webviews/${name}.js`),
@@ -56,6 +64,10 @@ export default async function generate(): Promise<void> {
   const viewerJs = await readFile(path.join(output, "graph.js"), "utf8");
   const viewerCss = await readFile(path.join(output, "viewer.css"), "utf8");
   await writeFile(path.join(output, "graph.html"), `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(graph)}</script><script>${viewerJs}</script></body></html>`);
+  await writeFile(
+    path.join(output, "semanticDiffGraph.html"),
+    semanticDiffGraphHarness()
+  );
   const communityOverview = {
     schema: "compass.viewer.graph/1",
     title: "Community fixture",
@@ -208,6 +220,164 @@ export default async function generate(): Promise<void> {
   );
   await writeFile(path.join(output, "query.html"), queryHarness());
   await writeFile(path.join(output, "initialize.html"), initializationHarness());
+}
+
+function semanticDiffGraphHarness(): string {
+  const overflowEdges = Array.from({ length: 44 }, (_, index) => ({
+    source: "changed-core",
+    target: `overflow-context-${String(index).padStart(2, "0")}`,
+    relation: "calls",
+    key: `overflow-${index}`,
+    source_file: "src/core.ts",
+    changed_fields: []
+  }));
+  const report = {
+    schema: "compass.semantic_diff.report/1",
+    comparison: {
+      old_commit: "a".repeat(40),
+      new_commit: "b".repeat(40),
+      fingerprint: "c".repeat(64)
+    },
+    findings: [{
+      id: "sd1-fixture",
+      subject: "changed-core",
+      headline: "Changed core behavior",
+      evidence: [{ record_key: "changed-core" }]
+    }],
+    source_changes: [{
+      old_path: "src/core.ts",
+      new_path: "src/core.ts",
+      patch: "@@ -1 +1 @@\n-old\n+new"
+    }],
+    graph_delta: {
+      changed_nodes: [
+        {
+          id: "changed-core",
+          label: "changed-core",
+          kind: "function",
+          source_file: "src/core.ts",
+          changed_fields: ["implementation"]
+        },
+        {
+          id: "hostile",
+          label: "</script><img src=x onerror=alert(1)>",
+          kind: "function",
+          source_file: "src/hostile.ts",
+          changed_fields: ["body"]
+        }
+      ],
+      added_nodes: [
+        {
+          id: "added-leaf",
+          label: "added-leaf",
+          kind: "function",
+          source_file: "src/leaf.ts",
+          changed_fields: []
+        },
+        {
+          id: "unrelated",
+          label: "unrelated",
+          kind: "type",
+          source_file: "src/unrelated.ts",
+          changed_fields: []
+        }
+      ],
+      removed_nodes: [{
+        id: "removed-caller",
+        label: "removed-caller",
+        kind: "function",
+        source_file: "src/caller.ts",
+        changed_fields: []
+      }],
+      changed_edges: [{
+        source: "removed-caller",
+        target: "changed-core",
+        relation: "calls",
+        key: "removed-core",
+        source_file: "src/core.ts",
+        changed_fields: ["confidence"]
+      }],
+      added_edges: [
+        {
+          source: "changed-core",
+          target: "added-leaf",
+          relation: "calls",
+          key: "core-leaf",
+          source_file: "src/core.ts",
+          changed_fields: []
+        },
+        {
+          source: "changed-core",
+          target: "context-api",
+          relation: "uses",
+          key: "core-context",
+          source_file: "src/core.ts",
+          changed_fields: []
+        },
+        ...overflowEdges,
+        {
+          source: "changed-core",
+          target: "zz-outside-sample",
+          relation: "calls",
+          key: "outside",
+          source_file: "src/core.ts",
+          changed_fields: []
+        }
+      ],
+      removed_edges: [],
+      collapsed_attribute_changes: {}
+    }
+  };
+  const rows = [
+    ...report.graph_delta.changed_nodes,
+    ...report.graph_delta.added_nodes,
+    ...report.graph_delta.removed_nodes
+  ].map((node) =>
+    `<li class="delta-row" data-graph-node-id="${node.id}">${node.id}</li>`
+  ).join("");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Semantic diff graph fixture</title>
+  <style>
+    :root{color-scheme:dark;--canvas:#0e1116;--surface:#141820;--surface-raised:#191e27;--surface-inset:#0b0e13;--border:#2b313b;--border-strong:#3a424e;--text:#e7eaf0;--text-soft:#c5cad3;--muted:#8d96a5;--accent:#8ab4f8;--red:#ff7b86;--amber:#d9a441;--green:#65bd84}
+    *{box-sizing:border-box}
+    body{margin:0;padding:20px;background:var(--canvas);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button{font:inherit;color:inherit}
+    .graph-note{color:var(--muted);font-size:11px}
+    .delta-row{padding:5px}
+  </style>
+  <link rel="stylesheet" href="/semantic-diff-graph.css">
+</head>
+<body>
+  <article id="sd1-fixture">Changed core behavior</article>
+  <details id="source-change-0"><summary>src/core.ts</summary><pre>source patch</pre></details>
+  <div class="graph-explorer">
+    <div id="graph-canvas" class="graph-canvas" aria-label="Changed code graph"></div>
+    <aside id="graph-inspector" class="graph-inspector" aria-labelledby="graph-inspector-heading">
+      <h3 id="graph-inspector-heading" class="sr-only">Node inspector</h3>
+      <p class="graph-inspector-empty">Select a node to inspect its change.</p>
+    </aside>
+  </div>
+  <p id="graph-live" class="sr-only" aria-live="polite"></p>
+  <p id="graph-note" class="graph-note">The visualization focuses on the changed subgraph.</p>
+  <ul id="exhaustive-list">${rows}</ul>
+  <script id="semantic-diff-data" type="application/json">${JSON.stringify(report).replaceAll("<", "\\u003c")}</script>
+  <script src="/semantic-diff-graph.js"></script>
+  <script>
+    const report = JSON.parse(document.getElementById("semantic-diff-data").textContent);
+    globalThis.graphFixture = globalThis.CompassSemanticDiffGraph.mount({
+      report,
+      host: document.getElementById("graph-canvas"),
+      inspector: document.getElementById("graph-inspector"),
+      liveRegion: document.getElementById("graph-live"),
+      note: document.getElementById("graph-note")
+    });
+  </script>
+</body>
+</html>`;
 }
 
 function graphLoadingHarness(): string {

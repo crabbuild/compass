@@ -553,7 +553,7 @@ Use the working Node installation explicitly:
 ```bash
 cargo test -p compass-cli semantic_diff_render --lib
 PATH=/Users/haipingfu/.nvm/versions/node/v24.13.1/bin:$PATH \
-  npm exec --prefix tests/viewer playwright test semantic-diff-graph.spec.ts
+  npm test --prefix tests/viewer -- semantic-diff-graph.spec.ts
 ```
 
 Expected: Rust renderer tests and the Chromium capsule test pass.
@@ -732,7 +732,7 @@ labels and links `sd1-fixture`.
 
 ```bash
 PATH=/Users/haipingfu/.nvm/versions/node/v24.13.1/bin:$PATH \
-  npm exec --prefix tests/viewer playwright test semantic-diff-graph.spec.ts
+  npm test --prefix tests/viewer -- semantic-diff-graph.spec.ts
 cargo test -p compass-cli semantic_diff_render --lib
 ```
 
@@ -934,7 +934,7 @@ cargo test -p compass-cli --test history_cli \
   diff_emits_semantic_text_json_html_and_rejects_removed_flags \
   -- --exact
 PATH=/Users/haipingfu/.nvm/versions/node/v24.13.1/bin:$PATH \
-  npm exec --prefix tests/viewer playwright test semantic-diff-graph.spec.ts
+  npm test --prefix tests/viewer -- semantic-diff-graph.spec.ts
 git diff --check
 ```
 
@@ -998,7 +998,7 @@ Expected: all commands exit `0`.
 
 ```bash
 PATH=/Users/haipingfu/.nvm/versions/node/v24.13.1/bin:$PATH \
-  npm exec --prefix tests/viewer playwright test semantic-diff-graph.spec.ts
+  npm test --prefix tests/viewer -- semantic-diff-graph.spec.ts
 ```
 
 Expected: all graph explorer Chromium tests pass.

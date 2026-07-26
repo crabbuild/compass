@@ -276,6 +276,16 @@ edge-identity shifts that preserve multigraph multiplicity. HTML output always
 requires an explicit path; `compass export html` remains the full graph
 renderer and does not accept semantic-diff reports.
 
+The graph visualization is a bounded interactive sample backed by those
+exhaustive lists and the embedded JSON. Select a node to focus its direct
+changed-edge neighborhood and open a persistent inspector with its retained
+kind, source path, changed-field names, incoming and outgoing relationships,
+and related semantic findings. Inspector links open an exact source patch or
+finding only when the report contains a matching target. Context-only endpoints
+show their identifier and known relationships without implying unavailable
+metadata. If JavaScript is disabled, the exhaustive lists remain the
+authoritative fallback.
+
 After writing any HTML page, an interactive Compass CLI asks before opening it
 in the default browser; Enter or `n` leaves the page closed. Scripts, pipes,
 redirected commands, and CI never prompt or launch a browser.

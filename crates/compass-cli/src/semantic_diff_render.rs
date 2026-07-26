@@ -8,6 +8,8 @@ use compass_semantic_diff::{
 };
 
 const PIERRE_DIFFS_JS: &str = include_str!("../assets/vendor/pierre-diffs-v1.2.12.js");
+const SEMANTIC_DIFF_GRAPH_CSS: &str = include_str!("../assets/semantic-diff-graph.css");
+const SEMANTIC_DIFF_GRAPH_JS: &str = include_str!("../assets/semantic-diff-graph.js");
 
 pub(crate) struct RenderOptions<'a> {
     pub include_routine: bool,
@@ -409,7 +411,11 @@ footer{color:var(--muted);border-top:1px solid var(--border);margin-top:40px;pad
 @media(max-width:900px){main{width:min(100% - 32px,1120px)}.metrics{grid-template-columns:repeat(3,1fr)}.metric:nth-child(4){border-left:0;padding-left:0}.feature{grid-template-columns:1fr}.files{grid-column:1;margin-top:-16px}.toolbar{position:static;grid-template-columns:1fr 180px auto auto}.shown{grid-column:1/-1;text-align:left}.detail{grid-template-columns:112px minmax(0,1fr)}.graph-summary{grid-template-columns:repeat(3,1fr)}.graph-stat:nth-child(4){border-left:0;padding-left:0}}
 @media(max-width:620px){main{width:min(100% - 24px,1120px);padding-top:28px}.title-row{display:block}.schema{margin-top:12px}.metrics{grid-template-columns:1fr 1fr}.metric:nth-child(odd){border-left:0;padding-left:0}.metric:nth-child(even){border-left:1px solid var(--border);padding-left:14px}.report-nav{gap:16px}.toolbar{grid-template-columns:1fr 1fr}.toolbar input{grid-column:1/-1}.toolbar label{grid-column:1/-1}.detail{display:block;padding:16px}.detail h4{margin:18px 0 5px}.detail h4:first-child{margin-top:0}.detail>p,.detail>ul,.detail>pre{margin:0}.feature{gap:7px}.files{margin-top:0}.code-heading{display:block}.code-heading-copy{margin-bottom:9px}.code-controls{justify-content:space-between}.source-summary{display:block}.source-meta{display:block;margin-top:4px}.graph-summary{grid-template-columns:1fr 1fr}.graph-stat:nth-child(odd){border-left:0;padding-left:0}.graph-stat:nth-child(even){border-left:1px solid var(--border);padding-left:12px}.delta-grid{grid-template-columns:1fr}.graph-canvas svg{height:360px}}
 @media(prefers-reduced-motion:reduce){.finding summary:after{transition:none}}
-</style>
+"#,
+    );
+    output.push_str(SEMANTIC_DIFF_GRAPH_CSS);
+    output.push_str(
+        r#"</style>
 </head>
 <body>
 <main>
@@ -533,6 +539,9 @@ footer{color:var(--muted);border-top:1px solid var(--border);margin-top:40px;pad
     output.push_str("<script>");
     output.push_str(&PIERRE_DIFFS_JS.replace("</script", "<\\/script"));
     output.push_str("</script>");
+    output.push_str("<script>");
+    output.push_str(&SEMANTIC_DIFF_GRAPH_JS.replace("</script", "<\\/script"));
+    output.push_str("</script>");
     output.push_str(
         r#"<script>
 const cards=[...document.querySelectorAll(".finding")];
@@ -639,134 +648,13 @@ document.getElementById("diff-wrap")?.addEventListener("change",event=>{
     instance.rerender();
   }
 });
-function renderChangedGraph(delta){
-  const host=document.getElementById("graph-canvas");
-  if(!host||!delta)return;
-  const nodeStates=new Map();
-  const nodeLabels=new Map();
-  const priority={context:0,changed:1,removed:2,added:3};
-  const rememberNode=(node,state)=>{
-    const id=typeof node==="string"?node:node.id;
-    if(!id)return;
-    if(!nodeStates.has(id)||priority[state]>priority[nodeStates.get(id)])nodeStates.set(id,state);
-    if(typeof node!=="string")nodeLabels.set(id,node.label||node.id);
-  };
-  for(const node of delta.changed_nodes||[])rememberNode(node,"changed");
-  for(const node of delta.removed_nodes||[])rememberNode(node,"removed");
-  for(const node of delta.added_nodes||[])rememberNode(node,"added");
-  const edgeSets=[
-    ...((delta.changed_edges||[]).map(edge=>({...edge,status:"changed"}))),
-    ...((delta.removed_edges||[]).map(edge=>({...edge,status:"removed"}))),
-    ...((delta.added_edges||[]).map(edge=>({...edge,status:"added"})))
-  ];
-  for(const edge of edgeSets){
-    rememberNode(edge.source,"context");
-    rememberNode(edge.target,"context");
-  }
-  const ranked=[...nodeStates.keys()].sort((a,b)=>{
-    const stateDifference=priority[nodeStates.get(b)]-priority[nodeStates.get(a)];
-    return stateDifference||a.localeCompare(b);
-  });
-  const maxNodes=80;
-  const maxEdges=120;
-  const selectedIds=ranked.slice(0,maxNodes);
-  const selected=new Set(selectedIds);
-  const edges=edgeSets
-    .filter(edge=>selected.has(edge.source)&&selected.has(edge.target))
-    .sort((a,b)=>`${a.source}\0${a.relation}\0${a.target}\0${a.key||""}`.localeCompare(`${b.source}\0${b.relation}\0${b.target}\0${b.key||""}`))
-    .slice(0,maxEdges);
-  const width=960;
-  const height=420;
-  const centerX=width/2;
-  const centerY=height/2;
-  const nodes=selectedIds.map((id,index)=>{
-    const angle=(Math.PI*2*index)/Math.max(selectedIds.length,1);
-    const ring=110+(index%7)*9;
-    return{id,state:nodeStates.get(id),label:nodeLabels.get(id)||id,x:centerX+Math.cos(angle)*ring,y:centerY+Math.sin(angle)*ring,vx:0,vy:0};
-  });
-  const byId=new Map(nodes.map(node=>[node.id,node]));
-  for(let step=0;step<170;step++){
-    for(let left=0;left<nodes.length;left++){
-      for(let right=left+1;right<nodes.length;right++){
-        const a=nodes[left],b=nodes[right];
-        let dx=b.x-a.x,dy=b.y-a.y;
-        const distanceSquared=Math.max(dx*dx+dy*dy,36);
-        const force=260/distanceSquared;
-        const distance=Math.sqrt(distanceSquared);
-        dx/=distance;dy/=distance;
-        a.vx-=dx*force;a.vy-=dy*force;b.vx+=dx*force;b.vy+=dy*force;
-      }
-    }
-    for(const edge of edges){
-      const source=byId.get(edge.source),target=byId.get(edge.target);
-      if(!source||!target)continue;
-      let dx=target.x-source.x,dy=target.y-source.y;
-      const distance=Math.max(Math.sqrt(dx*dx+dy*dy),1);
-      const force=(distance-105)*.0018;
-      dx/=distance;dy/=distance;
-      source.vx+=dx*force;source.vy+=dy*force;target.vx-=dx*force;target.vy-=dy*force;
-    }
-    for(const node of nodes){
-      node.vx+=(centerX-node.x)*.0007;
-      node.vy+=(centerY-node.y)*.0007;
-      node.vx*=.88;node.vy*=.88;
-      node.x=Math.max(24,Math.min(width-24,node.x+node.vx));
-      node.y=Math.max(22,Math.min(height-22,node.y+node.vy));
-    }
-  }
-  const ns="http://www.w3.org/2000/svg";
-  const svg=document.createElementNS(ns,"svg");
-  svg.setAttribute("viewBox",`0 0 ${width} ${height}`);
-  svg.setAttribute("aria-hidden","true");
-  const defs=document.createElementNS(ns,"defs");
-  for(const status of ["added","removed","changed","context"]){
-    const marker=document.createElementNS(ns,"marker");
-    marker.id=`arrow-${status}`;
-    marker.setAttribute("viewBox","0 0 10 10");
-    marker.setAttribute("refX","8");
-    marker.setAttribute("refY","5");
-    marker.setAttribute("markerWidth","5");
-    marker.setAttribute("markerHeight","5");
-    marker.setAttribute("orient","auto-start-reverse");
-    const path=document.createElementNS(ns,"path");
-    path.setAttribute("d","M 0 0 L 10 5 L 0 10 z");
-    path.setAttribute("class",`graph-arrow ${status}`);
-    marker.append(path);defs.append(marker);
-  }
-  svg.append(defs);
-  for(const edge of edges){
-    const source=byId.get(edge.source),target=byId.get(edge.target);
-    const line=document.createElementNS(ns,"line");
-    line.setAttribute("x1",source.x);line.setAttribute("y1",source.y);
-    line.setAttribute("x2",target.x);line.setAttribute("y2",target.y);
-    line.setAttribute("class",`graph-edge ${edge.status}`);
-    line.setAttribute("marker-end",`url(#arrow-${edge.status})`);
-    const title=document.createElementNS(ns,"title");
-    title.textContent=`${edge.source} —${edge.relation}→ ${edge.target}`;
-    line.append(title);svg.append(line);
-  }
-  const symbols={added:"+",removed:"−",changed:"~",context:"·"};
-  for(const node of nodes){
-    const group=document.createElementNS(ns,"g");
-    group.setAttribute("class",`graph-node ${node.state}`);
-    group.setAttribute("transform",`translate(${node.x} ${node.y})`);
-    const circle=document.createElementNS(ns,"circle");
-    circle.setAttribute("r","7");
-    const title=document.createElementNS(ns,"title");
-    title.textContent=`${symbols[node.state]} ${node.label}`;
-    circle.append(title);
-    const label=document.createElementNS(ns,"text");
-    label.setAttribute("x","11");label.setAttribute("y","3.5");
-    const shortLabel=node.label.length>34?`${node.label.slice(0,33)}…`:node.label;
-    label.textContent=`${symbols[node.state]} ${shortLabel}`;
-    group.append(circle,label);svg.append(group);
-  }
-  host.replaceChildren(svg);
-  if(ranked.length>maxNodes||edgeSets.length>edges.length){
-    document.getElementById("graph-note").textContent=`Visual sample: ${nodes.length} of ${ranked.length} involved nodes and ${edges.length} of ${edgeSets.length} changed edges. The lists below and embedded JSON remain exhaustive.`;
-  }
-}
-renderChangedGraph(reportData.graph_delta);
+globalThis.CompassSemanticDiffGraph.mount({
+  report:reportData,
+  host:document.getElementById("graph-canvas"),
+  inspector:document.getElementById("graph-inspector"),
+  liveRegion:document.getElementById("graph-live"),
+  note:document.getElementById("graph-note")
+});
 </script>
 <footer>Generated by Compass · Source diffs rendered with @pierre/diffs 1.2.12 · Embedded report data is available in <code>#semantic-diff-data</code>.</footer>
 </main>
@@ -795,7 +683,7 @@ fn render_source_changes(output: &mut String, changes: &[SourceFileDelta]) {
         let path = source_change_path(change);
         let _ = write!(
             output,
-            "<details class=\"source-file\" data-source-index=\"{index}\"{open}><summary><div class=\"source-summary\"><span class=\"source-path\">{}</span><span class=\"source-meta\">{} · {} hunks</span></div></summary>",
+            "<details id=\"source-change-{index}\" class=\"source-file\" data-source-index=\"{index}\"{open}><summary><div class=\"source-summary\"><span class=\"source-path\">{}</span><span class=\"source-meta\">{} · {} hunks</span></div></summary>",
             html_escape(&path),
             source_status_name(change.status),
             change.hunks.len()
@@ -848,7 +736,7 @@ fn render_graph_delta(output: &mut String, delta: &GraphDelta) {
             .push_str("<div class=\"graph-canvas graph-empty\">No meaningful graph changes.</div>");
     } else {
         output.push_str(
-            "<div id=\"graph-canvas\" class=\"graph-canvas\" role=\"img\" aria-label=\"Changed code graph\"></div><div class=\"graph-legend\"><span class=\"added\">Added (+)</span><span class=\"removed\">Removed (−)</span><span class=\"changed\">Changed (~)</span><span class=\"context\">Context (·)</span></div><p class=\"graph-note\" id=\"graph-note\">The visualization focuses on the changed subgraph. The lists below and embedded JSON are exhaustive.</p>",
+            "<div class=\"graph-explorer\"><div id=\"graph-canvas\" class=\"graph-canvas\" aria-label=\"Changed code graph\"></div><aside id=\"graph-inspector\" class=\"graph-inspector\" aria-labelledby=\"graph-inspector-heading\"><h3 id=\"graph-inspector-heading\" class=\"sr-only\">Node inspector</h3><p class=\"graph-inspector-empty\">Select a node to inspect its change.</p></aside></div><p id=\"graph-live\" class=\"sr-only\" aria-live=\"polite\"></p><div class=\"graph-legend\"><span class=\"added\">Added (+)</span><span class=\"removed\">Removed (−)</span><span class=\"changed\">Changed (~)</span><span class=\"context\">Context (·)</span></div><p class=\"graph-note\" id=\"graph-note\">The visualization focuses on the changed subgraph. The lists below and embedded JSON are exhaustive.</p>",
         );
     }
     output.push_str("<div class=\"delta-grid\"><div class=\"delta-column\"><h3>Nodes</h3>");
@@ -910,7 +798,8 @@ fn render_node_delta_group(
         }
         let _ = write!(
             output,
-            "<li class=\"delta-row\"><span class=\"delta-mark {class}\">{mark}</span><span class=\"delta-primary\">{}</span>",
+            "<li class=\"delta-row\" data-graph-node-id=\"{}\"><span class=\"delta-mark {class}\">{mark}</span><span class=\"delta-primary\">{}</span>",
+            html_attr(&node.id),
             html_escape(display)
         );
         if !metadata.is_empty() {
@@ -951,7 +840,10 @@ fn render_edge_delta_group(
         }
         let _ = write!(
             output,
-            "<li class=\"delta-row\"><span class=\"delta-mark {class}\">{mark}</span><span class=\"delta-primary\">{} —{}→ {}</span>",
+            "<li class=\"delta-row\" data-graph-edge-source=\"{}\" data-graph-edge-target=\"{}\" data-graph-edge-relation=\"{}\"><span class=\"delta-mark {class}\">{mark}</span><span class=\"delta-primary\">{} —{}→ {}</span>",
+            html_attr(&edge.source),
+            html_attr(&edge.target),
+            html_attr(&edge.relation),
             html_escape(&edge.source),
             html_escape(&edge.relation),
             html_escape(&edge.target)
@@ -1485,6 +1377,19 @@ mod tests {
         assert!(html.contains("<span class=\"diff-line remove\">-old()</span>"));
         assert!(html.contains("id=\"graph\""));
         assert!(html.contains("id=\"graph-canvas\""));
+        assert!(html.contains("globalThis.CompassSemanticDiffGraph"));
+        assert!(html.contains("class=\"graph-explorer\""));
+        assert!(html.contains("id=\"graph-inspector\""));
+        assert!(html.contains("id=\"graph-live\""));
+        assert!(html.contains("aria-live=\"polite\""));
+        assert!(html.contains("id=\"source-change-0\""));
+        assert!(html.contains("data-graph-node-id=\"new\""));
+        assert!(html.contains("data-graph-edge-source=\"caller\""));
+        assert!(html.contains("Select a node to inspect its change."));
+        assert!(html.contains("Interactive graph unavailable."));
+        assert!(html.contains("@media (max-width: 760px)"));
+        assert!(html.contains("@media (prefers-reduced-motion: reduce)"));
+        assert!(!html.contains("href=\"#source-change-undefined\""));
         assert!(html.contains("caller —calls→ new"));
         assert!(!html.contains("<script src="));
         assert!(!html.contains("<link rel="));
