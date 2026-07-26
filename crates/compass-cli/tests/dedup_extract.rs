@@ -46,10 +46,11 @@ fn dedup_llm_without_backend_has_actionable_diagnostic() -> Result<(), Box<dyn E
     let output = command.output()?;
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stderr)?,
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.starts_with(
         "error: no LLM API key found (--dedup-llm was passed). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key.\n"
-    );
+    ));
+    assert!(stderr.contains("Compass extract failed after "));
     Ok(())
 }
 

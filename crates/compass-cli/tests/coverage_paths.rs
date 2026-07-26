@@ -401,7 +401,7 @@ fn dense_extract_value_forms_and_compass_formatting_run_end_to_end() -> Result<(
     ];
     let outcome = invoke_owned(Frontend::Compass, &arguments);
     assert_eq!(outcome.code, 0, "{}", outcome.stderr);
-    assert!(outcome.stderr.contains("[compass timing] write"));
+    assert!(outcome.stderr.contains("[compass timing] publish"));
     Ok(())
 }
 

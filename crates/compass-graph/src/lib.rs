@@ -63,6 +63,28 @@ pub fn build_with_tiebreaker(
     Ok(build_from_extraction(&combined, directed, root))
 }
 
+/// Build a graph from an owned extraction without first cloning the complete
+/// node and edge inventory into a temporary combined extraction.
+pub fn build_owned_with_tiebreaker(
+    mut extraction: Extraction,
+    directed: bool,
+    dedup: bool,
+    root: Option<&Path>,
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
+) -> Result<GraphDocument, DedupError> {
+    if dedup && !extraction.nodes.is_empty() {
+        let result = deduplicate_entities_with_tiebreaker(
+            &extraction.nodes,
+            &extraction.edges,
+            &HashMap::new(),
+            tiebreaker,
+        )?;
+        extraction.nodes = result.nodes;
+        extraction.edges = result.edges;
+    }
+    Ok(build_from_extraction(&extraction, directed, root))
+}
+
 /// Build a NetworkX-compatible node-link document from extraction facts.
 #[must_use]
 pub fn build_from_extraction(

@@ -40,7 +40,9 @@ use compass_core::{
     cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
     format_diagnostic_report, merge_graphs, watch_local_graph,
 };
-use compass_files::{BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect};
+use compass_files::{
+    BuildScope, DetectOptions, Detection, Manifest, ManifestKind, ProjectConfig, detect,
+};
 use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
@@ -1432,16 +1434,25 @@ fn command_benchmark(args: &[String]) -> Outcome {
 }
 
 fn command_build(frontend: Frontend, args: &[String], operation: BuildOperation) -> Outcome {
-    command_build_with_validation(frontend, args, operation, None)
+    command_build_with_validation(frontend, args, operation, None, None, None)
 }
 
-pub(crate) fn command_build_with_file_progress(
+pub(crate) fn command_build_with_precomputed_detection(
     frontend: Frontend,
     args: &[String],
     operation: BuildOperation,
-    progress: &(dyn Fn(BuildFileProgress) + Sync),
+    detection: Detection,
+    started: Instant,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
 ) -> Outcome {
-    command_build_with_validation(frontend, args, operation, Some(progress))
+    command_build_with_validation(
+        frontend,
+        args,
+        operation,
+        progress,
+        Some(detection),
+        Some(started),
+    )
 }
 
 fn command_build_with_validation(
@@ -1449,10 +1460,18 @@ fn command_build_with_validation(
     args: &[String],
     operation: BuildOperation,
     file_progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+    precomputed_detection: Option<Detection>,
+    operation_started: Option<Instant>,
 ) -> Outcome {
-    let started = Instant::now();
-    let mut outcome =
-        command_build_with_validation_inner(frontend, args, operation, file_progress, started);
+    let started = operation_started.unwrap_or_else(Instant::now);
+    let mut outcome = command_build_with_validation_inner(
+        frontend,
+        args,
+        operation,
+        file_progress,
+        precomputed_detection,
+        started,
+    );
     if outcome.code == 0 && outcome.stdout.starts_with("Usage:") {
         return outcome;
     }
@@ -1487,6 +1506,7 @@ fn command_build_with_validation_inner(
     args: &[String],
     operation: BuildOperation,
     file_progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+    precomputed_detection: Option<Detection>,
     started: Instant,
 ) -> Outcome {
     let extract = operation.extracts_semantics();
@@ -1752,6 +1772,7 @@ fn command_build_with_validation_inner(
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
     options.program_analysis = true;
     options.program_artifacts = program_artifacts;
+    options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let extract_incremental = extract
@@ -2081,7 +2102,14 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
             ]
         },
     );
-    let result = command_build_with_validation(frontend, &build_args, BuildOperation::Update, None);
+    let result = command_build_with_validation(
+        frontend,
+        &build_args,
+        BuildOperation::Update,
+        None,
+        None,
+        None,
+    );
     if result.code != 0 {
         return result;
     }

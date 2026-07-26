@@ -9,7 +9,7 @@ use compass_files::{
     ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
-    ClusterOptions, EntityTiebreaker, build_with_tiebreaker as build_document, cluster,
+    ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
     dedupe_edges, dedupe_nodes, god_nodes, label_communities_by_hub, remap_communities_to_previous,
     score_communities, suggest_questions, surprising_connections,
 };
@@ -63,6 +63,8 @@ pub struct BuildOptions {
     /// tests whose oracle and native halves must share one source revision.
     pub built_at_commit: Option<String>,
     pub purpose: BuildPurpose,
+    /// Detection already validated by an init preview.
+    pub precomputed_detection: Option<Detection>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -111,6 +113,7 @@ impl BuildOptions {
             max_workers: None,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
+            precomputed_detection: None,
         }
     }
 }
@@ -229,6 +232,8 @@ pub enum CoreError {
     InvalidProgramInput(String),
     #[error("invalid completed-build state: {0}")]
     InvalidBuildState(String),
+    #[error("precomputed detection root does not match build root")]
+    DetectionRootMismatch,
 }
 
 /// Run the complete deterministic local graph pipeline without invoking Python,
@@ -349,7 +354,20 @@ fn build_graph_inner(
         cache_root: Some(output_root.clone()),
         ..DetectOptions::default()
     };
-    let mut detection = detect(&root, &detect_options)?;
+    let mut detection = if let Some(detection) = options.precomputed_detection.clone() {
+        let scan_root = fs::canonicalize(&detection.scan_root).map_err(|source| {
+            compass_files::FileError::Io {
+                path: PathBuf::from(&detection.scan_root),
+                source,
+            }
+        })?;
+        if scan_root != root {
+            return Err(CoreError::DetectionRootMismatch);
+        }
+        detection
+    } else {
+        detect(&root, &detect_options)?
+    };
     if options.google_workspace {
         let converted_dir = root.join(&output_name).join("converted");
         let mut sidecars = Vec::new();
@@ -932,13 +950,7 @@ fn build_graph_inner(
             timings,
         });
     }
-    let document = build_document(
-        std::slice::from_ref(&resolved),
-        false,
-        true,
-        Some(&root),
-        tiebreaker,
-    )?;
+    let document = build_document(resolved, false, true, Some(&root), tiebreaker)?;
     timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {
@@ -2461,6 +2473,28 @@ mod tests {
     use serde_json::{Map, Value};
 
     use super::*;
+
+    #[test]
+    fn precomputed_detection_cannot_cross_repository_roots() -> Result<(), Box<dyn Error>> {
+        let detected_root = tempfile::tempdir()?;
+        fs::write(
+            detected_root.path().join("main.py"),
+            "def main():\n    pass\n",
+        )?;
+        let detection = detect(detected_root.path(), &DetectOptions::default())?;
+
+        let build_root = tempfile::tempdir()?;
+        fs::write(
+            build_root.path().join("main.py"),
+            "def other():\n    pass\n",
+        )?;
+        let mut options = BuildOptions::new(build_root.path());
+        options.precomputed_detection = Some(detection);
+
+        let error = build_local_graph(&options).expect_err("mismatched detection must fail");
+        assert!(matches!(error, CoreError::DetectionRootMismatch));
+        Ok(())
+    }
 
     #[test]
     fn ast_id_remap_does_not_conflate_prefix_named_symbol_with_file() -> Result<(), Box<dyn Error>>
