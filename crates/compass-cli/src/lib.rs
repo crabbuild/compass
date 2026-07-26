@@ -40,7 +40,9 @@ use compass_core::{
     cluster_existing_graph, default_graph_path, diagnose_graph_file, format_diagnostic_json,
     format_diagnostic_report, merge_graphs, watch_local_graph,
 };
-use compass_files::{BuildScope, DetectOptions, Manifest, ManifestKind, ProjectConfig, detect};
+use compass_files::{
+    BuildScope, DetectOptions, Detection, Manifest, ManifestKind, ProjectConfig, detect,
+};
 use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
@@ -81,6 +83,27 @@ pub(crate) fn process_cancellation() -> Result<&'static AtomicBool, String> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Frontend {
     Compass,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BuildOperation {
+    Init,
+    Extract,
+    Update,
+}
+
+impl BuildOperation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Init => "init",
+            Self::Extract => "extract",
+            Self::Update => "update",
+        }
+    }
+
+    fn extracts_semantics(self) -> bool {
+        self == Self::Extract
+    }
 }
 
 #[derive(Debug)]
@@ -351,8 +374,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "tree" => command_tree(frontend, &args),
         "cluster-only" => command_cluster_only(frontend, &args),
         "diagnose" => command_diagnose(frontend, &args),
-        "update" => command_build(frontend, &args, false),
-        "extract" => command_build(frontend, &args, true),
+        "update" => command_build(frontend, &args, BuildOperation::Update),
+        "extract" => command_build(frontend, &args, BuildOperation::Extract),
         "init" => Outcome::failure(
             "error: init requires terminal input and must be run from the compass binary"
                 .to_owned(),
@@ -1410,29 +1433,87 @@ fn command_benchmark(args: &[String]) -> Outcome {
     ))
 }
 
-fn command_build(frontend: Frontend, args: &[String], extract: bool) -> Outcome {
-    command_build_with_validation(frontend, args, extract, None)
+fn command_build(frontend: Frontend, args: &[String], operation: BuildOperation) -> Outcome {
+    command_build_with_validation(frontend, args, operation, None, None, None)
 }
 
-pub(crate) fn command_build_with_file_progress(
+pub(crate) fn command_build_with_precomputed_detection(
     frontend: Frontend,
     args: &[String],
-    extract: bool,
-    progress: &(dyn Fn(BuildFileProgress) + Sync),
+    operation: BuildOperation,
+    detection: Detection,
+    started: Instant,
+    progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
 ) -> Outcome {
-    command_build_with_validation(frontend, args, extract, Some(progress))
+    command_build_with_validation(
+        frontend,
+        args,
+        operation,
+        progress,
+        Some(detection),
+        Some(started),
+    )
 }
 
 fn command_build_with_validation(
     frontend: Frontend,
     args: &[String],
-    extract: bool,
+    operation: BuildOperation,
     file_progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+    precomputed_detection: Option<Detection>,
+    operation_started: Option<Instant>,
 ) -> Outcome {
-    let started = Instant::now();
+    let started = operation_started.unwrap_or_else(Instant::now);
+    let mut outcome = command_build_with_validation_inner(
+        frontend,
+        args,
+        operation,
+        file_progress,
+        precomputed_detection,
+        started,
+    );
+    if outcome.code == 0 && outcome.stdout.starts_with("Usage:") {
+        return outcome;
+    }
+    let elapsed = started.elapsed();
+    let line = if outcome.code == 0 {
+        format!(
+            "Compass {} completed in {:.2}s wall time.",
+            operation.label(),
+            elapsed.as_secs_f64()
+        )
+    } else {
+        format!(
+            "Compass {} failed after {:.2}s wall time.",
+            operation.label(),
+            elapsed.as_secs_f64()
+        )
+    };
+    let target = if outcome.code == 0 {
+        &mut outcome.stdout
+    } else {
+        &mut outcome.stderr
+    };
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(&line);
+    outcome
+}
+
+fn command_build_with_validation_inner(
+    frontend: Frontend,
+    args: &[String],
+    operation: BuildOperation,
+    file_progress: Option<&(dyn Fn(BuildFileProgress) + Sync)>,
+    precomputed_detection: Option<Detection>,
+    started: Instant,
+) -> Outcome {
+    let extract = operation.extracts_semantics();
     let mut root = None;
     let mut output_root = None;
     let mut force = environment_truthy("COMPASS_FORCE");
+    let mut reuse_cache_on_force = false;
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut gitignore = true;
@@ -1460,6 +1541,7 @@ fn command_build_with_validation(
     while index < args.len() {
         match args[index].as_str() {
             "--force" => force = true,
+            "--reuse-cache-on-force" => reuse_cache_on_force = true,
             "--no-cluster" => no_cluster = true,
             "--no-viz" => no_viz = true,
             "--no-gitignore" => gitignore = false,
@@ -1630,13 +1712,13 @@ fn command_build_with_validation(
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
-            "--timing" if extract => timing = true,
+            "--timing" => timing = true,
             "--dedup-llm" if extract => dedup_llm = true,
             "-h" | "--help" => {
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program-artifact PATH] [--no-cluster] [--force] [--no-viz]".to_owned()
+                    "Usage: compass update [path] [--program-artifact PATH] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1674,6 +1756,7 @@ fn command_build_with_validation(
     options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
     options.force = force;
+    options.reuse_cache_on_force = reuse_cache_on_force;
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
     options.gitignore = gitignore;
@@ -1692,6 +1775,7 @@ fn command_build_with_validation(
         google_workspace || compass_google_workspace::google_workspace_enabled(None);
     options.program_analysis = true;
     options.program_artifacts = program_artifacts;
+    options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let extract_incremental = extract
@@ -1827,7 +1911,7 @@ fn command_build_with_validation(
         .map_err(|error| error.to_string())
     };
     match built {
-        Ok((result, mut notes, semantic_elapsed)) => {
+        Ok((result, mut notes, _semantic_elapsed)) => {
             if let Some(tiebreaker) = dedup_tiebreaker.as_mut() {
                 notes.extend(tiebreaker.take_warnings());
             }
@@ -1900,12 +1984,9 @@ fn command_build_with_validation(
                 if !outcome.stderr.is_empty() {
                     outcome.stderr.push('\n');
                 }
-                outcome.stderr.push_str(&format_extract_timings(
-                    no_cluster,
-                    started.elapsed(),
-                    semantic_elapsed,
-                    &result.timings,
-                ));
+                outcome
+                    .stderr
+                    .push_str(&format_build_timings(started.elapsed(), &result.timings));
             }
             outcome
         }
@@ -1919,27 +2000,14 @@ fn apply_max_workers_override(options: &mut BuildOptions, max_workers: Option<us
     }
 }
 
-fn format_extract_timings(
-    no_cluster: bool,
-    elapsed: Duration,
-    semantic_elapsed: Duration,
-    timings: &BuildTimings,
-) -> String {
-    let mut stages = vec![
+fn format_build_timings(elapsed: Duration, timings: &BuildTimings) -> String {
+    let stages = [
         ("detect", timings.detect),
-        ("AST extract", timings.ast_extract),
-        ("semantic extract", semantic_elapsed),
+        ("deterministic extract", timings.deterministic_extract),
+        ("graph assembly", timings.graph_assembly),
+        ("program analysis", timings.program_analysis),
+        ("publish", timings.publish),
     ];
-    if no_cluster {
-        stages.push(("write", timings.write));
-    } else {
-        stages.extend([
-            ("build", timings.build),
-            ("cluster", timings.cluster),
-            ("analyze", timings.analyze),
-            ("export", timings.export),
-        ]);
-    }
     let mut lines = stages
         .into_iter()
         .map(|(stage, duration)| {
@@ -2037,7 +2105,14 @@ fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
             ]
         },
     );
-    let result = command_build_with_validation(frontend, &build_args, false, None);
+    let result = command_build_with_validation(
+        frontend,
+        &build_args,
+        BuildOperation::Update,
+        None,
+        None,
+        None,
+    );
     if result.code != 0 {
         return result;
     }

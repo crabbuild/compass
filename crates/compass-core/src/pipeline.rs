@@ -4,14 +4,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, DetectOptions, Detection, IgnorePolicy, Manifest,
     ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
-    ClusterOptions, EntityTiebreaker, build_with_tiebreaker as build_document, cluster,
-    dedupe_edges, dedupe_nodes, god_nodes, label_communities_by_hub, remap_communities_to_previous,
-    score_communities, suggest_questions, surprising_connections,
+    ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
+    dedupe_edges, dedupe_nodes, graph_insights, label_communities_by_hub,
+    remap_communities_to_previous, score_communities,
 };
 use compass_languages::{Engine, Extraction, Registry, file_stem, make_id};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
@@ -24,7 +25,13 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::program::{ProgramBuild, build_program, load_current_program, write_program};
+use crate::build_state::{
+    ArtifactSeal, BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified,
+};
+use crate::program::{
+    PreparedSyntaxInput, ProgramBuild, build_program, load_current_program, program_artifact_count,
+    write_program,
+};
 use crate::raw_guard::enforce_incomplete_raw_guard;
 
 #[derive(Clone, Debug)]
@@ -33,6 +40,9 @@ pub struct BuildOptions {
     pub scan_filesystem: bool,
     pub output_root: Option<PathBuf>,
     pub force: bool,
+    /// Preserve validated extraction and completed-output fast paths while
+    /// retaining force authorization for output replacement.
+    pub reuse_cache_on_force: bool,
     pub no_cluster: bool,
     pub no_viz: bool,
     pub gitignore: bool,
@@ -57,6 +67,8 @@ pub struct BuildOptions {
     /// tests whose oracle and native halves must share one source revision.
     pub built_at_commit: Option<String>,
     pub purpose: BuildPurpose,
+    /// Detection already validated by an init preview.
+    pub precomputed_detection: Option<Detection>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -88,6 +100,7 @@ impl BuildOptions {
             scan_filesystem: true,
             output_root: None,
             force: false,
+            reuse_cache_on_force: false,
             no_cluster: false,
             no_viz: false,
             gitignore: true,
@@ -105,6 +118,7 @@ impl BuildOptions {
             max_workers: None,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
+            precomputed_detection: None,
         }
     }
 }
@@ -145,12 +159,10 @@ pub struct BuildFileProgress {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BuildTimings {
     pub detect: Duration,
-    pub ast_extract: Duration,
-    pub build: Duration,
-    pub cluster: Duration,
-    pub analyze: Duration,
-    pub export: Duration,
-    pub write: Duration,
+    pub deterministic_extract: Duration,
+    pub graph_assembly: Duration,
+    pub program_analysis: Duration,
+    pub publish: Duration,
 }
 
 /// Validated semantic output to merge into one atomic graph build.
@@ -205,6 +217,8 @@ pub enum CoreError {
     InvalidSupplementalFragment(serde_json::Error),
     #[error("could not create an AST worker pool: {0}")]
     WorkerPool(String),
+    #[error("build worker panicked during {0}")]
+    WorkerPanic(String),
     #[error(
         "semantic extraction was incomplete and would shrink the graph ({new} < {existing} nodes)"
     )]
@@ -221,6 +235,10 @@ pub enum CoreError {
     ProgramIr(#[from] compass_ir::IrError),
     #[error("invalid Program IR input: {0}")]
     InvalidProgramInput(String),
+    #[error("invalid completed-build state: {0}")]
+    InvalidBuildState(String),
+    #[error("precomputed detection root does not match build root")]
+    DetectionRootMismatch,
 }
 
 /// Run the complete deterministic local graph pipeline without invoking Python,
@@ -319,7 +337,11 @@ fn build_graph_inner(
         path: output_dir.clone(),
         source,
     })?;
+    let prior_build_complete = BuildGuard::ensure_complete(&output_dir).is_ok();
     let guard = BuildGuard::begin(&output_dir)?;
+    if options.force || !prior_build_complete {
+        remove_if_exists(&output_dir.join(BUILD_STATE_FILE))?;
+    }
     let manifest_path = output_dir.join("manifest.json");
     let prior_manifest = Manifest::load(&manifest_path, Some(&root));
     let has_confirmed_deletion = prior_manifest
@@ -337,7 +359,20 @@ fn build_graph_inner(
         cache_root: Some(output_root.clone()),
         ..DetectOptions::default()
     };
-    let mut detection = detect(&root, &detect_options)?;
+    let mut detection = if let Some(detection) = options.precomputed_detection.clone() {
+        let scan_root = fs::canonicalize(&detection.scan_root).map_err(|source| {
+            compass_files::FileError::Io {
+                path: PathBuf::from(&detection.scan_root),
+                source,
+            }
+        })?;
+        if scan_root != root {
+            return Err(CoreError::DetectionRootMismatch);
+        }
+        detection
+    } else {
+        detect(&root, &detect_options)?
+    };
     if options.google_workspace {
         let converted_dir = root.join(&output_name).join("converted");
         let mut sidecars = Vec::new();
@@ -368,6 +403,7 @@ fn build_graph_inner(
     }
     timings.detect = stage_started.elapsed();
     stage_started = Instant::now();
+    let mut internal_started = Instant::now();
     let mut semantic_documents = if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
@@ -400,12 +436,66 @@ fn build_graph_inner(
     );
 
     let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && !options.force
+        && (!options.force || options.reuse_cache_on_force)
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
+    let build_profile = build_profile(options);
+    let has_program_artifacts =
+        options.program_analysis && program_artifact_count(&root, options)? != 0;
+    let build_state_present = output_dir.join(BUILD_STATE_FILE).is_file();
+    let verified_state = if semantic.is_none() && supplemental.is_empty() && manifest_unchanged {
+        load_verified(
+            &output_dir,
+            &build_profile,
+            &manifest_path,
+            prior_build_complete,
+        )?
+    } else {
+        None
+    };
+    let allow_legacy_validation = prior_build_complete
+        && (!build_state_present || (has_program_artifacts && verified_state.is_some()));
+    if !has_program_artifacts {
+        let verified = verified_state;
+        if let Some(state) = verified.filter(|state| state.stats.files == sources.len()) {
+            if options.no_viz {
+                remove_if_exists(&output_dir.join("graph.html"))?;
+            }
+            if options.no_cluster {
+                remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+            }
+            remove_if_exists(&output_dir.join("needs_update"))?;
+            guard.commit()?;
+            return Ok(BuildResult {
+                root,
+                output_dir: output_dir.clone(),
+                detection,
+                files_considered: state.stats.files,
+                files_extracted: 0,
+                files_cached: state.stats.files,
+                empty_files: Vec::new(),
+                nodes: state.stats.nodes,
+                edges: state.stats.edges,
+                communities: state.stats.communities,
+                html_written: output_dir.join("graph.html").is_file(),
+                outputs_changed: false,
+                program_modules: state.stats.program_modules,
+                program_summaries: state.stats.program_summaries,
+                program_syntax_analyzed: 0,
+                program_syntax_reused: state.stats.program_modules,
+                program_artifacts_loaded: 0,
+                program_artifacts_reused: 0,
+                program_artifact_documents_analyzed: 0,
+                program_artifact_documents_reused: 0,
+                program_conflicts: state.stats.program_conflicts,
+                timings,
+            });
+        }
+    }
     let unchanged_program = if options.program_analysis
         && semantic.is_none()
         && supplemental.is_empty()
         && manifest_unchanged
+        && allow_legacy_validation
     {
         load_current_program(&root, &sources, options, &output_dir)?
     } else {
@@ -414,6 +504,7 @@ fn build_graph_inner(
     if semantic.is_none()
         && supplemental.is_empty()
         && manifest_unchanged
+        && allow_legacy_validation
         && (!options.program_analysis || unchanged_program.is_some())
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
     {
@@ -424,6 +515,16 @@ fn build_graph_inner(
             remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         }
         remove_if_exists(&output_dir.join("needs_update"))?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            stats.nodes,
+            stats.edges,
+            stats.communities,
+            unchanged_program.as_ref(),
+        )?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -461,13 +562,9 @@ fn build_graph_inner(
 
     let cache_root = (output_root != root).then_some(output_root.as_path());
     let mut cache = Cache::new(&root, cache_root)?;
-    let program = options
-        .program_analysis
-        .then(|| build_program(&root, &sources, options, &cache))
-        .transpose()?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
-    if !options.force {
+    if !options.force || options.reuse_cache_on_force {
         for path in &sources {
             let cached = cache.load(path, &CacheKind::Ast, None, false, false)?;
             if let Some(value) = cached {
@@ -496,6 +593,7 @@ fn build_graph_inner(
     } else {
         None
     };
+    profile_internal("extract setup and cache load", &mut internal_started);
     // A Rayon worker pool costs more resident memory than it saves time on
     // small multilingual projects, where parser-table page residency dominates.
     // Stay sequential below the measured crossover. Larger corpora use an
@@ -509,7 +607,19 @@ fn build_graph_inner(
                 path: path.clone(),
                 source,
             })?;
-            let extraction = engine.extract_source(path, &bytes)?;
+            let source_file = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let language = Registry::resolve(path).map_or("", |spec| spec.name);
+            let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+            let prepared = combined.program.map(|batch| PreparedSyntaxInput {
+                source_file,
+                language: language.to_owned(),
+                bytes: bytes.clone(),
+                batch,
+            });
             if let Some(progress) = progress {
                 let mut completed = completed_files
                     .lock()
@@ -525,7 +635,7 @@ fn build_graph_inner(
                 path.to_string_lossy().into_owned(),
                 String::from_utf8_lossy(&bytes).into_owned(),
             );
-            Ok((path.clone(), extraction, source))
+            Ok((path.clone(), combined.graph, source, prepared))
         };
     let fresh = if missing.len() < 256 {
         let mut engine = Engine::default();
@@ -546,47 +656,111 @@ fn build_graph_inner(
             extract()?
         }
     };
-    const CACHE_BATCH_SIZE: usize = 128;
-    for batch in fresh.chunks(CACHE_BATCH_SIZE) {
-        let entries = batch
-            .par_iter()
-            .filter(|(_, extraction, _)| !extraction.nodes.is_empty())
-            .map(|(path, extraction, _)| {
-                serde_json::to_value(extraction)
-                    .map(|value| (path.clone(), value))
-                    .map_err(|source| CoreError::SerializeExtraction {
-                        path: path.clone(),
-                        source,
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        cache.save_batch(&entries, &CacheKind::Ast, None)?;
-    }
+    profile_internal("tree-sitter combined extraction", &mut internal_started);
+    let prepared = if options.force && !options.reuse_cache_on_force {
+        fresh
+            .iter()
+            .filter_map(|(_, _, _, prepared)| prepared.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let mut program_handle = if options.program_analysis {
+        let program_root = root.clone();
+        let program_sources = sources.clone();
+        let mut program_options = options.clone();
+        program_options.force = options.force && !options.reuse_cache_on_force;
+        let program_cache_root = cache_root.map(Path::to_path_buf);
+        let program_output_dir = output_dir.clone();
+        Some(
+            std::thread::Builder::new()
+                .name("compass-program".to_owned())
+                .spawn(move || {
+                    let started = Instant::now();
+                    let program_cache = Cache::new(&program_root, program_cache_root.as_deref())?
+                        .without_hash_flush();
+                    let program = build_program(
+                        &program_root,
+                        &program_sources,
+                        &program_options,
+                        &program_cache,
+                        &prepared,
+                    )?;
+                    write_program(&program_output_dir, &program.canonical_bytes)?;
+                    Ok::<_, CoreError>((program, started.elapsed()))
+                })
+                .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let ast_cache_entries = fresh
+        .par_iter()
+        .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
+        .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
+        .collect::<Vec<_>>();
+    let ast_cache_handle = std::thread::Builder::new()
+        .name("compass-ast-cache".to_owned())
+        .spawn(move || {
+            let started = Instant::now();
+            cache.save_portable_ast_batch(&ast_cache_entries)?;
+            cache.flush()?;
+            Ok::<_, CoreError>(started.elapsed())
+        })
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
-        .map(|(path, _, _)| path.clone())
+        .map(|(path, _, _, _)| path.clone())
         .collect::<HashSet<_>>();
     let mut fresh_source_text = HashMap::with_capacity(fresh.len());
-    for (path, extraction, (source_path, source)) in fresh {
+    for (path, extraction, (source_path, source), _) in fresh {
         if extraction.nodes.is_empty() {
             empty_files.push(path.clone());
         }
         fresh_source_text.insert(source_path, source);
         extractions.insert(path, extraction);
     }
-    cache.flush()?;
+    profile_internal("AST cache snapshot and dispatch", &mut internal_started);
 
     let mut ordered = sources
         .iter()
         .filter_map(|path| extractions.remove(path))
         .collect::<Vec<_>>();
     merge_decl_def_classes(&mut ordered);
-    let live_id_remap = ast_source_identity_map(&sources, &root);
-    let ast_id_remap = collect_ast_id_remap(&ordered, &root, &live_id_remap);
-    for extraction in &mut ordered {
-        apply_ast_id_remap(extraction, &ast_id_remap);
+    profile_internal("declaration merge", &mut internal_started);
+    let ast_root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
+    let portable_check_started = Instant::now();
+    let ast_is_portable = ast_extractions_are_portable(&ordered, &root);
+    profile_internal_duration("portable AST precheck", portable_check_started.elapsed());
+    let ast_id_remap = if ast_is_portable {
+        AHashMap::new()
+    } else {
+        let identity_map_started = Instant::now();
+        let live_id_remap = ast_source_identity_map(&sources, &root);
+        profile_internal_duration(
+            "portable AST source identity map",
+            identity_map_started.elapsed(),
+        );
+        let remap_collection_started = Instant::now();
+        let remap = collect_ast_id_remap(&ordered, &root, &live_id_remap);
+        profile_internal_duration(
+            "portable AST remap collection",
+            remap_collection_started.elapsed(),
+        );
+        remap
+    };
+    if !ast_id_remap.is_empty() {
+        let remap_application_started = Instant::now();
+        ordered.par_iter_mut().for_each(|extraction| {
+            apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
+        });
+        profile_internal_duration(
+            "portable AST remap application",
+            remap_application_started.elapsed(),
+        );
     }
+    profile_internal("portable AST ID remapping", &mut internal_started);
     let read_source = |path: &PathBuf| {
         fs::read(path).ok().map(|bytes| {
             (
@@ -610,9 +784,23 @@ fn build_graph_inner(
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
+    profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
-    finalize_ast_extraction(&mut resolved, &root, &ast_id_remap);
-    timings.ast_extract = stage_started.elapsed();
+    finalize_ast_extraction(&mut resolved, &root);
+    profile_internal("AST finalization", &mut internal_started);
+    let ast_cache_elapsed = ast_cache_handle
+        .join()
+        .map_err(|_| CoreError::WorkerPanic("AST cache publication".to_owned()))??;
+    profile_internal_duration("AST cache publication worker", ast_cache_elapsed);
+    internal_started = Instant::now();
+    timings.deterministic_extract = stage_started.elapsed();
+    let defer_program_join = options.force && !options.no_cluster;
+    let mut program = if defer_program_join {
+        None
+    } else {
+        join_program_worker(program_handle.take(), &mut timings)?
+    };
+    profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
     if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
@@ -678,7 +866,16 @@ fn build_graph_inner(
             &root,
             semantic,
         )?;
-        write_program_output(&output_dir, program.as_ref())?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            document.nodes.len(),
+            document.links.len(),
+            0,
+            program.as_ref(),
+        )?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -745,9 +942,18 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
-        write_program_output(&output_dir, program.as_ref())?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            nodes.len(),
+            edges.len(),
+            0,
+            program.as_ref(),
+        )?;
         guard.commit()?;
-        timings.write = stage_started.elapsed();
+        timings.publish = stage_started.elapsed();
         return Ok(BuildResult {
             root,
             output_dir,
@@ -783,14 +989,9 @@ fn build_graph_inner(
             timings,
         });
     }
-    let document = build_document(
-        std::slice::from_ref(&resolved),
-        false,
-        true,
-        Some(&root),
-        tiebreaker,
-    )?;
-    timings.build = stage_started.elapsed();
+    let document = build_document(resolved, false, true, Some(&root), tiebreaker)?;
+    profile_internal("graph document build and dedup", &mut internal_started);
+    timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
@@ -827,7 +1028,16 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
-        write_program_output(&output_dir, program.as_ref())?;
+        publish_build_state(
+            options,
+            &output_dir,
+            &manifest_path,
+            sources.len(),
+            document.nodes.len(),
+            document.links.len(),
+            communities,
+            program.as_ref(),
+        )?;
         guard.commit()?;
         return Ok(BuildResult {
             root,
@@ -869,26 +1079,38 @@ fn build_graph_inner(
     // profile. Incremental seeds may accelerate extraction, but their prior
     // community numbering is operational state and cannot influence the
     // content-addressed result.
-    let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
-        HashMap::new()
-    } else {
-        previous_communities(&output_dir.join("graph.json"))
+    let cluster_options = ClusterOptions {
+        resolution: options.resolution,
+        exclude_hubs_percentile: options.exclude_hubs,
     };
-    let current = cluster(
-        &document,
-        ClusterOptions {
-            resolution: options.resolution,
-            exclude_hubs_percentile: options.exclude_hubs,
+    let ((previous, previous_elapsed), (current, cluster_elapsed)) = rayon::join(
+        || {
+            let started = Instant::now();
+            let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
+                HashMap::new()
+            } else {
+                previous_communities(&output_dir.join("graph.json"))
+            };
+            (previous, started.elapsed())
+        },
+        || {
+            let started = Instant::now();
+            let current = cluster(&document, cluster_options);
+            (current, started.elapsed())
         },
     );
+    profile_internal_duration("load previous communities", previous_elapsed);
+    profile_internal_duration("Louvain clustering", cluster_elapsed);
+    internal_started = Instant::now();
     let communities = if previous.is_empty() {
         current
     } else {
         remap_communities_to_previous(&current, &previous)
     };
-    timings.cluster = stage_started.elapsed();
+    timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
+    profile_internal("community labeling", &mut internal_started);
     let commit = options.built_at_commit.clone().or_else(|| {
         std::env::current_dir()
             .ok()
@@ -896,33 +1118,51 @@ fn build_graph_inner(
     });
 
     let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
-    write_json(
-        &document,
-        &communities,
-        output_dir.join("graph.json"),
-        &JsonExportOptions {
-            force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
-                !incomplete_semantic || layer.allow_partial
-            }),
-            built_at_commit: commit.as_deref(),
-            community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
-                .then_some(&labels),
-        },
-    )?;
-    if options.purpose == BuildPurpose::Update {
-        write_text_atomic(
-            output_dir.join(".compass_root"),
-            &options.root.to_string_lossy(),
+    let graph_output = || -> Result<Duration, CoreError> {
+        let started = Instant::now();
+        let mut output_profile_started = Instant::now();
+        write_json(
+            &document,
+            &communities,
+            output_dir.join("graph.json"),
+            &JsonExportOptions {
+                force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
+                    !incomplete_semantic || layer.allow_partial
+                }),
+                built_at_commit: commit.as_deref(),
+                community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
+                    .then_some(&labels),
+            },
         )?;
-        write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
-    }
-
-    let mut html_written = false;
-    {
-        let cohesion = score_communities(&document, &communities);
-        let gods = god_nodes(&document, 10);
-        let surprises = surprising_connections(&document, &communities, 5);
-        let questions = suggest_questions(&document, &communities, &labels, 10);
+        profile_internal(
+            "graph.json borrowed publication",
+            &mut output_profile_started,
+        );
+        if options.purpose == BuildPurpose::Update {
+            write_text_atomic(
+                output_dir.join(".compass_root"),
+                &options.root.to_string_lossy(),
+            )?;
+            write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
+            profile_internal(
+                "graph root marker and overview publication",
+                &mut output_profile_started,
+            );
+        }
+        Ok(started.elapsed())
+    };
+    let graph_analyses = || -> Result<(bool, Duration), CoreError> {
+        let started = Instant::now();
+        let analysis_compute_started = Instant::now();
+        let (cohesion, (gods, surprises, questions)) = rayon::join(
+            || score_communities(&document, &communities),
+            || graph_insights(&document, &communities, &labels, 10, 5, 10),
+        );
+        profile_internal_duration(
+            "graph analyses computation",
+            analysis_compute_started.elapsed(),
+        );
+        let analysis_render_started = Instant::now();
         let tokens = semantic_tokens(semantic);
         let analysis = if options.purpose == BuildPurpose::Extract {
             json!({
@@ -941,8 +1181,6 @@ fn build_graph_inner(
                 "questions": questions,
             })
         };
-        timings.analyze = stage_started.elapsed();
-        stage_started = Instant::now();
         if options.purpose == BuildPurpose::Extract {
             write_json_atomic(output_dir.join(".compass_analysis.json"), &analysis, true)?;
         } else {
@@ -964,7 +1202,7 @@ fn build_graph_inner(
                 .then(|| detection.warning.clone())
                 .flatten(),
         };
-        if options.purpose == BuildPurpose::Update {
+        let html_written = if options.purpose == BuildPurpose::Update {
             let report_root = report_root_label(&options.root);
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
@@ -985,6 +1223,7 @@ fn build_graph_inner(
             let html_path = output_dir.join("graph.html");
             if options.no_viz {
                 remove_if_exists(&html_path)?;
+                false
             } else {
                 let rendered = match write_html(
                     &document,
@@ -1000,13 +1239,32 @@ fn build_graph_inner(
                     Err(OutputError::HtmlTooLarge { .. }) => None,
                     Err(error) => return Err(CoreError::Output(error)),
                 };
-                html_written = rendered.is_some();
+                let html_written = rendered.is_some();
                 if !html_written {
                     remove_if_exists(&html_path)?;
                 }
+                html_written
             }
-        }
-    }
+        } else {
+            false
+        };
+        profile_internal_duration(
+            "graph analysis and report rendering",
+            analysis_render_started.elapsed(),
+        );
+        Ok((html_written, started.elapsed()))
+    };
+    let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
+    let graph_output_elapsed = graph_output_elapsed?;
+    let (html_written, analysis_elapsed) = analysis_result?;
+    profile_internal_duration("graph and overview publication", graph_output_elapsed);
+    profile_internal_duration(
+        "parallel graph analyses and report publication",
+        analysis_elapsed,
+    );
+    internal_started = Instant::now();
+    timings.graph_assembly += stage_started.elapsed();
+    stage_started = Instant::now();
 
     write_semantic_marker(&output_dir, semantic)?;
 
@@ -1018,8 +1276,10 @@ fn build_graph_inner(
         &root,
         semantic,
     )?;
-    timings.export = stage_started.elapsed();
-    write_program_output(&output_dir, program.as_ref())?;
+    timings.publish = stage_started.elapsed();
+    if program.is_none() {
+        program = join_program_worker(program_handle.take(), &mut timings)?;
+    }
     save_output_stats(
         &output_dir,
         document.nodes.len(),
@@ -1027,6 +1287,17 @@ fn build_graph_inner(
         communities.len(),
         true,
     )?;
+    publish_build_state(
+        options,
+        &output_dir,
+        &manifest_path,
+        sources.len(),
+        document.nodes.len(),
+        document.links.len(),
+        communities.len(),
+        program.as_ref(),
+    )?;
+    profile_internal("Program output and build seals", &mut internal_started);
     guard.commit()?;
     Ok(BuildResult {
         root,
@@ -1064,22 +1335,85 @@ fn build_graph_inner(
     })
 }
 
-fn write_program_output(
-    output_dir: &Path,
-    program: Option<&ProgramBuild>,
-) -> Result<(), CoreError> {
-    if let Some(program) = program {
-        write_program(output_dir, &program.analysis)?;
-    }
-    Ok(())
-}
-
 fn program_modules(program: Option<&ProgramBuild>) -> usize {
     program.map_or(0, |program| program.analysis.program.modules.len())
 }
 
 fn program_summaries(program: Option<&ProgramBuild>) -> usize {
     program.map_or(0, |program| program.analysis.summaries.len())
+}
+
+fn program_providers(program: Option<&ProgramBuild>) -> usize {
+    program.map_or(0, |program| program.analysis.program.providers.len())
+}
+
+fn build_profile(options: &BuildOptions) -> BuildProfile {
+    BuildProfile {
+        purpose: match options.purpose {
+            BuildPurpose::Update => "update",
+            BuildPurpose::Extract => "extract",
+        }
+        .to_owned(),
+        no_cluster: options.no_cluster,
+        no_viz: options.no_viz,
+        resolution: options.resolution,
+        exclude_hubs: options.exclude_hubs,
+        program_analysis: options.program_analysis,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_build_state(
+    options: &BuildOptions,
+    output_dir: &Path,
+    manifest_path: &Path,
+    files: usize,
+    nodes: usize,
+    edges: usize,
+    communities: usize,
+    program: Option<&ProgramBuild>,
+) -> Result<(), CoreError> {
+    let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
+    match options.purpose {
+        BuildPurpose::Update => {
+            required.push(output_dir.join(".compass_root"));
+            if !options.no_cluster {
+                required.extend([
+                    output_dir.join(GRAPH_OVERVIEW_FILE),
+                    output_dir.join(".compass_labels.json"),
+                    output_dir.join("GRAPH_REPORT.md"),
+                ]);
+            }
+        }
+        BuildPurpose::Extract if !options.no_cluster => {
+            required.push(output_dir.join(".compass_analysis.json"));
+        }
+        BuildPurpose::Extract => {}
+    }
+    for optional in ["graph.html", ".compass_semantic_marker"] {
+        let path = output_dir.join(optional);
+        if path.is_file() {
+            required.push(path);
+        }
+    }
+    let state = BuildState::capture(
+        output_dir,
+        build_profile(options),
+        manifest_path,
+        program.map(|program| ArtifactSeal::from_bytes(&program.canonical_bytes)),
+        &required,
+        SavedStats {
+            files,
+            nodes,
+            edges,
+            communities,
+            program_modules: program_modules(program),
+            program_summaries: program_summaries(program),
+            program_providers: program_providers(program),
+            program_conflicts: program.map_or(0, |program| program.conflicts),
+        },
+    )?;
+    state.save(output_dir)
 }
 
 #[cfg(target_os = "macos")]
@@ -1119,12 +1453,7 @@ fn write_semantic_marker(
     Ok(())
 }
 
-fn finalize_ast_extraction(
-    extraction: &mut Extraction,
-    root: &Path,
-    ast_id_remap: &HashMap<String, String>,
-) {
-    apply_ast_id_remap(extraction, ast_id_remap);
+fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
     let mut external_id_remap = HashMap::new();
     let mut canonical_sources = HashMap::<String, PathBuf>::new();
     for node in &mut extraction.nodes {
@@ -1170,28 +1499,34 @@ fn finalize_ast_extraction(
             }
         }
     }
-    for node in &mut extraction.nodes {
-        normalize_source_attribute_cached(&mut node.attributes, root, &mut canonical_sources);
-        node.attributes.remove("origin_file");
-        node.attributes.remove("_callable");
-        node.attributes.insert(
-            "_origin".to_owned(),
-            serde_json::Value::String("ast".to_owned()),
-        );
-    }
-    for edge in &mut extraction.edges {
-        normalize_source_attribute_cached(&mut edge.attributes, root, &mut canonical_sources);
-        edge.attributes.insert(
-            "_origin".to_owned(),
-            serde_json::Value::String("ast".to_owned()),
-        );
-    }
+    rayon::join(
+        || {
+            extraction.nodes.par_iter_mut().for_each(|node| {
+                normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
+                node.attributes.remove("origin_file");
+                node.attributes.remove("_callable");
+                node.attributes.insert(
+                    "_origin".to_owned(),
+                    serde_json::Value::String("ast".to_owned()),
+                );
+            });
+        },
+        || {
+            extraction.edges.par_iter_mut().for_each(|edge| {
+                normalize_source_attribute_cached(&mut edge.attributes, root, &canonical_sources);
+                edge.attributes.insert(
+                    "_origin".to_owned(),
+                    serde_json::Value::String("ast".to_owned()),
+                );
+            });
+        },
+    );
 }
 
 fn normalize_source_attribute_cached(
     attributes: &mut serde_json::Map<String, serde_json::Value>,
     root: &Path,
-    canonical_sources: &mut HashMap<String, PathBuf>,
+    canonical_sources: &HashMap<String, PathBuf>,
 ) {
     let Some(source) = attributes
         .get("source_file")
@@ -1203,9 +1538,13 @@ fn normalize_source_attribute_cached(
     if !path.is_absolute() {
         return;
     }
-    let canonical_path = canonical_sources
-        .entry(source.to_owned())
-        .or_insert_with(|| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+    let canonical_fallback;
+    let canonical_path = if let Some(canonical) = canonical_sources.get(source) {
+        canonical
+    } else {
+        canonical_fallback = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        &canonical_fallback
+    };
     let Ok(relative) = canonical_path.strip_prefix(root) else {
         return;
     };
@@ -1306,10 +1645,17 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
     }
 }
 
-fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
+fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> AHashMap<String, String> {
+    let mut aliases = AHashMap::with_capacity(sources.len().saturating_mul(2));
     for source in sources {
-        let identity = rooted_source_identity(source, root);
+        let identity = if source.is_absolute()
+            && source.starts_with(root)
+            && fs::symlink_metadata(source).is_ok_and(|metadata| !metadata.file_type().is_symlink())
+        {
+            source.clone()
+        } else {
+            rooted_source_identity(source, root)
+        };
         let relative = identity
             .strip_prefix(root)
             .or_else(|_| source.strip_prefix(root));
@@ -1327,31 +1673,93 @@ fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> HashMap<String, 
     aliases
 }
 
+fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool {
+    let rooted_prefix = format!("{}_", make_id(&[&root.to_string_lossy()]));
+    extractions.par_iter().all(|extraction| {
+        extraction.nodes.iter().all(|node| {
+            !node.id.starts_with(&rooted_prefix)
+                && node
+                    .attributes
+                    .get("source_file")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|source| !Path::new(source).is_absolute())
+        }) && extraction.edges.iter().all(|edge| {
+            !edge.source.starts_with(&rooted_prefix) && !edge.target.starts_with(&rooted_prefix)
+        }) && extraction
+            .raw_calls
+            .iter()
+            .flatten()
+            .all(|call| !call.caller_nid.starts_with(&rooted_prefix))
+    })
+}
+
 fn collect_ast_id_remap(
     extractions: &[Extraction],
     root: &Path,
-    live_id_remap: &HashMap<String, String>,
-) -> HashMap<String, String> {
-    // Python first rewrites every exact ID derived from a file that is really
-    // present in the detected corpus. This also catches references emitted by
-    // another extractor (for example an .lpk unit pointing at sample.pas), but
-    // deliberately leaves IDs for absent project references untouched.
-    let mut id_remap = live_id_remap.clone();
+    live_id_remap: &AHashMap<String, String>,
+) -> AHashMap<String, String> {
     let node_ids = extractions
         .iter()
         .flat_map(|extraction| extraction.nodes.iter())
         .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    let root_prefix = make_id(&[&root.to_string_lossy()]);
-    let root_marker = format!("{root_prefix}_");
+        .collect::<AHashSet<_>>();
+    let root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
+    if extractions.len() < 256 {
+        return collect_ast_id_remap_chunk(
+            extractions,
+            root,
+            live_id_remap,
+            &node_ids,
+            &root_marker,
+        );
+    }
+    let target_chunks = rayon::current_num_threads().saturating_mul(2).max(1);
+    let chunk_size = extractions.len().div_ceil(target_chunks);
+    let chunks = extractions
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            collect_ast_id_remap_chunk(chunk, root, live_id_remap, &node_ids, &root_marker)
+        })
+        .collect::<Vec<_>>();
+    let capacity = chunks.iter().map(|chunk| chunk.len()).sum();
+    let mut remap = AHashMap::with_capacity(capacity);
+    // Indexed parallel collection preserves source chunk order, so a duplicate
+    // ID keeps the same last-extraction-wins behavior as the sequential pass.
+    for chunk in chunks {
+        remap.extend(chunk);
+    }
+    remap
+}
+
+fn collect_ast_id_remap_chunk(
+    extractions: &[Extraction],
+    root: &Path,
+    live_id_remap: &AHashMap<String, String>,
+    node_ids: &AHashSet<&str>,
+    root_marker: &str,
+) -> AHashMap<String, String> {
+    // Python first rewrites every exact ID derived from a file that is really
+    // present in the detected corpus. This also catches references emitted by
+    // another extractor (for example an .lpk unit pointing at sample.pas), but
+    // deliberately leaves IDs for absent project references untouched.
+    let node_count = extractions
+        .iter()
+        .map(|extraction| extraction.nodes.len())
+        .sum();
+    let mut id_remap = AHashMap::with_capacity(node_count);
+    let mut source_identities = HashMap::<String, (PathBuf, String, String)>::new();
     let mut remap_rooted_id = |id: &str| {
+        if let Some(portable) = live_id_remap.get(id) {
+            id_remap.insert(id.to_owned(), portable.clone());
+            return;
+        }
         // A rooted endpoint without a node is an unresolved file reference.
         // Root-prefixed IDs that do have nodes may instead be symbols whose
         // file-derived prefix happens to match the checkout path.
         if node_ids.contains(id) {
             return;
         }
-        if let Some(relative) = id.strip_prefix(&root_marker)
+        if let Some(relative) = id.strip_prefix(root_marker)
             && !relative.is_empty()
         {
             id_remap
@@ -1371,7 +1779,8 @@ fn collect_ast_id_remap(
     {
         // An exact alias for a detected file is stronger than a symbol-prefix
         // interpretation from the referring node's source file.
-        if id_remap.contains_key(&node.id) {
+        if let Some(portable) = live_id_remap.get(&node.id) {
+            id_remap.insert(node.id.clone(), portable.clone());
             continue;
         }
         let Some(source) = node
@@ -1381,13 +1790,30 @@ fn collect_ast_id_remap(
         else {
             continue;
         };
-        let source_path = Path::new(source);
-        let absolute = rooted_source_identity(source_path, root);
-        let Ok(relative) = absolute.strip_prefix(root) else {
+        let (absolute, old_prefix, new_prefix) = source_identities
+            .entry(source.to_owned())
+            .or_insert_with(|| {
+                let source_path = Path::new(source);
+                let old_prefix = make_id(&[&file_stem(source_path)]);
+                if source_path.is_relative() {
+                    return (root.join(source_path), old_prefix.clone(), old_prefix);
+                }
+                let absolute = rooted_source_identity(source_path, root);
+                let new_prefix = absolute.strip_prefix(root).map_or_else(
+                    |_| String::new(),
+                    |relative| make_id(&[&file_stem(relative)]),
+                );
+                (absolute, old_prefix, new_prefix)
+            });
+        if absolute.strip_prefix(root).is_err() {
             continue;
-        };
-        let old_prefix = make_id(&[&file_stem(source_path)]);
-        let new_prefix = make_id(&[&file_stem(relative)]);
+        }
+        if new_prefix.is_empty() {
+            continue;
+        }
+        if old_prefix == new_prefix {
+            continue;
+        }
         if node
             .attributes
             .get("type")
@@ -1397,8 +1823,8 @@ fn collect_ast_id_remap(
             continue;
         }
         if node.id == make_id(&[source]) {
-            id_remap.insert(node.id.clone(), new_prefix);
-        } else if node.id == old_prefix
+            id_remap.insert(node.id.clone(), new_prefix.clone());
+        } else if node.id == *old_prefix
             && node
                 .attributes
                 .get("symbol_kind")
@@ -1437,25 +1863,34 @@ fn collect_ast_id_remap(
     id_remap
 }
 
-fn apply_ast_id_remap(extraction: &mut Extraction, id_remap: &HashMap<String, String>) {
-    for node in &mut extraction.nodes {
-        if let Some(canonical) = id_remap.get(&node.id) {
-            node.id.clone_from(canonical);
+fn apply_ast_id(id: &mut String, id_remap: &AHashMap<String, String>, root_marker: &str) {
+    if let Some(canonical) = id_remap.get(id) {
+        if id
+            .strip_prefix(root_marker)
+            .is_some_and(|relative| relative == canonical)
+        {
+            id.drain(..root_marker.len());
+        } else {
+            id.clone_from(canonical);
         }
     }
+}
+
+fn apply_ast_id_remap(
+    extraction: &mut Extraction,
+    id_remap: &AHashMap<String, String>,
+    root_marker: &str,
+) {
+    for node in &mut extraction.nodes {
+        apply_ast_id(&mut node.id, id_remap, root_marker);
+    }
     for edge in &mut extraction.edges {
-        if let Some(canonical) = id_remap.get(&edge.source) {
-            edge.source.clone_from(canonical);
-        }
-        if let Some(canonical) = id_remap.get(&edge.target) {
-            edge.target.clone_from(canonical);
-        }
+        apply_ast_id(&mut edge.source, id_remap, root_marker);
+        apply_ast_id(&mut edge.target, id_remap, root_marker);
     }
     if let Some(calls) = extraction.raw_calls.as_mut() {
         for call in calls {
-            if let Some(canonical) = id_remap.get(&call.caller_nid) {
-                call.caller_nid.clone_from(canonical);
-            }
+            apply_ast_id(&mut call.caller_nid, id_remap, root_marker);
         }
     }
 }
@@ -1737,7 +2172,15 @@ fn save_build_manifest(
     semantic: Option<&SemanticLayer>,
 ) -> Result<(), CoreError> {
     let Some(layer) = semantic else {
-        manifest.save(files, path, ManifestKind::Ast, Some(root), None, None)?;
+        let scan_corpus = files.values().flatten().cloned().collect::<BTreeSet<_>>();
+        manifest.save(
+            files,
+            path,
+            ManifestKind::Ast,
+            Some(root),
+            Some(&scan_corpus),
+            None,
+        )?;
         return Ok(());
     };
 
@@ -2178,6 +2621,36 @@ fn absolutize(path: &Path) -> PathBuf {
     }
 }
 
+fn profile_internal(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
+}
+
+fn profile_internal_duration(label: &str, elapsed: Duration) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!("[compass internal] {label}: {:.3}s", elapsed.as_secs_f64());
+    }
+}
+
+fn join_program_worker(
+    handle: Option<std::thread::JoinHandle<Result<(ProgramBuild, Duration), CoreError>>>,
+    timings: &mut BuildTimings,
+) -> Result<Option<ProgramBuild>, CoreError> {
+    let Some(handle) = handle else {
+        return Ok(None);
+    };
+    let (program, elapsed) = handle
+        .join()
+        .map_err(|_| CoreError::WorkerPanic("program analysis".to_owned()))??;
+    timings.program_analysis = elapsed;
+    Ok(Some(program))
+}
+
 pub(crate) fn git_commit(root: &Path) -> Option<String> {
     let dot_git = root
         .ancestors()
@@ -2221,6 +2694,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn precomputed_detection_cannot_cross_repository_roots() -> Result<(), Box<dyn Error>> {
+        let detected_root = tempfile::tempdir()?;
+        fs::write(
+            detected_root.path().join("main.py"),
+            "def main():\n    pass\n",
+        )?;
+        let detection = detect(detected_root.path(), &DetectOptions::default())?;
+
+        let build_root = tempfile::tempdir()?;
+        fs::write(
+            build_root.path().join("main.py"),
+            "def other():\n    pass\n",
+        )?;
+        let mut options = BuildOptions::new(build_root.path());
+        options.precomputed_detection = Some(detection);
+
+        let error = build_local_graph(&options).expect_err("mismatched detection must fail");
+        assert!(matches!(error, CoreError::DetectionRootMismatch));
+        Ok(())
+    }
+
+    #[test]
     fn ast_id_remap_does_not_conflate_prefix_named_symbol_with_file() -> Result<(), Box<dyn Error>>
     {
         let directory = tempfile::tempdir()?;
@@ -2258,7 +2753,11 @@ mod tests {
         let live_id_remap = ast_source_identity_map(std::slice::from_ref(&source), root);
         let id_remap =
             collect_ast_id_remap(std::slice::from_ref(&extraction), root, &live_id_remap);
-        apply_ast_id_remap(&mut extraction, &id_remap);
+        apply_ast_id_remap(
+            &mut extraction,
+            &id_remap,
+            &format!("{}_", make_id(&[&root.to_string_lossy()])),
+        );
 
         assert_eq!(extraction.nodes[0].id, "internal_timeformattype_string");
         assert_eq!(extraction.nodes[1].id, prefix_symbol_id);
@@ -2293,7 +2792,7 @@ mod tests {
             }],
             ..Extraction::default()
         };
-        finalize_ast_extraction(&mut extraction, &root, &HashMap::new());
+        finalize_ast_extraction(&mut extraction, &root);
         assert_eq!(extraction.nodes[0].id, "ext_core_core_csproj");
         assert_eq!(
             extraction.nodes[0].string("source_file"),
@@ -2406,11 +2905,9 @@ mod tests {
         assert_eq!(cold.files_considered, 2);
         assert_eq!(cold.files_extracted, 2);
         assert!(cold.timings.detect > Duration::ZERO);
-        assert!(cold.timings.ast_extract > Duration::ZERO);
-        assert!(cold.timings.build > Duration::ZERO);
-        assert!(cold.timings.cluster > Duration::ZERO);
-        assert!(cold.timings.analyze > Duration::ZERO);
-        assert!(cold.timings.export > Duration::ZERO);
+        assert!(cold.timings.deterministic_extract > Duration::ZERO);
+        assert!(cold.timings.graph_assembly > Duration::ZERO);
+        assert!(cold.timings.publish > Duration::ZERO);
         assert!(cold.nodes > 0);
         assert!(cold.output_dir.join("graph.json").is_file());
         let overview_path = cold.output_dir.join("graph-overview.json");
@@ -2724,6 +3221,37 @@ mod tests {
             fs::read(warm.output_dir.join("manifest.json"))?,
             manifest_bytes
         );
+        Ok(())
+    }
+
+    #[test]
+    fn ast_manifest_prunes_existing_files_removed_from_scope() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::write(root.join("main.py"), "def main():\n    return 1\n")?;
+        fs::create_dir(root.join("generated"))?;
+        fs::write(
+            root.join("generated/copied.py"),
+            "def generated():\n    return 2\n",
+        )?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = true;
+        options.no_viz = true;
+
+        let initial = build_local_graph(&options)?;
+        assert_eq!(initial.files_considered, 2);
+
+        options.extra_excludes = vec!["generated/**".to_owned()];
+        let scoped = build_local_graph(&options)?;
+        assert_eq!(scoped.files_considered, 1);
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(scoped.output_dir.join("manifest.json"))?)?;
+        assert_eq!(manifest.as_object().map(serde_json::Map::len), Some(1));
+
+        let unchanged = build_local_graph(&options)?;
+        assert_eq!(unchanged.files_extracted, 0);
+        assert_eq!(unchanged.files_cached, 1);
+        assert!(!unchanged.outputs_changed);
         Ok(())
     }
 

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use md5::Md5;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -113,6 +114,67 @@ impl StatHashIndex {
         entry.word_count = Some(count);
         self.dirty = true;
         count
+    }
+
+    pub fn word_counts<F>(&mut self, paths: &[PathBuf], compute: F) -> Vec<u64>
+    where
+        F: Fn(&Path) -> u64 + Sync,
+    {
+        struct Missing {
+            index: usize,
+            path: PathBuf,
+            key: String,
+            size: u64,
+            mtime_ns: u128,
+        }
+
+        let mut counts = vec![0_u64; paths.len()];
+        let mut missing = Vec::new();
+        for (index, path) in paths.iter().enumerate() {
+            let Ok(resolved) = fs::canonicalize(path) else {
+                counts[index] = compute(path);
+                continue;
+            };
+            let Ok(metadata) = fs::metadata(path) else {
+                counts[index] = compute(path);
+                continue;
+            };
+            let mtime_ns = modified_ns(&metadata);
+            let key = resolved.to_string_lossy().into_owned();
+            if let Some(entry) = self.entries.get(&key)
+                && entry.size == metadata.len()
+                && entry.mtime_ns == mtime_ns
+                && let Some(count) = entry.word_count
+            {
+                counts[index] = count;
+                continue;
+            }
+            missing.push(Missing {
+                index,
+                path: path.clone(),
+                key,
+                size: metadata.len(),
+                mtime_ns,
+            });
+        }
+        let computed = missing
+            .par_iter()
+            .map(|item| compute(&item.path))
+            .collect::<Vec<_>>();
+        for (item, count) in missing.into_iter().zip(computed) {
+            counts[item.index] = count;
+            let entry = self.entries.entry(item.key).or_default();
+            if entry.size != item.size || entry.mtime_ns != item.mtime_ns {
+                *entry = StatEntry {
+                    size: item.size,
+                    mtime_ns: item.mtime_ns,
+                    ..StatEntry::default()
+                };
+            }
+            entry.word_count = Some(count);
+            self.dirty = true;
+        }
+        counts
     }
 
     pub fn flush(&mut self) -> Result<(), FileError> {

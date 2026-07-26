@@ -43,6 +43,12 @@ pub enum FileError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("could not encode MessagePack cache at {path}: {source}")]
+    MessagePackEncode {
+        path: PathBuf,
+        #[source]
+        source: rmp_serde::encode::Error,
+    },
     #[error("file hash requires a regular file: {0}")]
     NotAFile(PathBuf),
     #[error("path is outside the scan root: {0}")]

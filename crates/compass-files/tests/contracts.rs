@@ -121,6 +121,11 @@ fn detection_ignores_compass_generated_output() -> Result<(), Box<dyn Error>> {
     fs::create_dir(root.join("compass-out"))?;
     fs::write(root.join("compass-out/graph.json"), "{}\n")?;
     fs::write(root.join("compass-out/.compass_labels.json"), "{}\n")?;
+    fs::create_dir(root.join("graphify-out"))?;
+    fs::write(
+        root.join("graphify-out/generated.rs"),
+        "fn generated() {}\n",
+    )?;
 
     let detection = compass_files::detect(root, &DetectOptions::default())?;
     assert_eq!(detection.files["code"].len(), 1);
@@ -292,6 +297,14 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
     });
     let mut cache = Cache::new(directory.path(), None)?;
     cache.save(&source, &value, &CacheKind::Ast, None)?;
+    assert!(
+        fs::read_dir(cache.directory(&CacheKind::Ast, None))?
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .path()
+                .extension()
+                .is_some_and(|value| value == "msgpack"))
+    );
     assert_eq!(
         cache.load(&source, &CacheKind::Ast, None, true, false)?,
         Some(value)
@@ -341,11 +354,28 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
     )?;
     assert_eq!(
         cache.load(&first, &CacheKind::Ast, None, false, false)?,
-        Some(first_value)
+        Some(first_value.clone())
     );
     assert_eq!(
         cache.load(&second, &CacheKind::Ast, None, false, false)?,
         Some(second_value)
+    );
+
+    let portable_first = json!({
+        "nodes":[{"id":"first","source_file":"first.rs"}],
+        "edges":[]
+    });
+    cache.save_portable_ast_batch(&[(first.clone(), portable_first)])?;
+    let canonical_first_value = json!({
+        "nodes":[{
+            "id":"first",
+            "source_file":fs::canonicalize(&first)?.to_string_lossy()
+        }],
+        "edges":[]
+    });
+    assert_eq!(
+        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        Some(canonical_first_value)
     );
 
     fs::write(&first, "fn first_changed() {}\n")?;
@@ -505,7 +535,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v0.9.21")
+            .ends_with("ast/v0.9.21/e1")
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.20").exists());
 
@@ -513,7 +543,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/vcurrent")
+            .ends_with("ast/vcurrent/e1")
     );
     assert!(
         cache
@@ -831,6 +861,16 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
         &json!({"source_file":"src/b.rs"}),
     )?;
     cache.save_program(&artifact, "index.scip:bbbbbbbb", &json!({"kind":"scip"}))?;
+    let syntax_directory = cache.directory(&syntax, None);
+    assert!(syntax_directory.ends_with("e1"));
+    assert!(
+        fs::read_dir(&syntax_directory)?
+            .filter_map(Result::ok)
+            .all(|entry| entry
+                .path()
+                .extension()
+                .is_some_and(|value| value == "msgpack"))
+    );
 
     let first: serde_json::Value = cache
         .load_program(&syntax, "src/a.rs:aaaaaaaa")?
@@ -840,6 +880,43 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
         .ok_or("missing second syntax entry")?;
     assert_eq!(first["source_file"], "src/a.rs");
     assert_eq!(second["source_file"], "src/b.rs");
+
+    let first_entry = fs::read_dir(&syntax_directory)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            fs::read(path)
+                .ok()
+                .and_then(|bytes| rmp_serde::from_slice::<serde_json::Value>(&bytes).ok())
+                .is_some_and(|value| value["source_file"] == "src/a.rs")
+        })
+        .ok_or("missing first MessagePack syntax entry")?;
+    let legacy_directory = syntax_directory.parent().ok_or("missing encoding parent")?;
+    let legacy_entry = legacy_directory.join(
+        first_entry
+            .file_stem()
+            .ok_or("missing MessagePack cache stem")?,
+    );
+    let legacy_entry = legacy_entry.with_extension("json");
+    fs::write(&legacy_entry, serde_json::to_vec(&first)?)?;
+    fs::remove_file(&first_entry)?;
+    assert_eq!(
+        cache.load_program::<serde_json::Value>(&syntax, "src/a.rs:aaaaaaaa")?,
+        Some(first.clone())
+    );
+
+    let second_entry = fs::read_dir(&syntax_directory)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .next()
+        .ok_or("missing second MessagePack syntax entry")?;
+    fs::write(&second_entry, b"not-messagepack")?;
+    assert!(
+        cache
+            .load_program::<serde_json::Value>(&syntax, "src/b.rs:aaaaaaaa")?
+            .is_none()
+    );
+    cache.save_program(&syntax, "src/b.rs:aaaaaaaa", &second)?;
     assert!(
         cache
             .load_program::<serde_json::Value>(&artifact, "src/a.rs:aaaaaaaa")?

@@ -109,24 +109,25 @@ fn resolve_swift_registry_compatibility(
     }
 }
 
-struct Indexes {
-    nodes: HashMap<String, NodeRecord>,
+struct Indexes<'a> {
+    nodes: HashMap<&'a str, &'a NodeRecord>,
     types: HashMap<String, Vec<String>>,
     methods: HashMap<(String, String), Vec<String>>,
     defines: HashMap<(String, String), Vec<String>>,
     enclosing_method: HashMap<String, String>,
     enclosing_member: HashMap<String, String>,
     contains: HashMap<String, HashMap<String, Vec<String>>>,
+    modules_by_stem: HashMap<String, Vec<String>>,
     file_of: HashMap<String, String>,
     imports: HashMap<String, HashSet<String>>,
     bases: HashMap<String, Vec<String>>,
 }
 
-impl Indexes {
-    fn new(nodes: &[NodeRecord], edges: &[EdgeRecord]) -> Self {
+impl<'a> Indexes<'a> {
+    fn new(nodes: &'a [NodeRecord], edges: &[EdgeRecord]) -> Self {
         let nodes_by_id = nodes
             .iter()
-            .map(|node| (node.id.clone(), node.clone()))
+            .map(|node| (node.id.as_str(), node))
             .collect::<HashMap<_, _>>();
         let contained = edges
             .iter()
@@ -148,7 +149,9 @@ impl Indexes {
         let mut imports = HashMap::<String, HashSet<String>>::new();
         let mut bases = HashMap::<String, Vec<String>>::new();
         for edge in edges {
-            let target_label = nodes_by_id.get(&edge.target).map(NodeRecord::label);
+            let target_label = nodes_by_id
+                .get(edge.target.as_str())
+                .map(|node| node.label());
             match relation(edge) {
                 "method" => {
                     if let Some(label) = target_label {
@@ -189,6 +192,13 @@ impl Indexes {
                 _ => {}
             }
         }
+        let mut modules_by_stem = HashMap::<String, Vec<String>>::new();
+        for module in contains.keys() {
+            let stem = module_stem(nodes_by_id.get(module.as_str()).copied());
+            if !stem.is_empty() {
+                push_unique(&mut modules_by_stem, stem, module);
+            }
+        }
         Self {
             nodes: nodes_by_id,
             types,
@@ -197,6 +207,7 @@ impl Indexes {
             enclosing_method,
             enclosing_member,
             contains,
+            modules_by_stem,
             file_of,
             imports,
             bases,
@@ -386,16 +397,20 @@ fn resolve_python_members(
                 continue;
             };
             let imported = indexes.imports.get(caller_file);
-            let modules = indexes
-                .contains
-                .keys()
+            let mut modules = indexes
+                .modules_by_stem
+                .get(&key(receiver))
+                .into_iter()
+                .flatten()
                 .filter(|module| imported.is_some_and(|set| set.contains(*module)))
-                .filter(|module| module_stem(indexes.nodes.get(*module)) == key(receiver))
-                .collect::<Vec<_>>();
-            if modules.len() != 1 {
+                .take(2);
+            let Some(module) = modules.next() else {
+                continue;
+            };
+            if modules.next().is_some() {
                 continue;
             }
-            unique(indexes.contains[modules[0]].get(&key(&call.callee)))
+            unique(indexes.contains[module].get(&key(&call.callee)))
         };
         if let Some(target) = target {
             emit(

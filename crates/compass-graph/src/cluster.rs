@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_model::GraphDocument;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -31,7 +33,9 @@ impl Default for ClusterOptions {
 /// Detect stable communities with a native port of NetworkX's seeded Louvain pass.
 #[must_use]
 pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities {
+    let mut profile_started = Instant::now();
     let graph = WeightedGraph::from_document(document);
+    profile_cluster("weighted graph construction", &mut profile_started);
     if graph.is_empty() {
         return Communities::new();
     }
@@ -52,11 +56,13 @@ pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities
         .filter(|node| graph.degree_unweighted(*node) > 0 && !hubs.contains(node))
         .collect::<Vec<_>>();
     let connected = graph.subgraph(&connected_nodes);
+    profile_cluster("hub filtering and connected subgraph", &mut profile_started);
 
     let mut raw = Vec::<Vec<String>>::new();
     if !connected.is_empty() {
         raw.extend(louvain(&connected, options.resolution));
     }
+    profile_cluster("Louvain levels", &mut profile_started);
     raw.extend(
         isolates
             .into_iter()
@@ -66,12 +72,14 @@ pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities
     if !hubs.is_empty() {
         reattach_hubs(&graph, &hubs, &mut raw);
     }
+    profile_cluster("isolate and hub attachment", &mut profile_started);
 
+    let positions = graph.position_map();
     let maximum_size = MIN_SPLIT_SIZE.max((graph.len() as f64 * MAX_COMMUNITY_FRACTION) as usize);
     let mut first_pass = Vec::new();
     for members in raw {
         if members.len() > maximum_size {
-            first_pass.extend(split_community(&graph, &members));
+            first_pass.extend(split_community(&graph, &positions, &members));
         } else {
             first_pass.push(members);
         }
@@ -79,9 +87,9 @@ pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities
     let mut final_communities = Vec::new();
     for members in first_pass {
         if members.len() >= COHESION_SPLIT_MIN_SIZE
-            && cohesion_score_graph(&graph, &members) < COHESION_SPLIT_THRESHOLD
+            && cohesion_score_graph(&graph, &positions, &members) < COHESION_SPLIT_THRESHOLD
         {
-            let splits = split_community(&graph, &members);
+            let splits = split_community(&graph, &positions, &members);
             if splits.len() > 1 {
                 final_communities.extend(splits);
             } else {
@@ -96,7 +104,19 @@ pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities
     }
     final_communities
         .sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
-    final_communities.into_iter().enumerate().collect()
+    let communities = final_communities.into_iter().enumerate().collect();
+    profile_cluster("community splitting and ordering", &mut profile_started);
+    communities
+}
+
+fn profile_cluster(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] cluster {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
 }
 
 #[must_use]
@@ -104,13 +124,36 @@ pub fn label_communities_by_hub(
     document: &GraphDocument,
     communities: &Communities,
 ) -> BTreeMap<usize, String> {
-    let graph = WeightedGraph::from_document(document);
-    let positions = graph
-        .ids
+    let positions = document
+        .nodes
         .iter()
         .enumerate()
-        .map(|(index, id)| (id.as_str(), index))
+        .map(|(index, node)| (node.id.as_str(), index))
         .collect::<HashMap<_, _>>();
+    let mut degrees = vec![0_usize; document.nodes.len()];
+    let mut neighbors = HashSet::<(usize, usize)>::new();
+    for edge in &document.links {
+        let (Some(&left), Some(&right)) = (
+            positions.get(edge.source.as_str()),
+            positions.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        let pair = if left <= right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        if !neighbors.insert(pair) {
+            continue;
+        }
+        if left == right {
+            degrees[left] += 2;
+        } else {
+            degrees[left] += 1;
+            degrees[right] += 1;
+        }
+    }
     let labels = document
         .nodes
         .iter()
@@ -122,9 +165,8 @@ pub fn label_communities_by_hub(
             .iter()
             .filter_map(|member| positions.get(member.as_str()).map(|index| (member, *index)))
             .min_by(|(left_id, left), (right_id, right)| {
-                graph
-                    .degree_unweighted(*right)
-                    .cmp(&graph.degree_unweighted(*left))
+                degrees[*right]
+                    .cmp(&degrees[*left])
                     .then_with(|| left_id.cmp(right_id))
             });
         let fallback = format!("Community {community}");
@@ -160,7 +202,9 @@ pub fn community_member_signatures(communities: &Communities) -> BTreeMap<usize,
 
 #[must_use]
 pub fn cohesion_score(document: &GraphDocument, members: &[String]) -> f64 {
-    cohesion_score_graph(&WeightedGraph::from_document(document), members)
+    let graph = WeightedGraph::from_document(document);
+    let positions = graph.position_map();
+    cohesion_score_graph(&graph, &positions, members)
 }
 
 #[must_use]
@@ -168,19 +212,36 @@ pub fn score_communities(
     document: &GraphDocument,
     communities: &Communities,
 ) -> BTreeMap<usize, f64> {
-    let graph = WeightedGraph::from_document(document);
-    let positions = graph.position_map();
-    let mut node_community = vec![None; graph.len()];
+    let positions = document
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut node_community = vec![None; document.nodes.len()];
     let mut internal_edges = HashMap::<usize, usize>::new();
     for (community, members) in communities {
         for member in members {
-            if let Some(position) = positions.get(member) {
+            if let Some(position) = positions.get(member.as_str()) {
                 node_community[*position] = Some(*community);
             }
         }
     }
-    for (left, right, _) in graph.edges() {
-        if let Some(community) = node_community[left]
+    let mut seen = HashSet::<(usize, usize)>::new();
+    for edge in &document.links {
+        let (Some(&left), Some(&right)) = (
+            positions.get(edge.source.as_str()),
+            positions.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        let pair = if left <= right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        if seen.insert(pair)
+            && let Some(community) = node_community[left]
             && node_community[right] == Some(community)
         {
             *internal_edges.entry(community).or_default() += 1;
@@ -204,7 +265,7 @@ pub fn score_communities(
 #[must_use]
 pub fn remap_communities_to_previous(
     communities: &Communities,
-    previous: &HashMap<String, usize>,
+    previous: &std::collections::HashMap<String, usize>,
 ) -> Communities {
     if communities.is_empty() {
         return Communities::new();
@@ -324,8 +385,11 @@ fn reattach_hubs(graph: &WeightedGraph, hubs: &HashSet<usize>, raw: &mut Vec<Vec
     }
 }
 
-fn split_community(graph: &WeightedGraph, members: &[String]) -> Vec<Vec<String>> {
-    let positions = graph.position_map();
+fn split_community(
+    graph: &WeightedGraph,
+    positions: &HashMap<&String, usize>,
+    members: &[String],
+) -> Vec<Vec<String>> {
     let selected = members
         .iter()
         .filter_map(|member| positions.get(member).copied())
@@ -350,12 +414,15 @@ fn split_community(graph: &WeightedGraph, members: &[String]) -> Vec<Vec<String>
     }
 }
 
-fn cohesion_score_graph(graph: &WeightedGraph, members: &[String]) -> f64 {
+fn cohesion_score_graph(
+    graph: &WeightedGraph,
+    positions: &HashMap<&String, usize>,
+    members: &[String],
+) -> f64 {
     let count = members.len();
     if count <= 1 {
         return 1.0;
     }
-    let positions = graph.position_map();
     let member_set = members
         .iter()
         .filter_map(|member| positions.get(member).copied())
@@ -597,25 +664,9 @@ impl WeightedGraph {
             .map(|(index, id)| (id.clone(), index))
             .collect::<HashMap<_, _>>();
         let mut graph = Self::new(ids, members);
-        let mut edges = document
-            .links
-            .iter()
-            .map(|edge| {
-                (
-                    edge.source.as_str(),
-                    edge.target.as_str(),
-                    canonical_attributes(&edge.attributes),
-                    edge,
-                )
-            })
-            .collect::<Vec<_>>();
-        edges.sort_by(|left, right| {
-            left.0
-                .cmp(right.0)
-                .then_with(|| left.1.cmp(right.1))
-                .then_with(|| left.2.cmp(&right.2))
-        });
-        for (_, _, _, edge) in edges {
+        let mut selected =
+            HashMap::<(usize, usize), (usize, f64)>::with_capacity(document.links.len());
+        for (edge_index, edge) in document.links.iter().enumerate() {
             let (Some(left), Some(right)) =
                 (positions.get(&edge.source), positions.get(&edge.target))
             else {
@@ -626,7 +677,23 @@ impl WeightedGraph {
                 .get("weight")
                 .and_then(Value::as_f64)
                 .unwrap_or(1.0);
-            graph.set_edge(*left, *right, weight);
+            let candidate = selected
+                .entry((*left, *right))
+                .or_insert((edge_index, weight));
+            if candidate.1 != weight
+                && canonical_attributes(&edge.attributes)
+                    >= canonical_attributes(&document.links[candidate.0].attributes)
+            {
+                *candidate = (edge_index, weight);
+            }
+        }
+        let mut edges = selected
+            .into_iter()
+            .map(|((left, right), (_, weight))| (left, right, weight))
+            .collect::<Vec<_>>();
+        edges.sort_by_key(|(left, right, _)| (*left, *right));
+        for (left, right, weight) in edges {
+            graph.set_edge(left, right, weight);
         }
         graph
     }
@@ -972,8 +1039,9 @@ mod tests {
         assert!(excluded_hubs(&weighted, None).is_empty());
         assert!(excluded_hubs(&WeightedGraph::new(Vec::new(), Vec::new()), Some(50.0)).is_empty());
         assert_eq!(weighted.position_map().get(&&weighted.ids[0]), Some(&0));
+        let positions = weighted.position_map();
         assert_eq!(
-            split_community(&weighted, &["b".to_owned(), "a".to_owned()]),
+            split_community(&weighted, &positions, &["b".to_owned(), "a".to_owned()]),
             vec![vec!["a".to_owned()], vec!["b".to_owned()]]
         );
         assert_eq!(
@@ -1006,12 +1074,16 @@ mod tests {
 
     #[test]
     fn remapping_and_canonical_attributes_cover_unmatched_ties_and_nested_values() {
-        assert!(remap_communities_to_previous(&Communities::new(), &HashMap::new()).is_empty());
+        assert!(
+            remap_communities_to_previous(&Communities::new(), &std::collections::HashMap::new())
+                .is_empty()
+        );
         let communities = BTreeMap::from([
             (7, vec!["b".to_owned(), "a".to_owned()]),
             (4, vec!["c".to_owned(), "d".to_owned()]),
         ]);
-        let remapped = remap_communities_to_previous(&communities, &HashMap::new());
+        let remapped =
+            remap_communities_to_previous(&communities, &std::collections::HashMap::new());
         assert_eq!(
             remapped.get(&0),
             Some(&vec!["a".to_owned(), "b".to_owned()])

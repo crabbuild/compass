@@ -200,6 +200,22 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     assert_eq!(warm.program_syntax_reused, 1);
     assert_eq!(fs::read(&output)?, cold_bytes);
 
+    let mut same_size_program_damage = cold_bytes.clone();
+    same_size_program_damage[0] = b'[';
+    fs::write(&output, same_size_program_damage)?;
+    let repaired_same_size_program = build_local_graph(&options)?;
+    assert_eq!(repaired_same_size_program.program_syntax_reused, 1);
+    assert_eq!(fs::read(&output)?, cold_bytes);
+
+    let graph_output = cold.output_dir.join("graph.json");
+    let graph_bytes = fs::read(&graph_output)?;
+    let mut same_size_graph_damage = graph_bytes.clone();
+    same_size_graph_damage[0] = b'[';
+    fs::write(&graph_output, same_size_graph_damage)?;
+    let repaired_same_size_graph = build_local_graph(&options)?;
+    assert_eq!(repaired_same_size_graph.program_syntax_reused, 1);
+    assert_eq!(fs::read(&graph_output)?, graph_bytes);
+
     fs::write(&output, serde_json::to_vec_pretty(&document)?)?;
     let repaired = build_local_graph(&options)?;
     assert_eq!(repaired.program_syntax_reused, 1);

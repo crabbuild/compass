@@ -47,6 +47,12 @@ pub use scip::{ScipExtraction, ingest_scip_json};
 
 use std::path::PathBuf;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CombinedExtraction {
+    pub graph: Extraction,
+    pub program: Option<compass_program::EvidenceBatch>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractError {
     #[error("unsupported deterministic source format: {0}")]

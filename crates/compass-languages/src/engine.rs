@@ -12,7 +12,8 @@ use tree_sitter::{Node, Parser, Tree};
 use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
 use crate::config::{GenericConfig, generic_config};
 use crate::{
-    ExtractError, Extraction, ExtractorKind, LanguageSpec, RawCall, Registry, file_stem, make_id,
+    CombinedExtraction, ExtractError, Extraction, ExtractorKind, LanguageSpec, RawCall, Registry,
+    file_stem, make_id,
 };
 
 const JSON_MAX_BYTES: u64 = 1_048_576;
@@ -59,6 +60,41 @@ impl Engine {
             ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
             _ => self.extract(path),
         }
+    }
+
+    pub fn extract_source_combined(
+        &mut self,
+        path: &Path,
+        source_file: &str,
+        source: &[u8],
+    ) -> Result<CombinedExtraction, ExtractError> {
+        let spec =
+            Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
+        if spec.kind != ExtractorKind::Generic
+            || !matches!(
+                spec.name,
+                "python" | "rust" | "typescript" | "tsx" | "javascript"
+            )
+        {
+            return self
+                .extract_source(path, source)
+                .map(|graph| CombinedExtraction {
+                    graph,
+                    program: None,
+                });
+        }
+        let tree = self.parse(path, spec, source)?;
+        let root = tree.root_node();
+        let graph = Self::extract_generic_from_tree(path, spec, source, root);
+        let program = crate::program::extract_from_tree(source_file, spec.name, source, root)
+            .map_err(|error| ExtractError::InvalidProgramEvidence {
+                path: path.to_path_buf(),
+                detail: error.to_string(),
+            })?;
+        Ok(CombinedExtraction {
+            graph,
+            program: Some(program),
+        })
     }
 
     pub(super) fn extract_embedded_script(
@@ -144,8 +180,21 @@ impl Engine {
             source
         };
         let tree = self.parse(path, spec, source)?;
+        Ok(Self::extract_generic_from_tree(
+            path,
+            spec,
+            source,
+            tree.root_node(),
+        ))
+    }
+
+    fn extract_generic_from_tree(
+        path: &Path,
+        spec: LanguageSpec,
+        source: &[u8],
+        root: Node<'_>,
+    ) -> Extraction {
         let config = generic_config(spec);
-        let root = tree.root_node();
         let mut extraction = match spec.name {
             "go" => crate::go::extract(path, source, root),
             "rust" => crate::rust_lang::extract(path, source, root),
@@ -165,7 +214,7 @@ impl Engine {
             add_python_rationale(path, source, root, &mut extraction);
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
-        Ok(extraction)
+        extraction
     }
 
     fn extract_json(

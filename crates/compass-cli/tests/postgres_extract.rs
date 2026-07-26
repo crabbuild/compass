@@ -15,7 +15,8 @@ fn postgres_extract_rejects_invalid_dsn_without_echoing_it() -> Result<(), Box<d
         .output()?;
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr)?;
-    assert_eq!(stderr, "error: invalid PostgreSQL DSN\n");
+    assert!(stderr.starts_with("error: invalid PostgreSQL DSN\n"));
+    assert!(stderr.contains("Compass extract failed after "));
     assert!(!stderr.contains("top-secret"));
     Ok(())
 }

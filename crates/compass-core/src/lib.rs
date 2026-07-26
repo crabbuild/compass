@@ -1,5 +1,6 @@
 //! Application services shared by the Compass and Compass command frontends.
 
+mod build_state;
 mod cluster_existing;
 mod diagnostics;
 mod history;

@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
+
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use std::path::Path;
 
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
@@ -138,6 +140,10 @@ pub struct ImportCycle {
 #[must_use]
 pub fn god_nodes(document: &GraphDocument, top_n: usize) -> Vec<GodNode> {
     let graph = AnalysisGraph::new(document);
+    god_nodes_in(&graph, top_n)
+}
+
+fn god_nodes_in(graph: &AnalysisGraph<'_>, top_n: usize) -> Vec<GodNode> {
     let mut ranked = graph
         .nodes
         .iter()
@@ -169,6 +175,14 @@ pub fn surprising_connections(
     top_n: usize,
 ) -> Vec<SurpriseConnection> {
     let graph = AnalysisGraph::new(document);
+    surprising_connections_in(&graph, communities, top_n)
+}
+
+fn surprising_connections_in(
+    graph: &AnalysisGraph<'_>,
+    communities: &Communities,
+    top_n: usize,
+) -> Vec<SurpriseConnection> {
     let source_count = graph
         .nodes
         .iter()
@@ -193,6 +207,15 @@ pub fn suggest_questions(
     top_n: usize,
 ) -> Vec<SuggestedQuestion> {
     let graph = AnalysisGraph::new(document);
+    suggest_questions_in(&graph, communities, community_labels, top_n)
+}
+
+fn suggest_questions_in(
+    graph: &AnalysisGraph<'_>,
+    communities: &Communities,
+    community_labels: &BTreeMap<usize, String>,
+    top_n: usize,
+) -> Vec<SuggestedQuestion> {
     let node_community = invert_communities(communities);
     let cohesion = community_cohesion_scores(&graph, communities, &node_community);
     let mut questions = Vec::new();
@@ -365,6 +388,32 @@ pub fn suggest_questions(
     }
     questions.truncate(top_n);
     questions
+}
+
+#[must_use]
+pub fn graph_insights(
+    document: &GraphDocument,
+    communities: &Communities,
+    community_labels: &BTreeMap<usize, String>,
+    god_limit: usize,
+    surprise_limit: usize,
+    question_limit: usize,
+) -> (
+    Vec<GodNode>,
+    Vec<SurpriseConnection>,
+    Vec<SuggestedQuestion>,
+) {
+    let graph = AnalysisGraph::new(document);
+    let (gods, (surprises, questions)) = rayon::join(
+        || god_nodes_in(&graph, god_limit),
+        || {
+            rayon::join(
+                || surprising_connections_in(&graph, communities, surprise_limit),
+                || suggest_questions_in(&graph, communities, community_labels, question_limit),
+            )
+        },
+    );
+    (gods, surprises, questions)
 }
 
 #[must_use]

@@ -3,13 +3,17 @@ use std::fs;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use compass_files::{
-    BuildScope, DetectOptions, PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig, ScopeMatcher, detect,
+    BuildScope, DetectOptions, Detection, PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig,
+    ScopeMatcher, detect,
 };
 
 use crate::ide_contract::{PROGRESS_SCHEMA, ProgressEvent, ProgressState, ProgressWriter};
-use crate::{Frontend, Outcome, command_build, command_build_with_file_progress, write_outcome};
+use crate::{
+    BuildOperation, Frontend, Outcome, command_build_with_precomputed_detection, write_outcome,
+};
 
 struct InitOptions {
     root: PathBuf,
@@ -17,6 +21,7 @@ struct InitOptions {
     excludes: Vec<String>,
     yes: bool,
     force: bool,
+    timing: bool,
 }
 
 pub fn run_init(
@@ -32,7 +37,16 @@ pub fn run_init(
         stdout,
         stderr,
         input_is_terminal,
-        |_, build_arguments| command_build(Frontend::Compass, build_arguments, false),
+        |_, build_arguments, detection, started| {
+            command_build_with_precomputed_detection(
+                Frontend::Compass,
+                build_arguments,
+                BuildOperation::Init,
+                detection,
+                started,
+                None,
+            )
+        },
     )
 }
 
@@ -77,7 +91,7 @@ pub fn run_init_jsonl<W: Write + Send>(
         &mut human_stdout,
         &mut human_stderr,
         input_is_terminal,
-        |root, build_arguments| {
+        |root, build_arguments, detection, started| {
             let report = |progress: compass_core::BuildFileProgress| {
                 let path = progress
                     .path
@@ -110,7 +124,14 @@ pub fn run_init_jsonl<W: Write + Send>(
                     *slot = Some(error);
                 }
             };
-            command_build_with_file_progress(Frontend::Compass, build_arguments, false, &report)
+            command_build_with_precomputed_detection(
+                Frontend::Compass,
+                build_arguments,
+                BuildOperation::Init,
+                detection,
+                started,
+                Some(&report),
+            )
         },
     );
     let _ = stderr.write_all(&human_stdout);
@@ -157,7 +178,7 @@ fn run_init_with_builder(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
     input_is_terminal: bool,
-    build: impl FnOnce(&Path, &[String]) -> Outcome,
+    build: impl FnOnce(&Path, &[String], Detection, Instant) -> Outcome,
 ) -> u8 {
     let args = arguments
         .iter()
@@ -217,6 +238,7 @@ fn run_init_with_builder(
             return 2;
         }
     };
+    let mut operation_started = Instant::now();
     let detection = match detect(
         &root,
         &DetectOptions {
@@ -280,8 +302,15 @@ fn run_init_with_builder(
     let _ = writeln!(stdout, "Output: {}", root.join(output_name).display());
 
     if !options.yes {
+        let confirmation_started = Instant::now();
         match prompt(input, stdout, "Save configuration and build now? [y/N] ") {
-            Ok(answer) if matches!(answer.to_ascii_lowercase().as_str(), "y" | "yes") => {}
+            Ok(answer) if matches!(answer.to_ascii_lowercase().as_str(), "y" | "yes") => {
+                if let Some(adjusted) =
+                    operation_started.checked_add(confirmation_started.elapsed())
+                {
+                    operation_started = adjusted;
+                }
+            }
             Ok(_) => {
                 let _ = writeln!(stdout, "Cancelled; no files were changed.");
                 return 0;
@@ -297,10 +326,15 @@ fn run_init_with_builder(
         let _ = writeln!(stderr, "error: {error}");
         return 1;
     }
-    let outcome = build(
-        &root,
-        &[root.to_string_lossy().into_owned(), "--force".to_owned()],
-    );
+    let mut build_arguments = vec![
+        root.to_string_lossy().into_owned(),
+        "--force".to_owned(),
+        "--reuse-cache-on-force".to_owned(),
+    ];
+    if options.timing {
+        build_arguments.push("--timing".to_owned());
+    }
+    let outcome = build(&root, &build_arguments, detection, operation_started);
     if outcome.code != 0 {
         let _ = writeln!(
             stderr,
@@ -370,6 +404,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         excludes: Vec::new(),
         yes: false,
         force: false,
+        timing: false,
     };
     let mut root_seen = false;
     let mut index = 0;
@@ -377,6 +412,7 @@ fn parse(args: &[String]) -> Result<InitOptions, String> {
         match args[index].as_str() {
             "--yes" => options.yes = true,
             "--force" => options.force = true,
+            "--timing" => options.timing = true,
             "--include" | "--exclude" => {
                 let name = args[index].clone();
                 index += 1;

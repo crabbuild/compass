@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use ahash::AHashMap;
 use compass_model::{EdgeRecord, NodeRecord};
 use serde_json::Value;
 use sha1::{Digest, Sha1};
@@ -67,11 +68,20 @@ pub fn deduplicate_entities_with_tiebreaker(
     communities: &HashMap<String, i64>,
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
 ) -> Result<DedupResult, DedupError> {
-    validate_repository_scope(nodes)?;
+    deduplicate_owned(nodes.to_vec(), edges.to_vec(), communities, tiebreaker)
+}
+
+pub(crate) fn deduplicate_owned(
+    nodes: Vec<NodeRecord>,
+    edges: Vec<EdgeRecord>,
+    communities: &HashMap<String, i64>,
+    tiebreaker: Option<&mut dyn EntityTiebreaker>,
+) -> Result<DedupResult, DedupError> {
+    validate_repository_scope(&nodes)?;
     if nodes.len() <= 1 {
         return Ok(DedupResult {
-            nodes: nodes.to_vec(),
-            edges: edges.to_vec(),
+            nodes,
+            edges,
             stats: DedupStats::default(),
             diagnostics: Vec::new(),
         });
@@ -81,7 +91,7 @@ pub fn deduplicate_entities_with_tiebreaker(
     if unique_nodes.len() <= 1 {
         return Ok(DedupResult {
             nodes: unique_nodes,
-            edges: edges.to_vec(),
+            edges,
             stats: DedupStats::default(),
             diagnostics,
         });
@@ -159,7 +169,7 @@ pub fn deduplicate_entities_with_tiebreaker(
     if remap.is_empty() {
         return Ok(DedupResult {
             nodes: unique_nodes,
-            edges: edges.to_vec(),
+            edges,
             stats: DedupStats::default(),
             diagnostics,
         });
@@ -242,27 +252,25 @@ fn validate_repository_scope(nodes: &[NodeRecord]) -> Result<(), DedupError> {
     Ok(())
 }
 
-fn collapse_id_collisions(nodes: &[NodeRecord]) -> (Vec<NodeRecord>, Vec<String>) {
+fn collapse_id_collisions(nodes: Vec<NodeRecord>) -> (Vec<NodeRecord>, Vec<String>) {
     let mut output = Vec::<NodeRecord>::new();
-    let mut positions = HashMap::<String, usize>::new();
+    let mut positions = AHashMap::<String, usize>::new();
     let mut dropped = HashMap::<String, Vec<NodeRecord>>::new();
     for node in nodes {
         if node.id.is_empty() {
             continue;
         }
         if let Some(&position) = positions.get(&node.id) {
-            if collision_rank(node) < collision_rank(&output[position]) {
-                let incumbent = std::mem::replace(&mut output[position], node.clone());
-                dropped.entry(node.id.clone()).or_default().push(incumbent);
+            if collision_rank(&node) < collision_rank(&output[position]) {
+                let id = node.id.clone();
+                let incumbent = std::mem::replace(&mut output[position], node);
+                dropped.entry(id).or_default().push(incumbent);
             } else {
-                dropped
-                    .entry(node.id.clone())
-                    .or_default()
-                    .push(node.clone());
+                dropped.entry(node.id.clone()).or_default().push(node);
             }
         } else {
             positions.insert(node.id.clone(), output.len());
-            output.push(node.clone());
+            output.push(node);
         }
     }
     let mut diagnostics = Vec::new();
@@ -397,10 +405,9 @@ fn fuzzy_merge(
     merge_count
 }
 
-fn rewire_edges(edges: &[EdgeRecord], remap: &HashMap<String, String>) -> Vec<EdgeRecord> {
+fn rewire_edges(edges: Vec<EdgeRecord>, remap: &HashMap<String, String>) -> Vec<EdgeRecord> {
     let mut output = Vec::new();
-    for edge in edges {
-        let mut rewritten = edge.clone();
+    for mut rewritten in edges {
         if let Some(source) = remap.get(&rewritten.source) {
             rewritten.source.clone_from(source);
         }

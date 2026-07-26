@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use compass_ir::{
     Coverage, ExceptionEffect, IrError, OperationKind, ProgramBundle, SymbolId,
     canonical_json_bytes, hex_sha256,
 };
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -44,26 +45,41 @@ pub enum AnalysisError {
 pub fn analyze(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError> {
     let program = program.canonicalized();
     program.validate()?;
-    let mut summaries = Vec::new();
-    let mut symbols = BTreeSet::new();
+    analyze_prevalidated(program)
+}
+
+/// Analyze a Program canonicalized and validated by the in-process merger.
+///
+/// Untrusted artifacts must use [`analyze`].
+pub fn analyze_prevalidated(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError> {
+    let functions = program
+        .modules
+        .iter()
+        .flat_map(|module| module.functions.iter())
+        .collect::<Vec<_>>();
+    let mut summaries = functions
+        .par_iter()
+        .map(|function| summarize(function))
+        .collect::<Result<Vec<_>, _>>()?;
+    summaries.sort_by(|left, right| left.symbol_id.as_bytes().cmp(right.symbol_id.as_bytes()));
+    if let Some(duplicate) = summaries
+        .windows(2)
+        .find(|pair| pair[0].symbol_id == pair[1].symbol_id)
+    {
+        return Err(AnalysisError::DuplicateFunction(
+            duplicate[0].symbol_id.clone(),
+        ));
+    }
     let mut reverse_calls = BTreeMap::<String, Vec<String>>::new();
-    for module in &program.modules {
-        for function in &module.functions {
-            if !symbols.insert(function.symbol_id.clone()) {
-                return Err(AnalysisError::DuplicateFunction(function.symbol_id.clone()));
-            }
-            let summary = summarize(function)?;
-            for target in &summary.resolved_calls {
-                reverse_calls
-                    .entry(target.clone())
-                    .or_default()
-                    .push(function.symbol_id.clone());
-            }
-            summaries.push(summary);
+    for summary in &summaries {
+        for target in &summary.resolved_calls {
+            reverse_calls
+                .entry(target.clone())
+                .or_default()
+                .push(summary.symbol_id.clone());
         }
     }
     canonicalize_reverse_calls(&mut reverse_calls);
-    summaries.sort_by(|left, right| left.symbol_id.as_bytes().cmp(right.symbol_id.as_bytes()));
     Ok(AnalysisBundle {
         analysis_schema_version: crate::ANALYSIS_SCHEMA_VERSION,
         analyzer_version: crate::ANALYZER_VERSION,
@@ -117,9 +133,109 @@ impl AnalysisBundle {
         Ok(canonical_json_bytes(&bundle)?)
     }
 
+    /// Serialize an analysis that was canonicalized and validated by the
+    /// in-process merger.
+    ///
+    /// Large arrays are encoded in parallel while the final byte stream keeps
+    /// the same canonical ordering as [`Self::canonical_bytes`]. Untrusted
+    /// artifacts must continue to use [`Self::canonical_bytes`].
+    pub fn canonical_bytes_prevalidated(&self) -> Result<Vec<u8>, AnalysisError> {
+        let ((evidence, modules), (providers, (summaries, reverse_calls))) = rayon::join(
+            || {
+                rayon::join(
+                    || canonical_array_chunks(&self.program.evidence),
+                    || canonical_array_chunks(&self.program.modules),
+                )
+            },
+            || {
+                rayon::join(
+                    || canonical_array_chunks(&self.program.providers),
+                    || {
+                        rayon::join(
+                            || canonical_array_chunks(&self.summaries),
+                            || canonical_fragment(&self.reverse_calls),
+                        )
+                    },
+                )
+            },
+        );
+        let evidence = evidence?;
+        let modules = modules?;
+        let providers = providers?;
+        let summaries = summaries?;
+        let reverse_calls = reverse_calls?;
+        let schema = canonical_fragment(&self.program.schema)?;
+
+        let capacity = evidence
+            .iter()
+            .chain(&modules)
+            .chain(&providers)
+            .chain(&summaries)
+            .map(Vec::len)
+            .sum::<usize>()
+            .saturating_add(reverse_calls.len())
+            .saturating_add(schema.len())
+            .saturating_add(256);
+        let mut output = Vec::with_capacity(capacity);
+        output.extend_from_slice(b"{\"analysis_schema_version\":");
+        output.extend_from_slice(self.analysis_schema_version.to_string().as_bytes());
+        output.extend_from_slice(b",\"analyzer_version\":");
+        output.extend_from_slice(self.analyzer_version.to_string().as_bytes());
+        output.extend_from_slice(b",\"program\":{\"evidence\":");
+        append_canonical_array(&mut output, evidence);
+        output.extend_from_slice(b",\"modules\":");
+        append_canonical_array(&mut output, modules);
+        output.extend_from_slice(b",\"providers\":");
+        append_canonical_array(&mut output, providers);
+        output.extend_from_slice(b",\"schema\":");
+        output.extend_from_slice(&schema);
+        output.extend_from_slice(b"},\"reverse_calls\":");
+        output.extend_from_slice(&reverse_calls);
+        output.extend_from_slice(b",\"summaries\":");
+        append_canonical_array(&mut output, summaries);
+        output.extend_from_slice(b"}\n");
+        Ok(output)
+    }
+
     pub fn digest(&self) -> Result<String, AnalysisError> {
         Ok(hex_sha256(&self.canonical_bytes()?))
     }
+}
+
+fn canonical_array_chunks<T: Serialize + Sync>(
+    values: &[T],
+) -> Result<Vec<Vec<u8>>, AnalysisError> {
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Program serialization runs beside graph assembly. A small fixed number
+    // of chunks keeps those independent stages concurrent instead of filling
+    // the shared Rayon pool with serialization work.
+    let target_chunks = 2;
+    let chunk_size = values.len().div_ceil(target_chunks);
+    values
+        .par_chunks(chunk_size)
+        .map(|chunk| canonical_json_bytes(chunk).map_err(AnalysisError::from))
+        .collect()
+}
+
+fn canonical_fragment<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, AnalysisError> {
+    let mut bytes = canonical_json_bytes(value)?;
+    debug_assert_eq!(bytes.last(), Some(&b'\n'));
+    bytes.pop();
+    Ok(bytes)
+}
+
+fn append_canonical_array(output: &mut Vec<u8>, chunks: Vec<Vec<u8>>) {
+    output.push(b'[');
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        debug_assert!(chunk.starts_with(b"[") && chunk.ends_with(b"]\n"));
+        if index != 0 {
+            output.push(b',');
+        }
+        output.extend_from_slice(&chunk[1..chunk.len() - 2]);
+    }
+    output.push(b']');
 }
 
 pub(crate) fn summarize(

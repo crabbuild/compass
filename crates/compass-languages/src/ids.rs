@@ -6,6 +6,17 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 #[must_use]
 pub fn normalize_id(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.is_empty()
+        || (bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+            && bytes.first() != Some(&b'_')
+            && bytes.last() != Some(&b'_')
+            && !bytes.windows(2).any(|pair| pair == b"__"))
+    {
+        return value.to_owned();
+    }
     let normalized = value.nfkc().collect::<String>();
     let mut output = String::with_capacity(normalized.len());
     let mut separator = false;
