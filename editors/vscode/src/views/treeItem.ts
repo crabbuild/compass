@@ -9,6 +9,7 @@ export function treeItemFromNode(node: TreeNode): vscode.TreeItem {
     : vscode.TreeItemCollapsibleState.None;
   const item = new vscode.TreeItem(node.label, collapsibleState);
   item.id = node.id;
+  if (node.contextValue !== undefined) item.contextValue = node.contextValue;
   if (node.description !== undefined) item.description = node.description;
   if (node.tooltip !== undefined) item.tooltip = node.tooltip;
   item.iconPath = new vscode.ThemeIcon(node.icon);

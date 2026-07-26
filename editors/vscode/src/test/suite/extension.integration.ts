@@ -12,6 +12,9 @@ suite("Compass extension", () => {
       "compass.update",
       "compass.refreshWorkspace",
       "compass.toggleWatch",
+      "compass.startWatch",
+      "compass.stopWatch",
+      "compass.openSettings",
       "compass.openGraph",
       "compass.openCallGraph",
       "compass.openArchitecture",
@@ -33,8 +36,8 @@ suite("Compass extension", () => {
     assert.deepEqual(
       viewTitle.filter((item) => item.when === "view == compass.status")
         .map((item) => item.command),
-      ["compass.refreshWorkspace"],
-      "Workspace exposes one read-only title action"
+      ["compass.openSettings", "compass.refreshWorkspace"],
+      "Workspace exposes settings and refresh title actions"
     );
     await vscode.commands.executeCommand("compass.refreshWorkspace");
   });

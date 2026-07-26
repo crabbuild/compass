@@ -1,4 +1,4 @@
-import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
+import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   Component,
@@ -29,13 +29,31 @@ const DIFF_THEME_CSS = `:host {
 
 [data-gutter],
 [data-content] {
-  grid-template-rows: none;
-  grid-auto-rows: minmax(var(--diffs-line-height, 19px), auto);
-  align-content: start;
+  display: contents !important;
+}
+
+[data-gutter] > * {
+  grid-column: 1;
+}
+
+[data-content] > * {
+  grid-column: 2;
+  min-width: 0;
+}
+
+[data-diff-type="split"][data-overflow="wrap"] [data-additions] [data-gutter] > * {
+  grid-column: 3;
+}
+
+[data-diff-type="split"][data-overflow="wrap"] [data-additions] [data-content] > * {
+  grid-column: 4;
+}
+
+[data-overflow="scroll"] [data-gutter] > * {
+  position: sticky;
+  left: 0;
+  z-index: 3;
 }`;
-const DIFF_LINE_HEIGHT = 19;
-const DIFF_HUNK_SEPARATOR_HEIGHT = 32;
-const DIFF_VERTICAL_PADDING = 16;
 
 export function SourceChanges({ changes }: { changes: SourceChange[] }) {
   const [preferredStyle, setPreferredStyle] = useState<DiffStyle>("split");
@@ -204,10 +222,7 @@ function SourcePatch({
         fileDiff={parsed.fileDiff}
         disableWorkerPool
         className="history-source-diff"
-        style={{
-          ...themeStyle,
-          minHeight: minimumDiffHeight(parsed.fileDiff, style)
-        }}
+        style={themeStyle}
         options={{
           theme: themeType === "light" ? "pierre-light" : "pierre-dark",
           themeType,
@@ -222,21 +237,6 @@ function SourcePatch({
       />
     </DiffErrorBoundary>
   );
-}
-
-export function minimumDiffHeight(
-  fileDiff: FileDiffMetadata,
-  style: DiffStyle
-): number {
-  const lineCount = fileDiff.hunks.reduce(
-    (total, hunk) => total + (
-      style === "split" ? hunk.splitLineCount : hunk.unifiedLineCount
-    ),
-    0
-  );
-  return lineCount * DIFF_LINE_HEIGHT
-    + fileDiff.hunks.length * DIFF_HUNK_SEPARATOR_HEIGHT
-    + DIFF_VERTICAL_PADDING;
 }
 
 function PatchFallback({ patch }: { patch: string }) {

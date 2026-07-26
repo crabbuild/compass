@@ -23,12 +23,13 @@ describe("buildWorkspaceTree", () => {
 
     expect(nodes.map((node) => node.label)).toEqual([
       "repo",
-      "Explore",
-      "Maintain"
+      "Explore"
     ]);
     expect(nodes[0]).toMatchObject({
       description: "Graph ready",
-      tooltip: "/work/repo"
+      tooltip: "/work/repo",
+      contextValue: "compass.repository.ready",
+      repositoryId: "repository-1"
     });
     expect(nodes[0]?.children).toBeUndefined();
     expect(nodes[1]?.expanded).toBe(true);
@@ -38,11 +39,6 @@ describe("buildWorkspaceTree", () => {
       ["Call graph from cursor", "compass.openCallGraph"],
       ["Ask codebase", "compass.openQuery"],
       ["Codebase evolution", "compass.openHistory"]
-    ]);
-    expect(nodes[2]?.expanded).toBeUndefined();
-    expect(nodes[2]?.children?.map((node) => [node.label, node.command])).toEqual([
-      ["Update graph", "compass.update"],
-      ["Watch for changes", "compass.toggleWatch"]
     ]);
     expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
@@ -57,10 +53,10 @@ describe("buildWorkspaceTree", () => {
     expect(nodes.map((node) => node.label)).toEqual([
       "repo",
       "Active operations",
-      "Explore",
-      "Maintain"
+      "Explore"
     ]);
     expect(nodes[1]).toMatchObject({ description: "2", expanded: true });
+    expect(nodes[0]?.contextValue).toBe("compass.repository.watching");
     expect(nodes[1]?.children?.map((node) => ({
       label: node.label,
       description: node.description,
@@ -69,7 +65,6 @@ describe("buildWorkspaceTree", () => {
       { label: "Building graph", description: "repo", command: undefined },
       { label: "Watching for changes", description: "repo", command: undefined }
     ]);
-    expect(nodes[3]?.children?.at(-1)?.label).toBe("Stop watching");
     expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
 
@@ -160,8 +155,6 @@ describe("buildWorkspaceTree", () => {
     expect(nodes.filter((node) => node.id.startsWith("repository:")).map((node) => node.label))
       .toEqual(["repo", "other"]);
     expect(nodes.filter((node) => node.label === "Explore")).toHaveLength(1);
-    expect(nodes.filter((node) => node.label === "Maintain")).toHaveLength(1);
-    expect(commands(nodes).filter((command) => command === "compass.update")).toHaveLength(1);
     expect(new Set(commands(nodes)).size).toBe(commands(nodes).length);
   });
 });

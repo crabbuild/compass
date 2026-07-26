@@ -10,6 +10,8 @@ export type TreeNode = {
   icon: string;
   command?: string;
   commandArguments?: unknown[];
+  contextValue?: string;
+  repositoryId?: string;
   expanded?: boolean;
   children?: TreeNode[];
 };
@@ -81,8 +83,6 @@ export function buildWorkspaceTree(
   const hasMissing = missing.length > 0;
   const hasGraph = sessions.some((session) => session.graphState === "available");
   const hasFailed = failed.length > 0;
-  const hasWatch = sessions.some((session) => Boolean(session.watch));
-
   if (hasMissing) {
     nodes.push(actionNode(
       "workspace:initialize",
@@ -152,37 +152,6 @@ export function buildWorkspaceTree(
     children: explore
   });
 
-  const maintain: TreeNode[] = [];
-  if (hasGraph && !hasFailed) {
-    maintain.push(actionNode(
-      "workspace:update",
-      "Update graph",
-      "refresh",
-      "compass.update",
-      "Refresh changed code relationships"
-    ));
-  }
-  if (hasGraph || hasWatch) {
-    maintain.push(actionNode(
-      "workspace:watch",
-      sessions.length === 1 && hasWatch ? "Stop watching" : "Watch for changes",
-      sessions.length === 1 && hasWatch ? "debug-stop" : "eye",
-      "compass.toggleWatch",
-      sessions.length === 1
-        ? hasWatch
-          ? "Stop watching this repository"
-          : "Keep the graph current as files change"
-        : "Choose a repository to start or stop watching"
-    ));
-  }
-  if (maintain.length > 0) {
-    nodes.push({
-      id: "workspace:maintain",
-      label: "Maintain",
-      icon: "tools",
-      children: maintain
-    });
-  }
   return nodes;
 }
 
@@ -219,11 +188,20 @@ function repositoryStatusNodes(
 ): TreeNode[] {
   return sessions.map((session) => ({
     id: `repository:${session.id}`,
+    repositoryId: session.id,
     label: path.basename(session.root) || session.root,
     description: graphStateLabel(session.graphState),
     tooltip: session.root,
-    icon: graphStateIcon(session.graphState)
+    icon: graphStateIcon(session.graphState),
+    contextValue: repositoryContextValue(session)
   }));
+}
+
+function repositoryContextValue(session: SessionTreeSnapshot): string {
+  if (session.graphState === "available") {
+    return session.watch ? "compass.repository.watching" : "compass.repository.ready";
+  }
+  return `compass.repository.${session.graphState}`;
 }
 
 function activeOperationGroup(

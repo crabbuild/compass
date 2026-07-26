@@ -120,11 +120,83 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     return picked?.session;
   };
+  const openCompassSettings = async () => {
+    const selected = await vscode.window.showQuickPick([
+      {
+        label: "$(settings-gear) Extension and watch settings",
+        description: "CLI path, graph limits, debounce, and polling",
+        action: "extension"
+      },
+      {
+        label: "$(folder-library) Repository scope",
+        description: "Review included and excluded paths",
+        action: "scope"
+      },
+      {
+        label: "$(file-code) Repository configuration",
+        description: "Open .compass/config.toml",
+        action: "configuration"
+      },
+      {
+        label: "$(history) History profile",
+        description: "Configure versioned graph profiles",
+        action: "history"
+      },
+      {
+        label: "$(terminal) Select Compass CLI",
+        description: "Choose a Compass executable",
+        action: "cli"
+      }
+    ], {
+      placeHolder: "Choose which Compass settings to configure"
+    });
+    if (!selected) return;
+    if (selected.action === "extension") {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "@ext:crabbuild.compass-vscode"
+      );
+      return;
+    }
+    if (selected.action === "cli") {
+      await vscode.commands.executeCommand("compass.selectCli");
+      return;
+    }
+    const session = await selectRepository();
+    if (!session) return;
+    if (selected.action === "scope") {
+      await vscode.commands.executeCommand("compass.initialize", session.id);
+      return;
+    }
+    if (selected.action === "history") {
+      await vscode.commands.executeCommand("compass.openHistory", session.id);
+      return;
+    }
+    const configurationUri = vscode.Uri.joinPath(
+      vscode.Uri.file(session.root),
+      ".compass",
+      "config.toml"
+    );
+    try {
+      await vscode.workspace.fs.stat(configurationUri);
+      const document = await vscode.workspace.openTextDocument(configurationUri);
+      await vscode.window.showTextDocument(document);
+    } catch {
+      const action = await vscode.window.showInformationMessage(
+        "This repository does not have a Compass configuration yet.",
+        "Configure scope"
+      );
+      if (action === "Configure scope") {
+        await vscode.commands.executeCommand("compass.initialize", session.id);
+      }
+    }
+  };
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("compass.status", workspaceTree),
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
     vscode.commands.registerCommand("compass.refreshWorkspace", refresh),
     vscode.commands.registerCommand("compass.selectCli", selectCompassBinary),
+    vscode.commands.registerCommand("compass.openSettings", openCompassSettings),
     vscode.commands.registerCommand("compass.openGraph", async (repositoryId?: string) => {
       if (!vscode.workspace.isTrusted) {
         void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
