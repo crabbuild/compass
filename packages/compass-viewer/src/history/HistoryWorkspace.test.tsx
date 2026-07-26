@@ -34,7 +34,7 @@ function host(): HistoryHost {
 }
 
 describe("HistoryWorkspace", () => {
-  it("puts a zero-topology comparison explanation before the graph canvas", () => {
+  it("opens comparisons on source changes and keeps the graph in the second tab", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     const parent = "b".repeat(40);
@@ -116,12 +116,31 @@ describe("HistoryWorkspace", () => {
 
     const explanation = Array.from(container.querySelectorAll("*"))
       .find((element) => element.textContent === "No structural graph changes");
-    const graphFrame = container.querySelector(".history-graph-frame");
+    const comparisonWorkspace = container.querySelector(".history-comparison-workspace");
     expect(explanation).toBeDefined();
-    expect(graphFrame).not.toBeNull();
-    if (!explanation || !graphFrame) throw new Error("comparison layout did not render");
-    expect(explanation.compareDocumentPosition(graphFrame) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(comparisonWorkspace).not.toBeNull();
+    if (!explanation || !comparisonWorkspace) {
+      throw new Error("comparison layout did not render");
+    }
+    expect(
+      explanation.compareDocumentPosition(comparisonWorkspace)
+      & Node.DOCUMENT_POSITION_FOLLOWING
+    )
       .toBeTruthy();
+    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      "Source changes0",
+      "Changed graph0",
+      "Semantic findings0"
+    ]);
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector(".history-graph-frame")).toBeNull();
+
+    flushSync(() => tabs[1]?.click());
+
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector(".history-graph-frame")).not.toBeNull();
+    expect(container.textContent).toContain("No graph delta to draw");
     expect(container.textContent).toContain(`Comparing ${commit.slice(0, 9)} to ${parent.slice(0, 9)}`);
     expect(container.textContent).toContain(
       "No structural changes from the first parent. Source or configuration changes may still exist"

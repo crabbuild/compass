@@ -1,5 +1,16 @@
-import { useMemo, useState } from "react";
-import { HistoryIcon, SearchIcon } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent
+} from "react";
+import {
+  FileDiffIcon,
+  HistoryIcon,
+  NetworkIcon,
+  SearchIcon,
+  SparklesIcon
+} from "lucide-react";
 import { WorkspaceState } from "../components/workbench/WorkspaceState";
 import { CompassGraph } from "../graph/CompassGraph";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
@@ -12,7 +23,13 @@ import type {
 import { CommitDetails } from "./CommitDetails";
 import { CommitRail } from "./CommitRail";
 import { ComparisonOverlay, type GraphComparison } from "./ComparisonOverlay";
-import { SemanticFindings } from "./SemanticFindings";
+import {
+  SemanticFindings,
+  SourceChangeEvidence,
+  semanticEvidence
+} from "./SemanticFindings";
+
+type ComparisonTab = "source" | "graph" | "semantic";
 
 export type HistoryHost = {
   enableHistory(): void;
@@ -70,6 +87,10 @@ export function HistoryWorkspace({
   host: HistoryHost;
 }) {
   const [query, setQuery] = useState("");
+  const [comparisonTab, setComparisonTab] = useState<ComparisonTab>("source");
+  useEffect(() => {
+    setComparisonTab("source");
+  }, [comparison?.parent, selectedCommit]);
   const entries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return timeline.entries.filter((entry) => !normalizedQuery
@@ -91,6 +112,7 @@ export function HistoryWorkspace({
   const countLabel = timeline.hasMore
     ? `${loadedEntries.toLocaleString()} loaded commits`
     : `${(timeline.totalEntries ?? loadedEntries).toLocaleString()} reachable commits`;
+  const evidence = useMemo(() => semanticEvidence(semanticDiff), [semanticDiff]);
 
   return (
     <div className="history-shell">
@@ -213,103 +235,244 @@ export function HistoryWorkspace({
                 onExit={() => onExitComparison?.()}
               />
             )}
-            {comparison && semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
-            <div className="history-graph-frame">
-              {comparison && comparison.graph.nodes.length === 0
-                && comparison.graph.edges.length === 0 ? (
-                <WorkspaceState
-                  kind="empty"
-                  title="No graph delta to draw"
-                  description="This comparison changes source or configuration without changing visible graph topology."
-                />
-              ) : visibleGraph ? (
-                <div className="history-graph-ready">
-                  <div className="history-graph-status" role="status">
-                    {comparison ? "Viewing changed subgraph for " : "Viewing graph for "}
-                    <span>{selected.commit.slice(0, 9)}</span>
+            {comparison ? (
+              <div className="history-comparison-workspace">
+                <div
+                  className="history-comparison-tabs"
+                  role="tablist"
+                  aria-label="Comparison views"
+                  onKeyDown={handleComparisonTabKeyDown}
+                >
+                  <button
+                    type="button"
+                    id="history-comparison-tab-source"
+                    role="tab"
+                    aria-selected={comparisonTab === "source"}
+                    aria-controls="history-comparison-panel-source"
+                    tabIndex={comparisonTab === "source" ? 0 : -1}
+                    onClick={() => setComparisonTab("source")}
+                  >
+                    <FileDiffIcon aria-hidden="true" />
+                    <span>Source changes</span>
+                    <span className="history-comparison-tab-count">
+                      {evidence.sourceChanges.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    id="history-comparison-tab-graph"
+                    role="tab"
+                    aria-selected={comparisonTab === "graph"}
+                    aria-controls="history-comparison-panel-graph"
+                    tabIndex={comparisonTab === "graph" ? 0 : -1}
+                    onClick={() => setComparisonTab("graph")}
+                  >
+                    <NetworkIcon aria-hidden="true" />
+                    <span>Changed graph</span>
+                    <span
+                      className="history-comparison-tab-count"
+                      title={`${comparison.graph.nodes.length} changed graph nodes`}
+                    >
+                      {comparison.graph.nodes.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    id="history-comparison-tab-semantic"
+                    role="tab"
+                    aria-selected={comparisonTab === "semantic"}
+                    aria-controls="history-comparison-panel-semantic"
+                    tabIndex={comparisonTab === "semantic" ? 0 : -1}
+                    onClick={() => setComparisonTab("semantic")}
+                  >
+                    <SparklesIcon aria-hidden="true" />
+                    <span>Semantic findings</span>
+                    <span className="history-comparison-tab-count">
+                      {evidence.findings.length}
+                    </span>
+                  </button>
+                </div>
+
+                {comparisonTab === "source" && (
+                  <div
+                    id="history-comparison-panel-source"
+                    className="history-comparison-tab-panel"
+                    role="tabpanel"
+                    aria-labelledby="history-comparison-tab-source"
+                  >
+                    <SourceChangeEvidence report={semanticDiff} />
                   </div>
-                  <div className="history-graph-canvas">
-                    <CompassGraph
-                      model={visibleGraph}
-                      communityDetail={communityDetail}
-                      communityLoading={communityLoading}
-                      communityError={communityError}
-                      onBackToOverview={onBackToOverview}
-                      host={{
-                        openSource(source) {
-                          host.openSource(selected.commit, source);
-                        },
-                        openCommunity(communityId) {
-                          if (graphCommit) host.openCommunity(graphCommit, communityId);
-                        }
+                )}
+
+                {comparisonTab === "graph" && (
+                  <div
+                    id="history-comparison-panel-graph"
+                    className="history-comparison-tab-panel history-comparison-tab-panel-graph"
+                    role="tabpanel"
+                    aria-labelledby="history-comparison-tab-graph"
+                  >
+                    <div className="history-graph-frame history-graph-frame-tabbed">
+                      {comparison.graph.nodes.length === 0
+                        && comparison.graph.edges.length === 0 ? (
+                        <WorkspaceState
+                          kind="empty"
+                          title="No graph delta to draw"
+                          description="This comparison changes source or configuration without changing visible graph topology."
+                        />
+                      ) : (
+                        <div className="history-graph-ready">
+                          <div className="history-graph-status" role="status">
+                            Viewing changed subgraph for{" "}
+                            <span>{selected.commit.slice(0, 9)}</span>
+                          </div>
+                          <div className="history-graph-canvas">
+                            <CompassGraph
+                              model={comparison.graph}
+                              communityDetail={communityDetail}
+                              communityLoading={communityLoading}
+                              communityError={communityError}
+                              onBackToOverview={onBackToOverview}
+                              host={{
+                                openSource(source) {
+                                  host.openSource(selected.commit, source);
+                                },
+                                openCommunity(communityId) {
+                                  if (graphCommit) host.openCommunity(graphCommit, communityId);
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {comparisonTab === "semantic" && (
+                  <div
+                    id="history-comparison-panel-semantic"
+                    className="history-comparison-tab-panel"
+                    role="tabpanel"
+                    aria-labelledby="history-comparison-tab-semantic"
+                  >
+                    <SemanticFindings report={semanticDiff} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="history-graph-frame">
+                  {visibleGraph ? (
+                    <div className="history-graph-ready">
+                      <div className="history-graph-status" role="status">
+                        Viewing graph for <span>{selected.commit.slice(0, 9)}</span>
+                      </div>
+                      <div className="history-graph-canvas">
+                        <CompassGraph
+                          model={visibleGraph}
+                          communityDetail={communityDetail}
+                          communityLoading={communityLoading}
+                          communityError={communityError}
+                          onBackToOverview={onBackToOverview}
+                          host={{
+                            openSource(source) {
+                              host.openSource(selected.commit, source);
+                            },
+                            openCommunity(communityId) {
+                              if (graphCommit) host.openCommunity(graphCommit, communityId);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ) : buildState?.status === "requesting" ? (
+                    <WorkspaceState
+                      kind="running"
+                      title="Choosing a build profile"
+                      description="Select how Compass should materialize this revision graph."
+                    />
+                  ) : buildState?.status === "running" ? (
+                    <WorkspaceState
+                      kind="running"
+                      title="Building revision graph"
+                      description={`Compass is materializing ${selected.commit.slice(0, 9)}. You can cancel from the VS Code progress notification.`}
+                    />
+                  ) : buildState?.status === "failed" ? (
+                    <WorkspaceState
+                      kind="error"
+                      title="Revision build failed"
+                      description={buildState.message}
+                      action={{
+                        label: "Retry build",
+                        onClick: () => host.buildRevision(selected.commit)
                       }}
                     />
-                  </div>
+                  ) : operationError?.operation === "Load graph" ? (
+                    <WorkspaceState
+                      kind="error"
+                      title="Revision graph could not be opened"
+                      description={operationError.message}
+                      action={{
+                        label: "Retry load",
+                        onClick: () => host.loadRevision(selected.commit)
+                      }}
+                    />
+                  ) : !selected.presentationAvailable ? (
+                    <WorkspaceState
+                      kind="unavailable"
+                      title="Graph not built for this revision"
+                      description="Build this revision explicitly to inspect, compare, or query its code graph."
+                      action={{
+                        label: "Build graph",
+                        onClick: () => host.buildRevision(selected.commit)
+                      }}
+                    />
+                  ) : revisionLoadState === "loading" ? (
+                    <WorkspaceState
+                      kind="running"
+                      title={`Loading ${selected.subject || selected.commit.slice(0, 9)}`}
+                      description="Compass is opening the stored graph for this revision."
+                    />
+                  ) : (
+                    <WorkspaceState
+                      kind="unavailable"
+                      title="Revision graph is ready to open"
+                      description="Load the stored graph without rebuilding this revision."
+                      action={{
+                        label: "Open graph",
+                        onClick: () => host.loadRevision(selected.commit)
+                      }}
+                    />
+                  )}
                 </div>
-              ) : buildState?.status === "requesting" ? (
-                <WorkspaceState
-                  kind="running"
-                  title="Choosing a build profile"
-                  description="Select how Compass should materialize this revision graph."
-                />
-              ) : buildState?.status === "running" ? (
-                <WorkspaceState
-                  kind="running"
-                  title="Building revision graph"
-                  description={`Compass is materializing ${selected.commit.slice(0, 9)}. You can cancel from the VS Code progress notification.`}
-                />
-              ) : buildState?.status === "failed" ? (
-                <WorkspaceState
-                  kind="error"
-                  title="Revision build failed"
-                  description={buildState.message}
-                  action={{
-                    label: "Retry build",
-                    onClick: () => host.buildRevision(selected.commit)
-                  }}
-                />
-              ) : operationError?.operation === "Load graph" ? (
-                <WorkspaceState
-                  kind="error"
-                  title="Revision graph could not be opened"
-                  description={operationError.message}
-                  action={{
-                    label: "Retry load",
-                    onClick: () => host.loadRevision(selected.commit)
-                  }}
-                />
-              ) : !selected.presentationAvailable ? (
-                <WorkspaceState
-                  kind="unavailable"
-                  title="Graph not built for this revision"
-                  description="Build this revision explicitly to inspect, compare, or query its code graph."
-                  action={{
-                    label: "Build graph",
-                    onClick: () => host.buildRevision(selected.commit)
-                  }}
-                />
-              ) : revisionLoadState === "loading" ? (
-                <WorkspaceState
-                  kind="running"
-                  title={`Loading ${selected.subject || selected.commit.slice(0, 9)}`}
-                  description="Compass is opening the stored graph for this revision."
-                />
-              ) : (
-                <WorkspaceState
-                  kind="unavailable"
-                  title="Revision graph is ready to open"
-                  description="Load the stored graph without rebuilding this revision."
-                  action={{
-                    label: "Open graph",
-                    onClick: () => host.loadRevision(selected.commit)
-                  }}
-                />
-              )}
-            </div>
-            {!comparison && semanticDiff !== undefined && <SemanticFindings report={semanticDiff} />}
+                {semanticDiff !== undefined && (
+                  <div className="history-standalone-evidence">
+                    <SourceChangeEvidence report={semanticDiff} />
+                    <SemanticFindings report={semanticDiff} />
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
       </main>
     </div>
   );
+}
+
+function handleComparisonTabKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const tabs = Array.from(
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+  );
+  const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  if (current < 0) return;
+  let next = current;
+  if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+  if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+  if (event.key === "Home") next = 0;
+  if (event.key === "End") next = tabs.length - 1;
+  event.preventDefault();
+  tabs[next]?.focus();
+  tabs[next]?.click();
 }

@@ -1,7 +1,7 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
-import { SemanticFindings } from "./SemanticFindings";
+import { SemanticFindings, SourceChangeEvidence } from "./SemanticFindings";
 import { normalizeSourcePatch } from "./SourceChanges";
 
 globalThis.ResizeObserver = class {
@@ -29,7 +29,7 @@ describe("SemanticFindings", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     flushSync(() => root.render(
-        <SemanticFindings
+        <SourceChangeEvidence
           report={{
             schema: "compass.semantic_diff.report/1",
             comparison: { old_revision: "parent", new_revision: "current" },
@@ -54,8 +54,38 @@ describe("SemanticFindings", () => {
     expect(container.querySelector("h2")?.textContent).toBe("Source changes");
     expect(container.textContent).toContain("Cargo.toml");
     expect(container.textContent).toContain("+1−1");
-    expect(container.textContent).toContain("No semantic graph findings for this comparison.");
     expect(container.textContent).not.toContain("\"source_changes\"");
+    root.unmount();
+  });
+
+  it("renders semantic evidence as comfortable expandable fields", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <SemanticFindings
+        report={{
+          findings: [{
+            summary: "Resolver now falls back to the parent organization",
+            affected_symbols: ["resolveOrgRef", "pickOrg"],
+            confidence: "high"
+          }, {
+            summary: "Tests cover the new fallback",
+            evidence: { file: "resolveref_test.go", line: 42 }
+          }]
+        }}
+      />
+    ));
+
+    const cards = container.querySelectorAll<HTMLDetailsElement>(
+      ".history-finding-list details"
+    );
+    expect(cards).toHaveLength(2);
+    expect(cards[0]?.open).toBe(true);
+    expect(cards[1]?.open).toBe(false);
+    expect(container.textContent).toContain("2 evidence fields");
+    expect(container.textContent).toContain("Affected symbols");
+    expect(container.textContent).toContain("resolveOrgRef");
+    expect(container.textContent).not.toContain("\"affected_symbols\"");
     root.unmount();
   });
 });

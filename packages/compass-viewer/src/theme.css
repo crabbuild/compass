@@ -2935,8 +2935,106 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   font-size: 12px;
 }
 
-.history-diff-evidence {
-  padding: 11px 12px 12px;
+.history-comparison-workspace {
+  min-width: 0;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--vscode-editor-background, var(--background));
+  color: var(--vscode-editor-foreground, var(--foreground));
+}
+
+.history-comparison-tabs {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(
+    --vscode-editorGroupHeader-tabsBackground,
+    var(--vscode-sideBar-background, var(--background))
+  );
+  scrollbar-width: thin;
+}
+
+.history-comparison-tabs button {
+  position: relative;
+  display: inline-flex;
+  min-width: max-content;
+  min-height: 41px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--vscode-tab-inactiveForeground, var(--muted-foreground));
+  font: 11px/1 var(--compass-font-sans);
+}
+
+.history-comparison-tabs button:hover {
+  background: var(--workbench-hover);
+  color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.history-comparison-tabs button[aria-selected="true"] {
+  background: var(
+    --vscode-tab-activeBackground,
+    var(--vscode-editor-background, var(--background))
+  );
+  color: var(--vscode-tab-activeForeground, var(--foreground));
+  box-shadow: inset 0 2px 0 var(
+    --vscode-tab-activeBorder,
+    var(--vscode-focusBorder, var(--ring))
+  );
+}
+
+.history-comparison-tabs button:focus-visible {
+  z-index: 1;
+  outline: 1px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -2px;
+}
+
+.history-comparison-tabs button > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-focusBorder, var(--ring));
+}
+
+.history-comparison-tab-count {
+  display: inline-flex;
+  min-width: 19px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--foreground));
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.history-comparison-tab-panel {
+  min-width: 0;
+  background: var(--vscode-editor-background, var(--background));
+}
+
+.history-evidence-panel {
+  min-width: 0;
+  padding: 15px 15px 17px;
+}
+
+.history-evidence-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-evidence-header > p,
+.history-findings-header > div > p {
+  margin: 4px 0 0 22px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .history-diff-heading {
@@ -2946,25 +3044,41 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 }
 
 .history-diff-heading h2 {
-  font-size: 12px;
+  margin: 0;
+  font-size: 13px;
   font-weight: 600;
 }
 
-.history-semantic-heading {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+.history-findings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.history-source-changes,
-.history-finding-list {
+.history-findings-expand {
+  flex: 0 0 auto;
+  min-height: 27px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.history-findings-expand:hover {
+  border-color: var(--vscode-focusBorder, var(--ring));
+  background: var(--workbench-hover);
+}
+
+.history-source-changes {
   display: grid;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
-.history-source-changes details,
-.history-finding-list article {
+.history-source-changes details {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 2px;
@@ -2976,7 +3090,7 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .history-diff-layout {
@@ -3113,8 +3227,7 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
 }
 
-.history-diff-fallback pre,
-.history-finding-list pre {
+.history-diff-fallback pre {
   max-height: 260px;
   margin: 0;
   padding: 8px;
@@ -3126,16 +3239,216 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 
 .history-source-changes p,
 .history-diff-empty {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   color: var(--muted-foreground);
   font-size: 11px;
 }
 
-.history-finding-list article > strong {
-  display: block;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+.history-finding-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.history-finding-list details {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-foreground, var(--foreground)) 2%,
+    var(--vscode-editor-background, var(--background))
+  );
+  color: var(--vscode-editor-foreground, var(--foreground));
+}
+
+.history-finding-list details[open] {
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, var(--ring)) 58%,
+    var(--border)
+  );
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder, var(--ring));
+}
+
+.history-finding-list summary {
+  display: grid;
+  min-height: 58px;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.history-finding-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-finding-list summary:hover {
+  background: var(--workbench-hover);
+}
+
+.history-finding-list summary:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -2px;
+}
+
+.history-finding-index {
+  display: inline-flex;
+  width: 27px;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-editor-background, var(--background));
+  color: var(--vscode-focusBorder, var(--ring));
+  font: 600 10px/1 var(--compass-font-mono);
+}
+
+.history-finding-summary {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.history-finding-summary strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-finding-summary small {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.history-finding-list summary > svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted-foreground);
+  transition: transform 120ms ease;
+}
+
+.history-finding-list details[open] summary > svg {
+  transform: rotate(90deg);
+}
+
+.history-finding-body {
+  padding: 0 14px 15px 52px;
+  border-top: 1px solid var(--border);
+}
+
+.history-finding-body > p {
+  margin: 13px 0 0;
+  color: var(--muted-foreground);
   font-size: 11px;
+}
+
+.history-finding-body dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.history-finding-body dl > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 170px) minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-finding-body dl > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.history-finding-body dt {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.history-finding-body dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.history-finding-body dd ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 17px;
+}
+
+.history-finding-body dd pre {
+  max-height: 280px;
+  margin: 0;
+  padding: 9px 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--muted));
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font: 10px/1.55 var(--compass-font-mono);
+  white-space: pre-wrap;
+}
+
+.history-finding-body dd code {
+  font-family: var(--compass-font-mono);
+}
+
+.history-finding-muted {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.history-findings-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+
+.history-findings-empty > svg {
+  width: 17px;
+  height: 17px;
+  color: var(--vscode-focusBorder, var(--ring));
+}
+
+.history-findings-empty strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.history-findings-empty p {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+.history-standalone-evidence {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.history-standalone-evidence > section {
+  border: 1px solid var(--border);
+  background: var(--vscode-editor-background, var(--background));
 }
 
 .history-graph-frame {
@@ -3146,6 +3459,13 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--vscode-editor-background, var(--background));
+}
+
+.history-graph-frame-tabbed {
+  height: max(460px, calc(100vh - 230px));
+  min-height: 420px;
+  margin-top: 0;
+  border: 0;
 }
 
 .history-graph-ready,
@@ -3199,6 +3519,10 @@ body.vscode-high-contrast .history-comparison,
 body.vscode-high-contrast-light .history-comparison,
 body.vscode-high-contrast .history-diff-evidence,
 body.vscode-high-contrast-light .history-diff-evidence,
+body.vscode-high-contrast .history-comparison-workspace,
+body.vscode-high-contrast-light .history-comparison-workspace,
+body.vscode-high-contrast .history-finding-list details,
+body.vscode-high-contrast-light .history-finding-list details,
 body.vscode-high-contrast .history-source-changes details,
 body.vscode-high-contrast-light .history-source-changes details,
 body.vscode-high-contrast .history-change-counts span,
@@ -3236,6 +3560,33 @@ body.vscode-high-contrast-light .compass-change-badge {
 
   .history-diff-expand {
     margin-left: 0;
+  }
+
+  .history-comparison-tabs button {
+    min-height: 39px;
+    padding-inline: 11px;
+  }
+
+  .history-evidence-panel {
+    padding: 12px;
+  }
+
+  .history-findings-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .history-findings-expand {
+    align-self: flex-start;
+  }
+
+  .history-finding-body {
+    padding-left: 14px;
+  }
+
+  .history-finding-body dl > div {
+    grid-template-columns: 1fr;
+    gap: 5px;
   }
 
   .query-composer-footer {
