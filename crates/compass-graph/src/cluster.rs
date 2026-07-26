@@ -104,13 +104,36 @@ pub fn label_communities_by_hub(
     document: &GraphDocument,
     communities: &Communities,
 ) -> BTreeMap<usize, String> {
-    let graph = WeightedGraph::from_document(document);
-    let positions = graph
-        .ids
+    let positions = document
+        .nodes
         .iter()
         .enumerate()
-        .map(|(index, id)| (id.as_str(), index))
+        .map(|(index, node)| (node.id.as_str(), index))
         .collect::<HashMap<_, _>>();
+    let mut degrees = vec![0_usize; document.nodes.len()];
+    let mut neighbors = HashSet::<(usize, usize)>::new();
+    for edge in &document.links {
+        let (Some(&left), Some(&right)) = (
+            positions.get(edge.source.as_str()),
+            positions.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        let pair = if left <= right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        if !neighbors.insert(pair) {
+            continue;
+        }
+        if left == right {
+            degrees[left] += 2;
+        } else {
+            degrees[left] += 1;
+            degrees[right] += 1;
+        }
+    }
     let labels = document
         .nodes
         .iter()
@@ -122,9 +145,8 @@ pub fn label_communities_by_hub(
             .iter()
             .filter_map(|member| positions.get(member.as_str()).map(|index| (member, *index)))
             .min_by(|(left_id, left), (right_id, right)| {
-                graph
-                    .degree_unweighted(*right)
-                    .cmp(&graph.degree_unweighted(*left))
+                degrees[*right]
+                    .cmp(&degrees[*left])
                     .then_with(|| left_id.cmp(right_id))
             });
         let fallback = format!("Community {community}");
@@ -168,19 +190,36 @@ pub fn score_communities(
     document: &GraphDocument,
     communities: &Communities,
 ) -> BTreeMap<usize, f64> {
-    let graph = WeightedGraph::from_document(document);
-    let positions = graph.position_map();
-    let mut node_community = vec![None; graph.len()];
+    let positions = document
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut node_community = vec![None; document.nodes.len()];
     let mut internal_edges = HashMap::<usize, usize>::new();
     for (community, members) in communities {
         for member in members {
-            if let Some(position) = positions.get(member) {
+            if let Some(position) = positions.get(member.as_str()) {
                 node_community[*position] = Some(*community);
             }
         }
     }
-    for (left, right, _) in graph.edges() {
-        if let Some(community) = node_community[left]
+    let mut seen = HashSet::<(usize, usize)>::new();
+    for edge in &document.links {
+        let (Some(&left), Some(&right)) = (
+            positions.get(edge.source.as_str()),
+            positions.get(edge.target.as_str()),
+        ) else {
+            continue;
+        };
+        let pair = if left <= right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        if seen.insert(pair)
+            && let Some(community) = node_community[left]
             && node_community[right] == Some(community)
         {
             *internal_edges.entry(community).or_default() += 1;
@@ -597,36 +636,32 @@ impl WeightedGraph {
             .map(|(index, id)| (id.clone(), index))
             .collect::<HashMap<_, _>>();
         let mut graph = Self::new(ids, members);
-        let mut edges = document
-            .links
-            .iter()
-            .map(|edge| {
-                (
-                    edge.source.as_str(),
-                    edge.target.as_str(),
-                    canonical_attributes(&edge.attributes),
-                    edge,
-                )
-            })
-            .collect::<Vec<_>>();
-        edges.sort_by(|left, right| {
-            left.0
-                .cmp(right.0)
-                .then_with(|| left.1.cmp(right.1))
-                .then_with(|| left.2.cmp(&right.2))
-        });
-        for (_, _, _, edge) in edges {
+        let mut selected =
+            HashMap::<(usize, usize), (String, f64)>::with_capacity(document.links.len());
+        for edge in &document.links {
             let (Some(left), Some(right)) =
                 (positions.get(&edge.source), positions.get(&edge.target))
             else {
                 continue;
             };
+            let attributes = canonical_attributes(&edge.attributes);
             let weight = edge
                 .attributes
                 .get("weight")
                 .and_then(Value::as_f64)
                 .unwrap_or(1.0);
-            graph.set_edge(*left, *right, weight);
+            let candidate = selected.entry((*left, *right)).or_default();
+            if attributes >= candidate.0 {
+                *candidate = (attributes, weight);
+            }
+        }
+        let mut edges = selected
+            .into_iter()
+            .map(|((left, right), (_, weight))| (left, right, weight))
+            .collect::<Vec<_>>();
+        edges.sort_by_key(|(left, right, _)| (*left, *right));
+        for (left, right, weight) in edges {
+            graph.set_edge(left, right, weight);
         }
         graph
     }

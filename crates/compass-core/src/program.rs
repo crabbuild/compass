@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use compass_files::{Cache, CacheKind, FileError, write_bytes_atomic};
 use compass_ir::{ProviderDescriptor, canonical_json_bytes, hex_sha256};
@@ -75,6 +76,7 @@ pub(crate) fn build_program(
     cache: &Cache,
     prepared: &[PreparedSyntaxInput],
 ) -> Result<ProgramBuild, CoreError> {
+    let mut internal_started = Instant::now();
     let artifacts = discover_artifacts(root, options)?;
     let inputs = if artifacts.is_empty() && !prepared.is_empty() {
         let mut inputs = prepared
@@ -107,6 +109,7 @@ pub(crate) fn build_program(
         .iter()
         .map(|input| (input.source_file.clone(), input.bytes.clone()))
         .collect::<BTreeMap<_, _>>();
+    profile_internal("Program input preparation", &mut internal_started);
 
     let syntax_kind = CacheKind::ProgramSyntax {
         ir_schema: compass_ir::PROGRAM_SCHEMA_VERSION,
@@ -150,11 +153,12 @@ pub(crate) fn build_program(
     fresh.extend(prepared_fresh);
     fresh.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let syntax_analyzed = fresh.len();
-    for (key, batch) in fresh {
-        cache.save_program(&syntax_kind, &key, &batch)?;
+    cache.save_program_batch(&syntax_kind, &fresh)?;
+    for (_, batch) in fresh {
         batches.push(batch);
     }
     cache.prune_program(&syntax_kind, &live_syntax_keys)?;
+    profile_internal("Program syntax cache publication", &mut internal_started);
 
     let artifact_kind = CacheKind::ProgramArtifact {
         ir_schema: compass_ir::PROGRAM_SCHEMA_VERSION,
@@ -259,15 +263,19 @@ pub(crate) fn build_program(
         batches.push(batch);
     }
     cache.prune_program(&artifact_kind, &live_artifact_keys)?;
+    profile_internal("Program artifact processing", &mut internal_started);
 
     let program = merge_evidence(batches)?;
+    profile_internal("Program evidence merge", &mut internal_started);
     let analysis = compass_analysis::analyze_prevalidated(program)?;
+    profile_internal("Program summary analysis", &mut internal_started);
     // `analyze` canonicalizes and validates the Program before constructing
     // summaries in canonical order. Serialize that trusted result directly;
     // `AnalysisBundle::canonical_bytes` is intentionally stricter for
     // untrusted offline artifacts and would clone and reanalyze this 272 MB
     // bundle.
     let canonical_bytes = canonical_json_bytes(&analysis)?;
+    profile_internal("Program canonical JSON", &mut internal_started);
     let conflicts = count_conflicts(&analysis);
     Ok(ProgramBuild {
         analysis,
@@ -280,6 +288,16 @@ pub(crate) fn build_program(
         artifact_documents_reused,
         conflicts,
     })
+}
+
+fn profile_internal(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
 }
 
 pub(crate) fn load_current_program(

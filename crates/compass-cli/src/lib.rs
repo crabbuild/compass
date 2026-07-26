@@ -1478,13 +1478,13 @@ fn command_build_with_validation(
     let elapsed = started.elapsed();
     let line = if outcome.code == 0 {
         format!(
-            "Compass {} completed in {:.2}s.",
+            "Compass {} completed in {:.2}s wall time.",
             operation.label(),
             elapsed.as_secs_f64()
         )
     } else {
         format!(
-            "Compass {} failed after {:.2}s.",
+            "Compass {} failed after {:.2}s wall time.",
             operation.label(),
             elapsed.as_secs_f64()
         )
@@ -1513,6 +1513,7 @@ fn command_build_with_validation_inner(
     let mut root = None;
     let mut output_root = None;
     let mut force = environment_truthy("COMPASS_FORCE");
+    let mut reuse_cache_on_force = false;
     let mut no_cluster = false;
     let mut no_viz = false;
     let mut gitignore = true;
@@ -1540,6 +1541,7 @@ fn command_build_with_validation_inner(
     while index < args.len() {
         match args[index].as_str() {
             "--force" => force = true,
+            "--reuse-cache-on-force" => reuse_cache_on_force = true,
             "--no-cluster" => no_cluster = true,
             "--no-viz" => no_viz = true,
             "--no-gitignore" => gitignore = false,
@@ -1754,6 +1756,7 @@ fn command_build_with_validation_inner(
     options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
     options.force = force;
+    options.reuse_cache_on_force = reuse_cache_on_force;
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
     options.gitignore = gitignore;

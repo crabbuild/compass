@@ -249,6 +249,38 @@ impl Cache {
         })
     }
 
+    /// Persist AST values whose source paths are already repository-relative.
+    ///
+    /// The extraction pipeline produces portable paths directly. Encoding the
+    /// typed values avoids an intermediate JSON tree plus a second full clone
+    /// and traversal of every node and edge.
+    pub fn save_portable_ast_batch<T: Serialize + Sync>(
+        &mut self,
+        entries: &[(PathBuf, T)],
+    ) -> Result<(), FileError> {
+        let directory = self.directory(&CacheKind::Ast, None);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        let mut jobs = Vec::with_capacity(entries.len());
+        for (path, value) in entries {
+            if !path.is_file() {
+                continue;
+            }
+            let hash = self.content_hash(path)?;
+            jobs.push((
+                directory.join(format!("{hash}.{MESSAGEPACK_EXTENSION}")),
+                value,
+            ));
+        }
+        jobs.into_par_iter().try_for_each(|(destination, value)| {
+            let bytes =
+                rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
+                    path: destination.clone(),
+                    source,
+                })?;
+            write_bytes_atomic(destination, &bytes)
+        })
+    }
+
     /// Load a Program IR cache value by a caller-owned logical input key.
     ///
     /// Program values remain repository-relative and are never rewritten with
@@ -298,6 +330,32 @@ impl Cache {
                 source,
             })?;
         write_bytes_atomic(destination, &bytes)
+    }
+
+    /// Atomically persist a group of repository-relative Program cache values
+    /// in parallel. Program syntax extraction commonly produces thousands of
+    /// independent entries, so serial encoding and file publication otherwise
+    /// becomes a cold-build bottleneck.
+    pub fn save_program_batch<T: Serialize + Sync>(
+        &self,
+        kind: &CacheKind,
+        entries: &[(String, T)],
+    ) -> Result<(), FileError> {
+        ensure_program_kind(kind)?;
+        let directory = self.directory(kind, None);
+        fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
+        entries.par_iter().try_for_each(|(logical_key, value)| {
+            let destination = directory.join(format!(
+                "{}.{MESSAGEPACK_EXTENSION}",
+                logical_key_hash(logical_key)
+            ));
+            let bytes =
+                rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
+                    path: destination.clone(),
+                    source,
+                })?;
+            write_bytes_atomic(destination, &bytes)
+        })
     }
 
     /// Remove entries outside a successfully completed provider's live set.

@@ -48,6 +48,7 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
 fn init_refuses_overwrite_and_unmatched_scope() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
+    fs::write(root.path().join("other.rs"), "fn other() {}\n")?;
     let first = Command::new(env!("CARGO_BIN_EXE_compass"))
         .args(["init", ".", "--yes"])
         .current_dir(root.path())
@@ -65,6 +66,8 @@ fn init_refuses_overwrite_and_unmatched_scope() -> Result<(), Box<dyn Error>> {
     assert!(forced.status.success());
     let config = ProjectConfig::load(root.path())?.ok_or("missing forced config")?;
     assert_eq!(config.build.include, ["main.rs"]);
+    let graph = GraphDocument::load(&root.path().join("compass-out/graph.json"))?;
+    assert!(graph.nodes.iter().all(|node| node.label() != "other()"));
 
     let other = tempfile::tempdir()?;
     fs::write(other.path().join("main.rs"), "fn main() {}\n")?;

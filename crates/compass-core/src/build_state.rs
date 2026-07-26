@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use compass_files::{FileError, write_json_atomic};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -119,28 +120,40 @@ impl BuildState {
         } else {
             None
         };
-        let mut required = BTreeMap::new();
-        for path in required_paths {
-            let name = path
-                .strip_prefix(output_dir)
-                .map_err(|_| {
-                    CoreError::InvalidBuildState(format!(
-                        "required artifact is outside output directory: {}",
-                        path.display()
-                    ))
-                })?
-                .to_string_lossy()
-                .into_owned();
-            required.insert(name, ArtifactSeal::capture(path)?);
-        }
+        let ((manifest, graph), required) = rayon::join(
+            || {
+                rayon::join(
+                    || ArtifactSeal::capture(manifest_path),
+                    || ArtifactSeal::capture(&output_dir.join("graph.json")),
+                )
+            },
+            || {
+                required_paths
+                    .par_iter()
+                    .map(|path| {
+                        let name = path
+                            .strip_prefix(output_dir)
+                            .map_err(|_| {
+                                CoreError::InvalidBuildState(format!(
+                                    "required artifact is outside output directory: {}",
+                                    path.display()
+                                ))
+                            })?
+                            .to_string_lossy()
+                            .into_owned();
+                        Ok((name, ArtifactSeal::capture(path)?))
+                    })
+                    .collect::<Result<BTreeMap<_, _>, CoreError>>()
+            },
+        );
         Ok(Self {
             schema: BUILD_STATE_SCHEMA.to_owned(),
             producer: env!("CARGO_PKG_VERSION").to_owned(),
             profile,
-            manifest: ArtifactSeal::capture(manifest_path)?,
-            graph: ArtifactSeal::capture(&output_dir.join("graph.json"))?,
+            manifest: manifest?,
+            graph: graph?,
             program,
-            required,
+            required: required?,
             stats,
         })
     }

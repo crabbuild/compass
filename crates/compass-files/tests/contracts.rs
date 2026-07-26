@@ -121,6 +121,11 @@ fn detection_ignores_compass_generated_output() -> Result<(), Box<dyn Error>> {
     fs::create_dir(root.join("compass-out"))?;
     fs::write(root.join("compass-out/graph.json"), "{}\n")?;
     fs::write(root.join("compass-out/.compass_labels.json"), "{}\n")?;
+    fs::create_dir(root.join("graphify-out"))?;
+    fs::write(
+        root.join("graphify-out/generated.rs"),
+        "fn generated() {}\n",
+    )?;
 
     let detection = compass_files::detect(root, &DetectOptions::default())?;
     assert_eq!(detection.files["code"].len(), 1);
@@ -349,11 +354,28 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
     )?;
     assert_eq!(
         cache.load(&first, &CacheKind::Ast, None, false, false)?,
-        Some(first_value)
+        Some(first_value.clone())
     );
     assert_eq!(
         cache.load(&second, &CacheKind::Ast, None, false, false)?,
         Some(second_value)
+    );
+
+    let portable_first = json!({
+        "nodes":[{"id":"first","source_file":"first.rs"}],
+        "edges":[]
+    });
+    cache.save_portable_ast_batch(&[(first.clone(), portable_first)])?;
+    let canonical_first_value = json!({
+        "nodes":[{
+            "id":"first",
+            "source_file":fs::canonicalize(&first)?.to_string_lossy()
+        }],
+        "edges":[]
+    });
+    assert_eq!(
+        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        Some(canonical_first_value)
     );
 
     fs::write(&first, "fn first_changed() {}\n")?;

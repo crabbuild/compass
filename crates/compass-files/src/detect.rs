@@ -76,7 +76,7 @@ const SKIP_DIRS: &[&str] = &[
     ".nox",
     ".eggs",
     "compass-out",
-    "compass-out",
+    "graphify-out",
     "coverage",
     "lcov-report",
     "visual-tests",
@@ -516,6 +516,15 @@ fn is_noise_dir(path: &Path, output_name: &str) -> bool {
 }
 
 fn path_is_under(path: &Path, root: &Path) -> bool {
+    if path.starts_with(root)
+        && fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.file_type().is_symlink())
+    {
+        // Regular files reached by the guarded directory walk cannot escape
+        // the canonical scan root. Only file symlinks need another canonical
+        // resolution here; followed directory symlinks were checked while
+        // descending.
+        return true;
+    }
     fs::canonicalize(path)
         .and_then(|path| {
             path.strip_prefix(root).map(Path::to_path_buf).map_err(|_| {

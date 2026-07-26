@@ -6,6 +6,7 @@ pub use members::resolve_language_calls;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 use compass_languages::{Extraction, RawCall, make_id};
 use compass_model::{EdgeRecord, NodeRecord};
@@ -205,21 +206,41 @@ fn finish_resolution(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
+    let mut profile_started = Instant::now();
     resolve_javascript_reexports(&mut merged);
+    profile_internal("resolver JavaScript re-exports", &mut profile_started);
     canonicalize_import_targets(&mut merged);
+    profile_internal("resolver import canonicalization", &mut profile_started);
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
         &mut language_facts.calls,
     );
+    profile_internal("resolver collision disambiguation", &mut profile_started);
     canonicalize_csharp_namespace_nodes(&mut merged);
+    profile_internal("resolver C# namespace normalization", &mut profile_started);
     resolve_php_type_references(&mut merged, sources);
+    profile_internal("resolver PHP types", &mut profile_started);
     rewire_unique_family_stubs(&mut merged);
+    profile_internal("resolver family stubs", &mut profile_started);
     rewire_unique_stub_nodes(&mut merged);
+    profile_internal("resolver unique stubs", &mut profile_started);
     resolve_cross_file_calls_with_root_calls(&mut merged, sources, root, &language_facts.calls);
+    profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
+    profile_internal("resolver language calls", &mut profile_started);
     merged
+}
+
+fn profile_internal(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
 }
 
 /// Compass's per-file JavaScript extractor emits only the explicit
@@ -867,15 +888,27 @@ fn resolve_cross_file_calls_with_root_calls(
     root: &Path,
     raw_calls: &[RawCall],
 ) {
-    resolve_python_import_guided_with_calls(extraction, sources, root, raw_calls);
-    resolve_python_class_uses(extraction, sources, root);
+    let mut profile_started = Instant::now();
+    let python_imports = sources
+        .par_iter()
+        .filter(|(source_file, _)| extension(source_file) == "py")
+        .map(|(source_file, source)| (source_file.clone(), python_symbol_imports(source)))
+        .collect::<HashMap<_, _>>();
+    resolve_python_import_guided_with_calls(extraction, sources, root, raw_calls, &python_imports);
+    profile_internal("resolver Python import-guided calls", &mut profile_started);
+    resolve_python_class_uses(extraction, sources, root, &python_imports);
+    profile_internal("resolver Python class uses", &mut profile_started);
     let mut exact = HashMap::<String, Vec<String>>::new();
     let mut folded = HashMap::<String, Vec<String>>::new();
     let mut source_by_id = HashMap::<String, String>::new();
     let mut file_by_source = HashMap::<String, String>::new();
+    let mut callable = HashSet::<String>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
         source_by_id.insert(node.id.clone(), source.clone());
+        if node.attributes.get("_callable").and_then(Value::as_bool) == Some(true) {
+            callable.insert(node.id.clone());
+        }
         if is_file_node(node, &source) {
             file_by_source
                 .entry(source.clone())
@@ -992,10 +1025,7 @@ fn resolve_cross_file_calls_with_root_calls(
         let indirect = raw.extensions.get("indirect").and_then(Value::as_bool) == Some(true);
         if indirect {
             if target != raw.caller_nid
-                && extraction.nodes.iter().any(|node| {
-                    node.id == target
-                        && node.attributes.get("_callable").and_then(Value::as_bool) == Some(true)
-                })
+                && callable.contains(&target)
                 && call_like.insert((raw.caller_nid.clone(), target.clone()))
             {
                 let mut edge = resolved_edge(raw, &target, "INFERRED", 0.8);
@@ -1039,6 +1069,7 @@ fn resolve_cross_file_calls_with_root_calls(
             extraction.edges.push(edge);
         }
     }
+    profile_internal("resolver generic cross-file calls", &mut profile_started);
 }
 
 #[cfg(test)]
@@ -1048,7 +1079,12 @@ fn resolve_python_import_guided(
     root: &Path,
 ) {
     let raw_calls = extraction.raw_calls.clone().unwrap_or_default();
-    resolve_python_import_guided_with_calls(extraction, sources, root, &raw_calls);
+    let python_imports = sources
+        .iter()
+        .filter(|(source_file, _)| extension(source_file) == "py")
+        .map(|(source_file, source)| (source_file.clone(), python_symbol_imports(source)))
+        .collect::<HashMap<_, _>>();
+    resolve_python_import_guided_with_calls(extraction, sources, root, &raw_calls, &python_imports);
 }
 
 fn resolve_python_import_guided_with_calls(
@@ -1056,6 +1092,7 @@ fn resolve_python_import_guided_with_calls(
     sources: &HashMap<String, String>,
     root: &Path,
     raw_calls: &[RawCall],
+    python_imports: &HashMap<String, Vec<PythonImport>>,
 ) {
     let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
     for node in &extraction.nodes {
@@ -1106,14 +1143,17 @@ fn resolve_python_import_guided_with_calls(
         .iter()
         .map(|(source, id)| (normalize_path(source), id.clone()))
         .collect::<HashMap<_, _>>();
-    for (source_file, source) in sources {
+    for source_file in sources.keys() {
         if extension(source_file) != "py" {
             continue;
         }
         let Some(file_node) = file_nodes.get(source_file) else {
             continue;
         };
-        for imported in python_symbol_imports(source) {
+        let Some(imports) = python_imports.get(source_file) else {
+            continue;
+        };
+        for imported in imports {
             let module_file = python_module_file(
                 Path::new(source_file),
                 root,
@@ -1180,10 +1220,22 @@ fn resolve_python_import_guided_with_calls(
             }
         }
     }
-    let aliases_by_source = sources
+    let aliases_by_source = python_imports
         .iter()
-        .filter(|(source_file, _)| extension(source_file) == "py")
-        .map(|(source_file, source)| (source_file.as_str(), python_import_aliases(source)))
+        .map(|(source_file, imports)| {
+            (
+                source_file.as_str(),
+                imports
+                    .iter()
+                    .map(|import| {
+                        (
+                            import.local.clone(),
+                            (import.module.clone(), import.imported.clone()),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>(),
+            )
+        })
         .collect::<HashMap<_, _>>();
     for raw in raw_calls {
         if raw.is_member_call == Some(true)
@@ -1299,6 +1351,7 @@ fn resolve_python_class_uses(
     extraction: &mut Extraction,
     sources: &HashMap<String, String>,
     root: &Path,
+    python_imports: &HashMap<String, Vec<PythonImport>>,
 ) {
     let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
     let mut local_classes = HashMap::<String, Vec<String>>::new();
@@ -1350,14 +1403,17 @@ fn resolve_python_class_uses(
             )
         })
         .collect::<HashSet<_>>();
-    for (source_file, source) in sources {
+    for source_file in sources.keys() {
         if extension(source_file) != "py" {
             continue;
         }
         let Some(classes) = local_classes.get(source_file) else {
             continue;
         };
-        for imported in python_symbol_imports(source) {
+        let Some(imports) = python_imports.get(source_file) else {
+            continue;
+        };
+        for imported in imports {
             let candidates = python_resolved_definition_candidates(
                 Path::new(source_file),
                 root,
@@ -1397,6 +1453,7 @@ fn resolve_python_class_uses(
     }
 }
 
+#[cfg(test)]
 fn python_import_aliases(source: &str) -> HashMap<String, (String, String)> {
     python_symbol_imports(source)
         .into_iter()

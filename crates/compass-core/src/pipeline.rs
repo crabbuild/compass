@@ -39,6 +39,9 @@ pub struct BuildOptions {
     pub scan_filesystem: bool,
     pub output_root: Option<PathBuf>,
     pub force: bool,
+    /// Preserve validated extraction and completed-output fast paths while
+    /// retaining force authorization for output replacement.
+    pub reuse_cache_on_force: bool,
     pub no_cluster: bool,
     pub no_viz: bool,
     pub gitignore: bool,
@@ -96,6 +99,7 @@ impl BuildOptions {
             scan_filesystem: true,
             output_root: None,
             force: false,
+            reuse_cache_on_force: false,
             no_cluster: false,
             no_viz: false,
             gitignore: true,
@@ -398,6 +402,7 @@ fn build_graph_inner(
     }
     timings.detect = stage_started.elapsed();
     stage_started = Instant::now();
+    let mut internal_started = Instant::now();
     let mut semantic_documents = if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
     {
@@ -430,7 +435,7 @@ fn build_graph_inner(
     );
 
     let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && !options.force
+        && (!options.force || options.reuse_cache_on_force)
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
     let has_program_artifacts =
@@ -558,7 +563,7 @@ fn build_graph_inner(
     let mut cache = Cache::new(&root, cache_root)?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
-    if !options.force {
+    if !options.force || options.reuse_cache_on_force {
         for path in &sources {
             let cached = cache.load(path, &CacheKind::Ast, None, false, false)?;
             if let Some(value) = cached {
@@ -587,6 +592,7 @@ fn build_graph_inner(
     } else {
         None
     };
+    profile_internal("extract setup and cache load", &mut internal_started);
     // A Rayon worker pool costs more resident memory than it saves time on
     // small multilingual projects, where parser-table page residency dominates.
     // Stay sequential below the measured crossover. Larger corpora use an
@@ -649,7 +655,8 @@ fn build_graph_inner(
             extract()?
         }
     };
-    let prepared = if options.force {
+    profile_internal("tree-sitter combined extraction", &mut internal_started);
+    let prepared = if options.force && !options.reuse_cache_on_force {
         fresh
             .iter()
             .filter_map(|(_, _, _, prepared)| prepared.clone())
@@ -657,11 +664,13 @@ fn build_graph_inner(
     } else {
         Vec::new()
     };
-    let program_handle = if options.program_analysis {
+    let mut program_handle = if options.program_analysis {
         let program_root = root.clone();
         let program_sources = sources.clone();
-        let program_options = options.clone();
+        let mut program_options = options.clone();
+        program_options.force = options.force && !options.reuse_cache_on_force;
         let program_cache_root = cache_root.map(Path::to_path_buf);
+        let program_output_dir = output_dir.clone();
         Some(
             std::thread::Builder::new()
                 .name("compass-program".to_owned())
@@ -676,6 +685,7 @@ fn build_graph_inner(
                         &program_cache,
                         &prepared,
                     )?;
+                    write_program(&program_output_dir, &program.canonical_bytes)?;
                     Ok::<_, CoreError>((program, started.elapsed()))
                 })
                 .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
@@ -683,22 +693,20 @@ fn build_graph_inner(
     } else {
         None
     };
-    const CACHE_BATCH_SIZE: usize = 128;
-    for batch in fresh.chunks(CACHE_BATCH_SIZE) {
-        let entries = batch
-            .par_iter()
-            .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
-            .map(|(path, extraction, _, _)| {
-                serde_json::to_value(extraction)
-                    .map(|value| (path.clone(), value))
-                    .map_err(|source| CoreError::SerializeExtraction {
-                        path: path.clone(),
-                        source,
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        cache.save_batch(&entries, &CacheKind::Ast, None)?;
-    }
+    let ast_cache_entries = fresh
+        .par_iter()
+        .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
+        .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
+        .collect::<Vec<_>>();
+    let ast_cache_handle = std::thread::Builder::new()
+        .name("compass-ast-cache".to_owned())
+        .spawn(move || {
+            let started = Instant::now();
+            cache.save_portable_ast_batch(&ast_cache_entries)?;
+            cache.flush()?;
+            Ok::<_, CoreError>(started.elapsed())
+        })
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
@@ -712,18 +720,26 @@ fn build_graph_inner(
         fresh_source_text.insert(source_path, source);
         extractions.insert(path, extraction);
     }
-    cache.flush()?;
+    profile_internal("AST cache snapshot and dispatch", &mut internal_started);
 
     let mut ordered = sources
         .iter()
         .filter_map(|path| extractions.remove(path))
         .collect::<Vec<_>>();
     merge_decl_def_classes(&mut ordered);
-    let live_id_remap = ast_source_identity_map(&sources, &root);
-    let ast_id_remap = collect_ast_id_remap(&ordered, &root, &live_id_remap);
-    for extraction in &mut ordered {
-        apply_ast_id_remap(extraction, &ast_id_remap);
+    profile_internal("declaration merge", &mut internal_started);
+    let ast_id_remap = if ast_extractions_are_portable(&ordered, &root) {
+        HashMap::new()
+    } else {
+        let live_id_remap = ast_source_identity_map(&sources, &root);
+        collect_ast_id_remap(&ordered, &root, &live_id_remap)
+    };
+    if !ast_id_remap.is_empty() {
+        ordered
+            .par_iter_mut()
+            .for_each(|extraction| apply_ast_id_remap(extraction, &ast_id_remap));
     }
+    profile_internal("portable AST ID remapping", &mut internal_started);
     let read_source = |path: &PathBuf| {
         fs::read(path).ok().map(|bytes| {
             (
@@ -747,19 +763,23 @@ fn build_graph_inner(
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
+    profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
     finalize_ast_extraction(&mut resolved, &root, &ast_id_remap);
+    profile_internal("AST finalization", &mut internal_started);
+    let ast_cache_elapsed = ast_cache_handle
+        .join()
+        .map_err(|_| CoreError::WorkerPanic("AST cache publication".to_owned()))??;
+    profile_internal_duration("AST cache publication worker", ast_cache_elapsed);
+    internal_started = Instant::now();
     timings.deterministic_extract = stage_started.elapsed();
-    let program = match program_handle {
-        Some(handle) => {
-            let (program, elapsed) = handle
-                .join()
-                .map_err(|_| CoreError::WorkerPanic("program analysis".to_owned()))??;
-            timings.program_analysis = elapsed;
-            Some(program)
-        }
-        None => None,
+    let defer_program_join = options.force && !options.no_cluster;
+    let mut program = if defer_program_join {
+        None
+    } else {
+        join_program_worker(program_handle.take(), &mut timings)?
     };
+    profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
     if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
@@ -825,7 +845,6 @@ fn build_graph_inner(
             &root,
             semantic,
         )?;
-        write_program_output(&output_dir, program.as_ref())?;
         publish_build_state(
             options,
             &output_dir,
@@ -902,7 +921,6 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
-        write_program_output(&output_dir, program.as_ref())?;
         publish_build_state(
             options,
             &output_dir,
@@ -951,6 +969,7 @@ fn build_graph_inner(
         });
     }
     let document = build_document(resolved, false, true, Some(&root), tiebreaker)?;
+    profile_internal("graph document build and dedup", &mut internal_started);
     timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {
@@ -988,7 +1007,6 @@ fn build_graph_inner(
             semantic,
         )?;
         remove_if_exists(&output_dir.join("needs_update"))?;
-        write_program_output(&output_dir, program.as_ref())?;
         publish_build_state(
             options,
             &output_dir,
@@ -1040,18 +1058,29 @@ fn build_graph_inner(
     // profile. Incremental seeds may accelerate extraction, but their prior
     // community numbering is operational state and cannot influence the
     // content-addressed result.
-    let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
-        HashMap::new()
-    } else {
-        previous_communities(&output_dir.join("graph.json"))
+    let cluster_options = ClusterOptions {
+        resolution: options.resolution,
+        exclude_hubs_percentile: options.exclude_hubs,
     };
-    let current = cluster(
-        &document,
-        ClusterOptions {
-            resolution: options.resolution,
-            exclude_hubs_percentile: options.exclude_hubs,
+    let ((previous, previous_elapsed), (current, cluster_elapsed)) = rayon::join(
+        || {
+            let started = Instant::now();
+            let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
+                HashMap::new()
+            } else {
+                previous_communities(&output_dir.join("graph.json"))
+            };
+            (previous, started.elapsed())
+        },
+        || {
+            let started = Instant::now();
+            let current = cluster(&document, cluster_options);
+            (current, started.elapsed())
         },
     );
+    profile_internal_duration("load previous communities", previous_elapsed);
+    profile_internal_duration("Louvain clustering", cluster_elapsed);
+    internal_started = Instant::now();
     let communities = if previous.is_empty() {
         current
     } else {
@@ -1060,6 +1089,7 @@ fn build_graph_inner(
     timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
+    profile_internal("community labeling", &mut internal_started);
     let commit = options.built_at_commit.clone().or_else(|| {
         std::env::current_dir()
             .ok()
@@ -1067,33 +1097,46 @@ fn build_graph_inner(
     });
 
     let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
-    write_json(
-        &document,
-        &communities,
-        output_dir.join("graph.json"),
-        &JsonExportOptions {
-            force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
-                !incomplete_semantic || layer.allow_partial
-            }),
-            built_at_commit: commit.as_deref(),
-            community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
-                .then_some(&labels),
-        },
-    )?;
-    if options.purpose == BuildPurpose::Update {
-        write_text_atomic(
-            output_dir.join(".compass_root"),
-            &options.root.to_string_lossy(),
+    let graph_output = || -> Result<Duration, CoreError> {
+        let started = Instant::now();
+        write_json(
+            &document,
+            &communities,
+            output_dir.join("graph.json"),
+            &JsonExportOptions {
+                force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
+                    !incomplete_semantic || layer.allow_partial
+                }),
+                built_at_commit: commit.as_deref(),
+                community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
+                    .then_some(&labels),
+            },
         )?;
-        write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
-    }
-
-    let mut html_written = false;
-    {
-        let cohesion = score_communities(&document, &communities);
-        let gods = god_nodes(&document, 10);
-        let surprises = surprising_connections(&document, &communities, 5);
-        let questions = suggest_questions(&document, &communities, &labels, 10);
+        if options.purpose == BuildPurpose::Update {
+            write_text_atomic(
+                output_dir.join(".compass_root"),
+                &options.root.to_string_lossy(),
+            )?;
+            write_graph_overview_artifact(&document, &communities, &labels, &output_dir)?;
+        }
+        Ok(started.elapsed())
+    };
+    let graph_analyses = || -> Result<(bool, Duration), CoreError> {
+        let started = Instant::now();
+        let ((cohesion, gods), (surprises, questions)) = rayon::join(
+            || {
+                rayon::join(
+                    || score_communities(&document, &communities),
+                    || god_nodes(&document, 10),
+                )
+            },
+            || {
+                rayon::join(
+                    || surprising_connections(&document, &communities, 5),
+                    || suggest_questions(&document, &communities, &labels, 10),
+                )
+            },
+        );
         let tokens = semantic_tokens(semantic);
         let analysis = if options.purpose == BuildPurpose::Extract {
             json!({
@@ -1112,8 +1155,6 @@ fn build_graph_inner(
                 "questions": questions,
             })
         };
-        timings.graph_assembly += stage_started.elapsed();
-        stage_started = Instant::now();
         if options.purpose == BuildPurpose::Extract {
             write_json_atomic(output_dir.join(".compass_analysis.json"), &analysis, true)?;
         } else {
@@ -1135,7 +1176,7 @@ fn build_graph_inner(
                 .then(|| detection.warning.clone())
                 .flatten(),
         };
-        if options.purpose == BuildPurpose::Update {
+        let html_written = if options.purpose == BuildPurpose::Update {
             let report_root = report_root_label(&options.root);
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
@@ -1156,6 +1197,7 @@ fn build_graph_inner(
             let html_path = output_dir.join("graph.html");
             if options.no_viz {
                 remove_if_exists(&html_path)?;
+                false
             } else {
                 let rendered = match write_html(
                     &document,
@@ -1171,13 +1213,28 @@ fn build_graph_inner(
                     Err(OutputError::HtmlTooLarge { .. }) => None,
                     Err(error) => return Err(CoreError::Output(error)),
                 };
-                html_written = rendered.is_some();
+                let html_written = rendered.is_some();
                 if !html_written {
                     remove_if_exists(&html_path)?;
                 }
+                html_written
             }
-        }
-    }
+        } else {
+            false
+        };
+        Ok((html_written, started.elapsed()))
+    };
+    let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
+    let graph_output_elapsed = graph_output_elapsed?;
+    let (html_written, analysis_elapsed) = analysis_result?;
+    profile_internal_duration("graph and overview publication", graph_output_elapsed);
+    profile_internal_duration(
+        "parallel graph analyses and report publication",
+        analysis_elapsed,
+    );
+    internal_started = Instant::now();
+    timings.graph_assembly += stage_started.elapsed();
+    stage_started = Instant::now();
 
     write_semantic_marker(&output_dir, semantic)?;
 
@@ -1190,7 +1247,9 @@ fn build_graph_inner(
         semantic,
     )?;
     timings.publish = stage_started.elapsed();
-    write_program_output(&output_dir, program.as_ref())?;
+    if program.is_none() {
+        program = join_program_worker(program_handle.take(), &mut timings)?;
+    }
     save_output_stats(
         &output_dir,
         document.nodes.len(),
@@ -1208,6 +1267,7 @@ fn build_graph_inner(
         communities.len(),
         program.as_ref(),
     )?;
+    profile_internal("Program output and build seals", &mut internal_started);
     guard.commit()?;
     Ok(BuildResult {
         root,
@@ -1243,16 +1303,6 @@ fn build_graph_inner(
         program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
         timings,
     })
-}
-
-fn write_program_output(
-    output_dir: &Path,
-    program: Option<&ProgramBuild>,
-) -> Result<(), CoreError> {
-    if let Some(program) = program {
-        write_program(output_dir, &program.canonical_bytes)?;
-    }
-    Ok(())
 }
 
 fn program_modules(program: Option<&ProgramBuild>) -> usize {
@@ -1378,7 +1428,9 @@ fn finalize_ast_extraction(
     root: &Path,
     ast_id_remap: &HashMap<String, String>,
 ) {
-    apply_ast_id_remap(extraction, ast_id_remap);
+    if !ast_id_remap.is_empty() {
+        apply_ast_id_remap(extraction, ast_id_remap);
+    }
     let mut external_id_remap = HashMap::new();
     let mut canonical_sources = HashMap::<String, PathBuf>::new();
     for node in &mut extraction.nodes {
@@ -1563,7 +1615,14 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
 fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> HashMap<String, String> {
     let mut aliases = HashMap::new();
     for source in sources {
-        let identity = rooted_source_identity(source, root);
+        let identity = if source.is_absolute()
+            && source.starts_with(root)
+            && fs::symlink_metadata(source).is_ok_and(|metadata| !metadata.file_type().is_symlink())
+        {
+            source.clone()
+        } else {
+            rooted_source_identity(source, root)
+        };
         let relative = identity
             .strip_prefix(root)
             .or_else(|_| source.strip_prefix(root));
@@ -1579,6 +1638,26 @@ fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> HashMap<String, 
         }
     }
     aliases
+}
+
+fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool {
+    let rooted_prefix = format!("{}_", make_id(&[&root.to_string_lossy()]));
+    extractions.par_iter().all(|extraction| {
+        extraction.nodes.iter().all(|node| {
+            !node.id.starts_with(&rooted_prefix)
+                && node
+                    .attributes
+                    .get("source_file")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|source| !Path::new(source).is_absolute())
+        }) && extraction.edges.iter().all(|edge| {
+            !edge.source.starts_with(&rooted_prefix) && !edge.target.starts_with(&rooted_prefix)
+        }) && extraction
+            .raw_calls
+            .iter()
+            .flatten()
+            .all(|call| !call.caller_nid.starts_with(&rooted_prefix))
+    })
 }
 
 fn collect_ast_id_remap(
@@ -1598,6 +1677,7 @@ fn collect_ast_id_remap(
         .collect::<HashSet<_>>();
     let root_prefix = make_id(&[&root.to_string_lossy()]);
     let root_marker = format!("{root_prefix}_");
+    let mut source_identities = HashMap::<String, (PathBuf, String, String)>::new();
     let mut remap_rooted_id = |id: &str| {
         // A rooted endpoint without a node is an unresolved file reference.
         // Root-prefixed IDs that do have nodes may instead be symbols whose
@@ -1635,13 +1715,30 @@ fn collect_ast_id_remap(
         else {
             continue;
         };
-        let source_path = Path::new(source);
-        let absolute = rooted_source_identity(source_path, root);
-        let Ok(relative) = absolute.strip_prefix(root) else {
+        let (absolute, old_prefix, new_prefix) = source_identities
+            .entry(source.to_owned())
+            .or_insert_with(|| {
+                let source_path = Path::new(source);
+                let old_prefix = make_id(&[&file_stem(source_path)]);
+                if source_path.is_relative() {
+                    return (root.join(source_path), old_prefix.clone(), old_prefix);
+                }
+                let absolute = rooted_source_identity(source_path, root);
+                let new_prefix = absolute.strip_prefix(root).map_or_else(
+                    |_| String::new(),
+                    |relative| make_id(&[&file_stem(relative)]),
+                );
+                (absolute, old_prefix, new_prefix)
+            });
+        if absolute.strip_prefix(root).is_err() {
             continue;
-        };
-        let old_prefix = make_id(&[&file_stem(source_path)]);
-        let new_prefix = make_id(&[&file_stem(relative)]);
+        }
+        if new_prefix.is_empty() {
+            continue;
+        }
+        if old_prefix == new_prefix {
+            continue;
+        }
         if node
             .attributes
             .get("type")
@@ -1651,8 +1748,8 @@ fn collect_ast_id_remap(
             continue;
         }
         if node.id == make_id(&[source]) {
-            id_remap.insert(node.id.clone(), new_prefix);
-        } else if node.id == old_prefix
+            id_remap.insert(node.id.clone(), new_prefix.clone());
+        } else if node.id == *old_prefix
             && node
                 .attributes
                 .get("symbol_kind")
@@ -1991,7 +2088,15 @@ fn save_build_manifest(
     semantic: Option<&SemanticLayer>,
 ) -> Result<(), CoreError> {
     let Some(layer) = semantic else {
-        manifest.save(files, path, ManifestKind::Ast, Some(root), None, None)?;
+        let scan_corpus = files.values().flatten().cloned().collect::<BTreeSet<_>>();
+        manifest.save(
+            files,
+            path,
+            ManifestKind::Ast,
+            Some(root),
+            Some(&scan_corpus),
+            None,
+        )?;
         return Ok(());
     };
 
@@ -2430,6 +2535,36 @@ fn absolutize(path: &Path) -> PathBuf {
     } else {
         std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
     }
+}
+
+fn profile_internal(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
+}
+
+fn profile_internal_duration(label: &str, elapsed: Duration) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!("[compass internal] {label}: {:.3}s", elapsed.as_secs_f64());
+    }
+}
+
+fn join_program_worker(
+    handle: Option<std::thread::JoinHandle<Result<(ProgramBuild, Duration), CoreError>>>,
+    timings: &mut BuildTimings,
+) -> Result<Option<ProgramBuild>, CoreError> {
+    let Some(handle) = handle else {
+        return Ok(None);
+    };
+    let (program, elapsed) = handle
+        .join()
+        .map_err(|_| CoreError::WorkerPanic("program analysis".to_owned()))??;
+    timings.program_analysis = elapsed;
+    Ok(Some(program))
 }
 
 pub(crate) fn git_commit(root: &Path) -> Option<String> {
@@ -2998,6 +3133,37 @@ mod tests {
             fs::read(warm.output_dir.join("manifest.json"))?,
             manifest_bytes
         );
+        Ok(())
+    }
+
+    #[test]
+    fn ast_manifest_prunes_existing_files_removed_from_scope() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::write(root.join("main.py"), "def main():\n    return 1\n")?;
+        fs::create_dir(root.join("generated"))?;
+        fs::write(
+            root.join("generated/copied.py"),
+            "def generated():\n    return 2\n",
+        )?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = true;
+        options.no_viz = true;
+
+        let initial = build_local_graph(&options)?;
+        assert_eq!(initial.files_considered, 2);
+
+        options.extra_excludes = vec!["generated/**".to_owned()];
+        let scoped = build_local_graph(&options)?;
+        assert_eq!(scoped.files_considered, 1);
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(scoped.output_dir.join("manifest.json"))?)?;
+        assert_eq!(manifest.as_object().map(serde_json::Map::len), Some(1));
+
+        let unchanged = build_local_graph(&options)?;
+        assert_eq!(unchanged.files_extracted, 0);
+        assert_eq!(unchanged.files_cached, 1);
+        assert!(!unchanged.outputs_changed);
         Ok(())
     }
 

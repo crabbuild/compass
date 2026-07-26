@@ -326,7 +326,11 @@ fn run_init_with_builder(
         let _ = writeln!(stderr, "error: {error}");
         return 1;
     }
-    let mut build_arguments = vec![root.to_string_lossy().into_owned(), "--force".to_owned()];
+    let mut build_arguments = vec![
+        root.to_string_lossy().into_owned(),
+        "--force".to_owned(),
+        "--reuse-cache-on-force".to_owned(),
+    ];
     if options.timing {
         build_arguments.push("--timing".to_owned());
     }

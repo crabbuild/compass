@@ -19,9 +19,11 @@ pub use dedup::{
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use rayon::prelude::*;
 use serde_json::{Map, Value};
 
 /// Merge resolved extraction chunks, apply native entity deduplication, and build
@@ -72,6 +74,7 @@ pub fn build_owned_with_tiebreaker(
     root: Option<&Path>,
     tiebreaker: Option<&mut dyn EntityTiebreaker>,
 ) -> Result<GraphDocument, DedupError> {
+    let mut profile_started = Instant::now();
     if dedup && !extraction.nodes.is_empty() {
         let result = deduplicate_entities_with_tiebreaker(
             &extraction.nodes,
@@ -82,7 +85,10 @@ pub fn build_owned_with_tiebreaker(
         extraction.nodes = result.nodes;
         extraction.edges = result.edges;
     }
-    Ok(build_from_extraction(&extraction, directed, root))
+    profile_internal("graph entity deduplication", &mut profile_started);
+    let document = build_from_owned_extraction(extraction, directed, root);
+    profile_internal("graph extraction conversion", &mut profile_started);
+    Ok(document)
 }
 
 /// Build a NetworkX-compatible node-link document from extraction facts.
@@ -92,11 +98,18 @@ pub fn build_from_extraction(
     directed: bool,
     root: Option<&Path>,
 ) -> GraphDocument {
+    build_from_owned_extraction(extraction.clone(), directed, root)
+}
+
+fn build_from_owned_extraction(
+    mut extraction: Extraction,
+    directed: bool,
+    root: Option<&Path>,
+) -> GraphDocument {
+    let mut profile_started = Instant::now();
     let rekey = semantic_id_remap(&extraction.nodes, root);
-    let mut prepared_nodes = extraction
-        .nodes
-        .iter()
-        .cloned()
+    let mut prepared_nodes = std::mem::take(&mut extraction.nodes)
+        .into_iter()
         .map(|mut node| {
             if let Some(canonical) = rekey.get(&node.id) {
                 node.id.clone_from(canonical);
@@ -105,6 +118,7 @@ pub fn build_from_extraction(
             node
         })
         .collect::<Vec<_>>();
+    profile_internal("graph node preparation", &mut profile_started);
     let doc_remap = doc_twin_remap(&prepared_nodes);
     prepared_nodes.retain(|node| !doc_remap.contains_key(&node.id));
 
@@ -118,6 +132,7 @@ pub fn build_from_extraction(
             nodes.push(node);
         }
     }
+    profile_internal("graph node deduplication", &mut profile_started);
 
     let ghost_remap = ghost_duplicate_remap(&nodes);
     if !ghost_remap.is_empty() {
@@ -127,6 +142,7 @@ pub fn build_from_extraction(
             positions.insert(node.id.clone(), index);
         }
     }
+    profile_internal("graph ghost remapping", &mut profile_started);
 
     let mut endpoint_remap = rekey.clone();
     endpoint_remap.extend(doc_remap.clone());
@@ -141,9 +157,12 @@ pub fn build_from_extraction(
             .entry(normalize_id(legacy))
             .or_insert_with(|| canonical.clone());
     }
-    add_unambiguous_legacy_aliases(&nodes, &mut normalized);
+    let needed_aliases =
+        needed_legacy_aliases(&extraction, &endpoint_remap, &positions, &normalized);
+    add_unambiguous_legacy_aliases(&nodes, &needed_aliases, &mut normalized);
+    profile_internal("graph alias preparation", &mut profile_started);
 
-    let mut source_edges = extraction.edges.clone();
+    let mut source_edges = std::mem::take(&mut extraction.edges);
     for edge in &mut source_edges {
         let original_source = edge.source.clone();
         let original_target = edge.target.clone();
@@ -157,40 +176,42 @@ pub fn build_from_extraction(
                 .insert("_drop".to_owned(), Value::Bool(true));
         }
     }
-    source_edges.sort_by(|left, right| {
+    source_edges.par_sort_by(|left, right| {
         (left.source.as_str(), left.target.as_str(), relation(left)).cmp(&(
             right.source.as_str(),
             right.target.as_str(),
             relation(right),
         ))
     });
+    profile_internal("graph edge cloning and sort", &mut profile_started);
+    let normalized_edges = source_edges
+        .into_par_iter()
+        .filter_map(|mut edge| {
+            if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
+                return None;
+            }
+            let source = resolve_endpoint(&edge.source, &positions, &normalized)?;
+            let target = resolve_endpoint(&edge.target, &positions, &normalized)?;
+            edge.source = source;
+            edge.target = target;
+            edge.attributes.remove("target_file");
+            sanitize_numeric(&mut edge.attributes, "weight");
+            sanitize_numeric(&mut edge.attributes, "confidence_score");
+            backfill_source_file(&mut edge, &nodes, &positions);
+            normalize_attribute_path(&mut edge.attributes, "source_file", root);
+            if is_cross_language_phantom(&edge, &nodes, &positions) {
+                return None;
+            }
+            edge.attributes
+                .insert("_src".to_owned(), Value::String(edge.source.clone()));
+            edge.attributes
+                .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
+            Some(edge)
+        })
+        .collect::<Vec<_>>();
     let mut links = Vec::<EdgeRecord>::new();
     let mut edge_positions = HashMap::<(String, String, String), usize>::new();
-    for mut edge in source_edges {
-        if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
-            continue;
-        }
-        let Some(source) = resolve_endpoint(&edge.source, &positions, &normalized) else {
-            continue;
-        };
-        let Some(target) = resolve_endpoint(&edge.target, &positions, &normalized) else {
-            continue;
-        };
-        edge.source = source;
-        edge.target = target;
-        edge.attributes.remove("target_file");
-        sanitize_numeric(&mut edge.attributes, "weight");
-        sanitize_numeric(&mut edge.attributes, "confidence_score");
-        backfill_source_file(&mut edge, &nodes, &positions);
-        normalize_attribute_path(&mut edge.attributes, "source_file", root);
-        if is_cross_language_phantom(&edge, &nodes, &positions) {
-            continue;
-        }
-        edge.attributes
-            .insert("_src".to_owned(), Value::String(edge.source.clone()));
-        edge.attributes
-            .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
-
+    for edge in normalized_edges {
         let key = edge_key(&edge.source, &edge.target, relation(&edge));
         if let Some(&position) = edge_positions.get(&key) {
             links[position].attributes.extend(edge.attributes);
@@ -199,14 +220,16 @@ pub fn build_from_extraction(
             links.push(edge);
         }
     }
+    profile_internal("graph edge normalization", &mut profile_started);
 
     let mut graph = Map::new();
     let hyperedges =
-        canonical_hyperedges(extraction, &positions, &normalized, &endpoint_remap, root);
+        canonical_hyperedges(&extraction, &positions, &normalized, &endpoint_remap, root);
     if !hyperedges.is_empty() {
         graph.insert("hyperedges".to_owned(), Value::Array(hyperedges));
     }
     let links = networkx_edge_order(&nodes, &links, directed);
+    profile_internal("graph NetworkX edge ordering", &mut profile_started);
     let multigraph = has_parallel_edges(&links, directed);
     GraphDocument {
         directed,
@@ -216,6 +239,16 @@ pub fn build_from_extraction(
         links,
         extras: BTreeMap::new(),
     }
+}
+
+fn profile_internal(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
 }
 
 fn semantic_id_remap(nodes: &[NodeRecord], root: Option<&Path>) -> HashMap<String, String> {
@@ -305,6 +338,21 @@ fn doc_twin_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
 fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
     let mut ordered = nodes.iter().collect::<Vec<_>>();
     ordered.sort_by(|left, right| left.id.cmp(&right.id));
+    let ast_ids = nodes
+        .iter()
+        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) == Some("ast"))
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut non_ast_sources = HashMap::<&str, HashSet<String>>::new();
+    for node in nodes
+        .iter()
+        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) != Some("ast"))
+    {
+        non_ast_sources
+            .entry(node.id.as_str())
+            .or_default()
+            .insert(node.string("source_file"));
+    }
     let mut canonical = HashMap::<(String, String), String>::new();
     let mut collisions = std::collections::HashSet::new();
     for node in &ordered {
@@ -328,22 +376,17 @@ fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
         }
         let key = (basename.to_owned(), label.to_owned());
         if ast {
-            if canonical.get(&key).is_some_and(|existing| {
-                nodes.iter().any(|candidate| {
-                    candidate.id == *existing
-                        && candidate.attributes.get("_origin").and_then(Value::as_str)
-                            == Some("ast")
-                })
-            }) {
+            if canonical
+                .get(&key)
+                .is_some_and(|existing| ast_ids.contains(existing.as_str()))
+            {
                 collisions.insert(key.clone());
             }
             canonical.insert(key, node.id.clone());
         } else if let Some(existing) = canonical.get(&key) {
-            let different_source = nodes.iter().any(|candidate| {
-                candidate.id == *existing
-                    && candidate.attributes.get("_origin").and_then(Value::as_str) != Some("ast")
-                    && candidate.string("source_file") != source
-            });
+            let different_source = non_ast_sources
+                .get(existing.as_str())
+                .is_some_and(|sources| sources.iter().any(|candidate| candidate != &source));
             if different_source {
                 collisions.insert(key);
             }
@@ -372,36 +415,109 @@ fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
     remap
 }
 
-fn add_unambiguous_legacy_aliases(nodes: &[NodeRecord], normalized: &mut HashMap<String, String>) {
-    let mut candidates = HashMap::<String, std::collections::HashSet<String>>::new();
+fn needed_legacy_aliases(
+    extraction: &Extraction,
+    endpoint_remap: &HashMap<String, String>,
+    positions: &HashMap<String, usize>,
+    normalized: &HashMap<String, String>,
+) -> HashSet<String> {
+    let mut needed = HashSet::new();
+    let mut inspect = |endpoint: &str| {
+        if positions.contains_key(endpoint) {
+            return;
+        }
+        let remapped;
+        let endpoint = if endpoint_remap.contains_key(endpoint) {
+            remapped = remap_endpoint(endpoint, endpoint_remap);
+            if positions.contains_key(&remapped) {
+                return;
+            }
+            remapped.as_str()
+        } else {
+            endpoint
+        };
+        let alias = normalize_id(endpoint);
+        if !normalized.contains_key(&alias) {
+            needed.insert(alias);
+        }
+    };
+    for edge in &extraction.edges {
+        inspect(&edge.source);
+        inspect(&edge.target);
+    }
+    for hyperedge in &extraction.hyperedges {
+        let Some(object) = hyperedge.as_object() else {
+            continue;
+        };
+        for key in ["nodes", "members", "node_ids"] {
+            if let Some(members) = object.get(key).and_then(Value::as_array) {
+                for member in members.iter().filter_map(Value::as_str) {
+                    inspect(member);
+                }
+            }
+        }
+    }
+    needed
+}
+
+fn add_unambiguous_legacy_aliases(
+    nodes: &[NodeRecord],
+    needed: &HashSet<String>,
+    normalized: &mut HashMap<String, String>,
+) {
+    if needed.is_empty() {
+        return;
+    }
+    let mut nodes_by_source = HashMap::<String, Vec<&NodeRecord>>::new();
     for node in nodes {
         let source = node.string("source_file");
         let path = Path::new(&source);
         if source.is_empty() || path.is_absolute() || path.file_name().is_none() {
             continue;
         }
-        let canonical_stem = make_id(&[&file_stem(path)]);
-        let normalized_id = normalize_id(&node.id);
-        let is_file = path.file_name().and_then(|value| value.to_str()) == Some(node.label());
-        let suffix = if is_file {
-            ""
-        } else {
-            normalized_id
-                .strip_prefix(&canonical_stem)
-                .unwrap_or_default()
-        };
-        for old_stem in old_file_stems(path) {
-            if old_stem == canonical_stem {
-                continue;
-            }
-            let alias = format!("{old_stem}{suffix}");
-            candidates
-                .entry(normalize_id(&alias))
-                .or_default()
-                .insert(node.id.clone());
-            candidates.entry(alias).or_default().insert(node.id.clone());
-        }
+        nodes_by_source.entry(source).or_default().push(node);
     }
+    let candidates = nodes_by_source
+        .into_par_iter()
+        .fold(
+            HashMap::<String, HashSet<String>>::new,
+            |mut candidates, (source, source_nodes)| {
+                let path = Path::new(&source);
+                let canonical_stem = make_id(&[&file_stem(path)]);
+                let old_stems = old_file_stems(path)
+                    .into_iter()
+                    .filter(|stem| stem != &canonical_stem)
+                    .collect::<Vec<_>>();
+                for node in source_nodes {
+                    let normalized_id = normalize_id(&node.id);
+                    let is_file =
+                        path.file_name().and_then(|value| value.to_str()) == Some(node.label());
+                    let suffix = if is_file {
+                        ""
+                    } else {
+                        normalized_id
+                            .strip_prefix(canonical_stem.as_str())
+                            .unwrap_or_default()
+                    };
+                    for old_stem in &old_stems {
+                        let normalized_alias = normalize_id(&format!("{old_stem}{suffix}"));
+                        if needed.contains(&normalized_alias) {
+                            candidates
+                                .entry(normalized_alias)
+                                .or_default()
+                                .insert(node.id.clone());
+                        }
+                    }
+                }
+                candidates
+            },
+        )
+        .reduce(HashMap::new, |mut combined, candidates| {
+            for (alias, ids) in candidates {
+                combined.entry(alias).or_default().extend(ids);
+            }
+            combined
+        });
     for (alias, ids) in candidates {
         if ids.len() == 1
             && let Some(id) = ids.into_iter().next()
