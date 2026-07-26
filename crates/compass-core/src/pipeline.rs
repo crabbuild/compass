@@ -1704,7 +1704,31 @@ fn collect_ast_id_remap(
         .map(|node| node.id.as_str())
         .collect::<AHashSet<_>>();
     let root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
-    collect_ast_id_remap_chunk(extractions, root, live_id_remap, &node_ids, &root_marker)
+    if extractions.len() < 256 {
+        return collect_ast_id_remap_chunk(
+            extractions,
+            root,
+            live_id_remap,
+            &node_ids,
+            &root_marker,
+        );
+    }
+    let target_chunks = rayon::current_num_threads().saturating_mul(2).max(1);
+    let chunk_size = extractions.len().div_ceil(target_chunks);
+    let chunks = extractions
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            collect_ast_id_remap_chunk(chunk, root, live_id_remap, &node_ids, &root_marker)
+        })
+        .collect::<Vec<_>>();
+    let capacity = chunks.iter().map(|chunk| chunk.len()).sum();
+    let mut remap = AHashMap::with_capacity(capacity);
+    // Indexed parallel collection preserves source chunk order, so a duplicate
+    // ID keeps the same last-extraction-wins behavior as the sequential pass.
+    for chunk in chunks {
+        remap.extend(chunk);
+    }
+    remap
 }
 
 fn collect_ast_id_remap_chunk(

@@ -40,7 +40,7 @@ impl ProgramBundle {
     }
 }
 
-pub fn canonical_json_bytes<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, IrError> {
+pub fn canonical_json_bytes<T: serde::Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, IrError> {
     let value = serde_json::to_value(value)?;
     let mut output = Vec::new();
     write_value(&value, &mut output)?;

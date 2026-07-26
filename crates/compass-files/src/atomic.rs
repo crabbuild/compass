@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::{FileError, io_error};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const ATOMIC_WRITE_BUFFER_BYTES: usize = 1024 * 1024;
 
 fn resolved_destination(path: &Path) -> PathBuf {
     if path.is_symlink() {
@@ -42,7 +43,7 @@ where
         .map_err(|source| io_error(&temporary, source))?;
 
     let result = (|| {
-        let mut writer = BufWriter::new(file);
+        let mut writer = BufWriter::with_capacity(ATOMIC_WRITE_BUFFER_BYTES, file);
         write(&mut writer)?;
         writer
             .flush()

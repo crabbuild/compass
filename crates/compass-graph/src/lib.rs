@@ -13,6 +13,7 @@ pub use cluster::{
     ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
     label_communities_by_hub, remap_communities_to_previous, score_communities,
 };
+use dedup::deduplicate_owned;
 pub use dedup::{
     AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
     deduplicate_entities_with_tiebreaker,
@@ -78,9 +79,9 @@ pub fn build_owned_with_tiebreaker(
 ) -> Result<GraphDocument, DedupError> {
     let mut profile_started = Instant::now();
     if dedup && !extraction.nodes.is_empty() {
-        let result = deduplicate_entities_with_tiebreaker(
-            &extraction.nodes,
-            &extraction.edges,
+        let result = deduplicate_owned(
+            std::mem::take(&mut extraction.nodes),
+            std::mem::take(&mut extraction.edges),
             &std::collections::HashMap::new(),
             tiebreaker,
         )?;
@@ -356,7 +357,7 @@ fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
             .insert(node.string("source_file"));
     }
     let mut canonical = HashMap::<(String, String), String>::new();
-    let mut collisions = std::collections::HashSet::new();
+    let mut collisions = HashSet::new();
     for node in &ordered {
         let label = node.label().trim();
         let source = node.string("source_file");
@@ -631,7 +632,7 @@ pub fn dedupe_nodes(nodes: &[NodeRecord]) -> Vec<NodeRecord> {
 #[must_use]
 pub fn dedupe_edges(edges: &[EdgeRecord]) -> Vec<EdgeRecord> {
     let mut output = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     for edge in edges {
         let key = (
             edge.source.clone(),

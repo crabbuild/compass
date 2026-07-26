@@ -124,6 +124,10 @@ fn summaries_capture_behavior_and_reverse_calls() -> Result<(), Box<dyn std::err
         bundle.canonical_bytes()?,
         bundle.canonicalized().canonical_bytes()?
     );
+    assert_eq!(
+        bundle.canonical_bytes_prevalidated()?,
+        bundle.canonical_bytes()?
+    );
     Ok(())
 }
 

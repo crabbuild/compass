@@ -133,9 +133,109 @@ impl AnalysisBundle {
         Ok(canonical_json_bytes(&bundle)?)
     }
 
+    /// Serialize an analysis that was canonicalized and validated by the
+    /// in-process merger.
+    ///
+    /// Large arrays are encoded in parallel while the final byte stream keeps
+    /// the same canonical ordering as [`Self::canonical_bytes`]. Untrusted
+    /// artifacts must continue to use [`Self::canonical_bytes`].
+    pub fn canonical_bytes_prevalidated(&self) -> Result<Vec<u8>, AnalysisError> {
+        let ((evidence, modules), (providers, (summaries, reverse_calls))) = rayon::join(
+            || {
+                rayon::join(
+                    || canonical_array_chunks(&self.program.evidence),
+                    || canonical_array_chunks(&self.program.modules),
+                )
+            },
+            || {
+                rayon::join(
+                    || canonical_array_chunks(&self.program.providers),
+                    || {
+                        rayon::join(
+                            || canonical_array_chunks(&self.summaries),
+                            || canonical_fragment(&self.reverse_calls),
+                        )
+                    },
+                )
+            },
+        );
+        let evidence = evidence?;
+        let modules = modules?;
+        let providers = providers?;
+        let summaries = summaries?;
+        let reverse_calls = reverse_calls?;
+        let schema = canonical_fragment(&self.program.schema)?;
+
+        let capacity = evidence
+            .iter()
+            .chain(&modules)
+            .chain(&providers)
+            .chain(&summaries)
+            .map(Vec::len)
+            .sum::<usize>()
+            .saturating_add(reverse_calls.len())
+            .saturating_add(schema.len())
+            .saturating_add(256);
+        let mut output = Vec::with_capacity(capacity);
+        output.extend_from_slice(b"{\"analysis_schema_version\":");
+        output.extend_from_slice(self.analysis_schema_version.to_string().as_bytes());
+        output.extend_from_slice(b",\"analyzer_version\":");
+        output.extend_from_slice(self.analyzer_version.to_string().as_bytes());
+        output.extend_from_slice(b",\"program\":{\"evidence\":");
+        append_canonical_array(&mut output, evidence);
+        output.extend_from_slice(b",\"modules\":");
+        append_canonical_array(&mut output, modules);
+        output.extend_from_slice(b",\"providers\":");
+        append_canonical_array(&mut output, providers);
+        output.extend_from_slice(b",\"schema\":");
+        output.extend_from_slice(&schema);
+        output.extend_from_slice(b"},\"reverse_calls\":");
+        output.extend_from_slice(&reverse_calls);
+        output.extend_from_slice(b",\"summaries\":");
+        append_canonical_array(&mut output, summaries);
+        output.extend_from_slice(b"}\n");
+        Ok(output)
+    }
+
     pub fn digest(&self) -> Result<String, AnalysisError> {
         Ok(hex_sha256(&self.canonical_bytes()?))
     }
+}
+
+fn canonical_array_chunks<T: Serialize + Sync>(
+    values: &[T],
+) -> Result<Vec<Vec<u8>>, AnalysisError> {
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Program serialization runs beside graph assembly. A small fixed number
+    // of chunks keeps those independent stages concurrent instead of filling
+    // the shared Rayon pool with serialization work.
+    let target_chunks = 2;
+    let chunk_size = values.len().div_ceil(target_chunks);
+    values
+        .par_chunks(chunk_size)
+        .map(|chunk| canonical_json_bytes(chunk).map_err(AnalysisError::from))
+        .collect()
+}
+
+fn canonical_fragment<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, AnalysisError> {
+    let mut bytes = canonical_json_bytes(value)?;
+    debug_assert_eq!(bytes.last(), Some(&b'\n'));
+    bytes.pop();
+    Ok(bytes)
+}
+
+fn append_canonical_array(output: &mut Vec<u8>, chunks: Vec<Vec<u8>>) {
+    output.push(b'[');
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        debug_assert!(chunk.starts_with(b"[") && chunk.ends_with(b"]\n"));
+        if index != 0 {
+            output.push(b',');
+        }
+        output.extend_from_slice(&chunk[1..chunk.len() - 2]);
+    }
+    output.push(b']');
 }
 
 pub(crate) fn summarize(

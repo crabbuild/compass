@@ -274,7 +274,7 @@ pub(crate) fn build_program(
     // `AnalysisBundle::canonical_bytes` is intentionally stricter for
     // untrusted offline artifacts and would clone and reanalyze this 272 MB
     // bundle.
-    let canonical_bytes = canonical_json_bytes(&analysis)?;
+    let canonical_bytes = analysis.canonical_bytes_prevalidated()?;
     profile_internal("Program canonical JSON", &mut internal_started);
     let conflicts = count_conflicts(&analysis);
     Ok(ProgramBuild {

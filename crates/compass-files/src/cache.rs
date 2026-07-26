@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -202,14 +203,14 @@ impl Cache {
                     source,
                 }
             })?;
-            write_bytes_atomic(destination, &bytes)
+            write_cache_bytes(&destination, &bytes)
         } else {
             write_json_atomic(directory.join(format!("{hash}.json")), &on_disk, false)
         }
     }
 
-    /// Persist a group of cache entries concurrently while retaining the same
-    /// content-addressed, atomic on-disk format as [`Self::save`].
+    /// Persist a group of independent content-addressed cache entries
+    /// concurrently.
     pub fn save_batch(
         &mut self,
         entries: &[(PathBuf, Value)],
@@ -242,7 +243,7 @@ impl Cache {
                         source,
                     }
                 })?;
-                write_bytes_atomic(destination, &bytes)
+                write_cache_bytes(&destination, &bytes)
             } else {
                 write_json_atomic(destination, &on_disk, false)
             }
@@ -277,7 +278,7 @@ impl Cache {
                     path: destination.clone(),
                     source,
                 })?;
-            write_bytes_atomic(destination, &bytes)
+            write_cache_bytes(&destination, &bytes)
         })
     }
 
@@ -310,7 +311,7 @@ impl Cache {
         Ok(serde_json::from_slice(&bytes).ok())
     }
 
-    /// Atomically save a repository-relative Program IR cache value.
+    /// Safely save a repository-relative Program IR cache value.
     pub fn save_program<T: Serialize>(
         &self,
         kind: &CacheKind,
@@ -329,11 +330,11 @@ impl Cache {
                 path: destination.clone(),
                 source,
             })?;
-        write_bytes_atomic(destination, &bytes)
+        write_cache_bytes(&destination, &bytes)
     }
 
-    /// Atomically persist a group of repository-relative Program cache values
-    /// in parallel. Program syntax extraction commonly produces thousands of
+    /// Safely persist a group of repository-relative Program cache values in
+    /// parallel. Program syntax extraction commonly produces thousands of
     /// independent entries, so serial encoding and file publication otherwise
     /// becomes a cold-build bottleneck.
     pub fn save_program_batch<T: Serialize + Sync>(
@@ -354,7 +355,7 @@ impl Cache {
                     path: destination.clone(),
                     source,
                 })?;
-            write_bytes_atomic(destination, &bytes)
+            write_cache_bytes(&destination, &bytes)
         })
     }
 
@@ -436,6 +437,28 @@ impl Cache {
         );
         Ok(value)
     }
+}
+
+fn write_cache_bytes(destination: &Path, bytes: &[u8]) -> Result<(), FileError> {
+    let file = match OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(destination)
+    {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+            return write_bytes_atomic(destination, bytes);
+        }
+        Err(source) => return Err(io_error(destination, source)),
+    };
+    // Content-addressed cache entries are rebuildable. A reader that observes
+    // an interrupted create treats the undecodable entry as a miss, and the
+    // next writer atomically replaces it through the existing-entry branch.
+    let mut writer = BufWriter::new(file);
+    writer
+        .write_all(bytes)
+        .and_then(|()| writer.flush())
+        .map_err(|source| io_error(destination, source))
 }
 
 impl Drop for Cache {
