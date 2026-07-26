@@ -14,10 +14,16 @@ export function registerBuildCommands(
     requirement: CapabilityRequirement
   ) => Promise<boolean>
 ): void {
-  const pick = (repositoryId?: string) => pickRepository(registry, repositoryId);
+  const pick = (
+    repositoryId: string | undefined,
+    eligible: (session: RepositorySession) => boolean
+  ) => pickRepository(registry, repositoryId, eligible);
   context.subscriptions.push(
     vscode.commands.registerCommand("compass.initialize", async (repositoryId?: string) => {
-      const session = await pick(repositoryId);
+      const session = await pick(
+        repositoryId,
+        (candidate) => candidate.graphState === "not-materialized"
+      );
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.initialize)) return;
       const includes = await vscode.window.showInputBox({
@@ -44,7 +50,10 @@ export function registerBuildCommands(
       }), "Initializing Compass", output, refresh);
     }),
     vscode.commands.registerCommand("compass.update", async (repositoryId?: string) => {
-      const session = await pick(repositoryId);
+      const session = await pick(
+        repositoryId,
+        (candidate) => candidate.graphState === "available" || candidate.graphState === "failed"
+      );
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.update)) return;
       if (session.watch) {
@@ -65,7 +74,10 @@ export function registerBuildCommands(
       );
     }),
     vscode.commands.registerCommand("compass.toggleWatch", async (repositoryId?: string) => {
-      const session = await pick(repositoryId);
+      const session = await pick(
+        repositoryId,
+        (candidate) => candidate.graphState === "available" || candidate.watch !== undefined
+      );
       if (!session) return;
       if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.watch)) return;
       if (session.watch) {
@@ -143,13 +155,19 @@ async function runGuided(
 
 async function pickRepository(
   registry: SessionRegistry,
-  repositoryId?: string
+  repositoryId: string | undefined,
+  eligible: (session: RepositorySession) => boolean
 ): Promise<RepositorySession | undefined> {
   const requested = registry.byId(repositoryId);
   if (requested) return requested;
-  const sessions = registry.all();
+  const editor = vscode.window.activeTextEditor;
+  const fromEditor = editor ? registry.forEditor(editor) : undefined;
+  if (fromEditor && eligible(fromEditor)) return fromEditor;
+  const sessions = registry.all().filter(eligible);
   if (sessions.length === 0) {
-    void vscode.window.showInformationMessage("Open a repository folder to use Compass.");
+    void vscode.window.showInformationMessage(
+      "No open repository is ready for this Compass action."
+    );
     return undefined;
   }
   if (sessions.length === 1) return sessions[0];

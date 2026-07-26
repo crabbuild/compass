@@ -42,54 +42,193 @@ export function actionNode(
   return node;
 }
 
-export function buildRepositoryTree(
+export function buildWorkspaceTree(
   discovery: CompassDiscovery,
   sessions: readonly SessionTreeSnapshot[]
 ): TreeNode[] {
-  const nodes: TreeNode[] = [];
-  const incompatible = sessions.find((session) => session.capabilityError);
-  if (discovery.kind === "missing") {
+  if (sessions.length === 0) {
+    return [
+      actionNode(
+        "workspace:open-folder",
+        "Open a repository folder",
+        "folder-opened",
+        "vscode.openFolder",
+        "Open a folder to use Compass"
+      )
+    ];
+  }
+
+  const attention = cliAttentionNodes(discovery, sessions);
+  const nodes = [...attention, ...repositoryStatusNodes(sessions)];
+  if (attention.length > 0) {
+    return nodes;
+  }
+
+  const active = activeOperationGroup(sessions);
+  if (active.length > 0) {
     nodes.push({
+      id: "workspace:active",
+      label: "Active operations",
+      description: String(active.length),
+      icon: "pulse",
+      expanded: true,
+      children: active
+    });
+  }
+
+  const missing = sessions.filter((session) => session.graphState === "not-materialized");
+  const failed = sessions.filter((session) => session.graphState === "failed");
+  const hasMissing = missing.length > 0;
+  const hasGraph = sessions.some((session) => session.graphState === "available");
+  const hasFailed = failed.length > 0;
+  const hasWatch = sessions.some((session) => Boolean(session.watch));
+
+  if (hasMissing) {
+    nodes.push(actionNode(
+      "workspace:initialize",
+      "Initialize repository",
+      "rocket",
+      "compass.initialize",
+      "Build the first Compass graph",
+      missing.length === 1 ? [missing[0]?.id] : undefined
+    ));
+  }
+  if (hasFailed) {
+    nodes.push(actionNode(
+      "workspace:retry",
+      "Retry graph build",
+      "refresh",
+      "compass.update",
+      "Retry a failed Compass graph build",
+      failed.length === 1 ? [failed[0]?.id] : undefined
+    ));
+  }
+
+  const explore: TreeNode[] = [];
+  if (hasGraph) {
+    explore.push(
+      actionNode(
+        "workspace:code-graph",
+        "Code graph",
+        "type-hierarchy",
+        "compass.openGraph",
+        "Explore the current repository graph"
+      ),
+      actionNode(
+        "workspace:architecture",
+        "Architecture flow",
+        "circuit-board",
+        "compass.openArchitecture",
+        "Read the codebase architecture flow"
+      ),
+      actionNode(
+        "workspace:call-graph",
+        "Call graph from cursor",
+        "references",
+        "compass.openCallGraph",
+        "Trace callers and callees for the active function"
+      ),
+      actionNode(
+        "workspace:query",
+        "Ask codebase",
+        "search",
+        "compass.openQuery",
+        "Ask a natural-language or CompassQL question"
+      )
+    );
+  }
+  explore.push(actionNode(
+    "workspace:evolution",
+    "Codebase evolution",
+    "history",
+    "compass.openHistory",
+    "Browse Git commits and revision graphs"
+  ));
+  nodes.push({
+    id: "workspace:explore",
+    label: "Explore",
+    icon: "compass",
+    expanded: true,
+    children: explore
+  });
+
+  const maintain: TreeNode[] = [];
+  if (hasGraph && !hasFailed) {
+    maintain.push(actionNode(
+      "workspace:update",
+      "Update graph",
+      "refresh",
+      "compass.update",
+      "Refresh changed code relationships"
+    ));
+  }
+  if (hasGraph || hasWatch) {
+    maintain.push(actionNode(
+      "workspace:watch",
+      sessions.length === 1 && hasWatch ? "Stop watching" : "Watch for changes",
+      sessions.length === 1 && hasWatch ? "debug-stop" : "eye",
+      "compass.toggleWatch",
+      sessions.length === 1
+        ? hasWatch
+          ? "Stop watching this repository"
+          : "Keep the graph current as files change"
+        : "Choose a repository to start or stop watching"
+    ));
+  }
+  if (maintain.length > 0) {
+    nodes.push({
+      id: "workspace:maintain",
+      label: "Maintain",
+      icon: "tools",
+      children: maintain
+    });
+  }
+  return nodes;
+}
+
+function cliAttentionNodes(
+  discovery: CompassDiscovery,
+  sessions: readonly SessionTreeSnapshot[]
+): TreeNode[] {
+  if (discovery.kind === "missing") {
+    return [{
       id: "cli-setup",
       label: "Compass CLI needs attention",
       description: "Not found",
       tooltip: "Compass was not found in the configured location or on PATH.",
       icon: "warning",
       command: "compass.selectCli"
-    });
-  } else if (incompatible) {
-    nodes.push({
+    }];
+  }
+  const incompatible = sessions.find((session) => session.capabilityError);
+  if (incompatible) {
+    return [{
       id: "cli-incompatible",
       label: "Compass CLI needs attention",
       description: "Incompatible",
       tooltip: incompatible.capabilityError ?? "The Compass CLI is incompatible.",
       icon: "warning",
       command: "compass.selectCli"
-    });
+    }];
   }
-
-  for (const session of sessions) {
-    const repositoryName = path.basename(session.root) || session.root;
-    const commandArguments = [session.id];
-    const children = repositoryActions(session, commandArguments);
-    nodes.push({
-      id: `repository:${session.id}`,
-      label: repositoryName,
-      description: graphStateLabel(session.graphState),
-      tooltip: session.root,
-      icon: graphStateIcon(session.graphState),
-      expanded: children.length > 0,
-      children
-    });
-  }
-  return nodes;
+  return [];
 }
 
-export function buildOperationsTree(
+function repositoryStatusNodes(
   sessions: readonly SessionTreeSnapshot[]
 ): TreeNode[] {
-  if (sessions.length === 0) return [];
-  const nodes: TreeNode[] = [];
+  return sessions.map((session) => ({
+    id: `repository:${session.id}`,
+    label: path.basename(session.root) || session.root,
+    description: graphStateLabel(session.graphState),
+    tooltip: session.root,
+    icon: graphStateIcon(session.graphState)
+  }));
+}
+
+function activeOperationGroup(
+  sessions: readonly SessionTreeSnapshot[]
+): TreeNode[] {
   const active: TreeNode[] = [];
   for (const session of sessions) {
     const repositoryName = path.basename(session.root) || session.root;
@@ -103,183 +242,22 @@ export function buildOperationsTree(
       });
     }
     if (session.watch) {
-      active.push(actionNode(
-        `active-watch:${session.id}`,
-        "Watching for changes",
-        "eye",
-        "compass.toggleWatch",
-        repositoryName,
-        [session.id]
-      ));
+      active.push({
+        id: `active-watch:${session.id}`,
+        label: "Watching for changes",
+        description: repositoryName,
+        tooltip: session.root,
+        icon: "eye"
+      });
     }
   }
-  if (active.length > 0) {
-    nodes.push({
-      id: "operations:active",
-      label: "Active operations",
-      description: String(active.length),
-      icon: "pulse",
-      expanded: true,
-      children: active
-    });
-  }
-
-  const hasMissing = sessions.some((session) => session.graphState === "not-materialized");
-  const hasGraph = sessions.some((session) => session.graphState === "available");
-  const hasFailed = sessions.some((session) => session.graphState === "failed");
-  const hasWatch = sessions.some((session) => Boolean(session.watch));
-  const build: TreeNode[] = [];
-  if (hasMissing) {
-    build.push(actionNode(
-      "operations:initialize",
-      "Initialize repository",
-      "rocket",
-      "compass.initialize",
-      "Build the first Compass graph"
-    ));
-  }
-  if (hasGraph || hasFailed) {
-    build.push(actionNode(
-      "operations:update",
-      "Update graph",
-      "refresh",
-      "compass.update",
-      hasFailed ? "Retry or refresh a graph build" : "Refresh changed code relationships"
-    ));
-  }
-  if (hasGraph || hasWatch) {
-    const watchLabel = sessions.length === 1
-      ? hasWatch ? "Stop watch" : "Start watch"
-      : "Start or stop watch";
-    build.push(actionNode(
-      "operations:watch",
-      watchLabel,
-      sessions.length === 1 && hasWatch ? "debug-stop" : "eye",
-      "compass.toggleWatch",
-      sessions.length === 1
-        ? hasWatch ? "Stop the repository watcher" : "Keep the graph current as files change"
-        : "Choose a repository and toggle its watcher"
-    ));
-  }
-  if (build.length > 0) {
-    nodes.push({
-      id: "operations:build",
-      label: "Build",
-      icon: "tools",
-      children: build
-    });
-  }
-
-  if (hasGraph) {
-    nodes.push({
-      id: "operations:explore",
-      label: "Explore",
-      icon: "compass",
-      children: [
-        actionNode(
-          "operations:open-graph",
-          "Open graph",
-          "type-hierarchy",
-          "compass.openGraph",
-          "Explore the current repository graph"
-        ),
-        actionNode(
-          "operations:call-graph",
-          "Call graph from cursor",
-          "references",
-          "compass.openCallGraph",
-          "Trace callers and callees for the active function"
-        ),
-        actionNode(
-          "operations:architecture",
-          "Architecture flow",
-          "circuit-board",
-          "compass.openArchitecture",
-          "Read the codebase architecture flow"
-        ),
-        actionNode(
-          "operations:query",
-          "Query codebase",
-          "search",
-          "compass.openQuery",
-          "Ask a natural-language or CompassQL question"
-        )
-      ]
-    });
-  }
-
-  nodes.push({
-    id: "operations:history",
-    label: "History",
-    icon: "history",
-    children: [
-      actionNode(
-        "operations:open-history",
-        "Codebase evolution",
-        "history",
-        "compass.openHistory",
-        "Browse Git commits and revision graphs"
-      )
-    ]
-  });
-  return nodes;
-}
-
-function repositoryActions(
-  session: SessionTreeSnapshot,
-  commandArguments: unknown[]
-): TreeNode[] {
-  if (session.graphState === "available") {
-    return [
-      actionNode(
-        `open-graph:${session.id}`,
-        "Open graph",
-        "type-hierarchy",
-        "compass.openGraph",
-        "Explore the current code graph",
-        commandArguments
-      ),
-      actionNode(
-        `open-history:${session.id}`,
-        "Codebase evolution",
-        "history",
-        "compass.openHistory",
-        "Browse Git commits and revision graphs",
-        commandArguments
-      )
-    ];
-  }
-  if (session.graphState === "not-materialized") {
-    return [
-      actionNode(
-        `initialize:${session.id}`,
-        "Initialize repository",
-        "rocket",
-        "compass.initialize",
-        "Build the first Compass graph",
-        commandArguments
-      )
-    ];
-  }
-  if (session.graphState === "failed") {
-    return [
-      actionNode(
-        `retry-update:${session.id}`,
-        "Update graph",
-        "refresh",
-        "compass.update",
-        "Retry the failed graph build",
-        commandArguments
-      )
-    ];
-  }
-  return [];
+  return active;
 }
 
 export function graphStateLabel(state: GraphState): string {
-  if (state === "available") return "Graph available";
-  if (state === "not-materialized") return "Not materialized";
-  if (state === "building") return "Building graph";
+  if (state === "available") return "Graph ready";
+  if (state === "not-materialized") return "Not initialized";
+  if (state === "building") return "Building";
   return "Build failed";
 }
 

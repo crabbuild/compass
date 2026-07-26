@@ -60,6 +60,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "compass.refreshWorkspace",
+        "title": "Compass: Refresh Status",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "compass.toggleWatch",
         "title": "Compass: Start or Stop Watch",
         "icon": "$(eye)"
@@ -125,30 +130,16 @@
       "compass": [
         {
           "id": "compass.status",
-          "name": "Repository"
-        },
-        {
-          "id": "compass.operations",
-          "name": "Operations"
+          "name": "Workspace"
         }
       ]
     },
     "menus": {
       "view/title": [
         {
-          "command": "compass.update",
+          "command": "compass.refreshWorkspace",
           "when": "view == compass.status",
           "group": "navigation"
-        },
-        {
-          "command": "compass.openGraph",
-          "when": "view == compass.status",
-          "group": "navigation"
-        },
-        {
-          "command": "compass.openHistory",
-          "when": "view == compass.status",
-          "group": "navigation@2"
         }
       ],
       "editor/context": [
