@@ -1232,6 +1232,13 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
     assert!(!html.contains("<script src="));
     assert!(html.contains("id=\"graph\""));
     assert!(html.contains("id=\"graph-canvas\""));
+    assert!(html.contains("globalThis.CompassSemanticDiffGraph"));
+    assert!(html.contains("class=\"graph-explorer\""));
+    assert!(html.contains("id=\"graph-inspector\""));
+    assert!(html.contains("id=\"graph-live\""));
+    assert!(html.contains("aria-live=\"polite\""));
+    assert!(html.contains("data-graph-node-id="));
+    assert!(html.contains("data-graph-edge-source="));
 
     let missing_html_output = run(
         compass,

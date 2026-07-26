@@ -267,6 +267,14 @@ exact source patch and the meaningful code-graph delta in the same report. The
 graph visualization focuses on the changed subgraph; its node/edge lists and
 embedded JSON remain exhaustive.
 
+In the graph view, select a changed node, inspect its incoming and outgoing
+changed relationships, follow any related semantic findings, then open the
+exact source patch when one is available. Connected nodes and edges remain
+prominent while unrelated topology dims; clear the selection to restore the
+whole sampled graph. The inspector can also follow relationships to nodes
+outside the bounded visual sample, while the lists below retain every graph
+change.
+
 Program IR v1 provides the richest behavior evidence. For graph-only languages,
 Compass can also report changed branch conditions when an exact zero-context
 source hunk overlaps the changed function's recorded line span. That evidence
