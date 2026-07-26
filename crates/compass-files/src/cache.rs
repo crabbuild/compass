@@ -8,9 +8,11 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{FileError, StatHashIndex, io_error, write_json_atomic};
+use crate::{FileError, StatHashIndex, io_error, write_bytes_atomic, write_json_atomic};
 
 const AST_EXTRACTOR_VERSION: &str = "0.9.21";
+const CACHE_ENCODING_VERSION: u32 = 1;
+const MESSAGEPACK_EXTENSION: &str = "msgpack";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheKind {
@@ -104,6 +106,14 @@ impl Cache {
     }
 
     pub fn directory(&self, kind: &CacheKind, prompt_fingerprint: Option<&str>) -> PathBuf {
+        let mut directory = self.legacy_directory(kind, prompt_fingerprint);
+        if deterministic_binary_kind(kind) {
+            directory = directory.join(format!("e{CACHE_ENCODING_VERSION}"));
+        }
+        directory
+    }
+
+    fn legacy_directory(&self, kind: &CacheKind, prompt_fingerprint: Option<&str>) -> PathBuf {
         let mut directory = self
             .cache_root
             .join(&self.output_name)
@@ -126,6 +136,24 @@ impl Cache {
         allow_partial: bool,
     ) -> Result<Option<Value>, FileError> {
         let hash = self.content_hash(path)?;
+        if deterministic_binary_kind(kind) {
+            let entry = self
+                .directory(kind, prompt_fingerprint)
+                .join(format!("{hash}.{MESSAGEPACK_EXTENSION}"));
+            if let Ok(bytes) = fs::read(entry)
+                && let Some(mut value) = decode_messagepack::<Value>(&bytes)
+            {
+                if !allow_partial && value.get("partial").and_then(Value::as_bool) == Some(true) {
+                    return Ok(None);
+                }
+                absolutize_source_files(&mut value, &self.root);
+                return Ok(Some(value));
+            }
+            let legacy = self
+                .legacy_directory(kind, prompt_fingerprint)
+                .join(format!("{hash}.json"));
+            return load_json_value(&legacy, allow_partial, &self.root);
+        }
         let mut entry = self
             .directory(kind, prompt_fingerprint)
             .join(format!("{hash}.json"));
@@ -138,19 +166,7 @@ impl Cache {
         if !entry.exists() {
             return Ok(None);
         }
-        let bytes = match fs::read(&entry) {
-            Ok(bytes) => bytes,
-            Err(_) => return Ok(None),
-        };
-        let mut value: Value = match serde_json::from_slice(&bytes) {
-            Ok(value) => value,
-            Err(_) => return Ok(None),
-        };
-        if !allow_partial && value.get("partial").and_then(Value::as_bool) == Some(true) {
-            return Ok(None);
-        }
-        absolutize_source_files(&mut value, &self.root);
-        Ok(Some(value))
+        load_json_value(&entry, allow_partial, &self.root)
     }
 
     pub fn save(
@@ -168,7 +184,18 @@ impl Cache {
         let hash = self.content_hash(path)?;
         let directory = self.directory(kind, prompt_fingerprint);
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
-        write_json_atomic(directory.join(format!("{hash}.json")), &on_disk, false)
+        if deterministic_binary_kind(kind) {
+            let destination = directory.join(format!("{hash}.{MESSAGEPACK_EXTENSION}"));
+            let bytes = rmp_serde::to_vec_named(&on_disk).map_err(|source| {
+                FileError::MessagePackEncode {
+                    path: destination.clone(),
+                    source,
+                }
+            })?;
+            write_bytes_atomic(destination, &bytes)
+        } else {
+            write_json_atomic(directory.join(format!("{hash}.json")), &on_disk, false)
+        }
     }
 
     /// Persist a group of cache entries concurrently while retaining the same
@@ -187,13 +214,28 @@ impl Cache {
                 continue;
             }
             let hash = self.content_hash(path)?;
-            jobs.push((directory.join(format!("{hash}.json")), value));
+            let extension = if deterministic_binary_kind(kind) {
+                MESSAGEPACK_EXTENSION
+            } else {
+                "json"
+            };
+            jobs.push((directory.join(format!("{hash}.{extension}")), value));
         }
         let root = &self.root;
         jobs.into_par_iter().try_for_each(|(destination, value)| {
             let mut on_disk = value.clone();
             relativize_source_files(&mut on_disk, root);
-            write_json_atomic(destination, &on_disk, false)
+            if deterministic_binary_kind(kind) {
+                let bytes = rmp_serde::to_vec_named(&on_disk).map_err(|source| {
+                    FileError::MessagePackEncode {
+                        path: destination.clone(),
+                        source,
+                    }
+                })?;
+                write_bytes_atomic(destination, &bytes)
+            } else {
+                write_json_atomic(destination, &on_disk, false)
+            }
         })
     }
 
@@ -207,12 +249,20 @@ impl Cache {
         logical_key: &str,
     ) -> Result<Option<T>, FileError> {
         ensure_program_kind(kind)?;
+        let key = logical_key_hash(logical_key);
         let entry = self
             .directory(kind, None)
-            .join(format!("{}.json", logical_key_hash(logical_key)));
-        let bytes = match fs::read(entry) {
+            .join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
+        if let Ok(bytes) = fs::read(entry)
+            && let Some(value) = decode_messagepack(&bytes)
+        {
+            return Ok(Some(value));
+        }
+        let legacy = self
+            .legacy_directory(kind, None)
+            .join(format!("{key}.json"));
+        let bytes = match fs::read(legacy) {
             Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(_) => return Ok(None),
         };
         Ok(serde_json::from_slice(&bytes).ok())
@@ -228,11 +278,16 @@ impl Cache {
         ensure_program_kind(kind)?;
         let directory = self.directory(kind, None);
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
-        write_json_atomic(
-            directory.join(format!("{}.json", logical_key_hash(logical_key))),
-            value,
-            false,
-        )
+        let destination = directory.join(format!(
+            "{}.{MESSAGEPACK_EXTENSION}",
+            logical_key_hash(logical_key)
+        ));
+        let bytes =
+            rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
+                path: destination.clone(),
+                source,
+            })?;
+        write_bytes_atomic(destination, &bytes)
     }
 
     /// Remove entries outside a successfully completed provider's live set.
@@ -246,7 +301,8 @@ impl Cache {
             .iter()
             .map(|key| logical_key_hash(key))
             .collect::<BTreeSet<_>>();
-        Ok(prune_json(&self.directory(kind, None), &hashes))
+        Ok(prune_cache_entries(&self.directory(kind, None), &hashes)
+            + prune_cache_entries(&self.legacy_directory(kind, None), &hashes))
     }
 
     pub fn flush(&mut self) -> Result<(), FileError> {
@@ -256,20 +312,20 @@ impl Cache {
     pub fn cached_files(&self) -> BTreeSet<String> {
         let base = self.cache_root.join(&self.output_name).join("cache");
         let mut hashes = BTreeSet::new();
-        collect_json_stems(&base, &mut hashes);
+        collect_cache_stems(&base, &mut hashes);
         hashes
     }
 
     pub fn clear(&self) {
         let base = self.cache_root.join(&self.output_name).join("cache");
-        clear_json(&base);
+        clear_cache_entries(&base);
     }
 
     pub fn prune_semantic(&self, live_hashes: &BTreeSet<String>) -> usize {
         let base = self.cache_root.join(&self.output_name).join("cache");
         let mut removed = 0;
         for kind in ["semantic", "semantic-deep"] {
-            removed += prune_json(&base.join(kind), live_hashes);
+            removed += prune_cache_entries(&base.join(kind), live_hashes);
         }
         removed
     }
@@ -333,6 +389,42 @@ fn ensure_program_kind(kind: &CacheKind) -> Result<(), FileError> {
     }
 }
 
+fn deterministic_binary_kind(kind: &CacheKind) -> bool {
+    matches!(
+        kind,
+        CacheKind::Ast
+            | CacheKind::ProgramSyntax { .. }
+            | CacheKind::ProgramArtifact { .. }
+            | CacheKind::ProgramMerge { .. }
+    )
+}
+
+fn load_json_value(
+    path: &Path,
+    allow_partial: bool,
+    root: &Path,
+) -> Result<Option<Value>, FileError> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return Ok(None),
+    };
+    let mut value: Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    if !allow_partial && value.get("partial").and_then(Value::as_bool) == Some(true) {
+        return Ok(None);
+    }
+    absolutize_source_files(&mut value, root);
+    Ok(Some(value))
+}
+
+fn decode_messagepack<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
+    let mut deserializer = rmp_serde::Deserializer::new(std::io::Cursor::new(bytes));
+    let value = serde::Deserialize::deserialize(&mut deserializer).ok()?;
+    (deserializer.position() == u64::try_from(bytes.len()).unwrap_or(u64::MAX)).then_some(value)
+}
+
 fn logical_key_hash(value: &str) -> String {
     use std::fmt::Write;
 
@@ -344,15 +436,20 @@ fn logical_key_hash(value: &str) -> String {
     output
 }
 
-fn collect_json_stems(directory: &Path, output: &mut BTreeSet<String>) {
+fn cache_extension(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == "json" || extension == MESSAGEPACK_EXTENSION)
+}
+
+fn collect_cache_stems(directory: &Path, output: &mut BTreeSet<String>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_json_stems(&path, output);
-        } else if path.extension().is_some_and(|ext| ext == "json")
+            collect_cache_stems(&path, output);
+        } else if cache_extension(&path)
             && let Some(stem) = path.file_stem().and_then(|value| value.to_str())
         {
             output.insert(stem.to_owned());
@@ -360,21 +457,21 @@ fn collect_json_stems(directory: &Path, output: &mut BTreeSet<String>) {
     }
 }
 
-fn clear_json(directory: &Path) {
+fn clear_cache_entries(directory: &Path) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            clear_json(&path);
-        } else if path.extension().is_some_and(|ext| ext == "json") {
+            clear_cache_entries(&path);
+        } else if cache_extension(&path) {
             let _ = fs::remove_file(path);
         }
     }
 }
 
-fn prune_json(directory: &Path, live_hashes: &BTreeSet<String>) -> usize {
+fn prune_cache_entries(directory: &Path, live_hashes: &BTreeSet<String>) -> usize {
     let Ok(entries) = fs::read_dir(directory) else {
         return 0;
     };
@@ -382,8 +479,8 @@ fn prune_json(directory: &Path, live_hashes: &BTreeSet<String>) -> usize {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            removed += prune_json(&path, live_hashes);
-        } else if path.extension().is_some_and(|ext| ext == "json")
+            removed += prune_cache_entries(&path, live_hashes);
+        } else if cache_extension(&path)
             && path
                 .file_stem()
                 .and_then(|value| value.to_str())

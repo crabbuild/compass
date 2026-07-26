@@ -1040,6 +1040,7 @@ dependencies = [
  "md-5 0.10.6",
  "rayon",
  "regex",
+ "rmp-serde",
  "serde",
  "serde_json",
  "sha2 0.10.9",
