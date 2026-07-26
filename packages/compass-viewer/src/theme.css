@@ -3004,9 +3004,20 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
   color: var(--foreground);
 }
 
-.history-diff-toolbar button[aria-pressed="true"] {
-  background: var(--vscode-button-secondaryBackground, var(--muted));
-  color: var(--vscode-button-secondaryForeground, var(--foreground));
+.history-diff-toolbar button[aria-pressed="true"],
+.history-diff-toolbar button[aria-pressed="true"]:hover {
+  background: var(
+    --vscode-tab-activeBackground,
+    var(--vscode-editor-background, var(--background))
+  );
+  color: var(
+    --vscode-tab-activeForeground,
+    var(--vscode-editor-foreground, var(--foreground))
+  );
+  box-shadow: inset 0 2px 0 var(
+    --vscode-tab-activeBorder,
+    var(--vscode-focusBorder, var(--ring))
+  );
 }
 
 .history-diff-toolbar button:disabled {
