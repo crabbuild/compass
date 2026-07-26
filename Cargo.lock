@@ -933,6 +933,7 @@ version = "0.1.6"
 dependencies = [
  "compass-ir",
  "compass-model",
+ "rayon",
  "serde",
  "sha2 0.10.9",
  "thiserror 2.0.19",

@@ -875,7 +875,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
         .collect::<BTreeMap<_, _>>();
     let mut unclassified = Vec::new();
     let mut google_workspace_shortcuts = Vec::new();
-    let mut total_words = 0;
+    let mut word_count_paths = Vec::new();
     let cache_root = options.cache_root.as_deref().unwrap_or(&root);
     let mut stat_index = StatHashIndex::load(cache_root, &options.output_name);
     for path in state.all_files {
@@ -915,7 +915,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
             continue;
         }
         if file_type != FileType::Video {
-            total_words += stat_index.word_count(&path, count_words);
+            word_count_paths.push(path.clone());
         }
         if let Some(bucket) = files.get_mut(file_type.key()) {
             bucket.push(path.to_string_lossy().into_owned());
@@ -934,7 +934,7 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
             continue;
         };
         if file_type != FileType::Video {
-            total_words += stat_index.word_count(path, count_words);
+            word_count_paths.push(path.clone());
         }
         if let Some(bucket) = files.get_mut(file_type.key()) {
             let value = path.to_string_lossy().into_owned();
@@ -946,6 +946,10 @@ pub fn detect(root: &Path, options: &DetectOptions) -> Result<Detection, FileErr
     for bucket in files.values_mut() {
         bucket.sort();
     }
+    let total_words = stat_index
+        .word_counts(&word_count_paths, count_words)
+        .into_iter()
+        .sum();
     let total_files = files.values().map(Vec::len).sum();
     let needs_graph = total_words >= CORPUS_WARN_THRESHOLD;
     let word_count = grouped_number(total_words);

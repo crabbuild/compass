@@ -1,12 +1,63 @@
 use std::collections::BTreeSet;
 use std::error::Error;
+use std::path::Path;
 
 use compass_ir::{
     Capability, CoverageState, ExceptionKind, ExecutionMode, OperationKind, ParameterKind,
     Visibility,
 };
-use compass_languages::TreeSitterSyntaxProvider;
+use compass_languages::{Engine, TreeSitterSyntaxProvider};
 use compass_program::{FileInput, SyntaxProvider, merge_evidence};
+
+#[test]
+fn combined_extraction_matches_standalone_graph_and_program_outputs() -> Result<(), Box<dyn Error>>
+{
+    for (path, language, source) in [
+        (
+            "src/app.py",
+            "python",
+            b"def helper():\n    return 1\n\ndef run():\n    return helper()\n".as_slice(),
+        ),
+        (
+            "src/lib.rs",
+            "rust",
+            b"fn helper() {}\nfn run() { helper(); }\n".as_slice(),
+        ),
+        (
+            "src/app.ts",
+            "typescript",
+            b"function helper() {}\nfunction run() { helper(); }\n".as_slice(),
+        ),
+        (
+            "src/view.tsx",
+            "tsx",
+            b"function View() { return <main />; }\n".as_slice(),
+        ),
+        (
+            "src/app.js",
+            "javascript",
+            b"function helper() {}\nfunction run() { helper(); }\n".as_slice(),
+        ),
+    ] {
+        let path = Path::new(path);
+        let standalone_graph = Engine::default().extract_source(path, source)?;
+        let standalone_program = TreeSitterSyntaxProvider::default()
+            .analyze_file(FileInput {
+                source_file: path.to_str().ok_or("non-UTF-8 fixture path")?,
+                language,
+                source,
+            })?
+            .ok_or("missing standalone Program evidence")?;
+        let combined = Engine::default().extract_source_combined(
+            path,
+            path.to_str().ok_or("non-UTF-8 fixture path")?,
+            source,
+        )?;
+        assert_eq!(combined.graph, standalone_graph);
+        assert_eq!(combined.program, Some(standalone_program));
+    }
+    Ok(())
+}
 
 #[test]
 fn rust_provider_emits_conservative_program_evidence() -> Result<(), Box<dyn Error>> {

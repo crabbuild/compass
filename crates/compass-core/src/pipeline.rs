@@ -24,9 +24,12 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::build_state::{BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified};
+use crate::build_state::{
+    ArtifactSeal, BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified,
+};
 use crate::program::{
-    ProgramBuild, build_program, load_current_program, program_artifact_count, write_program,
+    PreparedSyntaxInput, ProgramBuild, build_program, load_current_program, program_artifact_count,
+    write_program,
 };
 use crate::raw_guard::enforce_incomplete_raw_guard;
 
@@ -206,6 +209,8 @@ pub enum CoreError {
     InvalidSupplementalFragment(serde_json::Error),
     #[error("could not create an AST worker pool: {0}")]
     WorkerPool(String),
+    #[error("build worker panicked during {0}")]
+    WorkerPanic(String),
     #[error(
         "semantic extraction was incomplete and would shrink the graph ({new} < {existing} nodes)"
     )]
@@ -533,12 +538,6 @@ fn build_graph_inner(
 
     let cache_root = (output_root != root).then_some(output_root.as_path());
     let mut cache = Cache::new(&root, cache_root)?;
-    let program_started = Instant::now();
-    let program = options
-        .program_analysis
-        .then(|| build_program(&root, &sources, options, &cache))
-        .transpose()?;
-    timings.program_analysis = program_started.elapsed();
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
     if !options.force {
@@ -583,7 +582,19 @@ fn build_graph_inner(
                 path: path.clone(),
                 source,
             })?;
-            let extraction = engine.extract_source(path, &bytes)?;
+            let source_file = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let language = Registry::resolve(path).map_or("", |spec| spec.name);
+            let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+            let prepared = combined.program.map(|batch| PreparedSyntaxInput {
+                source_file,
+                language: language.to_owned(),
+                bytes: bytes.clone(),
+                batch,
+            });
             if let Some(progress) = progress {
                 let mut completed = completed_files
                     .lock()
@@ -599,7 +610,7 @@ fn build_graph_inner(
                 path.to_string_lossy().into_owned(),
                 String::from_utf8_lossy(&bytes).into_owned(),
             );
-            Ok((path.clone(), extraction, source))
+            Ok((path.clone(), combined.graph, source, prepared))
         };
     let fresh = if missing.len() < 256 {
         let mut engine = Engine::default();
@@ -620,12 +631,46 @@ fn build_graph_inner(
             extract()?
         }
     };
+    let prepared = if options.force {
+        fresh
+            .iter()
+            .filter_map(|(_, _, _, prepared)| prepared.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let program_handle = if options.program_analysis {
+        let program_root = root.clone();
+        let program_sources = sources.clone();
+        let program_options = options.clone();
+        let program_cache_root = cache_root.map(Path::to_path_buf);
+        Some(
+            std::thread::Builder::new()
+                .name("compass-program".to_owned())
+                .spawn(move || {
+                    let started = Instant::now();
+                    let program_cache = Cache::new(&program_root, program_cache_root.as_deref())?
+                        .without_hash_flush();
+                    let program = build_program(
+                        &program_root,
+                        &program_sources,
+                        &program_options,
+                        &program_cache,
+                        &prepared,
+                    )?;
+                    Ok::<_, CoreError>((program, started.elapsed()))
+                })
+                .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
+        )
+    } else {
+        None
+    };
     const CACHE_BATCH_SIZE: usize = 128;
     for batch in fresh.chunks(CACHE_BATCH_SIZE) {
         let entries = batch
             .par_iter()
-            .filter(|(_, extraction, _)| !extraction.nodes.is_empty())
-            .map(|(path, extraction, _)| {
+            .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
+            .map(|(path, extraction, _, _)| {
                 serde_json::to_value(extraction)
                     .map(|value| (path.clone(), value))
                     .map_err(|source| CoreError::SerializeExtraction {
@@ -639,10 +684,10 @@ fn build_graph_inner(
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
-        .map(|(path, _, _)| path.clone())
+        .map(|(path, _, _, _)| path.clone())
         .collect::<HashSet<_>>();
     let mut fresh_source_text = HashMap::with_capacity(fresh.len());
-    for (path, extraction, (source_path, source)) in fresh {
+    for (path, extraction, (source_path, source), _) in fresh {
         if extraction.nodes.is_empty() {
             empty_files.push(path.clone());
         }
@@ -686,9 +731,17 @@ fn build_graph_inner(
     let mut resolved = resolve_owned_with_root(ordered, &source_text, &root);
     drop(source_text);
     finalize_ast_extraction(&mut resolved, &root, &ast_id_remap);
-    timings.deterministic_extract = stage_started
-        .elapsed()
-        .saturating_sub(timings.program_analysis);
+    timings.deterministic_extract = stage_started.elapsed();
+    let program = match program_handle {
+        Some(handle) => {
+            let (program, elapsed) = handle
+                .join()
+                .map_err(|_| CoreError::WorkerPanic("program analysis".to_owned()))??;
+            timings.program_analysis = elapsed;
+            Some(program)
+        }
+        None => None,
+    };
     stage_started = Instant::now();
     if options.purpose == BuildPurpose::Update
         || (options.purpose == BuildPurpose::Extract && !options.force)
@@ -1185,7 +1238,7 @@ fn write_program_output(
     program: Option<&ProgramBuild>,
 ) -> Result<(), CoreError> {
     if let Some(program) = program {
-        write_program(output_dir, &program.analysis)?;
+        write_program(output_dir, &program.canonical_bytes)?;
     }
     Ok(())
 }
@@ -1255,6 +1308,7 @@ fn publish_build_state(
         output_dir,
         build_profile(options),
         manifest_path,
+        program.map(|program| ArtifactSeal::from_bytes(&program.canonical_bytes)),
         &required,
         SavedStats {
             files,

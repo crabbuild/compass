@@ -72,6 +72,7 @@ pub struct Cache {
     extractor_version: String,
     hashes: StatHashIndex,
     session_hashes: HashMap<PathBuf, SessionHash>,
+    flush_hashes_on_drop: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,7 @@ impl Cache {
             extractor_version: AST_EXTRACTOR_VERSION.to_owned(),
             hashes,
             session_hashes: HashMap::new(),
+            flush_hashes_on_drop: true,
         };
         cache.cleanup_stale_ast();
         Ok(cache)
@@ -102,6 +104,14 @@ impl Cache {
 
     pub fn with_extractor_version(mut self, version: impl Into<String>) -> Self {
         self.extractor_version = version.into();
+        self
+    }
+
+    /// Program-only cache users do not consult the path stat index. Disabling
+    /// its drop-time flush prevents a parallel Program worker from overwriting
+    /// hashes recorded by the graph extraction worker.
+    pub fn without_hash_flush(mut self) -> Self {
+        self.flush_hashes_on_drop = false;
         self
     }
 
@@ -372,7 +382,9 @@ impl Cache {
 
 impl Drop for Cache {
     fn drop(&mut self) {
-        let _ = self.flush();
+        if self.flush_hashes_on_drop {
+            let _ = self.flush();
+        }
     }
 }
 

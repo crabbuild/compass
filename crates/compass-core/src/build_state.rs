@@ -20,6 +20,13 @@ pub(crate) struct ArtifactSeal {
 }
 
 impl ArtifactSeal {
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
+        Self {
+            bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+        }
+    }
+
     pub(crate) fn capture(path: &Path) -> Result<Self, CoreError> {
         let metadata = fs::metadata(path).map_err(|source| FileError::Io {
             path: path.to_path_buf(),
@@ -100,11 +107,15 @@ impl BuildState {
         output_dir: &Path,
         profile: BuildProfile,
         manifest_path: &Path,
+        program_seal: Option<ArtifactSeal>,
         required_paths: &[PathBuf],
         stats: SavedStats,
     ) -> Result<Self, CoreError> {
         let program = if profile.program_analysis {
-            Some(ArtifactSeal::capture(&output_dir.join("program.json"))?)
+            Some(program_seal.map_or_else(
+                || ArtifactSeal::capture(&output_dir.join("program.json")),
+                Ok,
+            )?)
         } else {
             None
         };
@@ -222,6 +233,7 @@ mod tests {
             output,
             profile.clone(),
             &manifest,
+            None,
             std::slice::from_ref(&required),
             SavedStats::default(),
         )?;

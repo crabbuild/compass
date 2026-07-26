@@ -22,6 +22,7 @@ pub(crate) const PROGRAM_ARTIFACT: &str = "program.json";
 #[derive(Debug)]
 pub(crate) struct ProgramBuild {
     pub analysis: compass_analysis::AnalysisBundle,
+    pub canonical_bytes: Vec<u8>,
     pub syntax_analyzed: usize,
     pub syntax_reused: usize,
     pub artifacts_loaded: usize,
@@ -38,6 +39,14 @@ struct SourceInput {
     bytes: Vec<u8>,
     digest: String,
     cache_key: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct PreparedSyntaxInput {
+    pub source_file: String,
+    pub language: String,
+    pub bytes: Vec<u8>,
+    pub batch: EvidenceBatch,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,8 +73,32 @@ pub(crate) fn build_program(
     sources: &[PathBuf],
     options: &BuildOptions,
     cache: &Cache,
+    prepared: &[PreparedSyntaxInput],
 ) -> Result<ProgramBuild, CoreError> {
-    let inputs = read_sources(root, sources)?;
+    let artifacts = discover_artifacts(root, options)?;
+    let inputs = if artifacts.is_empty() && !prepared.is_empty() {
+        let mut inputs = prepared
+            .iter()
+            .map(|input| {
+                let digest = hex_sha256(&input.bytes);
+                SourceInput {
+                    source_file: input.source_file.clone(),
+                    language: input.language.clone(),
+                    bytes: input.bytes.clone(),
+                    cache_key: format!("{}:{digest}", input.source_file),
+                    digest,
+                }
+            })
+            .collect::<Vec<_>>();
+        inputs.sort_by(|left, right| {
+            left.source_file
+                .as_bytes()
+                .cmp(right.source_file.as_bytes())
+        });
+        inputs
+    } else {
+        read_sources(root, sources)?
+    };
     let source_digests = inputs
         .iter()
         .map(|input| (input.source_file.clone(), input.digest.clone()))
@@ -83,6 +116,16 @@ pub(crate) fn build_program(
     let mut missing = Vec::new();
     let mut syntax_reused = 0;
     let mut live_syntax_keys = BTreeSet::new();
+    let prepared = prepared
+        .iter()
+        .map(|input| {
+            (
+                format!("{}:{}", input.source_file, hex_sha256(&input.bytes)),
+                input.batch.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut prepared_fresh = Vec::new();
     for input in &inputs {
         if !supports_program_syntax(&input.source_file) {
             continue;
@@ -97,9 +140,15 @@ pub(crate) fn build_program(
             syntax_reused += 1;
             continue;
         }
+        if let Some(batch) = prepared.get(&input.cache_key) {
+            prepared_fresh.push((input.cache_key.clone(), batch.clone()));
+            continue;
+        }
         missing.push(input.clone());
     }
-    let fresh = analyze_syntax(&missing, options.max_workers)?;
+    let mut fresh = analyze_syntax(&missing, options.max_workers)?;
+    fresh.extend(prepared_fresh);
+    fresh.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let syntax_analyzed = fresh.len();
     for (key, batch) in fresh {
         cache.save_program(&syntax_kind, &key, &batch)?;
@@ -111,7 +160,6 @@ pub(crate) fn build_program(
         ir_schema: compass_ir::PROGRAM_SCHEMA_VERSION,
         decoder_version: format!("scip/{}", compass_program::SCIP_PROVIDER_VERSION),
     };
-    let artifacts = discover_artifacts(root, options)?;
     let mut live_artifact_keys = BTreeSet::new();
     let mut artifacts_loaded = 0;
     let mut artifacts_reused = 0;
@@ -212,31 +260,18 @@ pub(crate) fn build_program(
     }
     cache.prune_program(&artifact_kind, &live_artifact_keys)?;
 
-    let provider_digest = provider_manifest_digest(&batches)?;
-    let merge_kind = CacheKind::ProgramMerge {
-        ir_schema: compass_ir::PROGRAM_SCHEMA_VERSION,
-        merger_version: compass_program::MERGER_VERSION,
-        analyzer_version: compass_analysis::ANALYZER_VERSION,
-    };
-    let analysis = if !options.force
-        && let Some(cached) =
-            cache.load_program::<compass_analysis::AnalysisBundle>(&merge_kind, &provider_digest)?
-        && cached.validate().is_ok()
-    {
-        cached
-    } else {
-        let program = merge_evidence(batches)?;
-        let analysis = compass_analysis::analyze(program)?;
-        cache.save_program(&merge_kind, &provider_digest, &analysis)?;
-        analysis
-    };
-    cache.prune_program(
-        &merge_kind,
-        &[provider_digest].into_iter().collect::<BTreeSet<_>>(),
-    )?;
+    let program = merge_evidence(batches)?;
+    let analysis = compass_analysis::analyze_prevalidated(program)?;
+    // `analyze` canonicalizes and validates the Program before constructing
+    // summaries in canonical order. Serialize that trusted result directly;
+    // `AnalysisBundle::canonical_bytes` is intentionally stricter for
+    // untrusted offline artifacts and would clone and reanalyze this 272 MB
+    // bundle.
+    let canonical_bytes = canonical_json_bytes(&analysis)?;
     let conflicts = count_conflicts(&analysis);
     Ok(ProgramBuild {
         analysis,
+        canonical_bytes,
         syntax_analyzed,
         syntax_reused,
         artifacts_loaded,
@@ -330,6 +365,7 @@ pub(crate) fn load_current_program(
     let conflicts = count_conflicts(&analysis);
     Ok(Some(ProgramBuild {
         analysis,
+        canonical_bytes: bytes,
         syntax_analyzed: 0,
         syntax_reused: supported.len(),
         artifacts_loaded: 0,
@@ -389,14 +425,8 @@ pub(crate) fn current_provider_manifest(
     Ok(providers)
 }
 
-pub(crate) fn write_program(
-    output_dir: &Path,
-    analysis: &compass_analysis::AnalysisBundle,
-) -> Result<(), CoreError> {
-    write_bytes_atomic(
-        output_dir.join(PROGRAM_ARTIFACT),
-        &analysis.canonical_bytes()?,
-    )?;
+pub(crate) fn write_program(output_dir: &Path, canonical_bytes: &[u8]) -> Result<(), CoreError> {
+    write_bytes_atomic(output_dir.join(PROGRAM_ARTIFACT), canonical_bytes)?;
     Ok(())
 }
 
@@ -756,15 +786,6 @@ fn normalized_document_key(
         actual,
     ))?);
     Ok(format!("{artifact_digest}:normalized:{digest}"))
-}
-
-fn provider_manifest_digest(batches: &[EvidenceBatch]) -> Result<String, CoreError> {
-    let mut batch_digests = batches
-        .iter()
-        .map(EvidenceBatch::digest)
-        .collect::<Result<Vec<_>, _>>()?;
-    batch_digests.sort();
-    Ok(hex_sha256(&canonical_json_bytes(&batch_digests)?))
 }
 
 fn count_conflicts(analysis: &compass_analysis::AnalysisBundle) -> usize {

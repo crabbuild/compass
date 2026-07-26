@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use compass_ir::{
     Coverage, ExceptionEffect, IrError, OperationKind, ProgramBundle, SymbolId,
     canonical_json_bytes, hex_sha256,
 };
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -44,26 +45,41 @@ pub enum AnalysisError {
 pub fn analyze(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError> {
     let program = program.canonicalized();
     program.validate()?;
-    let mut summaries = Vec::new();
-    let mut symbols = BTreeSet::new();
+    analyze_prevalidated(program)
+}
+
+/// Analyze a Program canonicalized and validated by the in-process merger.
+///
+/// Untrusted artifacts must use [`analyze`].
+pub fn analyze_prevalidated(program: ProgramBundle) -> Result<AnalysisBundle, AnalysisError> {
+    let functions = program
+        .modules
+        .iter()
+        .flat_map(|module| module.functions.iter())
+        .collect::<Vec<_>>();
+    let mut summaries = functions
+        .par_iter()
+        .map(|function| summarize(function))
+        .collect::<Result<Vec<_>, _>>()?;
+    summaries.sort_by(|left, right| left.symbol_id.as_bytes().cmp(right.symbol_id.as_bytes()));
+    if let Some(duplicate) = summaries
+        .windows(2)
+        .find(|pair| pair[0].symbol_id == pair[1].symbol_id)
+    {
+        return Err(AnalysisError::DuplicateFunction(
+            duplicate[0].symbol_id.clone(),
+        ));
+    }
     let mut reverse_calls = BTreeMap::<String, Vec<String>>::new();
-    for module in &program.modules {
-        for function in &module.functions {
-            if !symbols.insert(function.symbol_id.clone()) {
-                return Err(AnalysisError::DuplicateFunction(function.symbol_id.clone()));
-            }
-            let summary = summarize(function)?;
-            for target in &summary.resolved_calls {
-                reverse_calls
-                    .entry(target.clone())
-                    .or_default()
-                    .push(function.symbol_id.clone());
-            }
-            summaries.push(summary);
+    for summary in &summaries {
+        for target in &summary.resolved_calls {
+            reverse_calls
+                .entry(target.clone())
+                .or_default()
+                .push(summary.symbol_id.clone());
         }
     }
     canonicalize_reverse_calls(&mut reverse_calls);
-    summaries.sort_by(|left, right| left.symbol_id.as_bytes().cmp(right.symbol_id.as_bytes()));
     Ok(AnalysisBundle {
         analysis_schema_version: crate::ANALYSIS_SCHEMA_VERSION,
         analyzer_version: crate::ANALYZER_VERSION,
