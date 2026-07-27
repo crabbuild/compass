@@ -1,7 +1,7 @@
 # VS Code Adaptive Edge Labels and Graph Loading Design
 
 **Date:** 2026-07-26  
-**Status:** Interaction approved; awaiting written-spec review
+**Status:** Approved
 
 ## Problem
 
@@ -234,8 +234,9 @@ and navigate the inspector.
 
 ## Verification
 
-Test-driven implementation will add targeted failing tests before production
-changes.
+Implementation-first delivery will add targeted regression tests immediately
+after each bounded production slice. It will not use a red-green TDD sequence,
+per the approved delivery constraint.
 
 Unit tests will cover:
 
