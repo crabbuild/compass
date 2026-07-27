@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  EDGE_LABEL_ZOOM_THRESHOLD,
   formatGraphEdgeLabel,
   shouldShowGraphEdgeLabel
 } from "./edgeLabels";
@@ -30,15 +29,15 @@ describe("shouldShowGraphEdgeLabel", () => {
   const hidden = {
     forceLabels: false,
     focusedNodeId: null,
-    hoveredEdgeId: null,
-    zoomScale: 1
+    focusedEdgeId: null,
+    hoveredEdgeId: null
   };
 
   it("keeps an unrelated edge hidden in the default wide view", () => {
     expect(shouldShowGraphEdgeLabel(edge, hidden)).toBe(false);
   });
 
-  it("reveals labels through each adaptive interaction", () => {
+  it("reveals labels through explicit and focused interactions", () => {
     expect(shouldShowGraphEdgeLabel(edge, {
       ...hidden,
       forceLabels: true
@@ -49,15 +48,22 @@ describe("shouldShowGraphEdgeLabel", () => {
     })).toBe(true);
     expect(shouldShowGraphEdgeLabel(edge, {
       ...hidden,
+      focusedEdgeId: "e1"
+    })).toBe(true);
+    expect(shouldShowGraphEdgeLabel(edge, {
+      ...hidden,
       focusedNodeId: "a"
     })).toBe(true);
     expect(shouldShowGraphEdgeLabel(edge, {
       ...hidden,
       focusedNodeId: "b"
     })).toBe(true);
+  });
+
+  it("does not reveal unrelated edges as the viewport changes", () => {
     expect(shouldShowGraphEdgeLabel(edge, {
       ...hidden,
-      zoomScale: EDGE_LABEL_ZOOM_THRESHOLD
-    })).toBe(true);
+      focusedEdgeId: "e2"
+    })).toBe(false);
   });
 });

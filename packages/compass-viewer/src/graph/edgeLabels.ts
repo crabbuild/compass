@@ -1,12 +1,10 @@
 import type { GraphEdge } from "../contracts/graph";
 
-export const EDGE_LABEL_ZOOM_THRESHOLD = 1.1;
-
 export type EdgeLabelVisibility = {
   forceLabels: boolean;
   focusedNodeId: string | null;
+  focusedEdgeId: string | null;
   hoveredEdgeId: string | null;
-  zoomScale: number;
 };
 
 export function formatGraphEdgeLabel(
@@ -25,7 +23,7 @@ export function shouldShowGraphEdgeLabel(
 ): boolean {
   return visibility.forceLabels
     || visibility.hoveredEdgeId === edge.id
+    || visibility.focusedEdgeId === edge.id
     || visibility.focusedNodeId === edge.source
-    || visibility.focusedNodeId === edge.target
-    || visibility.zoomScale >= EDGE_LABEL_ZOOM_THRESHOLD;
+    || visibility.focusedNodeId === edge.target;
 }

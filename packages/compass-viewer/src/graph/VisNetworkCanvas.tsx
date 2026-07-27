@@ -308,7 +308,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
     const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
-    const [zoomScale, setZoomScale] = useState(0);
+    const [focusedEdgeId, setFocusedEdgeId] = useState<string | null>(null);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
@@ -464,9 +464,17 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const handleBlurEdge = useCallback(() => {
       setHoveredEdgeId(null);
     }, []);
-    const handleZoom = useCallback((scale: number) => {
-      setZoomScale(scale);
+    const handleFocusEdge = useCallback((edgeId: string) => {
+      setFocusedEdgeId(edgeId || null);
     }, []);
+    const handleFocusNode = useCallback((nodeId: string) => {
+      setFocusedEdgeId(null);
+      onFocus(nodeId);
+    }, [onFocus]);
+    const handleClear = useCallback(() => {
+      setFocusedEdgeId(null);
+      onClear();
+    }, [onClear]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -480,20 +488,19 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
       bindGraphNetworkEvents(network, {
-        onFocus,
+        onFocus: handleFocusNode,
+        onFocusEdge: handleFocusEdge,
         onOpenSource,
         onHover,
         onHoverEdge: handleHoverEdge,
         onBlurEdge: handleBlurEdge,
-        onZoom: handleZoom,
-        onClear
+        onClear: handleClear
       });
       network.once("stabilizationIterationsDone", () => {
         initialViewRef.current = {
           position: network.getViewPosition(),
           scale: network.getScale()
         };
-        setZoomScale(network.getScale());
         onStabilized();
       });
       return () => {
@@ -505,10 +512,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       nodeData,
       comparisonMode,
       handleBlurEdge,
+      handleClear,
+      handleFocusEdge,
+      handleFocusNode,
       handleHoverEdge,
-      handleZoom,
-      onClear,
-      onFocus,
       onHover,
       onOpenSource,
       onStabilized
@@ -605,6 +612,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             ? false
             : { duration: 260, easingFunction: "easeInOutQuad" }
         });
+      } else if (focusedEdgeId) {
+        network.selectEdges([focusedEdgeId]);
       } else {
         network.unselectAll();
       }
@@ -613,6 +622,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       comparisonPalette,
       edgeColor,
       edgeData,
+      focusedEdgeId,
       focusedNodeId,
       model,
       nodeData
@@ -647,11 +657,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       const visibility = {
         forceLabels,
         focusedNodeId,
-        hoveredEdgeId,
-        zoomScale
+        focusedEdgeId,
+        hoveredEdgeId
       };
       edgeData.update(model.edges.map((edge) => {
-        const focused = focusedNodeId === edge.source || focusedNodeId === edge.target;
+        const focused = focusedEdgeId === edge.id
+          || focusedNodeId === edge.source
+          || focusedNodeId === edge.target;
         const hovered = hoveredEdgeId === edge.id;
         return {
           id: edge.id,
@@ -674,11 +686,11 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       edgeLabelColor,
       edgeLabelFont,
       edgeLabelMutedColor,
+      focusedEdgeId,
       focusedNodeId,
       forceLabels,
       hoveredEdgeId,
-      model.edges,
-      zoomScale
+      model.edges
     ]);
 
     useImperativeHandle(ref, () => ({

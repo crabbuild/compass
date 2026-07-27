@@ -8,6 +8,11 @@
 
 **Tech Stack:** Rust and Serde, TypeScript 5.9, React 19, vis-network 9, Zod 4, Vitest 3, Playwright 1.56, VS Code webviews, CSS using VS Code semantic variables.
 
+> **Approved revision:** The user subsequently removed zoom as an edge-label
+> trigger and approved click/focus pinning instead. The loader now uses only the
+> current tilted Compass logo, without the graph constellation. This revision
+> supersedes the original zoom and constellation steps below.
+
 ## Global Constraints
 
 - Implement production behavior before adding its regression tests, per the user's explicit request; do not use a red-green TDD sequence.

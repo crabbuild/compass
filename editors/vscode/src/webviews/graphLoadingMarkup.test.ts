@@ -10,6 +10,8 @@ describe("graphStaticLoadingMarkup", () => {
     expect(markup).toContain("Mapping your codebase");
     expect(markup).toContain("Reading graph");
     expect(markup).toContain("compass-load-progress");
+    expect(markup).toContain("compass-load-logo");
+    expect(markup).not.toContain("compass-load-graph");
     expect(markup).not.toContain("<script");
     expect(markup).not.toContain("<style");
   });

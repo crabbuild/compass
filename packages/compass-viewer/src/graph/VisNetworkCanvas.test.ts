@@ -61,14 +61,14 @@ describe("graphNodeColor", () => {
     expect(shouldShowGraphEdgeLabel(edge, {
       forceLabels: false,
       focusedNodeId: "run",
+      focusedEdgeId: null,
       hoveredEdgeId: null,
-      zoomScale: 1
     })).toBe(true);
     expect(shouldShowGraphEdgeLabel(edge, {
       forceLabels: false,
       focusedNodeId: "store",
+      focusedEdgeId: null,
       hoveredEdgeId: null,
-      zoomScale: 1
     })).toBe(false);
   });
 });

@@ -15,9 +15,10 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain('role="status"');
     expect(markup).toContain("Mapping your codebase");
     expect(markup).toContain("Arranging relationships");
-    expect(markup).toContain('data-testid="graph-constellation"');
+    expect(markup).toContain('data-testid="compass-loading-logo"');
     expect(markup).toContain('aria-hidden="true"');
-    expect(markup).toContain("compass-load-graph");
+    expect(markup).toContain("compass-load-logo");
+    expect(markup).not.toContain("compass-load-graph");
     expect(markup).toContain(
       'class="compass-load-step" data-state="active"><i aria-hidden="true"></i>Reading graph'
     );
@@ -36,7 +37,7 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("viewer export failed");
     expect(markup).toContain("Retry");
     expect(markup).toContain("Show Compass output");
-    expect(markup).not.toContain("compass-load-tracer");
+    expect(markup).not.toContain("compass-load-logo");
   });
 
   it("accepts purpose-specific loading copy", () => {

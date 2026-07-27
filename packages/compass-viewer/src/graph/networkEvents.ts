@@ -15,11 +15,11 @@ export type GraphNetworkEventSource = {
 
 export type GraphNetworkHandlers = {
   onFocus(nodeId: string): void;
+  onFocusEdge(edgeId: string): void;
   onOpenSource(nodeId: string): void;
   onHover(change: GraphHover | null): void;
   onHoverEdge(edgeId: string): void;
   onBlurEdge(): void;
-  onZoom(scale: number): void;
   onClear(): void;
 };
 
@@ -30,9 +30,17 @@ export function bindGraphNetworkEvents(
   network.on("click", (parameters) => {
     handlers.onHover(null);
     handlers.onBlurEdge();
-    const selected = parameters.nodes[0];
-    if (selected !== undefined) handlers.onFocus(String(selected));
-    else handlers.onClear();
+    const selectedNode = parameters.nodes[0];
+    const selectedEdge = parameters.edges[0];
+    if (selectedNode !== undefined) {
+      handlers.onFocus(String(selectedNode));
+    } else if (selectedEdge !== undefined) {
+      handlers.onClear();
+      handlers.onFocusEdge(String(selectedEdge));
+    } else {
+      handlers.onClear();
+      handlers.onFocusEdge("");
+    }
   });
   network.on("doubleClick", (parameters) => {
     const selected = parameters.nodes[0];
@@ -57,9 +65,8 @@ export function bindGraphNetworkEvents(
     handlers.onHover(null);
     handlers.onBlurEdge();
   });
-  network.on("zoom", (parameters) => {
+  network.on("zoom", () => {
     handlers.onHover(null);
     handlers.onBlurEdge();
-    if (parameters.scale !== undefined) handlers.onZoom(parameters.scale);
   });
 }

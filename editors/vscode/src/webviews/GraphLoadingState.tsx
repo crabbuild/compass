@@ -1,6 +1,5 @@
 import {
   AlertTriangleIcon,
-  CompassIcon,
   RotateCcwIcon,
   SquareTerminalIcon
 } from "lucide-react";
@@ -23,6 +22,24 @@ const DEFAULT_LOADING_COPY: GraphLoadingCopy = {
   activeStep: 0
 };
 
+function CompassBrandMark() {
+  return (
+    <svg
+      className="compass-load-logo"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M3.554 21.529c1.797 1.221 4.943-.038 11.236-2.554 1.342-.537 2.013-.806 2.54-1.267q.201-.177.378-.378c.461-.527.73-1.198 1.267-2.54 2.515-6.293 3.775-9.44 2.554-11.236a4.1 4.1 0 0 0-1.083-1.083c-1.797-1.221-4.944.037-11.236 2.554-1.342.537-2.013.806-2.54 1.267q-.201.177-.378.378c-.461.527-.73 1.198-1.267 2.54-2.517 6.292-3.775 9.439-2.554 11.236.29.426.657.793 1.083 1.083M8.25 12a3.75 3.75 0 1 1 7.5 0 3.75 3.75 0 0 1-7.5 0m1.5 0a2.25 2.25 0 1 1 4.5 0 2.25 2.25 0 0 1-4.5 0"
+      />
+    </svg>
+  );
+}
+
 export function GraphLoadingState({
   state,
   onRetry,
@@ -40,42 +57,13 @@ export function GraphLoadingState({
   return (
     <main className="compass-load-shell" data-variant={variant}>
       <div
-        className="compass-load-constellation"
-        data-testid="graph-constellation"
+        className="compass-load-visual"
+        data-testid="compass-loading-logo"
         data-state={state.kind}
         aria-hidden="true"
       >
-        {loading && (
-          <svg className="compass-load-graph" viewBox="0 0 180 112">
-            <path
-              className="compass-load-edge compass-load-edge-a"
-              d="M18 74 58 28 90 56"
-            />
-            <path
-              className="compass-load-edge compass-load-edge-b"
-              d="M90 56 132 20 162 62"
-            />
-            <path
-              className="compass-load-edge compass-load-edge-c"
-              d="M42 94 90 56 138 94"
-            />
-            <circle className="compass-load-node compass-load-node-a" cx="18" cy="74" r="4" />
-            <circle className="compass-load-node compass-load-node-b" cx="58" cy="28" r="4" />
-            <circle className="compass-load-node compass-load-node-c" cx="132" cy="20" r="4" />
-            <circle className="compass-load-node compass-load-node-d" cx="162" cy="62" r="4" />
-            <circle className="compass-load-node compass-load-node-e" cx="42" cy="94" r="4" />
-            <circle className="compass-load-node compass-load-node-f" cx="138" cy="94" r="4" />
-            <circle className="compass-load-tracer" r="3">
-              <animateMotion
-                dur="2.8s"
-                repeatCount="indefinite"
-                path="M18 74 58 28 90 56 132 20 162 62"
-              />
-            </circle>
-          </svg>
-        )}
         <span className="compass-load-mark">
-          {loading ? <CompassIcon /> : <AlertTriangleIcon />}
+          {loading ? <CompassBrandMark /> : <AlertTriangleIcon />}
         </span>
         {loading && <span className="compass-load-progress"><i /></span>}
       </div>
