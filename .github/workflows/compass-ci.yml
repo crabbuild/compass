@@ -31,7 +31,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck:js
       - run: npm run test:js
-      - run: xvfb-run -a npm run test:integration -w compass-vscode
+      - run: xvfb-run -a npm run test:integration -w editors/vscode
       - run: node scripts/check_viewer_assets.mjs
       - run: npm run build:vscode
       - run: npm run package -w editors/vscode

@@ -1,10 +1,10 @@
-import { readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
 const directory = path.resolve(new URL("..", import.meta.url).pathname);
-const vsix = (await readdir(directory)).find((file) => file.endsWith(".vsix"));
-if (!vsix) throw new Error("No packaged VSIX found");
+const manifest = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
+const vsix = `${manifest.name}-${manifest.version}.vsix`;
 const unzip = spawnSync("unzip", ["-l", path.join(directory, vsix)], {
   encoding: "utf8",
   shell: false

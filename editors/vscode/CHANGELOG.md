@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Adopt the new Compass Codegraph logo for the Marketplace and VS Code
+  Activity Bar.
+
 ## 0.1.1
 
 - Allow the Codebase Evolution diff renderer's generated grid-span styles so
