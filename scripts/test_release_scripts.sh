@@ -15,17 +15,25 @@ chmod +x "$test_root/fake-checksum-bin/shasum"
 
 cat > "$test_root/fake-checksum-bin/sha256sum" <<'EOF'
 #!/bin/sh
+if [ -x /usr/bin/sha256sum ]; then
+    exec /usr/bin/sha256sum "$@"
+fi
 exec /usr/bin/shasum -a 256 "$@"
 EOF
 chmod +x "$test_root/fake-checksum-bin/sha256sum"
 
-for target in \
-    aarch64-apple-darwin \
-    x86_64-apple-darwin \
-    aarch64-unknown-linux-gnu \
-    x86_64-unknown-linux-gnu
+for release_case in \
+    "aarch64-apple-darwin compass" \
+    "x86_64-apple-darwin compass" \
+    "aarch64-unknown-linux-gnu compass" \
+    "x86_64-unknown-linux-gnu compass" \
+    "aarch64-pc-windows-msvc compass.exe" \
+    "x86_64-pc-windows-msvc compass.exe"
 do
-    fake_binary="$test_root/fake-compass-$target"
+    set -- $release_case
+    target=$1
+    binary_name=$2
+    fake_binary="$test_root/fake-$target-$binary_name"
     printf '#!/bin/sh\necho %s\n' "$target" > "$fake_binary"
     chmod +x "$fake_binary"
     dist="$test_root/dist-$target"
@@ -35,9 +43,13 @@ do
     checksum="$archive.sha256"
     test -f "$archive"
     test -f "$checksum"
-    (cd "$dist" && shasum -a 256 -c "$(basename "$checksum")")
-    tar -tzf "$archive" | grep -Eq '(^|/)compass$'
-    test "$(tar -tzf "$archive" | grep -Ec '(^|/)compass$')" -eq 1
+    (
+        cd "$dist"
+        PATH="$test_root/fake-checksum-bin:$PATH" \
+            sha256sum -c "$(basename "$checksum")"
+    )
+    tar -tzf "$archive" | grep -Eq "(^|/)$binary_name$"
+    test "$(tar -tzf "$archive" | grep -Ec "(^|/)$binary_name$")" -eq 1
 done
 
 release_dir="$test_root/release"

@@ -11,7 +11,12 @@ binary=$2
 dist=$3
 case "$target" in
     aarch64-apple-darwin|x86_64-apple-darwin|\
-    aarch64-unknown-linux-gnu|x86_64-unknown-linux-gnu) ;;
+    aarch64-unknown-linux-gnu|x86_64-unknown-linux-gnu)
+        binary_name=compass
+        ;;
+    aarch64-pc-windows-msvc|x86_64-pc-windows-msvc)
+        binary_name=compass.exe
+        ;;
     *)
         echo "error: unsupported release target: $target" >&2
         exit 2
@@ -26,7 +31,8 @@ trap 'rm -rf "$staging"' EXIT HUP INT TERM
 bundle="$staging/$name"
 mkdir -p "$bundle" "$dist"
 
-install -m 0755 "$binary" "$bundle/compass"
+cp "$binary" "$bundle/$binary_name"
+chmod 0755 "$bundle/$binary_name"
 cp "$repo_root/README.md" "$bundle/"
 cp "$repo_root/LICENSE" "$bundle/"
 cp "$repo_root/LICENSE-MIT" "$bundle/"

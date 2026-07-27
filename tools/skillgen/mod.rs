@@ -42,7 +42,7 @@ pub(crate) fn validate(assets: &Path, cli_source: &Path, help_source: &Path) -> 
     let skill_path = skill_root.join("SKILL.md");
     let skill = read_utf8(&skill_path)?;
     require(
-        skill.starts_with("---\nname: compass\n"),
+        has_canonical_frontmatter(&skill),
         &skill_path,
         "frontmatter must start with the canonical Compass skill name",
     )?;
@@ -276,7 +276,7 @@ fn validate_integrations(root: &Path) -> io::Result<()> {
             .unwrap_or_default();
         if DELEGATING_INTEGRATIONS.contains(&name) {
             require(
-                body.starts_with("---\nname: compass\n"),
+                has_canonical_frontmatter(&body),
                 &path,
                 "delegating command must use canonical Compass frontmatter",
             )?;
@@ -350,6 +350,11 @@ fn read_utf8(path: &Path) -> io::Result<String> {
         .map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))
 }
 
+fn has_canonical_frontmatter(body: &str) -> bool {
+    let mut lines = body.lines();
+    lines.next() == Some("---") && lines.next() == Some("name: compass")
+}
+
 fn validate_native(path: &Path, body: &str) -> io::Result<()> {
     let lowercase = body.to_ascii_lowercase();
     require(
@@ -381,7 +386,23 @@ fn path_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::linked_references;
+    use super::{has_canonical_frontmatter, linked_references};
+
+    #[test]
+    fn canonical_frontmatter_accepts_lf_and_crlf() {
+        assert!(has_canonical_frontmatter(
+            "---\nname: compass\ndescription: test\n"
+        ));
+        assert!(has_canonical_frontmatter(
+            "---\r\nname: compass\r\ndescription: test\r\n"
+        ));
+        assert!(!has_canonical_frontmatter(
+            "---\n\nname: compass\ndescription: test\n"
+        ));
+        assert!(!has_canonical_frontmatter(
+            "---\nname: other\ndescription: test\n"
+        ));
+    }
 
     #[test]
     fn reference_links_are_deduplicated_and_sorted() {
