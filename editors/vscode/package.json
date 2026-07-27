@@ -126,7 +126,7 @@
       },
       {
         "command": "compass.selectCli",
-        "title": "Compass: Select CLI Binary",
+        "title": "Compass: Select CLI Version",
         "icon": "$(terminal)"
       }
     ],
@@ -143,7 +143,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Absolute path to an installed Compass CLI. Leave empty to discover compass on PATH."
+          "description": "Absolute path to the selected Compass CLI. Leave empty to auto-detect Compass on PATH and in common install locations."
         },
         "compass.graphNodeLimit": {
           "type": "number",
@@ -255,7 +255,7 @@
           {
             "id": "compass.cli",
             "title": "Connect the Compass CLI",
-            "description": "Install Compass separately and configure `compass.cliPath` if it is not on PATH."
+            "description": "Compass auto-detects installed CLI versions. Use **Select Compass CLI** to compare paths or choose a different version."
           },
           {
             "id": "compass.init",

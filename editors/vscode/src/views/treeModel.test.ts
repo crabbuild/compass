@@ -7,7 +7,14 @@ import {
 
 const discovery = {
   kind: "found" as const,
-  executable: "/usr/local/bin/compass"
+  executable: "/usr/local/bin/compass",
+  version: "0.1.5",
+  installations: [{
+    executable: "/usr/local/bin/compass",
+    version: "0.1.5",
+    source: "path" as const
+  }],
+  searched: ["/usr/local/bin/compass"]
 };
 
 const available: SessionTreeSnapshot = {
@@ -105,7 +112,7 @@ describe("buildWorkspaceTree", () => {
 
   it("focuses the tree on setup when the CLI is missing or incompatible", () => {
     const missing = buildWorkspaceTree(
-      { kind: "missing", searched: ["/usr/bin/compass"] },
+      { kind: "missing", installations: [], searched: ["/usr/bin/compass"] },
       [available]
     );
     expect(missing.map((node) => node.label)).toEqual([
