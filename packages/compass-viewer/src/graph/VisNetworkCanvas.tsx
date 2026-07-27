@@ -308,7 +308,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
     const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
-    const [focusedEdgeId, setFocusedEdgeId] = useState<string | null>(null);
+    const labeledEdgeRef = useRef<string | null>(null);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
@@ -327,10 +327,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     );
     const edgeLabelColor = useMemo(
       () => cssColor("--vscode-editor-foreground", "#eef5ff"),
-      [themeRevision]
-    );
-    const edgeLabelMutedColor = useMemo(
-      () => cssColor("--vscode-descriptionForeground", "#9aa7b7"),
       [themeRevision]
     );
     const edgeLabelBackground = useMemo(
@@ -458,23 +454,16 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       })
     ), [comparisonMode, model.edges]);
+    const graphEdgeById = useMemo(
+      () => new Map(model.edges.map((edge) => [edge.id, edge])),
+      [model.edges]
+    );
     const handleHoverEdge = useCallback((edgeId: string) => {
       setHoveredEdgeId(edgeId);
     }, []);
     const handleBlurEdge = useCallback(() => {
       setHoveredEdgeId(null);
     }, []);
-    const handleFocusEdge = useCallback((edgeId: string) => {
-      setFocusedEdgeId(edgeId || null);
-    }, []);
-    const handleFocusNode = useCallback((nodeId: string) => {
-      setFocusedEdgeId(null);
-      onFocus(nodeId);
-    }, [onFocus]);
-    const handleClear = useCallback(() => {
-      setFocusedEdgeId(null);
-      onClear();
-    }, [onClear]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -488,13 +477,12 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
       bindGraphNetworkEvents(network, {
-        onFocus: handleFocusNode,
-        onFocusEdge: handleFocusEdge,
+        onFocus,
         onOpenSource,
         onHover,
         onHoverEdge: handleHoverEdge,
         onBlurEdge: handleBlurEdge,
-        onClear: handleClear
+        onClear
       });
       network.once("stabilizationIterationsDone", () => {
         initialViewRef.current = {
@@ -512,10 +500,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       nodeData,
       comparisonMode,
       handleBlurEdge,
-      handleClear,
-      handleFocusEdge,
-      handleFocusNode,
       handleHoverEdge,
+      onClear,
+      onFocus,
       onHover,
       onOpenSource,
       onStabilized
@@ -612,8 +599,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             ? false
             : { duration: 260, easingFunction: "easeInOutQuad" }
         });
-      } else if (focusedEdgeId) {
-        network.selectEdges([focusedEdgeId]);
       } else {
         network.unselectAll();
       }
@@ -622,7 +607,6 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       comparisonPalette,
       edgeColor,
       edgeData,
-      focusedEdgeId,
       focusedNodeId,
       model,
       nodeData
@@ -654,43 +638,37 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     ]);
 
     useEffect(() => {
-      const visibility = {
-        forceLabels,
-        focusedNodeId,
-        focusedEdgeId,
-        hoveredEdgeId
-      };
-      edgeData.update(model.edges.map((edge) => {
-        const focused = focusedEdgeId === edge.id
-          || focusedNodeId === edge.source
-          || focusedNodeId === edge.target;
-        const hovered = hoveredEdgeId === edge.id;
-        return {
-          id: edge.id,
-          label: shouldShowGraphEdgeLabel(edge, visibility)
-            ? formatGraphEdgeLabel(edge)
-            : "",
-          font: {
-            align: "middle",
-            face: edgeLabelFont,
-            size: 11,
-            color: focused || hovered ? edgeLabelColor : edgeLabelMutedColor,
-            background: edgeLabelBackground,
-            strokeWidth: 0
-          }
-        };
-      }));
+      const previousEdgeId = labeledEdgeRef.current;
+      const updates: Edge[] = [];
+      if (previousEdgeId && previousEdgeId !== hoveredEdgeId && edgeData.get(previousEdgeId)) {
+        updates.push({ id: previousEdgeId, label: "" });
+      }
+      if (hoveredEdgeId) {
+        const edge = graphEdgeById.get(hoveredEdgeId);
+        if (edge && shouldShowGraphEdgeLabel(edge, { hoveredEdgeId })) {
+          updates.push({
+            id: edge.id,
+            label: formatGraphEdgeLabel(edge),
+            font: {
+              align: "middle",
+              face: edgeLabelFont,
+              size: 11,
+              color: edgeLabelColor,
+              background: edgeLabelBackground,
+              strokeWidth: 0
+            }
+          });
+        }
+      }
+      if (updates.length > 0) edgeData.update(updates);
+      labeledEdgeRef.current = hoveredEdgeId;
     }, [
       edgeData,
       edgeLabelBackground,
       edgeLabelColor,
       edgeLabelFont,
-      edgeLabelMutedColor,
-      focusedEdgeId,
-      focusedNodeId,
-      forceLabels,
+      graphEdgeById,
       hoveredEdgeId,
-      model.edges
     ]);
 
     useImperativeHandle(ref, () => ({

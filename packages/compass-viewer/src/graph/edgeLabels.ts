@@ -1,9 +1,6 @@
 import type { GraphEdge } from "../contracts/graph";
 
 export type EdgeLabelVisibility = {
-  forceLabels: boolean;
-  focusedNodeId: string | null;
-  focusedEdgeId: string | null;
   hoveredEdgeId: string | null;
 };
 
@@ -18,12 +15,8 @@ export function formatGraphEdgeLabel(
 }
 
 export function shouldShowGraphEdgeLabel(
-  edge: Pick<GraphEdge, "id" | "source" | "target">,
+  edge: Pick<GraphEdge, "id">,
   visibility: EdgeLabelVisibility
 ): boolean {
-  return visibility.forceLabels
-    || visibility.hoveredEdgeId === edge.id
-    || visibility.focusedEdgeId === edge.id
-    || visibility.focusedNodeId === edge.source
-    || visibility.focusedNodeId === edge.target;
+  return visibility.hoveredEdgeId === edge.id;
 }

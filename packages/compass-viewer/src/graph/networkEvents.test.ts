@@ -14,7 +14,6 @@ function fixture() {
   };
   const handlers = {
     onFocus: vi.fn(),
-    onFocusEdge: vi.fn(),
     onOpenSource: vi.fn(),
     onHover: vi.fn(),
     onHoverEdge: vi.fn(),
@@ -48,17 +47,21 @@ describe("bindGraphNetworkEvents", () => {
     expect(handlers.onOpenSource).not.toHaveBeenCalled();
   });
 
-  it("pins a clicked edge and clears a clicked background", () => {
+  it("clears graph focus on edge clicks without ending the active hover", () => {
     const { listeners, handlers } = fixture();
     listeners.get("click")?.({
       ...event([]),
       edges: [7]
     });
     expect(handlers.onClear).toHaveBeenCalledTimes(1);
-    expect(handlers.onFocusEdge).toHaveBeenCalledWith("7");
+    expect(handlers.onBlurEdge).not.toHaveBeenCalled();
+  });
 
+  it("clears both graph focus and edge hover on background clicks", () => {
+    const { listeners, handlers } = fixture();
     listeners.get("click")?.(event([]));
-    expect(handlers.onFocusEdge).toHaveBeenLastCalledWith("");
+    expect(handlers.onClear).toHaveBeenCalledTimes(1);
+    expect(handlers.onBlurEdge).toHaveBeenCalledTimes(1);
   });
 
   it("forwards edge hover and clears it on blur", () => {
@@ -83,7 +86,6 @@ describe("bindGraphNetworkEvents", () => {
 
     expect(handlers.onHover).toHaveBeenCalledWith(null);
     expect(handlers.onBlurEdge).toHaveBeenCalledTimes(1);
-    expect(handlers.onFocusEdge).not.toHaveBeenCalled();
   });
 
   it("clears node and edge hover when dragging starts", () => {

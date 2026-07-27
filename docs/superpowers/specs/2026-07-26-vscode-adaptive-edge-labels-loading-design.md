@@ -5,10 +5,10 @@
 
 ## Approved Interaction Revision
 
-The final interaction removes zoom-driven disclosure. Edge labels appear only
-while their edge is hovered, while their edge is clicked/focused, when they are
-incident to the focused node, or when the user explicitly enables `Show
-labels`. Zooming never reveals additional labels.
+The final interaction uses direct hover as the sole disclosure trigger. An edge
+label appears only while that specific edge is hovered and disappears on blur,
+drag, or zoom. Edge clicks, node focus, and the `Show labels` control never
+reveal edge labels; `Show labels` remains a node-label control.
 
 The final loader also removes the knowledge-graph constellation. Its sole
 visual mark is the current tilted Compass logo from the extension media assets,

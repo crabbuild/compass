@@ -49,7 +49,7 @@ describe("graphNodeColor", () => {
     });
   });
 
-  it("derives focused relationship labels without forcing unrelated edges", () => {
+  it("derives relationship labels but reveals them only on direct hover", () => {
     const edge = {
       id: "run-helper",
       source: "run",
@@ -59,16 +59,10 @@ describe("graphNodeColor", () => {
     };
     expect(formatGraphEdgeLabel(edge)).toBe("calls [EXTRACTED]");
     expect(shouldShowGraphEdgeLabel(edge, {
-      forceLabels: false,
-      focusedNodeId: "run",
-      focusedEdgeId: null,
-      hoveredEdgeId: null,
+      hoveredEdgeId: "run-helper"
     })).toBe(true);
     expect(shouldShowGraphEdgeLabel(edge, {
-      forceLabels: false,
-      focusedNodeId: "store",
-      focusedEdgeId: null,
-      hoveredEdgeId: null,
+      hoveredEdgeId: null
     })).toBe(false);
   });
 });

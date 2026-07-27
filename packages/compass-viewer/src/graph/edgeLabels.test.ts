@@ -25,45 +25,20 @@ describe("formatGraphEdgeLabel", () => {
 });
 
 describe("shouldShowGraphEdgeLabel", () => {
-  const edge = { id: "e1", source: "a", target: "b" };
-  const hidden = {
-    forceLabels: false,
-    focusedNodeId: null,
-    focusedEdgeId: null,
-    hoveredEdgeId: null
-  };
+  const edge = { id: "e1" };
 
-  it("keeps an unrelated edge hidden in the default wide view", () => {
-    expect(shouldShowGraphEdgeLabel(edge, hidden)).toBe(false);
+  it("keeps an edge hidden until it is directly hovered", () => {
+    expect(shouldShowGraphEdgeLabel(edge, {
+      hoveredEdgeId: null
+    })).toBe(false);
+    expect(shouldShowGraphEdgeLabel(edge, {
+      hoveredEdgeId: "e2"
+    })).toBe(false);
   });
 
-  it("reveals labels through explicit and focused interactions", () => {
+  it("reveals only the directly hovered edge", () => {
     expect(shouldShowGraphEdgeLabel(edge, {
-      ...hidden,
-      forceLabels: true
-    })).toBe(true);
-    expect(shouldShowGraphEdgeLabel(edge, {
-      ...hidden,
       hoveredEdgeId: "e1"
     })).toBe(true);
-    expect(shouldShowGraphEdgeLabel(edge, {
-      ...hidden,
-      focusedEdgeId: "e1"
-    })).toBe(true);
-    expect(shouldShowGraphEdgeLabel(edge, {
-      ...hidden,
-      focusedNodeId: "a"
-    })).toBe(true);
-    expect(shouldShowGraphEdgeLabel(edge, {
-      ...hidden,
-      focusedNodeId: "b"
-    })).toBe(true);
-  });
-
-  it("does not reveal unrelated edges as the viewport changes", () => {
-    expect(shouldShowGraphEdgeLabel(edge, {
-      ...hidden,
-      focusedEdgeId: "e2"
-    })).toBe(false);
   });
 });

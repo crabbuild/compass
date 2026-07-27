@@ -15,7 +15,6 @@ export type GraphNetworkEventSource = {
 
 export type GraphNetworkHandlers = {
   onFocus(nodeId: string): void;
-  onFocusEdge(edgeId: string): void;
   onOpenSource(nodeId: string): void;
   onHover(change: GraphHover | null): void;
   onHoverEdge(edgeId: string): void;
@@ -29,17 +28,12 @@ export function bindGraphNetworkEvents(
 ): void {
   network.on("click", (parameters) => {
     handlers.onHover(null);
-    handlers.onBlurEdge();
+    if (parameters.edges.length === 0) handlers.onBlurEdge();
     const selectedNode = parameters.nodes[0];
-    const selectedEdge = parameters.edges[0];
     if (selectedNode !== undefined) {
       handlers.onFocus(String(selectedNode));
-    } else if (selectedEdge !== undefined) {
-      handlers.onClear();
-      handlers.onFocusEdge(String(selectedEdge));
     } else {
       handlers.onClear();
-      handlers.onFocusEdge("");
     }
   });
   network.on("doubleClick", (parameters) => {
