@@ -108,7 +108,11 @@ impl CompleteGraphBuilder for RecordingBuilder {
                 program: None,
                 analysis: None,
                 labels: None,
-                manifest: Some(json!({"service.rs":{"ast_hash":"fixture"}})),
+                manifest: Some(json!({
+                    "service.rs":{"ast_hash":"fixture"},
+                    "settings.toml":{"ast_hash":"fixture"},
+                    "config/tsconfig.json":{"ast_hash":"fixture"}
+                })),
                 authoritative_sidecars: Default::default(),
             },
             completion: CompletionEvidence {
@@ -149,7 +153,52 @@ fn current_snapshot_is_published_without_invoking_the_exact_builder()
     assert!(builder.builds()? == 0, "exact builder unexpectedly ran");
     let artifacts = history.artifacts(&published.id)?;
     assert_eq!(artifacts.artifacts.document.nodes[0].id, "promoted");
+    let inventory: serde_json::Value = serde_json::from_slice(
+        artifacts
+            .artifacts
+            .authoritative_sidecars
+            .get(".compass_source_inventory.json")
+            .ok_or("source inventory was not published")?,
+    )?;
+    assert_eq!(inventory["schema"], "compass.history.source_inventory/1");
+    assert_eq!(inventory["code_files"]["service.rs"]["status"], "extracted");
+    assert!(
+        inventory["code_files"]["service.rs"]["git_object"]
+            .as_str()
+            .is_some_and(|object| object.len() >= 40)
+    );
     assert_eq!(published.version.git_commit, commit.to_string());
+    Ok(())
+}
+
+#[test]
+fn exact_materialization_rejects_a_code_file_without_an_ast_completion_stamp()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
+    std::fs::write(directory.path().join("omitted.py"), "def omitted(): pass\n")?;
+    git(directory.path(), &["add", "."])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "sources"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let history = HistoryStore::create(&repository)?;
+
+    let error = materialize_history(
+        &history,
+        &RecordingBuilder::default(),
+        request(&repository, commit.clone(), false)?,
+    )
+    .err()
+    .ok_or("materialization unexpectedly accepted an omitted code source")?;
+
+    assert!(error.to_string().contains("omitted.py"));
+    assert!(history.preferred(&commit)?.is_none());
     Ok(())
 }
 

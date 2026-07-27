@@ -51,10 +51,16 @@ compass diff v1.2.0 HEAD
 compass diff HEAD~1 HEAD --all
 compass diff HEAD~1 HEAD --format json
 compass diff HEAD~1 HEAD --explain sd1-...
+compass history diff HEAD~1 HEAD --format jsonl
+compass history diff HEAD~1 HEAD --root nodes --root edges --output exact.jsonl
 compass history list HEAD --format json
 compass history show HEAD
 compass history export HEAD --format compass-out --output historical-output
 ```
+
+Use `compass diff` for a ranked semantic review. Use `compass history diff`
+when the user needs an exhaustive, deterministic record-level comparison of
+immutable graph roots.
 
 Semantic realizations with different extraction fingerprints are not silently
 treated as equivalent. Use `history list`, `show`, and `prefer` to inspect or

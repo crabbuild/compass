@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -195,6 +196,55 @@ impl Repository {
         attach_hunks(&patch, &mut deltas)?;
         deltas.sort();
         Ok(deltas)
+    }
+
+    /// Return the exact Git object identity for every ordinary blob in a commit.
+    ///
+    /// Paths are repository-relative and use Git's `/` separator. Gitlinks are
+    /// deliberately excluded because they are reported separately as target
+    /// limitations and cannot contribute ordinary source records.
+    pub fn committed_blob_ids(
+        &self,
+        commit: &CommitId,
+    ) -> Result<BTreeMap<String, String>, HistoryError> {
+        let listing = git_output(
+            &self.root,
+            &["ls-tree", "-r", "-z", "--full-tree", commit.as_str()],
+        )?;
+        let mut blobs = BTreeMap::new();
+        for entry in listing
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+        {
+            let tab = entry
+                .iter()
+                .position(|byte| *byte == b'\t')
+                .ok_or_else(|| {
+                    HistoryError::Git("Git returned malformed tree inventory".to_owned())
+                })?;
+            let metadata = std::str::from_utf8(&entry[..tab]).map_err(|error| {
+                HistoryError::Git(format!("Git returned non-UTF-8 tree metadata: {error}"))
+            })?;
+            let fields = metadata.split_ascii_whitespace().collect::<Vec<_>>();
+            if fields.len() != 3 || fields.get(1) != Some(&"blob") {
+                continue;
+            }
+            let object = fields[2];
+            if object.len() < 40 || !object.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(HistoryError::Git(format!(
+                    "Git returned invalid blob identity {object:?}"
+                )));
+            }
+            let path = String::from_utf8(entry[tab + 1..].to_vec()).map_err(|error| {
+                HistoryError::Git(format!("Git returned non-UTF-8 tree path: {error}"))
+            })?;
+            if blobs.insert(path.clone(), object.to_owned()).is_some() {
+                return Err(HistoryError::Git(format!(
+                    "Git returned duplicate tree path {path:?}"
+                )));
+            }
+        }
+        Ok(blobs)
     }
 
     /// Return every commit reachable from `tip` in parent-before-child order.
