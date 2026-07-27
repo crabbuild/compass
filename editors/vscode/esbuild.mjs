@@ -60,6 +60,7 @@ const builds = [
     entryPoints: {
       graph: "src/webviews/graph.tsx",
       callGraph: "src/webviews/callGraph.tsx",
+      callGraphGuide: "src/webviews/callGraphGuide.tsx",
       architecture: "src/webviews/architecture.tsx",
       query: "src/webviews/query.tsx",
       history: "src/webviews/history.tsx",

@@ -125,8 +125,8 @@ export function buildWorkspaceTree(
         "workspace:call-graph",
         "Call graph from cursor",
         "references",
-        "compass.openCallGraph",
-        "Trace callers and callees for the active function"
+        "compass.openCallGraphGuide",
+        "Learn how to trace callers and callees from the editor"
       ),
       actionNode(
         "workspace:query",

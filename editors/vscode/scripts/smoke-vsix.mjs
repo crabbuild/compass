@@ -17,6 +17,7 @@ for (const required of [
   "extension/dist/webviews/graph.js",
   "extension/dist/webviews/viewer.css",
   "extension/dist/webviews/callGraph.js",
+  "extension/dist/webviews/callGraphGuide.js",
   "extension/dist/webviews/history.js",
   "extension/media/icon.png"
 ]) {

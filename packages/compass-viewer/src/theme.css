@@ -4535,3 +4535,772 @@ body.vscode-high-contrast-light .architecture-call-table {
     max-width: none;
   }
 }
+
+/* Call graph editor guide */
+.call-guide-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: clamp(28px, 5vw, 72px) clamp(20px, 5vw, 72px) 40px;
+  background:
+    radial-gradient(
+      circle at 77% 8%,
+      color-mix(in srgb, var(--compass-focus) 9%, transparent),
+      transparent 28rem
+    ),
+    var(--vscode-editor-background, var(--background));
+  isolation: isolate;
+}
+
+.call-guide-grid {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  opacity: 0.19;
+  background-image:
+    linear-gradient(var(--compass-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--compass-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, black, transparent 68%);
+  pointer-events: none;
+}
+
+.call-guide-hero,
+.call-guide-section,
+.call-guide-footer {
+  width: min(1120px, 100%);
+  margin-inline: auto;
+}
+
+.call-guide-hero {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.1fr);
+  align-items: center;
+  gap: clamp(40px, 7vw, 96px);
+  min-height: 330px;
+  padding-bottom: clamp(36px, 5vw, 64px);
+  border-bottom: 1px solid var(--vscode-panel-border, var(--border));
+}
+
+.call-guide-kicker,
+.call-guide-overline,
+.call-guide-route-label,
+.call-guide-route-readout,
+.call-guide-shortcut,
+.call-guide-coverage-badge {
+  font-family: var(--compass-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.call-guide-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.call-guide-kicker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.call-guide-intro h1 {
+  max-width: 650px;
+  margin: 18px 0 0;
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font-size: clamp(34px, 5vw, 62px);
+  font-weight: 620;
+  letter-spacing: -0.052em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.call-guide-lead {
+  max-width: 580px;
+  margin: 22px 0 0;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: clamp(14px, 1.7vw, 17px);
+  line-height: 1.65;
+}
+
+.call-guide-source {
+  display: inline-flex;
+  max-width: min(100%, 560px);
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 4px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editorWidget-background, var(--card)) 88%,
+    transparent
+  );
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 11px/1.3 var(--compass-font-mono);
+}
+
+.call-guide-source > span:not(.call-guide-source-light) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-guide-source > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.call-guide-source code {
+  flex: 0 0 auto;
+  margin-left: 3px;
+  padding-left: 9px;
+  border-left: 1px solid var(--vscode-panel-border, var(--border));
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: inherit;
+}
+
+.call-guide-source-light {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--vscode-disabledForeground, var(--compass-faint));
+}
+
+.call-guide-source[data-ready="true"] .call-guide-source-light {
+  background: var(--vscode-testing-iconPassed, var(--compass-success));
+  box-shadow: 0 0 9px color-mix(
+    in srgb,
+    var(--vscode-testing-iconPassed, var(--compass-success)) 60%,
+    transparent
+  );
+}
+
+.call-guide-route {
+  position: relative;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--vscode-editorWidget-background, var(--card)) 94%, transparent),
+      color-mix(in srgb, var(--vscode-editor-background, var(--background)) 82%, transparent)
+    );
+  box-shadow: 0 24px 70px color-mix(in srgb, #000 22%, transparent);
+}
+
+.call-guide-route::before {
+  content: "";
+  position: absolute;
+  width: 230px;
+  height: 230px;
+  top: 46%;
+  left: 50%;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 14%, transparent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 0 0 44px color-mix(in srgb, var(--compass-focus) 3%, transparent),
+    0 0 0 88px color-mix(in srgb, var(--compass-focus) 2%, transparent);
+  pointer-events: none;
+}
+
+.call-guide-route-label,
+.call-guide-route-readout {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  font-size: 9px;
+}
+
+.call-guide-route-label code {
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: inherit;
+  text-transform: none;
+}
+
+.call-guide-route-stage {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 13%;
+  min-height: 226px;
+}
+
+.call-guide-route-node {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 5px;
+  background: var(--vscode-editor-background, var(--background));
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 20%, transparent);
+}
+
+.call-guide-route-node > span {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 8px/1 var(--compass-font-mono);
+  letter-spacing: 0.12em;
+}
+
+.call-guide-route-node strong {
+  overflow: hidden;
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font: 600 11px/1.3 var(--compass-font-mono);
+  text-overflow: ellipsis;
+}
+
+.call-guide-route-node small {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-guide-route-current {
+  align-items: center;
+  padding-block: 17px;
+  border-color: var(--vscode-focusBorder, var(--compass-focus));
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, var(--compass-focus)) 9%,
+    var(--vscode-editor-background, var(--background))
+  );
+  text-align: center;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--compass-focus) 16%, transparent),
+    0 15px 40px color-mix(in srgb, var(--compass-focus) 14%, transparent);
+}
+
+.call-guide-route-current > svg {
+  width: 17px;
+  height: 17px;
+  margin-bottom: 3px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.call-guide-route-line {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  width: 32%;
+  height: 1px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--compass-focus) 44%, var(--border));
+}
+
+.call-guide-route-line-in {
+  left: 18%;
+}
+
+.call-guide-route-line-out {
+  right: 18%;
+}
+
+.call-guide-route-line i {
+  position: absolute;
+  top: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vscode-focusBorder, var(--compass-focus));
+  box-shadow: 0 0 9px var(--vscode-focusBorder, var(--compass-focus));
+  animation: call-guide-trace 2.2s linear infinite;
+}
+
+.call-guide-route-line-out i {
+  animation-delay: 1.1s;
+}
+
+@keyframes call-guide-trace {
+  from {
+    left: -8px;
+  }
+
+  to {
+    left: calc(100% + 8px);
+  }
+}
+
+.call-guide-route-readout {
+  padding-top: 11px;
+  border-top: 1px solid var(--vscode-panel-border, var(--border));
+  letter-spacing: 0.08em;
+}
+
+.call-guide-section {
+  padding-block: clamp(34px, 5vw, 58px);
+  border-bottom: 1px solid var(--vscode-panel-border, var(--border));
+}
+
+.call-guide-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 24px;
+}
+
+.call-guide-overline {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.call-guide-heading h2 {
+  margin: 0;
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font-size: clamp(19px, 2.4vw, 26px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.call-guide-heading > p {
+  max-width: 420px;
+  margin: 0;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.call-guide-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.call-guide-shortcut svg {
+  width: 12px;
+  height: 12px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.call-guide-steps {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(340px, 1.45fr) minmax(170px, 0.8fr);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.call-guide-steps > li {
+  position: relative;
+  display: grid;
+  min-height: 168px;
+  align-content: start;
+  gap: 17px;
+  padding: 18px;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 5px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editorWidget-background, var(--card)) 72%,
+    transparent
+  );
+}
+
+.call-guide-steps > li > svg {
+  width: 22px;
+  height: 22px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.call-guide-step-number {
+  position: absolute;
+  top: 17px;
+  right: 17px;
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  font: 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.1em;
+}
+
+.call-guide-steps h3 {
+  margin: 0;
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.call-guide-steps p {
+  margin: 6px 0 0;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.call-guide-step-menu {
+  grid-template-columns: minmax(150px, 0.85fr) minmax(195px, 1.15fr);
+  align-items: center;
+}
+
+.call-guide-menu-preview {
+  position: relative;
+  min-width: 0;
+  padding-right: 44%;
+  font-size: 10px;
+}
+
+.call-guide-menu-parent,
+.call-guide-submenu {
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  border-radius: 4px;
+  background: var(--vscode-menu-background, var(--popover));
+  color: var(--vscode-menu-foreground, var(--popover-foreground));
+  box-shadow: 0 12px 30px color-mix(in srgb, #000 25%, transparent);
+}
+
+.call-guide-menu-parent {
+  display: grid;
+  grid-template-columns: 15px 1fr 13px;
+  align-items: center;
+  gap: 7px;
+  min-height: 31px;
+  padding: 0 8px;
+  border-color: var(--vscode-focusBorder, var(--compass-focus));
+  background: var(--vscode-menu-selectionBackground, var(--accent));
+  color: var(--vscode-menu-selectionForeground, var(--accent-foreground));
+}
+
+.call-guide-menu-parent svg,
+.call-guide-submenu svg {
+  width: 13px;
+  height: 13px;
+}
+
+.call-guide-submenu {
+  position: absolute;
+  z-index: 2;
+  top: 22px;
+  right: 0;
+  width: 58%;
+  min-width: 165px;
+  padding: 4px;
+}
+
+.call-guide-submenu span {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.call-guide-submenu span.is-active {
+  background: var(--vscode-menu-selectionBackground, var(--accent));
+  color: var(--vscode-menu-selectionForeground, var(--accent-foreground));
+}
+
+.call-guide-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.call-guide-action {
+  position: relative;
+  display: grid;
+  min-height: 104px;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 13px;
+  padding: 18px;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 5px;
+  outline: none;
+  background: var(--vscode-editorWidget-background, var(--card));
+  color: var(--vscode-editor-foreground, var(--foreground));
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.call-guide-action:not(:disabled):hover {
+  border-color: var(--vscode-focusBorder, var(--compass-focus));
+  background: color-mix(
+    in srgb,
+    var(--vscode-list-hoverBackground, var(--workbench-hover)) 70%,
+    var(--vscode-editorWidget-background, var(--card))
+  );
+  transform: translateY(-2px);
+}
+
+.call-guide-action:focus-visible,
+.call-guide-walkthrough:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: 2px;
+}
+
+.call-guide-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.call-guide-action[data-primary="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, var(--compass-focus)) 72%,
+    var(--border)
+  );
+  background:
+    linear-gradient(
+      130deg,
+      color-mix(in srgb, var(--vscode-focusBorder, var(--compass-focus)) 13%, transparent),
+      transparent 58%
+    ),
+    var(--vscode-editorWidget-background, var(--card));
+}
+
+.call-guide-action-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--vscode-panel-border, var(--border));
+  border-radius: 4px;
+  background: var(--vscode-editor-background, var(--background));
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.call-guide-action-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.call-guide-action strong,
+.call-guide-action small {
+  display: block;
+}
+
+.call-guide-action strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.call-guide-action small {
+  margin-top: 5px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.call-guide-action-arrow {
+  width: 15px;
+  height: 15px;
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  transition: transform 140ms ease;
+}
+
+.call-guide-action:not(:disabled):hover .call-guide-action-arrow {
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  transform: translateX(3px);
+}
+
+.call-guide-action em {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: normal 8px/1 var(--compass-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.call-guide-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding-top: 24px;
+}
+
+.call-guide-coverage {
+  display: flex;
+  max-width: 760px;
+  align-items: center;
+  gap: 13px;
+}
+
+.call-guide-coverage-badge {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border: 1px solid color-mix(
+    in srgb,
+    var(--vscode-testing-iconPassed, var(--compass-success)) 50%,
+    var(--border)
+  );
+  border-radius: 3px;
+  color: var(--vscode-testing-iconPassed, var(--compass-success));
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.call-guide-coverage p {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.call-guide-walkthrough {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: 11px/1 var(--compass-font-sans);
+}
+
+.call-guide-walkthrough svg {
+  width: 14px;
+  height: 14px;
+}
+
+.call-guide-walkthrough svg:last-child {
+  width: 12px;
+  transition: transform 140ms ease;
+}
+
+.call-guide-walkthrough:hover svg:last-child {
+  transform: translateX(2px);
+}
+
+body.vscode-high-contrast .call-guide-route,
+body.vscode-high-contrast-light .call-guide-route,
+body.vscode-high-contrast .call-guide-steps > li,
+body.vscode-high-contrast-light .call-guide-steps > li,
+body.vscode-high-contrast .call-guide-action,
+body.vscode-high-contrast-light .call-guide-action {
+  border-width: 2px;
+  border-color: var(--vscode-contrastBorder, var(--ring));
+}
+
+@media (max-width: 900px) {
+  .call-guide-hero {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .call-guide-route {
+    width: min(620px, 100%);
+    box-sizing: border-box;
+  }
+
+  .call-guide-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .call-guide-step-menu {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 680px) {
+  .call-guide-shell {
+    padding-inline: 16px;
+  }
+
+  .call-guide-heading,
+  .call-guide-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .call-guide-heading > p {
+    text-align: left;
+  }
+
+  .call-guide-shortcut {
+    display: none;
+  }
+
+  .call-guide-steps,
+  .call-guide-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .call-guide-step-menu {
+    grid-column: auto;
+    grid-row: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .call-guide-menu-preview {
+    padding-right: min(42%, 180px);
+  }
+
+  .call-guide-coverage {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 440px) {
+  .call-guide-route-stage {
+    gap: 5%;
+  }
+
+  .call-guide-route-node {
+    padding: 9px 7px;
+  }
+
+  .call-guide-route-node small {
+    display: none;
+  }
+
+  .call-guide-menu-preview {
+    padding: 0;
+  }
+
+  .call-guide-submenu {
+    position: relative;
+    top: auto;
+    width: auto;
+    margin: 6px 0 0 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-guide-route-line i {
+    animation: none;
+  }
+
+  .call-guide-action,
+  .call-guide-action-arrow,
+  .call-guide-walkthrough svg:last-child {
+    transition: none;
+  }
+}

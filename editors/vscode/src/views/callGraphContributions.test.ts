@@ -19,6 +19,10 @@ const manifest = JSON.parse(
 
 describe("call graph editor contributions", () => {
   it("contributes one editor submenu with caller, callee, and combined actions", () => {
+    expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({
+      command: "compass.openCallGraphGuide",
+      title: "Compass: Call Graph Guide"
+    }));
     expect(manifest.contributes.submenus).toContainEqual({
       id: "compass.callGraph",
       label: "Compass Call Graph"
