@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
-const AST_EXTRACTOR_VERSION: &str = "0.9.21";
+const AST_CACHE_VERSION: &str = "1";
 const CACHE_ENCODING_VERSION: u32 = 6;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
 
@@ -108,7 +108,7 @@ impl CacheKind {
 pub struct Cache {
     root: PathBuf,
     cache_base: PathBuf,
-    extractor_version: String,
+    ast_cache_version: String,
     hashes: StatHashIndex,
     hash_policy: CacheHashPolicy,
     session_hashes: HashMap<PathBuf, SessionHash>,
@@ -141,7 +141,7 @@ impl Cache {
         let cache = Self {
             root,
             cache_base,
-            extractor_version: AST_EXTRACTOR_VERSION.to_owned(),
+            ast_cache_version: AST_CACHE_VERSION.to_owned(),
             hashes,
             hash_policy: options.hash_policy,
             session_hashes: HashMap::new(),
@@ -149,11 +149,6 @@ impl Cache {
         };
         cache.cleanup_stale_ast();
         Ok(cache)
-    }
-
-    pub fn with_extractor_version(mut self, version: impl Into<String>) -> Self {
-        self.extractor_version = version.into();
-        self
     }
 
     /// Program-only cache users do not consult the path stat index. Disabling
@@ -167,7 +162,7 @@ impl Cache {
     pub fn directory(&self, kind: &CacheKind, prompt_fingerprint: Option<&str>) -> PathBuf {
         let mut directory = self.cache_base.join(kind.directory_name());
         if matches!(kind, CacheKind::Ast) {
-            directory = directory.join(format!("v{}", self.extractor_version));
+            directory = directory.join(format!("v{}", self.ast_cache_version));
         } else if let Some(fingerprint) = prompt_fingerprint {
             directory = directory.join(format!("p{fingerprint}"));
         }
@@ -419,7 +414,7 @@ impl Cache {
 
     fn cleanup_stale_ast(&self) {
         let base = self.cache_base.join("ast");
-        let current = format!("v{}", self.extractor_version);
+        let current = format!("v{}", self.ast_cache_version);
         let Ok(entries) = fs::read_dir(&base) else {
             return;
         };
