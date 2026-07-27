@@ -1,7 +1,9 @@
 //! Corpus-level semantic extraction, reconciliation, and caching.
 
 use super::*;
-use compass_files::{Cache, CacheKind, bisect_slice, file_hash, prompt_fingerprint, split_file};
+use compass_files::{
+    Cache, CacheKind, CacheOptions, bisect_slice, file_hash, prompt_fingerprint, split_file,
+};
 
 /// Load one semantic chunk, call a resolved provider, validate its untrusted
 /// graph fragment, and bind code-symbol evidence to the exact text sent to the
@@ -752,8 +754,18 @@ where
     let prompt = extraction_prompt(options.deep_mode);
     let cache_enabled =
         options.cache_enabled && !environment.contains_key("COMPASS_NO_INCREMENTAL_CACHE");
+    let cache_options = cache_root.map_or_else(
+        || CacheOptions::output_directory(None),
+        |cache_root| {
+            if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
+                CacheOptions::shared_history(cache_root)
+            } else {
+                CacheOptions::output_directory(Some(cache_root))
+            }
+        },
+    );
     let mut cache = cache_enabled
-        .then(|| Cache::new(root, cache_root))
+        .then(|| Cache::open(root, cache_options))
         .transpose()?;
     let checked = if options.force || !cache_enabled {
         SemanticCacheCheck {
@@ -1046,11 +1058,10 @@ pub fn check_semantic_cache(
     check_semantic_cache_mode(cache, files, deep_mode.then_some("deep"), Some(prompt))
 }
 
-/// Compatibility cache reader for agent-managed extraction workflows.
+/// Deterministic cache reader for agent-managed extraction workflows.
 ///
-/// A missing prompt reads the historical flat namespace. Supplying a prompt
-/// selects its fingerprinted namespace while retaining legacy fallback, just
-/// like Python's `check_semantic_cache`.
+/// Supplying a prompt selects its fingerprinted namespace. The hard-cutover
+/// cache contract never falls back to a previous namespace or encoding.
 pub fn check_semantic_cache_mode(
     cache: &mut Cache,
     files: &[PathBuf],
@@ -1063,7 +1074,7 @@ pub fn check_semantic_cache_mode(
     let fingerprint = prompt.map(prompt_fingerprint);
     let mut checked = SemanticCacheCheck::default();
     for file in files {
-        let Some(entry) = cache.load(file, &kind, fingerprint.as_deref(), true, false)? else {
+        let Some(entry) = cache.load(file, &kind, fingerprint.as_deref(), false)? else {
             checked.uncached.push(file.clone());
             continue;
         };
@@ -1224,7 +1235,7 @@ pub fn save_semantic_cache(
         }
         let mut previous_partial = false;
         if options.merge_existing
-            && let Some(previous) = cache.load(&path, &kind, Some(&fingerprint), false, true)?
+            && let Some(previous) = cache.load(&path, &kind, Some(&fingerprint), true)?
         {
             previous_partial = previous.get("partial").and_then(Value::as_bool) == Some(true);
             prepend_cached_bucket(&mut group.nodes, &previous, "nodes");

@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::keys::{EDGE_KIND, HYPEREDGE_KIND, KEY_SCHEMA_V1, NODE_KIND};
-use crate::{HistoryError, HistoryStore, RealizationId, StoredTree};
+use crate::{HistoryError, RealizationReader, StoredTree};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,16 +40,14 @@ pub trait ChangeSink {
     fn change(&mut self, change: GraphChange) -> Result<(), HistoryError>;
 }
 
-impl HistoryStore {
+impl RealizationReader<'_> {
     /// Stream graph-aware changes without materializing either complete graph.
     pub fn diff(
         &self,
-        old: &RealizationId,
-        new: &RealizationId,
+        new: &RealizationReader<'_>,
         sink: &mut dyn ChangeSink,
     ) -> Result<(), HistoryError> {
         self.diff_records(
-            old,
             new,
             &[
                 RecordKind::Node,
@@ -71,14 +69,17 @@ impl HistoryStore {
     /// avoid decoding analysis and reconstruction metadata entirely.
     pub fn diff_records(
         &self,
-        old: &RealizationId,
-        new: &RealizationId,
+        new: &RealizationReader<'_>,
         records: &[RecordKind],
         sink: &mut dyn ChangeSink,
     ) -> Result<(), HistoryError> {
-        let activity = self.activity()?;
-        let old = self.get_with_activity(old, &activity)?;
-        let new = self.get_with_activity(new, &activity)?;
+        if !std::ptr::eq(self.store, new.store) {
+            return Err(HistoryError::OperationalState(
+                "cannot diff readers from different history stores".to_owned(),
+            ));
+        }
+        let old = &self.published;
+        let new = &new.published;
         for (kind, left, right) in [
             (
                 RecordKind::Node,
@@ -133,7 +134,11 @@ impl HistoryStore {
         if old == new {
             return Ok(());
         }
-        for difference in self.prolly.stream_diff(&old.to_tree(), &new.to_tree())? {
+        for difference in self
+            .store
+            .prolly
+            .stream_diff(&old.to_tree(), &new.to_tree())?
+        {
             let difference = difference?;
             let (change, key, old, new) = match difference {
                 Diff::Added { key, val } => {

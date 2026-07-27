@@ -8,6 +8,7 @@ mod cql;
 mod cypher;
 mod graphml;
 mod history_bundle;
+mod history_viewer;
 mod html;
 mod json;
 mod obsidian;
@@ -34,6 +35,7 @@ pub use graphml::{graphml_document, write_graphml};
 pub use history_bundle::{
     DerivedArtifactRequest, HistoryBundleInput, SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
 };
+pub use history_viewer::{HistoricalViewError, historical_graph_document, historical_view_model};
 pub use html::{
     HtmlOptions, HtmlRender, graph_community_view_model_document, graph_view_model_document,
     html_document, write_html,

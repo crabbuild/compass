@@ -132,72 +132,14 @@ impl HistoryStore {
         &self.database_path
     }
 
+    /// Open the owner-protected disposable cache plane.
+    pub fn cache(&self) -> Result<crate::HistoryCache, HistoryError> {
+        crate::HistoryCache::open(&self.root)
+    }
+
     /// Acquire the shared activity lock.
     pub fn activity(&self) -> Result<ActivityGuard, HistoryError> {
         ActivityGuard::acquire(&self.lock_path, false)
-    }
-
-    /// Read one typed semantic record without reconstructing its containing artifact tree.
-    pub fn read_record(
-        &self,
-        realization: &RealizationId,
-        key: HistoryRecordKey<'_>,
-    ) -> Result<Option<HistoryRecord>, HistoryError> {
-        let activity = self.activity()?;
-        let published = self.get_with_activity(realization, &activity)?;
-        let (tree, encoded_key, schema) = match key {
-            HistoryRecordKey::Node(id) => (
-                published.version.nodes_root.to_tree(),
-                crate::node_key(id),
-                "compass.node",
-            ),
-            HistoryRecordKey::ProgramModule(source_file) => (
-                self.load_program_root(realization, b"program-facts")?,
-                crate::artifacts::program_key("module", source_file),
-                "compass.program.module",
-            ),
-            HistoryRecordKey::ProgramFunction(symbol_id) => (
-                self.load_program_root(realization, b"program-facts")?,
-                crate::artifacts::program_key("function", symbol_id),
-                "compass.program.function",
-            ),
-            HistoryRecordKey::ProgramSummary(symbol_id) => (
-                self.load_program_root(realization, b"program-summaries")?,
-                crate::artifacts::program_key("summary", symbol_id),
-                "compass.program.summary",
-            ),
-            HistoryRecordKey::ReverseCallers(symbol_id) => (
-                self.load_program_root(realization, b"program-summaries")?,
-                crate::artifacts::program_key("reverse-call", symbol_id),
-                "compass.program.reverse-call",
-            ),
-        };
-        let Some(bytes) = self.prolly.get(&tree, &encoded_key)? else {
-            return Ok(None);
-        };
-        if bytes.len() > crate::MAX_RECORD_VALUE_BYTES {
-            return Err(HistoryError::CorruptHistory(
-                "history record exceeds byte limit".to_owned(),
-            ));
-        }
-        let record = match key {
-            HistoryRecordKey::Node(_) => {
-                HistoryRecord::Node(crate::artifacts::decode_typed(&bytes, schema)?)
-            }
-            HistoryRecordKey::ProgramModule(_) => {
-                HistoryRecord::ProgramModule(crate::artifacts::decode_typed(&bytes, schema)?)
-            }
-            HistoryRecordKey::ProgramFunction(_) => {
-                HistoryRecord::ProgramFunction(crate::artifacts::decode_typed(&bytes, schema)?)
-            }
-            HistoryRecordKey::ProgramSummary(_) => {
-                HistoryRecord::ProgramSummary(crate::artifacts::decode_typed(&bytes, schema)?)
-            }
-            HistoryRecordKey::ReverseCallers(_) => {
-                HistoryRecord::ReverseCallers(crate::artifacts::decode_typed(&bytes, schema)?)
-            }
-        };
-        Ok(Some(record))
     }
 
     /// Acquire the exclusive maintenance lock.

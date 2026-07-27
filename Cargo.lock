@@ -1230,6 +1230,7 @@ dependencies = [
  "compass-cypher",
  "compass-files",
  "compass-graph",
+ "compass-history",
  "compass-model",
  "compass-query",
  "rayon",

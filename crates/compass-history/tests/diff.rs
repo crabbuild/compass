@@ -126,8 +126,10 @@ fn diff_reports_topology_attribute_and_analysis_changes() -> Result<(), Box<dyn 
         vec![json!({"id":"flow","nodes":["a","b"],"weight":2})],
         2,
     )?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
     let mut changes = VecSink::default();
-    history.diff(&old.id, &new.id, &mut changes)?;
+    old_reader.diff(&new_reader, &mut changes)?;
     assert!(changes.0.iter().any(|change| {
         change.record == RecordKind::Node
             && change.change == ChangeKind::Added
@@ -146,9 +148,8 @@ fn diff_reports_topology_attribute_and_analysis_changes() -> Result<(), Box<dyn 
             .any(|change| change.record == RecordKind::Analysis)
     );
     let mut topology_roots = VecSink::default();
-    history.diff_records(
-        &old.id,
-        &new.id,
+    old_reader.diff_records(
+        &new_reader,
         &[RecordKind::Node, RecordKind::Edge],
         &mut topology_roots,
     )?;
@@ -181,8 +182,10 @@ fn identity_changes_are_remove_add_equal_roots_are_empty_and_sink_errors_stop()
         vec![json!({"nodes":["a","b"],"weight":2})],
         1,
     )?)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
     let mut changes = VecSink::default();
-    history.diff(&old.id, &new.id, &mut changes)?;
+    old_reader.diff(&new_reader, &mut changes)?;
     for record in [RecordKind::Edge, RecordKind::Hyperedge] {
         assert!(
             changes
@@ -198,7 +201,7 @@ fn identity_changes_are_remove_add_equal_roots_are_empty_and_sink_errors_stop()
         );
     }
     let mut equal = VecSink::default();
-    history.diff(&old.id, &old.id, &mut equal)?;
+    old_reader.diff(&old_reader, &mut equal)?;
     assert!(equal.0.is_empty());
 
     struct FailingSink(usize);
@@ -209,7 +212,7 @@ fn identity_changes_are_remove_add_equal_roots_are_empty_and_sink_errors_stop()
         }
     }
     let mut failing = FailingSink(0);
-    assert!(history.diff(&old.id, &new.id, &mut failing).is_err());
+    assert!(old_reader.diff(&new_reader, &mut failing).is_err());
     assert_eq!(failing.0, 1);
     Ok(())
 }
@@ -225,18 +228,19 @@ fn full_diff_includes_program_facts_while_topology_diff_skips_them()
     let mut new_request = request('f', vec![json!({"id":"a"})], vec![], vec![], 1)?;
     new_request.artifacts.program = Some(program(b"new")?);
     let new = history.publish(new_request)?;
+    let old_reader = history.reader(&old.id)?;
+    let new_reader = history.reader(&new.id)?;
 
     let mut full = VecSink::default();
-    history.diff(&old.id, &new.id, &mut full)?;
+    old_reader.diff(&new_reader, &mut full)?;
     assert!(
         full.0
             .iter()
             .any(|change| change.record == RecordKind::ProgramFact)
     );
     let mut topology = VecSink::default();
-    history.diff_records(
-        &old.id,
-        &new.id,
+    old_reader.diff_records(
+        &new_reader,
         &[RecordKind::Node, RecordKind::Edge],
         &mut topology,
     )?;

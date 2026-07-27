@@ -1,6 +1,7 @@
 //! Immutable, SQLite-backed version history for complete Compass graphs.
 
 mod artifacts;
+mod cache;
 mod canonical;
 mod config;
 mod diff;
@@ -9,16 +10,22 @@ mod error;
 mod fingerprint;
 mod gc;
 mod git;
+mod graph_read;
 mod jobs;
 mod keys;
 mod leases;
 mod lock;
 mod model;
+mod reader;
 mod store;
 mod timeline;
 mod validate;
 
 pub use artifacts::{CompletedGraphArtifacts, GraphArtifacts, PartitionedGraph};
+pub use cache::{
+    CacheGcPlan, CacheNamespaceStatus, CacheStatus, DerivedCacheNamespace, HISTORY_CACHE_VERSION,
+    HistoryCache,
+};
 pub use canonical::{CANONICAL_ENCODING_VERSION, canonical_json_bytes};
 pub use config::HistoryConfig;
 pub use diff::{ChangeKind, ChangeSink, GraphChange, RecordKind};
@@ -28,6 +35,7 @@ pub use gc::{GcPlan, GcSweep};
 pub use git::{
     GitTargetLimitation, Repository, SourceFileDelta, SourceFileStatus, SourceHunk, WorktreeGuard,
 };
+pub use graph_read::GraphRecordSink;
 pub use jobs::{ClaimedJob, HistoryQueue, JobRecord, JobRequest, JobState};
 pub use keys::{edge_key, hyperedge_key, node_key};
 pub use leases::{LEASE_DURATION_MILLIS, LEASE_HEARTBEAT_MILLIS, LeaseGuard};
@@ -37,6 +45,7 @@ pub use model::{
     GraphVersion, HISTORY_SCHEMA_VERSION, PublishRequest, PublishedVersion, RealizationId,
     StoredTree, StructuralSharing,
 };
+pub use reader::RealizationReader;
 pub use store::{
     CorruptPreferredToken, HistoryRecord, HistoryRecordKey, HistoryStore, PreparedPublication,
 };
