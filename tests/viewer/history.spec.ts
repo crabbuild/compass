@@ -160,12 +160,47 @@ test("comparison replaces the full graph with a readable focused delta", async (
   await expect(page.getByText(/Viewing changed subgraph for bbbbbbbbb/)).toBeVisible();
   await expect(page.getByLabel("Graph change filters")).toContainText("Changed2");
 
+  const graphSearch = page.getByRole("combobox", { name: "Search graph nodes" });
+  await graphSearch.fill("Core B");
+  await page.getByRole("option", { name: /Core B/i }).click();
+  await page.getByRole("button", { name: /Inspect changes/i }).click();
+
+  await expect(page.getByText(/Viewing exact changes in community 0/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Changed symbols" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Changed run/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Added added_symbol/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Removed removed_symbol/i })).toBeVisible();
+
+  await page.getByRole("button", { name: /Changed run/i }).click();
+  await expect(page.getByRole("heading", { name: "What changed" })).toBeVisible();
+  const fieldEvidence = page.locator(".compass-record-evidence");
+  await expect(fieldEvidence.getByText("pub fn run(old_value: usize)")).toBeVisible();
+  await expect(fieldEvidence.getByText("pub fn run(new_value: usize)")).toBeVisible();
+  const relationshipEvidence = page.locator(".compass-relationship-evidence");
+  await relationshipEvidence.locator("summary").click();
+  await expect(relationshipEvidence.getByText("inferred")).toBeVisible();
+  await expect(relationshipEvidence.locator("summary i")).toHaveText("extracted");
+  await expect(page.getByRole("button", { name: "Open before" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open after" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Back to community overview" }).click();
+  await expect(page.getByText(/Viewing changed subgraph for bbbbbbbbb/)).toBeVisible();
+
   await page.getByRole("tab", { name: /Semantic findings/ }).click();
   await expect(page.getByText("Fixture comparison", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Exit comparison" }).click();
   await expect(page.getByText("Comparison mode")).toHaveCount(0);
   await expect(page.getByText(/Viewing graph for bbbbbbbbb/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.find((message) => message.type === "exitComparison");
+  })).toMatchObject({
+    type: "exitComparison",
+    commit: "b".repeat(40)
+  });
 });
 
 test("unavailable comparison explains how to recover", async ({ page }) => {

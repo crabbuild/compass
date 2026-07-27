@@ -6,7 +6,14 @@ import {
   PanelRightOpenIcon,
   SearchIcon
 } from "lucide-react";
-import type { GraphNode, GraphViewModel, SourceLocation } from "../contracts/graph";
+import type {
+  GraphEdge,
+  GraphNode,
+  GraphViewModel,
+  SourceLocation
+} from "../contracts/graph";
+import { ChangeEvidence, type GraphSourceRevisions } from "./ChangeEvidence";
+import { ChangedSymbolList } from "./ChangedSymbolList";
 import { navigableSource } from "./sourceNavigation";
 
 function lineRange(node: GraphNode): string | undefined {
@@ -61,10 +68,12 @@ export function GraphInspector({
   model,
   selected,
   neighbors,
+  connectedEdges,
   query,
   matches,
   hiddenCommunities,
   comparisonMode,
+  sourceRevisions,
   onQueryChange,
   onFocus,
   onOpenSource,
@@ -77,13 +86,15 @@ export function GraphInspector({
   model: GraphViewModel;
   selected: GraphNode | undefined;
   neighbors: GraphNode[];
+  connectedEdges: GraphEdge[];
   query: string;
   matches: GraphNode[];
   hiddenCommunities: ReadonlySet<number>;
   comparisonMode: boolean;
+  sourceRevisions?: GraphSourceRevisions | undefined;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
-  onOpenSource(source: SourceLocation): void;
+  onOpenSource(source: SourceLocation, revision?: string): void;
   onOpenCommunity?: ((communityId: number) => void) | undefined;
   onToggleCommunity(communityId: number): void;
   onSetAllVisible(visible: boolean): void;
@@ -102,6 +113,10 @@ export function GraphInspector({
     return counts;
   }, [model.nodes]);
   const allVisible = hiddenCommunities.size === 0;
+  const nodeLookup = useMemo(
+    () => new Map(model.nodes.map((node) => [node.id, node])),
+    [model.nodes]
+  );
 
   const choose = (node: GraphNode) => {
     onFocus(node.id);
@@ -265,7 +280,12 @@ export function GraphInspector({
                         type="button"
                         aria-label={sourceActionLabel(selected, source)}
                         title={sourceActionLabel(selected, source)}
-                        onClick={() => onOpenSource(source)}
+                        onClick={() => onOpenSource(
+                          source,
+                          selected.change === "removed"
+                            ? sourceRevisions?.before
+                            : sourceRevisions?.after
+                        )}
                       >
                         <span className="compass-source-copy">
                           <span className="compass-source-eyebrow" aria-hidden="true">
@@ -303,39 +323,64 @@ export function GraphInspector({
                   type="button"
                   onClick={() => onOpenCommunity(selected.community)}
                 >
-                  Open community
-                  <span>{selected.memberCount.toLocaleString()} members</span>
+                  {comparisonMode ? "Inspect changes" : "Open community"}
+                  <span>
+                    {selected.memberCount.toLocaleString()}{" "}
+                    {comparisonMode ? "current symbols" : "members"}
+                  </span>
                 </button>
               )}
-            <div className="compass-neighbors-heading">
-              <span>Connected nodes</span>
-              <strong>{neighbors.length}</strong>
-            </div>
-            <div className="compass-neighbors-list">
-              {neighbors.length ? neighbors.map((neighbor) => (
-                <button
-                  key={neighbor.id}
-                  type="button"
-                  className="compass-neighbor-link"
-                  title={neighbor.label}
-                  onClick={() => onFocus(neighbor.id)}
-                >
-                  <span
-                    className="compass-neighbor-dot"
-                    aria-hidden="true"
-                    style={{ background: neighbor.color?.background
-                      ?? model.communities.find((item) => item.id === neighbor.community)?.color
-                      ?? "var(--border)" }}
-                  />
-                  <span className="compass-neighbor-label">{neighbor.label}</span>
-                </button>
-              )) : <span className="compass-empty">No connected nodes</span>}
-            </div>
+            {comparisonMode ? (
+              <ChangeEvidence
+                node={selected}
+                edges={connectedEdges}
+                nodes={nodeLookup}
+                sourceRevisions={sourceRevisions}
+                onFocus={onFocus}
+                onOpenSource={onOpenSource}
+              />
+            ) : (
+              <>
+                <div className="compass-neighbors-heading">
+                  <span>Connected nodes</span>
+                  <strong>{neighbors.length}</strong>
+                </div>
+                <div className="compass-neighbors-list">
+                  {neighbors.length ? neighbors.map((neighbor) => (
+                    <button
+                      key={neighbor.id}
+                      type="button"
+                      className="compass-neighbor-link"
+                      title={neighbor.label}
+                      onClick={() => onFocus(neighbor.id)}
+                    >
+                      <span
+                        className="compass-neighbor-dot"
+                        aria-hidden="true"
+                        style={{ background: neighbor.color?.background
+                          ?? model.communities.find((item) => item.id === neighbor.community)?.color
+                          ?? "var(--border)" }}
+                      />
+                      <span className="compass-neighbor-label">{neighbor.label}</span>
+                    </button>
+                  )) : <span className="compass-empty">No connected nodes</span>}
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <p className="compass-empty">Select a node to inspect its relationships.</p>
         )}
       </section>
+
+      {comparisonMode && !model.stats.aggregated && (
+        <ChangedSymbolList
+          nodes={model.nodes}
+          query={query}
+          selectedId={selected?.id}
+          onFocus={onFocus}
+        />
+      )}
 
       <section
         className="compass-community-panel"

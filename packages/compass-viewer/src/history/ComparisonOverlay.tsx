@@ -2,8 +2,10 @@ import { GitCompareIcon, XIcon } from "lucide-react";
 import type {
   GraphEdge,
   GraphNode,
+  GraphRecordEvidence,
   GraphViewModel
 } from "../contracts/graph";
+import { compareRecord } from "./recordDiff";
 
 export type GraphComparison = {
   addedNodes: number;
@@ -88,37 +90,68 @@ export function compareGraphs(
 ): GraphComparison {
   const parentNodes = new Map(parent.nodes.map((node) => [node.id, node]));
   const currentNodes = new Map(current.nodes.map((node) => [node.id, node]));
-  const parentEdges = new Map(parent.edges.map((edge) => [edge.id, edge]));
-  const currentEdges = new Map(current.edges.map((edge) => [edge.id, edge]));
   const nodes = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
   const addedNodeIds = difference(currentNodes, parentNodes);
   const removedNodeIds = difference(parentNodes, currentNodes);
-  const changedNodeIds = intersection(currentNodes, parentNodes)
-    .filter((id) => !sameRecord(currentNodes.get(id), parentNodes.get(id)));
-  const addedEdgeIds = difference(currentEdges, parentEdges);
-  const removedEdgeIds = difference(parentEdges, currentEdges);
-  const changedEdgeIds = intersection(currentEdges, parentEdges)
-    .filter((id) => !sameRecord(currentEdges.get(id), parentEdges.get(id)));
+  const nodeEvidence = new Map(intersection(currentNodes, parentNodes).map((id) => [
+    id,
+    compareRecord(parentNodes.get(id), currentNodes.get(id))
+  ]));
+  const changedNodeIds = [...nodeEvidence.entries()]
+    .filter(([, evidence]) => evidence.fields.length > 0)
+    .map(([id]) => id);
+  const edgeMatches = matchEdges(parent.edges, current.edges);
+  const changedEdgeMatches = edgeMatches.matched
+    .map(({ before, after }) => ({
+      before,
+      after,
+      evidence: compareMatchedEdges(before, after)
+    }))
+    .filter(({ evidence }) => evidence.fields.length > 0);
 
-  for (const id of addedNodeIds) addNode(nodes, currentNodes.get(id), "added");
-  for (const id of removedNodeIds) addNode(nodes, parentNodes.get(id), "removed");
-  for (const id of changedNodeIds) addNode(nodes, currentNodes.get(id), "changed");
-  for (const [ids, source, change] of [
-    [addedEdgeIds, currentEdges, "added"],
-    [removedEdgeIds, parentEdges, "removed"],
-    [changedEdgeIds, currentEdges, "changed"]
-  ] as const) {
-    for (const id of ids) {
-      const edge = source.get(id);
-      if (!edge) continue;
-      edges.push({ ...edge, change });
-      addContextNode(nodes, edge.source, parentNodes, currentNodes);
-      addContextNode(nodes, edge.target, parentNodes, currentNodes);
-    }
+  for (const id of addedNodeIds) {
+    addNode(
+      nodes,
+      currentNodes.get(id),
+      "added",
+      compareRecord(undefined, currentNodes.get(id))
+    );
+  }
+  for (const id of removedNodeIds) {
+    addNode(
+      nodes,
+      parentNodes.get(id),
+      "removed",
+      compareRecord(parentNodes.get(id), undefined)
+    );
+  }
+  for (const id of changedNodeIds) {
+    addNode(nodes, currentNodes.get(id), "changed", nodeEvidence.get(id));
+  }
+  for (const edge of edgeMatches.added) {
+    edges.push({
+      ...edge,
+      change: "added",
+      evidence: compareRecord(undefined, edge)
+    });
+    addEdgeContext(nodes, edge, parentNodes, currentNodes);
+  }
+  for (const edge of edgeMatches.removed) {
+    edges.push({
+      ...edge,
+      change: "removed",
+      evidence: compareRecord(edge, undefined)
+    });
+    addEdgeContext(nodes, edge, parentNodes, currentNodes);
+  }
+  for (const { after, evidence } of changedEdgeMatches) {
+    edges.push({ ...after, change: "changed", evidence });
+    addEdgeContext(nodes, after, parentNodes, currentNodes);
   }
   const orderedNodes = [...nodes.values()].sort((left, right) => left.id.localeCompare(right.id));
   edges.sort((left, right) => left.id.localeCompare(right.id));
+  const orderedEdges = uniqueEdgeIds(edges);
   const communityIds = new Set(orderedNodes.map((node) => node.community));
   const communities = [
     ...current.communities,
@@ -129,21 +162,21 @@ export function compareGraphs(
     addedNodes: addedNodeIds.length,
     removedNodes: removedNodeIds.length,
     changedNodes: changedNodeIds.length,
-    addedEdges: addedEdgeIds.length,
-    removedEdges: removedEdgeIds.length,
-    changedEdges: changedEdgeIds.length,
+    addedEdges: edgeMatches.added.length,
+    removedEdges: edgeMatches.removed.length,
+    changedEdges: changedEdgeMatches.length,
     graph: {
       ...current,
       title: `Graph delta · ${current.title}`,
       stats: {
         ...current.stats,
         nodes: orderedNodes.length,
-        edges: edges.length,
+        edges: orderedEdges.length,
         communities: communities.length,
-        aggregated: false
+        aggregated: parent.stats.aggregated || current.stats.aggregated
       },
       nodes: orderedNodes,
-      edges,
+      edges: orderedEdges,
       communities,
       hyperedges: []
     }
@@ -158,16 +191,17 @@ function intersection<T>(left: ReadonlyMap<string, T>, right: ReadonlyMap<string
   return [...left.keys()].filter((id) => right.has(id));
 }
 
-function sameRecord(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function addNode(
   nodes: Map<string, GraphNode>,
   node: GraphNode | undefined,
-  change: "added" | "removed" | "changed"
+  change: "added" | "removed" | "changed",
+  evidence: GraphRecordEvidence | undefined
 ): void {
-  if (node) nodes.set(node.id, { ...node, change });
+  if (node) nodes.set(node.id, {
+    ...node,
+    change,
+    ...(evidence ? { evidence } : {})
+  });
 }
 
 function addContextNode(
@@ -181,5 +215,146 @@ function addContextNode(
   if (node) nodes.set(id, {
     ...node,
     change: "unchanged"
+  });
+}
+
+function addEdgeContext(
+  nodes: Map<string, GraphNode>,
+  edge: GraphEdge,
+  parent: ReadonlyMap<string, GraphNode>,
+  current: ReadonlyMap<string, GraphNode>
+): void {
+  addContextNode(nodes, edge.source, parent, current);
+  addContextNode(nodes, edge.target, parent, current);
+}
+
+function compareMatchedEdges(
+  before: GraphEdge,
+  after: GraphEdge
+): GraphRecordEvidence {
+  return compareRecord(
+    { ...before, id: after.id },
+    after
+  );
+}
+
+function matchEdges(
+  parent: GraphEdge[],
+  current: GraphEdge[]
+): {
+  matched: Array<{ before: GraphEdge; after: GraphEdge }>;
+  added: GraphEdge[];
+  removed: GraphEdge[];
+} {
+  const parentUsed = new Set<number>();
+  const currentUsed = new Set<number>();
+  const matched: Array<{ before: GraphEdge; after: GraphEdge }> = [];
+  const pair = (parentIndex: number, currentIndex: number): void => {
+    parentUsed.add(parentIndex);
+    currentUsed.add(currentIndex);
+    matched.push({
+      before: parent[parentIndex]!,
+      after: current[currentIndex]!
+    });
+  };
+
+  pairEdgesByKey(
+    parent,
+    current,
+    parentUsed,
+    currentUsed,
+    pair,
+    (edge) => isGeneratedEdgeId(edge.id) ? undefined : edge.id
+  );
+  pairEdgesByKey(
+    parent,
+    current,
+    parentUsed,
+    currentUsed,
+    pair,
+    (edge) => isGeneratedEdgeId(edge.id) ? edgeSemanticKey(edge) : undefined
+  );
+
+  const endpointGroups = new Map<string, { parent: number[]; current: number[] }>();
+  parent.forEach((edge, index) => {
+    if (parentUsed.has(index) || !isGeneratedEdgeId(edge.id)) return;
+    const group = endpointGroups.get(edgeEndpointKey(edge)) ?? { parent: [], current: [] };
+    group.parent.push(index);
+    endpointGroups.set(edgeEndpointKey(edge), group);
+  });
+  current.forEach((edge, index) => {
+    if (currentUsed.has(index) || !isGeneratedEdgeId(edge.id)) return;
+    const group = endpointGroups.get(edgeEndpointKey(edge)) ?? { parent: [], current: [] };
+    group.current.push(index);
+    endpointGroups.set(edgeEndpointKey(edge), group);
+  });
+  for (const group of endpointGroups.values()) {
+    group.parent.sort((left, right) => compareEdgeOrder(parent[left]!, parent[right]!));
+    group.current.sort((left, right) => compareEdgeOrder(current[left]!, current[right]!));
+    const pairCount = Math.min(group.parent.length, group.current.length);
+    for (let index = 0; index < pairCount; index += 1) {
+      pair(group.parent[index]!, group.current[index]!);
+    }
+  }
+
+  return {
+    matched,
+    added: current.filter((_, index) => !currentUsed.has(index)),
+    removed: parent.filter((_, index) => !parentUsed.has(index))
+  };
+}
+
+function pairEdgesByKey(
+  parent: GraphEdge[],
+  current: GraphEdge[],
+  parentUsed: ReadonlySet<number>,
+  currentUsed: ReadonlySet<number>,
+  pair: (parentIndex: number, currentIndex: number) => void,
+  keyFor: (edge: GraphEdge) => string | undefined
+): void {
+  const currentByKey = new Map<string, number[]>();
+  current.forEach((edge, index) => {
+    if (currentUsed.has(index)) return;
+    const key = keyFor(edge);
+    if (key === undefined) return;
+    const indexes = currentByKey.get(key) ?? [];
+    indexes.push(index);
+    currentByKey.set(key, indexes);
+  });
+  parent.forEach((edge, parentIndex) => {
+    if (parentUsed.has(parentIndex)) return;
+    const key = keyFor(edge);
+    if (key === undefined) return;
+    const candidates = currentByKey.get(key);
+    const currentIndex = candidates?.shift();
+    if (currentIndex !== undefined) pair(parentIndex, currentIndex);
+  });
+}
+
+function edgeSemanticKey(edge: GraphEdge): string {
+  const record: Record<string, unknown> = { ...edge };
+  delete record.id;
+  return JSON.stringify(compareRecord(undefined, record).after);
+}
+
+function edgeEndpointKey(edge: GraphEdge): string {
+  return JSON.stringify([edge.source, edge.target]);
+}
+
+function compareEdgeOrder(left: GraphEdge, right: GraphEdge): number {
+  return edgeSemanticKey(left).localeCompare(edgeSemanticKey(right))
+    || left.id.localeCompare(right.id);
+}
+
+function isGeneratedEdgeId(id: string): boolean {
+  return /^edge-\d+-/.test(id);
+}
+
+function uniqueEdgeIds(edges: GraphEdge[]): GraphEdge[] {
+  const counts = new Map<string, number>();
+  return edges.map((edge) => {
+    const count = counts.get(edge.id) ?? 0;
+    counts.set(edge.id, count + 1);
+    return count === 0 ? edge : { ...edge, id: `${edge.id}::${edge.change}-${count}` };
   });
 }

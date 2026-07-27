@@ -204,6 +204,52 @@ export default async function generate(): Promise<void> {
     ...historyOverviewB,
     title: "Revision C graph"
   };
+  const historyCommunityA = {
+    ...communityDetail,
+    title: "Core detail at revision A",
+    stats: { nodes: 3, edges: 1, communities: 1, aggregated: false },
+    nodes: [
+      {
+        id: "run", label: "run", kind: "function", community: 0, degree: 1,
+        language: "rust", signature: "pub fn run(old_value: usize)",
+        source: { file: "src/lib.rs", startLine: 1, endLine: 3 }
+      },
+      {
+        id: "shared", label: "shared", kind: "function", community: 0, degree: 1,
+        language: "rust", signature: "fn shared()",
+        source: { file: "src/shared.rs", startLine: 4, endLine: 6 }
+      },
+      {
+        id: "removed", label: "removed_symbol", kind: "function", community: 0,
+        source: { file: "src/removed.rs", startLine: 1 }
+      }
+    ],
+    edges: [{
+      id: "run-shared", source: "run", target: "shared", relation: "calls",
+      confidence: "inferred"
+    }],
+    communities: communityOverview.communities.slice(0, 1)
+  };
+  const historyCommunityB = {
+    ...historyCommunityA,
+    title: "Core detail at revision B",
+    nodes: [
+      {
+        id: "run", label: "run", kind: "function", community: 0, degree: 1,
+        language: "rust", signature: "pub fn run(new_value: usize)",
+        source: { file: "src/lib.rs", startLine: 8, endLine: 11 }
+      },
+      historyCommunityA.nodes[1],
+      {
+        id: "added", label: "added_symbol", kind: "function", community: 0,
+        source: { file: "src/added.rs", startLine: 1 }
+      }
+    ],
+    edges: [{
+      id: "run-shared", source: "run", target: "shared", relation: "uses",
+      confidence: "extracted"
+    }]
+  };
   await writeFile(path.join(output, "architecture.html"), architectureHarness(architecture));
   await writeFile(path.join(output, "calls.html"), callGraphHarness(calls));
   await writeFile(
@@ -215,7 +261,11 @@ export default async function generate(): Promise<void> {
         [commitB]: historyOverviewB,
         [commitC]: historyOverviewC
       },
-      communityDetail
+      {
+        [commitA]: historyCommunityA,
+        [commitB]: historyCommunityB,
+        [commitC]: historyCommunityB
+      }
     )
   );
   await writeFile(path.join(output, "query.html"), queryHarness());
@@ -560,10 +610,13 @@ window.acquireVsCodeApi=()=>({postMessage(message){
   progress(40,1,3,"src/commands/init.ts");
   progress(440,2,3,"src/core/index.ts");
   progress(840,3,3,"src/views/graph.ts");
-  window.initializationTimers.push(setTimeout(
-    ()=>window.postMessage({type:"succeeded",message:"compass is indexed and ready for graph exploration."},"*"),
-    1240
-  ));
+  window.completeInitialization=()=>window.postMessage({
+    type:"succeeded",
+    message:"compass is indexed and ready for graph exploration."
+  },"*");
+  if(!new URLSearchParams(window.location.search).has("manualSuccess")) {
+    window.initializationTimers.push(setTimeout(window.completeInitialization,1240));
+  }
 }})</script><script src="/initialize.js"></script></body></html>`;
 }
 
@@ -591,11 +644,12 @@ window.acquireVsCodeApi=()=>({getState(){return window.webviewState},setState(st
 function historyHarness(
   timeline: { entries: Array<{ commit: string }> },
   graphs: Record<string, unknown>,
-  detail: unknown
+  details: Record<string, unknown>
 ): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass history fixture</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self' 'unsafe-inline';"><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
+window.historyCommunityGraphs=${JSON.stringify(details)};
 window.historyHostMessages=[];
 window.historyBootstrapAttempts=0;
 window.historyGeneration=0;
@@ -670,7 +724,7 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     },"*"),20);
   } else if(message.type==="openCommunity") {
     window.openedHistoricalCommunity=message.communityId;
-    setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,commit:message.commit,communityId:message.communityId,graph:${JSON.stringify(detail)}},"*"),0);
+    setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,commit:message.commit,communityId:message.communityId,graph:window.historyCommunityGraphs[message.commit]},"*"),0);
   } else if(message.type==="compare") {
     setTimeout(()=>window.postMessage({
       type:"comparison",
@@ -678,6 +732,8 @@ window.acquireVsCodeApi=()=>({postMessage(message){
       parent:message.parent,
       realization:"r-"+message.commit.slice(0,1),
       fingerprint:"f-"+message.commit.slice(0,1),
+      parentRealization:"r-"+message.parent.slice(0,1),
+      parentFingerprint:"f-"+message.parent.slice(0,1),
       currentGraph:window.historyGraphs[message.commit],
       parentGraph:window.historyGraphs[message.parent],
       counts:{
@@ -699,6 +755,17 @@ window.acquireVsCodeApi=()=>({postMessage(message){
         }],
         findings:[{summary:"Fixture comparison"}]
       }
+    },"*"),0);
+  } else if(message.type==="compareCommunity") {
+    setTimeout(()=>window.postMessage({
+      type:"communityComparison",
+      requestId:message.requestId,
+      commit:message.commit,
+      parent:message.parent,
+      communityId:message.communityId,
+      currentGraph:message.hasCurrent ? window.historyCommunityGraphs[message.commit] : undefined,
+      parentGraph:message.hasParent ? window.historyCommunityGraphs[message.parent] : undefined,
+      nodeLimit:5000
     },"*"),0);
   } else if(message.type==="buildRevision") {
     const scenario=new URLSearchParams(window.location.search).get("build") || "cancel";
