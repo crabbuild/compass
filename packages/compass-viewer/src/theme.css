@@ -572,11 +572,11 @@ button:not(:disabled),
   }
 }
 
-/* VS Code-native loading shell. The older constellation selectors remain for
-   backwards-compatible embedded assets, but current webviews use this compact mark. */
+/* VS Code-native loading shell. The graph constellation is the one expressive
+   moment; typography and recovery actions remain intentionally workbench-flat. */
 .compass-load-shell {
   grid-template-rows: auto auto;
-  gap: 14px;
+  gap: 18px;
   background: var(--vscode-editor-background, var(--background));
 }
 
@@ -585,15 +585,64 @@ button:not(:disabled),
 }
 
 .compass-load-constellation {
-  display: grid;
-  width: 64px;
-  height: 68px;
+  position: relative;
+  display: block;
+  width: min(180px, 64vw);
+  height: 112px;
   margin: 0 auto;
-  place-items: start center;
+}
+
+.compass-load-graph {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.compass-load-graph .compass-load-edge {
+  stroke: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-classForeground, var(--compass-focus)) 48%,
+    var(--vscode-widget-border, var(--border))
+  );
+  stroke-dasharray: 4 7;
+  stroke-width: 1;
+}
+
+.compass-load-graph .compass-load-edge-b {
+  stroke: color-mix(
+    in srgb,
+    var(--vscode-progressBar-background, var(--workbench-progress)) 54%,
+    var(--vscode-widget-border, var(--border))
+  );
+}
+
+.compass-load-graph .compass-load-node {
+  fill: var(--vscode-symbolIcon-classForeground, var(--compass-focus));
+  animation-duration: 2.8s;
+}
+
+.compass-load-graph .compass-load-node-b,
+.compass-load-graph .compass-load-node-e {
+  fill: var(--vscode-progressBar-background, var(--workbench-progress));
+}
+
+.compass-load-tracer {
+  fill: var(--vscode-progressBar-background, var(--workbench-progress));
+  filter: drop-shadow(
+    0 0 5px color-mix(
+      in srgb,
+      var(--vscode-progressBar-background, var(--workbench-progress)) 62%,
+      transparent
+    )
+  );
 }
 
 .compass-load-mark {
-  position: static;
+  position: absolute;
+  top: 32px;
+  left: 66px;
   display: grid;
   width: 48px;
   height: 48px;
@@ -613,9 +662,11 @@ button:not(:disabled),
 .compass-load-progress {
   position: absolute;
   bottom: 0;
-  width: 64px;
+  left: 50%;
+  width: 96px;
   height: 2px;
   overflow: hidden;
+  transform: translateX(-50%);
   background: var(
     --vscode-progressBar-background,
     color-mix(in srgb, var(--workbench-progress) 28%, transparent)
@@ -664,8 +715,46 @@ button:not(:disabled),
   font-size: 12px;
 }
 
-.compass-load-steps b {
-  color: var(--muted-foreground);
+.compass-load-steps {
+  gap: 8px 14px;
+}
+
+.compass-load-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-disabledForeground, var(--muted-foreground));
+}
+
+.compass-load-step > i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.compass-load-step[data-state="complete"] {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+}
+
+.compass-load-step[data-state="complete"] > i {
+  border-color: var(--vscode-progressBar-background, var(--workbench-progress));
+  background: var(--vscode-progressBar-background, var(--workbench-progress));
+}
+
+.compass-load-step[data-state="active"] {
+  color: var(--vscode-editor-foreground, var(--foreground));
+}
+
+.compass-load-step[data-state="active"] > i {
+  border-color: var(--vscode-progressBar-background, var(--workbench-progress));
+  background: var(--vscode-progressBar-background, var(--workbench-progress));
+  box-shadow: 0 0 7px color-mix(
+    in srgb,
+    var(--vscode-progressBar-background, var(--workbench-progress)) 46%,
+    transparent
+  );
 }
 
 .compass-load-action {
@@ -1703,15 +1792,28 @@ body.vscode-high-contrast .compass-graph-inspector,
 body.vscode-high-contrast .compass-inspector-resizer,
 body.vscode-high-contrast .compass-load-mark,
 body.vscode-high-contrast .compass-load-action,
+body.vscode-high-contrast .compass-load-step > i,
 body.vscode-high-contrast .compass-source-metadata,
 body.vscode-high-contrast-light .compass-glass-panel,
 body.vscode-high-contrast-light .compass-graph-inspector,
 body.vscode-high-contrast-light .compass-inspector-resizer,
 body.vscode-high-contrast-light .compass-load-mark,
 body.vscode-high-contrast-light .compass-load-action,
+body.vscode-high-contrast-light .compass-load-step > i,
 body.vscode-high-contrast-light .compass-source-metadata {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--compass-focus));
+}
+
+body.vscode-high-contrast .compass-load-graph .compass-load-edge,
+body.vscode-high-contrast-light .compass-load-graph .compass-load-edge {
+  stroke: var(--vscode-contrastBorder, currentColor);
+}
+
+body.vscode-high-contrast .compass-load-graph .compass-load-node,
+body.vscode-high-contrast-light .compass-load-graph .compass-load-node {
+  stroke: var(--vscode-contrastBorder, currentColor);
+  stroke-width: 1.5px;
 }
 
 @media (max-width: 980px) {
@@ -1800,6 +1902,10 @@ body.vscode-high-contrast-light .compass-source-metadata {
   .architecture-load-skeleton span,
   .workbench-state-spinner {
     animation: none !important;
+  }
+
+  .compass-load-tracer {
+    display: none;
   }
 }
 

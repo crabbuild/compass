@@ -17,6 +17,10 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("Arranging relationships");
     expect(markup).toContain('data-testid="graph-constellation"');
     expect(markup).toContain('aria-hidden="true"');
+    expect(markup).toContain("compass-load-graph");
+    expect(markup).toContain(
+      'class="compass-load-step" data-state="active"><i aria-hidden="true"></i>Reading graph'
+    );
   });
 
   it("shows a recoverable error with both host actions", () => {
@@ -32,6 +36,7 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("viewer export failed");
     expect(markup).toContain("Retry");
     expect(markup).toContain("Show Compass output");
+    expect(markup).not.toContain("compass-load-tracer");
   });
 
   it("accepts purpose-specific loading copy", () => {
@@ -61,7 +66,8 @@ describe("GraphLoadingState", () => {
         loadingCopy={{
           eyebrow: "Compass code graph · 42.2 MB",
           title: "Preparing a large code graph",
-          steps: ["Reading graph", "Building overview", "Opening explorer"]
+          steps: ["Snapshot ready", "Building overview", "Opening explorer"],
+          activeStep: 1
         }}
         onRetry={vi.fn()}
         onShowOutput={vi.fn()}
@@ -71,6 +77,15 @@ describe("GraphLoadingState", () => {
     expect(markup).toContain("Preparing a large code graph");
     expect(markup).toContain("42.2 MB");
     expect(markup).toContain("Building overview");
+    expect(markup).toContain(
+      'class="compass-load-step" data-state="complete"><i aria-hidden="true"></i>Snapshot ready'
+    );
+    expect(markup).toContain(
+      'class="compass-load-step" data-state="active"><i aria-hidden="true"></i>Building overview'
+    );
+    expect(markup).toContain(
+      'class="compass-load-step" data-state="pending"><i aria-hidden="true"></i>Opening explorer'
+    );
   });
 
   it("renders a compact Architecture loader with a layout skeleton", () => {

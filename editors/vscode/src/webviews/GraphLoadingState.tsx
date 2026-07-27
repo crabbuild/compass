@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import {
   AlertTriangleIcon,
   CompassIcon,
@@ -14,12 +13,14 @@ export type GraphLoadingCopy = {
   eyebrow: string;
   title: string;
   steps: readonly string[];
+  activeStep?: number;
 };
 
 const DEFAULT_LOADING_COPY: GraphLoadingCopy = {
   eyebrow: "Compass graph",
   title: "Mapping your codebase",
-  steps: ["Reading graph", "Arranging relationships", "Preparing inspector"]
+  steps: ["Reading graph", "Arranging relationships", "Preparing inspector"],
+  activeStep: 0
 };
 
 export function GraphLoadingState({
@@ -44,6 +45,35 @@ export function GraphLoadingState({
         data-state={state.kind}
         aria-hidden="true"
       >
+        {loading && (
+          <svg className="compass-load-graph" viewBox="0 0 180 112">
+            <path
+              className="compass-load-edge compass-load-edge-a"
+              d="M18 74 58 28 90 56"
+            />
+            <path
+              className="compass-load-edge compass-load-edge-b"
+              d="M90 56 132 20 162 62"
+            />
+            <path
+              className="compass-load-edge compass-load-edge-c"
+              d="M42 94 90 56 138 94"
+            />
+            <circle className="compass-load-node compass-load-node-a" cx="18" cy="74" r="4" />
+            <circle className="compass-load-node compass-load-node-b" cx="58" cy="28" r="4" />
+            <circle className="compass-load-node compass-load-node-c" cx="132" cy="20" r="4" />
+            <circle className="compass-load-node compass-load-node-d" cx="162" cy="62" r="4" />
+            <circle className="compass-load-node compass-load-node-e" cx="42" cy="94" r="4" />
+            <circle className="compass-load-node compass-load-node-f" cx="138" cy="94" r="4" />
+            <circle className="compass-load-tracer" r="3">
+              <animateMotion
+                dur="2.8s"
+                repeatCount="indefinite"
+                path="M18 74 58 28 90 56 132 20 162 62"
+              />
+            </circle>
+          </svg>
+        )}
         <span className="compass-load-mark">
           {loading ? <CompassIcon /> : <AlertTriangleIcon />}
         </span>
@@ -61,12 +91,20 @@ export function GraphLoadingState({
         <h1>{loading ? loadingCopy.title : "Compass could not load this graph"}</h1>
         {loading ? (
           <p className="compass-load-steps">
-            {loadingCopy.steps.map((step, index) => (
-              <Fragment key={step}>
-                {index > 0 && <b aria-hidden="true">·</b>}
-                <span>{step}</span>
-              </Fragment>
-            ))}
+            {loadingCopy.steps.map((step, index) => {
+              const activeStep = loadingCopy.activeStep ?? 0;
+              const stepState = index < activeStep
+                ? "complete"
+                : index === activeStep
+                  ? "active"
+                  : "pending";
+              return (
+                <span key={step} className="compass-load-step" data-state={stepState}>
+                  <i aria-hidden="true" />
+                  {step}
+                </span>
+              );
+            })}
           </p>
         ) : (
           <>
