@@ -37,11 +37,13 @@ export function mergeExpansion(
   };
 }
 
-function uniqueSites<T extends { anchor: { source_file: string; start_byte: number; end_byte: number } }>(
+function uniqueSites<T extends CallGraphResponse["edges"][number]["callSites"][number]>(
   sites: T[]
 ): T[] {
   return [...new Map(sites.map((site) => [
-    `${site.anchor.source_file}:${site.anchor.start_byte}:${site.anchor.end_byte}`,
+    "anchor" in site
+      ? `${site.anchor.source_file}:${site.anchor.start_byte}:${site.anchor.end_byte}`
+      : `${site.sourceFile}:${site.line}:${site.startByte}:${site.endByte}`,
     site
   ])).values()];
 }

@@ -38,11 +38,7 @@ export function CallCanvas({
       kind: node.unresolved ? "Unresolved call" : "Function",
       community: resolutionCommunity[nodeResolution.get(node.id) ?? "resolved"],
       communityName: nodeResolution.get(node.id) ?? "resolved",
-      source: node.anchor ? {
-        file: node.anchor.source_file,
-        startByte: node.anchor.start_byte,
-        endByte: node.anchor.end_byte
-      } : undefined
+      source: sourceLocation(node)
     })),
     edges: graph.edges.map((edge) => ({
       id: edge.id,
@@ -61,4 +57,24 @@ export function CallCanvas({
     hyperedges: []
   };
   return <CompassGraph model={model} host={host} />;
+}
+
+function sourceLocation(
+  node: CallGraphResponse["nodes"][number]
+): GraphViewModel["nodes"][number]["source"] {
+  if (node.anchor) {
+    return {
+      file: node.anchor.source_file,
+      startByte: node.anchor.start_byte,
+      endByte: node.anchor.end_byte
+    };
+  }
+  if (!node.file) return undefined;
+  return {
+    file: node.file,
+    ...(node.startLine != null ? { startLine: node.startLine } : {}),
+    ...(node.endLine != null ? { endLine: node.endLine } : {}),
+    ...(node.startByte != null ? { startByte: node.startByte } : {}),
+    ...(node.endByte != null ? { endByte: node.endByte } : {})
+  };
 }
