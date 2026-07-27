@@ -1,4 +1,4 @@
-name: Release Compass for macOS and Linux
+name: Release Compass for macOS, Linux, and Windows
 
 on:
   push:
@@ -34,12 +34,22 @@ jobs:
         include:
           - runner: macos-15-intel
             target: x86_64-apple-darwin
+            binary: compass
           - runner: macos-15
             target: aarch64-apple-darwin
+            binary: compass
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            binary: compass
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            binary: compass
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            binary: compass.exe
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            binary: compass.exe
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -59,14 +69,16 @@ jobs:
       - name: Test Compass product contract
         run: cargo test -p compass-cli --test compass_product --locked
       - name: Test release scripts
+        shell: bash
         run: sh scripts/test_release_scripts.sh
       - name: Build locked Compass binary
         run: cargo build --release --locked -p compass-cli --bin compass --target ${{ matrix.target }}
       - name: Package release distribution
+        shell: bash
         run: >-
           scripts/package_release.sh
           ${{ matrix.target }}
-          target/${{ matrix.target }}/release/compass
+          target/${{ matrix.target }}/release/${{ matrix.binary }}
           dist
       - name: Verify packaged Compass binary
         shell: bash
@@ -74,12 +86,19 @@ jobs:
           name="compass-${{ matrix.target }}"
           mkdir -p dist/verify
           tar -C dist/verify -xzf "dist/$name.tar.gz"
-          "dist/verify/$name/compass" --version
-          "dist/verify/$name/compass" query --help
+          "dist/verify/$name/${{ matrix.binary }}" --version
+          "dist/verify/$name/${{ matrix.binary }}" query --help
           test -f "dist/verify/$name/LICENSE-MIT"
           test -f "dist/verify/$name/LICENSE-APACHE"
           test -f "dist/verify/$name/THIRD_PARTY_NOTICES.md"
-          (cd dist && shasum -a 256 -c "$name.tar.gz.sha256")
+          (
+            cd dist
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum -c "$name.tar.gz.sha256"
+            else
+              shasum -a 256 -c "$name.tar.gz.sha256"
+            fi
+          )
       - name: Attest release archive
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
