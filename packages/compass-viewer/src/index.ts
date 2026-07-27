@@ -5,6 +5,8 @@ export * from "./contracts/callflow";
 export * from "./contracts/graph";
 export * from "./contracts/history";
 export * from "./graph/CompassGraph";
+export * from "./graph/CompassBrandMark";
+export * from "./graph/GraphTransitionScreen";
 export * from "./graph/inspectorLayout";
 export * from "./graph/state";
 export * from "./query/QueryWorkspace";

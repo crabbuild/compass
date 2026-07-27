@@ -639,9 +639,9 @@ window.acquireVsCodeApi=()=>({getState(){return window.webviewState},setState(st
     window.communityRequestCount+=1;
     window.openedCommunity=message.communityId;
     if(message.communityId===1 && window.communityRequestCount===1) {
-      setTimeout(()=>window.postMessage({type:"communityError",requestId:message.requestId,communityId:message.communityId,message:"Community detail failed"},"*"),250);
+      setTimeout(()=>window.postMessage({type:"communityError",requestId:message.requestId,communityId:message.communityId,message:"Community detail failed"},"*"),800);
     } else {
-      setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,repositoryId:"fixture",communityId:message.communityId,model:${JSON.stringify(detail)}},"*"),0);
+      setTimeout(()=>window.postMessage({type:"communityGraph",requestId:message.requestId,repositoryId:"fixture",communityId:message.communityId,model:${JSON.stringify(detail)}},"*"),500);
     }
   } else if(message.type==="openSource") {
     window.openedSource=message.source;

@@ -144,6 +144,8 @@ test("community double-click enters lazy detail, source opens, and Back restores
   await page.getByRole("option", { name: /Core/i }).click();
   await page.waitForTimeout(300);
   await page.locator("canvas").dblclick();
+  await expect(page.getByRole("heading", { name: "Opening Core" })).toBeVisible();
+  await expect(page.locator(".compass-workspace-content")).toHaveAttribute("inert", "");
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedCommunity?: number }).openedCommunity
   )).toBe(0);
@@ -163,7 +165,7 @@ test("community double-click enters lazy detail, source opens, and Back restores
   await expect(page.getByText("Data", { exact: true })).toBeVisible();
 });
 
-test("community failure preserves the overview, suppresses duplicates, and permits retry", async ({
+test("community failure preserves the overview and permits retry", async ({
   page
 }) => {
   await page.goto("/community.html");
@@ -172,7 +174,8 @@ test("community failure preserves the overview, suppresses duplicates, and permi
   await page.getByRole("option", { name: /Data/i }).click();
   const openCommunity = page.getByRole("button", { name: "Open community" });
   await openCommunity.click();
-  await openCommunity.click();
+  await expect(page.getByRole("heading", { name: "Opening Data" })).toBeVisible();
+  await expect(page.locator(".compass-workspace-content")).toHaveAttribute("inert", "");
   await page.waitForTimeout(50);
   expect(await page.evaluate(
     () => (window as typeof window & { communityRequestCount?: number }).communityRequestCount
