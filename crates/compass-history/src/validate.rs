@@ -2,6 +2,7 @@ use compass_model::GraphDocument;
 use prolly::{Prolly, Tree, VersionedValue};
 use prolly_store_sqlite::SqliteStore;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::{
@@ -92,11 +93,15 @@ pub(crate) struct ValidatedPartition {
 }
 
 pub(crate) fn validate_publication_partition(
-    artifacts: &GraphArtifacts,
+    artifacts: GraphArtifacts,
     completion: &CompletionEvidence,
 ) -> Result<ValidatedPartition, HistoryError> {
-    let partitioned = artifacts.partition(completion)?;
     let mut problems = Vec::new();
+    validate_document_references(&artifacts.document, &mut problems)?;
+    if !problems.is_empty() {
+        return Err(HistoryError::InvalidRealization(problems));
+    }
+    let partitioned = artifacts.into_partition(completion)?;
     let mut total_bytes = 0_u64;
     for (kind, entries) in [
         ("nodes", partitioned.nodes.as_slice()),
@@ -110,9 +115,8 @@ pub(crate) fn validate_publication_partition(
             partitioned.program_summaries.as_slice(),
         ),
     ] {
-        validate_partition_records(kind, entries, &mut total_bytes, &mut problems)?;
+        validate_generated_partition_records(kind, entries, &mut total_bytes, &mut problems);
     }
-    validate_partition_references(&partitioned.nodes, &artifacts.document, &mut problems)?;
     if !problems.is_empty() {
         return Err(HistoryError::InvalidRealization(problems));
     }
@@ -276,12 +280,12 @@ pub(crate) fn validate_trees_with_artifacts(
     })
 }
 
-fn validate_partition_records(
+fn validate_generated_partition_records(
     kind: &'static str,
     entries: &[(Vec<u8>, Vec<u8>)],
     total_bytes: &mut u64,
     problems: &mut Vec<ValidationProblem>,
-) -> Result<(), HistoryError> {
+) {
     let count = record_count(entries);
     if exceeds_limit(count, MAX_RECORDS_PER_TREE) {
         problems.push(ValidationProblem::ResourceLimit {
@@ -299,9 +303,8 @@ fn validate_partition_records(
         }
     }
     for (key, value) in entries {
-        validate_record_limits(kind, key, value, total_bytes, problems)?;
+        validate_record_size_limits(key, value, total_bytes, problems);
     }
-    Ok(())
 }
 
 fn validate_record_limits(
@@ -311,6 +314,43 @@ fn validate_record_limits(
     total_bytes: &mut u64,
     problems: &mut Vec<ValidationProblem>,
 ) -> Result<(), HistoryError> {
+    validate_record_size_limits(key, value, total_bytes, problems);
+    let envelope = match VersionedValue::from_bytes(value) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(format!(
+                "{kind} record has an invalid envelope: {error}"
+            )));
+            return Ok(());
+        }
+    };
+    let json = match serde_json::from_slice::<Value>(&envelope.payload) {
+        Ok(json) => json,
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(format!(
+                "{kind} record has invalid JSON: {error}"
+            )));
+            return Ok(());
+        }
+    };
+    if let Some(problem) = json_depth_problem(&json) {
+        problems.push(problem);
+    }
+    if canonical_json_bytes(&json)? != envelope.payload {
+        problems.push(ValidationProblem::KeyMismatch {
+            kind,
+            key: key.to_vec(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_record_size_limits(
+    key: &[u8],
+    value: &[u8],
+    total_bytes: &mut u64,
+    problems: &mut Vec<ValidationProblem>,
+) {
     if exceeds_limit(key.len() as u64, MAX_KEY_BYTES as u64) {
         problems.push(ValidationProblem::ResourceLimit {
             kind: "key bytes",
@@ -335,39 +375,22 @@ fn validate_record_limits(
             actual: *total_bytes,
         });
     }
-    let envelope = match VersionedValue::from_bytes(value) {
-        Ok(envelope) => envelope,
-        Err(error) => {
-            problems.push(ValidationProblem::ArtifactRegistry(format!(
-                "{kind} record has an invalid envelope: {error}"
-            )));
-            return Ok(());
-        }
-    };
-    let json = match serde_json::from_slice::<Value>(&envelope.payload) {
-        Ok(json) => json,
-        Err(error) => {
-            problems.push(ValidationProblem::ArtifactRegistry(format!(
-                "{kind} record has invalid JSON: {error}"
-            )));
-            return Ok(());
-        }
-    };
-    let depth = json_depth(&json);
-    if exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64) {
-        problems.push(ValidationProblem::ResourceLimit {
-            kind: "JSON depth",
-            limit: MAX_JSON_DEPTH as u64,
-            actual: depth as u64,
-        });
-    }
-    if canonical_json_bytes(&json)? != envelope.payload {
-        problems.push(ValidationProblem::KeyMismatch {
-            kind,
-            key: key.to_vec(),
-        });
+}
+
+pub(crate) fn validate_generated_json(json: &Value) -> Result<(), HistoryError> {
+    if let Some(problem) = json_depth_problem(json) {
+        return Err(HistoryError::InvalidRealization(vec![problem]));
     }
     Ok(())
+}
+
+fn json_depth_problem(json: &Value) -> Option<ValidationProblem> {
+    let depth = json_depth(json);
+    exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64).then_some(ValidationProblem::ResourceLimit {
+        kind: "JSON depth",
+        limit: MAX_JSON_DEPTH as u64,
+        actual: depth as u64,
+    })
 }
 
 fn record_count(entries: &[(Vec<u8>, Vec<u8>)]) -> u64 {
@@ -446,14 +469,18 @@ fn validate_references(
     Ok(())
 }
 
-fn validate_partition_references(
-    nodes: &[(Vec<u8>, Vec<u8>)],
+fn validate_document_references(
     document: &GraphDocument,
     problems: &mut Vec<ValidationProblem>,
 ) -> Result<(), HistoryError> {
+    let nodes = document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
     for edge in &document.links {
         for endpoint in [&edge.source, &edge.target] {
-            if !partition_has_node(nodes, endpoint) {
+            if !nodes.contains(endpoint.as_str()) {
                 problems.push(ValidationProblem::MissingEdgeEndpoint {
                     edge: canonical_json_bytes(&serde_json::to_value(edge)?)?,
                     endpoint: endpoint.clone(),
@@ -482,7 +509,7 @@ fn validate_partition_references(
             .flatten()
             .filter_map(Value::as_str)
         {
-            if !partition_has_node(nodes, member) {
+            if !nodes.contains(member) {
                 problems.push(ValidationProblem::MissingHyperedgeMember {
                     hyperedge: canonical_json_bytes(value)?,
                     member: member.to_owned(),
@@ -491,13 +518,6 @@ fn validate_partition_references(
         }
     }
     Ok(())
-}
-
-fn partition_has_node(nodes: &[(Vec<u8>, Vec<u8>)], node: &str) -> bool {
-    let key = node_key(node);
-    nodes
-        .binary_search_by(|(candidate, _)| candidate.as_slice().cmp(key.as_slice()))
-        .is_ok()
 }
 
 fn json_depth(value: &Value) -> usize {
