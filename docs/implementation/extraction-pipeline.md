@@ -260,10 +260,12 @@ Cases to test:
 Performance qualification compares cold, warm unchanged, single-file change,
 rename, and delete cases against Compass-owned baselines.
 
-Extractor semantics use a versioned AST cache namespace. The C declarator and
-positional-document corrections advance that namespace to `v0.9.21`, so the
-first update after upgrading refreshes AST facts. Later unchanged updates return
-to the normal warm path.
+Extractor semantics use the Compass-owned AST compatibility namespace `v1`.
+This cache version is independent of the Compass package release and advances
+only when changed extractor behavior makes existing AST entries unsafe to
+reuse. The first update after such a version change refreshes AST facts; later
+unchanged updates return to the normal warm path. The nested `e6` namespace is
+the binary cache encoding version, not part of the AST compatibility version.
 
 ## Watch mode
 

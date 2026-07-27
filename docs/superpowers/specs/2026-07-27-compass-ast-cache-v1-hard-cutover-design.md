@@ -34,7 +34,8 @@ terminology to AST-cache-version terminology:
 
 - `AST_EXTRACTOR_VERSION` becomes `AST_CACHE_VERSION`;
 - `Cache::extractor_version` becomes `Cache::ast_cache_version`;
-- the test-only/customization builder becomes `with_ast_cache_version`.
+- the public extractor-version override is removed so callers cannot create
+  alternate AST namespaces.
 
 The default compatibility value is the explicit string `"1"`. It must not use
 `CARGO_PKG_VERSION`, because normal Compass releases must not discard compatible
@@ -63,4 +64,3 @@ Verification consists of:
 2. the complete `compass-files` test suite;
 3. formatting and Clippy for `compass-files`;
 4. `graphify update .` after code changes, as required by the parent project.
-
