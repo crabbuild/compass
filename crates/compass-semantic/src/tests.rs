@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread::JoinHandle;
 
-use compass_files::Cache;
+use compass_files::{Cache, CacheOptions};
 use serde_json::json;
 
 use super::*;
@@ -900,7 +900,10 @@ fn cached_corpus_orchestration_checkpoints_replays_and_prunes() -> Result<(), Bo
         .collect::<Result<Vec<_>, std::io::Error>>()?;
     let orphan = corpus.path().join("orphan.md");
     fs::write(&orphan, "orphan")?;
-    let mut seed_cache = Cache::new(corpus.path(), Some(output.path()))?;
+    let mut seed_cache = Cache::open(
+        corpus.path(),
+        CacheOptions::output_directory(Some(output.path())),
+    )?;
     save_semantic_cache(
         &mut seed_cache,
         corpus.path(),
@@ -952,7 +955,11 @@ fn cached_corpus_orchestration_checkpoints_replays_and_prunes() -> Result<(), Bo
         },
         &mut |index, total, chunk, _| {
             if let Ok(mut observations) = checkpoint_observations.lock() {
-                let mut probe = Cache::new(corpus.path(), Some(output.path())).ok();
+                let mut probe = Cache::open(
+                    corpus.path(),
+                    CacheOptions::output_directory(Some(output.path())),
+                )
+                .ok();
                 let cached = probe.as_mut().and_then(|cache| {
                     check_semantic_cache(
                         cache,
@@ -1084,7 +1091,10 @@ fn semantic_cache_checkpoints_are_scoped_partial_and_prompt_versioned() -> Resul
     fs::write(&a, "a")?;
     fs::write(&b, "b")?;
     fs::write(&c, "c")?;
-    let mut cache = Cache::new(corpus.path(), Some(output.path()))?;
+    let mut cache = Cache::open(
+        corpus.path(),
+        CacheOptions::output_directory(Some(output.path())),
+    )?;
     let fragment = json!({
         "nodes":[
             {"id":"a","source_file":&a},

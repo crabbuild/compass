@@ -4,8 +4,8 @@ use std::fs::{self, FileTimes};
 use std::time::{Duration, UNIX_EPOCH};
 
 use compass_files::{
-    BuildGuard, Cache, CacheKind, DetectOptions, FileSlice, Manifest, ManifestKind, StatHashIndex,
-    WatchPathFilter, bisect_slice, body_content, classify_file, file_hash, md5_file,
+    BuildGuard, Cache, CacheKind, CacheOptions, DetectOptions, FileSlice, Manifest, ManifestKind,
+    StatHashIndex, WatchPathFilter, bisect_slice, body_content, classify_file, file_hash, md5_file,
     prompt_fingerprint, read_slice_text, read_source_lossy, slice_boundaries, split_file,
     write_bytes_atomic, write_json_atomic, write_text_atomic,
 };
@@ -295,7 +295,7 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
         "edges": [],
         "partial": false
     });
-    let mut cache = Cache::new(directory.path(), None)?;
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
     cache.save(&source, &value, &CacheKind::Ast, None)?;
     assert!(
         fs::read_dir(cache.directory(&CacheKind::Ast, None))?
@@ -306,7 +306,7 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
                 .is_some_and(|value| value == "msgpack"))
     );
     assert_eq!(
-        cache.load(&source, &CacheKind::Ast, None, true, false)?,
+        cache.load(&source, &CacheKind::Ast, None, false)?,
         Some(value)
     );
     cache.flush()?;
@@ -321,11 +321,11 @@ fn cache_round_trip_is_portable_and_partial_safe() -> Result<(), Box<dyn Error>>
     let partial = json!({"nodes": [], "edges": [], "partial": true});
     cache.save(&source, &partial, &CacheKind::Semantic, None)?;
     assert_eq!(
-        cache.load(&source, &CacheKind::Semantic, None, true, false)?,
+        cache.load(&source, &CacheKind::Semantic, None, false)?,
         None
     );
     assert_eq!(
-        cache.load(&source, &CacheKind::Semantic, None, true, true)?,
+        cache.load(&source, &CacheKind::Semantic, None, true)?,
         Some(partial)
     );
     Ok(())
@@ -342,7 +342,7 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
         json!({"nodes":[{"id":"first","source_file":first.to_string_lossy()}],"edges":[]});
     let second_value =
         json!({"nodes":[{"id":"second","source_file":second.to_string_lossy()}],"edges":[]});
-    let mut cache = Cache::new(directory.path(), None)?;
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
 
     cache.save_batch(
         &[
@@ -353,11 +353,11 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
         None,
     )?;
     assert_eq!(
-        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        cache.load(&first, &CacheKind::Ast, None, false)?,
         Some(first_value.clone())
     );
     assert_eq!(
-        cache.load(&second, &CacheKind::Ast, None, false, false)?,
+        cache.load(&second, &CacheKind::Ast, None, false)?,
         Some(second_value)
     );
 
@@ -374,7 +374,7 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
         "edges":[]
     });
     assert_eq!(
-        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        cache.load(&first, &CacheKind::Ast, None, false)?,
         Some(canonical_first_value)
     );
 
@@ -383,7 +383,7 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
         json!({"nodes":[{"id":"first_changed","source_file":first.to_string_lossy()}],"edges":[]});
     cache.save_batch(&[(first.clone(), changed.clone())], &CacheKind::Ast, None)?;
     assert_eq!(
-        cache.load(&first, &CacheKind::Ast, None, false, false)?,
+        cache.load(&first, &CacheKind::Ast, None, false)?,
         Some(changed)
     );
     Ok(())
@@ -394,11 +394,11 @@ fn malformed_and_non_object_cache_entries_fail_closed() -> Result<(), Box<dyn Er
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("main.py");
     fs::write(&source, "def main(): pass\n")?;
-    let mut cache = Cache::new(directory.path(), None)?;
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
 
     cache.save(&source, &json!("scalar"), &CacheKind::Semantic, None)?;
     assert_eq!(
-        cache.load(&source, &CacheKind::Semantic, None, false, false)?,
+        cache.load(&source, &CacheKind::Semantic, None, false)?,
         Some(json!("scalar"))
     );
 
@@ -412,7 +412,7 @@ fn malformed_and_non_object_cache_entries_fail_closed() -> Result<(), Box<dyn Er
         .ok_or("missing semantic cache entry")?;
     fs::write(entry, b"not-json")?;
     assert_eq!(
-        cache.load(&source, &CacheKind::Semantic, None, false, false)?,
+        cache.load(&source, &CacheKind::Semantic, None, false)?,
         None
     );
     Ok(())
@@ -531,19 +531,20 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     let source = root.join("main.md");
     fs::write(&source, "---\ntitle: ignored\n---\nbody\n")?;
 
-    let default_cache = Cache::new(&root, Some(&cache_root))?;
+    let default_cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?;
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v0.9.21/e1")
+            .ends_with("ast/v0.9.21/e6")
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.20").exists());
 
-    let mut cache = Cache::new(&root, Some(&cache_root))?.with_extractor_version("current");
+    let mut cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?
+        .with_extractor_version("current");
     assert!(
         cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/vcurrent/e1")
+            .ends_with("ast/vcurrent/e6")
     );
     assert!(
         cache
@@ -562,19 +563,19 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
         None,
     )?;
     assert_eq!(
-        cache.load(&source, &CacheKind::Semantic, Some("new"), false, true)?,
+        cache.load(&source, &CacheKind::Semantic, Some("new"), true)?,
         None
     );
-    let legacy = cache
-        .load(&source, &CacheKind::Semantic, Some("new"), true, true)?
-        .ok_or("legacy cache entry")?;
+    let stored = cache
+        .load(&source, &CacheKind::Semantic, None, true)?
+        .ok_or("current cache entry")?;
     assert!(
-        legacy["nodes"][0]["source_file"]
+        stored["nodes"][0]["source_file"]
             .as_str()
             .is_some_and(|path| path.ends_with("main.md"))
     );
     assert!(
-        legacy["nodes"][1]["source_file"]
+        stored["nodes"][1]["source_file"]
             .as_str()
             .is_some_and(|path| path.ends_with("relative.md"))
     );
@@ -604,7 +605,13 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
 
     let missing = root.join("missing.md");
     cache.save(&missing, &json!({}), &CacheKind::Ast, None)?;
-    assert!(Cache::new(root.join("missing-root"), None).is_err());
+    assert!(
+        Cache::open(
+            root.join("missing-root"),
+            CacheOptions::output_directory(None)
+        )
+        .is_err()
+    );
     Ok(())
 }
 
@@ -841,7 +848,7 @@ fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
 #[test]
 fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
-    let cache = Cache::new(directory.path(), None)?;
+    let cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
     let syntax = CacheKind::ProgramSyntax {
         ir_schema: 1,
         provider_version: "tree-sitter-rust/1".to_owned(),
@@ -862,7 +869,7 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
     )?;
     cache.save_program(&artifact, "index.scip:bbbbbbbb", &json!({"kind":"scip"}))?;
     let syntax_directory = cache.directory(&syntax, None);
-    assert!(syntax_directory.ends_with("e1"));
+    assert!(syntax_directory.ends_with("e6"));
     assert!(
         fs::read_dir(&syntax_directory)?
             .filter_map(Result::ok)
@@ -900,9 +907,11 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
     let legacy_entry = legacy_entry.with_extension("json");
     fs::write(&legacy_entry, serde_json::to_vec(&first)?)?;
     fs::remove_file(&first_entry)?;
-    assert_eq!(
-        cache.load_program::<serde_json::Value>(&syntax, "src/a.rs:aaaaaaaa")?,
-        Some(first.clone())
+    assert!(
+        cache
+            .load_program::<serde_json::Value>(&syntax, "src/a.rs:aaaaaaaa")?
+            .is_none(),
+        "hard cutover must not decode the legacy JSON cache"
     );
 
     let second_entry = fs::read_dir(&syntax_directory)?

@@ -2,16 +2,18 @@ use std::path::PathBuf;
 
 use compass_analysis::FunctionSummary;
 use compass_history::{
-    ChangeKind, ChangeSink, ExtractionFingerprint, GraphChange, HistoryError, HistoryRecord,
-    HistoryRecordKey, HistoryStore, RealizationId, RecordKind, Repository,
+    ChangeKind, ChangeSink, DerivedCacheNamespace, ExtractionFingerprint, GraphChange,
+    HistoryError, HistoryRecord, HistoryRecordKey, RealizationReader, RecordKind, Repository,
+    canonical_json_bytes,
 };
 use compass_ir::{FunctionIr, ModuleIr};
 use compass_model::NodeRecord;
 use compass_semantic_diff::{
     ChangeDirection, DependencyDelta, EvidenceRef, GraphDelta, GraphEdgeDelta, GraphNodeDelta,
-    SemanticDiffError, SemanticDiffInput, SnapshotIdentity, SnapshotReader, SnapshotSide,
-    StaticTestEvidence, compare,
+    SemanticDiffError, SemanticDiffInput, SemanticDiffReport, SnapshotIdentity, SnapshotReader,
+    SnapshotSide, StaticTestEvidence, compare,
 };
+use sha2::{Digest, Sha256};
 
 use crate::semantic_diff_render::{RenderOptions, render_html, render_json, render_text};
 use crate::{Frontend, Outcome, history_commands};
@@ -95,43 +97,77 @@ fn execute(args: &[String]) -> Result<CommandOutput, CommandError> {
         options.fingerprint.as_deref(),
     )
     .map_err(CommandError::Runtime)?;
-    let mut direct = DirectChanges::default();
-    resolved
-        .history
-        .diff_records(
-            &resolved.old.id,
-            &resolved.new.id,
-            &[RecordKind::Node, RecordKind::Edge],
-            &mut direct,
-        )
-        .map_err(runtime)?;
-    direct.cancel_attribute_only_dependency_churn();
-    direct.normalize_graph_delta();
-    let snapshots = HistorySnapshots {
-        store: &resolved.history,
-        old: &resolved.old.id,
-        new: &resolved.new.id,
+    let source_delta_bytes =
+        canonical_json_bytes(&serde_json::to_value(&source_deltas).map_err(runtime)?)
+            .map_err(runtime)?;
+    let cache_key = serde_json::json!({
+        "schema": "compass.semantic_diff.cache_key/1",
+        "engine_version": compass_semantic_diff::ENGINE_VERSION,
+        "old_realization": resolved.old.id.to_string(),
+        "new_realization": resolved.new.id.to_string(),
+        "source_delta_sha256": format!("{:x}", Sha256::digest(&source_delta_bytes)),
+    });
+    let cache = resolved.history.cache().ok();
+    let cached_report = cache
+        .as_ref()
+        .and_then(|cache| {
+            cache
+                .read(
+                    DerivedCacheNamespace::SemanticDiff,
+                    &cache_key,
+                    128 * 1024 * 1024,
+                )
+                .ok()
+                .flatten()
+        })
+        .and_then(|bytes| serde_json::from_slice::<SemanticDiffReport>(&bytes).ok());
+    let report = match cached_report {
+        Some(report) => report,
+        None => {
+            let mut direct = DirectChanges::default();
+            let old_reader = resolved.history.reader(&resolved.old.id).map_err(runtime)?;
+            let new_reader = resolved.history.reader(&resolved.new.id).map_err(runtime)?;
+            old_reader
+                .diff_records(
+                    &new_reader,
+                    &[RecordKind::Node, RecordKind::Edge],
+                    &mut direct,
+                )
+                .map_err(runtime)?;
+            direct.cancel_attribute_only_dependency_churn();
+            direct.normalize_graph_delta();
+            let snapshots = HistorySnapshots {
+                old: old_reader,
+                new: new_reader,
+            };
+            let test_evidence = StaticTestEvidence::new(&snapshots, SnapshotSide::New);
+            let report = compare(SemanticDiffInput {
+                old: SnapshotIdentity {
+                    commit: resolved.old.version.git_commit.clone(),
+                    realization: resolved.old.id.to_string(),
+                    fingerprint: resolved.old.version.profile_digest.clone(),
+                },
+                new: SnapshotIdentity {
+                    commit: resolved.new.version.git_commit.clone(),
+                    realization: resolved.new.id.to_string(),
+                    fingerprint: resolved.new.version.profile_digest.clone(),
+                },
+                source_deltas: &source_deltas,
+                changed_node_ids: &direct.nodes,
+                dependency_deltas: &direct.dependencies,
+                graph_delta: &direct.graph_delta,
+                snapshots: &snapshots,
+                test_evidence: &test_evidence,
+            })
+            .map_err(runtime)?;
+            let payload = canonical_json_bytes(&serde_json::to_value(&report).map_err(runtime)?)
+                .map_err(runtime)?;
+            if let Some(cache) = &cache {
+                let _ = cache.write(DerivedCacheNamespace::SemanticDiff, &cache_key, &payload);
+            }
+            serde_json::from_slice(&payload).map_err(runtime)?
+        }
     };
-    let test_evidence = StaticTestEvidence::new(&snapshots, SnapshotSide::New);
-    let report = compare(SemanticDiffInput {
-        old: SnapshotIdentity {
-            commit: resolved.old.version.git_commit.clone(),
-            realization: resolved.old.id.to_string(),
-            fingerprint: resolved.old.version.profile_digest.clone(),
-        },
-        new: SnapshotIdentity {
-            commit: resolved.new.version.git_commit.clone(),
-            realization: resolved.new.id.to_string(),
-            fingerprint: resolved.new.version.profile_digest.clone(),
-        },
-        source_deltas: &source_deltas,
-        changed_node_ids: &direct.nodes,
-        dependency_deltas: &direct.dependencies,
-        graph_delta: &direct.graph_delta,
-        snapshots: &snapshots,
-        test_evidence: &test_evidence,
-    })
-    .map_err(runtime)?;
     let render = RenderOptions {
         include_routine: options.all,
         max_findings_per_section: options.limit.or((!options.all).then_some(20)),
@@ -305,16 +341,15 @@ fn parse_format(value: &str) -> Result<Format, String> {
 }
 
 struct HistorySnapshots<'a> {
-    store: &'a HistoryStore,
-    old: &'a RealizationId,
-    new: &'a RealizationId,
+    old: RealizationReader<'a>,
+    new: RealizationReader<'a>,
 }
 
 impl HistorySnapshots<'_> {
-    fn realization(&self, side: SnapshotSide) -> &RealizationId {
+    fn reader(&self, side: SnapshotSide) -> &RealizationReader<'_> {
         match side {
-            SnapshotSide::Old => self.old,
-            SnapshotSide::New => self.new,
+            SnapshotSide::Old => &self.old,
+            SnapshotSide::New => &self.new,
         }
     }
 }
@@ -326,8 +361,8 @@ impl SnapshotReader for HistorySnapshots<'_> {
         node_id: &str,
     ) -> Result<Option<NodeRecord>, SemanticDiffError> {
         match self
-            .store
-            .read_record(self.realization(side), HistoryRecordKey::Node(node_id))
+            .reader(side)
+            .read(HistoryRecordKey::Node(node_id))
             .map_err(evidence_error)?
         {
             Some(HistoryRecord::Node(node)) => Ok(Some(node)),
@@ -344,11 +379,8 @@ impl SnapshotReader for HistorySnapshots<'_> {
         source_file: &str,
     ) -> Result<Option<ModuleIr>, SemanticDiffError> {
         match self
-            .store
-            .read_record(
-                self.realization(side),
-                HistoryRecordKey::ProgramModule(source_file),
-            )
+            .reader(side)
+            .read(HistoryRecordKey::ProgramModule(source_file))
             .map_err(evidence_error)?
         {
             Some(HistoryRecord::ProgramModule(module)) => Ok(Some(module)),
@@ -365,11 +397,8 @@ impl SnapshotReader for HistorySnapshots<'_> {
         symbol_id: &str,
     ) -> Result<Option<FunctionSummary>, SemanticDiffError> {
         match self
-            .store
-            .read_record(
-                self.realization(side),
-                HistoryRecordKey::ProgramSummary(symbol_id),
-            )
+            .reader(side)
+            .read(HistoryRecordKey::ProgramSummary(symbol_id))
             .map_err(evidence_error)?
         {
             Some(HistoryRecord::ProgramSummary(summary)) => Ok(Some(summary)),
@@ -386,11 +415,8 @@ impl SnapshotReader for HistorySnapshots<'_> {
         symbol_id: &str,
     ) -> Result<Option<FunctionIr>, SemanticDiffError> {
         match self
-            .store
-            .read_record(
-                self.realization(side),
-                HistoryRecordKey::ProgramFunction(symbol_id),
-            )
+            .reader(side)
+            .read(HistoryRecordKey::ProgramFunction(symbol_id))
             .map_err(evidence_error)?
         {
             Some(HistoryRecord::ProgramFunction(function)) => Ok(Some(function)),
@@ -407,11 +433,8 @@ impl SnapshotReader for HistorySnapshots<'_> {
         symbol_id: &str,
     ) -> Result<Vec<String>, SemanticDiffError> {
         match self
-            .store
-            .read_record(
-                self.realization(side),
-                HistoryRecordKey::ReverseCallers(symbol_id),
-            )
+            .reader(side)
+            .read(HistoryRecordKey::ReverseCallers(symbol_id))
             .map_err(evidence_error)?
         {
             Some(HistoryRecord::ReverseCallers(callers)) => Ok(callers),

@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
-    BuildGuard, BuildScope, Cache, CacheKind, DetectOptions, Detection, IgnorePolicy, Manifest,
-    ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
+    BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
+    Manifest, ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
     ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
@@ -39,6 +39,8 @@ pub struct BuildOptions {
     pub root: PathBuf,
     pub scan_filesystem: bool,
     pub output_root: Option<PathBuf>,
+    /// Explicit repository-private cache root used by exact history builds.
+    pub cache_root: Option<PathBuf>,
     pub force: bool,
     /// Preserve validated extraction and completed-output fast paths while
     /// retaining force authorization for output replacement.
@@ -99,6 +101,7 @@ impl BuildOptions {
             root: root.into(),
             scan_filesystem: true,
             output_root: None,
+            cache_root: None,
             force: false,
             reuse_cache_on_force: false,
             no_cluster: false,
@@ -441,7 +444,6 @@ fn build_graph_inner(
     let build_profile = build_profile(options);
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let build_state_present = output_dir.join(BUILD_STATE_FILE).is_file();
     let verified_state = if semantic.is_none() && supplemental.is_empty() && manifest_unchanged {
         load_verified(
             &output_dir,
@@ -452,8 +454,7 @@ fn build_graph_inner(
     } else {
         None
     };
-    let allow_legacy_validation = prior_build_complete
-        && (!build_state_present || (has_program_artifacts && verified_state.is_some()));
+    let verified_output = verified_state.is_some();
     if !has_program_artifacts {
         let verified = verified_state;
         if let Some(state) = verified.filter(|state| state.stats.files == sources.len()) {
@@ -495,7 +496,7 @@ fn build_graph_inner(
         && semantic.is_none()
         && supplemental.is_empty()
         && manifest_unchanged
-        && allow_legacy_validation
+        && verified_output
     {
         load_current_program(&root, &sources, options, &output_dir)?
     } else {
@@ -504,7 +505,7 @@ fn build_graph_inner(
     if semantic.is_none()
         && supplemental.is_empty()
         && manifest_unchanged
-        && allow_legacy_validation
+        && verified_output
         && (!options.program_analysis || unchanged_program.is_some())
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
     {
@@ -560,13 +561,17 @@ fn build_graph_inner(
         });
     }
 
-    let cache_root = (output_root != root).then_some(output_root.as_path());
-    let mut cache = Cache::new(&root, cache_root)?;
+    let output_cache_root = (output_root != root).then_some(output_root.as_path());
+    let cache_options = options.cache_root.as_deref().map_or_else(
+        || CacheOptions::output_directory(output_cache_root),
+        CacheOptions::shared_history,
+    );
+    let mut cache = Cache::open(&root, cache_options)?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
     if !options.force || options.reuse_cache_on_force {
         for path in &sources {
-            let cached = cache.load(path, &CacheKind::Ast, None, false, false)?;
+            let cached = cache.load(path, &CacheKind::Ast, None, false)?;
             if let Some(value) = cached {
                 let extraction =
                     serde_json::from_value(value).map_err(|source| CoreError::InvalidCache {
@@ -670,15 +675,20 @@ fn build_graph_inner(
         let program_sources = sources.clone();
         let mut program_options = options.clone();
         program_options.force = options.force && !options.reuse_cache_on_force;
-        let program_cache_root = cache_root.map(Path::to_path_buf);
+        let program_cache_root = options.cache_root.clone();
+        let program_output_cache_root = output_cache_root.map(Path::to_path_buf);
         let program_output_dir = output_dir.clone();
         Some(
             std::thread::Builder::new()
                 .name("compass-program".to_owned())
                 .spawn(move || {
                     let started = Instant::now();
-                    let program_cache = Cache::new(&program_root, program_cache_root.as_deref())?
-                        .without_hash_flush();
+                    let program_cache_options = program_cache_root.as_deref().map_or_else(
+                        || CacheOptions::output_directory(program_output_cache_root.as_deref()),
+                        CacheOptions::shared_history,
+                    );
+                    let program_cache =
+                        Cache::open(&program_root, program_cache_options)?.without_hash_flush();
                     let program = build_program(
                         &program_root,
                         &program_sources,
@@ -694,20 +704,11 @@ fn build_graph_inner(
     } else {
         None
     };
-    let ast_cache_entries = fresh
+    let mut ast_cache_entries = fresh
         .par_iter()
         .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
         .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
         .collect::<Vec<_>>();
-    let ast_cache_handle = std::thread::Builder::new()
-        .name("compass-ast-cache".to_owned())
-        .spawn(move || {
-            let started = Instant::now();
-            cache.save_portable_ast_batch(&ast_cache_entries)?;
-            cache.flush()?;
-            Ok::<_, CoreError>(started.elapsed())
-        })
-        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
@@ -755,11 +756,28 @@ fn build_graph_inner(
         ordered.par_iter_mut().for_each(|extraction| {
             apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
         });
+        ast_cache_entries
+            .par_iter_mut()
+            .for_each(|(_, extraction)| {
+                apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
+            });
         profile_internal_duration(
             "portable AST remap application",
             remap_application_started.elapsed(),
         );
     }
+    ast_cache_entries
+        .par_iter_mut()
+        .for_each(|(path, extraction)| prepare_portable_ast_cache_entry(extraction, path, &root));
+    let ast_cache_handle = std::thread::Builder::new()
+        .name("compass-ast-cache".to_owned())
+        .spawn(move || {
+            let started = Instant::now();
+            cache.save_portable_ast_batch(&ast_cache_entries)?;
+            cache.flush()?;
+            Ok::<_, CoreError>(started.elapsed())
+        })
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     profile_internal("portable AST ID remapping", &mut internal_started);
     let read_source = |path: &PathBuf| {
         fs::read(path).ok().map(|bytes| {
@@ -1076,9 +1094,8 @@ fn build_graph_inner(
     }
 
     // A history realization must depend only on the target commit and build
-    // profile. Incremental seeds may accelerate extraction, but their prior
-    // community numbering is operational state and cannot influence the
-    // content-addressed result.
+    // profile. Prior community numbering is current-worktree operational state
+    // and cannot influence the content-addressed result.
     let cluster_options = ClusterOptions {
         resolution: options.resolution,
         exclude_hubs_percentile: options.exclude_hubs,
@@ -1521,6 +1538,60 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
             });
         },
     );
+}
+
+fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, root: &Path) {
+    let canonical = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let Ok(relative) = canonical
+        .strip_prefix(root)
+        .or_else(|_| source.strip_prefix(root))
+    else {
+        return;
+    };
+    let portable = relative.to_string_lossy().replace('\\', "/");
+    let set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
+        for key in ["source_file", "origin_file"] {
+            if attributes
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+            {
+                attributes.insert(key.to_owned(), serde_json::Value::String(portable.clone()));
+            }
+        }
+        if let Some(target) = attributes
+            .get("target_file")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+        {
+            let target = Path::new(&target);
+            let canonical = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+            if let Ok(relative) = canonical.strip_prefix(root) {
+                attributes.insert(
+                    "target_file".to_owned(),
+                    serde_json::Value::String(relative.to_string_lossy().replace('\\', "/")),
+                );
+            }
+        }
+    };
+    for node in &mut extraction.nodes {
+        set_portable(&mut node.attributes);
+    }
+    for edge in &mut extraction.edges {
+        set_portable(&mut edge.attributes);
+    }
+    for hyperedge in &mut extraction.hyperedges {
+        if let Some(attributes) = hyperedge.as_object_mut() {
+            set_portable(attributes);
+        }
+    }
+    if let Some(calls) = extraction.raw_calls.as_mut() {
+        for call in calls {
+            if !call.source_file.is_empty() {
+                call.source_file.clone_from(&portable);
+            }
+        }
+    }
 }
 
 fn normalize_source_attribute_cached(

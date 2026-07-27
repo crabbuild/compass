@@ -179,8 +179,10 @@ fn small_change_reuses_content_addressed_nodes() -> Result<(), Box<dyn std::erro
     assert!(after_second - after_first < sharing.second_total_nodes);
 
     let mut sink = CountingSink::default();
+    let first_reader = history.reader(&first.id)?;
+    let second_reader = history.reader(&second.id)?;
     let started = Instant::now();
-    history.diff(&first.id, &second.id, &mut sink)?;
+    first_reader.diff(&second_reader, &mut sink)?;
     let diff_latency = started.elapsed();
     assert!(sink.changes > 0);
 

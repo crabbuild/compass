@@ -1755,6 +1755,9 @@ fn command_build_with_validation_inner(
     };
     options.scan_filesystem = has_explicit_root || !extract;
     options.output_root = output_root;
+    options.cache_root = std::env::var_os("COMPASS_HISTORY_CACHE_ROOT")
+        .map(PathBuf::from)
+        .filter(|_| environment_truthy("COMPASS_HISTORY_BUILD"));
     options.force = force;
     options.reuse_cache_on_force = reuse_cache_on_force;
     options.no_cluster = no_cluster;
@@ -2199,7 +2202,9 @@ fn build_semantic_graph(
         cache_enabled: true,
         prune_live_files: Some(live_semantic),
     };
-    let cache_root = (output_root != root).then_some(output_root.as_path());
+    let history_cache_root = options.cache_root.as_deref();
+    let cache_root =
+        history_cache_root.or_else(|| (output_root != root).then_some(output_root.as_path()));
 
     let extracted = if semantic_files.is_empty() {
         None
