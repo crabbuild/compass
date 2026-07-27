@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import {
   COMPASS_REQUIREMENTS,
   compatibilityIssue,
@@ -191,6 +192,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }
   };
+  const openCallGraph = async (direction: CallDirection) => {
+    if (!vscode.workspace.isTrusted) {
+      void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
+      return;
+    }
+    const editor = vscode.window.activeTextEditor;
+    const session = registry.forEditor(editor);
+    if (!editor || !session) {
+      void vscode.window.showInformationMessage(
+        "Place the cursor inside a repository function to open its call graph."
+      );
+      return;
+    }
+    if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.calls)) return;
+    try {
+      await CallGraphPanel.open(context, session, editor, output, direction);
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Compass call graph failed: ${message(error)}`);
+    }
+  };
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("compass.status", workspaceTree),
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
@@ -219,22 +240,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       await GraphPanel.open(context, session, output);
     }),
-    vscode.commands.registerCommand("compass.openCallGraph", async () => {
-      const editor = vscode.window.activeTextEditor;
-      const session = registry.forEditor(editor);
-      if (!editor || !session) {
-        void vscode.window.showInformationMessage(
-          "Place the cursor inside a repository function to open its call graph."
-        );
-        return;
-      }
-      if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.calls)) return;
-      try {
-        await CallGraphPanel.open(context, session, editor, output);
-      } catch (error) {
-        void vscode.window.showErrorMessage(`Compass call graph failed: ${message(error)}`);
-      }
-    }),
+    vscode.commands.registerCommand("compass.openCallGraph", () => openCallGraph("both")),
+    vscode.commands.registerCommand("compass.openCallers", () => openCallGraph("callers")),
+    vscode.commands.registerCommand("compass.openCallees", () => openCallGraph("callees")),
+    vscode.commands.registerCommand(
+      "compass.openCallersAndCallees",
+      () => openCallGraph("both")
+    ),
     vscode.commands.registerCommand("compass.openArchitecture", async (repositoryId?: string) => {
       const session = await selectRepository(repositoryId);
       if (!session) return;

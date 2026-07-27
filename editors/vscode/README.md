@@ -26,8 +26,9 @@ is found first on `PATH`, Compass stops before running a workflow and offers
   it; double-click an overview community to load its detailed graph, use
   **Overview** to go back, and double-click a detail node with an exact file and
   line/byte location to open source.
-- Start a caller/callee graph from the function under the cursor and expand it
-  by depth while retaining resolved, inferred, ambiguous, and unresolved calls.
+- Start a caller/callee graph from the function under the cursor in any
+  call-capable language already represented in the Compass graph. Expand it by
+  depth while retaining resolved, inferred, ambiguous, and unresolved calls.
 - Read the broader architecture flow document in a separate editor tab.
 - Run natural-language queries or deterministic CompassQL.
 - Browse every reachable Git commit with graph states: graph available, not
@@ -62,6 +63,25 @@ It never initializes, updates, or watches a graph.
 Open **Code graph** to inspect connected nodes, filter communities, search, and
 open source. Drag the inspector divider to resize it, or use its header control
 to collapse and expand it.
+
+### Trace calls from the editor
+
+1. Open an indexed source file and place the cursor anywhere inside a function
+   or method body.
+2. Right-click in the editor and choose **Compass Call Graph**.
+3. Choose **Show Callers**, **Show Callees**, or **Show Callers & Callees**.
+4. In the graph tab, use **Callers**, **Both**, and **Callees** to switch
+   direction without returning to the editor. Use an **Expand** action to trace
+   a continuation one level farther.
+5. Double-click a located function node to open its source.
+
+The same three direction commands are available from the Command Palette.
+Compass uses the repository's structural graph for every supported language
+and enriches it with Program IR when that artifact exists. The coverage notice
+identifies structural-only or combined evidence and says when results are
+partial. An empty direction means that Compass found the function but has no
+represented relationship in that direction; it does not prove no runtime call
+exists.
 
 Compass discovers the CLI automatically from the configured location and then
 from `PATH`. A setup row appears only when the executable is missing or

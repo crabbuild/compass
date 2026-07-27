@@ -42,11 +42,28 @@ use the same interaction against their exact commit.
 
 ## Calls and architecture
 
-Place the cursor inside a function and run **Open Call Graph from Cursor**.
-Compass resolves the cursor as a UTF-8 byte position, selects the innermost
-function, and expands callers, callees, or both with explicit depth and size
-bounds. Resolved, inferred, ambiguous, and unresolved calls use distinct labels
-and visual treatment. Unresolved calls never prove that another call is absent.
+Open an indexed source file and place the cursor anywhere inside a function or
+method. Right-click, choose **Compass Call Graph**, then choose **Show
+Callers**, **Show Callees**, or **Show Callers & Callees**. The same commands
+are available from the Command Palette.
+
+Compass sends the relative file, UTF-8 cursor byte, and 1-based line to the
+language-neutral call-graph command. It selects the innermost callable range
+from the structural graph, so Go and every other call-capable language already
+represented by Compass use the same editor workflow. If Program IR exists for
+the selected repository, Compass uses it only as an enrichment layer; it is not
+required to open a structural graph.
+
+In the graph tab, choose **Callers**, **Both**, or **Callees** to reload the
+root in another direction, or use an **Expand** action to trace a continuation.
+Resolved, inferred, ambiguous, and unresolved calls use distinct labels and
+visual treatment. The coverage badge identifies structural-only or combined
+evidence, and a partial-coverage notice explains known limitations. A valid
+empty state means Compass resolved the root but has no represented relationship
+in that direction. It does not prove that no runtime call exists.
+
+If Compass cannot resolve the cursor, move it inside the function or method
+body and retry. **Show Compass output** opens the local command diagnostics.
 
 Use **Open Architecture Flow** for the broader subsystem call-flow document,
 cross-community relationships, symbol lists, call tables, confidence, and

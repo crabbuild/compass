@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import * as vscode from "vscode";
 import { CallGraphResponseSchema } from "@compass/viewer/contracts/callGraph";
+import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import type { RepositorySession } from "../workspace/repositorySession";
+import {
+  callGraphExpansionArguments,
+  callGraphRootArguments
+} from "./callGraphArguments";
 import { utf8ByteAt } from "./cursorByte";
 import { openGraphSource } from "./sourceNavigation";
 
@@ -11,7 +16,8 @@ export class CallGraphPanel {
     context: vscode.ExtensionContext,
     session: RepositorySession,
     editor: vscode.TextEditor,
-    output: vscode.OutputChannel
+    output: vscode.OutputChannel,
+    initialDirection: CallDirection = "both"
   ): Promise<void> {
     const relative = path.relative(session.root, editor.document.uri.fsPath)
       .split(path.sep)
@@ -20,6 +26,8 @@ export class CallGraphPanel {
       throw new Error("The active editor is outside the selected Compass repository.");
     }
     const byte = utf8ByteAt(editor.document, editor.selection.active);
+    const line = editor.selection.active.line + 1;
+    const hasProgram = await fileExists(session.programPath);
     const panel = vscode.window.createWebviewPanel(
       "compass.callGraph",
       `Compass Calls — ${path.basename(relative)}`,
@@ -30,29 +38,43 @@ export class CallGraphPanel {
         localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist")]
       }
     );
-    const controller = new AbortController();
+    const panelController = new AbortController();
+    let requestController: AbortController | undefined;
     let rootGeneration = 0;
-    panel.onDidDispose(() => controller.abort());
+    let direction = initialDirection;
+    panel.onDidDispose(() => {
+      requestController?.abort();
+      panelController.abort();
+    });
     panel.webview.html = html(context, panel.webview);
     panel.webview.onDidReceiveMessage(async (message) => {
       if (message?.type === "ready" || message?.type === "retry") {
         rootGeneration += 1;
-        await send([
-          "--at", `${relative}:${byte}`,
-          "--direction", "both",
-          "--depth", "2"
-        ], "hydrateCallGraph", rootGeneration);
+        await send(
+          callGraphRootArguments({ file: relative, byte, line }, direction, 2),
+          "hydrateCallGraph",
+          rootGeneration
+        );
+      } else if (message?.type === "changeDirection"
+        && isDirection(message.direction)) {
+        direction = message.direction;
+        rootGeneration += 1;
+        await send(
+          callGraphRootArguments({ file: relative, byte, line }, direction, 2),
+          "hydrateCallGraph",
+          rootGeneration
+        );
       } else if (message?.type === "showOutput") {
         output.show(true);
       } else if (message?.type === "expand"
         && typeof message.symbol === "string"
         && ["callers", "callees", "both"].includes(message.direction)
         && Number.isInteger(message.depth)) {
-        await send([
-          "--symbol", message.symbol,
-          "--direction", message.direction,
-          "--depth", String(message.depth)
-        ], "mergeCallGraph", rootGeneration);
+        await send(
+          callGraphExpansionArguments(message.symbol, message.direction, message.depth),
+          "mergeCallGraph",
+          rootGeneration
+        );
       } else if (message?.type === "openSource") {
         await openGraphSource(session, message.repositoryId, message.source);
       }
@@ -63,14 +85,19 @@ export class CallGraphPanel {
       type: "hydrateCallGraph" | "mergeCallGraph",
       generation: number
     ): Promise<void> {
+      requestController?.abort();
+      const controller = new AbortController();
+      requestController = controller;
+      const abort = () => controller.abort();
+      panelController.signal.addEventListener("abort", abort, { once: true });
       try {
         const graphArgs = [
-          "program", "call-graph",
+          "call-graph",
           ...rootArgs,
           "--max-nodes", "500",
           "--max-edges", "1000",
-          "--program", session.programPath,
           "--graph", session.graphPath,
+          ...(hasProgram ? ["--program", session.programPath] : []),
           "--format", "json"
         ];
         const graph = await session.processes.runJson(
@@ -89,14 +116,36 @@ export class CallGraphPanel {
       } catch (error) {
         if (generation !== rootGeneration || controller.signal.aborted) return;
         const message = error instanceof Error ? error.message : String(error);
-        output.appendLine(`[error] Call graph failed for ${relative}:${byte}: ${message}`);
+        output.appendLine(`[error] Call graph failed for ${relative}:${line}: ${message}`);
         await panel.webview.postMessage({
           type: "error",
-          message
+          message: userFacingError(message)
         });
+      } finally {
+        panelController.signal.removeEventListener("abort", abort);
+        if (requestController === controller) requestController = undefined;
       }
     }
   }
+}
+
+function isDirection(value: unknown): value is CallDirection {
+  return value === "callers" || value === "callees" || value === "both";
+}
+
+async function fileExists(file: string): Promise<boolean> {
+  try {
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(file));
+    return (stat.type & vscode.FileType.File) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+function userFacingError(message: string): string {
+  return message.includes("no callable graph node matches")
+    ? "Place the cursor inside a function or method included in the Compass graph."
+    : message;
 }
 
 function html(context: vscode.ExtensionContext, webview: vscode.Webview): string {
