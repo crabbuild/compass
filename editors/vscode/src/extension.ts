@@ -76,7 +76,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } else if (action === "Open Setup") {
       await vscode.commands.executeCommand(
         "workbench.action.openWalkthrough",
-        "crabbuild.compass-vscode#compass.getStarted",
+        "crabbuild.crabbuild-compass-vscode#compass.getStarted",
         false
       );
     }
@@ -155,7 +155,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (selected.action === "extension") {
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
-        "@ext:crabbuild.compass-vscode"
+        "@ext:crabbuild.crabbuild-compass-vscode"
       );
       return;
     }
