@@ -90,8 +90,18 @@
         "icon": "$(type-hierarchy)"
       },
       {
-        "command": "compass.openCallGraph",
-        "title": "Compass: Open Call Graph from Cursor",
+        "command": "compass.openCallers",
+        "title": "Compass: Show Callers",
+        "icon": "$(references)"
+      },
+      {
+        "command": "compass.openCallees",
+        "title": "Compass: Show Callees",
+        "icon": "$(references)"
+      },
+      {
+        "command": "compass.openCallersAndCallees",
+        "title": "Compass: Show Callers & Callees",
         "icon": "$(references)"
       },
       {
@@ -113,6 +123,12 @@
         "command": "compass.selectCli",
         "title": "Compass: Select CLI Binary",
         "icon": "$(terminal)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "compass.callGraph",
+        "label": "Compass Call Graph"
       }
     ],
     "configuration": {
@@ -205,9 +221,23 @@
       ],
       "editor/context": [
         {
-          "command": "compass.openCallGraph",
+          "submenu": "compass.callGraph",
           "when": "resourceScheme == file",
           "group": "navigation@90"
+        }
+      ],
+      "compass.callGraph": [
+        {
+          "command": "compass.openCallers",
+          "group": "1_direction@1"
+        },
+        {
+          "command": "compass.openCallees",
+          "group": "1_direction@2"
+        },
+        {
+          "command": "compass.openCallersAndCallees",
+          "group": "1_direction@3"
         }
       ]
     },
@@ -235,6 +265,17 @@
             "description": "Search, filter, inspect relationships, and jump to source.",
             "media": { "markdown": "README.md" },
             "completionEvents": ["onCommand:compass.openGraph"]
+          },
+          {
+            "id": "compass.calls",
+            "title": "Trace calls from the editor",
+            "description": "Place the cursor inside a function, right-click, choose **Compass Call Graph**, then select callers, callees, or both.",
+            "media": { "markdown": "README.md" },
+            "completionEvents": [
+              "onCommand:compass.openCallers",
+              "onCommand:compass.openCallees",
+              "onCommand:compass.openCallersAndCallees"
+            ]
           }
         ]
       }

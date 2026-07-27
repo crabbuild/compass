@@ -17,6 +17,7 @@ import { CoverageNotice } from "./CoverageNotice";
 export type CallGraphHost = {
   openSource(source: SourceLocation): void;
   expand(symbol: string, direction: CallDirection, depth: number): void;
+  changeDirection(direction: CallDirection): void;
 };
 
 export function CallGraph({
@@ -30,9 +31,37 @@ export function CallGraph({
   const visibleContinuations = showAllContinuations
     ? graph.continuations
     : graph.continuations.slice(0, 20);
+  const emptyTitle = graph.direction === "callers"
+    ? "No callers found"
+    : graph.direction === "callees"
+      ? "No callees found"
+      : "No calls found";
   return (
     <div className="relative h-screen">
       <CallCanvas graph={graph} host={host} />
+      <div
+        className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-md border bg-popover/95 p-1 shadow-lg backdrop-blur"
+        role="group"
+        aria-label="Call graph direction"
+      >
+        {([
+          ["callers", "Callers"],
+          ["both", "Both"],
+          ["callees", "Callees"]
+        ] as const).map(([direction, label]) => (
+          <Button
+            key={direction}
+            size="sm"
+            variant={graph.direction === direction ? "secondary" : "ghost"}
+            aria-pressed={graph.direction === direction}
+            onClick={() => {
+              if (graph.direction !== direction) host.changeDirection(direction);
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
       <section className="absolute bottom-3 left-3 z-20 flex max-w-[min(44rem,calc(100%-1.5rem))] flex-col gap-2 rounded-md border bg-popover/95 p-3 text-popover-foreground shadow-xl backdrop-blur">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline"><GitForkIcon /> depth {graph.depth}</Badge>
@@ -46,7 +75,18 @@ export function CallGraph({
           <Badge variant="outline">{graph.coverage.inferred} inferred</Badge>
           <Badge variant="outline">{graph.coverage.ambiguous} ambiguous</Badge>
           <Badge variant="destructive">{graph.coverage.unresolved} unresolved</Badge>
+          {graph.coverage.evidenceLayer && (
+            <Badge variant="outline">{evidenceLabel(graph.coverage.evidenceLayer)}</Badge>
+          )}
         </div>
+        {graph.edges.length === 0 && (
+          <Alert>
+            <AlertTitle>{emptyTitle}</AlertTitle>
+            <AlertDescription>
+              Compass found the root function but no represented relationships in this direction.
+            </AlertDescription>
+          </Alert>
+        )}
         {graph.truncated && (
           <Alert>
             <TriangleAlertIcon />
@@ -98,4 +138,13 @@ export function CallGraph({
       </section>
     </div>
   );
+}
+
+function evidenceLabel(layer: NonNullable<CallGraphResponse["coverage"]["evidenceLayer"]>): string {
+  return layer
+    .split("_")
+    .map((part, index) => index === 0
+      ? `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
+      : part)
+    .join(" ");
 }

@@ -9,7 +9,7 @@ const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
-    "process.env.NODE_ENV": JSON.stringify("production")
+    "process.env.NODE_ENV": JSON.stringify(process.env.VITEST ? "test" : "production")
   },
   resolve: {
     alias: {

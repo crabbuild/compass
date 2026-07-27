@@ -108,7 +108,7 @@ fn parse_format(value: &str) -> Result<Format, String> {
     }
 }
 
-fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
+pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("could not read {}: {error}", path.display()))?;
     if !metadata.is_file() {

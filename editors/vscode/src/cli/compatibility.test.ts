@@ -36,4 +36,23 @@ describe("compatibilityIssue", () => {
     expect(compatibilityIssue(compatible, undefined, COMPASS_REQUIREMENTS.graph))
       .toBeUndefined();
   });
+
+  it("requires the language-neutral call graph contract", () => {
+    const report: CapabilityReport = {
+      ...compatible,
+      contracts: {
+        ...compatible.contracts,
+        call_graph: "compass.call_graph/1"
+      },
+      features: {
+        ...compatible.features,
+        call_graph: true
+      }
+    };
+
+    expect(compatibilityIssue(report, undefined, COMPASS_REQUIREMENTS.calls))
+      .toBeUndefined();
+    expect(compatibilityIssue(compatible, undefined, COMPASS_REQUIREMENTS.calls))
+      .toContain("'call_graph' feature");
+  });
 });

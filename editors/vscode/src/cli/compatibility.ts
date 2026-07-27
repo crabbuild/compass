@@ -29,8 +29,8 @@ export const COMPASS_REQUIREMENTS = {
   },
   calls: {
     workflow: "open the call graph",
-    feature: "program",
-    contracts: { program_call_graph: "compass.program.call_graph/1" }
+    feature: "call_graph",
+    contracts: { call_graph: "compass.call_graph/1" }
   },
   architecture: {
     workflow: "open the architecture flow",

@@ -13,6 +13,12 @@ fn capabilities_reports_versioned_ide_contracts() -> Result<(), Box<dyn Error>> 
     let value: Value = serde_json::from_str(&output.stdout)?;
     assert_eq!(value["schema"], "compass.ide.capabilities/1");
     assert_eq!(value["contracts"]["graph_viewer"], "compass.viewer.graph/1");
+    assert_eq!(value["contracts"]["call_graph"], "compass.call_graph/1");
+    assert_eq!(
+        value["contracts"]["program_call_graph"],
+        "compass.program.call_graph/1"
+    );
+    assert_eq!(value["features"]["call_graph"], true);
     assert_eq!(value["features"]["community_detail"], true);
     assert_eq!(value["features"]["history_timeline_pagination"], true);
     assert!(value["compass_version"].is_string());

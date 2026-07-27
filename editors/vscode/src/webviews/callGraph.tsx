@@ -52,6 +52,10 @@ function render(): void {
         },
         expand(symbol, direction, depth) {
           vscode.postMessage({ type: "expand", symbol, direction, depth });
+        },
+        changeDirection(direction) {
+          renderLoading();
+          vscode.postMessage({ type: "changeDirection", direction });
         }
       }}
     />

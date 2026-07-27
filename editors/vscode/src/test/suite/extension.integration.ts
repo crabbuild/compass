@@ -3,7 +3,9 @@ import * as vscode from "vscode";
 
 suite("Compass extension", () => {
   test("activates and registers every primary workflow", async () => {
-    const extension = vscode.extensions.getExtension("crabbuild.compass-vscode");
+    const extension = vscode.extensions.getExtension(
+      "crabbuild.crabbuild-compass-vscode"
+    );
     assert.ok(extension, "Compass extension is installed in the test host");
     await extension.activate();
     const commands = new Set(await vscode.commands.getCommands(true));
@@ -17,6 +19,9 @@ suite("Compass extension", () => {
       "compass.openSettings",
       "compass.openGraph",
       "compass.openCallGraph",
+      "compass.openCallers",
+      "compass.openCallees",
+      "compass.openCallersAndCallees",
       "compass.openArchitecture",
       "compass.openQuery",
       "compass.openHistory",
