@@ -28,11 +28,14 @@ high-contrast theme.
 `media/icon.svg` is the canonical 128-by-128 source. It uses a fully opaque,
 rounded indigo tile with a white compass mark and a subtle inset keyline. The
 tile supplies its own background, so the logo never depends on the surrounding
-Marketplace theme for contrast.
+Marketplace theme for contrast. The `#5865F2` tile has a 4.61:1 contrast ratio
+against white and a 3.62:1 ratio against VS Code's common `#1E1E1E` dark
+surface; the white mark has a 4.61:1 ratio against the tile.
 
-`media/icon.png` is a deterministic 128-by-128 render of that SVG. The PNG must
-be fully opaque, included in the VSIX, and visually inspected against both
-near-white and near-black backgrounds.
+`media/icon.png` is a deterministic 128-by-128 render of that SVG. The central
+tile behind the mark must be fully opaque; only the decorative pixels outside
+its rounded corners may be transparent. The PNG must be included in the VSIX
+and visually inspected against both near-white and near-black backgrounds.
 
 ### VS Code workbench
 
@@ -59,7 +62,8 @@ theme.
 ## Verification
 
 - Parse both retained SVG files as XML.
-- Confirm the Marketplace PNG is exactly 128 by 128 and fully opaque.
+- Confirm the Marketplace PNG is exactly 128 by 128 and the mark sits entirely
+  on the opaque tile.
 - Render a light/dark comparison image for visual inspection.
 - Run the VS Code extension typecheck and test suite.
 - Build and smoke-test `crabbuild-compass-vscode-0.1.3.vsix`.

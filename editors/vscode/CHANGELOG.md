@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Place the Marketplace logo on a high-contrast indigo badge so it remains
+  visible in light and dark themes.
+- Keep the Activity Bar logo monochrome and controlled by the active VS Code
+  theme.
+
 ## 0.1.2
 
 - Adopt the new Compass Codegraph logo for the Marketplace and VS Code
