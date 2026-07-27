@@ -2,7 +2,10 @@ import type { GraphHover } from "./NodeHoverCard";
 
 export type GraphNetworkEvent = {
   nodes: Array<string | number>;
+  edges: Array<string | number>;
   node?: string | number;
+  edge?: string | number;
+  scale?: number;
   pointer: { DOM: { x: number; y: number } };
 };
 
@@ -14,6 +17,9 @@ export type GraphNetworkHandlers = {
   onFocus(nodeId: string): void;
   onOpenSource(nodeId: string): void;
   onHover(change: GraphHover | null): void;
+  onHoverEdge(edgeId: string): void;
+  onBlurEdge(): void;
+  onZoom(scale: number): void;
   onClear(): void;
 };
 
@@ -23,6 +29,7 @@ export function bindGraphNetworkEvents(
 ): void {
   network.on("click", (parameters) => {
     handlers.onHover(null);
+    handlers.onBlurEdge();
     const selected = parameters.nodes[0];
     if (selected !== undefined) handlers.onFocus(String(selected));
     else handlers.onClear();
@@ -40,6 +47,19 @@ export function bindGraphNetworkEvents(
     });
   });
   network.on("blurNode", () => handlers.onHover(null));
-  network.on("dragStart", () => handlers.onHover(null));
-  network.on("zoom", () => handlers.onHover(null));
+  network.on("hoverEdge", (parameters) => {
+    if (parameters.edge !== undefined) {
+      handlers.onHoverEdge(String(parameters.edge));
+    }
+  });
+  network.on("blurEdge", () => handlers.onBlurEdge());
+  network.on("dragStart", () => {
+    handlers.onHover(null);
+    handlers.onBlurEdge();
+  });
+  network.on("zoom", (parameters) => {
+    handlers.onHover(null);
+    handlers.onBlurEdge();
+    if (parameters.scale !== undefined) handlers.onZoom(parameters.scale);
+  });
 }

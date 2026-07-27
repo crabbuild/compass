@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -8,6 +9,10 @@ import {
 } from "react";
 import { DataSet, Network, type Edge, type Node, type Options } from "vis-network/standalone";
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
+import {
+  formatGraphEdgeLabel,
+  shouldShowGraphEdgeLabel
+} from "./edgeLabels";
 import type { GraphHover } from "./NodeHoverCard";
 import { bindGraphNetworkEvents } from "./networkEvents";
 import type { GraphChangeType } from "./state";
@@ -302,6 +307,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
   }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
+    const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+    const [zoomScale, setZoomScale] = useState(0);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
@@ -316,6 +323,22 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     );
     const edgeColor = useMemo(
       () => cssColor("--vscode-descriptionForeground", "#60728b"),
+      [themeRevision]
+    );
+    const edgeLabelColor = useMemo(
+      () => cssColor("--vscode-editor-foreground", "#eef5ff"),
+      [themeRevision]
+    );
+    const edgeLabelMutedColor = useMemo(
+      () => cssColor("--vscode-descriptionForeground", "#9aa7b7"),
+      [themeRevision]
+    );
+    const edgeLabelBackground = useMemo(
+      () => cssColor("--vscode-editor-background", "#08111f"),
+      [themeRevision]
+    );
+    const edgeLabelFont = useMemo(
+      () => cssColor("--vscode-font-family", "system-ui"),
       [themeRevision]
     );
     const comparisonPalette = useMemo<ComparisonPalette>(() => {
@@ -426,7 +449,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           id: edge.id,
           from: edge.source,
           to: edge.target,
-          title: `${edge.relation}${edge.confidence ? ` · ${edge.confidence}` : ""}`,
+          label: "",
+          title: formatGraphEdgeLabel(edge),
           dashes: appearance.dashes,
           width: appearance.width,
           ...(comparisonMode ? { smooth: comparisonEdgeCurve(edge.change) } : {}),
@@ -434,6 +458,15 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       })
     ), [comparisonMode, model.edges]);
+    const handleHoverEdge = useCallback((edgeId: string) => {
+      setHoveredEdgeId(edgeId);
+    }, []);
+    const handleBlurEdge = useCallback(() => {
+      setHoveredEdgeId(null);
+    }, []);
+    const handleZoom = useCallback((scale: number) => {
+      setZoomScale(scale);
+    }, []);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -450,6 +483,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         onFocus,
         onOpenSource,
         onHover,
+        onHoverEdge: handleHoverEdge,
+        onBlurEdge: handleBlurEdge,
+        onZoom: handleZoom,
         onClear
       });
       network.once("stabilizationIterationsDone", () => {
@@ -457,6 +493,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           position: network.getViewPosition(),
           scale: network.getScale()
         };
+        setZoomScale(network.getScale());
         onStabilized();
       });
       return () => {
@@ -467,6 +504,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       edgeData,
       nodeData,
       comparisonMode,
+      handleBlurEdge,
+      handleHoverEdge,
+      handleZoom,
       onClear,
       onFocus,
       onHover,
@@ -601,6 +641,44 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       maxDegree,
       model.nodes,
       nodeData
+    ]);
+
+    useEffect(() => {
+      const visibility = {
+        forceLabels,
+        focusedNodeId,
+        hoveredEdgeId,
+        zoomScale
+      };
+      edgeData.update(model.edges.map((edge) => {
+        const focused = focusedNodeId === edge.source || focusedNodeId === edge.target;
+        const hovered = hoveredEdgeId === edge.id;
+        return {
+          id: edge.id,
+          label: shouldShowGraphEdgeLabel(edge, visibility)
+            ? formatGraphEdgeLabel(edge)
+            : "",
+          font: {
+            align: "middle",
+            face: edgeLabelFont,
+            size: 11,
+            color: focused || hovered ? edgeLabelColor : edgeLabelMutedColor,
+            background: edgeLabelBackground,
+            strokeWidth: 0
+          }
+        };
+      }));
+    }, [
+      edgeData,
+      edgeLabelBackground,
+      edgeLabelColor,
+      edgeLabelFont,
+      edgeLabelMutedColor,
+      focusedNodeId,
+      forceLabels,
+      hoveredEdgeId,
+      model.edges,
+      zoomScale
     ]);
 
     useImperativeHandle(ref, () => ({
