@@ -131,7 +131,7 @@ pub fn build_universal_call_graph(
         .map(|node| (node.id.clone(), structural_node(node)))
         .collect::<BTreeMap<_, _>>();
     attach_program_symbols(&mut all_nodes, analysis);
-    let root = resolve_structural_root(&all_nodes, &request.root)?;
+    let (root, approximate_root_range) = resolve_structural_root(&all_nodes, &request.root)?;
 
     let mut all_edges = graph
         .links
@@ -234,7 +234,7 @@ pub fn build_universal_call_graph(
         })
         .collect::<Vec<_>>();
     truncated |= !continuation_records.is_empty();
-    let coverage = coverage(&edges, enriched);
+    let coverage = coverage(&edges, enriched, approximate_root_range);
 
     Ok(UniversalCallGraphResponse {
         schema: UNIVERSAL_CALL_GRAPH_SCHEMA,
@@ -397,9 +397,9 @@ fn callable(node: &NodeRecord, call_endpoints: &BTreeSet<&String>) -> bool {
         kind.as_str(),
         "function" | "method" | "constructor" | "procedure" | "subroutine"
     );
-    let has_range = line(node, "line_start").is_some() && line(node, "line_end").is_some();
+    let has_location = line(node, "line_start").is_some();
     let is_file = kind == "file";
-    has_range && !is_file && (known_kind || call_endpoints.contains(&node.id))
+    has_location && !is_file && (known_kind || call_endpoints.contains(&node.id))
 }
 
 fn structural_node(node: &NodeRecord) -> UniversalCallNode {
@@ -421,11 +421,11 @@ fn structural_node(node: &NodeRecord) -> UniversalCallNode {
 fn resolve_structural_root(
     nodes: &BTreeMap<String, UniversalCallNode>,
     root: &UniversalCallGraphRoot,
-) -> Result<String, UniversalCallGraphError> {
+) -> Result<(String, bool), UniversalCallGraphError> {
     match root {
         UniversalCallGraphRoot::Symbol { symbol } => {
             if nodes.contains_key(symbol) {
-                return Ok(symbol.clone());
+                return Ok((symbol.clone(), false));
             }
             let matches = nodes
                 .values()
@@ -433,7 +433,7 @@ fn resolve_structural_root(
                 .map(|node| node.id.clone())
                 .collect::<Vec<_>>();
             match matches.as_slice() {
-                [id] => Ok(id.clone()),
+                [id] => Ok((id.clone(), false)),
                 [] => Err(UniversalCallGraphError::MissingRoot(symbol.clone())),
                 _ => Err(UniversalCallGraphError::AmbiguousRoot(symbol.clone())),
             }
@@ -442,7 +442,7 @@ fn resolve_structural_root(
             file, byte, line, ..
         } => {
             let normalized = normalize_path(file);
-            nodes
+            let exact = nodes
                 .values()
                 .filter(|node| {
                     node.file
@@ -459,7 +459,23 @@ fn resolve_structural_root(
                         node.id.as_str(),
                     )
                 })
-                .map(|node| node.id.clone())
+                .map(|node| node.id.clone());
+            if let Some(id) = exact {
+                return Ok((id, false));
+            }
+            // Older/source-driven extractors may only have a declaration line.
+            // Select the closest preceding callable and disclose the approximate
+            // range instead of making those languages cursor-incompatible.
+            nodes
+                .values()
+                .filter(|node| {
+                    node.file
+                        .as_deref()
+                        .is_some_and(|candidate| normalize_path(candidate) == normalized)
+                        && node.start_line.is_some_and(|start| start <= *line)
+                })
+                .max_by_key(|node| (node.start_line.unwrap_or_default(), node.id.as_str()))
+                .map(|node| (node.id.clone(), true))
                 .ok_or_else(|| {
                     UniversalCallGraphError::MissingRoot(format!("{file}:{byte} (line {line})"))
                 })
@@ -501,13 +517,25 @@ fn traverse(
     (selected, continuations)
 }
 
-fn coverage(edges: &[UniversalCallEdge], enriched: bool) -> UniversalCallCoverage {
+fn coverage(
+    edges: &[UniversalCallEdge],
+    enriched: bool,
+    approximate_root_range: bool,
+) -> UniversalCallCoverage {
     let count = |resolution| {
         edges
             .iter()
             .filter(|edge| edge.resolution == resolution)
             .count()
     };
+    let mut limitations = if enriched {
+        vec!["structural_graph_baseline".to_owned()]
+    } else {
+        vec!["program_ir_unavailable".to_owned()]
+    };
+    if approximate_root_range {
+        limitations.push("approximate_callable_range".to_owned());
+    }
     UniversalCallCoverage {
         resolved: count(CallResolution::Resolved),
         inferred: count(CallResolution::Inferred),
@@ -519,12 +547,11 @@ fn coverage(edges: &[UniversalCallEdge], enriched: bool) -> UniversalCallCoverag
             "structural_graph"
         },
         partial: true,
-        limitations: if enriched {
-            vec!["structural_graph_baseline".to_owned()]
-        } else {
-            vec!["program_ir_unavailable".to_owned()]
-        },
-        warning: if enriched {
+        limitations,
+        warning: if approximate_root_range {
+            "Compass approximated this callable range from declaration lines; move the cursor to the declaration if the selected root is incorrect."
+                .to_owned()
+        } else if enriched {
             "Structural call evidence is enriched with available Program IR; language coverage may still be partial."
                 .to_owned()
         } else {

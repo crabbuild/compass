@@ -80,7 +80,7 @@ impl<'a> State<'a> {
 
     fn add_classes(&mut self) {
         let Ok(pattern) = Regex::new(
-            r"(?m)^\s*(?:(?:abstract|sealed|base|interface|final|mixin)\s+)*(?:class|mixin|enum|extension\s+type)\s+(\w+)",
+            r"(?m)^[ \t]*(?:(?:abstract|sealed|base|interface|final|mixin)\s+)*(?:class|mixin|enum|extension\s+type)\s+(\w+)",
         ) else {
             return;
         };
@@ -97,6 +97,7 @@ impl<'a> State<'a> {
         for (start, end, name) in matches {
             let id = make_id(&[&self.stem, &name]);
             self.add_node(&id, &name, "code", Some(self.source_file.clone()));
+            self.set_callable_range(&id, start, start, "class");
             self.add_edge(&self.file_id.clone(), &id, "defines", None);
 
             let header_end = safe_end(&self.text, end, 500);
@@ -178,6 +179,7 @@ impl<'a> State<'a> {
                 if semicolon.is_none_or(|semicolon| open < semicolon) {
                     let close = matching_delimiter(self.text.as_bytes(), open, b'{', b'}')
                         .map_or(self.text.len(), |value| value + 1);
+                    self.set_callable_range(&id, start, close, "class");
                     let body = self.text[open..close].to_owned();
                     self.add_class_framework(&id, &body);
                 }
@@ -453,7 +455,7 @@ impl<'a> State<'a> {
 
     fn add_functions(&mut self) {
         let Ok(pattern) = Regex::new(
-            r"(?m)^\s{0,2}(?:factory\s+|static\s+|async\s+|external\s+|abstract\s+)?(?:\([^)]+\)|[A-Za-z0-9_<>,.?]+)(?:\s+[A-Za-z0-9_<>,.?]+){0,3}\s+(\w+(?:\.\w+)?)\s*\(",
+            r"(?m)^[ \t]{0,2}(?:factory\s+|static\s+|async\s+|external\s+|abstract\s+)?(?:\([^)]+\)|[A-Za-z0-9_<>,.?]+)(?:\s+[A-Za-z0-9_<>,.?]+){0,3}\s+(\w+(?:\.\w+)?)\s*\(",
         ) else {
             return;
         };
@@ -484,6 +486,7 @@ impl<'a> State<'a> {
             }
             let id = make_id(&[&self.stem, name]);
             self.add_node(&id, name, "code", Some(self.source_file.clone()));
+            self.set_callable_range(&id, start, start, "function");
             self.add_edge(&self.file_id.clone(), &id, "defines", None);
             let open = self.text[start..].find('{').map(|value| start + value);
             let semicolon = self.text[start..].find(';').map(|value| start + value);
@@ -494,8 +497,11 @@ impl<'a> State<'a> {
             {
                 let close = matching_delimiter(self.text.as_bytes(), open, b'{', b'}')
                     .map_or(self.text.len(), |value| value + 1);
+                self.set_callable_range(&id, start, close, "function");
                 let body = self.text[open..close].to_owned();
                 self.add_function_framework(&id, &body);
+            } else if let Some(end) = semicolon {
+                self.set_callable_range(&id, start, end.saturating_add(1), "function");
             }
         }
     }
@@ -654,6 +660,34 @@ impl<'a> State<'a> {
         });
     }
 
+    fn set_callable_range(&mut self, id: &str, start: usize, end: usize, kind: &str) {
+        let start_line = self.line_at(start);
+        let end_line = self.line_at(end);
+        let Some(node) = self.extraction.nodes.iter_mut().find(|node| node.id == id) else {
+            return;
+        };
+        node.attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{start_line}")),
+        );
+        node.attributes
+            .insert("symbol_kind".into(), Value::String(kind.to_owned()));
+        node.attributes
+            .insert("language".into(), Value::String("dart".to_owned()));
+        node.attributes
+            .insert("line_start".into(), Value::from(start_line));
+        node.attributes
+            .insert("line_end".into(), Value::from(end_line.max(start_line)));
+    }
+
+    fn line_at(&self, offset: usize) -> usize {
+        self.text.as_bytes()[..offset.min(self.text.len())]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            + 1
+    }
+
     fn add_edge(&mut self, source: &str, target: &str, relation: &str, context: Option<&str>) {
         let mut attributes = Map::new();
         attributes.insert("relation".into(), Value::String(relation.to_owned()));
@@ -809,4 +843,45 @@ fn lower_first(value: &str) -> String {
     chars.next().map_or_else(String::new, |first| {
         first.to_lowercase().collect::<String>() + chars.as_str()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::extract;
+
+    #[test]
+    fn call_owners_have_cursor_resolvable_ranges() -> Result<(), &'static str> {
+        let source = br#"
+class CounterBloc {
+  void register() {
+    on<Increment>((event, emit) {
+      emit(CountChanged());
+    });
+  }
+}
+
+void bootstrap() {
+  CounterBloc();
+}
+"#;
+        let extraction = extract(Path::new("lib/counter.dart"), source);
+        let class = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "CounterBloc")
+            .ok_or("class")?;
+        let function = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "bootstrap")
+            .ok_or("function")?;
+
+        assert_eq!(class.attributes["line_start"], 2);
+        assert_eq!(class.attributes["line_end"], 8);
+        assert_eq!(function.attributes["line_start"], 10);
+        assert_eq!(function.attributes["line_end"], 12);
+        Ok(())
+    }
 }

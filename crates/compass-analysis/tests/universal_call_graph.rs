@@ -117,6 +117,62 @@ fn source_resolution_selects_the_smallest_containing_callable()
 }
 
 #[test]
+fn declaration_only_ranges_keep_source_driven_languages_cursor_capable()
+-> Result<(), Box<dyn std::error::Error>> {
+    for language in ["groovy", "zig", "r", "pascal", "dart"] {
+        let file = format!("src/example.{language}");
+        let graph = GraphDocument {
+            directed: true,
+            multigraph: true,
+            graph: Map::new(),
+            nodes: vec![
+                node_for_language("first", "first()", &file, "function", language, 4, 4),
+                node_for_language("root", "root()", &file, "function", language, 20, 20),
+                node_for_language("callee", "callee()", &file, "function", language, 40, 40),
+            ],
+            links: vec![EdgeRecord {
+                source: "root".to_owned(),
+                target: "callee".to_owned(),
+                attributes: object(json!({
+                    "relation": "calls",
+                    "source_file": file,
+                    "source_location": "L25",
+                    "confidence": "EXTRACTED"
+                })),
+            }],
+            extras: BTreeMap::new(),
+        };
+        let response = build_universal_call_graph(
+            &graph,
+            None,
+            &UniversalCallGraphRequest {
+                root: UniversalCallGraphRoot::SourcePosition {
+                    file,
+                    byte: 200,
+                    line: 25,
+                },
+                direction: CallGraphDirection::Callees,
+                depth: 1,
+                max_nodes: 20,
+                max_edges: 20,
+            },
+        )?;
+
+        assert_eq!(response.root_symbol, "root", "{language}");
+        assert_eq!(response.edges.len(), 1, "{language}");
+        assert!(
+            response
+                .coverage
+                .limitations
+                .iter()
+                .any(|limitation| limitation == "approximate_callable_range"),
+            "{language}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn program_ir_enriches_structural_edges_and_retains_unresolved_calls()
 -> Result<(), Box<dyn std::error::Error>> {
     let graph = go_graph();
@@ -293,6 +349,18 @@ fn node(
     line_start: u64,
     line_end: u64,
 ) -> NodeRecord {
+    node_for_language(id, label, file, symbol_kind, "go", line_start, line_end)
+}
+
+fn node_for_language(
+    id: &str,
+    label: &str,
+    file: &str,
+    symbol_kind: &str,
+    language: &str,
+    line_start: u64,
+    line_end: u64,
+) -> NodeRecord {
     NodeRecord {
         id: id.to_owned(),
         attributes: object(json!({
@@ -300,7 +368,7 @@ fn node(
             "source_file": file,
             "source_location": format!("L{line_start}"),
             "symbol_kind": symbol_kind,
-            "language": "go",
+            "language": language,
             "line_start": line_start,
             "line_end": line_end
         })),
