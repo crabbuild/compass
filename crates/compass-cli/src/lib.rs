@@ -1,5 +1,6 @@
 //! Command implementation for the native Compass CLI.
 
+mod call_graph_commands;
 mod capability_commands;
 mod dedup_commands;
 mod help;
@@ -337,6 +338,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     };
     let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
+        "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),

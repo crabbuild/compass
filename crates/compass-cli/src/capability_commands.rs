@@ -26,6 +26,7 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
         contracts: BTreeMap::from([
             ("graph_viewer", compass_output::GRAPH_VIEWER_SCHEMA),
             ("callflow_viewer", compass_output::CALLFLOW_VIEWER_SCHEMA),
+            ("call_graph", compass_analysis::UNIVERSAL_CALL_GRAPH_SCHEMA),
             ("program_call_graph", compass_analysis::CALL_GRAPH_SCHEMA),
             ("progress", crate::ide_contract::PROGRESS_SCHEMA),
             ("history_timeline", compass_history::HISTORY_TIMELINE_SCHEMA),
@@ -37,6 +38,7 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
             ("update", true),
             ("watch", true),
             ("graph", true),
+            ("call_graph", true),
             ("program", true),
             ("query", true),
             ("history", true),

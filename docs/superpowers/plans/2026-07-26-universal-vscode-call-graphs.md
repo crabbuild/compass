@@ -194,8 +194,8 @@ still fail clearly when unreadable or invalid.
 ```
 
 Defaults are `compass-out/graph.json`, depth 2, 250 nodes, and 500 edges. Program
-IR is absent unless `--program` is supplied or the default
-`compass-out/program.json` exists.
+IR is absent unless `--program` is supplied explicitly, which prevents a custom
+graph path from being enriched with an unrelated default artifact.
 
 **Implementation**
 

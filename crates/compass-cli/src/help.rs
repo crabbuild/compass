@@ -87,6 +87,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Explore",
         commands: &[
+            "call-graph",
             "query",
             "program",
             "path",
@@ -133,6 +134,12 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "call-graph",
+        "Trace callers and callees for a source position or symbol",
+        ["compass call-graph (--file <PATH> --byte <N> --line <N>|--symbol <ID>) [OPTIONS]"],
+        "Options:\n  --file <PATH>                   Repository-relative source file\n  --byte <N>                      Zero-based UTF-8 byte offset\n  --line <N>                      One-based source line\n  --symbol <ID>                   Structural or Program IR symbol instead of a position\n  --direction <callers|callees|both> Traversal direction [default: both]\n  --depth <N>                     Traversal depth [default: 2]\n  --max-nodes <N>                 Node bound [default: 250]\n  --max-edges <N>                 Edge bound [default: 500]\n  --graph <PATH>                  Structural graph [default: compass-out/graph.json]\n  --program <PATH>                Optional Program IR enrichment\n  --format json                   Emit the versioned machine contract\n\nExamples:\n  compass call-graph --file src/lib.rs --byte 240 --line 12 --direction both --format json\n  compass call-graph --symbol src_lib_run --direction callers --format json\n\nNotes:\n  Structural call evidence is the language-neutral baseline. Program IR enriches exact call sites and unresolved calls when available."
+    ),
     page!(
         "capabilities",
         "Report versioned machine contracts for editor integrations",
