@@ -8,7 +8,8 @@
     "./contracts/callGraph": "./src/contracts/callGraph.ts",
     "./contracts/callflow": "./src/contracts/callflow.ts",
     "./contracts/graph": "./src/contracts/graph.ts",
-    "./contracts/history": "./src/contracts/history.ts"
+    "./contracts/history": "./src/contracts/history.ts",
+    "./graph/CompassBrandMark": "./src/graph/CompassBrandMark.tsx"
   },
   "scripts": {
     "build": "vite build",

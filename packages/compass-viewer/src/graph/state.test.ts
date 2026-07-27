@@ -14,11 +14,21 @@ describe("graphReducer", () => {
   it("only resumes through the explicit physics action", () => {
     const settled = graphReducer(initialGraphState, { type: "stabilized" });
     expect(settled.physicsRunning).toBe(false);
+    expect(settled.initialLayoutPending).toBe(false);
     expect(graphReducer(settled, { type: "stabilized" })).toBe(settled);
-    expect(graphReducer(settled, {
+    const resumed = graphReducer(settled, {
       type: "setPhysics",
       running: true
-    }).physicsRunning).toBe(true);
+    });
+    expect(resumed.physicsRunning).toBe(true);
+    expect(resumed.initialLayoutPending).toBe(false);
+  });
+
+  it("reveals the current layout and stops initial physics", () => {
+    const revealed = graphReducer(initialGraphState, { type: "revealLayout" });
+
+    expect(revealed.physicsRunning).toBe(false);
+    expect(revealed.initialLayoutPending).toBe(false);
   });
 
   it("can hide or reveal every community in one action", () => {

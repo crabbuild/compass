@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import { GraphInspector } from "./GraphInspector";
+import { GraphTransitionScreen } from "./GraphTransitionScreen";
 import { GraphToolbar } from "./GraphToolbar";
 import { InspectorResizeHandle } from "./InspectorResizeHandle";
 import {
@@ -172,6 +173,9 @@ function CompassGraphView({
   const handleStabilized = useCallback(() => {
     dispatch({ type: "stabilized" });
   }, []);
+  const revealCurrentLayout = useCallback(() => {
+    dispatch({ type: "revealLayout" });
+  }, []);
   const activateNode = useCallback((nodeId: string) => {
     const node = model.nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return;
@@ -192,138 +196,161 @@ function CompassGraphView({
     sourceRevisions?.after,
     sourceRevisions?.before
   ]);
-  const status = communityLoading !== undefined && communityLoading !== null
-    ? `Loading community ${communityLoading}`
-    : selected
+  const status = selected
     ? `Inspecting ${selected.label}`
-    : state.physicsRunning ? "Layout settling" : "Layout paused";
+    : state.physicsRunning ? "Layout running" : "Layout paused";
+  const loadingCommunity = communityLoading !== undefined && communityLoading !== null
+    ? model.communities.find((community) => community.id === communityLoading)
+    : undefined;
+  const transition = communityLoading !== undefined && communityLoading !== null
+    ? {
+      kind: "community" as const,
+      communityLabel: loadingCommunity?.label ?? `Community ${communityLoading}`
+    }
+    : state.initialLayoutPending
+      ? { kind: "layout" as const }
+      : null;
 
   return (
     <div
       className="compass-workspace"
-      data-inspector-collapsed={inspectorLayout.collapsed}
       style={{
         "--compass-inspector-width": `${inspectorLayout.width}px`
       } as CSSProperties}
     >
-      <main
-        className="compass-graph-stage"
-        data-comparison={comparisonMode ? "true" : "false"}
+      <div
+        className="compass-workspace-content"
+        data-inspector-collapsed={inspectorLayout.collapsed}
+        inert={transition ? true : undefined}
+        aria-hidden={transition ? true : undefined}
       >
-        <VisNetworkCanvas
-          ref={canvasRef}
+        <main
+          className="compass-graph-stage"
+          data-comparison={comparisonMode ? "true" : "false"}
+        >
+          <VisNetworkCanvas
+            ref={canvasRef}
+            model={model}
+            focusedNodeId={state.focusedNodeId}
+            physicsRunning={state.physicsRunning}
+            forceLabels={state.forceLabels}
+            hiddenCommunities={state.hiddenCommunities}
+            hiddenChanges={state.hiddenChanges}
+            onFocus={focus}
+            onOpenSource={activateNode}
+            onHover={setHover}
+            onClear={clear}
+            onStabilized={handleStabilized}
+          />
+          <GraphToolbar
+            status={status}
+            physicsRunning={state.physicsRunning}
+            forceLabels={state.forceLabels}
+            onTogglePhysics={() => dispatch({
+              type: "setPhysics",
+              running: !state.physicsRunning
+            })}
+            onFit={() => canvasRef.current?.fit()}
+            onReset={() => {
+              clear();
+              canvasRef.current?.reset();
+            }}
+            onToggleLabels={() => dispatch({
+              type: "setLabels",
+              visible: !state.forceLabels
+            })}
+            onBack={onBackToOverview}
+          />
+          {comparisonMode && (
+            <div className="compass-change-legend" aria-label="Graph change filters">
+              {CHANGE_TYPES
+                .filter(({ value }) => (changeCounts.get(value) ?? 0) > 0)
+                .map(({ value, label }) => {
+                  const visible = !state.hiddenChanges.has(value);
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      data-change={value}
+                      aria-pressed={visible}
+                      onClick={() => dispatch({ type: "toggleChange", change: value })}
+                    >
+                      <span aria-hidden="true" />
+                      {label}
+                      <small>{changeCounts.get(value) ?? 0}</small>
+                    </button>
+                  );
+                })}
+            </div>
+          )}
+          {communityError && (
+            <div
+              className="absolute bottom-4 left-4 z-20 max-w-md rounded-md border border-destructive/50 bg-background/95 px-3 py-2 text-sm text-destructive shadow-lg"
+              role="alert"
+            >
+              {communityError}
+            </div>
+          )}
+          {bounded && (
+            <div className="compass-bounded-notice" role="status">
+              <strong>Partial community comparison</strong>
+              <span>
+                This view is limited to {bounded.limit.toLocaleString()} nodes. Increase{" "}
+                <code>compass.graphNodeLimit</code> to inspect all{" "}
+                {Math.max(bounded.parentMembers, bounded.currentMembers).toLocaleString()} symbols.
+              </span>
+            </div>
+          )}
+          {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
+        </main>
+        {!inspectorLayout.collapsed && (
+          <InspectorResizeHandle
+            width={inspectorLayout.width}
+            onResize={(width) => onInspectorLayoutChange({
+              ...inspectorLayout,
+              width
+            })}
+          />
+        )}
+        <GraphInspector
           model={model}
-          focusedNodeId={state.focusedNodeId}
-          physicsRunning={state.physicsRunning}
-          forceLabels={state.forceLabels}
+          selected={selected}
+          neighbors={neighbors}
+          connectedEdges={selected
+            ? model.edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)
+            : []}
+          query={state.query}
+          matches={matches}
           hiddenCommunities={state.hiddenCommunities}
-          hiddenChanges={state.hiddenChanges}
+          comparisonMode={comparisonMode}
+          sourceRevisions={sourceRevisions}
+          onQueryChange={(query) => dispatch({ type: "search", query })}
           onFocus={focus}
-          onOpenSource={activateNode}
-          onHover={setHover}
-          onClear={clear}
-          onStabilized={handleStabilized}
-        />
-        <GraphToolbar
-          status={status}
-          physicsRunning={state.physicsRunning}
-          forceLabels={state.forceLabels}
-          onTogglePhysics={() => dispatch({
-            type: "setPhysics",
-            running: !state.physicsRunning
+          onOpenSource={host.openSource}
+          onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
+          onToggleCommunity={(communityId) => dispatch({
+            type: "toggleCommunity",
+            communityId
           })}
-          onFit={() => canvasRef.current?.fit()}
-          onReset={() => {
-            clear();
-            canvasRef.current?.reset();
-          }}
-          onToggleLabels={() => dispatch({
-            type: "setLabels",
-            visible: !state.forceLabels
+          onSetAllVisible={(visible) => dispatch({
+            type: "setHiddenCommunities",
+            communityIds: visible ? [] : model.communities.map((community) => community.id)
           })}
-          onBack={onBackToOverview}
-        />
-        {comparisonMode && (
-          <div className="compass-change-legend" aria-label="Graph change filters">
-            {CHANGE_TYPES
-              .filter(({ value }) => (changeCounts.get(value) ?? 0) > 0)
-              .map(({ value, label }) => {
-                const visible = !state.hiddenChanges.has(value);
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    data-change={value}
-                    aria-pressed={visible}
-                    onClick={() => dispatch({ type: "toggleChange", change: value })}
-                  >
-                    <span aria-hidden="true" />
-                    {label}
-                    <small>{changeCounts.get(value) ?? 0}</small>
-                  </button>
-                );
-              })}
-          </div>
-        )}
-        {communityError && (
-          <div
-            className="absolute bottom-4 left-4 z-20 max-w-md rounded-md border border-destructive/50 bg-background/95 px-3 py-2 text-sm text-destructive shadow-lg"
-            role="alert"
-          >
-            {communityError}
-          </div>
-        )}
-        {bounded && (
-          <div className="compass-bounded-notice" role="status">
-            <strong>Partial community comparison</strong>
-            <span>
-              This view is limited to {bounded.limit.toLocaleString()} nodes. Increase{" "}
-              <code>compass.graphNodeLimit</code> to inspect all{" "}
-              {Math.max(bounded.parentMembers, bounded.currentMembers).toLocaleString()} symbols.
-            </span>
-          </div>
-        )}
-        {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
-      </main>
-      {!inspectorLayout.collapsed && (
-        <InspectorResizeHandle
-          width={inspectorLayout.width}
-          onResize={(width) => onInspectorLayoutChange({
+          collapsed={inspectorLayout.collapsed}
+          onToggleCollapsed={() => onInspectorLayoutChange({
             ...inspectorLayout,
-            width
+            collapsed: !inspectorLayout.collapsed
           })}
         />
-      )}
-      <GraphInspector
-        model={model}
-        selected={selected}
-        neighbors={neighbors}
-        connectedEdges={selected
-          ? model.edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)
-          : []}
-        query={state.query}
-        matches={matches}
-        hiddenCommunities={state.hiddenCommunities}
-        comparisonMode={comparisonMode}
-        sourceRevisions={sourceRevisions}
-        onQueryChange={(query) => dispatch({ type: "search", query })}
-        onFocus={focus}
-        onOpenSource={host.openSource}
-        onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
-        onToggleCommunity={(communityId) => dispatch({
-          type: "toggleCommunity",
-          communityId
-        })}
-        onSetAllVisible={(visible) => dispatch({
-          type: "setHiddenCommunities",
-          communityIds: visible ? [] : model.communities.map((community) => community.id)
-        })}
-        collapsed={inspectorLayout.collapsed}
-        onToggleCollapsed={() => onInspectorLayoutChange({
-          ...inspectorLayout,
-          collapsed: !inspectorLayout.collapsed
-        })}
-      />
+      </div>
+      {transition?.kind === "community" ? (
+        <GraphTransitionScreen
+          kind="community"
+          communityLabel={transition.communityLabel}
+        />
+      ) : transition?.kind === "layout" ? (
+        <GraphTransitionScreen kind="layout" onShowGraph={revealCurrentLayout} />
+      ) : null}
     </div>
   );
 }

@@ -5,6 +5,7 @@ export type GraphChangeType = NonNullable<GraphNode["change"]>;
 export type GraphState = {
   focusedNodeId: string | null;
   physicsRunning: boolean;
+  initialLayoutPending: boolean;
   forceLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
@@ -15,6 +16,7 @@ export type GraphAction =
   | { type: "focus"; nodeId: string }
   | { type: "clearFocus" }
   | { type: "stabilized" }
+  | { type: "revealLayout" }
   | { type: "setPhysics"; running: boolean }
   | { type: "setLabels"; visible: boolean }
   | { type: "toggleCommunity"; communityId: number }
@@ -25,6 +27,7 @@ export type GraphAction =
 export const initialGraphState: GraphState = {
   focusedNodeId: null,
   physicsRunning: true,
+  initialLayoutPending: true,
   forceLabels: false,
   hiddenCommunities: new Set<number>(),
   hiddenChanges: new Set<GraphChangeType>(),
@@ -42,7 +45,15 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
     case "clearFocus":
       return { ...state, focusedNodeId: null };
     case "stabilized":
-      return state.physicsRunning ? { ...state, physicsRunning: false } : state;
+      return state.physicsRunning || state.initialLayoutPending
+        ? { ...state, physicsRunning: false, initialLayoutPending: false }
+        : state;
+    case "revealLayout":
+      return {
+        ...state,
+        physicsRunning: false,
+        initialLayoutPending: false
+      };
     case "setPhysics":
       return { ...state, physicsRunning: action.running };
     case "setLabels":
