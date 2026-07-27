@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphViewModel } from "../contracts/graph";
 import { compareGraphs } from "./ComparisonOverlay";
+import { compareRecord, displayFieldValue } from "./recordDiff";
 
 function graph(
   nodes: GraphViewModel["nodes"],
@@ -83,5 +84,100 @@ describe("compareGraphs", () => {
     expect(comparison.graph.nodes).toEqual([]);
     expect(comparison.graph.edges).toEqual([]);
     expect(comparison.graph.stats).toMatchObject({ nodes: 0, edges: 0 });
+  });
+
+  it("retains exact before and after fields without presentation metadata", () => {
+    const parent = graph(
+      [{
+        id: "shared",
+        label: "Shared",
+        community: 0,
+        signature: "old()",
+        source: { file: "src/core.ts", startLine: 2 },
+        color: { background: "#111111", border: "#222222" }
+      }],
+      [{
+        id: "edge",
+        source: "shared",
+        target: "shared",
+        relation: "calls",
+        confidence: "inferred"
+      }]
+    );
+    const current = graph(
+      [{
+        id: "shared",
+        label: "Shared",
+        community: 0,
+        signature: "new()",
+        source: { file: "src/core.ts", startLine: 4 },
+        color: { background: "#eeeeee", border: "#dddddd" }
+      }],
+      [{
+        id: "edge",
+        source: "shared",
+        target: "shared",
+        relation: "invokes",
+        confidence: "extracted"
+      }]
+    );
+
+    const comparison = compareGraphs(parent, current);
+    const changedNode = comparison.graph.nodes[0];
+    const changedEdge = comparison.graph.edges[0];
+
+    expect(changedNode?.evidence?.fields).toEqual([
+      { field: "signature", before: "old()", after: "new()" },
+      { field: "source.startLine", before: 2, after: 4 }
+    ]);
+    expect(changedNode?.evidence?.fields.map((field) => field.field))
+      .not.toContain("color.background");
+    expect(changedEdge?.evidence?.fields).toEqual([
+      { field: "confidence", before: "inferred", after: "extracted" },
+      { field: "relation", before: "calls", after: "invokes" }
+    ]);
+  });
+
+  it("preserves aggregate comparison mode for community drill-down", () => {
+    const parent = graph(
+      [{ id: "community-0", label: "Core", community: 0, memberCount: 5 }],
+      []
+    );
+    const current = graph(
+      [{ id: "community-0", label: "Core", community: 0, memberCount: 6 }],
+      []
+    );
+    parent.stats.aggregated = true;
+    current.stats.aggregated = true;
+
+    const comparison = compareGraphs(parent, current);
+
+    expect(comparison.graph.stats.aggregated).toBe(true);
+    expect(comparison.graph.nodes[0]?.evidence).toMatchObject({
+      before: { memberCount: 5 },
+      after: { memberCount: 6 },
+      fields: [{ field: "memberCount", before: 5, after: 6 }]
+    });
+  });
+});
+
+describe("record diff presentation", () => {
+  it("is independent of object key order and reports missing nested values", () => {
+    const evidence = compareRecord(
+      { source: { startLine: 2, file: "src/core.ts" }, signature: "same()" },
+      { signature: "same()", source: { file: "src/core.ts", endLine: 8 } }
+    );
+
+    expect(evidence.fields).toEqual([
+      { field: "source.endLine", after: 8 },
+      { field: "source.startLine", before: 2 }
+    ]);
+  });
+
+  it("bounds structured values and marks them as shortened", () => {
+    expect(displayFieldValue({ detail: "x".repeat(100) }, 32)).toEqual({
+      text: expect.stringMatching(/…$/),
+      truncated: true
+    });
   });
 });

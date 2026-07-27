@@ -40,7 +40,12 @@ export function NodeHoverCard({
         </span>
       )}
       {node.memberCount !== undefined ? (
-        <p>{node.memberCount.toLocaleString()} symbols</p>
+        <>
+          <p>{node.memberCount.toLocaleString()} symbols</p>
+          {node.change && node.change !== "unchanged" && (
+            <p className="compass-hover-hint">Select to inspect exact changes</p>
+          )}
+        </>
       ) : (
         <>
           {node.language && <p>Language: {node.language}</p>}

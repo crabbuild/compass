@@ -16,6 +16,7 @@ import {
 } from "./inspectorLayout";
 import { graphNodeActivation } from "./nodeActivation";
 import { NodeHoverCard, type GraphHover } from "./NodeHoverCard";
+import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 import {
   graphReducer,
@@ -34,17 +35,28 @@ const CHANGE_TYPES: Array<{
 ];
 
 export type GraphHost = {
-  openSource(source: SourceLocation): void;
+  openSource(source: SourceLocation, revision?: string): void;
   openCommunity?(communityId: number): void;
+};
+
+export type CommunityGraphDetail = {
+  communityId: number;
+  model: GraphViewModel;
+  bounded?: {
+    limit: number;
+    parentMembers: number;
+    currentMembers: number;
+  } | undefined;
 };
 
 export type CompassGraphProps = {
   model: GraphViewModel;
   host: GraphHost;
-  communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
+  communityDetail?: CommunityGraphDetail | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
+  sourceRevisions?: GraphSourceRevisions | undefined;
   initialInspectorLayout?: Partial<InspectorLayout> | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
 };
@@ -56,6 +68,7 @@ export function CompassGraph({
   communityLoading,
   communityError,
   onBackToOverview,
+  sourceRevisions,
   initialInspectorLayout,
   onInspectorLayoutChange
 }: CompassGraphProps) {
@@ -78,6 +91,8 @@ export function CompassGraph({
       communityLoading={communityLoading}
       communityError={communityError}
       onBackToOverview={communityDetail ? onBackToOverview : undefined}
+      bounded={communityDetail?.bounded}
+      sourceRevisions={sourceRevisions}
       inspectorLayout={inspectorLayout}
       onInspectorLayoutChange={updateInspectorLayout}
     />
@@ -91,6 +106,8 @@ function CompassGraphView({
   communityLoading,
   communityError,
   onBackToOverview,
+  bounded,
+  sourceRevisions,
   inspectorLayout,
   onInspectorLayoutChange
 }: {
@@ -100,6 +117,8 @@ function CompassGraphView({
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
+  bounded?: CommunityGraphDetail["bounded"];
+  sourceRevisions?: GraphSourceRevisions | undefined;
   inspectorLayout: InspectorLayout;
   onInspectorLayoutChange(layout: InspectorLayout): void;
 }) {
@@ -160,8 +179,19 @@ function CompassGraphView({
     if (activation.type === "community") {
       hostRef.current.openCommunity?.(activation.communityId);
     }
-    if (activation.type === "source") hostRef.current.openSource(activation.source);
-  }, [detailCommunityId, model.nodes, model.stats.aggregated]);
+    if (activation.type === "source") {
+      hostRef.current.openSource(
+        activation.source,
+        node.change === "removed" ? sourceRevisions?.before : sourceRevisions?.after
+      );
+    }
+  }, [
+    detailCommunityId,
+    model.nodes,
+    model.stats.aggregated,
+    sourceRevisions?.after,
+    sourceRevisions?.before
+  ]);
   const status = communityLoading !== undefined && communityLoading !== null
     ? `Loading community ${communityLoading}`
     : selected
@@ -243,6 +273,16 @@ function CompassGraphView({
             {communityError}
           </div>
         )}
+        {bounded && (
+          <div className="compass-bounded-notice" role="status">
+            <strong>Partial community comparison</strong>
+            <span>
+              This view is limited to {bounded.limit.toLocaleString()} nodes. Increase{" "}
+              <code>compass.graphNodeLimit</code> to inspect all{" "}
+              {Math.max(bounded.parentMembers, bounded.currentMembers).toLocaleString()} symbols.
+            </span>
+          </div>
+        )}
         {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
       </main>
       {!inspectorLayout.collapsed && (
@@ -258,10 +298,14 @@ function CompassGraphView({
         model={model}
         selected={selected}
         neighbors={neighbors}
+        connectedEdges={selected
+          ? model.edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)
+          : []}
         query={state.query}
         matches={matches}
         hiddenCommunities={state.hiddenCommunities}
         comparisonMode={comparisonMode}
+        sourceRevisions={sourceRevisions}
         onQueryChange={(query) => dispatch({ type: "search", query })}
         onFocus={focus}
         onOpenSource={host.openSource}

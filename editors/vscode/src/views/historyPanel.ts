@@ -6,12 +6,12 @@ import { loadSemanticDiff } from "../history/diffClient";
 import { loadChangeCounts } from "../history/changeCountsClient";
 import { RevisionStore } from "../history/revisionStore";
 import { loadTimeline } from "../history/timelineClient";
+import { HistoricalSourceProvider } from "../history/historicalSource";
 import {
   historyOperationFor,
   type HistoryHostMessage
 } from "../history/panelMessages";
 import type { RepositorySession } from "../workspace/repositorySession";
-import { openGraphSource } from "./sourceNavigation";
 import { openQueryPanel } from "./queryPanel";
 
 const TIMELINE_PAGE_SIZE = 100;
@@ -46,6 +46,21 @@ export async function openHistoryPanel(
     .get("graphNodeLimit", 5000);
   const countCache = new Map<string, Awaited<ReturnType<typeof loadChangeCounts>>>();
   let disposed = false;
+  let activeComparison: {
+    commit: string;
+    parent: string;
+    currentIdentity: { realization: string; fingerprint: string };
+    parentIdentity: { realization: string; fingerprint: string };
+  } | undefined;
+  let activeSourceCommits = new Set<string>();
+  const sourceProvider = new HistoricalSourceProvider(
+    `compass-history-${randomUUID().replaceAll("-", "")}`,
+    session.root
+  );
+  const sourceProviderRegistration = vscode.workspace.registerTextDocumentContentProvider(
+    sourceProvider.scheme,
+    sourceProvider
+  );
   let activePanelBuild: {
     command: ReturnType<RepositorySession["processes"]["startJsonl"]>;
     cancelled: boolean;
@@ -143,6 +158,8 @@ export async function openHistoryPanel(
   };
   panel.onDidDispose(() => {
     disposed = true;
+    sourceProviderRegistration.dispose();
+    sourceProvider.dispose();
     if (activePanelBuild) {
       activePanelBuild.cancelled = true;
       activePanelBuild.command.cancel();
@@ -388,6 +405,8 @@ export async function openHistoryPanel(
           graphNodeLimit,
           historyIdentity(entry)
         );
+        activeComparison = undefined;
+        activeSourceCommits = new Set([message.commit]);
         await postMessage({
           type: "graph",
           commit: message.commit,
@@ -441,16 +460,83 @@ export async function openHistoryPanel(
           loadSemanticDiff(session, message.parent, message.commit),
           loadChangeCounts(session, message.commit, message.parent)
         ]);
+        const currentIdentity = {
+          realization: current.realization,
+          fingerprint: current.fingerprint
+        };
+        const parentIdentity = {
+          realization: parent.realization,
+          fingerprint: parent.fingerprint
+        };
+        activeComparison = {
+          commit: message.commit,
+          parent: message.parent,
+          currentIdentity,
+          parentIdentity
+        };
+        activeSourceCommits = new Set([message.commit, message.parent]);
         await postMessage({
           type: "comparison",
           commit: message.commit,
           parent: message.parent,
-          realization: current.realization,
-          fingerprint: current.fingerprint,
+          realization: currentIdentity.realization,
+          fingerprint: currentIdentity.fingerprint,
+          parentRealization: parentIdentity.realization,
+          parentFingerprint: parentIdentity.fingerprint,
           currentGraph: current.graph,
           parentGraph: parent.graph,
           semanticDiff,
           counts
+        });
+      } else if (message?.type === "compareCommunity"
+        && typeof message.requestId === "string"
+        && typeof message.commit === "string"
+        && typeof message.parent === "string"
+        && typeof message.communityId === "number"
+        && typeof message.hasCurrent === "boolean"
+        && typeof message.hasParent === "boolean") {
+        if (session.capabilities?.features.community_detail !== true) {
+          throw new Error(
+            "The installed Compass CLI does not support historical community details. Upgrade Compass and reload VS Code."
+          );
+        }
+        if (!message.hasCurrent && !message.hasParent) {
+          throw new Error("The selected community is absent from both compared revisions.");
+        }
+        if (!activeComparison
+          || activeComparison.commit !== message.commit
+          || activeComparison.parent !== message.parent
+          || !sameIdentity(activeComparison.currentIdentity, message.currentIdentity)
+          || !sameIdentity(activeComparison.parentIdentity, message.parentIdentity)) {
+          throw new Error("This community request no longer matches the active comparison.");
+        }
+        const [current, parent] = await Promise.all([
+          message.hasCurrent
+            ? revisions.loadCommunity(
+                message.commit,
+                message.communityId,
+                graphNodeLimit,
+                activeComparison.currentIdentity
+              )
+            : undefined,
+          message.hasParent
+            ? revisions.loadCommunity(
+                message.parent,
+                message.communityId,
+                graphNodeLimit,
+                activeComparison.parentIdentity
+              )
+            : undefined
+        ]);
+        await postMessage({
+          type: "communityComparison",
+          requestId: message.requestId,
+          commit: message.commit,
+          parent: message.parent,
+          communityId: message.communityId,
+          ...(current ? { currentGraph: current.graph } : {}),
+          ...(parent ? { parentGraph: parent.graph } : {}),
+          nodeLimit: graphNodeLimit
         });
       } else if (message?.type === "queryRevision" && typeof message.commit === "string") {
         const entry = timeline?.entries.find((candidate) => candidate.commit === message.commit);
@@ -466,7 +552,13 @@ export async function openHistoryPanel(
         }
         await postMessage({ type: "changeCounts", commit: message.commit, counts });
       } else if (message?.type === "openSource") {
-        await openGraphSource(session, message.repositoryId, message.source);
+        if (typeof message.commit !== "string" || !activeSourceCommits.has(message.commit)) {
+          throw new Error("This source request no longer matches the active revision view.");
+        }
+        if (message.repositoryId !== session.id) {
+          throw new Error("The source request belongs to another repository.");
+        }
+        await sourceProvider.open(message.commit, message.source);
       }
     } catch (error) {
       if (message?.type === "buildRevision" && typeof message.commit === "string") {
@@ -486,6 +578,19 @@ export async function openHistoryPanel(
           type: "communityError",
           requestId: message.requestId,
           commit: typeof message.commit === "string" ? message.commit : "",
+          communityId: message.communityId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
+      if (message?.type === "compareCommunity"
+        && typeof message.requestId === "string"
+        && typeof message.communityId === "number") {
+        await postMessage({
+          type: "communityComparisonError",
+          requestId: message.requestId,
+          commit: typeof message.commit === "string" ? message.commit : "",
+          parent: typeof message.parent === "string" ? message.parent : "",
           communityId: message.communityId,
           message: error instanceof Error ? error.message : String(error)
         });
@@ -514,6 +619,18 @@ function historyIdentity(
   return entry?.realization && entry.fingerprint
     ? { realization: entry.realization, fingerprint: entry.fingerprint }
     : undefined;
+}
+
+function sameIdentity(
+  left: { realization: string; fingerprint: string },
+  right: unknown
+): boolean {
+  return typeof right === "object"
+    && right !== null
+    && "realization" in right
+    && "fingerprint" in right
+    && right.realization === left.realization
+    && right.fingerprint === left.fingerprint;
 }
 
 function html(context: vscode.ExtensionContext, webview: vscode.Webview): string {

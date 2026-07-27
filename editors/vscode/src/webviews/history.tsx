@@ -8,6 +8,7 @@ import {
   compareGraphs,
   type GraphViewModel,
   type GraphComparison,
+  type CommunityGraphDetail,
   type HistoryBuildState,
   type HistoryChangeCounts,
   type HistoryOperationError,
@@ -28,10 +29,22 @@ let selectedCommit = "";
 let graph: GraphViewModel | undefined;
 let graphCommit: string | undefined;
 let graphIdentity: { realization: string; fingerprint: string } | undefined;
-let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
+let comparisonIdentities: {
+  current: { realization: string; fingerprint: string };
+  parent: { realization: string; fingerprint: string };
+} | undefined;
+let communityDetail: CommunityGraphDetail | undefined;
 let communityLoading: number | null = null;
 let communityError: string | undefined;
 let activeCommunityRequest = "";
+let activeCommunityContext: {
+  requestId: string;
+  commit: string;
+  parent?: string | undefined;
+  communityId: number;
+  parentMembers: number;
+  currentMembers: number;
+} | undefined;
 let semanticDiff: unknown;
 let comparison: (GraphComparison & { parent: string }) | undefined;
 let repositoryId = "";
@@ -53,6 +66,7 @@ function clearRevisionPresentation(): void {
   graph = undefined;
   graphCommit = undefined;
   graphIdentity = undefined;
+  comparisonIdentities = undefined;
   semanticDiff = undefined;
   comparison = undefined;
   changeCounts = undefined;
@@ -60,6 +74,7 @@ function clearRevisionPresentation(): void {
   communityLoading = null;
   communityError = undefined;
   activeCommunityRequest = "";
+  activeCommunityContext = undefined;
   revisionLoadState = "idle";
 }
 
@@ -149,11 +164,18 @@ function render(): void {
         communityLoading = null;
         communityError = undefined;
         activeCommunityRequest = "";
+        activeCommunityContext = undefined;
         render();
       }}
       onExitComparison={() => {
         comparison = undefined;
+        comparisonIdentities = undefined;
         semanticDiff = undefined;
+        communityDetail = undefined;
+        communityLoading = null;
+        communityError = undefined;
+        activeCommunityRequest = "";
+        activeCommunityContext = undefined;
         requestChangeCounts(selectedCommit);
         render();
       }}
@@ -203,6 +225,51 @@ function render(): void {
           communityLoading = communityId;
           communityError = undefined;
           activeCommunityRequest = crypto.randomUUID();
+          const aggregate = comparison?.graph.nodes.find(
+            (node) => node.community === communityId && node.memberCount !== undefined
+          );
+          if (comparison && comparisonIdentities && aggregate) {
+            const hasCurrent = aggregate.change === "unchanged"
+              || aggregate.evidence?.after !== undefined;
+            const hasParent = aggregate.change === "unchanged"
+              || aggregate.evidence?.before !== undefined;
+            const currentMembers = memberCount(
+              aggregate.evidence?.after,
+              hasCurrent ? (aggregate.memberCount ?? 0) : 0
+            );
+            const parentMembers = memberCount(
+              aggregate.evidence?.before,
+              hasParent ? (aggregate.memberCount ?? 0) : 0
+            );
+            activeCommunityContext = {
+              requestId: activeCommunityRequest,
+              commit,
+              parent: comparison.parent,
+              communityId,
+              parentMembers,
+              currentMembers
+            };
+            postMessage({
+              type: "compareCommunity",
+              requestId: activeCommunityRequest,
+              commit,
+              parent: comparison.parent,
+              currentIdentity: comparisonIdentities.current,
+              parentIdentity: comparisonIdentities.parent,
+              communityId,
+              hasCurrent,
+              hasParent
+            });
+            render();
+            return;
+          }
+          activeCommunityContext = {
+            requestId: activeCommunityRequest,
+            commit,
+            communityId,
+            parentMembers: 0,
+            currentMembers: aggregate?.memberCount ?? 0
+          };
           postMessage({
             type: "openCommunity",
             requestId: activeCommunityRequest,
@@ -288,10 +355,12 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
         realization: message.realization,
         fingerprint: message.fingerprint
       };
+      comparisonIdentities = undefined;
       communityDetail = undefined;
       communityLoading = null;
       communityError = undefined;
       activeCommunityRequest = "";
+      activeCommunityContext = undefined;
       operationErrors.delete(message.commit);
       revisionLoadState = "ready";
     }
@@ -329,10 +398,21 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
         realization: message.realization,
         fingerprint: message.fingerprint
       };
+      comparisonIdentities = {
+        current: {
+          realization: message.realization,
+          fingerprint: message.fingerprint
+        },
+        parent: {
+          realization: message.parentRealization,
+          fingerprint: message.parentFingerprint
+        }
+      };
       communityDetail = undefined;
       communityLoading = null;
       communityError = undefined;
       activeCommunityRequest = "";
+      activeCommunityContext = undefined;
       comparison = {
         ...compareGraphs(parent.data, current.data),
         ...(exactCounts
@@ -352,6 +432,70 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
       operationErrors.delete(message.commit);
       revisionLoadState = "ready";
     }
+  } else if (message?.type === "communityComparison") {
+    const context = activeCommunityContext;
+    if (!context
+      || message.requestId !== activeCommunityRequest
+      || message.requestId !== context.requestId
+      || message.commit !== selectedCommit
+      || message.commit !== context.commit
+      || message.parent !== comparison?.parent
+      || message.parent !== context.parent
+      || message.communityId !== context.communityId) {
+      return;
+    }
+    const current = message.currentGraph
+      ? GraphViewModelSchema.safeParse(message.currentGraph)
+      : undefined;
+    const parent = message.parentGraph
+      ? GraphViewModelSchema.safeParse(message.parentGraph)
+      : undefined;
+    if ((current && !current.success) || (parent && !parent.success) || (!current && !parent)) {
+      communityLoading = null;
+      communityError = "Compass returned an invalid community comparison.";
+    } else {
+      const reference = current?.success
+        ? current.data
+        : parent?.success
+          ? parent.data
+          : comparison.graph;
+      const currentGraph = current?.success
+        ? current.data
+        : emptyGraph(reference, "Current community");
+      const parentGraph = parent?.success
+        ? parent.data
+        : emptyGraph(reference, "Parent community");
+      const detail = compareGraphs(parentGraph, currentGraph);
+      const bounded = currentGraph.nodes.length < context.currentMembers
+        || parentGraph.nodes.length < context.parentMembers;
+      communityDetail = {
+        communityId: message.communityId,
+        model: detail.graph,
+        ...(bounded
+          ? {
+              bounded: {
+                limit: message.nodeLimit,
+                parentMembers: context.parentMembers,
+                currentMembers: context.currentMembers
+              }
+            }
+          : {})
+      };
+      communityLoading = null;
+      communityError = undefined;
+    }
+  } else if (message?.type === "communityComparisonError") {
+    const context = activeCommunityContext;
+    if (!context
+      || message.requestId !== activeCommunityRequest
+      || message.requestId !== context.requestId
+      || message.commit !== selectedCommit
+      || message.parent !== comparison?.parent
+      || message.communityId !== context.communityId) {
+      return;
+    }
+    communityLoading = null;
+    communityError = message.message;
   } else if (message?.type === "changeCounts") {
     if (!acceptsCommit(message.commit)) return;
     const parsed = HistoryChangeCountsSchema.safeParse(message.counts);
@@ -383,3 +527,28 @@ window.addEventListener("message", (event: MessageEvent<HistoryHostMessage>) => 
 
 render();
 postMessage({ type: "ready" });
+
+function memberCount(
+  snapshot: Record<string, unknown> | undefined,
+  fallback: number
+): number {
+  return typeof snapshot?.memberCount === "number" ? snapshot.memberCount : fallback;
+}
+
+function emptyGraph(reference: GraphViewModel, title: string): GraphViewModel {
+  return {
+    ...reference,
+    title,
+    stats: {
+      ...reference.stats,
+      nodes: 0,
+      edges: 0,
+      communities: 0,
+      aggregated: false
+    },
+    nodes: [],
+    edges: [],
+    communities: [],
+    hyperedges: []
+  };
+}

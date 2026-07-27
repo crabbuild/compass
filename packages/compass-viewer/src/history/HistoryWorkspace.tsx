@@ -12,7 +12,10 @@ import {
   SparklesIcon
 } from "lucide-react";
 import { WorkspaceState } from "../components/workbench/WorkspaceState";
-import { CompassGraph } from "../graph/CompassGraph";
+import {
+  CompassGraph,
+  type CommunityGraphDetail
+} from "../graph/CompassGraph";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type {
   HistoryBuildState,
@@ -71,7 +74,7 @@ export function HistoryWorkspace({
   semanticDiff?: unknown;
   changeCounts?: HistoryChangeCounts | undefined;
   graphCommit?: string | undefined;
-  communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
+  communityDetail?: CommunityGraphDetail | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
@@ -322,7 +325,9 @@ export function HistoryWorkspace({
                       ) : (
                         <div className="history-graph-ready">
                           <div className="history-graph-status" role="status">
-                            Viewing changed subgraph for{" "}
+                            {communityDetail
+                              ? `Viewing exact changes in community ${communityDetail.communityId} for `
+                              : "Viewing changed subgraph for "}
                             <span>{selected.commit.slice(0, 9)}</span>
                           </div>
                           <div className="history-graph-canvas">
@@ -332,9 +337,13 @@ export function HistoryWorkspace({
                               communityLoading={communityLoading}
                               communityError={communityError}
                               onBackToOverview={onBackToOverview}
+                              sourceRevisions={{
+                                before: comparison.parent,
+                                after: selected.commit
+                              }}
                               host={{
-                                openSource(source) {
-                                  host.openSource(selected.commit, source);
+                                openSource(source, revision) {
+                                  host.openSource(revision ?? selected.commit, source);
                                 },
                                 openCommunity(communityId) {
                                   if (graphCommit) host.openCommunity(graphCommit, communityId);
@@ -375,8 +384,8 @@ export function HistoryWorkspace({
                           communityError={communityError}
                           onBackToOverview={onBackToOverview}
                           host={{
-                            openSource(source) {
-                              host.openSource(selected.commit, source);
+                            openSource(source, revision) {
+                              host.openSource(revision ?? selected.commit, source);
                             },
                             openCommunity(communityId) {
                               if (graphCommit) host.openCommunity(graphCommit, communityId);

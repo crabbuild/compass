@@ -94,6 +94,14 @@ Select a commit, then:
    revision graphs are available.
 4. Choose **Query this revision** to run a query against that exact commit.
 
+In a changed graph, select an aggregate community and choose **Inspect
+changes**. Compass lazily compares that community at both revisions and shows
+the exact added, removed, and changed symbols and relationships. Selecting a
+changed symbol reveals a Before/After table containing only modified fields,
+including signatures and source ranges, with source actions for both commits.
+If either community exceeds `compass.graphNodeLimit`, the detail view labels
+its counts as partial and explains how to increase the limit.
+
 Opening Codebase Evolution never builds historical graphs automatically. Revision
 builds are explicit because they can take time and may use a configured semantic
 provider.

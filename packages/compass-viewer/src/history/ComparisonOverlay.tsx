@@ -2,8 +2,10 @@ import { GitCompareIcon, XIcon } from "lucide-react";
 import type {
   GraphEdge,
   GraphNode,
+  GraphRecordEvidence,
   GraphViewModel
 } from "../contracts/graph";
+import { compareRecord } from "./recordDiff";
 
 export type GraphComparison = {
   addedNodes: number;
@@ -94,16 +96,42 @@ export function compareGraphs(
   const edges: GraphEdge[] = [];
   const addedNodeIds = difference(currentNodes, parentNodes);
   const removedNodeIds = difference(parentNodes, currentNodes);
-  const changedNodeIds = intersection(currentNodes, parentNodes)
-    .filter((id) => !sameRecord(currentNodes.get(id), parentNodes.get(id)));
+  const nodeEvidence = new Map(intersection(currentNodes, parentNodes).map((id) => [
+    id,
+    compareRecord(parentNodes.get(id), currentNodes.get(id))
+  ]));
+  const changedNodeIds = [...nodeEvidence.entries()]
+    .filter(([, evidence]) => evidence.fields.length > 0)
+    .map(([id]) => id);
   const addedEdgeIds = difference(currentEdges, parentEdges);
   const removedEdgeIds = difference(parentEdges, currentEdges);
-  const changedEdgeIds = intersection(currentEdges, parentEdges)
-    .filter((id) => !sameRecord(currentEdges.get(id), parentEdges.get(id)));
+  const edgeEvidence = new Map(intersection(currentEdges, parentEdges).map((id) => [
+    id,
+    compareRecord(parentEdges.get(id), currentEdges.get(id))
+  ]));
+  const changedEdgeIds = [...edgeEvidence.entries()]
+    .filter(([, evidence]) => evidence.fields.length > 0)
+    .map(([id]) => id);
 
-  for (const id of addedNodeIds) addNode(nodes, currentNodes.get(id), "added");
-  for (const id of removedNodeIds) addNode(nodes, parentNodes.get(id), "removed");
-  for (const id of changedNodeIds) addNode(nodes, currentNodes.get(id), "changed");
+  for (const id of addedNodeIds) {
+    addNode(
+      nodes,
+      currentNodes.get(id),
+      "added",
+      compareRecord(undefined, currentNodes.get(id))
+    );
+  }
+  for (const id of removedNodeIds) {
+    addNode(
+      nodes,
+      parentNodes.get(id),
+      "removed",
+      compareRecord(parentNodes.get(id), undefined)
+    );
+  }
+  for (const id of changedNodeIds) {
+    addNode(nodes, currentNodes.get(id), "changed", nodeEvidence.get(id));
+  }
   for (const [ids, source, change] of [
     [addedEdgeIds, currentEdges, "added"],
     [removedEdgeIds, parentEdges, "removed"],
@@ -112,7 +140,12 @@ export function compareGraphs(
     for (const id of ids) {
       const edge = source.get(id);
       if (!edge) continue;
-      edges.push({ ...edge, change });
+      const evidence = change === "added"
+        ? compareRecord(undefined, edge)
+        : change === "removed"
+          ? compareRecord(edge, undefined)
+          : edgeEvidence.get(id);
+      edges.push({ ...edge, change, ...(evidence ? { evidence } : {}) });
       addContextNode(nodes, edge.source, parentNodes, currentNodes);
       addContextNode(nodes, edge.target, parentNodes, currentNodes);
     }
@@ -140,7 +173,7 @@ export function compareGraphs(
         nodes: orderedNodes.length,
         edges: edges.length,
         communities: communities.length,
-        aggregated: false
+        aggregated: parent.stats.aggregated || current.stats.aggregated
       },
       nodes: orderedNodes,
       edges,
@@ -158,16 +191,17 @@ function intersection<T>(left: ReadonlyMap<string, T>, right: ReadonlyMap<string
   return [...left.keys()].filter((id) => right.has(id));
 }
 
-function sameRecord(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function addNode(
   nodes: Map<string, GraphNode>,
   node: GraphNode | undefined,
-  change: "added" | "removed" | "changed"
+  change: "added" | "removed" | "changed",
+  evidence: GraphRecordEvidence | undefined
 ): void {
-  if (node) nodes.set(node.id, { ...node, change });
+  if (node) nodes.set(node.id, {
+    ...node,
+    change,
+    ...(evidence ? { evidence } : {})
+  });
 }
 
 function addContextNode(
