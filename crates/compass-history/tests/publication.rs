@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use compass_analysis::{AnalysisBundle, analyze};
 use compass_history::{
-    CommitId, CompletionEvidence, ExtractionFingerprint, GraphArtifacts, HistoryStore,
-    PublishRequest, Repository,
+    CommitId, CompletedGraphArtifacts, CompletionEvidence, ExtractionFingerprint, GraphArtifacts,
+    HistoryStore, PublishRequest, Repository,
 };
 use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
@@ -120,6 +120,10 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
     let mut publish = request('a', false)?;
     publish.profile.insert("provider", "none")?;
     let expected_profile = publish.profile.clone();
+    let expected_artifacts = CompletedGraphArtifacts {
+        artifacts: publish.artifacts.clone(),
+        completion: publish.completion.clone(),
+    };
     let first = history.publish(publish.clone())?;
     let second = history.publish(publish)?;
     assert_eq!(first.id, second.id);
@@ -139,6 +143,7 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
         first.id
     );
     assert_eq!(reopened.get(&first.id)?.version, first.version);
+    assert_eq!(reopened.artifacts(&first.id)?, expected_artifacts);
     assert_eq!(reopened.list(None)?.len(), 1);
     Ok(())
 }
@@ -241,6 +246,7 @@ fn validation_rejects_missing_endpoints_before_catalog_publication()
     let fixture = Fixture::new()?;
     let repository = Repository::discover(&fixture.path)?;
     let history = HistoryStore::create(&repository)?;
+    let initial_nodes = history.plan_gc(false)?.candidate_nodes;
     let mut invalid = request('c', true)?;
     invalid.artifacts.document.links[0].target = "missing".to_owned();
     let error = match history.publish(invalid) {
@@ -268,6 +274,11 @@ fn validation_rejects_missing_endpoints_before_catalog_publication()
         Err(error) => error,
     };
     assert!(error.to_string().contains("MissingHyperedgeMember"));
+    assert_eq!(
+        history.plan_gc(false)?.candidate_nodes,
+        initial_nodes,
+        "invalid in-memory partitions must not write orphaned tree nodes"
+    );
 
     let valid = history.publish(request('d', true)?)?;
     let report = history.validate(&valid.id)?;
