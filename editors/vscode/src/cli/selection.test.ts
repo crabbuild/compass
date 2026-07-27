@@ -37,6 +37,10 @@ describe("compassSelectionItems", () => {
       expect.objectContaining({
         label: "$(folder-opened) Browse for another Compass CLI…",
         browse: true
+      }),
+      expect.objectContaining({
+        label: "$(edit) Enter Compass CLI path manually…",
+        manual: true
       })
     ]);
   });
@@ -48,7 +52,8 @@ describe("compassSelectionItems", () => {
       searched: []
     });
 
-    expect(items).toHaveLength(1);
+    expect(items).toHaveLength(2);
     expect(items[0]?.browse).toBe(true);
+    expect(items[1]?.manual).toBe(true);
   });
 });

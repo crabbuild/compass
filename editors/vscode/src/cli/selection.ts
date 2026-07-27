@@ -10,6 +10,7 @@ export type CompassSelectionItem = {
   detail: string;
   installation?: CompassInstallation | undefined;
   browse?: boolean | undefined;
+  manual?: boolean | undefined;
 };
 
 export function compassSelectionItems(
@@ -35,6 +36,12 @@ export function compassSelectionItems(
       description: "Choose an executable outside detected locations",
       detail: "The selected path will be stored in compass.cliPath",
       browse: true
+    },
+    {
+      label: "$(edit) Enter Compass CLI path manually…",
+      description: "Paste an absolute path when auto-detection is unavailable",
+      detail: "Supports paths such as ~/.local/bin/compass",
+      manual: true
     }
   ];
 }

@@ -80,6 +80,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!selected) return;
 
     let installation = selected.installation;
+    let selectedPath: string | undefined;
     if (selected.browse) {
       const browsed = await vscode.window.showOpenDialog({
         title: "Select Compass CLI",
@@ -88,10 +89,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         canSelectMany: false
       });
       if (!browsed?.[0]) return;
-      installation = await inspectCompassInstallation(browsed[0].fsPath);
+      selectedPath = browsed[0].fsPath;
+    } else if (selected.manual) {
+      const configuredPath = vscode.workspace.getConfiguration("compass")
+        .get<string>("cliPath")?.trim();
+      selectedPath = await vscode.window.showInputBox({
+        title: "Enter Compass CLI path",
+        prompt: "Enter the full path to a Compass executable",
+        placeHolder: "~/.local/bin/compass",
+        ...(configuredPath ? { value: configuredPath } : {}),
+        validateInput: (value) => value.trim()
+          ? undefined
+          : "Enter a Compass CLI path"
+      });
+      if (selectedPath === undefined) return;
+    }
+    if (selectedPath !== undefined) {
+      installation = await inspectCompassInstallation(selectedPath);
       if (!installation) {
         void vscode.window.showErrorMessage(
-          "The selected Compass CLI path is not an executable file."
+          `The Compass CLI path is not an executable file: ${selectedPath}`
         );
         return;
       }

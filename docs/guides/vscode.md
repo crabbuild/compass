@@ -11,7 +11,8 @@ Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
 3. Open a trusted repository.
 4. The extension detects Compass on `PATH` and in common install locations.
    Choose **Select Compass CLI** to compare detected paths and versions, browse
-   for another executable, or set `compass.cliPath` directly.
+   for another executable, enter a path manually, or set `compass.cliPath`
+   directly.
 5. Open the Compass activity bar and run **Initialize Repository**.
 
 Initialization previews include and exclude globs before it writes

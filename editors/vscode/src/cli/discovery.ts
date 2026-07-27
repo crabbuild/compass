@@ -68,7 +68,7 @@ export async function inspectCompassInstallation(
   executable: string,
   source: CompassInstallationSource = "configured"
 ): Promise<CompassInstallation | undefined> {
-  const resolved = path.resolve(executable);
+  const resolved = resolveCompassPath(executable);
   try {
     await access(resolved, constants.X_OK);
   } catch {
@@ -80,6 +80,20 @@ export async function inspectCompassInstallation(
     ...(version ? { version } : {}),
     source
   };
+}
+
+export function resolveCompassPath(
+  executable: string,
+  environment: NodeJS.ProcessEnv = process.env
+): string {
+  const trimmed = executable.trim();
+  const home = environment.HOME ?? environment.USERPROFILE;
+  const expanded = home && (trimmed === "~"
+    || trimmed.startsWith("~/")
+    || trimmed.startsWith("~\\"))
+    ? path.join(home, trimmed.slice(2))
+    : trimmed;
+  return path.resolve(expanded);
 }
 
 function installationCandidates(
@@ -113,7 +127,7 @@ function installationCandidates(
       : []),
     ...pathCandidates,
     ...commonCandidates
-  ], platform);
+  ], platform, environment);
 }
 
 function commonInstallDirectories(
@@ -155,12 +169,13 @@ function commonInstallDirectories(
 
 function deduplicateCandidates(
   candidates: Candidate[],
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv
 ): Candidate[] {
   const seen = new Set<string>();
   const unique: Candidate[] = [];
   for (const candidate of candidates) {
-    const resolved = path.resolve(candidate.executable);
+    const resolved = resolveCompassPath(candidate.executable, environment);
     const key = platform === "win32" ? resolved.toLocaleLowerCase() : resolved;
     if (seen.has(key)) continue;
     seen.add(key);

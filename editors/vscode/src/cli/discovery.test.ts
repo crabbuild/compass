@@ -3,7 +3,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { discoverCompass, inspectCompassInstallation } from "./discovery";
+import {
+  discoverCompass,
+  inspectCompassInstallation,
+  resolveCompassPath
+} from "./discovery";
 
 const created: string[] = [];
 afterEach(async () => {
@@ -128,6 +132,13 @@ describe("discoverCompass", () => {
       executable,
       source: "configured"
     });
+  });
+
+  it("expands a home-relative path entered by the user", () => {
+    expect(resolveCompassPath(
+      "~/.local/bin/compass",
+      { HOME: "/home/dev" }
+    )).toBe(path.resolve("/home/dev/.local/bin/compass"));
   });
 });
 
