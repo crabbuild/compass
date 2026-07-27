@@ -18,6 +18,7 @@ suite("Compass extension", () => {
       "compass.stopWatch",
       "compass.openSettings",
       "compass.openGraph",
+      "compass.openCallGraphGuide",
       "compass.openCallGraph",
       "compass.openCallers",
       "compass.openCallees",

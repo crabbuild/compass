@@ -66,6 +66,11 @@ to collapse and expand it.
 
 ### Trace calls from the editor
 
+Choose **Call graph from cursor** under **Workspace > Explore** to open a visual
+guide with the editor steps and working **Show Callers**, **Show Callees**, and
+**Show Both** actions. Compass captures the active source position before the
+guide opens and returns to that exact cursor when an action is selected.
+
 1. Open an indexed source file and place the cursor anywhere inside a function
    or method body.
 2. Right-click in the editor and choose **Compass Call Graph**.

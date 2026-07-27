@@ -90,6 +90,11 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "compass.openCallGraphGuide",
+        "title": "Compass: Call Graph Guide",
+        "icon": "$(book)"
+      },
+      {
         "command": "compass.openCallers",
         "title": "Compass: Show Callers",
         "icon": "$(references)"

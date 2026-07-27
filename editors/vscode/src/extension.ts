@@ -11,6 +11,7 @@ import { CompassProcessManager } from "./cli/processManager";
 import { registerBuildCommands } from "./commands/buildCommands";
 import { GraphPanel } from "./views/graphPanel";
 import { CallGraphPanel } from "./views/callGraphPanel";
+import { openCallGraphGuidePanel } from "./views/callGraphGuidePanel";
 import { openArchitecturePanel } from "./views/architecturePanel";
 import { openQueryPanel } from "./views/queryPanel";
 import { openHistoryPanel } from "./views/historyPanel";
@@ -239,6 +240,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       await GraphPanel.open(context, session, output);
+    }),
+    vscode.commands.registerCommand("compass.openCallGraphGuide", () => {
+      openCallGraphGuidePanel(context, vscode.window.activeTextEditor);
     }),
     vscode.commands.registerCommand("compass.openCallGraph", () => openCallGraph("both")),
     vscode.commands.registerCommand("compass.openCallers", () => openCallGraph("callers")),
