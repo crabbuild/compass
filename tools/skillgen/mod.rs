@@ -276,7 +276,7 @@ fn validate_integrations(root: &Path) -> io::Result<()> {
             .unwrap_or_default();
         if DELEGATING_INTEGRATIONS.contains(&name) {
             require(
-                body.starts_with("---\nname: compass\n"),
+                has_canonical_frontmatter(&body),
                 &path,
                 "delegating command must use canonical Compass frontmatter",
             )?;
