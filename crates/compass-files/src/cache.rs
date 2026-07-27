@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 const AST_EXTRACTOR_VERSION: &str = "0.9.21";
-const CACHE_ENCODING_VERSION: u32 = 2;
+const CACHE_ENCODING_VERSION: u32 = 6;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

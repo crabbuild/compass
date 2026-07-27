@@ -704,20 +704,11 @@ fn build_graph_inner(
     } else {
         None
     };
-    let ast_cache_entries = fresh
+    let mut ast_cache_entries = fresh
         .par_iter()
         .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
         .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
         .collect::<Vec<_>>();
-    let ast_cache_handle = std::thread::Builder::new()
-        .name("compass-ast-cache".to_owned())
-        .spawn(move || {
-            let started = Instant::now();
-            cache.save_portable_ast_batch(&ast_cache_entries)?;
-            cache.flush()?;
-            Ok::<_, CoreError>(started.elapsed())
-        })
-        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
@@ -765,11 +756,28 @@ fn build_graph_inner(
         ordered.par_iter_mut().for_each(|extraction| {
             apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
         });
+        ast_cache_entries
+            .par_iter_mut()
+            .for_each(|(_, extraction)| {
+                apply_ast_id_remap(extraction, &ast_id_remap, &ast_root_marker);
+            });
         profile_internal_duration(
             "portable AST remap application",
             remap_application_started.elapsed(),
         );
     }
+    ast_cache_entries
+        .par_iter_mut()
+        .for_each(|(path, extraction)| prepare_portable_ast_cache_entry(extraction, path, &root));
+    let ast_cache_handle = std::thread::Builder::new()
+        .name("compass-ast-cache".to_owned())
+        .spawn(move || {
+            let started = Instant::now();
+            cache.save_portable_ast_batch(&ast_cache_entries)?;
+            cache.flush()?;
+            Ok::<_, CoreError>(started.elapsed())
+        })
+        .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     profile_internal("portable AST ID remapping", &mut internal_started);
     let read_source = |path: &PathBuf| {
         fs::read(path).ok().map(|bytes| {
@@ -1530,6 +1538,60 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
             });
         },
     );
+}
+
+fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, root: &Path) {
+    let canonical = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let Ok(relative) = canonical
+        .strip_prefix(root)
+        .or_else(|_| source.strip_prefix(root))
+    else {
+        return;
+    };
+    let portable = relative.to_string_lossy().replace('\\', "/");
+    let set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
+        for key in ["source_file", "origin_file"] {
+            if attributes
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+            {
+                attributes.insert(key.to_owned(), serde_json::Value::String(portable.clone()));
+            }
+        }
+        if let Some(target) = attributes
+            .get("target_file")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+        {
+            let target = Path::new(&target);
+            let canonical = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+            if let Ok(relative) = canonical.strip_prefix(root) {
+                attributes.insert(
+                    "target_file".to_owned(),
+                    serde_json::Value::String(relative.to_string_lossy().replace('\\', "/")),
+                );
+            }
+        }
+    };
+    for node in &mut extraction.nodes {
+        set_portable(&mut node.attributes);
+    }
+    for edge in &mut extraction.edges {
+        set_portable(&mut edge.attributes);
+    }
+    for hyperedge in &mut extraction.hyperedges {
+        if let Some(attributes) = hyperedge.as_object_mut() {
+            set_portable(attributes);
+        }
+    }
+    if let Some(calls) = extraction.raw_calls.as_mut() {
+        for call in calls {
+            if !call.source_file.is_empty() {
+                call.source_file.clone_from(&portable);
+            }
+        }
+    }
 }
 
 fn normalize_source_attribute_cached(

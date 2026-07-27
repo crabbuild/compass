@@ -160,13 +160,12 @@ fn execute(args: &[String]) -> Result<CommandOutput, CommandError> {
                 test_evidence: &test_evidence,
             })
             .map_err(runtime)?;
-            if let (Some(cache), Ok(payload)) = (
-                &cache,
-                canonical_json_bytes(&serde_json::to_value(&report).map_err(runtime)?),
-            ) {
+            let payload = canonical_json_bytes(&serde_json::to_value(&report).map_err(runtime)?)
+                .map_err(runtime)?;
+            if let Some(cache) = &cache {
                 let _ = cache.write(DerivedCacheNamespace::SemanticDiff, &cache_key, &payload);
             }
-            report
+            serde_json::from_slice(&payload).map_err(runtime)?
         }
     };
     let render = RenderOptions {

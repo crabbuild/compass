@@ -535,7 +535,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v0.9.21/e2")
+            .ends_with("ast/v0.9.21/e6")
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.20").exists());
 
@@ -544,7 +544,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/vcurrent/e2")
+            .ends_with("ast/vcurrent/e6")
     );
     assert!(
         cache
@@ -869,7 +869,7 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
     )?;
     cache.save_program(&artifact, "index.scip:bbbbbbbb", &json!({"kind":"scip"}))?;
     let syntax_directory = cache.directory(&syntax, None);
-    assert!(syntax_directory.ends_with("e2"));
+    assert!(syntax_directory.ends_with("e6"));
     assert!(
         fs::read_dir(&syntax_directory)?
             .filter_map(Result::ok)
