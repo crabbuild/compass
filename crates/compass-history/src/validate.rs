@@ -2,6 +2,7 @@ use compass_model::GraphDocument;
 use prolly::{Prolly, Tree, VersionedValue};
 use prolly_store_sqlite::SqliteStore;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::{
@@ -92,11 +93,15 @@ pub(crate) struct ValidatedPartition {
 }
 
 pub(crate) fn validate_publication_partition(
-    artifacts: &GraphArtifacts,
+    artifacts: GraphArtifacts,
     completion: &CompletionEvidence,
 ) -> Result<ValidatedPartition, HistoryError> {
-    let partitioned = artifacts.partition(completion)?;
     let mut problems = Vec::new();
+    validate_document_references(&artifacts.document, &mut problems)?;
+    if !problems.is_empty() {
+        return Err(HistoryError::InvalidRealization(problems));
+    }
+    let partitioned = artifacts.into_partition(completion)?;
     let mut total_bytes = 0_u64;
     for (kind, entries) in [
         ("nodes", partitioned.nodes.as_slice()),
@@ -112,7 +117,6 @@ pub(crate) fn validate_publication_partition(
     ] {
         validate_partition_records(kind, entries, &mut total_bytes, &mut problems)?;
     }
-    validate_partition_references(&partitioned.nodes, &artifacts.document, &mut problems)?;
     if !problems.is_empty() {
         return Err(HistoryError::InvalidRealization(problems));
     }
@@ -446,14 +450,18 @@ fn validate_references(
     Ok(())
 }
 
-fn validate_partition_references(
-    nodes: &[(Vec<u8>, Vec<u8>)],
+fn validate_document_references(
     document: &GraphDocument,
     problems: &mut Vec<ValidationProblem>,
 ) -> Result<(), HistoryError> {
+    let nodes = document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
     for edge in &document.links {
         for endpoint in [&edge.source, &edge.target] {
-            if !partition_has_node(nodes, endpoint) {
+            if !nodes.contains(endpoint.as_str()) {
                 problems.push(ValidationProblem::MissingEdgeEndpoint {
                     edge: canonical_json_bytes(&serde_json::to_value(edge)?)?,
                     endpoint: endpoint.clone(),
@@ -482,7 +490,7 @@ fn validate_partition_references(
             .flatten()
             .filter_map(Value::as_str)
         {
-            if !partition_has_node(nodes, member) {
+            if !nodes.contains(member) {
                 problems.push(ValidationProblem::MissingHyperedgeMember {
                     hyperedge: canonical_json_bytes(value)?,
                     member: member.to_owned(),
@@ -491,13 +499,6 @@ fn validate_partition_references(
         }
     }
     Ok(())
-}
-
-fn partition_has_node(nodes: &[(Vec<u8>, Vec<u8>)], node: &str) -> bool {
-    let key = node_key(node);
-    nodes
-        .binary_search_by(|(candidate, _)| candidate.as_slice().cmp(key.as_slice()))
-        .is_ok()
 }
 
 fn json_depth(value: &Value) -> usize {

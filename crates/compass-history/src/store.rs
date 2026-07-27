@@ -187,7 +187,7 @@ impl HistoryStore {
             })
         };
 
-        let validated = validate_publication_partition(&request.artifacts, &request.completion)?;
+        let validated = validate_publication_partition(request.artifacts, &request.completion)?;
         let report = validated.report;
         let partitioned = validated.partitioned;
         let node_count = report.nodes;

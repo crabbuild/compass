@@ -100,6 +100,11 @@ impl CompletedGraphArtifacts {
         self.artifacts.partition(&self.completion)
     }
 
+    /// Consume and partition this completed output without retaining the source graph.
+    pub fn into_partition(self) -> Result<PartitionedGraph, HistoryError> {
+        self.artifacts.into_partition(&self.completion)
+    }
+
     /// Reconstruct graph artifacts together with the stored completion proof.
     pub fn reconstruct(partitioned: &PartitionedGraph) -> Result<Self, HistoryError> {
         let artifacts = GraphArtifacts::reconstruct(partitioned)?;
@@ -163,46 +168,70 @@ impl GraphArtifacts {
         &self,
         completion: &CompletionEvidence,
     ) -> Result<PartitionedGraph, HistoryError> {
+        self.clone().into_partition(completion)
+    }
+
+    /// Consume realization state while producing deterministic typed records.
+    pub fn into_partition(
+        mut self,
+        completion: &CompletionEvidence,
+    ) -> Result<PartitionedGraph, HistoryError> {
         completion.validate()?;
         validate_sidecar_paths(&self.authoritative_sidecars)?;
+        canonicalize_graph_document(&mut self.document)?;
+        let registry = artifact_registry_from_canonical(&self)?;
         let mut partitioned = PartitionedGraph::default();
-        let mut node_keys = BTreeSet::new();
-        let mut edge_keys = BTreeSet::new();
-        let mut hyperedge_keys = BTreeSet::new();
 
-        if let Some(program) = &self.program {
+        if let Some(program) = self.program.take() {
             program.validate()?;
+            let AnalysisBundle {
+                analysis_schema_version,
+                analyzer_version,
+                program,
+                summaries,
+                reverse_calls,
+            } = program;
+            let compass_ir::ProgramBundle {
+                schema,
+                providers,
+                evidence,
+                modules,
+            } = program;
             partitioned.program_facts.push((
                 program_key("header", "analysis"),
                 encode_record(
                     "compass.program.header",
                     &serde_json::to_value(ProgramHeader {
-                        program_schema: program.program.schema.clone(),
-                        analysis_schema_version: program.analysis_schema_version,
-                        analyzer_version: program.analyzer_version,
+                        program_schema: schema,
+                        analysis_schema_version,
+                        analyzer_version,
                     })?,
                 )?,
             ));
-            for provider in &program.program.providers {
+            for provider in providers {
+                let key = program_key("provider", &provider.id);
                 partitioned.program_facts.push((
-                    program_key("provider", &provider.id),
+                    key,
                     encode_record("compass.program.provider", &serde_json::to_value(provider)?)?,
                 ));
             }
-            for evidence in &program.program.evidence {
+            for evidence in evidence {
+                let key = program_key("evidence", &evidence.id);
                 partitioned.program_facts.push((
-                    program_key("evidence", &evidence.id),
+                    key,
                     encode_record("compass.program.evidence", &serde_json::to_value(evidence)?)?,
                 ));
             }
-            for module in &program.program.modules {
+            for module in modules {
+                let key = program_key("module", &module.source_file);
                 partitioned.program_facts.push((
-                    program_key("module", &module.source_file),
-                    encode_record("compass.program.module", &serde_json::to_value(module)?)?,
+                    key,
+                    encode_record("compass.program.module", &serde_json::to_value(&module)?)?,
                 ));
-                for function in &module.functions {
+                for function in module.functions {
+                    let key = program_key("function", &function.symbol_id);
                     partitioned.program_facts.push((
-                        program_key("function", &function.symbol_id),
+                        key,
                         encode_record(
                             "compass.program.function",
                             &serde_json::to_value(function)?,
@@ -210,15 +239,16 @@ impl GraphArtifacts {
                     ));
                 }
             }
-            for summary in &program.summaries {
+            for summary in summaries {
+                let key = program_key("summary", &summary.symbol_id);
                 partitioned.program_summaries.push((
-                    program_key("summary", &summary.symbol_id),
+                    key,
                     encode_record("compass.program.summary", &serde_json::to_value(summary)?)?,
                 ));
             }
-            for (target, callers) in &program.reverse_calls {
+            for (target, callers) in reverse_calls {
                 partitioned.program_summaries.push((
-                    program_key("reverse-call", target),
+                    program_key("reverse-call", &target),
                     encode_record(
                         "compass.program.reverse-call",
                         &serde_json::to_value(callers)?,
@@ -227,15 +257,15 @@ impl GraphArtifacts {
             }
         }
 
-        // Node-link arrays are sets for graph identity. Canonicalize their
-        // presentation order before recording reconstructable ranks so
-        // parallel extraction order cannot change a realization ID.
-        let mut ordered_nodes = self.document.nodes.iter().collect::<Vec<_>>();
-        ordered_nodes.sort_by(|left, right| left.id.as_bytes().cmp(right.id.as_bytes()));
-        for (rank, node) in ordered_nodes.into_iter().enumerate() {
-            let mut stored = node.clone();
+        // The owned document was canonicalized before its registry digest was
+        // computed, so records can consume that exact order without retaining
+        // a second graph-sized allocation.
+        for (rank, mut node) in std::mem::take(&mut self.document.nodes)
+            .into_iter()
+            .enumerate()
+        {
             for field in MOVED_NODE_FIELDS {
-                if let Some(value) = stored.attributes.remove(field) {
+                if let Some(value) = node.attributes.remove(field) {
                     partitioned.analysis.push((
                         analysis_key(&[b"node", node.id.as_bytes(), field.as_bytes()]),
                         encode_record("compass.analysis.node", &value)?,
@@ -243,15 +273,9 @@ impl GraphArtifacts {
                 }
             }
             let key = node_key(&node.id);
-            if !node_keys.insert(key.clone()) {
-                return Err(HistoryError::InvalidArtifacts(format!(
-                    "duplicate node ID {}",
-                    node.id
-                )));
-            }
             partitioned.nodes.push((
                 key.clone(),
-                encode_record("compass.node", &serde_json::to_value(stored)?)?,
+                encode_record("compass.node", &serde_json::to_value(node)?)?,
             ));
             partitioned.metadata.push((
                 metadata_rank_key("node-order", rank)?,
@@ -265,22 +289,19 @@ impl GraphArtifacts {
             ));
         }
 
-        let mut ordered_edges = self
-            .document
-            .links
-            .iter()
-            .map(|edge| Ok((canonical_json_bytes(&serde_json::to_value(edge)?)?, edge)))
-            .collect::<Result<Vec<_>, HistoryError>>()?;
-        ordered_edges.sort_by(|left, right| left.0.cmp(&right.0));
         let mut edge_occurrences = BTreeMap::<Vec<u8>, u64>::new();
-        for (rank, (canonical, edge)) in ordered_edges.into_iter().enumerate() {
+        for (rank, edge) in std::mem::take(&mut self.document.links)
+            .into_iter()
+            .enumerate()
+        {
+            let canonical = canonical_json_bytes(&serde_json::to_value(&edge)?)?;
             let discriminator = edge_discriminator(
-                edge,
+                &edge,
                 self.document.multigraph,
                 &canonical,
                 &mut edge_occurrences,
             )?;
-            let (source, target) = edge_identity_endpoints(edge);
+            let (source, target) = edge_identity_endpoints(&edge);
             // Compass keeps an undirected NetworkX header while its
             // persisted link endpoints retain the true semantic direction.
             let key = edge_key(
@@ -290,12 +311,6 @@ impl GraphArtifacts {
                 true,
                 discriminator.as_deref(),
             );
-            if !edge_keys.insert(key.clone()) {
-                return Err(HistoryError::InvalidArtifacts(format!(
-                    "duplicate non-multigraph edge {} -> {}",
-                    edge.source, edge.target
-                )));
-            }
             partitioned.edges.push((
                 key.clone(),
                 encode_record("compass.edge", &serde_json::to_value(edge)?)?,
@@ -312,19 +327,21 @@ impl GraphArtifacts {
             ));
         }
 
-        let graph_hyperedges = hyperedge_array(self.document.graph.get("hyperedges"))?;
-        let top_hyperedges = hyperedge_array(self.document.extras.get("hyperedges"))?;
+        let graph_hyperedges_present = self.document.graph.contains_key("hyperedges");
+        let graph_hyperedges = take_hyperedge_array(self.document.graph.remove("hyperedges"))?;
+        let top_hyperedges_present = self.document.extras.contains_key("hyperedges");
+        let top_hyperedges = take_hyperedge_array(self.document.extras.remove("hyperedges"))?;
         let mut hyperedge_occurrences = BTreeMap::<Vec<u8>, u64>::new();
         let mut explicit_hyperedges = BTreeSet::<Vec<u8>>::new();
         let mut ordered_hyperedges = graph_hyperedges
-            .iter()
+            .into_iter()
             .map(|value| (HyperedgeLocation::Graph, value))
             .chain(
                 top_hyperedges
-                    .iter()
+                    .into_iter()
                     .map(|value| (HyperedgeLocation::TopLevel, value)),
             )
-            .map(|(location, value)| Ok((location, canonical_json_bytes(value)?, value)))
+            .map(|(location, value)| Ok((location, canonical_json_bytes(&value)?, value)))
             .collect::<Result<Vec<_>, HistoryError>>()?;
         ordered_hyperedges
             .sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
@@ -347,14 +364,9 @@ impl GraphArtifacts {
                 (identity, Some(rank))
             };
             let key = hyperedge_key(&identity, occurrence);
-            if !hyperedge_keys.insert(key.clone()) {
-                return Err(HistoryError::InvalidArtifacts(
-                    "duplicate hyperedge key".to_owned(),
-                ));
-            }
             partitioned
                 .hyperedges
-                .push((key.clone(), encode_record("compass.hyperedge", hyperedge)?));
+                .push((key.clone(), encode_record("compass.hyperedge", &hyperedge)?));
             partitioned.metadata.push((
                 metadata_rank_key("hyperedge-order", rank)?,
                 encode_record(
@@ -367,10 +379,6 @@ impl GraphArtifacts {
             ));
         }
 
-        let mut graph = self.document.graph.clone();
-        let graph_hyperedges_present = graph.remove("hyperedges").is_some();
-        let mut extras = self.document.extras.clone();
-        let top_hyperedges_present = extras.remove("hyperedges").is_some();
         partitioned.metadata.push((
             metadata_key(&[b"document"]),
             encode_record(
@@ -378,8 +386,8 @@ impl GraphArtifacts {
                 &serde_json::to_value(DocumentHeader {
                     directed: self.document.directed,
                     multigraph: self.document.multigraph,
-                    graph,
-                    extras,
+                    graph: std::mem::take(&mut self.document.graph),
+                    extras: std::mem::take(&mut self.document.extras),
                     graph_hyperedges_present,
                     top_hyperedges_present,
                 })?,
@@ -396,27 +404,23 @@ impl GraphArtifacts {
         add_optional_analysis(
             &mut partitioned,
             ".compass_analysis.json",
-            self.analysis.as_ref(),
+            self.analysis.take(),
         )?;
-        add_optional_analysis(
-            &mut partitioned,
-            ".compass_labels.json",
-            self.labels.as_ref(),
-        )?;
-        if let Some(manifest) = &self.manifest {
-            let manifest = canonical_manifest(manifest);
+        add_optional_analysis(&mut partitioned, ".compass_labels.json", self.labels.take())?;
+        if let Some(manifest) = self.manifest.take() {
+            let manifest = canonical_manifest_owned(manifest);
             partitioned.metadata.push((
                 metadata_key(&[b"manifest"]),
                 encode_record("compass.metadata.manifest", &manifest)?,
             ));
         }
-        for (path, bytes) in &self.authoritative_sidecars {
+        for (path, bytes) in std::mem::take(&mut self.authoritative_sidecars) {
+            let key = metadata_key(&[b"sidecar", path.as_bytes()]);
             partitioned.metadata.push((
-                metadata_key(&[b"sidecar", path.as_bytes()]),
+                key,
                 encode_record("compass.metadata.sidecar", &serde_json::to_value(bytes)?)?,
             ));
         }
-        let registry = artifact_registry(self)?;
         partitioned.metadata.push((
             metadata_key(&[b"artifact-registry"]),
             encode_record(
@@ -715,12 +719,12 @@ fn edge_identity_endpoints(edge: &EdgeRecord) -> (&str, &str) {
 fn add_optional_analysis(
     partitioned: &mut PartitionedGraph,
     path: &str,
-    value: Option<&Value>,
+    value: Option<Value>,
 ) -> Result<(), HistoryError> {
     if let Some(value) = value {
         partitioned.analysis.push((
             analysis_key(&[b"sidecar", path.as_bytes()]),
-            encode_record("compass.analysis.sidecar", value)?,
+            encode_record("compass.analysis.sidecar", &value)?,
         ));
     }
     Ok(())
@@ -730,10 +734,24 @@ fn artifact_registry(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
     let graph_bytes = canonical_graph_bytes(&artifacts.document)?;
+    artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
+}
+
+fn artifact_registry_from_canonical(
+    artifacts: &GraphArtifacts,
+) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
+    let graph_bytes = canonical_json_bytes(&serde_json::to_value(&artifacts.document)?)?;
+    artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
+}
+
+fn artifact_registry_with_graph_bytes(
+    artifacts: &GraphArtifacts,
+    graph_bytes: &[u8],
+) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
     let mut registry = vec![authoritative_entry(
         "graph.json",
         "application/json",
-        &graph_bytes,
+        graph_bytes,
     )];
     if let Some(program) = &artifacts.program {
         registry.push(authoritative_entry(
@@ -977,23 +995,30 @@ fn verify_builtin_registry_content(
 
 fn canonical_graph_bytes(document: &GraphDocument) -> Result<Vec<u8>, HistoryError> {
     let mut canonical = document.clone();
-    canonical
+    canonicalize_graph_document(&mut canonical)?;
+    canonical_json_bytes(&serde_json::to_value(canonical)?)
+}
+
+fn canonicalize_graph_document(document: &mut GraphDocument) -> Result<(), HistoryError> {
+    document
         .nodes
         .sort_by(|left, right| left.id.as_bytes().cmp(right.id.as_bytes()));
-    let mut links = canonical
-        .links
+    let mut links = std::mem::take(&mut document.links)
         .into_iter()
         .map(|edge| Ok((canonical_json_bytes(&serde_json::to_value(&edge)?)?, edge)))
         .collect::<Result<Vec<_>, HistoryError>>()?;
     links.sort_by(|left, right| left.0.cmp(&right.0));
-    canonical.links = links.into_iter().map(|(_, edge)| edge).collect();
-    canonicalize_hyperedge_array(canonical.graph.get_mut("hyperedges"))?;
-    canonicalize_hyperedge_array(canonical.extras.get_mut("hyperedges"))?;
-    canonical_json_bytes(&serde_json::to_value(canonical)?)
+    document.links = links.into_iter().map(|(_, edge)| edge).collect();
+    canonicalize_hyperedge_array(document.graph.get_mut("hyperedges"))?;
+    canonicalize_hyperedge_array(document.extras.get_mut("hyperedges"))?;
+    Ok(())
 }
 
 fn canonical_manifest(manifest: &Value) -> Value {
-    let mut canonical = manifest.clone();
+    canonical_manifest_owned(manifest.clone())
+}
+
+fn canonical_manifest_owned(mut canonical: Value) -> Value {
     let Some(entries) = canonical.as_object_mut() else {
         return canonical;
     };
@@ -1023,10 +1048,10 @@ fn canonicalize_hyperedge_array(value: Option<&mut Value>) -> Result<(), History
     Ok(())
 }
 
-fn hyperedge_array(value: Option<&Value>) -> Result<Vec<Value>, HistoryError> {
+fn take_hyperedge_array(value: Option<Value>) -> Result<Vec<Value>, HistoryError> {
     match value {
         None => Ok(Vec::new()),
-        Some(Value::Array(values)) => Ok(values.clone()),
+        Some(Value::Array(values)) => Ok(values),
         Some(_) => Err(HistoryError::InvalidArtifacts(
             "hyperedges must be an array".to_owned(),
         )),
@@ -1466,9 +1491,9 @@ mod tests {
         assert!(is_builtin_artifact("manifest.json"));
         assert!(!is_builtin_artifact("custom.json"));
 
-        assert!(hyperedge_array(None)?.is_empty());
-        assert_eq!(hyperedge_array(Some(&json!([{"id":"h"}])))?.len(), 1);
-        assert!(hyperedge_array(Some(&json!({"id":"h"}))).is_err());
+        assert!(take_hyperedge_array(None)?.is_empty());
+        assert_eq!(take_hyperedge_array(Some(json!([{"id":"h"}])))?.len(), 1);
+        assert!(take_hyperedge_array(Some(json!({"id":"h"}))).is_err());
 
         let mut unique = vec![(b"b".to_vec(), vec![]), (b"a".to_vec(), vec![])];
         sort_unique(&mut unique, "node")?;

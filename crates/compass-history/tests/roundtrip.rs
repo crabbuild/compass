@@ -127,6 +127,11 @@ fn complete_graph_and_build_state_round_trip() -> Result<(), Box<dyn std::error:
         )]),
     };
     let partitioned = artifacts.partition(&completion())?;
+    assert_eq!(
+        partitioned,
+        artifacts.clone().into_partition(&completion())?,
+        "owned publication partitioning must preserve exact record identity"
+    );
     let restored = GraphArtifacts::reconstruct(&partitioned)?;
     assert_eq!(restored, artifacts);
     assert_eq!(restored.document, document);
