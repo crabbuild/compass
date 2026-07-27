@@ -1,7 +1,7 @@
 # VS Code Community Diff Detail Design
 
 **Date:** 2026-07-26  
-**Status:** Interaction approved; awaiting written-spec review
+**Status:** Implemented and verified
 
 ## Problem
 

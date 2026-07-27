@@ -10,6 +10,18 @@ export const SourceLocationSchema = z.object({
   endByte: z.number().int().nonnegative().optional()
 }).passthrough();
 
+export const GraphFieldChangeSchema = z.object({
+  field: z.string().min(1),
+  before: z.unknown().optional(),
+  after: z.unknown().optional()
+});
+
+export const GraphRecordEvidenceSchema = z.object({
+  before: z.record(z.string(), z.unknown()).optional(),
+  after: z.record(z.string(), z.unknown()).optional(),
+  fields: z.array(GraphFieldChangeSchema)
+});
+
 export const GraphNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string(),
@@ -24,6 +36,7 @@ export const GraphNodeSchema = z.object({
   learningStatus: z.string().optional(),
   learningStale: z.boolean().optional(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
+  evidence: GraphRecordEvidenceSchema.optional(),
   source: SourceLocationSchema.optional(),
   color: z.object({
     background: z.string(),
@@ -37,6 +50,7 @@ export const GraphEdgeSchema = z.object({
   target: z.string().min(1),
   relation: z.string(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
+  evidence: GraphRecordEvidenceSchema.optional(),
   confidence: z.enum([
     "extracted",
     "inferred",
@@ -68,6 +82,8 @@ export const GraphViewModelSchema = z.object({
 }).passthrough();
 
 export type SourceLocation = z.infer<typeof SourceLocationSchema>;
+export type GraphFieldChange = z.infer<typeof GraphFieldChangeSchema>;
+export type GraphRecordEvidence = z.infer<typeof GraphRecordEvidenceSchema>;
 export type GraphNode = z.infer<typeof GraphNodeSchema>;
 export type GraphEdge = z.infer<typeof GraphEdgeSchema>;
 export type GraphViewModel = z.infer<typeof GraphViewModelSchema>;

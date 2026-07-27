@@ -12,6 +12,8 @@ export type HistoryOperation =
   | "Load graph"
   | "Build graph"
   | "Compare revisions"
+  | "Compare community"
+  | "Exit comparison"
   | "Load change counts"
   | "Open community"
   | "Open source"
@@ -25,6 +27,18 @@ export type HistoryWebviewMessage =
   | { type: "loadRevision"; commit: string }
   | { type: "buildRevision"; commit: string }
   | { type: "compare"; commit: string; parent: string }
+  | { type: "exitComparison"; commit: string }
+  | {
+    type: "compareCommunity";
+    requestId: string;
+    commit: string;
+    parent: string;
+    currentIdentity: { realization: string; fingerprint: string };
+    parentIdentity: { realization: string; fingerprint: string };
+    communityId: number;
+    hasCurrent: boolean;
+    hasParent: boolean;
+  }
   | { type: "queryRevision"; commit: string }
   | { type: "changeCounts"; commit: string }
   | {
@@ -78,10 +92,30 @@ export type HistoryHostMessage =
     parent: string;
     realization: string;
     fingerprint: string;
+    parentRealization: string;
+    parentFingerprint: string;
     currentGraph: GraphViewModel;
     parentGraph: GraphViewModel;
     semanticDiff: unknown;
     counts?: HistoryChangeCounts;
+  }
+  | {
+    type: "communityComparison";
+    requestId: string;
+    commit: string;
+    parent: string;
+    communityId: number;
+    currentGraph?: GraphViewModel;
+    parentGraph?: GraphViewModel;
+    nodeLimit: number;
+  }
+  | {
+    type: "communityComparisonError";
+    requestId: string;
+    commit: string;
+    parent: string;
+    communityId: number;
+    message: string;
   }
   | { type: "changeCounts"; commit: string; counts: HistoryChangeCounts }
   | { type: "buildRunning"; commit: string }
@@ -106,6 +140,8 @@ export function historyOperationFor(message: unknown): HistoryOperation {
     case "loadRevision": return "Load graph";
     case "buildRevision": return "Build graph";
     case "compare": return "Compare revisions";
+    case "compareCommunity": return "Compare community";
+    case "exitComparison": return "Exit comparison";
     case "changeCounts": return "Load change counts";
     case "openCommunity": return "Open community";
     case "openSource": return "Open source";

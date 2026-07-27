@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("initialization reviews scope before starting file-level progress", async ({ page }) => {
-  await page.goto("/initialize.html");
+  await page.goto("/initialize.html?manualSuccess=true");
 
   await expect(page.getByRole("heading", { name: "Build a map of compass" })).toBeVisible();
   await page.getByRole("radio", { name: /custom scope/i }).click();
@@ -16,6 +16,10 @@ test("initialization reviews scope before starting file-level progress", async (
   await expect(page.getByText("src/commands/init.ts")).toBeVisible();
   await expect(page.getByText("3 of 3 files")).toBeVisible();
   await expect(page.getByText("src/views/graph.ts")).toBeVisible();
+  await page.evaluate(() => {
+    (window as typeof window & { completeInitialization: () => void })
+      .completeInitialization();
+  });
   await expect(page.getByRole("heading", { name: "Your Compass index is ready" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     const messages = (window as typeof window & {

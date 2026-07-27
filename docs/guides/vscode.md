@@ -81,6 +81,15 @@ Choose a parent to see structural counts and Compass semantic findings. Queries
 can target the selected available revision; unavailable revisions stay
 disabled and are never materialized implicitly.
 
+The changed-graph tab starts with the bounded community overview. Select a
+changed community and choose **Inspect changes** to load that community from
+both revisions. The detail view provides a searchable affected-symbol list,
+status-aware relationships, and a Before/After table for every modified symbol
+field. **Open before** and **Open after** display read-only source from the
+owning Git commit. If the configured `compass.graphNodeLimit` prevents either
+community export from being complete, Compass keeps the aggregate comparison
+available and marks the detailed counts as partial.
+
 ## Security
 
 The extension is disabled for untrusted workspaces. It starts Compass with
