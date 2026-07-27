@@ -9,8 +9,10 @@ Dev Container extension hosts. Browser-only `vscode.dev` is not supported.
 1. Install Compass and confirm `compass --version` works on the workspace host.
 2. Install the Compass VSIX.
 3. Open a trusted repository.
-4. If the extension cannot find Compass on `PATH`, choose **Select Compass
-   Binary** or set `compass.cliPath`.
+4. The extension detects Compass on `PATH` and in common install locations.
+   Choose **Select Compass CLI** to compare detected paths and versions, browse
+   for another executable, enter a path manually, or set `compass.cliPath`
+   directly.
 5. Open the Compass activity bar and run **Initialize Repository**.
 
 Initialization previews include and exclude globs before it writes
@@ -18,7 +20,7 @@ Initialization previews include and exclude globs before it writes
 The CLI must support `compass capabilities --format json`. If capability
 negotiation fails or a required versioned contract is missing, the extension
 does not run the incompatible command; upgrade Compass or use **Compass: Select
-CLI Binary**, then reload VS Code.
+CLI Version** to choose another detected version, then reload VS Code.
 
 ## Current graph
 
