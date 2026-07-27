@@ -49,4 +49,29 @@ describe("GraphViewModelSchema", () => {
       learningStale: false
     });
   });
+
+  it("preserves aggregated overview edge confidence", () => {
+    const parsed = GraphViewModelSchema.parse({
+      schema: "compass.viewer.graph/1",
+      title: "Aggregate",
+      stats: { nodes: 2, edges: 1, communities: 2, aggregated: true },
+      nodes: [
+        { id: "0", label: "Core", community: 0 },
+        { id: "1", label: "Data", community: 1 }
+      ],
+      edges: [{
+        id: "aggregate-edge",
+        source: "0",
+        target: "1",
+        relation: "2 cross-community edges",
+        confidence: "aggregated"
+      }],
+      communities: [
+        { id: 0, label: "Core", color: "#4E79A7" },
+        { id: 1, label: "Data", color: "#F28E2B" }
+      ]
+    });
+
+    expect(parsed.edges[0]?.confidence).toBe("aggregated");
+  });
 });

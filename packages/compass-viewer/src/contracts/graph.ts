@@ -37,7 +37,12 @@ export const GraphEdgeSchema = z.object({
   target: z.string().min(1),
   relation: z.string(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
-  confidence: z.enum(["extracted", "inferred", "ambiguous"]).optional()
+  confidence: z.enum([
+    "extracted",
+    "inferred",
+    "ambiguous",
+    "aggregated"
+  ]).optional()
 }).passthrough();
 
 export const CommunitySchema = z.object({
