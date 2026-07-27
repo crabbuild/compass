@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3
+## 0.1.6
 
 - Place the Marketplace logo on a high-contrast indigo badge so it remains
   visible in light and dark themes.

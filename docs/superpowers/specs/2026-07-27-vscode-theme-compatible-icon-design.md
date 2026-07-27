@@ -19,7 +19,7 @@ high-contrast theme.
   high-contrast themes.
 - Make the intended use of each asset explicit and remove unused theme
   variants.
-- Release the change as extension version `0.1.3` in a separate pull request.
+- Release the change as extension version `0.1.6` in a separate pull request.
 
 ## Asset Strategy
 
@@ -53,9 +53,9 @@ theme.
 
 ## Release Changes
 
-- Bump `editors/vscode/package.json` from `0.1.2` to `0.1.3`.
-- Update the workspace lockfile entry to `0.1.3`.
-- Add a `0.1.3` changelog entry describing the cross-theme icon treatment.
+- Bump `editors/vscode/package.json` from `0.1.2` to `0.1.6`.
+- Update the workspace lockfile entry to `0.1.6`.
+- Add a `0.1.6` changelog entry describing the cross-theme icon treatment.
 - Keep the extension name, publisher, display name, commands, and settings
   unchanged.
 
@@ -66,7 +66,7 @@ theme.
   on the opaque tile.
 - Render a light/dark comparison image for visual inspection.
 - Run the VS Code extension typecheck and test suite.
-- Build and smoke-test `crabbuild-compass-vscode-0.1.3.vsix`.
+- Build and smoke-test `crabbuild-compass-vscode-0.1.6.vsix`.
 - Verify the packaged manifest version and packaged icon.
 - Run `git diff --check`.
 
