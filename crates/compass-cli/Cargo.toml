@@ -20,16 +20,21 @@ path = "src/bin/compass.rs"
 
 [dependencies]
 ctrlc.workspace = true
+flate2.workspace = true
 glob.workspace = true
 mimalloc.workspace = true
 regex.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+self-replace.workspace = true
 sha2.workspace = true
+tar.workspace = true
 tempfile.workspace = true
 time.workspace = true
 tokio.workspace = true
 toml.workspace = true
+ureq.workspace = true
 compass-core = { path = "../compass-core", version = "0.1.4" }
 compass-analysis = { path = "../compass-analysis", version = "0.1.4" }
 compass-ir = { path = "../compass-ir", version = "0.1.4" }

@@ -26,6 +26,10 @@ fn collect(root: &Path, directory: &Path, files: &mut Vec<PathBuf>) -> io::Resul
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "cargo:rustc-env=COMPASS_BUILD_TARGET={}",
+        env::var("TARGET")?
+    );
     println!("cargo:rerun-if-changed=assets");
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/help.rs");

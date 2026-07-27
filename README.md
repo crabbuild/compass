@@ -139,6 +139,16 @@ You can also install directly through Cargo:
 cargo install --locked --path crates/compass-cli --bin compass
 ```
 
+Upgrade any installed Compass executable to the latest stable release with:
+
+```bash
+compass upgrade
+```
+
+Compass verifies the official release checksum before replacing the executable.
+If no newer release is available, it exits successfully and reports that the
+installed version is already the latest.
+
 ### 2. Initialize and build a local graph
 
 ```bash
