@@ -1,5 +1,7 @@
+import { FileCode2Icon, NetworkIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { GraphNode } from "../contracts/graph";
+import type { GraphNodeActivation } from "./nodeActivation";
 
 export type GraphHover = {
   nodeId: string;
@@ -16,10 +18,12 @@ function sourceRange(node: GraphNode): string | undefined {
 
 export function NodeHoverCard({
   node,
-  hover
+  hover,
+  activation
 }: {
   node: GraphNode;
   hover: GraphHover;
+  activation: GraphNodeActivation;
 }) {
   const style = {
     "--compass-hover-x": `${hover.x + 18}px`,
@@ -40,12 +44,7 @@ export function NodeHoverCard({
         </span>
       )}
       {node.memberCount !== undefined ? (
-        <>
-          <p>{node.memberCount.toLocaleString()} symbols</p>
-          {node.change && node.change !== "unchanged" && (
-            <p className="compass-hover-hint">Select to inspect exact changes</p>
-          )}
-        </>
+        <p>{node.memberCount.toLocaleString()} symbols</p>
       ) : (
         <>
           {node.language && <p>Language: {node.language}</p>}
@@ -53,6 +52,19 @@ export function NodeHoverCard({
           {range && <p>Lines: {range}</p>}
           {node.signature && <code>{node.signature}</code>}
         </>
+      )}
+      {activation.type !== "none" && (
+        <p className="compass-hover-hint">
+          {activation.type === "community"
+            ? <NetworkIcon aria-hidden="true" />
+            : <FileCode2Icon aria-hidden="true" />}
+          <span>
+            <strong>Double-click</strong>{" "}
+            {activation.type === "community"
+              ? "to open community subgraph"
+              : "to open source code"}
+          </span>
+        </p>
       )}
     </div>
   );

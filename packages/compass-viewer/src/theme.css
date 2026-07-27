@@ -1479,8 +1479,25 @@ button:not(:disabled),
 }
 
 .compass-hover-hint {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--compass-line);
   color: var(--vscode-textLink-foreground, var(--compass-focus));
-  font-weight: 600;
+  font-size: 11px;
+}
+
+.compass-hover-hint svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.compass-hover-hint strong {
+  color: var(--vscode-editorHoverWidget-foreground, var(--foreground));
+  font-weight: 650;
 }
 
 .compass-section-heading,
