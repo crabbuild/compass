@@ -130,6 +130,9 @@ function CompassGraphView({
   hostRef.current = host;
   const selected = model.nodes.find((node) => node.id === state.focusedNodeId);
   const hovered = hover ? model.nodes.find((node) => node.id === hover.nodeId) : undefined;
+  const hoveredActivation = hovered
+    ? graphNodeActivation(model, hovered, detailCommunityId)
+    : undefined;
   const comparisonMode = model.nodes.some((node) => node.change !== undefined)
     || model.edges.some((edge) => edge.change !== undefined);
   const changeCounts = useMemo(() => {
@@ -301,7 +304,13 @@ function CompassGraphView({
               </span>
             </div>
           )}
-          {hover && hovered && <NodeHoverCard node={hovered} hover={hover} />}
+          {hover && hovered && hoveredActivation && (
+            <NodeHoverCard
+              node={hovered}
+              hover={hover}
+              activation={hoveredActivation}
+            />
+          )}
         </main>
         {!inspectorLayout.collapsed && (
           <InspectorResizeHandle
