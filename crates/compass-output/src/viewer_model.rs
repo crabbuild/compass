@@ -331,8 +331,8 @@ mod tests {
     }
 
     #[test]
-    fn graph_model_preserves_aggregated_edge_confidence()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn graph_model_preserves_aggregated_edge_confidence() -> Result<(), Box<dyn std::error::Error>>
+    {
         let document: GraphDocument = serde_json::from_value(json!({
             "nodes": [
                 {"id": "0", "label": "Core"},
@@ -345,10 +345,8 @@ mod tests {
                 "confidence": "AGGREGATED"
             }]
         }))?;
-        let communities: Communities = BTreeMap::from([
-            (0, vec!["0".into()]),
-            (1, vec!["1".into()]),
-        ]);
+        let communities: Communities =
+            BTreeMap::from([(0, vec!["0".into()]), (1, vec!["1".into()])]);
         let model = graph_view_model(
             &document,
             &communities,

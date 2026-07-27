@@ -20,6 +20,8 @@ test("compiled graph webview centers its loader and honors reduced motion", asyn
   expect(mark).not.toBeNull();
   expect(mark!.width).toBe(48);
   expect(mark!.height).toBe(48);
+  await expect(page.locator(".compass-load-graph .compass-load-node")).toHaveCount(6);
+  await expect(page.locator(".compass-load-tracer")).toBeHidden();
   await expect(page.locator(".compass-load-progress i"))
     .toHaveCSS("animation-name", "none");
 });
@@ -51,4 +53,34 @@ test("compiled graph webview explains one-time preparation for a large graph", a
   ).toBeVisible();
   await expect(page.getByRole("status")).toContainText("42.2 MB");
   await expect(page.getByRole("status")).toContainText("Building overview");
+  await expect(page.getByText("Snapshot ready"))
+    .toHaveAttribute("data-state", "complete");
+  await expect(page.getByText("Building overview"))
+    .toHaveAttribute("data-state", "active");
+  await expect(page.getByText("Opening explorer"))
+    .toHaveAttribute("data-state", "pending");
+});
+
+test("compiled graph webview reports the snapshot phase honestly", async ({ page }) => {
+  await page.goto("/loading.html?snapshot=1");
+
+  await expect(page.getByText("Securing snapshot"))
+    .toHaveAttribute("data-state", "active");
+  await expect(page.getByText("Building overview"))
+    .toHaveAttribute("data-state", "pending");
+});
+
+test("loading constellation follows the high-contrast border token", async ({ page }) => {
+  await page.goto("/loading.html");
+  await page.evaluate(() => {
+    document.body.classList.add("vscode-high-contrast");
+    document.documentElement.style.setProperty("--vscode-contrastBorder", "#ff00ff");
+    document.documentElement.style.setProperty("--vscode-editor-background", "#000000");
+    document.documentElement.style.setProperty("--vscode-editor-foreground", "#ffffff");
+  });
+
+  await expect(page.locator(".compass-load-mark"))
+    .toHaveCSS("border-top-color", "rgb(255, 0, 255)");
+  await expect(page.locator(".compass-load-mark")).toHaveCSS("border-top-width", "2px");
+  await expect(page.getByText("Reading graph")).toHaveCSS("color", "rgb(255, 255, 255)");
 });

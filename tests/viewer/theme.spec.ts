@@ -87,6 +87,7 @@ test("history comparison and source diffs follow the light VS Code theme", async
     .toHaveCSS("background-color", "rgb(244, 244, 244)");
   await expect(page.getByRole("button", { name: "Split" }))
     .toHaveCSS("color", "rgb(32, 32, 32)");
+  await page.getByRole("tab", { name: /Changed graph/ }).click();
   await expect(page.locator(".compass-graph-stage"))
     .toHaveAttribute("data-comparison", "true");
   await expect(page.locator(".compass-graph-stage"))

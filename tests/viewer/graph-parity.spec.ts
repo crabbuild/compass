@@ -105,6 +105,13 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
       document.querySelector(".vis-network");
   });
   await page.getByRole("button", { name: "Show labels" }).click();
+  await expect(page.getByRole("button", { name: "Hide labels" })).toBeVisible();
+  expect(await page.evaluate(() => (
+    window as typeof window & { initialNetwork?: Element | null }
+  ).initialNetwork === document.querySelector(".vis-network"))).toBe(true);
+  await page.getByRole("button", { name: "Hide labels" }).click();
+  await expect(page.getByRole("button", { name: "Show labels" })).toBeVisible();
+  await page.getByRole("button", { name: "Show labels" }).click();
   await page.evaluate(() => {
     document.documentElement.style.setProperty("--vscode-editor-background", "#f8fafc");
     document.documentElement.style.setProperty("--vscode-sideBar-background", "#eef2f7");
