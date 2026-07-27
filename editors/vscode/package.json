@@ -1,9 +1,9 @@
 {
-  "name": "compass-vscode",
-  "displayName": "Compass",
+  "name": "crabbuild-compass-vscode",
+  "displayName": "Compass Codegraph",
   "description": "Explore, query, and understand how your codebase evolves with Compass.",
   "publisher": "crabbuild",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",

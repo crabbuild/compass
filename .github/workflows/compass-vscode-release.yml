@@ -29,7 +29,7 @@ jobs:
         run: test "$(node -p "require('./editors/vscode/package.json').version")" = "${{ inputs.version }}"
       - run: npm run typecheck:js
       - run: npm run test:js
-      - run: xvfb-run -a npm run test:integration -w compass-vscode
+      - run: xvfb-run -a npm run test:integration -w editors/vscode
       - run: node scripts/check_viewer_assets.mjs
       - run: npm run package -w editors/vscode
       - run: npm run smoke:vsix -w editors/vscode
@@ -37,7 +37,7 @@ jobs:
         run: shasum -a 256 editors/vscode/*.vsix > editors/vscode/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: compass-vscode-${{ inputs.version }}
+          name: crabbuild-compass-vscode-${{ inputs.version }}
           path: |
             editors/vscode/*.vsix
             editors/vscode/SHA256SUMS

@@ -10,11 +10,10 @@ existing Marketplace extension named `compass-vscode`.
 - Marketplace manifest name: `crabbuild-compass-vscode`
 - Marketplace publisher: `crabbuild`
 - Marketplace extension ID: `crabbuild.crabbuild-compass-vscode`
-- User-facing display name: `Compass`
+- User-facing display name: `Compass Codegraph`
 
 The rename changes only the distribution identifier. It does not change the
-extension directory, command identifiers, settings keys, view identifiers, or
-product branding.
+extension directory, command identifiers, settings keys, or view identifiers.
 
 ## Repository Changes
 
@@ -32,12 +31,11 @@ directory from being selected accidentally.
 ## Verification
 
 Run the extension typecheck, unit tests, build, package command, and VSIX smoke
-check. Inspect the generated archive name and manifest identity. After code
-changes, run `graphify update .` from the parent Graphify repository.
+check. Inspect the generated archive name and manifest identity.
 
 ## Non-Goals
 
 - Renaming the `editors/vscode` directory
-- Changing the display name from `Compass`
+- Renaming command titles or other in-product `Compass` branding
 - Changing `compass.*` commands or settings
 - Publishing to the Marketplace during this change
