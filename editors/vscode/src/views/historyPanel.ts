@@ -531,24 +531,31 @@ export async function openHistoryPanel(
           || !sameIdentity(comparisonState.parentIdentity, message.parentIdentity)) {
           throw new Error("This community request no longer matches the active comparison.");
         }
-        const [current, parent] = await Promise.all([
-          message.hasCurrent
-            ? revisions.loadCommunity(
-                message.commit,
-                message.communityId,
-                graphNodeLimit,
-                comparisonState.currentIdentity
-              )
-            : undefined,
-          message.hasParent
-            ? revisions.loadCommunity(
-                message.parent,
-                message.communityId,
-                graphNodeLimit,
-                comparisonState.parentIdentity
-              )
-            : undefined
-        ]);
+        let current: Awaited<ReturnType<RevisionStore["loadCommunity"]>> | undefined;
+        let parent: Awaited<ReturnType<RevisionStore["loadCommunity"]>> | undefined;
+        try {
+          [current, parent] = await Promise.all([
+            message.hasCurrent
+              ? revisions.loadCommunity(
+                  message.commit,
+                  message.communityId,
+                  graphNodeLimit,
+                  comparisonState.currentIdentity
+                )
+              : undefined,
+            message.hasParent
+              ? revisions.loadCommunity(
+                  message.parent,
+                  message.communityId,
+                  graphNodeLimit,
+                  comparisonState.parentIdentity
+                )
+              : undefined
+          ]);
+        } catch (error) {
+          if (generation !== viewGeneration || activeComparison !== comparisonState) return;
+          throw error;
+        }
         if (generation !== viewGeneration || activeComparison !== comparisonState) return;
         await postMessage({
           type: "communityComparison",

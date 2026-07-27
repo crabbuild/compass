@@ -258,7 +258,6 @@ function matchEdges(
     });
   };
 
-  pairEdgesByKey(parent, current, parentUsed, currentUsed, pair, edgeSemanticKey);
   pairEdgesByKey(
     parent,
     current,
@@ -267,16 +266,24 @@ function matchEdges(
     pair,
     (edge) => isGeneratedEdgeId(edge.id) ? undefined : edge.id
   );
+  pairEdgesByKey(
+    parent,
+    current,
+    parentUsed,
+    currentUsed,
+    pair,
+    (edge) => isGeneratedEdgeId(edge.id) ? edgeSemanticKey(edge) : undefined
+  );
 
   const endpointGroups = new Map<string, { parent: number[]; current: number[] }>();
   parent.forEach((edge, index) => {
-    if (parentUsed.has(index)) return;
+    if (parentUsed.has(index) || !isGeneratedEdgeId(edge.id)) return;
     const group = endpointGroups.get(edgeEndpointKey(edge)) ?? { parent: [], current: [] };
     group.parent.push(index);
     endpointGroups.set(edgeEndpointKey(edge), group);
   });
   current.forEach((edge, index) => {
-    if (currentUsed.has(index)) return;
+    if (currentUsed.has(index) || !isGeneratedEdgeId(edge.id)) return;
     const group = endpointGroups.get(edgeEndpointKey(edge)) ?? { parent: [], current: [] };
     group.current.push(index);
     endpointGroups.set(edgeEndpointKey(edge), group);

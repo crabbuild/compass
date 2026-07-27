@@ -228,6 +228,42 @@ describe("compareGraphs", () => {
         { field: "relation", before: "calls", after: "uses" }
       ]);
   });
+
+  it("keeps stable custom edge IDs authoritative when parallel records swap", () => {
+    const nodes = [
+      { id: "a", label: "A", community: 0 },
+      { id: "b", label: "B", community: 0 }
+    ];
+    const parent = graph(nodes, [
+      { id: "primary", source: "a", target: "b", relation: "calls" },
+      { id: "secondary", source: "a", target: "b", relation: "uses" }
+    ]);
+    const current = graph(nodes, [
+      { id: "primary", source: "a", target: "b", relation: "uses" },
+      { id: "secondary", source: "a", target: "b", relation: "calls" }
+    ]);
+
+    const comparison = compareGraphs(parent, current);
+
+    expect(comparison).toMatchObject({
+      addedEdges: 0,
+      removedEdges: 0,
+      changedEdges: 2
+    });
+    expect(comparison.graph.edges.map((edge) => ({
+      id: edge.id,
+      fields: edge.evidence?.fields
+    }))).toEqual([
+      {
+        id: "primary",
+        fields: [{ field: "relation", before: "calls", after: "uses" }]
+      },
+      {
+        id: "secondary",
+        fields: [{ field: "relation", before: "uses", after: "calls" }]
+      }
+    ]);
+  });
 });
 
 describe("record diff presentation", () => {
