@@ -1,3 +1,6 @@
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
 use compass_core::LoadedGraph;
 use compass_core::{
     MaterializeError, MaterializeObserver, MaterializeRequest, MaterializeStage,
@@ -7,8 +10,10 @@ use compass_history::{
     ArtifactClass, BuildProfile, ChangeKind, ChangeSink, ClaimedJob, CommitId,
     DerivedCacheNamespace, ExtractionFingerprint, GitTargetLimitation, GraphChange, HistoryConfig,
     HistoryError, HistoryQueue, HistoryStore, JobRequest, JobState, PublishedVersion,
-    RealizationId, Repository,
+    RealizationId, RecordKind, Repository, canonical_json_bytes,
 };
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::history_build::{HistoryBuildOptions, parse_build_command, parse_enable_options};
 use crate::{Frontend, Outcome};
@@ -16,7 +21,7 @@ use crate::{Frontend, Outcome};
 pub(crate) fn help(_frontend: Frontend) -> String {
     let prefix = "compass";
     format!(
-        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  change-counts REV [--parent REV] --format json\n  status [REV] [--format text|json]\n  verify REV|REALIZATION [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  cache status [--format text|json]\n  cache gc [--max-bytes N] [--max-age-days N] [--yes] [--format text|json]\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+        "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  change-counts REV [--parent REV] --format json\n  diff OLD NEW [--root NAME] [--output PATH] --format jsonl\n  status [REV] [--format text|json]\n  verify REV|REALIZATION [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  cache status [--format text|json]\n  cache gc [--max-bytes N] [--max-age-days N] [--yes] [--format text|json]\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nExact diff roots:\n  nodes, edges, hyperedges, analysis, metadata, program-facts, program-summaries\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
     )
 }
 
@@ -232,6 +237,14 @@ pub(crate) fn resolve_comparable_pair(
             (history, old, new)
         }
     };
+    let old_engine = engine_compatibility_digest(&old.version.build_profile)?;
+    let new_engine = engine_compatibility_digest(&new.version.build_profile)?;
+    if old_engine != new_engine {
+        return Err(format!(
+            "realizations were produced by incompatible graph engines\n\nOLD {} ({}) engine: {}\nNEW {} ({}) engine: {}\n\nRebuild one revision with `compass history build REV --profile-from OTHER`",
+            old.version.git_commit, old.id, old_engine, new.version.git_commit, new.id, new_engine,
+        ));
+    }
     if old.version.build_profile != new.version.build_profile {
         return Err(format!(
             "realizations are not semantically comparable\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}",
@@ -246,6 +259,37 @@ pub(crate) fn resolve_comparable_pair(
         ));
     }
     Ok(ResolvedDiff { history, old, new })
+}
+
+fn engine_compatibility_digest(profile: &BuildProfile) -> Result<String, String> {
+    const ENGINE_FIELDS: [&str; 13] = [
+        "compass_version",
+        "graph_schema",
+        "extractor_version",
+        "resolver_version",
+        "pipeline_version",
+        "program_provider_policy",
+        "program_ir_schema",
+        "program_merger_version",
+        "program_analysis_schema",
+        "program_analyzer_version",
+        "enabled_features",
+        "direction",
+        "semantic_prompt_sha256",
+    ];
+    let values = ENGINE_FIELDS
+        .into_iter()
+        .map(|field| {
+            profile
+                .value(field)
+                .map(|value| (field, value))
+                .ok_or_else(|| format!("build profile has no engine field {field}"))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let bytes =
+        canonical_json_bytes(&serde_json::to_value(values).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 fn select_existing(
@@ -291,6 +335,9 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
     }
     if args[0] == "change-counts" {
         return execute_change_counts(&repository, &args[1..]);
+    }
+    if args[0] == "diff" {
+        return execute_exact_diff(&repository, &args[1..]);
     }
     if args[0] == "verify" {
         return execute_verify(&repository, &args[1..]);
@@ -702,6 +749,250 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
         }
         other => Err(usage(format!("unknown history command {other}"))),
     }
+}
+
+const MAX_STDOUT_EXACT_DIFF_BYTES: u64 = 128 * 1024 * 1024;
+
+fn execute_exact_diff(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
+    let mut revisions = Vec::new();
+    let mut roots = Vec::new();
+    let mut output = None;
+    let mut format = "jsonl";
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--root" => {
+                index += 1;
+                roots.push(
+                    args.get(index)
+                        .ok_or_else(|| usage("--root requires a root name"))?
+                        .clone(),
+                );
+            }
+            value if value.starts_with("--root=") => roots.push(value[7..].to_owned()),
+            "--output" => {
+                index += 1;
+                let path = args
+                    .get(index)
+                    .ok_or_else(|| usage("--output requires a path"))?;
+                if output.replace(PathBuf::from(path)).is_some() {
+                    return Err(usage("duplicate --output"));
+                }
+            }
+            value if value.starts_with("--output=") => {
+                if output.replace(PathBuf::from(&value[9..])).is_some() {
+                    return Err(usage("duplicate --output"));
+                }
+            }
+            "--format" => {
+                index += 1;
+                format = args
+                    .get(index)
+                    .map(String::as_str)
+                    .ok_or_else(|| usage("--format requires jsonl"))?;
+            }
+            value if value.starts_with("--format=") => format = &value[9..],
+            value if value.starts_with('-') => {
+                return Err(usage(format!("unknown history diff option {value}")));
+            }
+            value => revisions.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    exact(&revisions, 2, "history diff requires OLD NEW")?;
+    if format != "jsonl" {
+        return Err(usage("history diff --format must be jsonl"));
+    }
+    if output
+        .as_ref()
+        .is_some_and(|path| path.as_os_str().is_empty())
+    {
+        return Err(usage("--output requires a non-empty path"));
+    }
+    let records = if roots.is_empty() {
+        exact_diff_roots().to_vec()
+    } else {
+        let mut selected = Vec::new();
+        for root in roots {
+            let record = parse_exact_diff_root(&root)?;
+            if !selected.contains(&record) {
+                selected.push(record);
+            }
+        }
+        selected
+    };
+    let old_commit = repository.resolve(&revisions[0]).map_err(runtime)?;
+    let new_commit = repository.resolve(&revisions[1]).map_err(runtime)?;
+    let resolved =
+        resolve_comparable_pair(repository, old_commit, new_commit, None).map_err(runtime)?;
+    let old_reader = resolved.history.reader(&resolved.old.id).map_err(runtime)?;
+    let new_reader = resolved.history.reader(&resolved.new.id).map_err(runtime)?;
+    let header = serde_json::json!({
+        "type": "header",
+        "schema": "compass.history.exact_diff/1",
+        "old": {
+            "commit": resolved.old.version.git_commit,
+            "realization": resolved.old.id,
+        },
+        "new": {
+            "commit": resolved.new.version.git_commit,
+            "realization": resolved.new.id,
+        },
+        "engine_compatibility": engine_compatibility_digest(&resolved.old.version.build_profile)
+            .map_err(runtime)?,
+        "profile_digest": resolved.old.version.profile_digest,
+        "roots": records.iter().map(|record| exact_diff_root_name(*record)).collect::<Vec<_>>(),
+    });
+    if let Some(output) = output {
+        if output.exists() {
+            return Err(runtime(format!(
+                "history diff output already exists: {}",
+                output.display()
+            )));
+        }
+        let parent = output
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(runtime)?;
+        let counts = write_exact_diff(
+            &old_reader,
+            &new_reader,
+            &records,
+            &header,
+            temporary.as_file_mut(),
+            None,
+        )
+        .map_err(runtime)?;
+        temporary.as_file_mut().flush().map_err(runtime)?;
+        temporary.as_file().sync_all().map_err(runtime)?;
+        temporary.persist_noclobber(&output).map_err(runtime)?;
+        Ok(format!(
+            "wrote {} exact changes to {}",
+            counts.total,
+            output.display()
+        ))
+    } else {
+        let mut bytes = Vec::new();
+        write_exact_diff(
+            &old_reader,
+            &new_reader,
+            &records,
+            &header,
+            &mut bytes,
+            Some(MAX_STDOUT_EXACT_DIFF_BYTES),
+        )
+        .map_err(runtime)?;
+        if bytes.last() == Some(&b'\n') {
+            bytes.pop();
+        }
+        String::from_utf8(bytes).map_err(runtime)
+    }
+}
+
+fn exact_diff_roots() -> &'static [RecordKind] {
+    &[
+        RecordKind::Node,
+        RecordKind::Edge,
+        RecordKind::Hyperedge,
+        RecordKind::Analysis,
+        RecordKind::Metadata,
+        RecordKind::ProgramFact,
+        RecordKind::ProgramSummary,
+    ]
+}
+
+fn parse_exact_diff_root(value: &str) -> Result<RecordKind, CommandFailure> {
+    match value {
+        "nodes" => Ok(RecordKind::Node),
+        "edges" => Ok(RecordKind::Edge),
+        "hyperedges" => Ok(RecordKind::Hyperedge),
+        "analysis" => Ok(RecordKind::Analysis),
+        "metadata" => Ok(RecordKind::Metadata),
+        "program-facts" => Ok(RecordKind::ProgramFact),
+        "program-summaries" => Ok(RecordKind::ProgramSummary),
+        _ => Err(usage(format!("unknown history diff root {value:?}"))),
+    }
+}
+
+fn exact_diff_root_name(record: RecordKind) -> &'static str {
+    match record {
+        RecordKind::Node => "nodes",
+        RecordKind::Edge => "edges",
+        RecordKind::Hyperedge => "hyperedges",
+        RecordKind::Analysis => "analysis",
+        RecordKind::Metadata => "metadata",
+        RecordKind::ProgramFact => "program-facts",
+        RecordKind::ProgramSummary => "program-summaries",
+    }
+}
+
+#[derive(Default, Serialize)]
+struct ExactDiffCounts {
+    total: u64,
+    added: u64,
+    removed: u64,
+    changed: u64,
+}
+
+struct ExactDiffWriter<'writer, W> {
+    writer: &'writer mut W,
+    written: u64,
+    max_bytes: Option<u64>,
+    counts: ExactDiffCounts,
+}
+
+impl<W: Write> ExactDiffWriter<'_, W> {
+    fn line(&mut self, value: &serde_json::Value) -> Result<(), HistoryError> {
+        let mut bytes = canonical_json_bytes(value)?;
+        bytes.push(b'\n');
+        let next = self
+            .written
+            .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        if self.max_bytes.is_some_and(|limit| next > limit) {
+            return Err(HistoryError::OperationalState(
+                "exact diff exceeds stdout limit; use --output PATH".to_owned(),
+            ));
+        }
+        self.writer
+            .write_all(&bytes)
+            .map_err(|error| HistoryError::OperationalState(error.to_string()))?;
+        self.written = next;
+        Ok(())
+    }
+}
+
+impl<W: Write> ChangeSink for ExactDiffWriter<'_, W> {
+    fn change(&mut self, change: GraphChange) -> Result<(), HistoryError> {
+        self.counts.total = self.counts.total.saturating_add(1);
+        match change.change {
+            ChangeKind::Added => self.counts.added = self.counts.added.saturating_add(1),
+            ChangeKind::Removed => self.counts.removed = self.counts.removed.saturating_add(1),
+            ChangeKind::Changed => self.counts.changed = self.counts.changed.saturating_add(1),
+        }
+        self.line(&serde_json::json!({"type":"change", "change":change}))
+    }
+}
+
+fn write_exact_diff<W: Write>(
+    old: &compass_history::RealizationReader<'_>,
+    new: &compass_history::RealizationReader<'_>,
+    records: &[RecordKind],
+    header: &serde_json::Value,
+    writer: &mut W,
+    max_bytes: Option<u64>,
+) -> Result<ExactDiffCounts, HistoryError> {
+    let mut sink = ExactDiffWriter {
+        writer,
+        written: 0,
+        max_bytes,
+        counts: ExactDiffCounts::default(),
+    };
+    sink.line(header)?;
+    old.diff_records(new, records, &mut sink)?;
+    let summary = serde_json::to_value(&sink.counts)?;
+    sink.line(&serde_json::json!({"type":"summary", "counts":summary}))?;
+    Ok(sink.counts)
 }
 
 #[derive(Default, serde::Serialize)]

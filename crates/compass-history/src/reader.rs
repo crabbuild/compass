@@ -1,12 +1,18 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use prolly::Tree;
+use prolly::{Prolly, RuntimeConfig, Tree};
+use prolly_store_sqlite::SqliteStore;
 
 use crate::{
     ActivityGuard, HistoryError, HistoryRecord, HistoryRecordKey, HistoryStore, PublishedVersion,
-    RealizationId,
+    RealizationId, StoredTree,
 };
+
+const READER_NODE_CACHE_MAX_NODES: usize = 16_384;
+const READER_NODE_CACHE_MAX_BYTES: usize = 128 * 1024 * 1024;
+const READER_READ_PARALLELISM: usize = 16;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum OwnedHistoryRecordKey {
@@ -34,6 +40,7 @@ pub struct RealizationReader<'store> {
     pub(crate) store: &'store HistoryStore,
     _activity: ActivityGuard,
     pub(crate) published: PublishedVersion,
+    pub(crate) prolly: Prolly<Arc<SqliteStore>>,
     roots: RefCell<HashMap<&'static str, Tree>>,
     records: RefCell<HashMap<OwnedHistoryRecordKey, Option<HistoryRecord>>>,
 }
@@ -45,10 +52,17 @@ impl HistoryStore {
     ) -> Result<RealizationReader<'_>, HistoryError> {
         let activity = self.activity()?;
         let published = self.get_with_activity(realization, &activity)?;
+        let mut config = self.prolly.config().clone();
+        config.runtime = RuntimeConfig {
+            node_cache_max_nodes: Some(READER_NODE_CACHE_MAX_NODES),
+            node_cache_max_bytes: Some(READER_NODE_CACHE_MAX_BYTES),
+            read_parallelism: READER_READ_PARALLELISM,
+        };
         Ok(RealizationReader {
             store: self,
             _activity: activity,
             published,
+            prolly: Prolly::new(self.prolly.store().clone(), config),
             roots: RefCell::new(HashMap::new()),
             records: RefCell::new(HashMap::new()),
         })
@@ -69,31 +83,31 @@ impl RealizationReader<'_> {
         let (root_name, tree, encoded_key, schema) = match &owned {
             OwnedHistoryRecordKey::Node(id) => (
                 "nodes",
-                self.published.version.nodes_root.to_tree(),
+                self.tree(&self.published.version.nodes_root),
                 crate::node_key(id),
                 "compass.node",
             ),
             OwnedHistoryRecordKey::ProgramModule(source_file) => (
                 "program-facts",
-                self.published.version.program_facts_root.to_tree(),
+                self.tree(&self.published.version.program_facts_root),
                 crate::artifacts::program_key("module", source_file),
                 "compass.program.module",
             ),
             OwnedHistoryRecordKey::ProgramFunction(symbol_id) => (
                 "program-facts",
-                self.published.version.program_facts_root.to_tree(),
+                self.tree(&self.published.version.program_facts_root),
                 crate::artifacts::program_key("function", symbol_id),
                 "compass.program.function",
             ),
             OwnedHistoryRecordKey::ProgramSummary(symbol_id) => (
                 "program-summaries",
-                self.published.version.program_summaries_root.to_tree(),
+                self.tree(&self.published.version.program_summaries_root),
                 crate::artifacts::program_key("summary", symbol_id),
                 "compass.program.summary",
             ),
             OwnedHistoryRecordKey::ReverseCallers(symbol_id) => (
                 "program-summaries",
-                self.published.version.program_summaries_root.to_tree(),
+                self.tree(&self.published.version.program_summaries_root),
                 crate::artifacts::program_key("reverse-call", symbol_id),
                 "compass.program.reverse-call",
             ),
@@ -104,7 +118,7 @@ impl RealizationReader<'_> {
             .entry(root_name)
             .or_insert(tree)
             .clone();
-        let value = match self.store.prolly.get(&tree, &encoded_key)? {
+        let value = match self.prolly.get(&tree, &encoded_key)? {
             None => None,
             Some(bytes) => {
                 if bytes.len() > crate::MAX_RECORD_VALUE_BYTES {
@@ -140,5 +154,9 @@ impl RealizationReader<'_> {
         keys: impl IntoIterator<Item = HistoryRecordKey<'key>>,
     ) -> Result<Vec<Option<HistoryRecord>>, HistoryError> {
         keys.into_iter().map(|key| self.read(key)).collect()
+    }
+
+    pub(crate) fn tree(&self, stored: &StoredTree) -> Tree {
+        stored.to_tree()
     }
 }

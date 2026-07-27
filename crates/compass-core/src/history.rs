@@ -289,7 +289,7 @@ fn run_promoted_materialization(
     request: &MaterializeRequest,
     observer: &mut dyn MaterializeObserver,
     activity: &compass_history::ActivityGuard,
-    completed: CompletedGraphArtifacts,
+    mut completed: CompletedGraphArtifacts,
 ) -> Result<PublishedVersion, MaterializeError> {
     let providers = completed
         .artifacts
@@ -302,7 +302,12 @@ fn run_promoted_materialization(
     observer.resolved(&fingerprint)?;
     observer.entered(MaterializeStage::Building)?;
     observer.entered(MaterializeStage::Validating)?;
-    validate_promoted(&completed, &request.commit)?;
+    validate_promoted(
+        &mut completed,
+        &request.repository,
+        &request.commit,
+        &request.profile,
+    )?;
     observer.entered(MaterializeStage::Publishing)?;
     let prepared = store.prepare_publish_with_activity(
         PublishRequest {
@@ -334,9 +339,15 @@ fn run_materialization(
     let fingerprint = resolve_fingerprint(&request.profile, worktree.path())?;
     observer.resolved(&fingerprint)?;
     observer.entered(MaterializeStage::Building)?;
-    let completed = builder.build(worktree.path(), worktree.output_root())?;
+    let mut completed = builder.build(worktree.path(), worktree.output_root())?;
     observer.entered(MaterializeStage::Validating)?;
-    validate_completed(&completed, &request.commit, &request.profile, worktree)?;
+    validate_completed(
+        &mut completed,
+        &request.repository,
+        &request.commit,
+        &request.profile,
+        worktree,
+    )?;
     let default_viewer = builder
         .default_viewer_projection(&completed, request.repository.root(), &request.commit)
         .ok()
@@ -562,7 +573,8 @@ fn collect_configuration_files(
 }
 
 fn validate_completed(
-    completed: &CompletedGraphArtifacts,
+    completed: &mut CompletedGraphArtifacts,
+    repository: &Repository,
     commit: &CommitId,
     profile: &BuildProfile,
     worktree: &WorktreeGuard,
@@ -638,12 +650,22 @@ fn validate_completed(
             }
         }
     }
+    attach_source_inventory(
+        completed,
+        repository,
+        commit,
+        profile,
+        worktree.path(),
+        &detection.files,
+    )?;
     Ok(())
 }
 
 fn validate_promoted(
-    completed: &CompletedGraphArtifacts,
+    completed: &mut CompletedGraphArtifacts,
+    repository: &Repository,
     commit: &CommitId,
+    profile: &BuildProfile,
 ) -> Result<(), MaterializeError> {
     let built_at = completed
         .artifacts
@@ -657,7 +679,146 @@ fn validate_promoted(
             built_at
         )));
     }
+    let detection = detect(
+        repository.root(),
+        &DetectOptions {
+            gitignore: profile_gitignore(profile),
+            ignore_policy: IgnorePolicy::HistoricalCommit,
+            extra_excludes: profile_excludes(profile),
+            ..DetectOptions::default()
+        },
+    )?;
+    attach_source_inventory(
+        completed,
+        repository,
+        commit,
+        profile,
+        repository.root(),
+        &detection.files,
+    )?;
     Ok(())
+}
+
+fn attach_source_inventory(
+    completed: &mut CompletedGraphArtifacts,
+    repository: &Repository,
+    commit: &CommitId,
+    profile: &BuildProfile,
+    checkout: &Path,
+    detected: &BTreeMap<String, Vec<String>>,
+) -> Result<(), MaterializeError> {
+    const INVENTORY_PATH: &str = ".compass_source_inventory.json";
+    if completed
+        .artifacts
+        .authoritative_sidecars
+        .contains_key(INVENTORY_PATH)
+    {
+        return Err(MaterializeError::Incomplete(format!(
+            "graph builder attempted to provide reserved artifact {INVENTORY_PATH}"
+        )));
+    }
+    let manifest = completed
+        .artifacts
+        .manifest
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            MaterializeError::Incomplete(
+                "exact extraction requires an object-shaped source manifest".to_owned(),
+            )
+        })?;
+    let blobs = repository.committed_blob_ids(commit)?;
+    let mut record_counts = BTreeMap::<String, u64>::new();
+    for attributes in completed
+        .artifacts
+        .document
+        .nodes
+        .iter()
+        .map(|node| &node.attributes)
+        .chain(
+            completed
+                .artifacts
+                .document
+                .links
+                .iter()
+                .map(|edge| &edge.attributes),
+        )
+    {
+        let mut attributed = BTreeSet::new();
+        for field in ["source_file", "origin_file"] {
+            if let Some(source) = attributes
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .and_then(|source| repository_relative_source(source, checkout))
+            {
+                attributed.insert(source);
+            }
+        }
+        for source in attributed {
+            *record_counts.entry(source).or_default() += 1;
+        }
+    }
+    let mut entries = BTreeMap::new();
+    for file in detected.get("code").into_iter().flatten() {
+        let path = Path::new(file);
+        let relative = path.strip_prefix(checkout).map_err(|_| {
+            MaterializeError::Incomplete(format!(
+                "detected code source escaped exact checkout: {}",
+                path.display()
+            ))
+        })?;
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let blob = blobs.get(&relative).ok_or_else(|| {
+            MaterializeError::Incomplete(format!(
+                "detected code source is absent from exact Git tree: {relative}"
+            ))
+        })?;
+        let ast_hash = manifest
+            .get(&relative)
+            .and_then(serde_json::Value::as_object)
+            .and_then(|entry| entry.get("ast_hash"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|hash| !hash.is_empty())
+            .ok_or_else(|| {
+                MaterializeError::Incomplete(format!(
+                    "extraction manifest has no AST completion stamp for {relative}"
+                ))
+            })?;
+        let record_count = record_counts.get(&relative).copied().unwrap_or_default();
+        entries.insert(
+            relative.clone(),
+            json!({
+                "git_object": blob,
+                "ast_hash": ast_hash,
+                "extension": relative.rsplit_once('.').map(|(_, extension)| extension).unwrap_or(""),
+                "status": if record_count == 0 { "no_graph_records" } else { "extracted" },
+                "graph_record_count": record_count,
+            }),
+        );
+    }
+    let inventory = json!({
+        "schema": "compass.history.source_inventory/1",
+        "commit": commit,
+        "profile_digest": format!("{:x}", Sha256::digest(profile.canonical_bytes()?)),
+        "code_files": entries,
+    });
+    completed.artifacts.authoritative_sidecars.insert(
+        INVENTORY_PATH.to_owned(),
+        compass_history::canonical_json_bytes(&inventory)?,
+    );
+    Ok(())
+}
+
+fn repository_relative_source(source: &str, checkout: &Path) -> Option<String> {
+    let path = Path::new(source);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(checkout).ok()?
+    } else {
+        path
+    };
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
+    (!normalized.is_empty() && !normalized.starts_with("../")).then(|| normalized.to_owned())
 }
 
 fn profile_gitignore(profile: &BuildProfile) -> bool {

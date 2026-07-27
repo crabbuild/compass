@@ -38,7 +38,23 @@ fn run(
 fn current_history_profile() -> Result<compass_history::BuildProfile, compass_history::HistoryError>
 {
     let mut profile = compass_history::BuildProfile::default();
-    profile.insert("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA)?;
+    for (key, value) in [
+        ("compass_version", env!("CARGO_PKG_VERSION")),
+        ("graph_schema", compass_history::HISTORY_GRAPH_SCHEMA),
+        ("extractor_version", "compass-languages/v1"),
+        ("resolver_version", "compass-resolve/v1"),
+        ("pipeline_version", "compass-core/v1"),
+        ("program_provider_policy", "offline-artifacts-first"),
+        ("program_ir_schema", "1"),
+        ("program_merger_version", "1"),
+        ("program_analysis_schema", "1"),
+        ("program_analyzer_version", "1"),
+        ("enabled_features", "workspace-default"),
+        ("direction", "native-source-semantics"),
+        ("semantic_prompt_sha256", "fixture-prompt"),
+    ] {
+        profile.insert(key, value)?;
+    }
     Ok(profile)
 }
 
@@ -1184,6 +1200,93 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
     drop(history);
 
     let compass = env!("CARGO_BIN_EXE_compass");
+    let exact_output = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "diff",
+            "HEAD~1",
+            "HEAD",
+            "--root",
+            "nodes",
+            "--root=edges",
+            "--format=jsonl",
+        ],
+    )?;
+    assert!(
+        exact_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exact_output.stderr)
+    );
+    let exact_lines = String::from_utf8(exact_output.stdout)?
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(
+        exact_lines.first().ok_or("missing exact diff header")?["type"],
+        "header"
+    );
+    assert_eq!(
+        exact_lines.first().ok_or("missing exact diff header")?["schema"],
+        "compass.history.exact_diff/1"
+    );
+    assert_eq!(
+        exact_lines.first().ok_or("missing exact diff header")?["roots"],
+        json!(["nodes", "edges"])
+    );
+    let exact_changes = exact_lines
+        .iter()
+        .filter(|line| line["type"] == "change")
+        .collect::<Vec<_>>();
+    assert!(!exact_changes.is_empty());
+    assert!(
+        exact_changes
+            .iter()
+            .all(|line| { matches!(line["change"]["record"].as_str(), Some("node" | "edge")) })
+    );
+    let exact_summary = exact_lines.last().ok_or("missing exact diff summary")?;
+    assert_eq!(exact_summary["type"], "summary");
+    assert_eq!(
+        exact_summary["counts"]["total"],
+        u64::try_from(exact_changes.len())?
+    );
+
+    let exact_path = directory.path().join("exact-diff.jsonl");
+    let exact_file = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "diff",
+            "HEAD~1",
+            "HEAD",
+            "--root=nodes",
+            "--output",
+            exact_path.to_str().ok_or("exact path")?,
+        ],
+    )?;
+    assert!(
+        exact_file.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exact_file.stderr)
+    );
+    assert!(exact_path.is_file());
+    let no_overwrite = run(
+        compass,
+        directory.path(),
+        &[
+            "history",
+            "diff",
+            "HEAD~1",
+            "HEAD",
+            "--output",
+            exact_path.to_str().ok_or("exact path")?,
+        ],
+    )?;
+    assert_eq!(no_overwrite.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&no_overwrite.stderr).contains("already exists"));
+
     let summary = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
     assert!(
         summary.status.success(),
@@ -1327,7 +1430,7 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
     drop(history);
     let mismatch = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
     assert_eq!(mismatch.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("not semantically comparable"));
+    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("incompatible graph engines"));
     Ok(())
 }
 

@@ -613,6 +613,7 @@ compass program call-graph (--symbol SYMBOL | --source FILE --byte BYTE)
   [--direction callers|callees|both] [--depth N] --format json
 compass history timeline [--rev REV] [--limit N [--after CURSOR]] --format json
 compass history change-counts REV [--parent REV] --format json
+compass history diff OLD NEW [--root NAME] [--output PATH] --format jsonl
 compass history export REV --format json [--community ID] [--node-limit N] --output PATH
 ```
 
@@ -622,7 +623,12 @@ the preceding page's opaque `nextCursor`. A cursor rejects local-ref changes
 instead of silently mixing snapshots. Responses include `hasMore`,
 `nextCursor`, and `totalEntries` once the final page establishes the exact
 count. `history change-counts` requires existing preferred realizations for
-both revisions and never builds them. Guided writers accept `--events jsonl`; stdout then contains
+both revisions and never builds them. `history diff` streams an exhaustive,
+deterministic record-level diff for selected immutable roots. It may lazily
+materialize a missing revision, requires identical complete build profiles and
+compatible graph engines, refuses to overwrite `--output`, and bounds stdout
+for safety. This is distinct from the ranked `compass diff` semantic-review
+report. Guided writers accept `--events jsonl`; stdout then contains
 `compass.ide.progress/1` events and human diagnostics move to stderr.
 
 `json` is the canonical versioned graph-presentation export. `viewer-json`

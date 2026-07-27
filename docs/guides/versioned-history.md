@@ -30,6 +30,7 @@ commit SHA + extraction fingerprint
                 +-- hyperedges
                 +-- analysis and communities
                 +-- reconstruction metadata
+                +-- committed source inventory
                 `-- authoritative sidecars
 ```
 
@@ -41,6 +42,12 @@ History graph schema `networkx-node-link/v1` records automatic multigraph
 promotion. This release is a hard cutover for caches and operational state:
 Compass starts the new `cache/v1` namespace empty and never imports or reads
 legacy cache entries. The immutable realization schema itself is unchanged.
+
+Before publication, Compass binds every detected code file to its exact Git
+blob ID and requires an AST completion stamp in the extraction manifest. The
+canonical `.compass_source_inventory.json` sidecar records that proof and
+distinguishes files that legitimately produced no graph records. A missing
+stamp fails closed instead of publishing an apparently complete graph.
 
 ## 1. Inspect the command contract
 
@@ -55,7 +62,8 @@ History commands include:
 
 ```text
 enable   disable   status   verify  build   rebuild
-list     show      prefer   export  cache   gc
+timeline change-counts diff list    show    prefer
+export   cache         gc
 ```
 
 Text output is for people. Commands that support `--format json` expose stable
@@ -245,6 +253,29 @@ Machine-readable output:
 compass diff v1.2.0 HEAD --format json
 ```
 
+For an exhaustive record-level diff rather than a ranked semantic review, use
+the history subcommand:
+
+```bash
+compass history diff v1.2.0 HEAD --format jsonl
+```
+
+It streams deterministic `header`, `change`, and `summary` records using schema
+`compass.history.exact_diff/1`. Select roots when an integration only needs
+part of the realization:
+
+```bash
+compass history diff v1.2.0 HEAD \
+  --root nodes \
+  --root edges \
+  --output exact-topology-diff.jsonl
+```
+
+Available roots are `nodes`, `edges`, `hyperedges`, `analysis`, `metadata`,
+`program-facts`, and `program-summaries`. Omitted roots are not opened. Output
+files are written atomically and never overwritten. Stdout is bounded; use
+`--output` for a very large exact diff.
+
 Self-contained interactive reviewer report:
 
 ```bash
@@ -305,7 +336,8 @@ compass history build NEW_REV --profile-from OLD_REV_OR_REALIZATION
 ```
 
 There is no profile-mismatch override: unlike profiles do not produce a
-semantic report.
+semantic or exact report. Compass checks graph-engine compatibility explicitly
+before comparing the complete build profiles.
 
 ## 7. Export a realization
 

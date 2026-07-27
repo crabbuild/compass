@@ -9,6 +9,8 @@ use compass_history::{
 };
 use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
+use prolly::{VersionedValue, decode_segments};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -105,6 +107,98 @@ fn program(input: &[u8]) -> Result<AnalysisBundle, compass_analysis::AnalysisErr
         evidence: Vec::new(),
         modules: Vec::new(),
     })
+}
+
+fn naive_changes(
+    record: RecordKind,
+    old: &[(Vec<u8>, Vec<u8>)],
+    new: &[(Vec<u8>, Vec<u8>)],
+) -> Result<Vec<GraphChange>, Box<dyn std::error::Error>> {
+    let old = old.iter().cloned().collect::<BTreeMap<_, _>>();
+    let new = new.iter().cloned().collect::<BTreeMap<_, _>>();
+    let keys = old
+        .keys()
+        .chain(new.keys())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let decode = |bytes: &[u8]| -> Result<Value, Box<dyn std::error::Error>> {
+        let envelope = VersionedValue::from_bytes(bytes)?;
+        Ok(serde_json::from_slice(&envelope.payload)?)
+    };
+    let display = |key: &[u8]| -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let mut segments = decode_segments(key)?;
+        segments.drain(..2);
+        Ok(segments
+            .into_iter()
+            .map(|segment| {
+                if segment
+                    .iter()
+                    .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+                {
+                    String::from_utf8(segment)
+                        .unwrap_or_else(|bytes| format!("invalid-utf8:{:?}", bytes.as_bytes()))
+                } else {
+                    segment.iter().fold(String::from("0x"), |mut output, byte| {
+                        use std::fmt::Write;
+                        let _ = write!(output, "{byte:02x}");
+                        output
+                    })
+                }
+            })
+            .collect())
+    };
+    let mut changes = Vec::new();
+    for key in keys {
+        let left = old.get(&key);
+        let right = new.get(&key);
+        let change = match (left, right) {
+            (Some(left), Some(right)) if left == right => None,
+            (Some(left), Some(right)) => Some(GraphChange {
+                record,
+                change: ChangeKind::Changed,
+                key: display(&key)?,
+                old: Some(decode(left)?),
+                new: Some(decode(right)?),
+            }),
+            (Some(left), None) => Some(GraphChange {
+                record,
+                change: ChangeKind::Removed,
+                key: display(&key)?,
+                old: Some(decode(left)?),
+                new: None,
+            }),
+            (None, Some(right)) => Some(GraphChange {
+                record,
+                change: ChangeKind::Added,
+                key: display(&key)?,
+                old: None,
+                new: Some(decode(right)?),
+            }),
+            (None, None) => None,
+        };
+        if let Some(change) = change {
+            changes.push(change);
+        }
+    }
+    Ok(changes)
+}
+
+fn sort_changes(changes: &mut [GraphChange]) -> Result<(), compass_history::HistoryError> {
+    let mut keyed = changes
+        .iter()
+        .cloned()
+        .map(|change| {
+            Ok((
+                compass_history::canonical_json_bytes(&serde_json::to_value(&change)?)?,
+                change,
+            ))
+        })
+        .collect::<Result<Vec<_>, compass_history::HistoryError>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    for (target, (_, change)) in changes.iter_mut().zip(keyed) {
+        *target = change;
+    }
+    Ok(())
 }
 
 #[test]
@@ -245,5 +339,77 @@ fn full_diff_includes_program_facts_while_topology_diff_skips_them()
         &mut topology,
     )?;
     assert!(topology.0.is_empty());
+    Ok(())
+}
+
+#[test]
+fn streamed_topology_diff_matches_naive_map_oracle_across_random_graphs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, repository) = repository()?;
+    let history = HistoryStore::create(&repository)?;
+    for seed in 0..64_u64 {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let graph = |rng: &mut StdRng| {
+            let mut nodes = Vec::new();
+            for index in 0..16 {
+                if rng.gen_bool(0.65) {
+                    nodes.push(json!({
+                        "id": format!("node-{index:02}"),
+                        "kind": if rng.gen_bool(0.5) { "function" } else { "class" },
+                        "revision": rng.gen_range(0..4),
+                    }));
+                }
+            }
+            if nodes.is_empty() {
+                nodes.push(json!({"id":"node-00","kind":"function","revision":0}));
+            }
+            let ids = nodes
+                .iter()
+                .filter_map(|node| node.get("id").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let mut links = Vec::new();
+            for index in 0..24 {
+                if rng.gen_bool(0.55) {
+                    let source = &ids[rng.gen_range(0..ids.len())];
+                    let target = &ids[rng.gen_range(0..ids.len())];
+                    links.push(json!({
+                        "source": source,
+                        "target": target,
+                        "relation": if rng.gen_bool(0.5) { "calls" } else { "imports" },
+                        "key": format!("edge-{index:02}"),
+                        "weight": rng.gen_range(0..5),
+                    }));
+                }
+            }
+            (nodes, links)
+        };
+        let (old_nodes, old_links) = graph(&mut rng);
+        let (new_nodes, new_links) = graph(&mut rng);
+        let old_request = request('a', old_nodes, old_links, Vec::new(), rng.gen_range(0..8))?;
+        let new_request = request('b', new_nodes, new_links, Vec::new(), rng.gen_range(0..8))?;
+        let old_partition = old_request.artifacts.partition(&old_request.completion)?;
+        let new_partition = new_request.artifacts.partition(&new_request.completion)?;
+        let old = history.publish(old_request)?;
+        let new = history.publish(new_request)?;
+        let old_reader = history.reader(&old.id)?;
+        let new_reader = history.reader(&new.id)?;
+        let mut actual = VecSink::default();
+        old_reader.diff_records(
+            &new_reader,
+            &[RecordKind::Node, RecordKind::Edge],
+            &mut actual,
+        )?;
+        let mut expected =
+            naive_changes(RecordKind::Node, &old_partition.nodes, &new_partition.nodes)?;
+        expected.extend(naive_changes(
+            RecordKind::Edge,
+            &old_partition.edges,
+            &new_partition.edges,
+        )?);
+        sort_changes(&mut actual.0)?;
+        sort_changes(&mut expected)?;
+        assert_eq!(actual.0, expected, "streaming diff diverged at seed {seed}");
+    }
     Ok(())
 }

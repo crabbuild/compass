@@ -134,11 +134,7 @@ impl RealizationReader<'_> {
         if old == new {
             return Ok(());
         }
-        for difference in self
-            .store
-            .prolly
-            .stream_diff(&old.to_tree(), &new.to_tree())?
-        {
+        for difference in self.prolly.stream_diff(&self.tree(old), &self.tree(new))? {
             let difference = difference?;
             let (change, key, old, new) = match difference {
                 Diff::Added { key, val } => {
