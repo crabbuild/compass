@@ -22,6 +22,7 @@ mod result_commands;
 mod semantic_commands;
 mod semantic_diff_commands;
 mod semantic_diff_render;
+mod upgrade_commands;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -370,6 +371,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "hook-refresh" => command_hook_refresh(frontend, &args),
         "install" => install_commands::command_install(frontend, &args),
         "uninstall" => install_commands::command_uninstall(frontend, &args),
+        "upgrade" => upgrade_commands::command_upgrade(&args),
         platform if install_commands::is_direct_command(platform) => {
             install_commands::command_platform(frontend, platform, &args)
         }

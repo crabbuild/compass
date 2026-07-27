@@ -115,6 +115,7 @@ const GROUPS: &[Group] = &[
             "hook",
             "install",
             "uninstall",
+            "upgrade",
             "provider",
             "save-result",
             "reflect",
@@ -478,6 +479,12 @@ const PAGES: &[Page] = &[
         "Remove installed Compass assistant guidance",
         ["compass uninstall [PLATFORM] [OPTIONS]"],
         "Arguments:\n  [PLATFORM]               Remove one assistant platform\n\nOptions:\n  --platform <NAME>        Select one assistant platform\n  --project                Remove project-scoped files\n  --purge                  Remove all installed Compass guidance\n\nExamples:\n  compass uninstall --platform codex\n  compass uninstall --project --purge"
+    ),
+    page!(
+        "upgrade",
+        "Upgrade Compass to the latest stable release",
+        ["compass upgrade"],
+        "Examples:\n  compass upgrade\n\nNotes:\n  Compass verifies the official release checksum before replacing the running executable.\n  If no newer stable release is available, the command exits successfully without changes."
     ),
     page!(
         "provider",
@@ -998,7 +1005,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 38);
+        assert_eq!(roots.len(), 39);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

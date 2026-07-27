@@ -83,6 +83,7 @@ tools and must not replace normal extraction without a reason.
 - `compass install`: install the canonical skill and platform integration.
 - `compass uninstall`: remove managed integrations; `--purge` additionally
   removes Compass output and requires explicit user intent.
+- `compass upgrade`: verify and install the latest stable Compass release.
 - `compass hook`: install, inspect, or uninstall repository refresh hooks.
 - `compass hook-check`: no-op probe owned by installed hook configuration.
 - `compass hook-guard`: adapter owned by installed search/read/Gemini guards.

@@ -466,6 +466,17 @@ compass uninstall
 
 Review targets before `--purge`.
 
+### `upgrade`
+
+```text
+compass upgrade
+```
+
+Downloads the latest stable Compass release for the current platform, verifies
+its SHA-256 checksum and reported version, then replaces the running executable.
+If the installed version is current or newer, the command exits successfully
+without changing it.
+
 ### `hook`
 
 ```text

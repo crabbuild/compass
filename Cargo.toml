@@ -74,6 +74,8 @@ rayon = "1"
 rand = "0.8.7"
 realfft = "3.5.0"
 regex = "1"
+semver = "1"
+self-replace = "1.5"
 rmcp = { version = "2.2.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
 rubato = "0.16.2"
 flate2 = "1.1.9"
@@ -91,6 +93,7 @@ unicode-normalization = "0.1"
 unicode-casefold = "0.2"
 unicode-properties = { version = "0.1.4", features = ["general-category"] }
 tempfile = "3"
+tar = "0.4"
 atomicwrites = "=0.4.4"
 tiktoken-rs = "0.7.0"
 symphonia = { version = "0.6.0", default-features = false, features = ["all"] }
