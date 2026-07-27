@@ -16,6 +16,7 @@ import {
 } from "./graphOverview";
 import { CurrentGraphSnapshot } from "./graphSnapshot";
 import { openGraphSource } from "./sourceNavigation";
+import { graphStaticLoadingMarkup } from "../webviews/graphLoadingMarkup";
 
 const LARGE_GRAPH_BYTES = 8 * 1024 * 1024;
 
@@ -243,7 +244,7 @@ export class GraphPanel {
 <title>Compass Code Graph</title>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">${graphStaticLoadingMarkup()}</div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;

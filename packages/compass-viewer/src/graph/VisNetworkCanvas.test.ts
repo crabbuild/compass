@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
+import {
+  formatGraphEdgeLabel,
+  shouldShowGraphEdgeLabel
+} from "./edgeLabels";
 import { graphNodeColor } from "./VisNetworkCanvas";
 
 const model: GraphViewModel = {
@@ -43,5 +47,28 @@ describe("graphNodeColor", () => {
       background: "#f7edcf",
       border: "#9a6700"
     });
+  });
+
+  it("derives focused relationship labels without forcing unrelated edges", () => {
+    const edge = {
+      id: "run-helper",
+      source: "run",
+      target: "helper",
+      relation: "calls",
+      confidence: "extracted" as const
+    };
+    expect(formatGraphEdgeLabel(edge)).toBe("calls [EXTRACTED]");
+    expect(shouldShowGraphEdgeLabel(edge, {
+      forceLabels: false,
+      focusedNodeId: "run",
+      focusedEdgeId: null,
+      hoveredEdgeId: null,
+    })).toBe(true);
+    expect(shouldShowGraphEdgeLabel(edge, {
+      forceLabels: false,
+      focusedNodeId: "store",
+      focusedEdgeId: null,
+      hoveredEdgeId: null,
+    })).toBe(false);
   });
 });

@@ -168,6 +168,7 @@ pub fn graph_view_model(
                     match value.to_ascii_lowercase().as_str() {
                         "extracted" => "extracted",
                         "ambiguous" => "ambiguous",
+                        "aggregated" => "aggregated",
                         _ => "inferred",
                     }
                     .to_owned()
@@ -326,6 +327,36 @@ mod tests {
             node.source.as_ref().and_then(|source| source.end_line),
             Some(8)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn graph_model_preserves_aggregated_edge_confidence() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [
+                {"id": "0", "label": "Core"},
+                {"id": "1", "label": "Data"}
+            ],
+            "links": [{
+                "source": "0",
+                "target": "1",
+                "relation": "2 cross-community edges",
+                "confidence": "AGGREGATED"
+            }]
+        }))?;
+        let communities: Communities =
+            BTreeMap::from([(0, vec!["0".into()]), (1, vec!["1".into()])]);
+        let model = graph_view_model(
+            &document,
+            &communities,
+            "Aggregate",
+            &HtmlOptions::default(),
+            true,
+        );
+
+        assert_eq!(model.edges[0].relation, "2 cross-community edges");
+        assert_eq!(model.edges[0].confidence.as_deref(), Some("aggregated"));
         Ok(())
     }
 }

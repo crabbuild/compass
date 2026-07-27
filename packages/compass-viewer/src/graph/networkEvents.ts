@@ -2,7 +2,10 @@ import type { GraphHover } from "./NodeHoverCard";
 
 export type GraphNetworkEvent = {
   nodes: Array<string | number>;
+  edges: Array<string | number>;
   node?: string | number;
+  edge?: string | number;
+  scale?: number;
   pointer: { DOM: { x: number; y: number } };
 };
 
@@ -12,8 +15,11 @@ export type GraphNetworkEventSource = {
 
 export type GraphNetworkHandlers = {
   onFocus(nodeId: string): void;
+  onFocusEdge(edgeId: string): void;
   onOpenSource(nodeId: string): void;
   onHover(change: GraphHover | null): void;
+  onHoverEdge(edgeId: string): void;
+  onBlurEdge(): void;
   onClear(): void;
 };
 
@@ -23,9 +29,18 @@ export function bindGraphNetworkEvents(
 ): void {
   network.on("click", (parameters) => {
     handlers.onHover(null);
-    const selected = parameters.nodes[0];
-    if (selected !== undefined) handlers.onFocus(String(selected));
-    else handlers.onClear();
+    handlers.onBlurEdge();
+    const selectedNode = parameters.nodes[0];
+    const selectedEdge = parameters.edges[0];
+    if (selectedNode !== undefined) {
+      handlers.onFocus(String(selectedNode));
+    } else if (selectedEdge !== undefined) {
+      handlers.onClear();
+      handlers.onFocusEdge(String(selectedEdge));
+    } else {
+      handlers.onClear();
+      handlers.onFocusEdge("");
+    }
   });
   network.on("doubleClick", (parameters) => {
     const selected = parameters.nodes[0];
@@ -40,6 +55,18 @@ export function bindGraphNetworkEvents(
     });
   });
   network.on("blurNode", () => handlers.onHover(null));
-  network.on("dragStart", () => handlers.onHover(null));
-  network.on("zoom", () => handlers.onHover(null));
+  network.on("hoverEdge", (parameters) => {
+    if (parameters.edge !== undefined) {
+      handlers.onHoverEdge(String(parameters.edge));
+    }
+  });
+  network.on("blurEdge", () => handlers.onBlurEdge());
+  network.on("dragStart", () => {
+    handlers.onHover(null);
+    handlers.onBlurEdge();
+  });
+  network.on("zoom", () => {
+    handlers.onHover(null);
+    handlers.onBlurEdge();
+  });
 }

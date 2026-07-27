@@ -1,6 +1,7 @@
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { graphStaticLoadingMarkup } from "../../../editors/vscode/src/webviews/graphLoadingMarkup";
 
 export default async function generate(): Promise<void> {
   const root = path.resolve("../..");
@@ -76,7 +77,13 @@ export default async function generate(): Promise<void> {
       { id: "0", label: "Core", community: 0, memberCount: 2, degree: 1 },
       { id: "1", label: "Data", community: 1, memberCount: 1, degree: 1 }
     ],
-    edges: [{ id: "overview-edge", source: "0", target: "1", relation: "calls" }],
+    edges: [{
+      id: "overview-edge",
+      source: "0",
+      target: "1",
+      relation: "2 cross-community edges",
+      confidence: "aggregated"
+    }],
     communities: [
       { id: 0, label: "Core", color: "#4E79A7", hidden: false },
       { id: 1, label: "Data", color: "#F28E2B", hidden: false }
@@ -440,7 +447,7 @@ function semanticDiffGraphHarness(): string {
 }
 
 function graphLoadingHarness(): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph loading fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph loading fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root">${graphStaticLoadingMarkup()}</div><script>
 window.hostMessages=[];
 window.webviewState=undefined;
 window.acquireVsCodeApi=()=>({
@@ -448,15 +455,16 @@ window.acquireVsCodeApi=()=>({
   setState(state){window.webviewState=state},
   postMessage(message){
     window.hostMessages.push(message);
-    if(new URLSearchParams(window.location.search).has("large") && message.type==="ready") {
+    const params=new URLSearchParams(window.location.search);
+    if((params.has("large") || params.has("snapshot")) && message.type==="ready") {
       setTimeout(()=>window.postMessage({
         type:"graphLoadStatus",
         mode:"large",
         graphBytes:44275915,
-        phase:"exporting"
+        phase:params.has("snapshot") ? "snapshotting" : "exporting"
       },"*"),0);
     }
-    if(new URLSearchParams(window.location.search).has("error") && (message.type==="ready" || message.type==="retry")) {
+    if(params.has("error") && (message.type==="ready" || message.type==="retry")) {
       setTimeout(()=>window.postMessage({type:"error",message:"The graph export could not be read."},"*"),0);
     }
   }

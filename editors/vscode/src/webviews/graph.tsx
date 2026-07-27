@@ -116,13 +116,19 @@ window.addEventListener("message", (event) => {
     return;
   }
   if (parsed.data.type === "graphLoadStatus") {
-    loadingCopy = {
-      eyebrow: `Compass code graph · ${formatBytes(parsed.data.graphBytes)}`,
-      title: "Preparing a large code graph",
-      steps: parsed.data.phase === "snapshotting"
-        ? ["Securing snapshot", "Building overview", "Opening explorer"]
-        : ["Snapshot ready", "Building overview", "Opening explorer"]
-    };
+    loadingCopy = parsed.data.phase === "snapshotting"
+      ? {
+          eyebrow: `Compass code graph · ${formatBytes(parsed.data.graphBytes)}`,
+          title: "Preparing a large code graph",
+          steps: ["Securing snapshot", "Building overview", "Opening explorer"],
+          activeStep: 0
+        }
+      : {
+          eyebrow: `Compass code graph · ${formatBytes(parsed.data.graphBytes)}`,
+          title: "Preparing a large code graph",
+          steps: ["Snapshot ready", "Building overview", "Opening explorer"],
+          activeStep: 1
+        };
     renderLoading();
     return;
   }
