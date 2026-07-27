@@ -13,6 +13,7 @@ export type HistoryOperation =
   | "Build graph"
   | "Compare revisions"
   | "Compare community"
+  | "Exit comparison"
   | "Load change counts"
   | "Open community"
   | "Open source"
@@ -26,6 +27,7 @@ export type HistoryWebviewMessage =
   | { type: "loadRevision"; commit: string }
   | { type: "buildRevision"; commit: string }
   | { type: "compare"; commit: string; parent: string }
+  | { type: "exitComparison"; commit: string }
   | {
     type: "compareCommunity";
     requestId: string;
@@ -139,6 +141,7 @@ export function historyOperationFor(message: unknown): HistoryOperation {
     case "buildRevision": return "Build graph";
     case "compare": return "Compare revisions";
     case "compareCommunity": return "Compare community";
+    case "exitComparison": return "Exit comparison";
     case "changeCounts": return "Load change counts";
     case "openCommunity": return "Open community";
     case "openSource": return "Open source";

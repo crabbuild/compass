@@ -159,6 +159,75 @@ describe("compareGraphs", () => {
       fields: [{ field: "memberCount", before: 5, after: 6 }]
     });
   });
+
+  it("matches production edges when inserted relationships shift generated IDs", () => {
+    const nodes = [
+      { id: "a", label: "A", community: 0 },
+      { id: "b", label: "B", community: 0 },
+      { id: "c", label: "C", community: 0 },
+      { id: "d", label: "D", community: 0 }
+    ];
+    const parent = graph(nodes, [
+      { id: "edge-0-b-c", source: "b", target: "c", relation: "calls" },
+      { id: "edge-1-c-d", source: "c", target: "d", relation: "uses" }
+    ]);
+    const current = graph(nodes, [
+      { id: "edge-0-a-b", source: "a", target: "b", relation: "calls" },
+      { id: "edge-1-b-c", source: "b", target: "c", relation: "calls" },
+      { id: "edge-2-c-d", source: "c", target: "d", relation: "uses" }
+    ]);
+
+    const comparison = compareGraphs(parent, current);
+
+    expect(comparison).toMatchObject({
+      addedEdges: 1,
+      removedEdges: 0,
+      changedEdges: 0
+    });
+    expect(comparison.graph.edges).toMatchObject([
+      { id: "edge-0-a-b", source: "a", target: "b", change: "added" }
+    ]);
+  });
+
+  it("retains field evidence when a shifted generated edge changes", () => {
+    const nodes = [
+      { id: "a", label: "A", community: 0 },
+      { id: "b", label: "B", community: 0 },
+      { id: "c", label: "C", community: 0 }
+    ];
+    const parent = graph(nodes, [
+      {
+        id: "edge-0-b-c",
+        source: "b",
+        target: "c",
+        relation: "calls",
+        confidence: "inferred"
+      }
+    ]);
+    const current = graph(nodes, [
+      { id: "edge-0-a-b", source: "a", target: "b", relation: "calls" },
+      {
+        id: "edge-1-b-c",
+        source: "b",
+        target: "c",
+        relation: "uses",
+        confidence: "extracted"
+      }
+    ]);
+
+    const comparison = compareGraphs(parent, current);
+
+    expect(comparison).toMatchObject({
+      addedEdges: 1,
+      removedEdges: 0,
+      changedEdges: 1
+    });
+    expect(comparison.graph.edges.find((edge) => edge.change === "changed")?.evidence?.fields)
+      .toEqual([
+        { field: "confidence", before: "inferred", after: "extracted" },
+        { field: "relation", before: "calls", after: "uses" }
+      ]);
+  });
 });
 
 describe("record diff presentation", () => {

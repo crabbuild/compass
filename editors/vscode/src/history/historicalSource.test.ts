@@ -24,6 +24,7 @@ vi.mock("vscode", () => ({
 
 import {
   historicalSourceArgs,
+  parseHistoricalSourceLocation,
   repositoryRelativePath
 } from "./historicalSource";
 
@@ -42,5 +43,23 @@ describe("historical source paths", () => {
       "--no-textconv",
       "abc1234:src/core.ts"
     ]);
+  });
+
+  it("rejects malformed source locations at the webview boundary", () => {
+    expect(parseHistoricalSourceLocation({
+      file: "src/core.ts",
+      startLine: 4,
+      metadata: "retained"
+    })).toMatchObject({
+      file: "src/core.ts",
+      startLine: 4,
+      metadata: "retained"
+    });
+    expect(() => parseHistoricalSourceLocation({
+      file: "src/core.ts",
+      startLine: -1
+    })).toThrow("invalid historical source location");
+    expect(() => parseHistoricalSourceLocation({ startLine: 1 }))
+      .toThrow("invalid historical source location");
   });
 });

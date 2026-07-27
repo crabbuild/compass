@@ -8,6 +8,7 @@ describe("history panel messages", () => {
     expect(historyOperationFor({ type: "loadMoreTimeline" })).toBe("Load more history");
     expect(historyOperationFor({ type: "enableHistory" })).toBe("Enable history");
     expect(historyOperationFor({ type: "compareCommunity" })).toBe("Compare community");
+    expect(historyOperationFor({ type: "exitComparison" })).toBe("Exit comparison");
   });
 
   it("supports recoverable bootstrap failures", () => {

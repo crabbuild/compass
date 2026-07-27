@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import * as vscode from "vscode";
-import type { SourceLocation } from "@compass/viewer/contracts/graph";
+import {
+  SourceLocationSchema,
+  type SourceLocation
+} from "@compass/viewer/contracts/graph";
 
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
@@ -71,6 +74,14 @@ export function historicalSourceArgs(
   relativePath: string
 ): string[] {
   return ["show", "--no-textconv", `${commit}:${relativePath}`];
+}
+
+export function parseHistoricalSourceLocation(value: unknown): SourceLocation {
+  const parsed = SourceLocationSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error("Compass refused an invalid historical source location.");
+  }
+  return parsed.data;
 }
 
 export function revealSource(

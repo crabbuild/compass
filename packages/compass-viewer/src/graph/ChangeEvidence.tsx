@@ -32,14 +32,14 @@ export function ChangeEvidence({
 
   return (
     <>
-      {node.change === "changed" && node.evidence?.fields.length ? (
+      {node.evidence?.fields.length ? (
         <section className="compass-record-evidence" aria-labelledby="compass-node-changes-title">
           <div className="compass-evidence-heading">
-            <h3 id="compass-node-changes-title">What changed</h3>
+            <h3 id="compass-node-changes-title">{evidenceTitle(node.change)}</h3>
             <span>{node.evidence.fields.length} fields</span>
           </div>
           <FieldTable fields={node.evidence.fields} />
-          {(beforeSource || afterSource) && (
+          {node.change === "changed" && (beforeSource || afterSource) && (
             <div className="compass-evidence-source-actions">
               {beforeSource && (
                 <button
@@ -155,4 +155,10 @@ function evidenceSource(
 function changeLabel(change: GraphEdge["change"]): string {
   if (!change || change === "unchanged") return "Context";
   return `${change[0]?.toLocaleUpperCase()}${change.slice(1)}`;
+}
+
+function evidenceTitle(change: GraphNode["change"]): string {
+  if (change === "added") return "Added symbol metadata";
+  if (change === "removed") return "Removed symbol metadata";
+  return "What changed";
 }

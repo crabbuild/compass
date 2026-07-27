@@ -168,6 +168,7 @@ function render(): void {
         render();
       }}
       onExitComparison={() => {
+        postMessage({ type: "exitComparison", commit: selectedCommit });
         comparison = undefined;
         comparisonIdentities = undefined;
         semanticDiff = undefined;

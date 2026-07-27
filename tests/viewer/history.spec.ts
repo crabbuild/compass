@@ -192,6 +192,15 @@ test("comparison replaces the full graph with a readable focused delta", async (
   await page.getByRole("button", { name: "Exit comparison" }).click();
   await expect(page.getByText("Comparison mode")).toHaveCount(0);
   await expect(page.getByText(/Viewing graph for bbbbbbbbb/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.find((message) => message.type === "exitComparison");
+  })).toMatchObject({
+    type: "exitComparison",
+    commit: "b".repeat(40)
+  });
 });
 
 test("unavailable comparison explains how to recover", async ({ page }) => {

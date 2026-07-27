@@ -6,7 +6,10 @@ import { loadSemanticDiff } from "../history/diffClient";
 import { loadChangeCounts } from "../history/changeCountsClient";
 import { RevisionStore } from "../history/revisionStore";
 import { loadTimeline } from "../history/timelineClient";
-import { HistoricalSourceProvider } from "../history/historicalSource";
+import {
+  HistoricalSourceProvider,
+  parseHistoricalSourceLocation
+} from "../history/historicalSource";
 import {
   historyOperationFor,
   type HistoryHostMessage
@@ -53,6 +56,7 @@ export async function openHistoryPanel(
     parentIdentity: { realization: string; fingerprint: string };
   } | undefined;
   let activeSourceCommits = new Set<string>();
+  let viewGeneration = 0;
   const sourceProvider = new HistoricalSourceProvider(
     `compass-history-${randomUUID().replaceAll("-", "")}`,
     session.root
@@ -400,12 +404,15 @@ export async function openHistoryPanel(
       } else if (message?.type === "loadRevision" && typeof message.commit === "string") {
         const entry = timeline?.entries.find((candidate) => candidate.commit === message.commit);
         if (!entry) throw new Error("Reload commit history before opening this revision.");
+        const generation = ++viewGeneration;
+        activeComparison = undefined;
+        activeSourceCommits = new Set();
         const revision = await revisions.load(
           message.commit,
           graphNodeLimit,
           historyIdentity(entry)
         );
-        activeComparison = undefined;
+        if (generation !== viewGeneration) return;
         activeSourceCommits = new Set([message.commit]);
         await postMessage({
           type: "graph",
@@ -454,12 +461,16 @@ export async function openHistoryPanel(
         if (!currentEntry?.presentationAvailable || !parentEntry?.presentationAvailable) {
           throw new Error("Both revisions must have graph available before comparison.");
         }
+        const generation = ++viewGeneration;
+        activeComparison = undefined;
+        activeSourceCommits = new Set([message.commit]);
         const [current, parent, semanticDiff, counts] = await Promise.all([
           revisions.load(message.commit, graphNodeLimit, historyIdentity(currentEntry)),
           revisions.load(message.parent, graphNodeLimit, historyIdentity(parentEntry)),
           loadSemanticDiff(session, message.parent, message.commit),
           loadChangeCounts(session, message.commit, message.parent)
         ]);
+        if (generation !== viewGeneration) return;
         const currentIdentity = {
           realization: current.realization,
           fingerprint: current.fingerprint
@@ -488,6 +499,14 @@ export async function openHistoryPanel(
           semanticDiff,
           counts
         });
+      } else if (message?.type === "exitComparison"
+        && typeof message.commit === "string") {
+        if (!activeComparison || activeComparison.commit !== message.commit) {
+          throw new Error("This comparison is no longer active.");
+        }
+        viewGeneration += 1;
+        activeComparison = undefined;
+        activeSourceCommits = new Set([message.commit]);
       } else if (message?.type === "compareCommunity"
         && typeof message.requestId === "string"
         && typeof message.commit === "string"
@@ -503,11 +522,13 @@ export async function openHistoryPanel(
         if (!message.hasCurrent && !message.hasParent) {
           throw new Error("The selected community is absent from both compared revisions.");
         }
-        if (!activeComparison
-          || activeComparison.commit !== message.commit
-          || activeComparison.parent !== message.parent
-          || !sameIdentity(activeComparison.currentIdentity, message.currentIdentity)
-          || !sameIdentity(activeComparison.parentIdentity, message.parentIdentity)) {
+        const generation = viewGeneration;
+        const comparisonState = activeComparison;
+        if (!comparisonState
+          || comparisonState.commit !== message.commit
+          || comparisonState.parent !== message.parent
+          || !sameIdentity(comparisonState.currentIdentity, message.currentIdentity)
+          || !sameIdentity(comparisonState.parentIdentity, message.parentIdentity)) {
           throw new Error("This community request no longer matches the active comparison.");
         }
         const [current, parent] = await Promise.all([
@@ -516,7 +537,7 @@ export async function openHistoryPanel(
                 message.commit,
                 message.communityId,
                 graphNodeLimit,
-                activeComparison.currentIdentity
+                comparisonState.currentIdentity
               )
             : undefined,
           message.hasParent
@@ -524,10 +545,11 @@ export async function openHistoryPanel(
                 message.parent,
                 message.communityId,
                 graphNodeLimit,
-                activeComparison.parentIdentity
+                comparisonState.parentIdentity
               )
             : undefined
         ]);
+        if (generation !== viewGeneration || activeComparison !== comparisonState) return;
         await postMessage({
           type: "communityComparison",
           requestId: message.requestId,
@@ -558,7 +580,10 @@ export async function openHistoryPanel(
         if (message.repositoryId !== session.id) {
           throw new Error("The source request belongs to another repository.");
         }
-        await sourceProvider.open(message.commit, message.source);
+        await sourceProvider.open(
+          message.commit,
+          parseHistoricalSourceLocation(message.source)
+        );
       }
     } catch (error) {
       if (message?.type === "buildRevision" && typeof message.commit === "string") {

@@ -95,6 +95,77 @@ describe("ChangeEvidence", () => {
     );
     root.unmount();
   });
+
+  it("shows every retained field for added and removed symbols", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const renderNode = (node: GraphNode) => flushSync(() => root.render(
+      <ChangeEvidence
+        node={node}
+        edges={[]}
+        nodes={new Map([[node.id, node]])}
+        onFocus={vi.fn()}
+        onOpenSource={vi.fn()}
+      />
+    ));
+    const added: GraphNode = {
+      id: "added",
+      label: "Added",
+      community: 7,
+      change: "added",
+      size: 42,
+      learningStatus: "learned",
+      evidence: {
+        after: {
+          id: "added",
+          label: "Added",
+          community: 7,
+          size: 42,
+          learningStatus: "learned"
+        },
+        fields: [
+          { field: "id", after: "added" },
+          { field: "label", after: "Added" },
+          { field: "community", after: 7 },
+          { field: "size", after: 42 },
+          { field: "learningStatus", after: "learned" }
+        ]
+      }
+    };
+
+    renderNode(added);
+    expect(container.querySelector("h3")?.textContent).toBe("Added symbol metadata");
+    expect(container.textContent).toContain("learningStatus");
+    expect(container.textContent).toContain("learned");
+    expect(container.textContent).toContain("size");
+    expect(container.textContent).toContain("42");
+
+    const removed: GraphNode = {
+      ...added,
+      id: "removed",
+      label: "Removed",
+      change: "removed",
+      evidence: {
+        before: {
+          id: "removed",
+          label: "Removed",
+          community: 7,
+          memberCount: 12
+        },
+        fields: [
+          { field: "id", before: "removed" },
+          { field: "label", before: "Removed" },
+          { field: "community", before: 7 },
+          { field: "memberCount", before: 12 }
+        ]
+      }
+    };
+    renderNode(removed);
+    expect(container.querySelector("h3")?.textContent).toBe("Removed symbol metadata");
+    expect(container.textContent).toContain("memberCount");
+    expect(container.textContent).toContain("12");
+    root.unmount();
+  });
 });
 
 describe("ChangedSymbolList", () => {
