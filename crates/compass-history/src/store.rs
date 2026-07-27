@@ -3,13 +3,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use prolly::{
-    BatchBuilder, Config, KeyBuilder, ManifestStoreScan, NamedRootUpdate, Prolly,
+    Config, KeyBuilder, ManifestStoreScan, NamedRootUpdate, Prolly, SortedBatchBuilder,
     TransactionUpdate, Tree,
 };
 use prolly_store_sqlite::{SqliteStore, SqliteStoreConfig};
 
 use crate::keys::root_name;
-use crate::validate::{RealizationTrees, validate_trees, validate_trees_with_artifacts};
+use crate::validate::{
+    RealizationTrees, validate_publication_partition, validate_trees, validate_trees_with_artifacts,
+};
 use crate::{
     ActivityGuard, CommitId, GraphVersion, HistoryError, MaintenanceGuard, PublishRequest,
     PublishedVersion, RealizationId, Repository, StoredTree, StructuralSharing,
@@ -185,14 +187,16 @@ impl HistoryStore {
             })
         };
 
-        let partitioned = request.artifacts.partition(&request.completion)?;
-        let node_count = count(partitioned.nodes.len())?;
-        let edge_count = count(partitioned.edges.len())?;
-        let hyperedge_count = count(partitioned.hyperedges.len())?;
-        let analysis_count = count(partitioned.analysis.len())?;
-        let metadata_count = count(partitioned.metadata.len())?;
-        let program_fact_count = count(partitioned.program_facts.len())?;
-        let program_summary_count = count(partitioned.program_summaries.len())?;
+        let validated = validate_publication_partition(&request.artifacts, &request.completion)?;
+        let report = validated.report;
+        let partitioned = validated.partitioned;
+        let node_count = report.nodes;
+        let edge_count = report.edges;
+        let hyperedge_count = report.hyperedges;
+        let analysis_count = report.analysis_records;
+        let metadata_count = report.metadata_records;
+        let program_fact_count = report.program_fact_records;
+        let program_summary_count = report.program_summary_records;
         let nodes = self.build_tree(partitioned.nodes)?;
         let edges = self.build_tree(partitioned.edges)?;
         let hyperedges = self.build_tree(partitioned.hyperedges)?;
@@ -228,21 +232,6 @@ impl HistoryStore {
             KeyBuilder::new().push_str("manifest").finish(),
             canonical_json_bytes(&serde_json::to_value(&version)?)?,
         )])?;
-
-        validate_trees(
-            &self.prolly,
-            &id,
-            &version,
-            RealizationTrees {
-                nodes: &nodes,
-                edges: &edges,
-                hyperedges: &hyperedges,
-                analysis: &analysis,
-                metadata: &metadata,
-                program_facts: &program_facts,
-                program_summaries: &program_summaries,
-            },
-        )?;
 
         Ok(PreparedPublication {
             id,
@@ -716,9 +705,9 @@ impl HistoryStore {
     }
 
     fn build_tree(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Tree, HistoryError> {
-        let mut builder = BatchBuilder::new(self.prolly.store().clone(), Config::default());
+        let mut builder = SortedBatchBuilder::new(self.prolly.store().clone(), Config::default());
         for (key, value) in entries {
-            builder.add(key, value);
+            builder.add(key, value)?;
         }
         builder.build().map_err(HistoryError::from)
     }
@@ -944,11 +933,6 @@ pub(crate) fn version_root_name(id: &RealizationId, kind: &[u8]) -> Vec<u8> {
 
 fn preferred_root_name(commit: &CommitId) -> Vec<u8> {
     root_name(&[b"compass", b"v1", b"preferred", commit.as_str().as_bytes()])
-}
-
-fn count(value: usize) -> Result<u64, HistoryError> {
-    u64::try_from(value)
-        .map_err(|_| HistoryError::InvalidArtifacts("record count exceeds u64".to_owned()))
 }
 
 fn hex(bytes: &[u8]) -> String {

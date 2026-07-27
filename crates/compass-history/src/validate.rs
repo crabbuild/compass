@@ -5,8 +5,8 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::{
-    CompletedGraphArtifacts, GraphVersion, HistoryError, PartitionedGraph, RealizationId,
-    canonical_json_bytes, node_key,
+    CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts, GraphVersion, HistoryError,
+    PartitionedGraph, RealizationId, canonical_json_bytes, node_key,
 };
 
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
@@ -84,6 +84,50 @@ pub(crate) struct RealizationTrees<'a> {
 pub(crate) struct ValidatedTrees {
     pub report: ValidationReport,
     pub artifacts: CompletedGraphArtifacts,
+}
+
+pub(crate) struct ValidatedPartition {
+    pub report: ValidationReport,
+    pub partitioned: PartitionedGraph,
+}
+
+pub(crate) fn validate_publication_partition(
+    artifacts: &GraphArtifacts,
+    completion: &CompletionEvidence,
+) -> Result<ValidatedPartition, HistoryError> {
+    let partitioned = artifacts.partition(completion)?;
+    let mut problems = Vec::new();
+    let mut total_bytes = 0_u64;
+    for (kind, entries) in [
+        ("nodes", partitioned.nodes.as_slice()),
+        ("edges", partitioned.edges.as_slice()),
+        ("hyperedges", partitioned.hyperedges.as_slice()),
+        ("analysis", partitioned.analysis.as_slice()),
+        ("metadata", partitioned.metadata.as_slice()),
+        ("program facts", partitioned.program_facts.as_slice()),
+        (
+            "program summaries",
+            partitioned.program_summaries.as_slice(),
+        ),
+    ] {
+        validate_partition_records(kind, entries, &mut total_bytes, &mut problems)?;
+    }
+    validate_partition_references(&partitioned.nodes, &artifacts.document, &mut problems)?;
+    if !problems.is_empty() {
+        return Err(HistoryError::InvalidRealization(problems));
+    }
+    Ok(ValidatedPartition {
+        report: ValidationReport {
+            nodes: record_count(&partitioned.nodes),
+            edges: record_count(&partitioned.edges),
+            hyperedges: record_count(&partitioned.hyperedges),
+            analysis_records: record_count(&partitioned.analysis),
+            metadata_records: record_count(&partitioned.metadata),
+            program_fact_records: record_count(&partitioned.program_facts),
+            program_summary_records: record_count(&partitioned.program_summaries),
+        },
+        partitioned,
+    })
 }
 
 pub(crate) fn validate_trees(
@@ -208,22 +252,126 @@ pub(crate) fn validate_trees_with_artifacts(
             None
         }
     };
-    if problems.is_empty() {
-        Ok(ValidatedTrees {
-            report: ValidationReport {
-                nodes: version.node_count,
-                edges: version.edge_count,
-                hyperedges: version.hyperedge_count,
-                analysis_records: version.analysis_count,
-                metadata_records: version.metadata_count,
-                program_fact_records: version.program_fact_count,
-                program_summary_records: version.program_summary_count,
-            },
-            artifacts: artifacts.expect("valid reconstruction is present without problems"),
-        })
-    } else {
-        Err(HistoryError::InvalidRealization(problems))
+    if !problems.is_empty() {
+        return Err(HistoryError::InvalidRealization(problems));
     }
+    let Some(artifacts) = artifacts else {
+        return Err(HistoryError::InvalidRealization(vec![
+            ValidationProblem::ArtifactRegistry(
+                "reconstruction was unavailable after successful validation".to_owned(),
+            ),
+        ]));
+    };
+    Ok(ValidatedTrees {
+        report: ValidationReport {
+            nodes: version.node_count,
+            edges: version.edge_count,
+            hyperedges: version.hyperedge_count,
+            analysis_records: version.analysis_count,
+            metadata_records: version.metadata_count,
+            program_fact_records: version.program_fact_count,
+            program_summary_records: version.program_summary_count,
+        },
+        artifacts,
+    })
+}
+
+fn validate_partition_records(
+    kind: &'static str,
+    entries: &[(Vec<u8>, Vec<u8>)],
+    total_bytes: &mut u64,
+    problems: &mut Vec<ValidationProblem>,
+) -> Result<(), HistoryError> {
+    let count = record_count(entries);
+    if exceeds_limit(count, MAX_RECORDS_PER_TREE) {
+        problems.push(ValidationProblem::ResourceLimit {
+            kind: "records per tree",
+            limit: MAX_RECORDS_PER_TREE,
+            actual: count,
+        });
+    }
+    for pair in entries.windows(2) {
+        if pair[0].0 >= pair[1].0 {
+            problems.push(ValidationProblem::KeyMismatch {
+                kind,
+                key: pair[1].0.clone(),
+            });
+        }
+    }
+    for (key, value) in entries {
+        validate_record_limits(kind, key, value, total_bytes, problems)?;
+    }
+    Ok(())
+}
+
+fn validate_record_limits(
+    kind: &'static str,
+    key: &[u8],
+    value: &[u8],
+    total_bytes: &mut u64,
+    problems: &mut Vec<ValidationProblem>,
+) -> Result<(), HistoryError> {
+    if exceeds_limit(key.len() as u64, MAX_KEY_BYTES as u64) {
+        problems.push(ValidationProblem::ResourceLimit {
+            kind: "key bytes",
+            limit: MAX_KEY_BYTES as u64,
+            actual: key.len() as u64,
+        });
+    }
+    if exceeds_limit(value.len() as u64, MAX_RECORD_VALUE_BYTES as u64) {
+        problems.push(ValidationProblem::ResourceLimit {
+            kind: "record value bytes",
+            limit: MAX_RECORD_VALUE_BYTES as u64,
+            actual: value.len() as u64,
+        });
+    }
+    *total_bytes = total_bytes
+        .saturating_add(key.len() as u64)
+        .saturating_add(value.len() as u64);
+    if exceeds_limit(*total_bytes, MAX_AUTHORITATIVE_BYTES) {
+        problems.push(ValidationProblem::ResourceLimit {
+            kind: "authoritative bytes",
+            limit: MAX_AUTHORITATIVE_BYTES,
+            actual: *total_bytes,
+        });
+    }
+    let envelope = match VersionedValue::from_bytes(value) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(format!(
+                "{kind} record has an invalid envelope: {error}"
+            )));
+            return Ok(());
+        }
+    };
+    let json = match serde_json::from_slice::<Value>(&envelope.payload) {
+        Ok(json) => json,
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(format!(
+                "{kind} record has invalid JSON: {error}"
+            )));
+            return Ok(());
+        }
+    };
+    let depth = json_depth(&json);
+    if exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64) {
+        problems.push(ValidationProblem::ResourceLimit {
+            kind: "JSON depth",
+            limit: MAX_JSON_DEPTH as u64,
+            actual: depth as u64,
+        });
+    }
+    if canonical_json_bytes(&json)? != envelope.payload {
+        problems.push(ValidationProblem::KeyMismatch {
+            kind,
+            key: key.to_vec(),
+        });
+    }
+    Ok(())
+}
+
+fn record_count(entries: &[(Vec<u8>, Vec<u8>)]) -> u64 {
+    u64::try_from(entries.len()).unwrap_or(u64::MAX)
 }
 
 fn scan_tree(
@@ -236,48 +384,7 @@ fn scan_tree(
     let mut entries = Vec::new();
     for entry in manager.range(tree, &[], None)? {
         let (key, value) = entry?;
-        if exceeds_limit(key.len() as u64, MAX_KEY_BYTES as u64) {
-            problems.push(ValidationProblem::ResourceLimit {
-                kind: "key bytes",
-                limit: MAX_KEY_BYTES as u64,
-                actual: key.len() as u64,
-            });
-        }
-        if exceeds_limit(value.len() as u64, MAX_RECORD_VALUE_BYTES as u64) {
-            problems.push(ValidationProblem::ResourceLimit {
-                kind: "record value bytes",
-                limit: MAX_RECORD_VALUE_BYTES as u64,
-                actual: value.len() as u64,
-            });
-        }
-        *total_bytes = total_bytes
-            .saturating_add(key.len() as u64)
-            .saturating_add(value.len() as u64);
-        if exceeds_limit(*total_bytes, MAX_AUTHORITATIVE_BYTES) {
-            problems.push(ValidationProblem::ResourceLimit {
-                kind: "authoritative bytes",
-                limit: MAX_AUTHORITATIVE_BYTES,
-                actual: *total_bytes,
-            });
-        }
-        if let Ok(envelope) = VersionedValue::from_bytes(&value)
-            && let Ok(json) = serde_json::from_slice::<Value>(&envelope.payload)
-        {
-            let depth = json_depth(&json);
-            if exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64) {
-                problems.push(ValidationProblem::ResourceLimit {
-                    kind: "JSON depth",
-                    limit: MAX_JSON_DEPTH as u64,
-                    actual: depth as u64,
-                });
-            }
-            if canonical_json_bytes(&json)? != envelope.payload {
-                problems.push(ValidationProblem::KeyMismatch {
-                    kind,
-                    key: key.clone(),
-                });
-            }
-        }
+        validate_record_limits(kind, &key, &value, total_bytes, problems)?;
         entries.push((key, value));
         if exceeds_limit(entries.len() as u64, MAX_RECORDS_PER_TREE) {
             problems.push(ValidationProblem::ResourceLimit {
@@ -337,6 +444,60 @@ fn validate_references(
         }
     }
     Ok(())
+}
+
+fn validate_partition_references(
+    nodes: &[(Vec<u8>, Vec<u8>)],
+    document: &GraphDocument,
+    problems: &mut Vec<ValidationProblem>,
+) -> Result<(), HistoryError> {
+    for edge in &document.links {
+        for endpoint in [&edge.source, &edge.target] {
+            if !partition_has_node(nodes, endpoint) {
+                problems.push(ValidationProblem::MissingEdgeEndpoint {
+                    edge: canonical_json_bytes(&serde_json::to_value(edge)?)?,
+                    endpoint: endpoint.clone(),
+                });
+            }
+        }
+    }
+    for value in document
+        .graph
+        .get("hyperedges")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            document
+                .extras
+                .get("hyperedges")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        )
+    {
+        for member in ["nodes", "members"]
+            .into_iter()
+            .filter_map(|field| value.get(field).and_then(Value::as_array))
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            if !partition_has_node(nodes, member) {
+                problems.push(ValidationProblem::MissingHyperedgeMember {
+                    hyperedge: canonical_json_bytes(value)?,
+                    member: member.to_owned(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn partition_has_node(nodes: &[(Vec<u8>, Vec<u8>)], node: &str) -> bool {
+    let key = node_key(node);
+    nodes
+        .binary_search_by(|(candidate, _)| candidate.as_slice().cmp(key.as_slice()))
+        .is_ok()
 }
 
 fn json_depth(value: &Value) -> usize {
