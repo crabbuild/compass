@@ -1253,6 +1253,7 @@ fn metadata_rank_key(kind: &str, rank: usize) -> Result<Vec<u8>, HistoryError> {
 }
 
 fn encode_record(schema: &str, value: &Value) -> Result<Vec<u8>, HistoryError> {
+    crate::validate::validate_generated_json(value)?;
     let payload = canonical_json_bytes(value)?;
     VersionedValue::raw(schema, RECORD_VERSION, payload)
         .to_bytes()

@@ -115,7 +115,7 @@ pub(crate) fn validate_publication_partition(
             partitioned.program_summaries.as_slice(),
         ),
     ] {
-        validate_partition_records(kind, entries, &mut total_bytes, &mut problems)?;
+        validate_generated_partition_records(kind, entries, &mut total_bytes, &mut problems);
     }
     if !problems.is_empty() {
         return Err(HistoryError::InvalidRealization(problems));
@@ -280,12 +280,12 @@ pub(crate) fn validate_trees_with_artifacts(
     })
 }
 
-fn validate_partition_records(
+fn validate_generated_partition_records(
     kind: &'static str,
     entries: &[(Vec<u8>, Vec<u8>)],
     total_bytes: &mut u64,
     problems: &mut Vec<ValidationProblem>,
-) -> Result<(), HistoryError> {
+) {
     let count = record_count(entries);
     if exceeds_limit(count, MAX_RECORDS_PER_TREE) {
         problems.push(ValidationProblem::ResourceLimit {
@@ -303,9 +303,8 @@ fn validate_partition_records(
         }
     }
     for (key, value) in entries {
-        validate_record_limits(kind, key, value, total_bytes, problems)?;
+        validate_record_size_limits(key, value, total_bytes, problems);
     }
-    Ok(())
 }
 
 fn validate_record_limits(
@@ -315,6 +314,43 @@ fn validate_record_limits(
     total_bytes: &mut u64,
     problems: &mut Vec<ValidationProblem>,
 ) -> Result<(), HistoryError> {
+    validate_record_size_limits(key, value, total_bytes, problems);
+    let envelope = match VersionedValue::from_bytes(value) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(format!(
+                "{kind} record has an invalid envelope: {error}"
+            )));
+            return Ok(());
+        }
+    };
+    let json = match serde_json::from_slice::<Value>(&envelope.payload) {
+        Ok(json) => json,
+        Err(error) => {
+            problems.push(ValidationProblem::ArtifactRegistry(format!(
+                "{kind} record has invalid JSON: {error}"
+            )));
+            return Ok(());
+        }
+    };
+    if let Some(problem) = json_depth_problem(&json) {
+        problems.push(problem);
+    }
+    if canonical_json_bytes(&json)? != envelope.payload {
+        problems.push(ValidationProblem::KeyMismatch {
+            kind,
+            key: key.to_vec(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_record_size_limits(
+    key: &[u8],
+    value: &[u8],
+    total_bytes: &mut u64,
+    problems: &mut Vec<ValidationProblem>,
+) {
     if exceeds_limit(key.len() as u64, MAX_KEY_BYTES as u64) {
         problems.push(ValidationProblem::ResourceLimit {
             kind: "key bytes",
@@ -339,39 +375,22 @@ fn validate_record_limits(
             actual: *total_bytes,
         });
     }
-    let envelope = match VersionedValue::from_bytes(value) {
-        Ok(envelope) => envelope,
-        Err(error) => {
-            problems.push(ValidationProblem::ArtifactRegistry(format!(
-                "{kind} record has an invalid envelope: {error}"
-            )));
-            return Ok(());
-        }
-    };
-    let json = match serde_json::from_slice::<Value>(&envelope.payload) {
-        Ok(json) => json,
-        Err(error) => {
-            problems.push(ValidationProblem::ArtifactRegistry(format!(
-                "{kind} record has invalid JSON: {error}"
-            )));
-            return Ok(());
-        }
-    };
-    let depth = json_depth(&json);
-    if exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64) {
-        problems.push(ValidationProblem::ResourceLimit {
-            kind: "JSON depth",
-            limit: MAX_JSON_DEPTH as u64,
-            actual: depth as u64,
-        });
-    }
-    if canonical_json_bytes(&json)? != envelope.payload {
-        problems.push(ValidationProblem::KeyMismatch {
-            kind,
-            key: key.to_vec(),
-        });
+}
+
+pub(crate) fn validate_generated_json(json: &Value) -> Result<(), HistoryError> {
+    if let Some(problem) = json_depth_problem(json) {
+        return Err(HistoryError::InvalidRealization(vec![problem]));
     }
     Ok(())
+}
+
+fn json_depth_problem(json: &Value) -> Option<ValidationProblem> {
+    let depth = json_depth(json);
+    exceeds_limit(depth as u64, MAX_JSON_DEPTH as u64).then_some(ValidationProblem::ResourceLimit {
+        kind: "JSON depth",
+        limit: MAX_JSON_DEPTH as u64,
+        actual: depth as u64,
+    })
 }
 
 fn record_count(entries: &[(Vec<u8>, Vec<u8>)]) -> u64 {

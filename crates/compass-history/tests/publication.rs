@@ -6,7 +6,7 @@ use std::sync::Arc;
 use compass_analysis::{AnalysisBundle, analyze};
 use compass_history::{
     CommitId, CompletedGraphArtifacts, CompletionEvidence, ExtractionFingerprint, GraphArtifacts,
-    HistoryStore, PublishRequest, Repository,
+    HistoryStore, MAX_JSON_DEPTH, PublishRequest, Repository,
 };
 use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
@@ -274,6 +274,23 @@ fn validation_rejects_missing_endpoints_before_catalog_publication()
         Err(error) => error,
     };
     assert!(error.to_string().contains("MissingHyperedgeMember"));
+
+    let mut excessive_depth = request('a', false)?;
+    let mut nested = serde_json::Value::Null;
+    for _ in 0..MAX_JSON_DEPTH {
+        nested = json!({"next": nested});
+    }
+    excessive_depth
+        .artifacts
+        .document
+        .graph
+        .insert("nested".to_owned(), nested);
+    let error = match history.publish(excessive_depth) {
+        Ok(_) => return Err("excessive JSON depth unexpectedly published".into()),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("JSON depth"));
+
     assert_eq!(
         history.plan_gc(false)?.candidate_nodes,
         initial_nodes,
