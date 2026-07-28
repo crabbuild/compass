@@ -1,5 +1,6 @@
 mod python;
 mod routes;
+mod typescript;
 
 pub use routes::{
     FrameworkResolutionError, ResolvedRoute, RouteStage, RouteStageRole, publish_resolved_routes,

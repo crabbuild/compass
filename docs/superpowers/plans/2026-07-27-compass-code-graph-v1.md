@@ -909,23 +909,23 @@ WebSocket, page component, endpoint, and route-middleware roles.
 
 **Implementation:**
 
-- [ ] Detect Express `app`/`router` verb calls and preserve every handler in
+- [x] Detect Express `app`/`router` verb calls and preserve every handler in
   the middleware chain in source order.
-- [ ] Detect NestJS `@Controller` plus HTTP method decorators; GraphQL
+- [x] Detect NestJS `@Controller` plus HTTP method decorators; GraphQL
   `@Resolver`, `@Query`, and `@Mutation`; `@MessagePattern`,
   `@EventPattern`, and `@SubscribeMessage`. HTTP and GraphQL operations
   publish route nodes and `routes_to` edges with distinct operation types;
   message, event, and WebSocket facts feed Task 12.
-- [ ] Detect React Router route elements/configuration and Vue Router route
+- [x] Detect React Router route elements/configuration and Vue Router route
   objects only when path and component/loader/action fields match the
   supported AST shape.
-- [ ] Derive SvelteKit, Nuxt, and Astro page/endpoint routes from
+- [x] Derive SvelteKit, Nuxt, and Astro page/endpoint routes from
   repository-relative paths. Support `[param]` and `[...rest]`, preserve the
   original convention path, and use `convention` provenance.
-- [ ] Emit Nuxt server endpoints and route middleware separately from page
+- [x] Emit Nuxt server endpoints and route middleware separately from page
   components. Resolve imported components and handlers through the existing
   TypeScript import/export graph.
-- [ ] Mark reflective NestJS wiring heuristic only when its registration site
+- [x] Mark reflective NestJS wiring heuristic only when its registration site
   is known; leave arbitrary computed router calls unresolved.
 
 **Contract produced:** JavaScript ecosystems share route semantics while

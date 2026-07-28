@@ -40,7 +40,13 @@ impl Engine {
             ExtractorKind::Solution => crate::dotnet_project::extract_solution(path),
             ExtractorKind::ProjectXml => crate::dotnet_project::extract_project(path),
             ExtractorKind::Xaml => crate::xaml::extract(self, path),
-            ExtractorKind::Template => crate::templates::extract(self, path, spec.name),
+            ExtractorKind::Template => {
+                let mut extraction = crate::templates::extract(self, path, spec.name)?;
+                if let Ok(source) = fs::read(path) {
+                    crate::frameworks::detect_template_file_route(path, &source, &mut extraction);
+                }
+                Ok(extraction)
+            }
         }
     }
 
