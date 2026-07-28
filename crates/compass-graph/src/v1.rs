@@ -1,13 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
     BuildMetadata, ConfigNodeDetails, CoverageRecord, DatabaseNodeDetails, EdgeDetails, EdgeKind,
-    EdgeRecord, FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
-    ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole,
-    QueryNodeDetails, ResourceKind, ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails,
-    RouteStage, SchemaNodeDetails, SymbolNodeDetails,
+    EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument,
+    GraphMetadata, ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind,
+    NodeRecord, NodeRole, QueryNodeDetails, ResourceKind, ResourceNodeDetails, RouteEdgeDetails,
+    RouteNodeDetails, RouteStage, SchemaNodeDetails, SymbolNodeDetails,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -19,6 +20,7 @@ use compass_model::provenance::{
 };
 use compass_model::{GraphError, validate_code_graph};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug)]
 pub struct BuildEvidence {
@@ -40,6 +42,85 @@ impl BuildEvidence {
             diagnostics: Vec::new(),
         }
     }
+
+    /// Derive deterministic build and file evidence from resolved raw facts.
+    pub fn from_extraction(
+        repository_root: impl Into<PathBuf>,
+        extraction: &Extraction,
+        configuration_digest: impl Into<String>,
+    ) -> Result<Self, GraphError> {
+        let repository_root = repository_root.into();
+        let mut paths = BTreeSet::new();
+        for attributes in extraction
+            .nodes
+            .iter()
+            .map(|node| &node.attributes)
+            .chain(extraction.edges.iter().map(|edge| &edge.attributes))
+        {
+            if let Some(path) = optional_string(attributes, "source_file") {
+                paths.insert(portable_path(&path, &repository_root)?);
+            }
+        }
+
+        let mut source_tree = Sha256::new();
+        let mut files = Vec::with_capacity(paths.len());
+        for path in paths {
+            let absolute = repository_root.join(&path);
+            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                path: absolute,
+                source,
+            })?;
+            let content_digest = sha256_prefixed(&bytes);
+            source_tree.update((path.len() as u64).to_le_bytes());
+            source_tree.update(path.as_bytes());
+            source_tree.update((content_digest.len() as u64).to_le_bytes());
+            source_tree.update(content_digest.as_bytes());
+            files.push(FileRecord {
+                id: file_id(&path),
+                path,
+                language: None,
+                content_digest,
+                byte_size: bytes.len() as u64,
+                generated: false,
+                extraction_status: ExtractionStatus::Extracted,
+                extractor_versions: vec![format!(
+                    "compass-languages/{}",
+                    env!("CARGO_PKG_VERSION")
+                )],
+                coverage: Vec::new(),
+                diagnostics: Vec::new(),
+            });
+        }
+
+        let configuration_digest = configuration_digest.into();
+        let source_tree_digest = format!("sha256:{:x}", source_tree.finalize());
+        let schema_fingerprint = schema_fingerprint();
+        let mut generation = Sha256::new();
+        for value in [
+            compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
+            env!("CARGO_PKG_VERSION"),
+            &schema_fingerprint,
+            &source_tree_digest,
+            &configuration_digest,
+        ] {
+            generation.update((value.len() as u64).to_le_bytes());
+            generation.update(value.as_bytes());
+        }
+        let generation_id = format!("sha256:{:x}", generation.finalize());
+        Ok(Self {
+            repository_root,
+            build: BuildMetadata {
+                builder_version: env!("CARGO_PKG_VERSION").to_owned(),
+                schema_fingerprint,
+                source_tree_digest,
+                configuration_digest,
+                generation_id,
+            },
+            files,
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    }
 }
 
 /// Publish resolved raw facts as a validated, deterministic Compass graph v1 document.
@@ -48,20 +129,7 @@ pub fn normalize_v1(
     mut evidence: BuildEvidence,
 ) -> Result<GraphDocument, GraphError> {
     normalize_file_inventory(&mut evidence.files, &evidence.repository_root)?;
-    let file_facts = evidence
-        .files
-        .iter()
-        .map(|file| {
-            (
-                file.path.clone(),
-                PublishedFileFacts {
-                    content_digest: file.content_digest.clone(),
-                    byte_size: file.byte_size,
-                    generated: file.generated,
-                },
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    let file_facts = published_file_facts(&evidence)?;
 
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
     let mut nodes = Vec::with_capacity(extraction.nodes.len());
@@ -97,6 +165,7 @@ pub fn normalize_v1(
             target,
             index,
             &evidence.repository_root,
+            &file_facts,
         )?);
     }
 
@@ -179,7 +248,7 @@ fn normalize_node(
         .unwrap_or_else(|| name.clone());
     let language = optional_any_string(&raw.attributes, &["language", "lang"]);
     let framework = optional_string(&raw.attributes, "framework");
-    let source = raw_anchor(&raw.attributes, root)?;
+    let source = raw_anchor(&raw.attributes, root, file_facts)?;
     let source_path = match &source {
         Some(anchor) => anchor.file.clone(),
         None => optional_string(&raw.attributes, "source_file")
@@ -251,12 +320,13 @@ fn normalize_edge(
     target: &str,
     index: usize,
     root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
 ) -> Result<EdgeRecord, GraphError> {
     let owner = format!("edge[{index}]");
     let raw_relation = required_string(&raw.attributes, "relation", &owner)?;
     let (kind, alias_rule, heuristic) = map_edge_kind(&raw_relation)
         .ok_or_else(|| raw_error(&owner, &format!("unknown raw relation {raw_relation:?}")))?;
-    let relationship_site = raw_anchor(&raw.attributes, root)?;
+    let relationship_site = raw_anchor(&raw.attributes, root, file_facts)?;
     let normalization_rule = heuristic
         .then_some("indirect-call-resolution")
         .or(alias_rule);
@@ -326,6 +396,9 @@ fn normalize_provenance(
     };
     let rule = optional_string(attributes, "rule")
         .or_else(|| normalization_rule.map(str::to_owned))
+        .or_else(|| {
+            (raw_origin.as_deref() == Some("semantic")).then(|| "semantic-extraction".to_owned())
+        })
         .filter(|value| !value.trim().is_empty());
     let origin = match raw_origin.as_deref() {
         None if normalization_rule == Some("indirect-call-resolution") => EvidenceOrigin::Heuristic,
@@ -337,6 +410,7 @@ fn normalize_provenance(
         Some("config" | "configuration") => EvidenceOrigin::Config,
         Some("convention") => EvidenceOrigin::Convention,
         Some("artifact" | "scip") => EvidenceOrigin::Artifact,
+        Some("semantic") => EvidenceOrigin::Heuristic,
         Some("heuristic") => EvidenceOrigin::Heuristic,
         Some(value) => {
             return Err(raw_error(
@@ -424,7 +498,7 @@ fn map_node_kind(
         "constructor" => NodeKind::Constructor,
         "property" => NodeKind::Property,
         "field" => NodeKind::Field,
-        "variable" => NodeKind::Variable,
+        "variable" | "symbol" => NodeKind::Variable,
         "constant" => NodeKind::Constant,
         "parameter" => NodeKind::Parameter,
         "import" => NodeKind::Import,
@@ -735,6 +809,7 @@ fn node_identity(
 fn raw_anchor(
     attributes: &Map<String, Value>,
     root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
 ) -> Result<Option<SourceAnchor>, GraphError> {
     if let Some(value) = attributes
         .get("source_anchor")
@@ -754,23 +829,31 @@ fn raw_anchor(
     let Some(source_file) = optional_string(attributes, "source_file") else {
         return Ok(None);
     };
-    let Some((start_byte, end_byte)) =
-        optional_u64(attributes, "start_byte").zip(optional_u64(attributes, "end_byte"))
-    else {
-        return Ok(None);
-    };
+    let source_file = portable_path(&source_file, root)?;
     let start_line = optional_u32(attributes, "line_start")
         .or_else(|| source_location_line(attributes))
         .unwrap_or(1);
     let end_line = optional_u32(attributes, "line_end").unwrap_or(start_line);
+    let start_column = optional_u32(attributes, "column_start").unwrap_or(0);
+    let end_column = optional_u32(attributes, "column_end");
+    let explicit = optional_u64(attributes, "start_byte").zip(optional_u64(attributes, "end_byte"));
+    let derived = file_facts
+        .get(&source_file)
+        .and_then(|file| file.byte_range(start_line, start_column, end_line, end_column));
+    let Some((start_byte, end_byte, end_column)) = explicit
+        .map(|(start, end)| (start, end, end_column.unwrap_or(start_column)))
+        .or(derived)
+    else {
+        return Ok(None);
+    };
     Ok(Some(SourceAnchor {
-        file: portable_path(&source_file, root)?,
+        file: source_file,
         start_byte,
         end_byte,
         start_line,
-        start_column: optional_u32(attributes, "column_start").unwrap_or(0),
+        start_column,
         end_line,
-        end_column: optional_u32(attributes, "column_end").unwrap_or(0),
+        end_column,
     }))
 }
 
@@ -891,6 +974,177 @@ struct PublishedFileFacts {
     content_digest: String,
     byte_size: u64,
     generated: bool,
+    line_starts: Vec<u64>,
+}
+
+impl PublishedFileFacts {
+    fn byte_range(
+        &self,
+        start_line: u32,
+        start_column: u32,
+        end_line: u32,
+        end_column: Option<u32>,
+    ) -> Option<(u64, u64, u32)> {
+        let start_index = usize::try_from(start_line.checked_sub(1)?).ok()?;
+        let end_index = usize::try_from(end_line.checked_sub(1)?).ok()?;
+        let line_start = *self.line_starts.get(start_index)?;
+        let next_line = self
+            .line_starts
+            .get(end_index.saturating_add(1))
+            .copied()
+            .unwrap_or(self.byte_size);
+        let end_line_start = *self.line_starts.get(end_index)?;
+        let maximum_column = u32::try_from(next_line.saturating_sub(end_line_start)).ok()?;
+        let end_column = end_column.unwrap_or(maximum_column).min(maximum_column);
+        let start_byte = line_start.saturating_add(u64::from(start_column));
+        let end_byte = end_line_start.saturating_add(u64::from(end_column));
+        (start_byte <= end_byte && end_byte <= self.byte_size)
+            .then_some((start_byte, end_byte, end_column))
+    }
+}
+
+fn published_file_facts(
+    evidence: &BuildEvidence,
+) -> Result<HashMap<String, PublishedFileFacts>, GraphError> {
+    evidence
+        .files
+        .iter()
+        .map(|file| {
+            let absolute = evidence.repository_root.join(&file.path);
+            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                path: absolute,
+                source,
+            })?;
+            if bytes.len() as u64 != file.byte_size
+                || sha256_prefixed(&bytes) != file.content_digest
+            {
+                return Err(raw_error(
+                    &file.path,
+                    "file inventory digest or byte size does not match the source tree",
+                ));
+            }
+            let mut line_starts = vec![0];
+            line_starts.extend(bytes.iter().enumerate().filter_map(|(index, byte)| {
+                if *byte == b'\n' {
+                    u64::try_from(index).ok().map(|value| value + 1)
+                } else {
+                    None
+                }
+            }));
+            Ok((
+                file.path.clone(),
+                PublishedFileFacts {
+                    content_digest: file.content_digest.clone(),
+                    byte_size: file.byte_size,
+                    generated: file.generated,
+                    line_starts,
+                },
+            ))
+        })
+        .collect()
+}
+
+fn sha256_prefixed(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn schema_fingerprint() -> String {
+    let mut vocabulary = BTreeMap::new();
+    vocabulary.insert(
+        "nodes",
+        [
+            "file",
+            "module",
+            "package",
+            "namespace",
+            "class",
+            "struct",
+            "interface",
+            "trait",
+            "protocol",
+            "enum",
+            "enum_member",
+            "type_alias",
+            "function",
+            "method",
+            "constructor",
+            "property",
+            "field",
+            "variable",
+            "constant",
+            "parameter",
+            "import",
+            "export",
+            "macro",
+            "annotation",
+            "route",
+            "component",
+            "event",
+            "message",
+            "topic",
+            "queue",
+            "job",
+            "resource",
+            "schema",
+            "query",
+            "migration",
+            "config_key",
+            "database",
+            "database_schema",
+            "database_table",
+            "database_view",
+            "database_column",
+            "database_index",
+            "database_constraint",
+            "database_procedure",
+            "database_trigger",
+        ]
+        .as_slice(),
+    );
+    vocabulary.insert(
+        "edges",
+        [
+            "contains",
+            "calls",
+            "imports",
+            "exports",
+            "extends",
+            "implements",
+            "references",
+            "type_of",
+            "returns",
+            "instantiates",
+            "overrides",
+            "decorates",
+            "routes_to",
+            "reads",
+            "writes",
+            "aliases",
+            "registers",
+            "handles",
+            "publishes",
+            "subscribes",
+            "produces",
+            "consumes",
+            "schedules",
+            "triggers",
+            "tests",
+            "depends_on",
+            "documents",
+            "maps_to",
+        ]
+        .as_slice(),
+    );
+    let mut digest = Sha256::new();
+    for (category, values) in vocabulary {
+        digest.update((category.len() as u64).to_le_bytes());
+        digest.update(category.as_bytes());
+        for value in values {
+            digest.update((value.len() as u64).to_le_bytes());
+            digest.update(value.as_bytes());
+        }
+    }
+    format!("sha256:{:x}", digest.finalize())
 }
 
 fn raw_error(record: &str, detail: &str) -> GraphError {

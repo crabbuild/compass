@@ -1,11 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{BuildMetadata, EdgeKind, ExtractionStatus, FileRecord, NodeKind};
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
-fn build_evidence(root: &Path) -> BuildEvidence {
+fn build_evidence(root: &Path) -> Result<BuildEvidence, Box<dyn std::error::Error>> {
+    let bytes = vec![b'x'; 500];
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), &bytes)?;
     let mut evidence = BuildEvidence::new(
         root,
         BuildMetadata {
@@ -20,15 +25,15 @@ fn build_evidence(root: &Path) -> BuildEvidence {
         id: "raw".to_owned(),
         path: root.join("src/lib.rs").to_string_lossy().into_owned(),
         language: Some("rust".to_owned()),
-        content_digest: "sha256:test".to_owned(),
-        byte_size: 500,
+        content_digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
+        byte_size: bytes.len() as u64,
         generated: false,
         extraction_status: ExtractionStatus::Extracted,
         extractor_versions: vec!["test".to_owned()],
         coverage: Vec::new(),
         diagnostics: Vec::new(),
     });
-    evidence
+    Ok(evidence)
 }
 
 fn anchor(root: &Path, start: u64) -> Value {
@@ -81,12 +86,14 @@ fn extraction(root: &Path) -> Extraction {
 #[test]
 fn normalization_is_root_portable_order_independent_and_auditable()
 -> Result<(), Box<dyn std::error::Error>> {
-    let left_root = PathBuf::from("/tmp/checkout-a");
-    let right_root = PathBuf::from("/opt/checkout-b");
-    let left = normalize_v1(extraction(&left_root), build_evidence(&left_root))?;
-    let mut reordered = extraction(&right_root);
+    let left_directory = tempfile::tempdir()?;
+    let right_directory = tempfile::tempdir()?;
+    let left_root = left_directory.path();
+    let right_root = right_directory.path();
+    let left = normalize_v1(extraction(left_root), build_evidence(left_root)?)?;
+    let mut reordered = extraction(right_root);
     reordered.nodes.reverse();
-    let right = normalize_v1(reordered, build_evidence(&right_root))?;
+    let right = normalize_v1(reordered, build_evidence(right_root)?)?;
 
     assert_eq!(left, right);
     assert_eq!(left.nodes[0].kind, NodeKind::Function);
@@ -102,34 +109,110 @@ fn normalization_is_root_portable_order_independent_and_auditable()
 
 #[test]
 fn normalization_rejects_unknown_aliases_and_missing_wiring_sites() {
-    let root = PathBuf::from("/tmp/checkout");
-    let mut unknown = extraction(&root);
+    let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+    let root = directory.path();
+    let mut unknown = extraction(root);
     unknown.edges[0]
         .attributes
         .insert("relation".to_owned(), json!("approximately_calls"));
-    assert!(normalize_v1(unknown, build_evidence(&root)).is_err());
+    let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
+    assert!(normalize_v1(unknown, evidence).is_err());
 
-    let mut missing_site = extraction(&root);
+    let mut missing_site = extraction(root);
     missing_site.edges[0].attributes.remove("source_anchor");
-    assert!(normalize_v1(missing_site, build_evidence(&root)).is_err());
+    let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
+    assert!(normalize_v1(missing_site, evidence).is_err());
 }
 
 #[test]
 fn normalization_maps_declared_raw_aliases_without_publishing_them()
 -> Result<(), Box<dyn std::error::Error>> {
-    let root = PathBuf::from("/tmp/checkout");
-    let mut aliased = extraction(&root);
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut aliased = extraction(root);
     aliased.edges[0]
         .attributes
         .insert("relation".to_owned(), json!("imports_from"));
     aliased.edges[0]
         .attributes
         .insert("confidence".to_owned(), json!("EXTRACTED"));
-    let document = normalize_v1(aliased, build_evidence(&root))?;
+    let document = normalize_v1(aliased, build_evidence(root)?)?;
     assert_eq!(document.links[0].kind, EdgeKind::Imports);
     let serialized = serde_json::to_string(&document)?;
     assert!(!serialized.contains("\"kind\":\"imports_from\""));
     assert!(!serialized.contains("\"relation\""));
     assert!(serialized.contains("raw-relation:imports_from"));
+    Ok(())
+}
+
+#[test]
+fn build_evidence_derives_digests_generation_and_byte_anchors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), b"fn a() {}\nfn b() {}\n")?;
+    let attributes = |name: &str, line: u64| {
+        Map::from_iter([
+            ("label".to_owned(), json!(name)),
+            ("qualified_name".to_owned(), json!(format!("crate::{name}"))),
+            ("symbol_kind".to_owned(), json!("function")),
+            ("file_type".to_owned(), json!("code")),
+            ("language".to_owned(), json!("rust")),
+            ("source_file".to_owned(), json!("src/lib.rs")),
+            ("line_start".to_owned(), json!(line)),
+            ("line_end".to_owned(), json!(line)),
+            ("_origin".to_owned(), json!("ast")),
+        ])
+    };
+    let extraction = Extraction {
+        nodes: vec![
+            RawNodeRecord {
+                id: "raw:a".to_owned(),
+                attributes: attributes("a", 1),
+            },
+            RawNodeRecord {
+                id: "raw:b".to_owned(),
+                attributes: attributes("b", 2),
+            },
+        ],
+        edges: vec![RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "raw:b".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("source_file".to_owned(), json!("src/lib.rs")),
+                ("line_start".to_owned(), json!(1)),
+                ("line_end".to_owned(), json!(1)),
+                ("_origin".to_owned(), json!("ast")),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:config")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    assert_eq!(graph.graph.files.len(), 1);
+    assert!(graph.graph.files[0].content_digest.starts_with("sha256:"));
+    assert!(graph.graph.build.generation_id.starts_with("sha256:"));
+    let a = graph.nodes.iter().find(|node| node.name == "a");
+    let b = graph.nodes.iter().find(|node| node.name == "b");
+    assert_eq!(
+        a.and_then(|node| node.source.as_ref())
+            .map(|anchor| anchor.start_byte),
+        Some(0)
+    );
+    assert_eq!(
+        b.and_then(|node| node.source.as_ref())
+            .map(|anchor| anchor.start_byte),
+        Some(10)
+    );
+    assert_eq!(
+        graph.links[0]
+            .relationship_site
+            .as_ref()
+            .map(|anchor| anchor.end_byte),
+        Some(10)
+    );
     Ok(())
 }
