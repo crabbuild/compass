@@ -74,6 +74,7 @@ fn projections_expose_only_registered_derived_properties() {
         evidence: vec![evidence()],
         weight: Some(1.0),
         context: Some("call".to_owned()),
+        deferred: false,
         diagnostics: Vec::new(),
     };
     assert_eq!(edge.string("relation"), "calls");

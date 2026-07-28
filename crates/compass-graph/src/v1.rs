@@ -296,6 +296,11 @@ fn normalize_edge(
         evidence,
         weight: optional_f64(&raw.attributes, "weight"),
         context: optional_string(&raw.attributes, "context"),
+        deferred: raw
+            .attributes
+            .get("deferred")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         diagnostics: Vec::new(),
     })
 }

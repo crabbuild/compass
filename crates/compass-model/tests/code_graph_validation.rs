@@ -92,6 +92,7 @@ fn document() -> GraphDocument {
         evidence: vec![evidence()],
         weight: None,
         context: None,
+        deferred: false,
         diagnostics: Vec::new(),
     });
     document

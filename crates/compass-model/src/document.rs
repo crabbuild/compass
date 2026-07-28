@@ -133,6 +133,11 @@ impl EdgeRecord {
     }
 
     #[must_use]
+    pub fn boolean(&self, key: &str) -> Option<bool> {
+        self.attributes.get(key).and_then(Value::as_bool)
+    }
+
+    #[must_use]
     pub fn property(&self, key: &str) -> Option<Value> {
         match key {
             "source" => Some(Value::String(self.source.clone())),

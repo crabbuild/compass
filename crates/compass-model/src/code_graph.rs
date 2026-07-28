@@ -634,6 +634,8 @@ pub struct EdgeRecord {
     pub weight: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub deferred: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<GraphDiagnostic>,
 }
@@ -672,6 +674,11 @@ impl EdgeRecord {
     }
 
     #[must_use]
+    pub fn boolean(&self, key: &str) -> Option<bool> {
+        self.property(key).and_then(|value| value.as_bool())
+    }
+
+    #[must_use]
     pub fn property(&self, key: &str) -> Option<Value> {
         match key {
             "id" | "key" => Some(Value::String(self.id.clone())),
@@ -703,6 +710,7 @@ impl EdgeRecord {
                 .map(|evidence| Value::String(evidence.origin.as_str().to_owned())),
             "weight" => self.weight.map(Value::from),
             "context" => self.context.clone().map(Value::String),
+            "deferred" => self.deferred.then_some(Value::Bool(true)),
             _ => None,
         }
     }
@@ -922,6 +930,7 @@ const EDGE_PROPERTY_KEYS: &[&str] = &[
     "_origin",
     "weight",
     "context",
+    "deferred",
 ];
 
 pub struct NodePropertyProjection<'a> {
@@ -980,6 +989,10 @@ fn value_as_python_string(value: &Value) -> Option<String> {
         Value::Number(value) => Some(value.to_string()),
         Value::Array(_) | Value::Object(_) => Some(value.to_string()),
     }
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Strict Compass records inside a NetworkX node-link envelope.
