@@ -61,11 +61,9 @@ created earlier in this plan, “Modify” means the file exists by that point.
 - `explore` returns source only when the current file digest matches the
   digest recorded in the graph.
 - CLI, MCP, viewer, and VS Code consume the same `compass.query/1` semantics.
-- Do not change Graphify or invoke Graphify’s TypeScript CodeGraph at runtime.
+- Keep implementation, validation, and release qualification Compass-native.
 - Preserve unrelated worktree changes, especially
   `editors/vscode/package.json` and the call-graph hardening documents.
-- After any task that changes code, run `graphify update .` from
-  `/Users/haipingfu/graphify` after the task’s Compass verification succeeds.
 
 ---
 
@@ -1715,13 +1713,6 @@ and platform claim.
 ```bash
 ./scripts/qualify_code_graph_v1.sh \
   --repositories tests/qualification/code-graph-v1-repositories.toml
-```
-
-- Run the outer graph refresh after the final code change:
-
-```bash
-cd /Users/haipingfu/graphify
-graphify update .
 ```
 
 **Done when:** Both qualification modes exit 0, the evidence report contains

@@ -27,9 +27,8 @@ The first release includes:
   extension;
 - a hard cutover from the current unversioned graph artifact.
 
-Graphify and the embedded TypeScript CodeGraph are not runtime dependencies.
-Their behavior may inform fixtures and expected outcomes, but Compass owns the
-new implementation and contract.
+Compass owns the implementation, contract, fixtures, qualification evidence,
+and release lifecycle end to end.
 
 ## Product goals
 
@@ -48,8 +47,6 @@ new implementation and contract.
 
 ## Non-goals
 
-- Enhancing or changing Graphify.
-- Invoking or shipping the embedded TypeScript CodeGraph as part of Compass.
 - Replacing Program IR with the structural graph.
 - Treating numeric heuristic scores as calibrated probabilities.
 - Using an LLM to create structural graph facts.
@@ -61,7 +58,6 @@ new implementation and contract.
 ## Architectural approach
 
 Compass will implement native Rust framework and domain intelligence packs.
-The embedded TypeScript CodeGraph is a reference oracle only.
 
 ```text
 compass-languages
