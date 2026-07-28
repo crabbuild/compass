@@ -5,6 +5,7 @@ import { CallGraphResponseSchema } from "@compass/viewer/contracts/callGraph";
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
 import type { RepositorySession } from "../workspace/repositorySession";
 import {
+  callGraphCommandArguments,
   callGraphExpansionArguments,
   callGraphRootArguments
 } from "./callGraphArguments";
@@ -27,7 +28,6 @@ export class CallGraphPanel {
     }
     const byte = utf8ByteAt(editor.document, editor.selection.active);
     const line = editor.selection.active.line + 1;
-    const hasProgram = await fileExists(session.programPath);
     const panel = vscode.window.createWebviewPanel(
       "compass.callGraph",
       `Compass Calls — ${path.basename(relative)}`,
@@ -91,15 +91,7 @@ export class CallGraphPanel {
       const abort = () => controller.abort();
       panelController.signal.addEventListener("abort", abort, { once: true });
       try {
-        const graphArgs = [
-          "call-graph",
-          ...rootArgs,
-          "--max-nodes", "500",
-          "--max-edges", "1000",
-          "--graph", session.graphPath,
-          ...(hasProgram ? ["--program", session.programPath] : []),
-          "--format", "json"
-        ];
+        const graphArgs = callGraphCommandArguments(rootArgs, session.graphPath);
         const graph = await session.processes.runJson(
           session.root,
           graphArgs,
@@ -131,15 +123,6 @@ export class CallGraphPanel {
 
 function isDirection(value: unknown): value is CallDirection {
   return value === "callers" || value === "callees" || value === "both";
-}
-
-async function fileExists(file: string): Promise<boolean> {
-  try {
-    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(file));
-    return (stat.type & vscode.FileType.File) !== 0;
-  } catch {
-    return false;
-  }
 }
 
 function userFacingError(message: string): string {

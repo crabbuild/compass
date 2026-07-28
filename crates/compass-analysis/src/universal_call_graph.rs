@@ -214,8 +214,8 @@ pub fn build_universal_call_graph(
         .collect::<Vec<_>>();
     if edges.len() > request.max_edges {
         for edge in &edges[request.max_edges..] {
-            continuations.insert(edge.source.clone());
-            continuations.insert(edge.target.clone());
+            insert_continuation(&mut continuations, edge.source.clone(), request.max_nodes);
+            insert_continuation(&mut continuations, edge.target.clone(), request.max_nodes);
         }
         edges.truncate(request.max_edges);
         truncated = true;
@@ -226,6 +226,7 @@ pub fn build_universal_call_graph(
         .collect::<Vec<_>>();
     let continuation_records = continuations
         .into_iter()
+        .take(request.max_nodes)
         .filter(|symbol| symbol != &root)
         .map(|symbol| UniversalCallContinuation {
             symbol,
@@ -489,15 +490,34 @@ fn traverse(
     edges: &[UniversalCallEdge],
     request: &UniversalCallGraphRequest,
 ) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut adjacency = BTreeMap::<&str, Vec<usize>>::new();
+    for (index, edge) in edges.iter().enumerate() {
+        match request.direction {
+            CallGraphDirection::Callers => {
+                adjacency.entry(&edge.target).or_default().push(index);
+            }
+            CallGraphDirection::Callees => {
+                adjacency.entry(&edge.source).or_default().push(index);
+            }
+            CallGraphDirection::Both => {
+                adjacency.entry(&edge.source).or_default().push(index);
+                if edge.target != edge.source {
+                    adjacency.entry(&edge.target).or_default().push(index);
+                }
+            }
+        }
+    }
+
     let mut selected = BTreeSet::from([root.to_owned()]);
     let mut queue = VecDeque::from([(root.to_owned(), 0_u32)]);
     let mut continuations = BTreeSet::new();
     while let Some((symbol, level)) = queue.pop_front() {
-        for edge in edges.iter().filter(|edge| match request.direction {
-            CallGraphDirection::Callers => edge.target == symbol,
-            CallGraphDirection::Callees => edge.source == symbol,
-            CallGraphDirection::Both => edge.source == symbol || edge.target == symbol,
-        }) {
+        for edge in adjacency
+            .get(symbol.as_str())
+            .into_iter()
+            .flatten()
+            .map(|index| &edges[*index])
+        {
             let next = if edge.source == symbol {
                 &edge.target
             } else {
@@ -505,8 +525,15 @@ fn traverse(
             };
             if level >= request.depth {
                 if nodes.contains_key(next) {
-                    continuations.insert(next.clone());
+                    insert_continuation(&mut continuations, next.clone(), request.max_nodes);
                 }
+                continue;
+            }
+            if selected.contains(next) {
+                continue;
+            }
+            if selected.len() >= request.max_nodes {
+                insert_continuation(&mut continuations, next.clone(), request.max_nodes);
                 continue;
             }
             if selected.insert(next.clone()) {
@@ -515,6 +542,12 @@ fn traverse(
         }
     }
     (selected, continuations)
+}
+
+fn insert_continuation(continuations: &mut BTreeSet<String>, symbol: String, limit: usize) {
+    if continuations.len() < limit {
+        continuations.insert(symbol);
+    }
 }
 
 fn coverage(

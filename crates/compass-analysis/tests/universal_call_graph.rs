@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use compass_analysis::{
     AnalysisBundle, CallGraphDirection, CallResolution, UNIVERSAL_CALL_GRAPH_SCHEMA,
@@ -218,6 +219,62 @@ fn program_ir_enriches_structural_edges_and_retains_unresolved_calls()
             .edges
             .iter()
             .any(|edge| edge.resolution == CallResolution::Unresolved)
+    );
+    Ok(())
+}
+
+#[test]
+fn high_fanout_traversal_stays_within_the_interactive_latency_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    const FANOUT: usize = 16_000;
+    let file = "src/hot_path.rs";
+    let mut graph = GraphDocument {
+        directed: true,
+        multigraph: true,
+        graph: Map::new(),
+        nodes: Vec::with_capacity(FANOUT + 1),
+        links: Vec::with_capacity(FANOUT),
+        extras: BTreeMap::new(),
+    };
+    graph
+        .nodes
+        .push(node("root", "root()", file, "function", 1, 3));
+    for index in 0..FANOUT {
+        let id = format!("callee-{index:05}");
+        graph.nodes.push(node(
+            &id,
+            &format!("callee_{index}()"),
+            file,
+            "function",
+            5,
+            7,
+        ));
+        graph.links.push(edge("root", &id, "L2", "EXTRACTED"));
+    }
+
+    let started = Instant::now();
+    let response = build_universal_call_graph(
+        &graph,
+        None,
+        &UniversalCallGraphRequest {
+            root: UniversalCallGraphRoot::Symbol {
+                symbol: "root".to_owned(),
+            },
+            direction: CallGraphDirection::Callees,
+            depth: 2,
+            max_nodes: 128,
+            max_edges: 256,
+        },
+    )?;
+    let elapsed = started.elapsed();
+
+    assert!(response.nodes.len() <= 128);
+    assert!(response.edges.len() <= 256);
+    assert!(response.continuations.len() <= 128);
+    assert!(response.truncated);
+    assert!(
+        elapsed < Duration::from_millis(1_500),
+        "bounded call-graph traversal took {elapsed:?}"
     );
     Ok(())
 }
