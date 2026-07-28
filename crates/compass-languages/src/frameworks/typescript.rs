@@ -357,10 +357,10 @@ fn collect_nest_methods(
                 }
             }
         }
-        for (decorator, kind, transport) in [
-            ("MessagePattern", "message", "microservice"),
-            ("EventPattern", "event", "microservice"),
-            ("SubscribeMessage", "message", "websocket"),
+        for (decorator, kind, transport, relationship) in [
+            ("MessagePattern", "message", "microservice", "handles"),
+            ("EventPattern", "event", "microservice", "handles"),
+            ("SubscribeMessage", "message", "websocket", "subscribes"),
         ] {
             if has_decorator(&method_text, decorator) {
                 let subject = decorator_argument(&method_text, decorator)
@@ -375,10 +375,30 @@ fn collect_nest_methods(
                     origin: RawFrameworkOrigin::Ast,
                     detail: Map::from_iter([
                         ("transport".into(), Value::String(transport.to_owned())),
-                        ("subject".into(), Value::String(subject)),
+                        ("subject".into(), Value::String(subject.clone())),
                         ("handler_reference".into(), Value::String(handler.clone())),
+                        (
+                            "relationship".into(),
+                            Value::String(relationship.to_owned()),
+                        ),
                     ]),
                 }));
+                if decorator == "SubscribeMessage" {
+                    facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                        framework: "nestjs".to_owned(),
+                        kind: kind.to_owned(),
+                        name: subject.clone(),
+                        declaring_scope: module_scope(path),
+                        anchor: anchor(path, node),
+                        origin: RawFrameworkOrigin::Ast,
+                        detail: Map::from_iter([
+                            ("transport".into(), Value::String(transport.to_owned())),
+                            ("subject".into(), Value::String(subject)),
+                            ("handler_reference".into(), Value::String(handler.clone())),
+                            ("relationship".into(), Value::String("registers".to_owned())),
+                        ]),
+                    }));
+                }
             }
         }
         return;

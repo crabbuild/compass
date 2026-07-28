@@ -1,4 +1,5 @@
 mod csharp;
+mod enterprise;
 mod file_routes;
 mod go;
 mod java;
@@ -47,6 +48,8 @@ pub(crate) fn detect(
         }
         _ => Vec::new(),
     };
+    let mut facts = facts;
+    facts.extend(enterprise::detect(path, source, language));
     if let Err(error) = FrameworkLimits::default().check_facts(facts.len()) {
         extraction
             .error

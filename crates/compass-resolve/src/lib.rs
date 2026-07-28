@@ -248,6 +248,15 @@ fn finish_resolution(
             .get_or_insert_with(|| format!("framework resolution failed: {error}"));
     }
     profile_internal("resolver framework routes", &mut profile_started);
+    if let Err(error) = frameworks::resolve_and_publish_framework_domains(
+        &mut merged,
+        compass_languages::FrameworkLimits::default(),
+    ) {
+        merged
+            .error
+            .get_or_insert_with(|| format!("framework domain resolution failed: {error}"));
+    }
+    profile_internal("resolver framework domains", &mut profile_started);
     merged
 }
 

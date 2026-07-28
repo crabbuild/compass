@@ -1134,24 +1134,24 @@ database entities only when exact metadata or query evidence exists.
 
 **Implementation:**
 
-- [ ] Convert recognized NestJS `@MessagePattern`, `@EventPattern`, and
+- [x] Convert recognized NestJS `@MessagePattern`, `@EventPattern`, and
   `@SubscribeMessage` plus Spring message/event annotations into event,
   message, topic, queue, and WebSocket subscription facts with `publishes`,
   `subscribes`, `produces`, `consumes`, `handles`, and `registers` edges as
   appropriate.
-- [ ] Detect Spring scheduled jobs, ASP.NET hosted/background services, and
+- [x] Detect Spring scheduled jobs, ASP.NET hosted/background services, and
   Celery tasks/schedules. Publish job nodes and `schedules`, `triggers`, or
   `handles` edges using exact declaration sites.
-- [ ] Extract ORM model/table/column metadata for Django, SQLAlchemy, TypeORM,
+- [x] Extract ORM model/table/column metadata for Django, SQLAlchemy, TypeORM,
   JPA, Entity Framework, Active Record, Eloquent, GORM, and Diesel.
-- [ ] Emit `maps_to` only for explicit table/schema/column mapping or a
+- [x] Emit `maps_to` only for explicit table/schema/column mapping or a
   framework convention with unambiguous model identity. Emit `reads` and
   `writes` only for exact query evidence.
-- [ ] Join ORM targets to Task 6 database entities by normalized qualified
+- [x] Join ORM targets to Task 6 database entities by normalized qualified
   identity. If the database target is absent, retain the mapping target as an
   unresolved domain reference and diagnostic rather than creating an
   unsupported exact entity.
-- [ ] Treat runtime registries, computed topic names, and dynamic schedules as
+- [x] Treat runtime registries, computed topic names, and dynamic schedules as
   heuristic only when a wiring site is available; otherwise leave them
   unresolved.
 
