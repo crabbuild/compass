@@ -55,6 +55,112 @@ pub enum NodeKind {
     DatabaseTrigger,
 }
 
+impl NodeKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Module => "module",
+            Self::Package => "package",
+            Self::Namespace => "namespace",
+            Self::Class => "class",
+            Self::Struct => "struct",
+            Self::Interface => "interface",
+            Self::Trait => "trait",
+            Self::Protocol => "protocol",
+            Self::Enum => "enum",
+            Self::EnumMember => "enum_member",
+            Self::TypeAlias => "type_alias",
+            Self::Function => "function",
+            Self::Method => "method",
+            Self::Constructor => "constructor",
+            Self::Property => "property",
+            Self::Field => "field",
+            Self::Variable => "variable",
+            Self::Constant => "constant",
+            Self::Parameter => "parameter",
+            Self::Import => "import",
+            Self::Export => "export",
+            Self::Macro => "macro",
+            Self::Annotation => "annotation",
+            Self::Route => "route",
+            Self::Component => "component",
+            Self::Event => "event",
+            Self::Message => "message",
+            Self::Topic => "topic",
+            Self::Queue => "queue",
+            Self::Job => "job",
+            Self::Resource => "resource",
+            Self::Schema => "schema",
+            Self::Query => "query",
+            Self::Migration => "migration",
+            Self::ConfigKey => "config_key",
+            Self::Database => "database",
+            Self::DatabaseSchema => "database_schema",
+            Self::DatabaseTable => "database_table",
+            Self::DatabaseView => "database_view",
+            Self::DatabaseColumn => "database_column",
+            Self::DatabaseIndex => "database_index",
+            Self::DatabaseConstraint => "database_constraint",
+            Self::DatabaseProcedure => "database_procedure",
+            Self::DatabaseTrigger => "database_trigger",
+        }
+    }
+
+    #[must_use]
+    pub const fn is_callable(self) -> bool {
+        matches!(
+            self,
+            Self::Function | Self::Method | Self::Constructor | Self::DatabaseProcedure
+        )
+    }
+
+    #[must_use]
+    pub const fn is_constructible(self) -> bool {
+        matches!(
+            self,
+            Self::Class | Self::Struct | Self::Enum | Self::Component | Self::DatabaseProcedure
+        )
+    }
+
+    #[must_use]
+    pub const fn is_type(self) -> bool {
+        matches!(
+            self,
+            Self::Class
+                | Self::Struct
+                | Self::Interface
+                | Self::Trait
+                | Self::Protocol
+                | Self::Enum
+                | Self::TypeAlias
+        )
+    }
+
+    #[must_use]
+    pub const fn is_container(self) -> bool {
+        matches!(
+            self,
+            Self::File
+                | Self::Module
+                | Self::Package
+                | Self::Namespace
+                | Self::Class
+                | Self::Struct
+                | Self::Interface
+                | Self::Trait
+                | Self::Protocol
+                | Self::Enum
+                | Self::Component
+                | Self::Schema
+                | Self::Database
+                | Self::DatabaseSchema
+                | Self::DatabaseTable
+                | Self::DatabaseView
+        )
+    }
+}
+
 /// Semantic roles that enrich, but never replace, a node's structural kind.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -106,6 +212,42 @@ pub enum EdgeKind {
     DependsOn,
     Documents,
     MapsTo,
+}
+
+impl EdgeKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Contains => "contains",
+            Self::Calls => "calls",
+            Self::Imports => "imports",
+            Self::Exports => "exports",
+            Self::Extends => "extends",
+            Self::Implements => "implements",
+            Self::References => "references",
+            Self::TypeOf => "type_of",
+            Self::Returns => "returns",
+            Self::Instantiates => "instantiates",
+            Self::Overrides => "overrides",
+            Self::Decorates => "decorates",
+            Self::RoutesTo => "routes_to",
+            Self::Reads => "reads",
+            Self::Writes => "writes",
+            Self::Aliases => "aliases",
+            Self::Registers => "registers",
+            Self::Handles => "handles",
+            Self::Publishes => "publishes",
+            Self::Subscribes => "subscribes",
+            Self::Produces => "produces",
+            Self::Consumes => "consumes",
+            Self::Schedules => "schedules",
+            Self::Triggers => "triggers",
+            Self::Tests => "tests",
+            Self::DependsOn => "depends_on",
+            Self::Documents => "documents",
+            Self::MapsTo => "maps_to",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -489,5 +631,29 @@ impl EdgeRecord {
     #[must_use]
     pub fn has_networkx_identity(&self) -> bool {
         self.id == self.key
+    }
+}
+
+/// Strict Compass records inside a NetworkX node-link envelope.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphDocument {
+    pub directed: bool,
+    pub multigraph: bool,
+    pub graph: GraphMetadata,
+    pub nodes: Vec<NodeRecord>,
+    pub links: Vec<EdgeRecord>,
+}
+
+impl GraphDocument {
+    #[must_use]
+    pub fn empty_v1(build: BuildMetadata) -> Self {
+        Self {
+            directed: true,
+            multigraph: true,
+            graph: GraphMetadata::v1(build),
+            nodes: Vec::new(),
+            links: Vec::new(),
+        }
     }
 }

@@ -23,4 +23,12 @@ pub enum GraphError {
     MissingNodeId,
     #[error("graph edge references an invalid endpoint")]
     InvalidEdgeEndpoint,
+    #[error(
+        "unsupported graph schema {found:?}; Compass requires compass.graph/1. Run `compass update` to rebuild"
+    )]
+    UnsupportedGraphSchema { found: Option<String> },
+    #[error("cannot normalize raw graph record {record}: {detail}")]
+    RawNormalization { record: String, detail: String },
+    #[error(transparent)]
+    InvalidCodeGraph(#[from] crate::validation::CodeGraphValidationError),
 }

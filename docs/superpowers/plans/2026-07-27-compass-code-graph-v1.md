@@ -371,10 +371,10 @@ must use.
 
 **Implementation:**
 
-- [ ] Add constructors and validation for the Task 1 evidence records.
+- [x] Add constructors and validation for the Task 1 evidence records.
   Heuristic evidence requires both `rule` and `wiring_site`;
   non-heuristic structural evidence requires at least one anchor.
-- [ ] Implement length-prefixed SHA-256 identity functions so IDs are stable
+- [x] Implement length-prefixed SHA-256 identity functions so IDs are stable
   across checkout roots:
 
 ```rust
@@ -393,18 +393,18 @@ pub fn edge_id(source: &str, kind: EdgeKind, target: &str,
                rule: Option<&str>) -> String;
 ```
 
-- [ ] Normalize paths to repository-relative forward-slash form before
+- [x] Normalize paths to repository-relative forward-slash form before
   hashing. Do not include an absolute checkout root, timestamps, extraction
   order, or machine-specific data.
-- [ ] Include the `compass.graph/1` schema identity in every hash preimage.
+- [x] Include the `compass.graph/1` schema identity in every hash preimage.
   Treat a rename or move as remove/add unless exact alias evidence establishes
   continuity; never infer continuity from name similarity.
-- [ ] Implement
+- [x] Implement
   `normalize_v1(Extraction, BuildEvidence) -> Result<
   compass_model::code_graph::GraphDocument, GraphError>` in
   `compass-graph/src/v1.rs`. This is the only function allowed to turn raw
   records into durable records.
-- [ ] Define the v1 envelope in `code_graph.rs`:
+- [x] Define the v1 envelope in `code_graph.rs`:
 
 ```rust
 pub struct GraphDocument {
@@ -419,7 +419,7 @@ pub struct GraphDocument {
   Keep it under `compass_model::code_graph` for this task. The existing
   crate-root loader and production builder remain on the temporary permissive
   document until Task 4 migrates all consumers in one compilable change.
-- [ ] Encode the current relation migration table:
+- [x] Encode the current relation migration table:
 
 | Raw relation | Published kind | Additional evidence |
 |---|---|---|
@@ -435,11 +435,11 @@ pub struct GraphDocument {
 | `embeds` | `contains` | rule `embedded-member` |
 | `mixes_in` | `implements` | rule `mixin-contract` |
 
-- [ ] Normalize current semantic/media nodes to `resource` and set
+- [x] Normalize current semantic/media nodes to `resource` and set
   `resource_kind` to `document`, `paper`, `image`, `concept`, or `rationale`.
   Reject any raw kind or relation not present in an explicit normalization
   table; report its producer path and anchor.
-- [ ] Validate endpoint-kind compatibility, duplicate identities, missing
+- [x] Validate endpoint-kind compatibility, duplicate identities, missing
   files, invalid anchors, heuristic evidence, candidate bounds, and edge
   `id == key` before returning a document. The initial closed endpoint matrix
   includes:
