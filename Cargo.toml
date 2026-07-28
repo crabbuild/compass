@@ -71,6 +71,7 @@ oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compre
 ctrlc = "3.5.2"
 strsim = "0.11"
 rayon = "1"
+rusqlite = { version = "0.31.0", features = ["bundled", "modern_sqlite"] }
 rand = "0.8.7"
 realfft = "3.5.0"
 regex = "1"

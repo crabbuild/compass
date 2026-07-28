@@ -1294,19 +1294,19 @@ corruption. `graph.json` and `program.json` remain the sources of truth.
 
 **Implementation:**
 
-- [ ] Add workspace `rusqlite = { version = "0.31.0", features =
+- [x] Add workspace `rusqlite = { version = "0.31.0", features =
   ["bundled", "modern_sqlite"] }` and use its bundled FTS5-capable SQLite.
-- [ ] Key the index directory by SHA-256 of graph digest, optional Program
+- [x] Key the index directory by SHA-256 of graph digest, optional Program
   digest, graph schema fingerprint, query schema fingerprint, and index
   format version.
-- [ ] Create normalized relational tables for nodes, edges, files, evidence,
+- [x] Create normalized relational tables for nodes, edges, files, evidence,
   aliases, and Program joins plus an FTS5 table over name, qualified name,
   aliases, kind, roles, language, framework, and normalized path.
-- [ ] Build into a temporary database, use transactions and prepared
+- [x] Build into a temporary database, use transactions and prepared
   statements, run integrity checks, fsync, and atomically rename into place.
   A lock coordinates concurrent builders; readers may continue using the
   last complete matching index.
-- [ ] Implement:
+- [x] Implement:
 
 ```rust
 pub fn open(graph_path: &Path, program_path: Option<&Path>,
@@ -1317,10 +1317,10 @@ pub fn search(&self, request: SearchRequest)
 
   Ranking order is exact qualified name, exact name, prefix, FTS rank, then
   stable node ID.
-- [ ] Escape FTS syntax through bound parameters and a conservative query
+- [x] Escape FTS syntax through bound parameters and a conservative query
   builder. Enforce term, token, result, and response-size limits before
   executing SQLite work.
-- [ ] Delete and rebuild on schema mismatch, digest mismatch, incomplete
+- [x] Delete and rebuild on schema mismatch, digest mismatch, incomplete
   build marker, failed integrity check, or SQLite corruption.
 
 **Contract produced:** `search` returns ranked `SearchHit` records and the
@@ -1367,27 +1367,27 @@ heuristic impact, and return digest-verified source grouped by file.
 
 **Implementation:**
 
-- [ ] Implement one-hop callers over inbound `calls` and `routes_to`; implement
+- [x] Implement one-hop callers over inbound `calls` and `routes_to`; implement
   one-hop callees over outbound `calls`. Preserve parallel edges and return
   all evidence records.
-- [ ] Implement impact as bounded reverse traversal over the approved impact
+- [x] Implement impact as bounded reverse traversal over the approved impact
   family: `calls`, `routes_to`, `imports`, `exports`, `references`,
   `depends_on`, `reads`, `writes`, `publishes`, `subscribes`, `produces`,
   `consumes`, `schedules`, `triggers`, and `maps_to`.
-- [ ] Default impact to exact/config/convention evidence. Add an
+- [x] Default impact to exact/config/convention evidence. Add an
   explicit request option for heuristic edges and label every affected path
   with its weakest resolution/evidence state.
-- [ ] Implement explore by resolving several requested symbols, selecting a
+- [x] Implement explore by resolving several requested symbols, selecting a
   minimal bounded connecting subgraph, and grouping source slices by
   normalized file path. Include the call/route path among selected symbols.
-- [ ] Before returning source, recompute the file digest and compare it to the
+- [x] Before returning source, recompute the file digest and compare it to the
   graph’s `FileRecord`. On mismatch, omit source and emit
   `stale_source_digest`; never return unverified current text as indexed
   source.
-- [ ] Implement node trail as a bounded best-path search ordered by hop count,
+- [x] Implement node trail as a bounded best-path search ordered by hop count,
   evidence quality, and stable edge identity. Include route middleware stages
   and heuristic wiring sites inline.
-- [ ] Expose the operations with these engine signatures:
+- [x] Expose the operations with these engine signatures:
 
 ```rust
 pub fn callers(&self, request: CallRequest)
@@ -1402,7 +1402,7 @@ pub fn node_trail(&self, request: NodeTrailRequest)
     -> Result<CodeQueryResponse, QueryError>;
 ```
 
-- [ ] Apply `CodeQueryLimits` during candidate resolution, traversal, source
+- [x] Apply `CodeQueryLimits` during candidate resolution, traversal, source
   reading, and serialization. Set `truncated` and diagnostics whenever a
   bound changes the result.
 

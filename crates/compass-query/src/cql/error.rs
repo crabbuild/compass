@@ -11,6 +11,10 @@ pub enum QueryErrorKind {
     MemoryLimit,
     Timeout,
     Cancelled,
+    CorruptArtifact,
+    UnsupportedSchema,
+    UnsafePath,
+    GraphInvariant,
     Internal,
 }
 
