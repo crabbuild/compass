@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./initialize.css";
+@import "./onboarding.css";
 
 @custom-variant dark (&:is(.dark *));
 
