@@ -1,35 +1,20 @@
-#![allow(dead_code)]
-
+use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
+use compass_mcp::CompassMcp;
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
     NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
-use sha2::{Digest, Sha256};
+use serde_json::{Map, Value, json};
 
-pub fn compass_executable() -> &'static Path {
-    Path::new(env!("CARGO_BIN_EXE_compass"))
-}
-
-pub fn compass_command() -> Command {
-    command(compass_executable())
-}
-
-pub fn command(executable: &Path) -> Command {
-    Command::new(executable)
-}
-
-pub fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn Error>> {
     let graph_path = root.join("graph.json");
-    let source_path = root.join("src/lib.rs");
-    let source = b"code";
-    fs::create_dir_all(source_path.parent().unwrap_or(root))?;
-    fs::write(&source_path, source)?;
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), "code")?;
     let anchor = SourceAnchor {
         file: "src/lib.rs".to_owned(),
         start_byte: 0,
@@ -41,7 +26,7 @@ pub fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn std::error::Err
     };
     let evidence = Provenance {
         origin: EvidenceOrigin::Ast,
-        extractor: "cli-test".to_owned(),
+        extractor: "mcp-test".to_owned(),
         confidence: EvidenceConfidence::Exact,
         rule: None,
         anchors: vec![anchor.clone()],
@@ -61,11 +46,12 @@ pub fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn std::error::Err
         id: file_id("src/lib.rs"),
         path: "src/lib.rs".to_owned(),
         language: Some("rust".to_owned()),
-        content_digest: format!("sha256:{:x}", Sha256::digest(source)),
+        content_digest: "sha256:5694d08a2e53ffcae0c3103e5ad6f6076abd960eb1f8a56577040bc1028f702b"
+            .to_owned(),
         byte_size: 4,
         generated: false,
         extraction_status: ExtractionStatus::Extracted,
-        extractor_versions: vec!["cli-test".to_owned()],
+        extractor_versions: vec!["mcp-test".to_owned()],
         coverage: Vec::new(),
         diagnostics: Vec::new(),
     });
@@ -104,4 +90,71 @@ pub fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn std::error::Err
     });
     fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
     Ok(graph_path)
+}
+
+fn invoke(server: &CompassMcp, name: &str, arguments: Value) -> Result<Value, Box<dyn Error>> {
+    let output = server.invoke(
+        name,
+        arguments.as_object().cloned().unwrap_or_else(Map::new),
+    );
+    Ok(serde_json::from_str(&output)?)
+}
+
+#[test]
+fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = write_typed_graph(directory.path())?;
+    let server = CompassMcp::new(graph);
+    for (tool, arguments, operation) in [
+        ("search_symbols", json!({"query":"Target"}), "search"),
+        ("get_callers", json!({"symbol":"Target"}), "callers"),
+        ("get_callees", json!({"symbol":"Caller"}), "callees"),
+        ("get_impact", json!({"symbol":"Target"}), "impact"),
+        (
+            "explore_code",
+            json!({"symbols":["Caller","Target"],"root":directory.path()}),
+            "explore",
+        ),
+        (
+            "get_node",
+            json!({"source":"Caller","target":"Target"}),
+            "node_trail",
+        ),
+    ] {
+        let response = invoke(&server, tool, arguments)?;
+        assert_eq!(response["schema"], "compass.query/1", "{tool}");
+        assert_eq!(response["operation"], operation, "{tool}");
+        assert!(response["limits"]["maxNodes"].as_u64().is_some(), "{tool}");
+    }
+    Ok(())
+}
+
+#[test]
+fn code_query_tool_schemas_are_closed_and_bounded() {
+    for tool in CompassMcp::tools().into_iter().filter(|tool| {
+        matches!(
+            tool.name.as_ref(),
+            "search_symbols"
+                | "get_callers"
+                | "get_callees"
+                | "get_impact"
+                | "explore_code"
+                | "get_node"
+        )
+    }) {
+        assert_eq!(
+            tool.input_schema.get("additionalProperties"),
+            Some(&Value::Bool(false))
+        );
+        assert!(
+            tool.input_schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .and_then(|properties| properties.get("max_nodes"))
+                .and_then(Value::as_object)
+                .and_then(|limit| limit.get("default"))
+                .and_then(Value::as_u64)
+                .is_some()
+        );
+    }
 }

@@ -1,5 +1,6 @@
 //! Native MCP service for Compass-compatible Compass graph queries.
 
+mod code_query;
 mod transport;
 
 pub use transport::{HttpOptions, serve_http, serve_stdio};
@@ -286,6 +287,36 @@ fn tool_specs() -> Vec<Tool> {
     });
     let mut specs = vec![
         tool(
+            "search_symbols",
+            "Search Compass code symbols with the trusted FTS5 index.",
+            code_query::schema(&["query"]),
+        ),
+        tool(
+            "get_callers",
+            "Return one-hop callers and route bindings for a symbol.",
+            code_query::schema(&["symbol"]),
+        ),
+        tool(
+            "get_callees",
+            "Return one-hop callees for a symbol.",
+            code_query::schema(&["symbol"]),
+        ),
+        tool(
+            "get_impact",
+            "Return the bounded transitive impact radius for a symbol.",
+            code_query::schema(&["symbol"]),
+        ),
+        tool(
+            "explore_code",
+            "Return related symbols, connecting paths, and verified source grouped by file.",
+            code_query::schema(&["symbols"]),
+        ),
+        tool(
+            "get_node",
+            "Return the trusted evidence trail between two code-graph nodes.",
+            code_query::schema(&["source", "target"]),
+        ),
+        tool(
             "query_graph",
             "Search the knowledge graph using BFS or DFS. Returns relevant nodes and edges as text context.",
             json!({"type":"object","properties":{
@@ -295,11 +326,6 @@ fn tool_specs() -> Vec<Tool> {
                 "token_budget":{"type":"integer","default":2000,"description":"Max output tokens"},
                 "context_filter":{"type":"array","items":{"type":"string"},"description":"Optional explicit edge-context filter, e.g. ['call', 'field']"}
             },"required":["question"]}),
-        ),
-        tool(
-            "get_node",
-            "Get full details for a specific node by label or ID.",
-            json!({"type":"object","properties":{"label":{"type":"string","description":"Node label or ID to look up"}},"required":["label"]}),
         ),
         tool(
             "get_neighbors",
@@ -415,8 +441,9 @@ fn invoke_tool(
     context: &GraphContext,
 ) -> Result<String, String> {
     match name {
+        "search_symbols" | "get_callers" | "get_callees" | "get_impact" | "explore_code"
+        | "get_node" => code_query::invoke(name, arguments, &context.path),
         "query_graph" => tool_query_graph(arguments, context),
-        "get_node" => tool_get_node(arguments, context),
         "get_neighbors" => tool_get_neighbors(arguments, context),
         "get_community" => tool_get_community(arguments, context),
         "god_nodes" => tool_god_nodes(arguments, context),
@@ -582,31 +609,6 @@ fn expand_home(path: &Path) -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .map_or_else(|| path.to_path_buf(), |home| home.join(suffix))
-}
-
-fn tool_get_node(arguments: &Map<String, Value>, context: &GraphContext) -> Result<String, String> {
-    let query = string_argument(arguments, "label")?.to_lowercase();
-    let Some((index, node)) = context.graph.nodes().find(|(_, node)| {
-        node.label().to_lowercase().contains(&query) || node.id.to_lowercase() == query
-    }) else {
-        return Ok(format!("No node matching '{query}' found."));
-    };
-    let community_name = node.string("community_name");
-    let community = if community_name.is_empty() {
-        node.string("community")
-    } else {
-        community_name
-    };
-    Ok(format!(
-        "Node: {}\n  ID: {}\n  Source: {} {}\n  Type: {}\n  Community: {}\n  Degree: {}",
-        sanitize_label(node.label()),
-        sanitize_label(&node.id),
-        sanitize_label(&node.string("source_file")),
-        sanitize_label(&node.string("source_location")),
-        sanitize_label(&node.string("file_type")),
-        sanitize_label(&community),
-        context.graph.degree(index)
-    ))
 }
 
 fn tool_get_neighbors(
@@ -1183,7 +1185,7 @@ mod tests {
         let graph = temp.path().join("graph.json");
         sample(&graph)?;
         let server = CompassMcp::new(graph);
-        assert_eq!(CompassMcp::tools().len(), 10);
+        assert_eq!(CompassMcp::tools().len(), 15);
         assert_eq!(CompassMcp::resources().len(), 6);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
@@ -1281,9 +1283,10 @@ mod tests {
         let invoke = |name: &str, value: Value| {
             server.invoke(name, value.as_object().cloned().unwrap_or_default())
         };
-        assert!(invoke("get_node", json!({"label":"alpha"})).contains("Node: Alpha"));
-        assert!(invoke("get_node", json!({"label":"absent"})).contains("No node"));
-        assert!(invoke("get_node", json!({})).contains("'label'"));
+        assert!(
+            invoke("get_node", json!({"source":"a","target":"b"}))
+                .contains("requires compass.graph/1")
+        );
         let neighbors = invoke("get_neighbors", json!({"label":"Beta"}));
         assert!(neighbors.contains("--> Delta"));
         assert!(neighbors.contains("<-- Alpha"));

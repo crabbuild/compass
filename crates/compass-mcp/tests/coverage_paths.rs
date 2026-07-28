@@ -50,7 +50,7 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
 
     let info = server.get_info();
     assert_eq!(info.server_info.name, "compass");
-    assert_eq!(CompassMcp::tools().len(), 10);
+    assert_eq!(CompassMcp::tools().len(), 15);
     assert!(CompassMcp::tools().iter().all(|tool| {
         tool.input_schema
             .get("properties")
@@ -76,16 +76,13 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
     );
     assert!(query.contains("Traversal: DFS"));
 
-    assert!(server.invoke("get_node", Map::new()).contains("'label'"));
     assert!(
         server
-            .invoke("get_node", args(&[("label", json!("alpha"))]))
-            .contains("Node: Alpha()")
-    );
-    assert!(
-        server
-            .invoke("get_node", args(&[("label", json!("missing"))]))
-            .contains("No node matching")
+            .invoke(
+                "get_node",
+                args(&[("source", json!("a")), ("target", json!("b"))])
+            )
+            .contains("requires compass.graph/1")
     );
 
     let neighbors = server.invoke(
@@ -290,7 +287,7 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
     let client = ().serve(client_transport).await?;
 
     let tools = client.list_tools(None).await?;
-    assert_eq!(tools.tools.len(), 10);
+    assert_eq!(tools.tools.len(), 15);
     let resources = client.list_resources(None).await?;
     assert_eq!(resources.resources.len(), 6);
 

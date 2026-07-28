@@ -1458,22 +1458,22 @@ delegate to `CodeQueryEngine` and return the shared response unchanged.
 
 **Implementation:**
 
-- [ ] Add CLI subcommands `search`, `callers`, `callees`, `impact`, `explore`,
+- [x] Add CLI subcommands `search`, `callers`, `callees`, `impact`, `explore`,
   and `node`, each accepting `--format json|text` plus operation-specific
   limits and evidence options.
-- [ ] Serialize `CodeQueryResponse` directly for JSON. Implement text as a
+- [x] Serialize `CodeQueryResponse` directly for JSON. Implement text as a
   renderer over the response; never build a second semantic result shape.
-- [ ] Route existing overlapping call-graph/affected functionality through
+- [x] Route existing overlapping call-graph/affected functionality through
   the new engine where v1 semantics apply, while retaining explicitly
   separate CQL and natural-language commands.
-- [ ] Add MCP tools `search_symbols`, `get_callers`, `get_callees`,
+- [x] Add MCP tools `search_symbols`, `get_callers`, `get_callees`,
   `get_impact`, `explore_code`, and `get_node`. Replace the existing
   `get_node` implementation rather than registering a duplicate name.
-- [ ] Use bounded JSON schemas with the same defaults as Rust request types.
+- [x] Use bounded JSON schemas with the same defaults as Rust request types.
   Return structured JSON plus concise text content. Reserve MCP protocol
   errors for invalid requests, corrupt schemas, unsafe paths, or engine
   failures; valid empty results remain successful responses.
-- [ ] Ensure pre-contract graphs return the same rebuild diagnostic through
+- [x] Ensure pre-contract graphs return the same rebuild diagnostic through
   CLI and MCP.
 
 **Contract produced:** Agents and scripts receive byte-equivalent JSON

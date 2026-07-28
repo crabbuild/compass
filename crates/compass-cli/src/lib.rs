@@ -2,6 +2,7 @@
 
 mod call_graph_commands;
 mod capability_commands;
+mod code_query_commands;
 mod dedup_commands;
 mod help;
 mod history_batch;
@@ -341,6 +342,12 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "history" => history_commands::command(frontend, &args),
         "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
+        "search" => code_query_commands::command("search", &args),
+        "callers" => code_query_commands::command("callers", &args),
+        "callees" => code_query_commands::command("callees", &args),
+        "impact" => code_query_commands::command("impact", &args),
+        "explore" => code_query_commands::command("explore", &args),
+        "node" => code_query_commands::command("node", &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
