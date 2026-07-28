@@ -639,12 +639,12 @@ Program IR, manifest, and build state as one generation.
 - [ ] Sanitize diagnostics so paths remain repository-relative and messages do
   not copy unrelated environment variables, credentials, or configuration
   secrets.
-- [ ] Sort files by normalized path, nodes by ID, and links by
+- [x] Sort files by normalized path, nodes by ID, and links by
   `(source, kind, target, key)`. Canonicalize maps before serialization so
   clean and incremental builds produce byte-identical JSON. Always publish
   `directed: true` and `multigraph: true`; do not derive either flag from the
   current edge inventory.
-- [ ] Replace signature-only graph caches with a content-addressed key over
+- [x] Replace signature-only graph caches with a content-addressed key over
   graph digest and schema fingerprint. Treat caches as disposable and rebuild
   them after corruption or mismatch.
 - [ ] Stage `graph.json`, `program.json`, manifest, and build state under one
