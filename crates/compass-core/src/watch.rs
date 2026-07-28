@@ -922,7 +922,8 @@ mod tests {
 
         assert!(complete, "watch statuses: {:?}", statuses.lock());
         assert!(root.join("compass-out/needs_update").is_file());
-        let graph = compass_model::GraphDocument::load(&root.join("compass-out/graph.json"))?;
+        let graph =
+            compass_model::code_graph::GraphDocument::load(&root.join("compass-out/graph.json"))?;
         assert!(
             graph
                 .nodes
@@ -1048,7 +1049,8 @@ mod tests {
         stop.store(true, Ordering::Release);
         handle.join().map_err(|_| "watch thread panicked")??;
 
-        let graph = compass_model::GraphDocument::load(&root.join("compass-out/graph.json"))?;
+        let graph =
+            compass_model::code_graph::GraphDocument::load(&root.join("compass-out/graph.json"))?;
         assert!(
             graph
                 .nodes

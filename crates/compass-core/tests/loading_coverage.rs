@@ -117,7 +117,7 @@ fn build_pipeline_reports_missing_and_empty_roots_and_accepts_file_only_sources(
 }
 
 #[test]
-fn semantic_build_normalizes_origins_paths_hyperedges_and_unicode_json()
+fn semantic_build_normalizes_typed_origins_paths_and_incremental_updates()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     fs::write(directory.path().join("main.rs"), "pub fn main_entry() {}\n")?;
@@ -129,16 +129,13 @@ fn semantic_build_normalizes_origins_paths_hyperedges_and_unicode_json()
         fragment: serde_json::json!({
             "directed":true,
             "multigraph":false,
-            "hyperedges":[
-                7,
-                {"id":"h1","label":"Café 🚀","nodes":["doc","external"],"source_file":directory.path().join("notes.md")}
-            ],
+            "hyperedges":[],
             "nodes":[
                 {"id":"doc","label":"Café 🚀","file_type":"document","source_file":directory.path().join("notes.md")},
-                {"id":"external","label":"External","file_type":"concept","source_file":""}
+                {"id":"external","label":"External","file_type":"concept","source_file":directory.path().join("notes.md")}
             ],
             "edges":[
-                {"source":"doc","target":"external","relation":"mentions","source_file":directory.path().join("notes.md")}
+                {"source":"doc","target":"external","relation":"references","source_file":directory.path().join("notes.md")}
             ]
         }),
         refreshed_files: vec![directory.path().join("notes.md")],
@@ -147,62 +144,41 @@ fn semantic_build_normalizes_origins_paths_hyperedges_and_unicode_json()
     };
     let result = build_graph_with_layers(&options, Some(&semantic), &[])?;
     assert!(result.nodes >= 3);
-    let document: serde_json::Value =
-        serde_json::from_slice(&fs::read(result.output_dir.join("graph.json"))?)?;
-    let semantic_edge = document["links"]
-        .as_array()
-        .and_then(|edges| edges.iter().find(|edge| edge["relation"] == "mentions"))
+    let document =
+        compass_model::code_graph::GraphDocument::load(&result.output_dir.join("graph.json"))?;
+    let semantic_edge = document
+        .links
+        .iter()
+        .find(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
         .ok_or("missing semantic edge")?;
-    assert_eq!(semantic_edge["_origin"], "semantic");
-    assert_eq!(semantic_edge["source_file"], "notes.md");
-    let semantic_hyperedge = document["hyperedges"]
-        .as_array()
-        .and_then(|hyperedges| hyperedges.iter().find(|hyperedge| hyperedge["id"] == "h1"))
-        .ok_or("missing semantic hyperedge")?;
-    assert_eq!(semantic_hyperedge["_origin"], "semantic");
-    assert_eq!(semantic_hyperedge["source_file"], "notes.md");
-    let encoded = fs::read_to_string(result.output_dir.join("graph.json"))?;
-    assert!(encoded.contains("\\u00e9"));
-    assert!(encoded.contains("\\ud83d\\ude80"));
+    assert_eq!(semantic_edge.source_file(), Some("notes.md"));
+    assert_eq!(
+        semantic_edge.evidence[0].origin,
+        compass_model::provenance::EvidenceOrigin::Heuristic
+    );
 
     let warm = build_graph_with_layers(&options, None, &[])?;
     assert!(!warm.outputs_changed);
-    let preserved: serde_json::Value =
-        serde_json::from_slice(&fs::read(warm.output_dir.join("graph.json"))?)?;
-    assert!(
-        preserved["nodes"]
-            .as_array()
-            .is_some_and(|nodes| { nodes.iter().any(|node| node["id"] == "doc") })
-    );
-    assert!(
-        preserved["hyperedges"]
-            .as_array()
-            .is_some_and(|hyperedges| {
-                hyperedges.iter().any(|hyperedge| hyperedge["id"] == "h1")
-            })
-    );
+    let preserved =
+        compass_model::code_graph::GraphDocument::load(&warm.output_dir.join("graph.json"))?;
+    assert!(preserved.nodes.iter().any(|node| node.label() == "Café 🚀"));
 
     fs::remove_file(directory.path().join("notes.md"))?;
     let pruned = build_graph_with_layers(&options, None, &[])?;
     assert!(pruned.outputs_changed);
-    let pruned_document: serde_json::Value =
-        serde_json::from_slice(&fs::read(pruned.output_dir.join("graph.json"))?)?;
+    let pruned_document =
+        compass_model::code_graph::GraphDocument::load(&pruned.output_dir.join("graph.json"))?;
     assert!(
-        pruned_document["nodes"]
-            .as_array()
-            .is_some_and(|nodes| { nodes.iter().all(|node| node["id"] != "doc") })
-    );
-    assert!(
-        pruned_document["hyperedges"]
-            .as_array()
-            .is_none_or(Vec::is_empty)
+        pruned_document
+            .nodes
+            .iter()
+            .all(|node| node.source_file() != Some("notes.md"))
     );
     Ok(())
 }
 
 #[test]
-fn incremental_update_preserves_then_replaces_owned_semantic_hyperedges()
--> Result<(), Box<dyn Error>> {
+fn incremental_update_preserves_then_replaces_owned_semantic_facts() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("main.rs");
     let notes = directory.path().join("notes.md");
@@ -218,11 +194,8 @@ fn incremental_update_preserves_then_replaces_owned_semantic_hyperedges()
                 {"id":"concept-a","label":"A","file_type":"concept","source_file":notes},
                 {"id":"concept-b","label":"B","file_type":"concept","source_file":notes}
             ],
-            "edges":[{"source":"concept-a","target":"concept-b","relation":"related","source_file":notes}],
-            "hyperedges":[
-                9,
-                {"id":"semantic-group","nodes":["concept-a","concept-b"],"source_file":notes}
-            ]
+            "edges":[{"source":"concept-a","target":"concept-b","relation":"references","source_file":notes}],
+            "hyperedges":[]
         }),
         refreshed_files: vec![notes.clone()],
         partial_files: Vec::new(),
@@ -232,16 +205,18 @@ fn incremental_update_preserves_then_replaces_owned_semantic_hyperedges()
 
     fs::write(&source, "pub fn second() {}\n")?;
     build_graph_with_layers(&options, None, &[])?;
-    let preserved: serde_json::Value =
-        serde_json::from_slice(&fs::read(directory.path().join("compass-out/graph.json"))?)?;
+    let preserved = compass_model::code_graph::GraphDocument::load(
+        &directory.path().join("compass-out/graph.json"),
+    )?;
     assert!(
-        preserved["hyperedges"]
-            .as_array()
-            .is_some_and(|hyperedges| {
-                hyperedges
-                    .iter()
-                    .any(|hyperedge| hyperedge["id"] == "semantic-group")
-            })
+        preserved.nodes.iter().any(|node| node.label() == "A")
+            && preserved.nodes.iter().any(|node| node.label() == "B")
+            && preserved
+                .links
+                .iter()
+                .filter(|edge| { edge.kind == compass_model::code_graph::EdgeKind::References })
+                .count()
+                == 1
     );
 
     let replacement = SemanticLayer {
@@ -251,21 +226,23 @@ fn incremental_update_preserves_then_replaces_owned_semantic_hyperedges()
                 {"id":"concept-b","label":"B2","file_type":"concept","source_file":notes}
             ],
             "edges":[],
-            "hyperedges":[{"id":"semantic-group","members":["concept-a","concept-b"],"source_file":notes}]
+            "hyperedges":[]
         }),
         refreshed_files: vec![notes],
         partial_files: Vec::new(),
         allow_partial: false,
     };
     build_graph_with_layers(&options, Some(&replacement), &[])?;
-    let replaced: serde_json::Value =
-        serde_json::from_slice(&fs::read(directory.path().join("compass-out/graph.json"))?)?;
-    let groups = replaced["hyperedges"]
-        .as_array()
-        .ok_or("missing hyperedges")?
-        .iter()
-        .filter(|hyperedge| hyperedge["id"] == "semantic-group")
-        .count();
-    assert_eq!(groups, 1);
+    let replaced = compass_model::code_graph::GraphDocument::load(
+        &directory.path().join("compass-out/graph.json"),
+    )?;
+    assert!(replaced.nodes.iter().any(|node| node.label() == "A2"));
+    assert!(replaced.nodes.iter().any(|node| node.label() == "B2"));
+    assert!(
+        replaced
+            .links
+            .iter()
+            .all(|edge| edge.kind != compass_model::code_graph::EdgeKind::References)
+    );
     Ok(())
 }

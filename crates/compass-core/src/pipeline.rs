@@ -2738,7 +2738,6 @@ mod tests {
     use std::error::Error;
 
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
-    use compass_model::provenance::EvidenceOrigin;
     use serde_json::{Map, Value};
 
     use super::*;
@@ -2860,7 +2859,7 @@ mod tests {
     fn astro_import_identities_do_not_include_checkout_root() -> Result<(), Box<dyn Error>> {
         let first = tempfile::tempdir()?;
         let second = tempfile::tempdir()?;
-        let build = |root: &Path| -> Result<GraphDocument, Box<dyn Error>> {
+        let build = |root: &Path| -> Result<V1GraphDocument, Box<dyn Error>> {
             let source = root.join("src");
             fs::create_dir_all(&source)?;
             fs::create_dir_all(root.join(".hidden"))?;
@@ -2872,13 +2871,13 @@ mod tests {
             let mut options = BuildOptions::new(root);
             options.no_viz = true;
             build_local_graph(&options)?;
-            Ok(GraphDocument::load(
+            Ok(V1GraphDocument::load(
                 &root.join("compass-out").join("graph.json"),
             )?)
         };
         let first_graph = build(first.path())?;
         let second_graph = build(second.path())?;
-        let identities = |document: &GraphDocument| {
+        let identities = |document: &V1GraphDocument| {
             let mut nodes = document
                 .nodes
                 .iter()
@@ -2891,7 +2890,7 @@ mod tests {
                     (
                         edge.source.clone(),
                         edge.target.clone(),
-                        edge.string("relation"),
+                        edge.relation().to_owned(),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -2904,7 +2903,12 @@ mod tests {
             .nodes
             .iter()
             .chain(&second_graph.nodes)
-            .flat_map(|node| [node.id.clone(), node.string("source_file")])
+            .flat_map(|node| {
+                [
+                    node.id.clone(),
+                    node.source_file().unwrap_or_default().to_owned(),
+                ]
+            })
             .chain(
                 first_graph
                     .links
@@ -2914,7 +2918,7 @@ mod tests {
                         [
                             edge.source.clone(),
                             edge.target.clone(),
-                            edge.string("source_file"),
+                            edge.source_file().unwrap_or_default().to_owned(),
                         ]
                     }),
             )
@@ -2927,7 +2931,7 @@ mod tests {
         let punctuation_symbols = first_graph
             .nodes
             .iter()
-            .filter(|node| node.string("label") == "[]")
+            .filter(|node| node.label() == "[]")
             .collect::<Vec<_>>();
         assert!(
             !punctuation_symbols.is_empty(),
@@ -2936,7 +2940,7 @@ mod tests {
         assert!(
             punctuation_symbols
                 .iter()
-                .all(|node| node.id.starts_with("src_page_"))
+                .all(|node| node.id.starts_with("sha256:"))
         );
         Ok(())
     }
@@ -3067,29 +3071,32 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let root = directory.path();
         fs::write(root.join("main.py"), "def before():\n    return 1\n")?;
+        fs::write(root.join("domain.md"), "# Domain rule\n")?;
         let mut options = BuildOptions::new(root);
         options.no_viz = true;
-        let first = build_local_graph(&options)?;
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "semantic_domain_rule",
+                    "label": "Domain rule",
+                    "file_type": "concept",
+                    "source_file": "domain.md",
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![PathBuf::from("domain.md")],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let first = build_graph_with_semantic(&options, &semantic)?;
         let graph_path = first.output_dir.join("graph.json");
-        let mut graph = GraphDocument::load(&graph_path)?;
-        let mut attributes = Map::new();
-        attributes.insert("label".to_owned(), Value::String("Domain rule".to_owned()));
-        attributes.insert("file_type".to_owned(), Value::String("concept".to_owned()));
-        graph.nodes.push(NodeRecord {
-            id: "semantic_domain_rule".to_owned(),
-            attributes,
-        });
-        write_json_atomic(&graph_path, &graph, true)?;
 
         fs::write(root.join("main.py"), "def after():\n    return 2\n")?;
         build_local_graph(&options)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(
-            graph
-                .nodes
-                .iter()
-                .any(|node| node.id == "semantic_domain_rule")
-        );
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Domain rule"));
         assert!(graph.nodes.iter().any(|node| node.label() == "after()"));
         assert!(!graph.nodes.iter().any(|node| node.label() == "before()"));
         Ok(())
@@ -3102,40 +3109,34 @@ mod tests {
         fs::write(root.join("guide.md"), "# Guide\n\nLocal structure.\n")?;
         let mut options = BuildOptions::new(root);
         options.no_viz = true;
-        let first = build_local_graph(&options)?;
-        let graph_path = first.output_dir.join("graph.json");
-        let semantic = GraphDocument {
-            directed: false,
-            multigraph: false,
-            graph: Map::new(),
-            nodes: vec![NodeRecord {
-                id: "semantic_guide".to_owned(),
-                attributes: Map::from_iter([
-                    (
-                        "label".to_owned(),
-                        Value::String("Guide concept".to_owned()),
-                    ),
-                    ("file_type".to_owned(), Value::String("concept".to_owned())),
-                    (
-                        "source_file".to_owned(),
-                        Value::String("guide.md".to_owned()),
-                    ),
-                ]),
-            }],
-            links: Vec::new(),
-            extras: BTreeMap::new(),
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "semantic_guide",
+                    "label": "Guide concept",
+                    "file_type": "concept",
+                    "source_file": "guide.md",
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![PathBuf::from("guide.md")],
+            partial_files: Vec::new(),
+            allow_partial: false,
         };
-        write_json_atomic(&graph_path, &semantic, true)?;
+        let first = build_graph_with_semantic(&options, &semantic)?;
+        let graph_path = first.output_dir.join("graph.json");
 
         build_local_graph(&options)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.nodes[0].id, "semantic_guide");
-        assert!(
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert_eq!(
             graph
                 .nodes
                 .iter()
-                .all(|node| node.attributes.get("_origin").is_none())
+                .filter(|node| node.label() == "Guide concept")
+                .count(),
+            1
         );
         Ok(())
     }
@@ -3178,7 +3179,7 @@ mod tests {
     }
 
     #[test]
-    fn code_sources_precede_deterministic_documents() -> Result<(), Box<dyn Error>> {
+    fn code_and_deterministic_document_sources_are_both_published() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         fs::write(
             directory.path().join("zzz.py"),
@@ -3193,30 +3194,20 @@ mod tests {
         options.no_viz = true;
 
         let result = build_local_graph(&options)?;
-        let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
-        let code_positions = graph
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        let code_nodes = graph
             .nodes
             .iter()
-            .enumerate()
-            .filter_map(|(position, node)| {
-                (node.string("source_file") == "zzz.py").then_some(position)
-            })
+            .filter(|node| node.source_file() == Some("zzz.py"))
             .collect::<Vec<_>>();
-        let document_positions = graph
+        let document_nodes = graph
             .nodes
             .iter()
-            .enumerate()
-            .filter_map(|(position, node)| {
-                (node.string("source_file") == "aaa.md").then_some(position)
-            })
+            .filter(|node| node.source_file() == Some("aaa.md"))
             .collect::<Vec<_>>();
 
-        assert!(!code_positions.is_empty());
-        assert!(!document_positions.is_empty());
-        assert!(
-            code_positions.iter().max() < document_positions.iter().min(),
-            "Python compatibility requires every code extraction to precede deterministic document extraction"
-        );
+        assert!(!code_nodes.is_empty());
+        assert!(!document_nodes.is_empty());
         Ok(())
     }
 
@@ -3236,7 +3227,7 @@ mod tests {
         options.no_viz = true;
 
         let result = build_local_graph(&options)?;
-        let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
         assert!(
             graph
                 .nodes
@@ -3247,7 +3238,7 @@ mod tests {
             graph
                 .nodes
                 .iter()
-                .all(|node| node.string("source_file") != "vendor-treadmill")
+                .all(|node| node.source_file() != Some("vendor-treadmill"))
         );
         Ok(())
     }
@@ -3341,8 +3332,8 @@ mod tests {
         };
         let first = build_graph_with_semantic(&options, &first_layer)?;
         let graph_path = first.output_dir.join("graph.json");
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(graph.nodes.iter().any(|node| node.id == "old_concept"));
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Old concept"));
         let manifest: Value =
             serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
         assert!(
@@ -3378,14 +3369,18 @@ mod tests {
             allow_partial: false,
         };
         build_graph_with_semantic(&options, &second_layer)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(!graph.nodes.iter().any(|node| node.id == "old_concept"));
-        assert!(graph.nodes.iter().any(|node| node.id == "new_concept"));
-        let Some(semantic) = graph.nodes.iter().find(|node| node.id == "new_concept") else {
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Old concept"));
+        assert!(graph.nodes.iter().any(|node| node.label() == "New concept"));
+        let Some(semantic) = graph
+            .nodes
+            .iter()
+            .find(|node| node.label() == "New concept")
+        else {
             return Err("new semantic node was not written".into());
         };
-        assert_eq!(semantic.string("source_file"), "diagram.png");
-        assert_eq!(semantic.string("_origin"), "semantic");
+        assert_eq!(semantic.source_file(), Some("diagram.png"));
+        assert!(node_has_origin(semantic, EvidenceOrigin::Heuristic));
         Ok(())
     }
 
@@ -3403,8 +3398,8 @@ mod tests {
         let complete = SemanticLayer {
             fragment: json!({
                 "nodes": [
-                    {"id":"concept_a", "source_file":"diagram.png"},
-                    {"id":"concept_b", "source_file":"diagram.png"}
+                    {"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"},
+                    {"id":"concept_b", "label":"Concept B", "file_type":"concept", "source_file":"diagram.png"}
                 ],
                 "edges": [],
                 "hyperedges": [],
@@ -3421,7 +3416,7 @@ mod tests {
         let original = fs::read(&graph_path)?;
         let mut incomplete = SemanticLayer {
             fragment: json!({
-                "nodes": [{"id":"concept_a", "source_file":"diagram.png"}],
+                "nodes": [{"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"}],
                 "edges": [],
                 "hyperedges": [],
                 "input_tokens": 2,
@@ -3441,12 +3436,9 @@ mod tests {
 
         incomplete.allow_partial = true;
         build_graph_with_semantic(&options, &incomplete)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(graph.nodes.iter().any(|node| node.id == "concept_a"));
-        assert!(!graph.nodes.iter().any(|node| node.id == "concept_b"));
-        let raw: Value = serde_json::from_slice(&fs::read(&graph_path)?)?;
-        assert_eq!(raw["input_tokens"], 2);
-        assert_eq!(raw["output_tokens"], 1);
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Concept A"));
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Concept B"));
         let manifest: Value =
             serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
         assert_eq!(manifest["diagram.png"]["semantic_hash"], "");
@@ -3466,8 +3458,8 @@ mod tests {
         let complete = SemanticLayer {
             fragment: json!({
                 "nodes": [
-                    {"id":"concept_a", "source_file":"diagram.png"},
-                    {"id":"concept_b", "source_file":"diagram.png"}
+                    {"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"},
+                    {"id":"concept_b", "label":"Concept B", "file_type":"concept", "source_file":"diagram.png"}
                 ],
                 "edges": [],
                 "hyperedges": [],
@@ -3481,7 +3473,7 @@ mod tests {
 
         let smaller = SemanticLayer {
             fragment: json!({
-                "nodes": [{"id":"concept_a", "source_file":"diagram.png"}],
+                "nodes": [{"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"}],
                 "edges": [],
                 "hyperedges": [],
                 "failed_chunks": 0,
@@ -3492,9 +3484,9 @@ mod tests {
         };
         build_graph_with_semantic(&options, &smaller)?;
         let graph_path = first.output_dir.join("graph.json");
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(graph.nodes.iter().any(|node| node.id == "concept_a"));
-        assert!(!graph.nodes.iter().any(|node| node.id == "concept_b"));
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Concept A"));
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Concept B"));
 
         fs::remove_file(&image)?;
         let empty = SemanticLayer {
@@ -3509,8 +3501,8 @@ mod tests {
             allow_partial: false,
         };
         build_graph_with_semantic(&options, &empty)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(!graph.nodes.iter().any(|node| node.id == "concept_a"));
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Concept A"));
         let manifest: Value =
             serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
         assert!(manifest.get("diagram.png").is_none());

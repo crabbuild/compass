@@ -160,6 +160,7 @@ impl NodeKind {
                 | Self::Protocol
                 | Self::Enum
                 | Self::Component
+                | Self::Resource
                 | Self::Schema
                 | Self::Database
                 | Self::DatabaseSchema
