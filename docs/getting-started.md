@@ -70,6 +70,27 @@ The macOS release is unsigned and not notarized. Read the release notes and
 [security policy](../SECURITY.md) before using an installer in a controlled
 environment.
 
+### Install a Windows release
+
+On Windows x64 or ARM64, the PowerShell installer downloads the matching
+archive, verifies its SHA-256 checksum, and installs `compass.exe` into
+`~/.local/bin` by default:
+
+```powershell
+irm https://github.com/crabbuild/compass/releases/latest/download/install.ps1 | iex
+```
+
+To use another user-writable directory, download `install.ps1` and run:
+
+```powershell
+$env:COMPASS_INSTALL_DIR = "$PWD\bin"
+.\install.ps1
+```
+
+The matching archive and `.sha256` file on the
+[latest release](https://github.com/crabbuild/compass/releases/latest) remain
+available for offline installation.
+
 ### Build from source
 
 The repository pins Rust 1.97.1 in `rust-toolchain.toml`:

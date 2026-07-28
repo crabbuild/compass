@@ -11,14 +11,17 @@ import {
   inspectCompassInstallation
 } from "./cli/discovery";
 import { CompassProcessManager } from "./cli/processManager";
+import { CompassRuntime } from "./cli/runtime";
 import { compassSelectionItems } from "./cli/selection";
 import { registerBuildCommands } from "./commands/buildCommands";
+import { resolveInstallCommand } from "./install/command";
 import { GraphPanel } from "./views/graphPanel";
 import { CallGraphPanel } from "./views/callGraphPanel";
 import { openCallGraphGuidePanel } from "./views/callGraphGuidePanel";
 import { openArchitecturePanel } from "./views/architecturePanel";
 import { openQueryPanel } from "./views/queryPanel";
 import { openHistoryPanel } from "./views/historyPanel";
+import { openCliOnboardingPanel } from "./views/cliOnboardingPanel";
 import { createCompassStatusBar } from "./views/statusBar";
 import { WorkspaceTree } from "./views/workspaceTree";
 import { SessionRegistry } from "./workspace/sessionRegistry";
@@ -55,8 +58,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }));
   }
 
-  const workspaceTree = new WorkspaceTree(registry, discovery);
+  const runtime = new CompassRuntime(discovery, {
+    processes,
+    sessions: () => registry.all(),
+    persistCliPath: async (selectedPath) => {
+      await vscode.workspace.getConfiguration("compass").update(
+        "cliPath",
+        selectedPath,
+        vscode.ConfigurationTarget.Global
+      );
+    }
+  });
+  const workspaceTree = new WorkspaceTree(registry, () => runtime.discovery);
   const statusBar = createCompassStatusBar(context, registry);
+  context.subscriptions.push(runtime.onDidChange(() => {
+    workspaceTree.refresh();
+    statusBar.refresh();
+  }));
   const refresh = async () => {
     await registry.refresh();
     workspaceTree.refresh();
@@ -122,26 +140,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     if (!installation) return;
 
-    if (installation.executable === executable) {
+    if (
+      runtime.discovery.kind === "found"
+      && installation.executable === runtime.discovery.executable
+    ) {
       void vscode.window.showInformationMessage(
         `Compass ${installation.version ?? "(version unavailable)"} is already active.`
       );
       return;
     }
-    await vscode.workspace.getConfiguration("compass").update(
-      "cliPath",
-      installation.executable,
-      vscode.ConfigurationTarget.Global
-    );
-    const version = installation.version
-      ? ` ${installation.version}`
-      : "";
-    const action = await vscode.window.showInformationMessage(
-      `Compass${version} selected from ${installation.executable}. Reload VS Code to activate it.`,
-      "Reload Window"
-    );
-    if (action === "Reload Window") {
-      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    try {
+      const activated = await runtime.activate(installation);
+      await refresh();
+      void vscode.window.showInformationMessage(
+        `Compass ${
+          activated.installation.version ?? activated.capabilities.compass_version
+        } is ready at ${activated.installation.executable}.`
+      );
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Compass CLI could not be activated: ${message(error)}`
+      );
     }
   };
   const handleSetupAction = async (action: string | undefined) => {
@@ -291,6 +310,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
     vscode.commands.registerCommand("compass.refreshWorkspace", refresh),
     vscode.commands.registerCommand("compass.selectCli", selectCompassBinary),
+    vscode.commands.registerCommand("compass.installCli", () =>
+      openCliOnboardingPanel(context, {
+        runtime,
+        selectExisting: selectCompassBinary,
+        initializeRepository: async () => {
+          await vscode.commands.executeCommand("compass.initialize");
+        },
+        refresh,
+        discover: () => discoverCompass(vscode.workspace.getConfiguration("compass")),
+        resolveCommand: () => resolveInstallCommand(process.platform, process.env)
+      })
+    ),
     vscode.commands.registerCommand("compass.openSettings", openCompassSettings),
     vscode.commands.registerCommand("compass.openGraph", async (repositoryId?: string) => {
       if (!vscode.workspace.isTrusted) {
@@ -355,10 +386,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ).then(handleSetupAction);
   } else if (discovery.kind === "missing") {
     void vscode.window.showInformationMessage(
-      "Compass CLI is required. Install it, then select or configure the executable.",
-      "Open Setup",
-      "Select Compass CLI"
-    ).then(handleSetupAction);
+      "Install Compass to build and explore a local code graph.",
+      "Install Compass",
+      "Select existing CLI"
+    ).then(async (action) => {
+      if (action === "Install Compass") {
+        await vscode.commands.executeCommand("compass.installCli");
+      } else if (action === "Select existing CLI") {
+        await vscode.commands.executeCommand("compass.selectCli");
+      }
+    });
   }
 }
 

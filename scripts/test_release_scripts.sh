@@ -2,6 +2,8 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+test -f "$repo_root/scripts/install.sh"
+test -f "$repo_root/scripts/install.ps1"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 mkdir -p "$test_root/fake-checksum-bin"

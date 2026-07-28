@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Add first-run Compass CLI installation in a visible VS Code terminal on
+  macOS, Linux, and Windows.
+- Verify and activate installed or manually selected CLIs without reloading the
+  editor.
+
 ## 0.1.6
 
 - Place the Marketplace logo on a high-contrast indigo badge so it remains
