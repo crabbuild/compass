@@ -1,133 +1,174 @@
-# Compass Code Graph v1 Implementation Plan
+# Compass Code Graph v1 Implementation-First Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:subagent-driven-development` (recommended) or
 > `superpowers:executing-plans` to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the first supported `compass.graph/1` structural code graph,
-including typed enterprise facts, framework routing, trusted provenance,
-Program IR enrichment, shared queries, and VS Code presentation.
+**Goal:** Ship the first supported `compass.graph/1` code graph with a closed
+vocabulary, trustworthy provenance, enterprise and framework facts, shared
+queries, and first-class VS Code presentation.
 
-**Architecture:** Keep the NetworkX node-link envelope, but make its metadata,
-nodes, and links strict typed Rust records. Language extractors continue to
-produce per-file raw facts; a typed normalization boundary in `compass-graph`
-converts them into v1 records after `compass-resolve` finishes cross-file and
-framework resolution. `graph.json` and `program.json` remain authoritative;
-`compass-query` builds a disposable SQLite/FTS5 index and returns one
-`compass.query/1` contract to CLI, MCP, and VS Code.
+**Architecture:** Preserve a versioned NetworkX node-link envelope for the
+durable artifact while replacing its free-form node and edge attributes with
+strict Compass records. Extractors keep a flexible internal fact model;
+`compass-resolve` resolves cross-file facts, and `compass-graph` is the only
+publication boundary allowed to create v1 nodes and edges. `graph.json` and
+the independently versioned Program IR remain authoritative, while a
+rebuildable SQLite/FTS5 projection powers one `compass.query/1` contract used
+by CLI, MCP, the viewer, and the VS Code extension.
 
-**Tech Stack:** Rust 1.97, serde/serde_json, tree-sitter, SHA-256, rusqlite
+**Tech Stack:** Rust 1.97.1, serde/serde_json, tree-sitter, SHA-256, rusqlite
 0.31 with bundled modern SQLite/FTS5, TypeScript 5.9, Zod 4, React 19, Vitest,
-Playwright, VS Code Extension API.
+Playwright, and the VS Code Extension API.
 
-## Global Constraints
+## How to use this plan
 
-- The graph schema is exactly `compass.graph/1`.
-- The durable envelope remains NetworkX-compatible with `directed`,
-  `multigraph`, `graph`, `nodes`, and `links`.
-- Every published graph is directed and multigraph.
-- Unversioned graphs are pre-contract artifacts: reject them at query/load
-  boundaries and rebuild them at index/update boundaries.
-- Do not add a legacy graph adapter, translation mode, or compatibility
-  relationship aliases.
-- Do not change Graphify or invoke the embedded TypeScript CodeGraph at runtime.
+Each task explains the current system, the reason for the change, the exact
+implementation boundary, and the contract it hands to later tasks. Implement
+the production path first, then add focused verification and run the listed
+gates. Each task ends in a reviewable, working commit; do not leave the
+workspace in a deliberately failing state between tasks.
+
+Tasks are ordered by dependency. A later task may consume only contracts
+explicitly produced by an earlier task. When a task lists a file that was
+created earlier in this plan, “Modify” means the file exists by that point.
+
+## Global constraints
+
+- The durable structural graph schema is exactly `compass.graph/1`.
+- The envelope remains NetworkX-compatible with `directed`, `multigraph`,
+  `graph`, `nodes`, and `links`.
+- Every published graph is directed and multigraph, even when it has no
+  parallel edges.
+- The new contract is called v1. Existing unversioned artifacts are
+  pre-contract artifacts, not an earlier supported version.
+- Do not add a legacy adapter, compatibility mode, dual writer, or
+  relationship aliases to the published artifact.
+- Query/load entry points reject pre-contract artifacts with rebuild guidance.
+  Index/update entry points rebuild them.
 - Keep Program IR under its existing
-  `http://crab.build/compass/v1` schema.
+  `http://crab.build/compass/v1` schema. Do not merge Program IR records into
+  the durable structural graph.
 - `graph.json`, `program.json`, manifest, and trusted build state publish as
   one generation.
 - Every declared node and edge kind must have a validated producer before the
   release gate passes.
-- Every heuristic edge must include its rule and wiring-site source anchor.
-- Ambiguous resolution keeps bounded candidates; it never picks the first
-  candidate silently.
-- Source returned by explore must match the digest recorded in the graph.
-- CLI, MCP, and VS Code must consume the same `compass.query/1` semantics.
-- Preserve the user's existing uncommitted
-  `editors/vscode/package.json` change unless it is intentionally superseded
-  during the VS Code task.
+- Every heuristic edge carries a non-empty rule and a wiring-site source
+  anchor.
+- Ambiguous resolution retains a bounded, deterministically sorted candidate
+  set. It never silently chooses the first candidate.
+- `explore` returns source only when the current file digest matches the
+  digest recorded in the graph.
+- CLI, MCP, viewer, and VS Code consume the same `compass.query/1` semantics.
+- Do not change Graphify or invoke Graphify’s TypeScript CodeGraph at runtime.
+- Preserve unrelated worktree changes, especially
+  `editors/vscode/package.json` and the call-graph hardening documents.
+- After any task that changes code, run `graphify update .` from
+  `/Users/haipingfu/graphify` after the task’s Compass verification succeeds.
 
 ---
 
-## File and module structure
+## Current system and target boundaries
+
+| Area | Current state | v1 target |
+|---|---|---|
+| Durable model | `compass-model::NodeRecord` and `EdgeRecord` flatten arbitrary JSON maps | Closed typed node, edge, provenance, file, coverage, and diagnostic records |
+| Extraction | `compass-languages::Extraction` directly contains durable records | Extractors emit `RawNodeRecord`, `RawEdgeRecord`, calls, and framework/domain facts |
+| Resolution | `compass-resolve` mutates free-form facts | Resolver consumes raw facts and emits explicit resolution state and candidates |
+| Construction | `compass-graph::build_*` canonicalizes strings and arbitrary attributes | One `normalize_v1` boundary validates and publishes canonical v1 records |
+| Loading | `GraphDocument` accepts permissive node-link JSON and caches by file signature | Strict schema loading with content-addressed derived caches |
+| Query | In-memory scoring, CQL, traversal, and affected-node commands use independent projections | One typed `compass.query/1` response for search, callers, callees, impact, explore, and node trail |
+| Program analysis | Program IR is a separate `compass/v1` artifact | Remains separate and joins only as optional query evidence |
+| Clients | CLI, MCP, viewer, and VS Code have separate graph/query shapes | Thin adapters and one TypeScript mirror of `compass.query/1` |
+
+## Planned module ownership
 
 | Path | Responsibility |
 |---|---|
-| `crates/compass-model/src/code_graph.rs` | V1 node, role, edge, file, build, coverage, and diagnostic records |
-| `crates/compass-model/src/provenance.rs` | Anchors, origins, confidence, and evidence invariants |
-| `crates/compass-model/src/identity.rs` | Portable SHA-256 file, symbol, route, domain, and edge IDs |
+| `crates/compass-model/src/code_graph.rs` | Closed v1 vocabulary and durable records |
+| `crates/compass-model/src/provenance.rs` | Evidence origin, confidence, anchors, resolution state, and invariants |
+| `crates/compass-model/src/identity.rs` | Portable deterministic IDs |
 | `crates/compass-model/src/query_contract.rs` | Transport-neutral `compass.query/1` requests and responses |
-| `crates/compass-model/src/document.rs` | NetworkX envelope serialization and strict v1 loading |
-| `crates/compass-model/src/validation.rs` | Closed vocabulary, endpoint matrix, anchor, path, and graph validation |
-| `crates/compass-languages/src/facts.rs` | Flexible pre-publication raw extraction records and framework facts |
-| `crates/compass-languages/src/frameworks/*.rs` | Local route/domain detection by ecosystem |
-| `crates/compass-resolve/src/frameworks/*.rs` | Cross-file handler, middleware, event, job, and ORM resolution |
-| `crates/compass-graph/src/v1.rs` | Raw-to-v1 normalization and canonical graph construction |
-| `crates/compass-query/src/index.rs` | Content-addressed SQLite/FTS5 index |
-| `crates/compass-query/src/code_query.rs` | Search, callers, callees, impact, explore, and node trail |
+| `crates/compass-model/src/document.rs` | NetworkX envelope serialization and strict loading |
+| `crates/compass-model/src/validation.rs` | Whole-document validation |
+| `crates/compass-languages/src/facts.rs` | Flexible pre-publication facts |
+| `crates/compass-languages/src/frameworks/` | Local framework and convention detection |
+| `crates/compass-resolve/src/frameworks/` | Cross-file route, message, job, and ORM resolution |
+| `crates/compass-graph/src/v1.rs` | Raw-to-v1 normalization and canonical publication |
+| `crates/compass-query/src/index.rs` | Disposable content-addressed SQLite/FTS5 index |
+| `crates/compass-query/src/code_query.rs` | Shared query execution |
 | `crates/compass-query/src/program_join.rs` | Optional Program IR evidence reconciliation |
-| `crates/compass-cli/src/code_query_commands.rs` | JSON/text CLI adapters |
-| `crates/compass-mcp/src/code_query.rs` | MCP tool schemas and structured result adapters |
-| `packages/compass-viewer/src/contracts/codeQuery.ts` | Zod mirror of `compass.query/1` |
-| `packages/compass-viewer/src/graph/CodeEvidence.tsx` | Provenance, coverage, conflict, and truncation presentation |
-| `editors/vscode/src/views/codeQueryClient.ts` | CLI-backed query client |
+| `crates/compass-cli/src/code_query_commands.rs` | CLI request parsing and rendering |
+| `crates/compass-mcp/src/code_query.rs` | MCP tool definitions and response adapters |
+| `packages/compass-viewer/src/contracts/codeQuery.ts` | Zod mirror of Rust query records |
+| `packages/compass-viewer/src/graph/CodeEvidence.tsx` | Provenance and coverage presentation |
+| `editors/vscode/src/views/codeQueryClient.ts` | Validated CLI-backed query client |
 
-## Milestone 1: Establish the graph contract and hard cutover
+## Requirement-to-task map
 
-### Task 1: Add the closed v1 vocabulary and typed records
+| Approved requirement | Implemented by |
+|---|---|
+| Closed node/edge vocabulary and NetworkX envelope | Tasks 1, 3, and 5 |
+| Portable identity and trustworthy provenance | Task 3 |
+| Removal of free-form durable attributes | Tasks 2 and 4 |
+| Hard cutover, canonical publication, file inventory, coverage | Task 5 |
+| Database, schema, query, migration, configuration producers | Task 6 |
+| Shared route model and complete framework matrix | Tasks 7–11 |
+| Events, messages, jobs, schedules, and ORM mappings | Task 12 |
+| Separate Program IR with query-time reconciliation | Task 13 |
+| FTS5 symbol search | Task 14 |
+| Callers, callees, impact, explore, and node trail | Task 15 |
+| Shared CLI and MCP semantics | Task 16 |
+| Viewer evidence and TypeScript contract | Task 17 |
+| VS Code enterprise integration | Task 18 |
+| Determinism, platform, and real-repository release gates | Task 19 |
+
+---
+
+## Milestone 1: Establish the durable contract
+
+### Task 1: Add the closed v1 model without breaking current extraction
+
+**Objective:** Introduce all durable v1 types alongside the current flexible
+records so the repository continues to compile while later tasks migrate
+producers.
+
+**Context:** Today `crates/compass-model/src/document.rs` owns both the
+NetworkX envelope and permissive records with flattened JSON attributes.
+Those records are imported directly by every language extractor. Replacing
+them in one edit would mix the public contract change with a repository-wide
+producer migration. This task therefore adds the new contract in a separate
+module and leaves the current root exports intact until Task 2 moves raw
+facts out of `compass-model`.
 
 **Files:**
 
 - Create: `crates/compass-model/src/code_graph.rs`
 - Create: `crates/compass-model/src/provenance.rs`
+- Create: `crates/compass-model/src/validation.rs`
 - Modify: `crates/compass-model/src/lib.rs`
-- Modify: `crates/compass-model/src/document.rs`
 - Test: `crates/compass-model/tests/code_graph_v1.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `NodeKind`, `NodeRole`, `EdgeKind`, `SourceAnchor`, `EvidenceOrigin`,
-  `EvidenceConfidence`, `Provenance`, `FileRecord`, `CoverageRecord`,
-  `GraphDiagnostic`, typed `NodeRecord`, typed `EdgeRecord`,
-  `GraphMetadata`, and `GraphDocument`.
-- Consumers: every later task.
-
-- [ ] **Step 1: Write the failing serialization test**
-
-```rust
-#[test]
-fn serializes_the_networkx_v1_envelope() -> Result<(), Box<dyn std::error::Error>> {
-    let document = fixture_graph();
-    let value = serde_json::to_value(document)?;
-    assert_eq!(value["directed"], true);
-    assert_eq!(value["multigraph"], true);
-    assert_eq!(value["graph"]["schema"], "compass.graph/1");
-    assert_eq!(value["nodes"][0]["kind"], "file");
-    assert_eq!(value["links"][0]["kind"], "contains");
-    assert_eq!(value["links"][0]["key"], value["links"][0]["id"]);
-    assert!(value["links"][0].get("relation").is_none());
-    Ok(())
-}
-```
-
-Also assert serde rejects `"kind":"unknown"` for a node, edge, role, origin,
-confidence, and diagnostic severity.
-
-- [ ] **Step 2: Run the test and verify the contract is absent**
-
-Run:
-
-```bash
-cargo test -p compass-model --test code_graph_v1 --locked
-```
-
-Expected: compilation fails because the v1 types and `fixture_graph` cannot be
-constructed.
-
-- [ ] **Step 3: Implement the exact vocabulary**
-
-Define serde `snake_case` enums with these variants:
+- [ ] Freeze the serialized node values as:
+  `file`, `module`, `package`, `namespace`, `class`, `struct`, `interface`,
+  `trait`, `protocol`, `enum`, `enum_member`, `type_alias`, `function`,
+  `method`, `constructor`, `property`, `field`, `variable`, `constant`,
+  `parameter`, `import`, `export`, `macro`, `annotation`, `route`,
+  `component`, `event`, `message`, `topic`, `queue`, `job`, `resource`,
+  `schema`, `query`, `migration`, `config_key`, `database`,
+  `database_schema`, `database_table`, `database_view`, `database_column`,
+  `database_index`, `database_constraint`, `database_procedure`, and
+  `database_trigger`.
+- [ ] Freeze the serialized edge values as:
+  `contains`, `calls`, `imports`, `exports`, `extends`, `implements`,
+  `references`, `type_of`, `returns`, `instantiates`, `overrides`,
+  `decorates`, `routes_to`, `reads`, `writes`, `aliases`, `registers`,
+  `handles`, `publishes`, `subscribes`, `produces`, `consumes`, `schedules`,
+  `triggers`, `tests`, `depends_on`, `documents`, and `maps_to`.
+- [ ] Add serde `snake_case` enums with the exact closed vocabulary:
 
 ```rust
 pub enum NodeKind {
@@ -157,228 +198,57 @@ pub enum EdgeKind {
 }
 ```
 
-Use `#[serde(deny_unknown_fields)]` on structured records. Serialize edge
-identity into both `id` and NetworkX `key`. Keep community fields typed and
-optional on `NodeRecord`; represent `resource` details with `ResourceKind`;
-do not reintroduce a flattened attributes map.
+- [ ] Define `SourceAnchor`, `EvidenceOrigin`, `EvidenceConfidence`,
+  `ResolutionState`, `ResolutionCandidate`, and `Provenance`.
+  `EvidenceOrigin` is exactly `ast`, `scip`, `configuration`, `convention`,
+  `heuristic`, or `program_ir`. This task establishes their serialized shape;
+  Task 3 adds construction and whole-graph invariants.
+- [ ] Define typed `NodeRecord`, `EdgeRecord`, `FileRecord`,
+  `GraphMetadata`, `CoverageRecord`, and `GraphDiagnostic`. Put kind-specific
+  fields in tagged detail enums instead of a flattened attributes map. Keep
+  community IDs, scores, colors, and labels typed and optional so existing
+  clustering can enrich v1 nodes without reopening the vocabulary.
+- [ ] Give each edge both `id` and NetworkX `key`; require them to contain the
+  same deterministic identity. Use `kind`, never `relation`, as the published
+  relationship field.
+- [ ] Apply `#[serde(deny_unknown_fields)]` to structured records. Unknown
+  enum values and misspelled required fields must fail deserialization.
+- [ ] Export the module as `compass_model::code_graph` but do not replace the
+  existing root-level flexible record exports yet.
 
-- [ ] **Step 4: Run the model tests**
+**Contract produced:** Later tasks can build against
+`compass_model::code_graph::{NodeRecord, EdgeRecord, NodeKind, EdgeKind,
+GraphMetadata}` without changing current extractors. The NetworkX envelope
+switches to these records in Task 3.
 
-Run:
+**Verification:**
+
+- Add record round-trip fixtures that assert closed enum behavior,
+  `routes_to` spelling, `id == key`, and absence of `relation`.
+- Run:
 
 ```bash
-cargo test -p compass-model --test code_graph_v1 --locked
 cargo test -p compass-model --all-targets --locked
+cargo check --workspace --all-targets --locked
 ```
 
-Expected: all tests pass.
+**Done when:** The typed model can serialize and reject malformed v1
+documents, while all current extractors and graph commands still compile
+against the old internal records.
 
-- [ ] **Step 5: Commit**
+**Commit:** `feat(model): define Compass code graph v1`
 
-```bash
-git add crates/compass-model
-git commit -m "feat(model): define Compass graph v1"
-```
+### Task 2: Move flexible records to the raw extraction boundary
 
-### Task 2: Implement portable identities and provenance validation
+**Objective:** Make free-form maps explicitly internal so only
+`compass-graph` can create durable v1 records.
 
-**Files:**
-
-- Create: `crates/compass-model/src/identity.rs`
-- Modify: `crates/compass-model/src/provenance.rs`
-- Modify: `crates/compass-model/src/validation.rs`
-- Modify: `crates/compass-model/src/error.rs`
-- Test: `crates/compass-model/tests/code_graph_identity.rs`
-- Test: `crates/compass-model/tests/code_graph_validation.rs`
-
-**Interfaces:**
-
-- Produces:
-  `file_id(path)`, `symbol_id(SymbolIdentity)`, `route_id(RouteIdentity)`,
-  `domain_id(DomainIdentity)`, `edge_id(EdgeIdentity)`, and
-  `validate_graph_v1(&GraphDocument)`.
-- Consumes: v1 types from Task 1.
-
-- [ ] **Step 1: Write failing identity and provenance tests**
-
-```rust
-#[test]
-fn identity_is_checkout_root_independent() {
-    let left = symbol_id(&SymbolIdentity {
-        language: "rust",
-        kind: NodeKind::Function,
-        source_path: "src/lib.rs",
-        qualified_name: "crate::run",
-        overload: None,
-    });
-    let right = symbol_id(&SymbolIdentity {
-        source_path: "./src/../src/lib.rs",
-        ..same_symbol()
-    });
-    assert_eq!(left, right);
-    assert!(!left.contains('/'));
-}
-
-#[test]
-fn heuristic_edges_require_a_wiring_site() {
-    let mut edge = calls_edge();
-    edge.provenance.origin = EvidenceOrigin::Heuristic;
-    edge.provenance.rule = Some("event-dispatch".to_owned());
-    edge.provenance.wiring_site = None;
-    assert!(matches!(
-        validate_graph_v1(&graph_with(edge)),
-        Err(GraphError::InvalidProvenance { .. })
-    ));
-}
-```
-
-Add tests for out-of-bounds anchors, absolute paths, `..` escape, conflicting
-duplicate IDs, dangling endpoints, and invalid endpoint-kind combinations.
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-cargo test -p compass-model --test code_graph_identity --locked
-cargo test -p compass-model --test code_graph_validation --locked
-```
-
-Expected: tests fail because identity and strict validation are missing.
-
-- [ ] **Step 3: Implement identity and invariants**
-
-Use length-prefixed identity components and SHA-256:
-
-```rust
-fn digest_identity(namespace: &str, fields: &[&str]) -> String {
-    let mut bytes = Vec::new();
-    push_field(&mut bytes, "compass.graph/1");
-    push_field(&mut bytes, namespace);
-    for field in fields {
-        push_field(&mut bytes, field);
-    }
-    format!("{namespace}:{}", hex_sha256(&bytes))
-}
-```
-
-Normalize separators to `/`, collapse `.` components, reject `..`, absolute
-paths, prefixes, and empty paths. Validate the full endpoint matrix from the
-approved design. A heuristic provenance record requires non-empty `rule` and
-`wiring_site`; all other origins require at least one anchor.
-
-- [ ] **Step 4: Verify identity and validation**
-
-Run:
-
-```bash
-cargo test -p compass-model --test code_graph_identity --locked
-cargo test -p compass-model --test code_graph_validation --locked
-cargo test -p compass-model --all-targets --locked
-```
-
-Expected: all tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-model
-git commit -m "feat(model): validate graph identity and evidence"
-```
-
-### Task 3: Enforce the graph v1 hard cutover
-
-**Files:**
-
-- Modify: `crates/compass-model/src/document.rs`
-- Modify: `crates/compass-model/src/error.rs`
-- Modify: `crates/compass-core/src/pipeline.rs`
-- Modify: `crates/compass-core/src/build_state.rs`
-- Modify: `crates/compass-history/src/store.rs`
-- Modify: `crates/compass-history/src/artifacts.rs`
-- Modify: `crates/compass-history/src/validate.rs`
-- Test: `crates/compass-model/tests/contracts_coverage.rs`
-- Test: `crates/compass-core/tests/loading_coverage.rs`
-- Test: `crates/compass-history/tests/roundtrip.rs`
-
-**Interfaces:**
-
-- Produces:
-  `GraphError::UnsupportedSchema`, strict `GraphDocument::load`, and
-  build-only `graph_needs_full_rebuild`.
-- Consumers: all graph readers and the history store.
-
-- [ ] **Step 1: Write failing hard-cutover tests**
-
-Add three cases:
-
-```rust
-#[test]
-fn loader_rejects_unversioned_graphs() {
-    let error = GraphDocument::from_slice(
-        br#"{"directed":true,"multigraph":true,"graph":{},"nodes":[],"links":[]}"#
-    ).unwrap_err();
-    assert!(matches!(error, GraphError::UnsupportedSchema { found: None }));
-}
-
-#[test]
-fn update_rebuilds_a_precontract_graph_from_source() -> Result<(), Box<dyn Error>> {
-    let repo = seeded_repo("fn run() {}")?;
-    write_precontract_graph(&repo)?;
-    let result = run_update(&repo)?;
-    assert_eq!(load_graph(&result)?.metadata.schema, "compass.graph/1");
-    Ok(())
-}
-
-#[test]
-fn history_store_format_names_compass_graph_v1() {
-    assert!(store_format().contains(r#""graph_schema":"compass.graph/1""#));
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-cargo test -p compass-model --test contracts_coverage --locked
-cargo test -p compass-core --test loading_coverage --locked
-cargo test -p compass-history --test roundtrip --locked
-```
-
-Expected: the unversioned graph loads and the history format still names
-`networkx-node-link/v1`.
-
-- [ ] **Step 3: Implement the hard cutover**
-
-- Require `graph.schema == "compass.graph/1"` in every query/history loader.
-- Let update/index detect `UnsupportedSchema` before loading incremental state,
-  invalidate AST/query/output caches, and perform a clean source rebuild.
-- Bump the trusted build-state and history store graph-schema fingerprints.
-- Refuse mixed graph/program/manifest/build-state generations.
-- Do not deserialize old `relation` attributes into `EdgeKind`.
-
-- [ ] **Step 4: Verify the cutover**
-
-Run:
-
-```bash
-cargo test -p compass-model -p compass-core -p compass-history --all-targets --locked
-```
-
-Expected: all tests pass, including explicit rejection of pre-contract graph
-reads and source rebuild during update.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-model crates/compass-core crates/compass-history
-git commit -m "feat: hard cut over to Compass graph v1"
-```
-
-## Milestone 2: Normalize extraction and publication
-
-### Task 4: Separate raw extraction facts from published records
+**Context:** `compass-languages::Extraction` currently stores
+`compass_model::{NodeRecord, EdgeRecord}`. `compass-resolve` and
+`compass-graph` both depend on their arbitrary attribute maps. The v1 model
+cannot be trustworthy while producers can write directly into the durable
+shape. This task preserves existing extraction behavior but renames and
+relocates the flexible types.
 
 **Files:**
 
@@ -418,208 +288,402 @@ git commit -m "feat: hard cut over to Compass graph v1"
 - Modify: `crates/compass-languages/src/zig.rs`
 - Modify: `crates/compass-resolve/src/lib.rs`
 - Modify: `crates/compass-resolve/src/members.rs`
-- Create: `crates/compass-graph/src/v1.rs`
+- Modify: `crates/compass-graph/src/dedup.rs`
 - Modify: `crates/compass-graph/src/lib.rs`
 - Test: `crates/compass-languages/tests/typed_extraction.rs`
-- Test: `crates/compass-graph/tests/graph_v1_normalization.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `RawNodeRecord`, `RawEdgeRecord`, `RawFrameworkFact`, and
-  `normalize_v1(Extraction, BuildEvidence) -> Result<GraphDocument, GraphError>`.
-- Consumes: typed v1 model and current per-language extraction behavior.
-
-- [ ] **Step 1: Write failing normalization tests**
-
-Build raw facts using the current extractor vocabulary and assert exact v1
-normalization:
+- [ ] Define `RawNodeRecord` and `RawEdgeRecord` in `facts.rs` with the current
+  `id`/endpoint fields and flattened JSON maps. Change `Extraction` to:
 
 ```rust
-#[test]
-fn normalizes_old_internal_relations_without_publishing_aliases() {
-    let raw = extraction_with_relations([
-        ("imports_from", "imports"),
-        ("re_exports", "exports"),
-        ("inherits", "extends"),
-        ("indirect_call", "calls"),
-        ("reads_from", "reads"),
-        ("references_constant", "references"),
-        ("uses_static_prop", "references"),
-    ]);
-    let graph = normalize_v1(raw, evidence()).unwrap();
-    assert!(graph.links.iter().all(|edge| {
-        !["imports_from", "re_exports", "inherits", "indirect_call"]
-            .contains(&edge.kind.as_str())
-    }));
-    let indirect = graph.links.iter()
-        .find(|edge| edge.kind == EdgeKind::Calls
-            && edge.provenance.rule.as_deref() == Some("indirect-call-resolution"))
-        .unwrap();
-    assert_eq!(indirect.provenance.origin, EvidenceOrigin::Heuristic);
+pub struct Extraction {
+    pub nodes: Vec<RawNodeRecord>,
+    pub edges: Vec<RawEdgeRecord>,
+    pub hyperedges: Vec<serde_json::Value>,
+    pub raw_calls: Option<Vec<RawCall>>,
+    pub error: Option<String>,
+    pub extensions: serde_json::Map<String, serde_json::Value>,
 }
 ```
+- [ ] Re-export the raw records from `compass-languages`. Update extractors
+  mechanically to construct them; do not change producer semantics in this
+  task.
+- [ ] Update resolution and deduplication signatures to consume raw records.
+  Keep current string relations and attributes lossless through these phases.
+- [ ] Change `compass-graph::build`, `build_with_tiebreaker`, and
+  `build_owned_with_tiebreaker` to accept raw extraction records. They may
+  still return the current permissive document until Task 3 installs the v1
+  normalization boundary.
 
-Add a compile-time migration test proving extractors use raw records and only
-`compass-graph` constructs published v1 records.
+**Contract produced:** Language and resolver crates own producer-facing raw
+facts. Only the temporary graph-construction compatibility path still uses
+the old permissive document, and Task 3 removes it. Existing extraction output
+remains behaviorally equivalent.
 
-- [ ] **Step 2: Verify the tests fail**
+**Verification:**
 
-Run:
-
-```bash
-cargo test -p compass-languages --test typed_extraction --locked
-cargo test -p compass-graph --test graph_v1_normalization --locked
-```
-
-Expected: raw types and normalization do not exist.
-
-- [ ] **Step 3: Move the flexible records to the extraction boundary**
-
-Define:
-
-```rust
-pub struct RawNodeRecord {
-    pub id: String,
-    pub attributes: serde_json::Map<String, serde_json::Value>,
-}
-
-pub struct RawEdgeRecord {
-    pub source: String,
-    pub target: String,
-    pub attributes: serde_json::Map<String, serde_json::Value>,
-}
-```
-
-Change extractor imports mechanically from `compass_model` to
-`crate::facts::{RawNodeRecord as NodeRecord, RawEdgeRecord as EdgeRecord}`.
-Change `compass-resolve` to operate on raw records. Implement the closed
-normalization table in `compass-graph/src/v1.rs`; any producer kind or relation
-outside the table is a build error with producer file and anchor.
-
-Normalize current semantic/media nodes to `resource` with a typed
-`resource_kind` of `document`, `paper`, `image`, `concept`, or `rationale`.
-Normalize `rationale_for` to `documents`, `configures` to `depends_on`,
-`case_of`, `defines`, and `method` to `contains`, `uses` to `references`,
-`embeds` to `contains` with evidence rule `embedded-member`, `mixes_in` to
-`implements` with evidence rule `mixin-contract`, `reads_from` to `reads`,
-`inherits` to `extends`, and `re_exports` to `exports`. Relations already in
-the closed vocabulary retain their typed meaning. The producer spelling is
-retained only in evidence detail; it is never serialized as an edge-kind
-alias.
-
-- [ ] **Step 4: Run language, resolver, and graph tests**
-
-Run:
+- Add a dependency-boundary check proving `compass-languages` and
+  `compass-resolve` construct raw records while only `compass-graph` imports
+  durable node and edge types.
+- Run:
 
 ```bash
 cargo test -p compass-languages -p compass-resolve -p compass-graph --all-targets --locked
+cargo check --workspace --all-targets --locked
 ```
 
-Expected: all existing extraction behavior passes through the typed
-publication boundary.
+**Done when:** No extractor or resolver constructs
+`compass_model::NodeRecord` or `EdgeRecord`, and the workspace still produces
+the same pre-v1 behavior through the temporary graph compatibility path.
 
-- [ ] **Step 5: Commit**
+**Commit:** `refactor: isolate raw graph extraction facts`
 
-```bash
-git add crates/compass-languages crates/compass-resolve crates/compass-graph
-git commit -m "refactor: type the graph publication boundary"
-```
+### Task 3: Implement portable identity, provenance, and v1 normalization
 
-### Task 5: Publish file inventory, coverage, diagnostics, and canonical bytes
+**Objective:** Convert resolved raw facts into deterministic v1 records with
+validated evidence.
+
+**Context:** Current IDs and evidence are assembled differently by language
+extractors, and edge confidence is carried in ad hoc strings such as
+`EXTRACTED`. Current producer relations also include aliases such as
+`imports_from`, `re_exports`, and `indirect_call`. This task creates the
+single normalization table and identity scheme that all publication paths
+must use.
 
 **Files:**
 
+- Create: `crates/compass-model/src/identity.rs`
+- Modify: `crates/compass-model/src/code_graph.rs`
+- Modify: `crates/compass-model/src/provenance.rs`
+- Modify: `crates/compass-model/src/validation.rs`
+- Modify: `crates/compass-model/src/error.rs`
+- Create: `crates/compass-graph/src/v1.rs`
+- Modify: `crates/compass-graph/src/lib.rs`
+- Test: `crates/compass-model/tests/code_graph_identity.rs`
+- Test: `crates/compass-model/tests/code_graph_validation.rs`
+- Test: `crates/compass-graph/tests/graph_v1_normalization.rs`
+
+**Implementation:**
+
+- [ ] Add constructors and validation for the Task 1 evidence records.
+  Heuristic evidence requires both `rule` and `wiring_site`;
+  non-heuristic structural evidence requires at least one anchor.
+- [ ] Implement length-prefixed SHA-256 identity functions so IDs are stable
+  across checkout roots:
+
+```rust
+pub fn file_id(normalized_path: &str) -> String;
+pub fn symbol_id(language: &str, normalized_path: &str, kind: NodeKind,
+                 qualified_name: &str, disambiguator: &str) -> String;
+pub fn route_id(framework: &str, normalized_path: &str, operation: &str,
+                route_path: &str, declaring_scope: &str) -> String;
+pub fn messaging_id(kind: NodeKind, transport: &str, subject: &str,
+                    declaring_scope: &str) -> String;
+pub fn database_entity_id(kind: NodeKind, logical_database: &str,
+                          database_schema: &str, qualified_name: &str) -> String;
+pub fn domain_id(kind: NodeKind, namespace: &str, qualified_name: &str) -> String;
+pub fn edge_id(source: &str, kind: EdgeKind, target: &str,
+               relationship_site: Option<&SourceAnchor>,
+               rule: Option<&str>) -> String;
+```
+
+- [ ] Normalize paths to repository-relative forward-slash form before
+  hashing. Do not include an absolute checkout root, timestamps, extraction
+  order, or machine-specific data.
+- [ ] Include the `compass.graph/1` schema identity in every hash preimage.
+  Treat a rename or move as remove/add unless exact alias evidence establishes
+  continuity; never infer continuity from name similarity.
+- [ ] Implement
+  `normalize_v1(Extraction, BuildEvidence) -> Result<
+  compass_model::code_graph::GraphDocument, GraphError>` in
+  `compass-graph/src/v1.rs`. This is the only function allowed to turn raw
+  records into durable records.
+- [ ] Define the v1 envelope in `code_graph.rs`:
+
+```rust
+pub struct GraphDocument {
+    pub directed: bool,
+    pub multigraph: bool,
+    pub graph: GraphMetadata,
+    pub nodes: Vec<NodeRecord>,
+    pub links: Vec<EdgeRecord>,
+}
+```
+
+  Keep it under `compass_model::code_graph` for this task. The existing
+  crate-root loader and production builder remain on the temporary permissive
+  document until Task 4 migrates all consumers in one compilable change.
+- [ ] Encode the current relation migration table:
+
+| Raw relation | Published kind | Additional evidence |
+|---|---|---|
+| `imports_from` | `imports` | retain producer spelling only in evidence detail |
+| `re_exports` | `exports` | retain producer spelling only in evidence detail |
+| `inherits` | `extends` | none |
+| `indirect_call` | `calls` | heuristic rule `indirect-call-resolution` and wiring site |
+| `reads_from` | `reads` | none |
+| `references_constant`, `uses_static_prop`, `uses` | `references` | none |
+| `rationale_for` | `documents` | none |
+| `configures` | `depends_on` | none |
+| `case_of`, `defines`, `method` | `contains` | none |
+| `embeds` | `contains` | rule `embedded-member` |
+| `mixes_in` | `implements` | rule `mixin-contract` |
+
+- [ ] Normalize current semantic/media nodes to `resource` and set
+  `resource_kind` to `document`, `paper`, `image`, `concept`, or `rationale`.
+  Reject any raw kind or relation not present in an explicit normalization
+  table; report its producer path and anchor.
+- [ ] Validate endpoint-kind compatibility, duplicate identities, missing
+  files, invalid anchors, heuristic evidence, candidate bounds, and edge
+  `id == key` before returning a document. The initial closed endpoint matrix
+  includes:
+
+  - `route routes_to function|method|class|component`;
+  - callable nodes `calls` callable or constructible nodes;
+  - callable nodes `publishes event|message|topic`;
+  - callable nodes `handles event|message`;
+  - callable nodes `reads|writes
+    database|database_schema|database_table|database_view|database_column|config_key`;
+  - type nodes `maps_to database_table|database_view`;
+  - callable or configuration nodes `schedules job`;
+  - `job triggers function|method`;
+  - test-role code symbols `tests` any code or domain symbol;
+  - container nodes `contains` their declared members.
+
+  Reject invalid pairs rather than degrading them to `references`.
+
+**Contract produced:** A resolved `Extraction` becomes one valid,
+deterministically identified v1 document or a specific build error.
+
+**Verification:**
+
+- Add root-relocation, duplicate-ID, missing-wiring-site, ambiguous-candidate,
+  raw-alias, and endpoint-matrix cases.
+- Run:
+
+```bash
+cargo test -p compass-model -p compass-graph --all-targets --locked
+```
+
+**Done when:** Reordering raw facts or moving a checkout does not change IDs;
+the v1 normalization path never emits an alias or unknown kind; malformed
+provenance cannot enter its document; and the existing production path still
+works until the consumer migration.
+
+**Commit:** `feat(graph): normalize trusted v1 records`
+
+### Task 4: Migrate durable graph consumers from attribute maps
+
+**Objective:** Move every graph reader, algorithm, query adapter, and exporter
+to typed v1 access before strict loading becomes mandatory.
+
+**Context:** Replacing `NodeRecord.attributes` and `EdgeRecord.attributes`
+changes more than extraction. Clustering, Graph/NetworkX projections,
+CompassQL property lookup, history, output formats, PostgreSQL integration,
+semantic diff, MCP, and CLI history currently read arbitrary keys directly.
+Leaving those reads implicit would either break the workspace or encourage a
+hidden compatibility map. This task provides typed accessors and explicit
+property projections, then migrates all durable consumers.
+
+**Files:**
+
+- Modify: `crates/compass-model/src/code_graph.rs`
+- Modify: `crates/compass-model/src/document.rs`
+- Modify: `crates/compass-model/src/lib.rs`
+- Modify: `crates/compass-model/src/graph.rs`
+- Modify: `crates/compass-model/src/query_index.rs`
+- Modify: `crates/compass-analysis/src/universal_call_graph.rs`
+- Modify: `crates/compass-graph/src/analyze.rs`
+- Modify: `crates/compass-graph/src/cluster.rs`
+- Modify: `crates/compass-graph/src/dedup.rs`
+- Modify: `crates/compass-graph/src/lib.rs`
+- Modify: `crates/compass-core/src/lib.rs`
+- Modify: `crates/compass-core/src/cluster_existing.rs`
+- Modify: `crates/compass-core/src/history.rs`
+- Modify: `crates/compass-core/src/merge.rs`
+- Modify: `crates/compass-core/src/pipeline.rs`
+- Modify: `crates/compass-global/src/lib.rs`
+- Modify: `crates/compass-graphdb/src/queries.rs`
+- Modify: `crates/compass-history/src/artifacts.rs`
+- Modify: `crates/compass-media/src/lib.rs`
+- Modify: `crates/compass-output/src/callflow.rs`
+- Modify: `crates/compass-output/src/callflow_model.rs`
+- Modify: `crates/compass-output/src/canvas.rs`
+- Modify: `crates/compass-output/src/cypher.rs`
+- Modify: `crates/compass-output/src/graphml.rs`
+- Modify: `crates/compass-output/src/history_bundle.rs`
+- Modify: `crates/compass-output/src/history_viewer.rs`
+- Modify: `crates/compass-output/src/html.rs`
+- Modify: `crates/compass-output/src/json.rs`
+- Modify: `crates/compass-output/src/obsidian.rs`
+- Modify: `crates/compass-output/src/report.rs`
+- Modify: `crates/compass-output/src/svg.rs`
+- Modify: `crates/compass-output/src/tree.rs`
+- Modify: `crates/compass-postgres/src/lib.rs`
+- Modify: `crates/compass-prs/src/lib.rs`
+- Modify: `crates/compass-query/src/cql/eval.rs`
+- Modify: `crates/compass-semantic-diff/src/engine.rs`
+- Modify: `crates/compass-semantic-diff/src/logic.rs`
+- Modify: `crates/compass-mcp/src/lib.rs`
+- Modify: `crates/compass-cli/src/history_build.rs`
+- Test: `crates/compass-model/tests/typed_property_projection.rs`
+- Modify: `crates/compass-graph/tests/build_coverage.rs`
+- Test: `crates/compass-output/tests/code_graph_v1_exports.rs`
+
+**Implementation:**
+
+- [ ] Replace the permissive records and envelope in `document.rs` with
+  re-exports of `code_graph::GraphDocument`, `NodeRecord`, and `EdgeRecord`.
+  Remove the flattened durable definitions, export typed records at the crate
+  root, and route `compass-graph::build*` through `normalize_v1`.
+- [ ] Add typed convenience accessors for frequently used structural fields:
+  label, kind, roles, source anchor, language, framework, community, evidence,
+  edge kind, and edge endpoints. These methods read typed fields and do not
+  reconstruct a mutable attribute map.
+- [ ] Add read-only `NodePropertyProjection` and `EdgePropertyProjection`
+  iterators for generic consumers such as CompassQL, Cypher, GraphML, and JSON
+  export. The projection has an explicit key registry and converts typed
+  fields to `GraphProperty` values; unknown keys return `None`.
+- [ ] Update graph construction, clustering, deduplication, analysis, merge,
+  and global-graph code to use typed fields and `EdgeKind` matching.
+- [ ] Update `compass-model::Graph`, query indexes, CompassQL evaluation, and
+  graph database queries to use the property projection where generic lookup
+  is required. Preserve existing query-visible property names through the
+  projection without storing them as arbitrary durable attributes.
+- [ ] Update history, semantic diff, PR analysis, and universal call graph
+  logic to compare typed records and evidence. Changes in provenance,
+  resolution state, roles, or kind-specific detail must be visible changes.
+- [ ] Update every output format to serialize from typed records. Exporters
+  may map v1 fields into format-specific property bags at the boundary, but
+  those bags are never written back into `GraphDocument`.
+- [ ] Update MCP and CLI history code that directly reads attributes. The new
+  code-query tools remain a later task; this change only keeps current
+  commands working on typed records.
+- [ ] Remove all durable Rust `.attributes` access outside raw extraction. Add
+  a repository check that permits it only on `RawNodeRecord` and
+  `RawEdgeRecord` inside language/resolver code and their extraction tests.
+
+**Contract produced:** Every existing Compass consumer can read the typed v1
+document without a flattened compatibility map, and generic query/export
+features use an explicit read-only property projection.
+
+**Verification:**
+
+- Verify clustering, CQL property access, graph algorithms, history diff,
+  semantic diff, MCP summaries, and each export family against one v1 fixture.
+- Run:
+
+```bash
+cargo test -p compass-model -p compass-graph -p compass-query --all-targets --locked
+cargo test -p compass-output -p compass-history -p compass-semantic-diff --all-targets --locked
+cargo check --workspace --all-targets --locked
+```
+
+**Done when:** The workspace compiles with typed durable records, exports and
+existing queries preserve their intended public behavior, and no durable
+consumer reaches into an arbitrary attribute map.
+
+**Commit:** `refactor: migrate graph consumers to typed records`
+
+### Task 5: Hard-cut publication and loading to `compass.graph/1`
+
+**Objective:** Make v1 the only supported durable graph and publish it
+atomically with complete file and coverage metadata.
+
+**Context:** `GraphDocument::load` currently accepts permissive node-link JSON
+and maintains signature-based binary caches. The pipeline and history store
+load graph artifacts independently. A hard cutover is trustworthy only if
+every loader agrees on schema validation and every build publishes graph,
+Program IR, manifest, and build state as one generation.
+
+**Files:**
+
+- Modify: `crates/compass-model/src/document.rs`
+- Modify: `crates/compass-model/src/validation.rs`
+- Modify: `crates/compass-model/src/error.rs`
+- Modify: `crates/compass-graph/src/v1.rs`
 - Modify: `crates/compass-core/src/pipeline.rs`
 - Modify: `crates/compass-core/src/build_state.rs`
 - Modify: `crates/compass-files/src/manifest.rs`
-- Modify: `crates/compass-graph/src/v1.rs`
+- Modify: `crates/compass-history/src/store.rs`
 - Modify: `crates/compass-history/src/artifacts.rs`
-- Test: `crates/compass-core/tests/program_pipeline.rs`
+- Modify: `crates/compass-history/src/validate.rs`
 - Test: `crates/compass-core/tests/loading_coverage.rs`
+- Test: `crates/compass-core/tests/program_pipeline.rs`
 - Test: `crates/compass-history/tests/roundtrip.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `BuildMetadata`, complete `FileRecord` inventory, canonical graph bytes, and
-  one-generation publication.
-- Consumes: Tasks 1-4 and existing file manifests.
+- [ ] Replace the permissive `GraphDocument` loader with strict v1
+  deserialization and whole-document validation. A missing or different
+  `graph.schema` returns `UnsupportedGraphSchema` with an explicit instruction
+  to run `compass update`. Retain explicit graph and Program artifact size
+  caps before allocation.
+- [ ] At index/update entry points, detect an existing pre-contract graph and
+  perform a clean rebuild. At read-only query, history, merge, recluster,
+  affected, and MCP entry points, reject it. Do not translate it in memory.
+- [ ] Populate `graph` metadata with:
+  `schema`, `build`, `files`, `coverage`, and `diagnostics`. A `FileRecord`
+  includes normalized path, language, content digest, size, parse state, and
+  extractor versions. Do not copy source text into `graph.json`.
+- [ ] Record explicit coverage for supported, unsupported, excluded, parse
+  failure, partial, generated, and binary files. Strict mode fails on required
+  incomplete coverage; default mode publishes diagnostics without pretending
+  those files were indexed.
+- [ ] Sanitize diagnostics so paths remain repository-relative and messages do
+  not copy unrelated environment variables, credentials, or configuration
+  secrets.
+- [ ] Sort files by normalized path, nodes by ID, and links by
+  `(source, kind, target, key)`. Canonicalize maps before serialization so
+  clean and incremental builds produce byte-identical JSON. Always publish
+  `directed: true` and `multigraph: true`; do not derive either flag from the
+  current edge inventory.
+- [ ] Replace signature-only graph caches with a content-addressed key over
+  graph digest and schema fingerprint. Treat caches as disposable and rebuild
+  them after corruption or mismatch.
+- [ ] Stage `graph.json`, `program.json`, manifest, and build state under one
+  generation directory, fsync files and directory, then atomically switch the
+  active generation. A failed build leaves the prior generation readable.
+- [ ] Bump history and trusted-build fingerprints to include
+  `compass.graph/1`; history rematerialization must reproduce the same
+  generation contract by checking out source and rebuilding v1. It must not
+  load or translate an unversioned graph stored by an older commit.
 
-- [ ] **Step 1: Write failing publication tests**
+**Contract produced:** All supported loaders see a validated v1 generation;
+all builders either publish the complete generation or preserve the previous
+one.
 
-```rust
-#[test]
-fn clean_and_incremental_builds_are_byte_identical() -> Result<(), Box<dyn Error>> {
-    let repo = seeded_repo("pub fn run() {}")?;
-    let clean = build(&repo, true)?;
-    let incremental = build(&repo, false)?;
-    assert_eq!(fs::read(clean.graph_path)?, fs::read(incremental.graph_path)?);
-    Ok(())
-}
+**Verification:**
 
-#[test]
-fn file_inventory_reports_failed_extraction() -> Result<(), Box<dyn Error>> {
-    let graph = build_fixture_with_invalid_source()?;
-    let file = graph.metadata.files.iter().find(|f| f.path == "src/bad.py").unwrap();
-    assert_eq!(file.extraction_status, ExtractionStatus::Failed);
-    assert!(!file.diagnostics.is_empty());
-    Ok(())
-}
-```
-
-Also assert build metadata excludes timestamps, hostnames, and absolute roots.
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-cargo test -p compass-core --test loading_coverage --locked
-cargo test -p compass-history --test roundtrip --locked
-```
-
-Expected: file inventory and canonical v1 generation are absent.
-
-- [ ] **Step 3: Implement deterministic metadata and atomic publication**
-
-Compute:
-
-```rust
-BuildMetadata {
-    builder_version,
-    schema_fingerprint,
-    source_tree_digest,
-    configuration_digest,
-    generation_id,
-}
-```
-
-Derive `generation_id` from the preceding four fields plus Program provider
-fingerprints. Sort files by normalized path, nodes by ID, and links by
-`(source, target, kind, id)`. Validate graph and Program fingerprints before
-publishing the guarded output directory.
-
-- [ ] **Step 4: Verify publication**
-
-Run:
+- Cover unversioned load rejection, automatic rebuild on update, interrupted
+  publication, corrupt cache recovery, missing Program IR, file coverage, and
+  clean/incremental byte equality.
+- Run:
 
 ```bash
-cargo test -p compass-core -p compass-history --all-targets --locked
+cargo test -p compass-model -p compass-core -p compass-history --all-targets --locked
 ```
 
-Expected: all tests pass and repeated builds are byte-identical.
+**Done when:** No product path can mistake a pre-contract graph for v1, and a
+reader never observes a mixed graph/Program/manifest generation.
 
-- [ ] **Step 5: Commit**
+**Commit:** `feat(core): hard cut over to Compass graph v1`
 
-```bash
-git add crates/compass-core crates/compass-files crates/compass-graph crates/compass-history
-git commit -m "feat(core): publish canonical graph generations"
-```
+---
 
-## Milestone 3: Add enterprise and framework producers
+## Milestone 2: Add enterprise and framework producers
 
-### Task 6: Emit SQL and database-domain nodes and edges
+### Task 6: Emit database, schema, query, migration, and configuration facts
+
+**Objective:** Supply trustworthy first-release producers for the database
+and configuration portion of the enterprise vocabulary.
+
+**Context:** The v1 release gate forbids declaring unused kinds. Compass
+already parses SQL, manifests, JSON configuration, and Terraform, but those
+extractors currently emit generic symbols and relations. This task upgrades
+only evidence that can be tied to exact syntax or configuration anchors.
 
 **Files:**
 
@@ -632,71 +696,53 @@ git commit -m "feat(core): publish canonical graph generations"
 - Test: `crates/compass-languages/tests/domain_extraction.rs`
 - Test: `crates/compass-graph/tests/domain_normalization.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces all database, schema, query, migration, config-key, package, and
-  resource node kinds plus `reads`, `writes`, `depends_on`, and `maps_to`
-  edges backed by direct syntax/configuration evidence.
+- [ ] Extend SQL extraction to emit raw facts for database, schema, table,
+  view, column, index, constraint, procedure, trigger, query, and migration
+  when the parsed statement provides an exact name and anchor.
+- [ ] Model SQL containment explicitly:
+  database → database_schema → table/view/procedure, and table/view → columns,
+  indexes, constraints, and triggers.
+- [ ] Emit `reads` and `writes` from exact SQL table references. Preserve
+  qualification and aliases in typed detail; do not resolve dynamic SQL
+  strings as exact.
+- [ ] Emit packages, resources, and config keys from manifest, JSON, and
+  Terraform syntax. Use `depends_on`, `contains`, and `references` only when
+  the source declares that relation.
+- [ ] Add producer identifiers to coverage metadata so the release gate can
+  prove which extractor emitted each declared kind and edge.
 
-- [ ] **Step 1: Write the failing domain fixture test**
+**Contract produced:** The v1 vocabulary has anchored database and
+configuration producers independent of ORM inference.
 
-The SQL fixture must contain one schema, table, view, index, constraint,
-procedure, trigger, migration marker, `SELECT`, `INSERT`, and `UPDATE`.
+**Verification:**
 
-```rust
-#[test]
-fn sql_emits_the_database_vocabulary() {
-    let graph = build_fixture("fixtures/code-graph/domain/database.sql");
-    assert_kinds(&graph, [
-        NodeKind::DatabaseSchema, NodeKind::DatabaseTable,
-        NodeKind::DatabaseView, NodeKind::DatabaseColumn,
-        NodeKind::DatabaseIndex, NodeKind::DatabaseConstraint,
-        NodeKind::DatabaseProcedure, NodeKind::DatabaseTrigger,
-        NodeKind::Query, NodeKind::Migration,
-    ]);
-    assert_edge(&graph, EdgeKind::Reads, "recent_orders", "orders");
-    assert_edge(&graph, EdgeKind::Writes, "insert_order", "orders");
-}
-```
-
-- [ ] **Step 2: Verify the test fails**
-
-Run:
+- Verify nested database containment, quoted identifiers, migration files,
+  query read/write direction, configuration references, malformed SQL, and
+  dynamic SQL non-resolution.
+- Run:
 
 ```bash
 cargo test -p compass-languages --test domain_extraction --locked
 cargo test -p compass-graph --test domain_normalization --locked
 ```
 
-Expected: current SQL facts do not cover the complete v1 domain vocabulary.
+**Done when:** Every database/configuration kind has a real positive fixture
+and near matches never become exact nodes or edges.
 
-- [ ] **Step 3: Implement exact producers**
+**Commit:** `feat(languages): extract database domain facts`
 
-Emit a domain node only when its parser exposes a definition or direct
-configuration key. Preserve SQL object qualification and query sites. Do not
-infer ORM mappings in this task. Emit package/resource/config facts from
-manifests, JSON configuration, and Terraform only when the key or block type
-matches the closed producer registry.
+### Task 7: Build the shared framework fact and route-resolution substrate
 
-- [ ] **Step 4: Verify domain extraction**
+**Objective:** Give every routing pack one local fact model and one
+deterministic cross-file resolver.
 
-Run:
-
-```bash
-cargo test -p compass-languages -p compass-graph --all-targets --locked
-```
-
-Expected: every domain node/edge in this task has positive and negative fixture
-coverage.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-languages crates/compass-graph fixtures/code-graph/domain
-git commit -m "feat(languages): extract database domain facts"
-```
-
-### Task 7: Introduce the framework-fact and route-resolution interfaces
+**Context:** Framework syntax differs, but route publication semantics do
+not. A route always has a framework, operation, normalized path, declaration
+anchor, provenance, resolution state, and ordered execution stages. Without a
+shared substrate, each framework would invent incompatible route records and
+candidate behavior.
 
 **Files:**
 
@@ -709,88 +755,77 @@ git commit -m "feat(languages): extract database domain facts"
 - Modify: `crates/compass-resolve/src/lib.rs`
 - Test: `crates/compass-resolve/tests/framework_routes.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `FrameworkFact::Route`, `HandlerReference`, `MiddlewareReference`,
-  `RouteResolution::{Exact, Ambiguous, Unresolved}`, and
-  `resolve_framework_facts`.
-- Consumers: Tasks 8-12.
-
-- [ ] **Step 1: Write failing generic route-resolution tests**
+- [ ] Define `RawFrameworkFact::Route(RawRouteFact)` and
+  `RawFrameworkFact::Domain(RawDomainFact)`.
+- [ ] Add `framework_facts: Vec<RawFrameworkFact>` to `Extraction` with an
+  empty default so non-framework extractors remain unchanged.
+- [ ] Define `RawRouteFact` with framework, operation, raw and normalized path,
+  declaring scope, route anchor, handler reference, ordered middleware
+  references, provenance origin, and framework-specific detail.
+- [ ] Define resolver output as:
 
 ```rust
-#[test]
-fn exact_route_resolution_emits_ordered_routes_to_edges() {
-    let resolved = resolve_fixture(route_fact(
-        "express", "GET", "/orders", ["auth", "list_orders"]
-    ));
-    assert_routes_to(&resolved, "GET /orders", [
-        ("auth", "middleware", 0),
-        ("list_orders", "handler", 1),
-    ]);
+pub struct ResolvedRoute {
+    pub route: RawRouteFact,
+    pub state: ResolutionState,
+    pub stages: Vec<RouteStage>,
+    pub candidates: Vec<ResolutionCandidate>,
 }
 
-#[test]
-fn duplicate_handler_names_remain_ambiguous() {
-    let resolved = resolve_fixture(route_to_name("show"));
-    assert_eq!(route(&resolved).resolution, RouteResolution::Ambiguous);
-    assert_eq!(route(&resolved).candidates.len(), 2);
-    assert!(resolved.edges.iter().all(|e| e.provenance.confidence != Exact));
+pub struct RouteStage {
+    pub position: u32,
+    pub role: RouteStageRole, // Middleware or Handler
+    pub target: String,
+    pub provenance: Provenance,
 }
 ```
 
-- [ ] **Step 2: Verify the tests fail**
+- [ ] Resolve exact handler IDs by qualified name, import/export aliases,
+  declaring scope, and framework convention. If several candidates remain,
+  return at most 20, sorted by stable ID, with reasons and confidence.
+- [ ] Centralize `FrameworkLimits` with `max_candidates: 20`,
+  `max_include_depth: 32`, `max_alias_expansions: 1_000`, and
+  `max_facts_per_file: 100_000`. Configuration parsers and resolvers fail with
+  a diagnostic when a bound is reached; they do not continue partial
+  recursive expansion silently.
+- [ ] Publish a `route` node and one `routes_to` edge per execution stage.
+  Middleware edges carry `stage: "middleware"` and zero-based `position`; the
+  final handler carries `stage: "handler"`.
+- [ ] Use `ast` for explicit bindings, `configuration` for routing files,
+  `convention` for file-based routes, and `heuristic` only at a dynamic
+  dispatch boundary with a rule and wiring site.
+- [ ] Reject URL-looking strings unless a recognized framework shape or
+  convention produced them.
 
-Run:
+**Contract produced:** Framework packs only detect local shapes; the shared
+resolver owns exact/ambiguous/unresolved semantics and `routes_to`
+publication.
+
+**Verification:**
+
+- Exercise exact, ambiguous, unresolved, duplicate, middleware-order,
+  candidate-limit, heuristic-evidence, and URL-like near-match cases.
+- Run:
 
 ```bash
 cargo test -p compass-resolve --test framework_routes --locked
 ```
 
-Expected: framework facts and route resolution do not exist.
+**Done when:** A synthetic route from any language produces the same typed
+shape and resolution behavior.
 
-- [ ] **Step 3: Implement the interfaces**
+**Commit:** `feat(resolve): add framework route substrate`
 
-Use this route fact shape:
+### Task 8: Add Django, Flask, and FastAPI routing packs
 
-```rust
-pub struct RouteFact {
-    pub framework: Framework,
-    pub method: String,
-    pub original_path: String,
-    pub normalized_path: String,
-    pub scope: String,
-    pub anchor: RawSourceAnchor,
-    pub provenance_origin: EvidenceOrigin,
-    pub handler: HandlerReference,
-    pub middleware: Vec<MiddlewareReference>,
-}
-```
+**Objective:** Detect and resolve the full Python routing matrix.
 
-Resolve exact qualified IDs first, imported aliases second, unique scoped names
-third. Multiple candidates remain bounded and sorted. Emit one `routes_to`
-edge per stage with `stage` and `position`.
-
-- [ ] **Step 4: Verify the resolver**
-
-Run:
-
-```bash
-cargo test -p compass-resolve --all-targets --locked
-```
-
-Expected: exact, ambiguous, unresolved, middleware-order, and heuristic wiring
-tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-languages crates/compass-resolve
-git commit -m "feat(resolve): add framework route facts"
-```
-
-### Task 8: Add Python routing packs
+**Context:** Python extraction already identifies functions, classes,
+decorators, imports, and calls. The framework pack should reuse those facts
+and add only route-specific facts. Cross-file and dotted-path resolution
+belongs in `compass-resolve`, not in the AST visitor.
 
 **Files:**
 
@@ -802,66 +837,52 @@ git commit -m "feat(resolve): add framework route facts"
 - Create: `fixtures/code-graph/routes/python/near_matches.py`
 - Test: `crates/compass-resolve/tests/python_routes.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces Django, Flask, and FastAPI route facts and resolved `routes_to`
-  edges.
+- [ ] Detect Django `path`, `re_path`, legacy `url`, `include`, class-based
+  `.as_view()`, and dotted handler strings in recognized URL modules.
+- [ ] Resolve `include()` recursively with cycle detection and a 32-file
+  nesting bound. Compose parent and child paths without discarding source
+  anchors.
+- [ ] Detect Flask `@app.route` and blueprint routes, including declared HTTP
+  method arrays and blueprint prefixes.
+- [ ] Detect FastAPI `@app` and `@router` decorators for every standard HTTP
+  method, router prefixes, and dependency/middleware execution stages that
+  can be proven statically.
+- [ ] Resolve imported functions, bound methods, class-based views, aliases,
+  and dotted paths against existing Python symbol facts.
+- [ ] Leave dynamic import strings and computed route expressions unresolved
+  or heuristic; never report them as exact.
 
-- [ ] **Step 1: Write failing framework tests**
+**Contract produced:** Python framework files emit `route` nodes and ordered
+`routes_to` edges with exact, convention, or surfaced heuristic evidence.
 
-Cover:
+**Verification:**
 
-- Django `path`, `re_path`, legacy `url`, `include`, `.as_view`, and dotted
-  paths;
-- Flask app and blueprint decorators with methods;
-- FastAPI app/router decorators for GET, POST, PUT, PATCH, DELETE, OPTIONS,
-  HEAD, and WebSocket;
-- strings and unrelated decorators that must emit zero routes.
-
-```rust
-#[test]
-fn django_include_composes_prefix_and_child_path() {
-    let graph = build_python_routes("django_urls.py");
-    assert_route(&graph, "GET", "/api/users/:id", "UserDetail.as_view");
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
+- Verify all recognized shapes, blueprint/router prefixes, nested Django
+  includes, `.as_view()`, aliases, ambiguous handlers, computed strings, and
+  ordinary decorators that happen to accept paths.
+- Run:
 
 ```bash
 cargo test -p compass-resolve --test python_routes --locked
 ```
 
-Expected: no Python route facts are emitted.
+**Done when:** Calling the callers query for a Python handler can surface its
+binding URL and evidence.
 
-- [ ] **Step 3: Implement Python detection and resolution**
+**Commit:** `feat(frameworks): resolve Python routes`
 
-Parse decorator/call arguments from tree-sitter nodes, never regular-expression
-scan whole files. Normalize Django converters and regex routes without claiming
-equivalence between distinct regexes. Blueprint/include composition is exact
-only when the prefix is a static literal; otherwise keep an unresolved route
-with exact local evidence.
+### Task 9: Add TypeScript/JavaScript and file-based routing packs
 
-- [ ] **Step 4: Verify Python packs**
+**Objective:** Cover server routers and front-end/file conventions in the
+JavaScript ecosystem.
 
-Run:
-
-```bash
-cargo test -p compass-languages -p compass-resolve --all-targets --locked
-```
-
-Expected: Python route and near-match tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-languages crates/compass-resolve fixtures/code-graph/routes/python
-git commit -m "feat(frameworks): resolve Python web routes"
-```
-
-### Task 9: Add TypeScript/JavaScript and file-route packs
+**Context:** Express and NestJS use explicit calls/decorators, while
+SvelteKit, Nuxt, and Astro derive routes from normalized file paths. React
+Router and Vue Router sit between those models. The extractor must retain
+middleware order and the resolver must distinguish HTTP, GraphQL, messaging,
+WebSocket, page component, endpoint, and route-middleware roles.
 
 **Files:**
 
@@ -882,68 +903,56 @@ git commit -m "feat(frameworks): resolve Python web routes"
 - Create: `fixtures/code-graph/routes/typescript/near-matches.ts`
 - Test: `crates/compass-resolve/tests/typescript_routes.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces Express, NestJS, React Router, SvelteKit, Vue Router, Nuxt, and
-  Astro routes, plus NestJS GraphQL/message/event/WebSocket domain facts.
+- [ ] Detect Express `app`/`router` verb calls and preserve every handler in
+  the middleware chain in source order.
+- [ ] Detect NestJS `@Controller` plus HTTP method decorators; GraphQL
+  `@Resolver`, `@Query`, and `@Mutation`; `@MessagePattern`,
+  `@EventPattern`, and `@SubscribeMessage`. HTTP and GraphQL operations
+  publish route nodes and `routes_to` edges with distinct operation types;
+  message, event, and WebSocket facts feed Task 12.
+- [ ] Detect React Router route elements/configuration and Vue Router route
+  objects only when path and component/loader/action fields match the
+  supported AST shape.
+- [ ] Derive SvelteKit, Nuxt, and Astro page/endpoint routes from
+  repository-relative paths. Support `[param]` and `[...rest]`, preserve the
+  original convention path, and use `convention` provenance.
+- [ ] Emit Nuxt server endpoints and route middleware separately from page
+  components. Resolve imported components and handlers through the existing
+  TypeScript import/export graph.
+- [ ] Mark reflective NestJS wiring heuristic only when its registration site
+  is known; leave arbitrary computed router calls unresolved.
 
-- [ ] **Step 1: Write failing TypeScript route tests**
+**Contract produced:** JavaScript ecosystems share route semantics while
+retaining framework, operation type, execution stage, and convention detail.
 
-Assert:
+**Verification:**
 
-- Express middleware order and router prefixes;
-- NestJS controller prefixes and all approved HTTP decorators;
-- NestJS GraphQL query/mutation/resolver, message pattern, event pattern, and
-  subscribed-message nodes/edges;
-- React Router route components;
-- SvelteKit, Nuxt, and Astro convention provenance;
-- Vue configured routes and route middleware;
-- dynamic path expressions remain unresolved rather than exact.
-
-```rust
-#[test]
-fn nest_controller_prefix_and_method_path_compose() {
-    let graph = build_ts_routes("nest.ts");
-    assert_route(&graph, "GET", "/admin/users/:id", "UsersController.show");
-    assert_role(&graph, "UsersController.show", NodeRole::RouteHandler);
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
+- Cover middleware chains, controller prefixes, GraphQL/message separation,
+  lazy imports, dynamic segments, rest segments, method-suffixed Nuxt APIs,
+  Astro endpoints, computed paths, and non-framework method calls.
+- Run:
 
 ```bash
 cargo test -p compass-resolve --test typescript_routes --locked
 ```
 
-Expected: TypeScript framework facts are absent.
+**Done when:** Explicit and file-based routes resolve to their code symbols
+without treating arbitrary JSX, decorators, or strings as routes.
 
-- [ ] **Step 3: Implement TypeScript and convention packs**
+**Commit:** `feat(frameworks): resolve TypeScript and file routes`
 
-Use AST decorators/calls for Express, NestJS, React Router, and Vue Router.
-Use normalized repository paths for SvelteKit, Nuxt, and Astro. Mark file
-routes `convention`, not `heuristic`. Mark reflective NestJS dispatch
-`heuristic` only when a runtime registration boundary cannot be proven.
+### Task 10: Add Laravel, Drupal, Rails, Spring, and Play routing packs
 
-- [ ] **Step 4: Verify TypeScript packs**
+**Objective:** Cover PHP, Ruby, Java, and Scala routing configuration and
+annotations.
 
-Run:
-
-```bash
-cargo test -p compass-languages -p compass-resolve --all-targets --locked
-```
-
-Expected: all TypeScript route, domain, and near-match tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-languages crates/compass-resolve fixtures/code-graph/routes/typescript
-git commit -m "feat(frameworks): resolve TypeScript web routes"
-```
-
-### Task 10: Add PHP, Ruby, and JVM routing packs
+**Context:** These frameworks mix AST syntax with external routing files.
+Drupal YAML and Play `conf/routes` need file parsers that emit configuration
+anchors; Laravel and Rails require framework-specific call/DSL recognition;
+Spring relies on annotations. All handler resolution still terminates in
+existing language symbol IDs.
 
 **Files:**
 
@@ -967,66 +976,51 @@ git commit -m "feat(frameworks): resolve TypeScript web routes"
 - Create: `fixtures/code-graph/routes/jvm/NearMatches.java`
 - Test: `crates/compass-resolve/tests/php_ruby_jvm_routes.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces Laravel, Drupal, Rails, Spring, and Play route facts and handlers.
+- [ ] Detect Laravel `Route` verbs, `resource`, `Controller@action`, class
+  constants, and tuple syntax. Expand resource routes into stable individual
+  route nodes with evidence pointing to the resource declaration.
+- [ ] Parse Drupal `*.routing.yml` for `_controller`, `_form`, and entity
+  handlers; connect recognized `hook_*` implementations in supported
+  `.module`, `.theme`, `.install`, and `.inc` files.
+- [ ] Detect Rails verb routes using `to:` and hash-rocket syntax and resolve
+  `users#index` to controller class plus action method.
+- [ ] Detect Spring `@GetMapping`, `@PostMapping`, other composed mappings,
+  and method-level `@RequestMapping`; compose class and method prefixes.
+- [ ] Parse Play verb routes from `conf/routes` and resolve Java or Scala
+  controller actions, including static and injected controller forms.
+- [ ] Give YAML and route-file edges `configuration` provenance and exact line
+  anchors. Dynamic controller names remain bounded candidates or unresolved.
 
-- [ ] **Step 1: Write failing ecosystem tests**
+**Contract produced:** PHP/Ruby/JVM handlers have the same canonical
+`routes_to` relationship as Python and TypeScript handlers.
 
-The fixtures must cover:
+**Verification:**
 
-- Laravel route methods, resources, `Controller@action`, and tuple syntax;
-- Drupal `*.routing.yml` `_controller`, `_form`, entity handlers, HTTP methods,
-  and `hook_*` implementations;
-- Rails `to:` and hash-rocket syntax;
-- Spring class/method prefixes, `RequestMapping`, and composed method mappings;
-- Play verb routes to Scala and Java actions;
-- near-match files that emit zero routes.
-
-```rust
-#[test]
-fn laravel_resource_expands_to_canonical_actions() {
-    let graph = build_fixture("php/laravel.php");
-    assert_route(&graph, "GET", "/users/:user", "UserController.show");
-    assert_route(&graph, "DELETE", "/users/:user", "UserController.destroy");
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
+- Cover every listed syntax, route groups/prefixes, resource expansion,
+  malformed configuration, handler overloading, controller ambiguity, and
+  DSL-like near matches outside framework contexts.
+- Run:
 
 ```bash
 cargo test -p compass-resolve --test php_ruby_jvm_routes --locked
 ```
 
-Expected: the five framework families are missing.
+**Done when:** Configuration-file and annotation routes navigate to exact
+actions with the original wiring anchor visible.
 
-- [ ] **Step 3: Implement the packs**
+**Commit:** `feat(frameworks): resolve PHP Ruby and JVM routes`
 
-Use tree-sitter for PHP, Ruby, Java, Scala, and controller symbols. Use bounded
-YAML parsing for Drupal and line-oriented grammar-aware parsing for Play
-`conf/routes`. Generated Laravel resource routes use `config` evidence anchored
-to the resource declaration and distinct stable route identities.
+### Task 11: Add Go, Rust, ASP.NET, and Vapor routing packs
 
-- [ ] **Step 4: Verify PHP, Ruby, and JVM packs**
+**Objective:** Cover native/server frameworks that register handlers through
+calls, attributes, or macros.
 
-Run:
-
-```bash
-cargo test -p compass-languages -p compass-resolve --all-targets --locked
-```
-
-Expected: all route and near-match tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-languages crates/compass-resolve fixtures/code-graph/routes/php fixtures/code-graph/routes/ruby fixtures/code-graph/routes/jvm
-git commit -m "feat(frameworks): resolve PHP Ruby and JVM routes"
-```
-
-### Task 11: Add Go, Rust, C#, and Swift routing packs
+**Context:** Gin, chi, gorilla/mux, Axum, Actix, Rocket, ASP.NET, and Vapor all
+have concise route shapes that can be confused with ordinary method calls.
+Detection must therefore require framework imports, receiver types,
+attributes, or macros rather than matching method names alone.
 
 **Files:**
 
@@ -1049,66 +1043,51 @@ git commit -m "feat(frameworks): resolve PHP Ruby and JVM routes"
 - Create: `fixtures/code-graph/routes/swift/NearMatches.swift`
 - Test: `crates/compass-resolve/tests/native_routes.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces Gin, chi, gorilla/mux, Axum, actix, Rocket, ASP.NET, and Vapor route
-  facts and handlers.
+- [ ] Detect Gin group/engine verbs, chi methods, gorilla/mux
+  `HandleFunc`/method chains, and nested path prefixes.
+- [ ] Detect Axum and Actix `.route(..., get(handler))` forms and Rocket
+  route attributes/macros, preserving macro or call anchors.
+- [ ] Detect ASP.NET HTTP method attributes on controller actions and compose
+  controller-level route attributes with action templates.
+- [ ] Detect Vapor application and route-group methods, including segmented
+  string paths and explicit `use:` handlers.
+- [ ] Resolve closures as anchored function-like symbols when they exist in
+  the structural graph. Do not invent exact handler symbols for opaque
+  runtime values.
+- [ ] Require recognized imports, receiver types, namespaces, attributes, or
+  macros before emitting a route fact.
 
-- [ ] **Step 1: Write failing native-stack tests**
+**Contract produced:** All remaining release-one server frameworks publish
+canonical routes and typed handler links.
 
-Cover:
+**Verification:**
 
-- Go `GET`, `POST`, and `HandleFunc`, group prefixes, and middleware;
-- Rust Axum chained `.route`, actix route builders/attributes, Rocket route
-  attributes and mounting;
-- ASP.NET controller/action prefixes and HTTP method attributes;
-- Vapor application and grouped-route registrations;
-- computed paths and receiver calls that are not router instances.
-
-```rust
-#[test]
-fn axum_route_resolves_get_handler() {
-    let graph = build_fixture("rust/axum.rs");
-    assert_route(&graph, "GET", "/users/:id", "show_user");
-    assert_edge_kind(&graph, "GET /users/:id", "show_user", EdgeKind::RoutesTo);
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
+- Cover group prefixes, middleware, closures, Rust macros, ASP.NET templates,
+  Vapor segments, aliases, receiver ambiguity, and unrelated methods named
+  `get`, `route`, or `HandleFunc`.
+- Run:
 
 ```bash
 cargo test -p compass-resolve --test native_routes --locked
 ```
 
-Expected: native-stack route packs are missing.
+**Done when:** Every framework in the approved routing matrix has positive,
+near-match, ambiguous, unresolved, and incremental fixtures.
 
-- [ ] **Step 3: Implement native-stack packs**
+**Commit:** `feat(frameworks): resolve native server routes`
 
-Require router receiver/type evidence before treating method calls as routes.
-Compose static group/mount prefixes. Preserve computed paths as unresolved
-facts. ASP.NET attribute routes are AST evidence; route-convention expansion
-is convention evidence.
+### Task 12: Emit events, messages, jobs, schedules, and ORM mappings
 
-- [ ] **Step 4: Verify native-stack packs**
+**Objective:** Complete the first-release enterprise/domain vocabulary beyond
+routes and SQL.
 
-Run:
-
-```bash
-cargo test -p compass-languages -p compass-resolve --all-targets --locked
-```
-
-Expected: route and near-match tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-languages crates/compass-resolve fixtures/code-graph/routes/go fixtures/code-graph/routes/rust fixtures/code-graph/routes/csharp fixtures/code-graph/routes/swift
-git commit -m "feat(frameworks): resolve native web routes"
-```
-
-### Task 12: Resolve events, messages, jobs, and ORM mappings
+**Context:** Some framework constructs recognized in Tasks 8–11 describe
+message dispatch, events, scheduled work, or model mappings rather than HTTP
+routes. They must reuse the same provenance and resolution discipline but
+publish domain-specific nodes and edges. ORM mappings may link to Task 6
+database entities only when exact metadata or query evidence exists.
 
 **Files:**
 
@@ -1149,72 +1128,65 @@ git commit -m "feat(frameworks): resolve native web routes"
 - Create: `fixtures/code-graph/domain/orm/dynamic-near-matches.ts`
 - Test: `crates/compass-resolve/tests/domain_resolution.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `event`, `message`, `topic`, `queue`, and `job` nodes;
-  `registers`, `handles`, `publishes`, `subscribes`, `produces`, `consumes`,
-  `schedules`, `triggers`, and exact `maps_to` edges.
+- [ ] Convert recognized NestJS `@MessagePattern`, `@EventPattern`, and
+  `@SubscribeMessage` plus Spring message/event annotations into event,
+  message, topic, queue, and WebSocket subscription facts with `publishes`,
+  `subscribes`, `produces`, `consumes`, `handles`, and `registers` edges as
+  appropriate.
+- [ ] Detect Spring scheduled jobs, ASP.NET hosted/background services, and
+  Celery tasks/schedules. Publish job nodes and `schedules`, `triggers`, or
+  `handles` edges using exact declaration sites.
+- [ ] Extract ORM model/table/column metadata for Django, SQLAlchemy, TypeORM,
+  JPA, Entity Framework, Active Record, Eloquent, GORM, and Diesel.
+- [ ] Emit `maps_to` only for explicit table/schema/column mapping or a
+  framework convention with unambiguous model identity. Emit `reads` and
+  `writes` only for exact query evidence.
+- [ ] Join ORM targets to Task 6 database entities by normalized qualified
+  identity. If the database target is absent, retain the mapping target as an
+  unresolved domain reference and diagnostic rather than creating an
+  unsupported exact entity.
+- [ ] Treat runtime registries, computed topic names, and dynamic schedules as
+  heuristic only when a wiring site is available; otherwise leave them
+  unresolved.
 
-- [ ] **Step 1: Write failing domain-resolution tests**
+**Contract produced:** All enterprise kinds and their domain relationships
+have at least one anchored producer and participate in the same impact and
+explore graph as code symbols.
 
-Fixtures must cover:
+**Verification:**
 
-- NestJS message/event/WebSocket handlers;
-- Spring events and scheduled jobs;
-- ASP.NET hosted/background jobs;
-- Django/Celery task registration;
-- exact ORM table mappings for Django, SQLAlchemy, TypeORM, JPA/Hibernate,
-  Entity Framework, ActiveRecord, Eloquent, GORM, and Diesel;
-- dynamic subjects/table names that remain unresolved.
-
-```rust
-#[test]
-fn scheduled_job_triggers_its_handler() {
-    let graph = build_fixture("jobs/spring.java");
-    assert_edge_kind(&graph, "nightly-cleanup", "Cleanup.run", EdgeKind::Triggers);
-    assert_exact_anchor(&graph, "nightly-cleanup");
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
+- Verify exact and dynamic message names, publisher/consumer direction,
+  schedule expressions, hosted services, conventional and explicit ORM
+  mappings, schema qualification, missing database targets, and false
+  near-match suppression.
+- Run:
 
 ```bash
 cargo test -p compass-resolve --test domain_resolution --locked
+cargo test -p compass-graph --test domain_normalization --locked
 ```
 
-Expected: domain dispatch and ORM mappings are absent.
+**Done when:** The producer coverage report has no zero-producer enterprise
+kind or edge.
 
-- [ ] **Step 3: Implement evidence-gated resolution**
+**Commit:** `feat(domain): resolve enterprise graph facts`
 
-Emit exact edges only from literal registrations, annotations, generated
-artifact facts, or exact ORM mapping declarations. Dynamic subject/table
-expressions produce unresolved facts. Runtime registry synthesis uses
-`heuristic` provenance with rule and wiring site.
+---
 
-- [ ] **Step 4: Verify domain resolution**
+## Milestone 3: Build one shared query engine
 
-Run:
+### Task 13: Define `compass.query/1` and optional Program IR enrichment
 
-```bash
-cargo test -p compass-resolve -p compass-graph --all-targets --locked
-```
+**Objective:** Establish the transport-neutral response used by every query
+operation and keep structural and Program evidence visibly separate.
 
-Expected: every enterprise node and edge kind has a positive producer and a
-negative fixture.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-resolve crates/compass-languages fixtures/code-graph/domain
-git commit -m "feat(resolve): connect enterprise domain facts"
-```
-
-## Milestone 4: Build the shared query engine
-
-### Task 13: Define `compass.query/1` and reconcile Program IR
+**Context:** Compass already has in-memory query, traversal, affected, and
+Program analysis paths, but they return unrelated shapes. The structural
+graph is authoritative for symbol identity and relationships. Program IR may
+add types, effects, signatures, and deeper call evidence, but it must never
+overwrite or silently contradict structural facts.
 
 **Files:**
 
@@ -1223,63 +1195,25 @@ git commit -m "feat(resolve): connect enterprise domain facts"
 - Create: `crates/compass-query/src/program_join.rs`
 - Modify: `crates/compass-query/src/lib.rs`
 - Modify: `crates/compass-query/Cargo.toml`
-- Test: `crates/compass-query/tests/program_join.rs`
+- Create: `fixtures/contracts/compass-query-v1.example.json`
+- Create: `fixtures/contracts/compass-query-v1.fingerprint`
 - Test: `crates/compass-query/tests/query_contract.rs`
+- Test: `crates/compass-query/tests/program_join.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `CodeQueryRequest`, `CodeQueryResponse`, `QueryNode`, `QueryEdge`,
-  `QueryFile`, `QueryPath`, `QueryDiagnostic`, `CodeQueryLimits`,
-  `ProgramEvidenceJoin`.
-- Consumes: `Graph`, optional `compass_analysis::AnalysisBundle`.
-
-- [ ] **Step 1: Write failing contract and reconciliation tests**
-
-```rust
-#[test]
-fn response_schema_is_versioned_and_preserves_two_evidence_layers() {
-    let response = query_fixture_with_program();
-    let value = serde_json::to_value(response).unwrap();
-    assert_eq!(value["schema"], "compass.query/1");
-    assert_eq!(value["edges"][0]["evidence"].as_array().unwrap().len(), 2);
-    assert_eq!(value["edges"][0]["evidence"][0]["layer"], "structural_graph");
-    assert_eq!(value["edges"][0]["evidence"][1]["layer"], "program_ir");
-}
-
-#[test]
-fn program_only_symbol_is_a_diagnostic_not_a_structural_node() {
-    let response = query_fixture_with_orphan_program_symbol();
-    assert!(response.nodes.iter().all(|node| node.id != "program-only"));
-    assert!(response.diagnostics.iter().any(|d| d.code == "program_orphan"));
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-cargo test -p compass-query --test query_contract --locked
-cargo test -p compass-query --test program_join --locked
-```
-
-Expected: query v1 and Program join types are absent.
-
-- [ ] **Step 3: Implement transport-neutral responses**
-
-Add `compass-analysis` and `compass-ir` path dependencies to
-`compass-query`. Join by `graph_node_id`; merge evidence without overwriting.
-Represent conflicts and missing graph identities as diagnostics. Keep all
-response collections sorted by stable identity.
-
-Use one additive response envelope for every operation:
+- [ ] Define bounded request types for search, callers/callees, impact,
+  explore, and node trail. Require explicit limits for depth, nodes, paths,
+  candidates, source bytes, and total response bytes. The public names are
+  `SearchRequest`, `CallRequest`, `ImpactRequest`, `ExploreRequest`, and
+  `NodeTrailRequest`.
+- [ ] Define one additive response:
 
 ```rust
 pub struct CodeQueryResponse {
-    pub schema: String,                 // always "compass.query/1"
+    pub schema: String, // always "compass.query/1"
     pub operation: CodeQueryOperation,
-    pub results: Vec<SearchHit>,        // populated by search
+    pub results: Vec<SearchHit>,
     pub nodes: Vec<QueryNode>,
     pub edges: Vec<QueryEdge>,
     pub files: Vec<QueryFile>,
@@ -1290,27 +1224,59 @@ pub struct CodeQueryResponse {
 }
 ```
 
-Non-search operations return an empty `results` array; search returns its
-ranked hits there and includes the corresponding nodes in `nodes`.
+- [ ] Define the response members `SearchHit`, `QueryNode`, `QueryEdge`,
+  `QueryFile`, `QueryPath`, `QueryDiagnostic`, and `CodeQueryLimits` in the
+  same module. Do not reuse the existing CompassQL `QueryLimits` type.
+- [ ] Put evidence records on query nodes and edges with a `layer` of
+  `structural_graph` or `program_ir`. Preserve origin, confidence, anchor,
+  rule, wiring site, and resolution state.
+- [ ] Add `compass-analysis` and `compass-ir` dependencies to
+  `compass-query`. Join Program evidence only through stable
+  `graph_node_id`.
+- [ ] When Program IR has an orphan symbol or contradicts a structural fact,
+  retain the structural record and add a typed diagnostic. Do not create a
+  new durable node or change `graph.json`.
+- [ ] Return no match, ambiguous match, unresolved handler, incomplete
+  coverage, stale source, and bounded truncation as successful typed responses
+  with diagnostics. Return corrupt authoritative artifacts, schema mismatch,
+  unsafe paths, and violated graph invariants as `QueryError`.
+- [ ] Sort every response collection by a documented stable key. Search is
+  the only operation that populates `results`; other operations return an
+  empty array rather than omitting the field.
+- [ ] Generate a complete example response and a deterministic fingerprint of
+  the Rust field/enum contract under `fixtures/contracts/`. Tasks 16–18 use
+  these files for transport and TypeScript parity.
 
-- [ ] **Step 4: Verify query contracts**
+**Contract produced:** All transports can serialize the same
+`CodeQueryResponse`; Program enrichment is optional, non-destructive, and
+auditable.
 
-Run:
+**Verification:**
+
+- Cover graph-only queries, graph-plus-Program evidence, orphan Program
+  symbols, conflicts, deterministic ordering, truncation, and missing Program
+  artifacts.
+- Run:
 
 ```bash
-cargo test -p compass-query --all-targets --locked
+cargo test -p compass-query --test query_contract --locked
+cargo test -p compass-query --test program_join --locked
 ```
 
-Expected: contract and Program reconciliation tests pass.
+**Done when:** Removing `program.json` reduces enrichment but does not change
+structural query identity or relationship results.
 
-- [ ] **Step 5: Commit**
+**Commit:** `feat(query): define shared code query contract`
 
-```bash
-git add crates/compass-model crates/compass-query
-git commit -m "feat(query): define shared code query contract"
-```
+### Task 14: Build the disposable SQLite/FTS5 projection and symbol search
 
-### Task 14: Build the disposable SQLite/FTS5 index and search
+**Objective:** Provide fast name search without making SQLite an
+authoritative artifact.
+
+**Context:** Current symbol scoring reads the graph into memory and uses
+custom token scoring. The product requirement calls for FTS5. The index must
+be disposable, content-addressed, bounded, and safe to rebuild after
+corruption. `graph.json` and `program.json` remain the sources of truth.
 
 **Files:**
 
@@ -1322,252 +1288,157 @@ git commit -m "feat(query): define shared code query contract"
 - Test: `crates/compass-query/tests/code_search.rs`
 - Test: `crates/compass-query/tests/index_recovery.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `CodeQueryEngine::open(graph, program, cache_dir)`,
-  `CodeQueryEngine::search(SearchRequest)`.
-- Consumes: Tasks 1-13.
-
-- [ ] **Step 1: Write failing FTS5 tests**
+- [ ] Add workspace `rusqlite = { version = "0.31.0", features =
+  ["bundled", "modern_sqlite"] }` and use its bundled FTS5-capable SQLite.
+- [ ] Key the index directory by SHA-256 of graph digest, optional Program
+  digest, graph schema fingerprint, query schema fingerprint, and index
+  format version.
+- [ ] Create normalized relational tables for nodes, edges, files, evidence,
+  aliases, and Program joins plus an FTS5 table over name, qualified name,
+  aliases, kind, roles, language, framework, and normalized path.
+- [ ] Build into a temporary database, use transactions and prepared
+  statements, run integrity checks, fsync, and atomically rename into place.
+  A lock coordinates concurrent builders; readers may continue using the
+  last complete matching index.
+- [ ] Implement:
 
 ```rust
-#[test]
-fn ranking_is_exact_then_qualified_then_prefix_then_bm25() {
-    let engine = fixture_engine();
-    let hits = engine.search(SearchRequest::new("UserService")).unwrap();
-    assert_eq!(names(&hits), [
-        "UserService",
-        "app.services.UserService",
-        "UserServiceFactory",
-        "LegacyUserServiceAdapter",
-    ]);
-}
-
-#[test]
-fn corrupt_cache_is_deleted_and_rebuilt() {
-    let fixture = fixture_paths();
-    fs::write(&fixture.index, b"not sqlite").unwrap();
-    let engine = CodeQueryEngine::open(&fixture.graph, None, &fixture.cache).unwrap();
-    assert_eq!(engine.search(SearchRequest::new("run")).unwrap().results.len(), 1);
-}
+pub fn open(graph_path: &Path, program_path: Option<&Path>,
+            cache_root: &Path) -> Result<CodeQueryEngine, QueryError>;
+pub fn search(&self, request: SearchRequest)
+    -> Result<CodeQueryResponse, QueryError>;
 ```
 
-- [ ] **Step 2: Verify the tests fail**
+  Ranking order is exact qualified name, exact name, prefix, FTS rank, then
+  stable node ID.
+- [ ] Escape FTS syntax through bound parameters and a conservative query
+  builder. Enforce term, token, result, and response-size limits before
+  executing SQLite work.
+- [ ] Delete and rebuild on schema mismatch, digest mismatch, incomplete
+  build marker, failed integrity check, or SQLite corruption.
 
-Run:
+**Contract produced:** `search` returns ranked `SearchHit` records and the
+corresponding typed nodes through `compass.query/1`.
+
+**Verification:**
+
+- Cover exact/prefix/fuzzy ranking, aliases, Unicode, punctuation, reserved
+  FTS characters, deterministic ties, concurrent open, stale index deletion,
+  corruption recovery, and large-input limits.
+- Run:
 
 ```bash
 cargo test -p compass-query --test code_search --locked
 cargo test -p compass-query --test index_recovery --locked
 ```
 
-Expected: index and search APIs are missing.
+**Done when:** Deleting the index changes only latency; the next query
+rebuilds it and returns the same response.
 
-- [ ] **Step 3: Implement the index**
+**Commit:** `feat(query): index graph symbols with FTS5`
 
-Add the already-locked dependency:
+### Task 15: Implement callers, callees, impact, explore, and node trail
 
-```toml
-rusqlite = { version = "0.31.0", features = ["bundled", "modern_sqlite"] }
-```
+**Objective:** Put all required graph operations on the shared engine with
+consistent evidence, paths, and bounds.
 
-Create `nodes_fts` with `name`, `qualified_name`, `kind`, `roles`, `path`,
-`language`, `framework`, `signature`, and `documentation`. Cache identity is
-SHA-256 over graph digest, Program digest, both schema fingerprints, and index
-implementation version. Use parameterized queries and quote FTS terms.
-
-- [ ] **Step 4: Verify search and recovery**
-
-Run:
-
-```bash
-cargo test -p compass-query --test code_search --locked
-cargo test -p compass-query --test index_recovery --locked
-cargo test -p compass-query --all-targets --locked
-```
-
-Expected: search filters, ranking, cache invalidation, and corruption recovery
-pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Cargo.toml Cargo.lock crates/compass-query
-git commit -m "feat(query): index graph symbols with FTS5"
-```
-
-### Task 15: Implement callers, callees, and impact
+**Context:** Current traversal and affected logic operate on permissive
+relation strings and render text directly. The v1 engine must traverse typed
+edge families, expose route bindings as callers, distinguish exact from
+heuristic impact, and return digest-verified source grouped by file.
 
 **Files:**
 
 - Modify: `crates/compass-query/src/code_query.rs`
 - Modify: `crates/compass-query/src/affected.rs`
 - Modify: `crates/compass-query/src/traversal.rs`
+- Create: `crates/compass-query/src/source.rs`
+- Modify: `crates/compass-query/src/lib.rs`
 - Test: `crates/compass-query/tests/code_traversal.rs`
 - Test: `crates/compass-query/tests/code_impact.rs`
-
-**Interfaces:**
-
-- Produces:
-  `CodeQueryEngine::callers`, `CodeQueryEngine::callees`,
-  `CodeQueryEngine::impact`.
-
-- [ ] **Step 1: Write failing traversal tests**
-
-```rust
-#[test]
-fn handler_callers_include_the_binding_route() {
-    let engine = routing_engine();
-    let response = engine.callers(CallRequest::one_hop("Users.show")).unwrap();
-    assert!(response.nodes.iter().any(|node| node.kind == NodeKind::Route));
-    assert!(response.edges.iter().any(|edge| edge.kind == EdgeKind::RoutesTo));
-}
-
-#[test]
-fn exact_only_impact_excludes_heuristic_edges() {
-    let engine = impact_engine();
-    let response = engine.impact(ImpactRequest {
-        exact_only: true,
-        ..ImpactRequest::new("charge")
-    }).unwrap();
-    assert!(!response.edges.iter().any(|edge| edge.provenance.origin == Heuristic));
-}
-```
-
-Add tests for one-hop default, bounded depth, middleware order, event/job
-execution, parallel sites, containment entry, no sibling explosion, reason
-paths, node caps, and truncation.
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-cargo test -p compass-query --test code_traversal --locked
-cargo test -p compass-query --test code_impact --locked
-```
-
-Expected: typed traversal methods are absent.
-
-- [ ] **Step 3: Implement traversal families**
-
-Execution edges are:
-
-```rust
-const EXECUTION: &[EdgeKind] = &[
-    EdgeKind::Calls, EdgeKind::RoutesTo, EdgeKind::Handles,
-    EdgeKind::Subscribes, EdgeKind::Schedules, EdgeKind::Triggers,
-];
-```
-
-Impact uses incoming dependency edges and records the predecessor edge for
-every hit. Enter a container's children at the same depth; never traverse an
-incoming `contains` edge. Enforce `max_depth`, `max_nodes`, `max_edges`, and
-return explicit truncation.
-
-- [ ] **Step 4: Verify traversal**
-
-Run:
-
-```bash
-cargo test -p compass-query --test code_traversal --locked
-cargo test -p compass-query --test code_impact --locked
-cargo test -p compass-query --all-targets --locked
-```
-
-Expected: all traversal tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-query
-git commit -m "feat(query): add trusted traversal and impact"
-```
-
-### Task 16: Implement explore and node trail
-
-**Files:**
-
-- Create: `crates/compass-query/src/source.rs`
-- Modify: `crates/compass-query/src/code_query.rs`
-- Modify: `crates/compass-query/src/lib.rs`
 - Test: `crates/compass-query/tests/code_explore.rs`
 - Test: `crates/compass-query/tests/node_trail.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces:
-  `CodeQueryEngine::explore(ExploreRequest)` and
-  `CodeQueryEngine::node_trail(NodeTrailRequest)`.
-
-- [ ] **Step 1: Write failing source-integrity and path tests**
+- [ ] Implement one-hop callers over inbound `calls` and `routes_to`; implement
+  one-hop callees over outbound `calls`. Preserve parallel edges and return
+  all evidence records.
+- [ ] Implement impact as bounded reverse traversal over the approved impact
+  family: `calls`, `routes_to`, `imports`, `exports`, `references`,
+  `depends_on`, `reads`, `writes`, `publishes`, `subscribes`, `produces`,
+  `consumes`, `schedules`, `triggers`, and `maps_to`.
+- [ ] Default impact to exact/configuration/convention evidence. Add an
+  explicit request option for heuristic edges and label every affected path
+  with its weakest resolution/evidence state.
+- [ ] Implement explore by resolving several requested symbols, selecting a
+  minimal bounded connecting subgraph, and grouping source slices by
+  normalized file path. Include the call/route path among selected symbols.
+- [ ] Before returning source, recompute the file digest and compare it to the
+  graph’s `FileRecord`. On mismatch, omit source and emit
+  `stale_source_digest`; never return unverified current text as indexed
+  source.
+- [ ] Implement node trail as a bounded best-path search ordered by hop count,
+  evidence quality, and stable edge identity. Include route middleware stages
+  and heuristic wiring sites inline.
+- [ ] Expose the operations with these engine signatures:
 
 ```rust
-#[test]
-fn explore_groups_verified_source_by_file_and_connects_symbols() {
-    let engine = source_fixture_engine();
-    let response = engine.explore(ExploreRequest::names(["route", "handler"])).unwrap();
-    assert_eq!(response.files.len(), 2);
-    assert_eq!(response.paths[0].edges[0].kind, EdgeKind::RoutesTo);
-    assert!(response.files.iter().all(|file| file.source.is_some()));
-}
-
-#[test]
-fn explore_omits_source_when_the_digest_is_stale() {
-    let fixture = source_fixture();
-    fs::write(fixture.root.join("src/handler.rs"), "changed").unwrap();
-    let response = fixture.engine.explore(ExploreRequest::names(["handler"])).unwrap();
-    assert!(response.files[0].source.is_none());
-    assert!(response.diagnostics.iter().any(|d| d.code == "stale_source"));
-}
+pub fn callers(&self, request: CallRequest)
+    -> Result<CodeQueryResponse, QueryError>;
+pub fn callees(&self, request: CallRequest)
+    -> Result<CodeQueryResponse, QueryError>;
+pub fn impact(&self, request: ImpactRequest)
+    -> Result<CodeQueryResponse, QueryError>;
+pub fn explore(&self, request: ExploreRequest)
+    -> Result<CodeQueryResponse, QueryError>;
+pub fn node_trail(&self, request: NodeTrailRequest)
+    -> Result<CodeQueryResponse, QueryError>;
 ```
 
-Add tests for ambiguous names, Program signatures/types/effects, heuristic
-wiring sites, route middleware, grouped slices, output budgets, and node-trail
-ancestors/children/domain relationships.
+- [ ] Apply `CodeQueryLimits` during candidate resolution, traversal, source
+  reading, and serialization. Set `truncated` and diagnostics whenever a
+  bound changes the result.
 
-- [ ] **Step 2: Verify the tests fail**
+**Contract produced:** Every required query operation returns the same typed
+nodes, edges, files, paths, diagnostics, limits, and evidence.
 
-Run:
+**Verification:**
+
+- Cover route-as-caller behavior, edge direction, parallel calls,
+  exact-only/heuristic impact, cycles, path tie-breaking, ambiguous symbols,
+  stale source, grouped source, Program enrichment, middleware stages, and
+  every truncation bound.
+- Run:
 
 ```bash
+cargo test -p compass-query --test code_traversal --locked
+cargo test -p compass-query --test code_impact --locked
 cargo test -p compass-query --test code_explore --locked
 cargo test -p compass-query --test node_trail --locked
 ```
 
-Expected: explore and node trail do not exist.
+**Done when:** Search, callers, callees, impact, explore, and node trail all
+serialize `compass.query/1` without transport-specific logic.
 
-- [ ] **Step 3: Implement bounded source assembly**
+**Commit:** `feat(query): add trusted code graph operations`
 
-Verify each file's digest before reading. Select the shortest evidence-rich
-path, preferring exact over inferred over ambiguous/heuristic when hop counts
-tie. Group source slices by normalized file path. Track `max_chars`,
-`max_files`, `max_chars_per_file`, omitted files, and truncation in the
-response.
+---
 
-- [ ] **Step 4: Verify explore and trail**
+## Milestone 4: Expose the shared contract to agents and developers
 
-Run:
+### Task 16: Add thin CLI and MCP adapters
 
-```bash
-cargo test -p compass-query --test code_explore --locked
-cargo test -p compass-query --test node_trail --locked
-cargo test -p compass-query --all-targets --locked
-```
+**Objective:** Expose query-engine operations without duplicating graph
+semantics in command or MCP layers.
 
-Expected: all tests pass without returning stale source.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-query
-git commit -m "feat(query): add explore and node trails"
-```
-
-## Milestone 5: Expose one contract through every client
-
-### Task 17: Add CLI and MCP adapters
+**Context:** The CLI currently has separate natural query, CQL, affected, and
+call-graph commands. MCP currently implements `query_graph`, `get_node`, and
+`get_neighbors` directly in `crates/compass-mcp/src/lib.rs`. Those paths must
+remain available where appropriate, but v1 code-graph operations should
+delegate to `CodeQueryEngine` and return the shared response unchanged.
 
 **Files:**
 
@@ -1581,148 +1452,121 @@ git commit -m "feat(query): add explore and node trails"
 - Modify: `crates/compass-mcp/src/lib.rs`
 - Test: `crates/compass-mcp/tests/code_query_tools.rs`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces CLI commands:
-  `search`, `callers`, `callees`, `impact`, `explore`, `node`.
-- Produces MCP tools:
-  `search_symbols`, `get_callers`, `get_callees`, `get_impact`,
-  `explore_code`, `get_node`.
-- Existing `query`, `affected`, `explain`, and `call-graph` delegate to the new
-  engine where their semantics overlap.
+- [ ] Add CLI subcommands `search`, `callers`, `callees`, `impact`, `explore`,
+  and `node`, each accepting `--format json|text` plus operation-specific
+  limits and evidence options.
+- [ ] Serialize `CodeQueryResponse` directly for JSON. Implement text as a
+  renderer over the response; never build a second semantic result shape.
+- [ ] Route existing overlapping call-graph/affected functionality through
+  the new engine where v1 semantics apply, while retaining explicitly
+  separate CQL and natural-language commands.
+- [ ] Add MCP tools `search_symbols`, `get_callers`, `get_callees`,
+  `get_impact`, `explore_code`, and `get_node`. Replace the existing
+  `get_node` implementation rather than registering a duplicate name.
+- [ ] Use bounded JSON schemas with the same defaults as Rust request types.
+  Return structured JSON plus concise text content. Reserve MCP protocol
+  errors for invalid requests, corrupt schemas, unsafe paths, or engine
+  failures; valid empty results remain successful responses.
+- [ ] Ensure pre-contract graphs return the same rebuild diagnostic through
+  CLI and MCP.
 
-- [ ] **Step 1: Write failing CLI/MCP parity tests**
+**Contract produced:** Agents and scripts receive byte-equivalent JSON
+semantics for the same request regardless of CLI or MCP transport.
 
-```rust
-#[test]
-fn cli_and_mcp_return_the_same_query_payload() {
-    let cli = run_cli(["callers", "Users.show", "--format", "json"]);
-    let mcp = invoke_mcp("get_callers", json!({"symbol":"Users.show"}));
-    assert_eq!(
-        canonicalize_query_payload(&cli.stdout),
-        canonicalize_query_payload(&mcp)
-    );
-}
+**Verification:**
 
-#[test]
-fn expected_no_match_is_a_success_response() {
-    let result = invoke_mcp("search_symbols", json!({"query":"absent"}));
-    assert_eq!(result["schema"], "compass.query/1");
-    assert_eq!(result["results"], json!([]));
-    assert_eq!(result["diagnostics"][0]["code"], "no_match");
-}
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
+- Add golden parity cases for every operation, limit, empty result,
+  truncation, heuristic option, stale source, and unsupported graph schema.
+- Run:
 
 ```bash
 cargo test -p compass-cli --test code_query_cli --locked
 cargo test -p compass-mcp --test code_query_tools --locked
 ```
 
-Expected: commands/tools are unknown.
+**Done when:** Equivalent CLI and MCP requests deserialize to the same Rust
+request and return the same `compass.query/1` payload.
 
-- [ ] **Step 3: Implement thin adapters**
+**Commit:** `feat: expose shared code graph queries`
 
-CLI JSON output serializes `CodeQueryResponse` directly. Text output is a
-renderer over that response. MCP returns structured JSON plus concise text
-content and reserves MCP errors for schema corruption, unsafe paths, or engine
-malfunctions. Add bounded request schemas with explicit defaults.
+### Task 17: Add the shared TypeScript contract and evidence presentation
 
-- [ ] **Step 4: Verify adapters**
+**Objective:** Give browser-based Compass surfaces a strict mirror of
+`compass.query/1` and a reusable way to present trust evidence.
 
-Run:
-
-```bash
-cargo test -p compass-cli -p compass-mcp --all-targets --locked
-```
-
-Expected: CLI/MCP golden payloads match.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add crates/compass-cli crates/compass-mcp
-git commit -m "feat: expose Compass code queries"
-```
-
-### Task 18: Add the shared TypeScript contract and graph evidence UI
+**Context:** The viewer already validates graph and call-graph projections
+with Zod, but it has no decoder for the new query envelope. Evidence is also
+spread across existing graph components. The viewer package should own the
+TypeScript contract and presentation primitives so the standalone viewer and
+VS Code webview cannot drift.
 
 **Files:**
 
 - Create: `packages/compass-viewer/src/contracts/codeQuery.ts`
 - Create: `packages/compass-viewer/src/contracts/codeQuery.test.ts`
-- Modify: `packages/compass-viewer/package.json`
 - Modify: `packages/compass-viewer/src/contracts/graph.ts`
 - Create: `packages/compass-viewer/src/graph/CodeEvidence.tsx`
 - Create: `packages/compass-viewer/src/graph/CodeEvidence.test.tsx`
 - Modify: `packages/compass-viewer/src/graph/GraphInspector.tsx`
 - Modify: `packages/compass-viewer/src/graph/edgeLabels.ts`
 - Modify: `packages/compass-viewer/src/graph/CompassGraph.tsx`
+- Modify: `packages/compass-viewer/src/index.ts`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces strict Zod decoders and reusable provenance/coverage rendering.
-- Consumes: `compass.query/1` and graph viewer projections.
+- [ ] Mirror every `compass.query/1` enum and record in strict Zod schemas.
+  Reject unknown variants and unsafe source anchors. Export inferred
+  TypeScript types from the schema module.
+- [ ] Decode `fixtures/contracts/compass-query-v1.example.json` and compare
+  `fixtures/contracts/compass-query-v1.fingerprint` with the fingerprint
+  generated from the TypeScript enum/field manifest so Rust/TypeScript drift
+  fails CI.
+- [ ] Render exact, configuration, convention, ambiguous, unresolved, and
+  heuristic states with text and icons. For heuristic edges, show rule,
+  wiring file/line, extractor, confidence, and candidates inline.
+- [ ] Add `routes_to` and enterprise edge labels without collapsing them into
+  generic references. Show middleware stage and position on route edges.
+- [ ] Integrate `CodeEvidence` into the graph inspector and query-result
+  projection. Use text and icons in addition to color, expose diagnostics and
+  truncation, and keep source actions callback-based so the package remains
+  host-neutral.
+- [ ] Export the decoder, types, and evidence component from the viewer
+  package entry point.
 
-- [ ] **Step 1: Write failing Zod and rendering tests**
+**Contract produced:** Browser clients share one strict decoder and evidence
+component whose vocabulary is fingerprinted against Rust.
 
-```typescript
-it("rejects heuristic edges without wiring evidence", () => {
-  const parsed = CodeQueryResponseSchema.safeParse({
-    ...fixtureResponse,
-    edges: [{ ...fixtureEdge, provenance: {
-      origin: "heuristic", rule: "event-dispatch", wiringSite: null
-    }}]
-  });
-  expect(parsed.success).toBe(false);
-});
+**Verification:**
 
-it("renders the heuristic rule and wiring site", () => {
-  render(<CodeEvidence edge={heuristicEdge} />);
-  expect(screen.getByText("event-dispatch")).toBeVisible();
-  expect(screen.getByText("src/events.ts:27")).toBeVisible();
-});
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-npm run test -w @compass/viewer -- src/contracts/codeQuery.test.ts src/graph/CodeEvidence.test.tsx
-```
-
-Expected: contract and component files are missing.
-
-- [ ] **Step 3: Implement strict decoders and evidence presentation**
-
-Use `z.strictObject` for contract records. Mirror every Rust enum exactly.
-Render exact, convention, ambiguous, and heuristic states with text and icons,
-not color alone. Show rule, extractor, anchor, wiring site, coverage,
-conflicts, stale state, and truncation.
-
-- [ ] **Step 4: Verify viewer contracts**
-
-Run:
+- Cover Zod parity, unknown variants, heuristic evidence, route stage labels,
+  ambiguous candidates, diagnostics, truncation, and accessible text/icon
+  states.
+- Run:
 
 ```bash
 npm run test -w @compass/viewer
 npm run typecheck -w @compass/viewer
+npm run build -w @compass/viewer
 ```
 
-Expected: all viewer tests and type checks pass.
+**Done when:** The viewer rejects any Rust/TypeScript contract drift and
+displays structural, Program, convention, ambiguity, and heuristic evidence
+without host-specific behavior.
 
-- [ ] **Step 5: Commit**
+**Commit:** `feat(viewer): present code graph evidence`
 
-```bash
-git add packages/compass-viewer
-git commit -m "feat(viewer): display code graph evidence"
-```
+### Task 18: Integrate code-graph queries into VS Code
 
-### Task 19: Integrate queries into the VS Code extension
+**Objective:** Make shared code-graph operations navigable inside the
+enterprise extension without adding a second graph implementation.
+
+**Context:** The extension already invokes Compass through its managed process
+layer and renders `@compass/viewer` in webviews. It must stay a client: it
+should send typed CLI requests, validate responses with Task 17’s decoder,
+and delegate all search/traversal semantics to Compass. Source navigation and
+rebuild actions remain host responsibilities.
 
 **Files:**
 
@@ -1736,87 +1580,65 @@ git commit -m "feat(viewer): display code graph evidence"
 - Modify: `editors/vscode/package.json`
 - Modify: `editors/vscode/src/test/suite/extension.integration.ts`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces VS Code actions for search, callers, callees, impact, explore, and
-  node trail; graph-schema rebuild guidance; source navigation.
-- Consumes: CLI commands from Task 17 and contracts from Task 18.
+- [ ] Implement `codeQueryClient` through the existing Compass process
+  manager. Pass literal argument arrays, require JSON output, validate it with
+  `CodeQueryResponseSchema`, and support cancellation and process cleanup.
+- [ ] Register extension actions for symbol search, callers, callees, impact,
+  explore selection, and node trail. Add context-menu actions on graph nodes
+  and editor symbols.
+- [ ] Send validated query responses to the graph webview through strict host
+  and webview message unions. The webview consumes Task 17’s components and
+  does not read `graph.json`.
+- [ ] Open returned source anchors through VS Code APIs only after confirming
+  the normalized path remains inside the active repository. For stale source,
+  show the diagnostic and offer rebuild rather than opening mismatched text.
+- [ ] On an unsupported graph schema, present “Rebuild with Compass” and invoke
+  the normal index/update workflow after user action.
+- [ ] Keep `routes_to` evidence visible when callers of a handler are shown,
+  including middleware order and heuristic wiring-site navigation.
+- [ ] Before editing `editors/vscode/package.json`, inspect and preserve the
+  existing user-owned modification; stage only intentional command/menu
+  additions.
 
-- [ ] **Step 1: Write failing host/webview tests**
+**Contract produced:** VS Code is a validated transport and navigation host
+for the same `compass.query/1` results exposed through CLI and MCP.
 
-```typescript
-it("requests callers for the selected node and validates the response", async () => {
-  const client = fixtureClient();
-  const response = await client.callers("node:user-show");
-  expect(response.schema).toBe("compass.query/1");
-  expect(client.invocations[0]?.args).toEqual([
-    "callers", "node:user-show", "--format", "json"
-  ]);
-});
+**Verification:**
 
-it("offers rebuild when graph v1 is missing", async () => {
-  await openGraphWithCliError("unsupported graph schema: unversioned");
-  expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-    expect.stringContaining("rebuild"),
-    "Update Graph"
-  );
-});
-```
-
-- [ ] **Step 2: Verify the tests fail**
-
-Run:
-
-```bash
-npm run test -w crabbuild-compass-vscode -- src/views/codeQueryClient.test.ts src/transport/messages.test.ts
-```
-
-Expected: client and query messages are missing.
-
-- [ ] **Step 3: Implement VS Code actions**
-
-Register:
-
-- `compass.searchSymbols`
-- `compass.showNodeTrail`
-- `compass.showImpact`
-- `compass.exploreSelection`
-
-Reuse existing caller/callee commands but route them through
-`codeQueryClient`. Post validated query results to the graph webview. Navigate
-using returned source anchors. Never parse CLI text or raw `graph.json`
-attributes.
-
-- [ ] **Step 4: Verify the extension**
-
-Run:
+- Cover literal CLI arguments, schema rejection, cancellation, message
+  validation, source navigation, repository escape rejection, stale source,
+  rebuild guidance, route callers, and all command registrations.
+- Run:
 
 ```bash
 npm run test -w crabbuild-compass-vscode
 npm run typecheck -w crabbuild-compass-vscode
-npm run build -w crabbuild-compass-vscode
+npm run build:vscode
+npm run test:integration -w editors/vscode
 ```
 
-Expected: unit tests, type checks, and extension build pass.
+**Done when:** A developer can select a handler, see the URL route that binds
+it, inspect exact or heuristic provenance, follow the node trail, and open
+verified source without the extension computing graph results.
 
-- [ ] **Step 5: Commit**
+**Commit:** `feat(vscode): explore trusted code graph evidence`
 
-Before staging, compare the existing user modification:
+---
 
-```bash
-git diff -- editors/vscode/package.json
-```
+## Milestone 5: Qualify the release
 
-Preserve unrelated content, then commit only intentional extension changes:
+### Task 19: Add deterministic, cross-platform, and real-repository gates
 
-```bash
-git add editors/vscode/src editors/vscode/package.json
-git commit -m "feat(vscode): explore trusted code graph evidence"
-```
+**Objective:** Turn the v1 trust claims into one repeatable release
+qualification command.
 
-## Milestone 6: Qualify the complete release
-
-### Task 20: Add cross-platform, determinism, and real-repository gates
+**Context:** Fixture tests prove syntax shapes but not real-repository
+behavior, deterministic incremental publication, client parity, or platform
+path semantics. Compass is the enterprise product, so v1 must not ship with
+declared kinds that lack producers or framework resolvers that only work in
+toy fixtures.
 
 **Files:**
 
@@ -1830,44 +1652,14 @@ git commit -m "feat(vscode): explore trusted code graph evidence"
 - Test: `crates/compass-core/tests/code_graph_v1_determinism.rs`
 - Test: `tests/viewer/query.spec.ts`
 
-**Interfaces:**
+**Implementation:**
 
-- Produces one release qualification command and a machine-readable coverage
-  report.
-- Consumes every previous task.
-
-- [ ] **Step 1: Write failing qualification checks**
-
-The coverage script must fail when:
-
-- a declared node/edge kind has zero producers;
-- a framework lacks positive, near-match, exact, ambiguous, unresolved, or
-  incremental coverage;
-- clean and incremental graph bytes differ;
-- a heuristic edge lacks rule/wiring site;
-- CLI/MCP/VS Code schema fingerprints differ.
-
-Add this shell contract:
-
-```bash
-./scripts/qualify_code_graph_v1.sh --fixtures-only
-```
-
-Expected before implementation: non-zero exit with a list of missing gates.
-
-- [ ] **Step 2: Run the failing gate**
-
-Run:
-
-```bash
-./scripts/qualify_code_graph_v1.sh --fixtures-only
-```
-
-Expected: failure listing all unimplemented checks.
-
-- [ ] **Step 3: Implement the qualification pipeline**
-
-The script runs:
+- [ ] Implement the coverage checker to fail when a declared node or edge kind
+  has zero producers; a framework lacks positive, near-match, exact,
+  ambiguous, unresolved, or incremental coverage; a heuristic edge lacks
+  wiring evidence; clean and incremental bytes differ; or Rust/CLI/MCP/VS
+  Code schema fingerprints differ.
+- [ ] Implement `qualify_code_graph_v1.sh --fixtures-only` to run:
 
 ```bash
 cargo fmt --all -- --check
@@ -1879,123 +1671,83 @@ npm run build
 python3 scripts/check_code_graph_v1_coverage.py
 ```
 
-The full mode additionally builds small, medium, and large repositories for
-each supported language family and executes three route-to-handler flows for
-every listed framework. Record repository revision, Compass revision, graph
-digest, node/edge counts, query timings, unresolved counts, and false exact
-resolutions in `docs/design/code-graph-v1-qualification.md`.
+- [ ] Define the real-repository lock format with `name`, `url`, immutable
+  40-hex `commit`, `size_class`, `language_family`, `frameworks`, and at least
+  three named route-to-handler flows for every framework. Reject branches,
+  tags, shortened hashes, duplicate size/language cells, or insufficient
+  framework flows.
+- [ ] Make full qualification clone locked repositories into temporary
+  directories, build clean and incremental graphs, execute the declared
+  queries, and record Compass revision, repository revision, graph digest,
+  counts, coverage, unresolved/ambiguous totals, false exact resolutions,
+  index time, and query latency.
+- [ ] Commit the generated evidence in
+  `docs/design/code-graph-v1-qualification.md`. Qualification fails if any
+  declared flow does not resolve as expected or if a bounded ambiguous result
+  is reported as exact.
+- [ ] Add Linux fixture qualification to
+  `.github/workflows/compass-ci.yml`. Run platform-sensitive suites on macOS,
+  Linux, and Windows for path normalization, atomic publication, SQLite,
+  process cancellation, source navigation, and VS Code packaging.
+- [ ] Document the hard cutover and rebuild requirement under the Unreleased
+  section of `CHANGELOG.md`; do not describe pre-contract graphs as a
+  supported old v1.
+- [ ] Add `make qualify-code-graph-v1` as the release entry point.
 
-Commit the real-repository matrix in
-`tests/qualification/code-graph-v1-repositories.toml`. Each entry contains
-`name`, `url`, immutable 40-hex `commit`, `size_class`, `language_family`, and
-`frameworks`. The script rejects branches, tags, shortened hashes, duplicate
-size/language cells, and any framework with fewer than three declared
-route-to-handler flows. It clones into a temporary directory and never writes
-into the fixture or source trees.
+**Contract produced:** Release engineering has a single command and an
+immutable evidence report for every vocabulary producer, framework, client,
+and platform claim.
 
-- [ ] **Step 4: Run the fixture gate**
+**Verification:**
 
-Run:
+- Run fixture qualification:
 
 ```bash
 ./scripts/qualify_code_graph_v1.sh --fixtures-only
 ```
 
-Expected: exit 0.
-
-- [ ] **Step 5: Run the real-repository and platform gates**
-
-Run:
+- Run locked real-repository qualification:
 
 ```bash
 ./scripts/qualify_code_graph_v1.sh \
   --repositories tests/qualification/code-graph-v1-repositories.toml
 ```
 
-Expected: exit 0 and a qualification report containing results for every
-locked repository and framework flow.
-
-Run platform-sensitive suites on:
-
-- macOS locally;
-- Linux in the repository's documented Node/Rust Docker environment;
-- the documented Windows VM for path, atomic publication, SQLite, and VS Code
-  process behavior.
-
-- [ ] **Step 6: Refresh the project graph**
-
-Because implementation modifies code files, run from the outer Graphify
-workspace:
+- Run the outer graph refresh after the final code change:
 
 ```bash
 cd /Users/haipingfu/graphify
 graphify update .
 ```
 
-Expected: `graphify-out/GRAPH_REPORT.md` records the implementation commit and
-the update exits 0.
+**Done when:** Both qualification modes exit 0, the evidence report contains
+no unresolved release gate, every declared kind has a producer, every
+framework has three real flows, and the cross-platform CI matrix is green.
 
-- [ ] **Step 7: Commit**
+**Commit:** `test: qualify Compass code graph v1`
 
-```bash
-git add scripts/check_code_graph_v1_coverage.py scripts/qualify_code_graph_v1.sh tests/qualification/code-graph-v1-repositories.toml docs/design/code-graph-v1-qualification.md .github/workflows/compass-ci.yml Makefile CHANGELOG.md crates/compass-core/tests/code_graph_v1_determinism.rs tests/viewer/query.spec.ts
-git commit -m "test: qualify Compass code graph v1"
-```
+---
 
-## Final verification
+## Final release review
 
-- [ ] Run the full Rust test suite:
-
-```bash
-cargo test --workspace --all-targets --locked
-```
-
-- [ ] Run strict Rust linting:
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-```
-
-- [ ] Run JavaScript tests, type checks, and builds:
-
-```bash
-npm run test:js
-npm run typecheck:js
-npm run build
-```
-
-- [ ] Run the fixture qualification gate:
-
-```bash
-./scripts/qualify_code_graph_v1.sh --fixtures-only
-```
-
-- [ ] Run the locked real-repository gate:
-
-```bash
-./scripts/qualify_code_graph_v1.sh \
-  --repositories tests/qualification/code-graph-v1-repositories.toml
-```
-
-- [ ] Inspect final scope:
-
-```bash
-git status --short
-git diff --stat HEAD~20..HEAD
-git log --oneline --decorate -20
-```
-
-- [ ] Confirm the original user-owned
-  `editors/vscode/package.json` change is either preserved verbatim or
-  intentionally incorporated and documented.
-
-- [ ] Run the outer graph refresh after the final code change:
-
-```bash
-cd /Users/haipingfu/graphify
-graphify update .
-```
-
-Expected: every command exits 0, the qualification document contains no
-unresolved release gate, and only intentional files are modified.
+- [ ] Confirm the durable artifact is a NetworkX-compatible
+  `compass.graph/1` envelope and contains no `relation` aliases or flattened
+  unknown attributes.
+- [ ] Confirm pre-contract artifacts rebuild on update and fail with rebuild
+  guidance on read-only paths; no adapter or dual representation exists.
+- [ ] Confirm Program IR remains `http://crab.build/compass/v1` and is joined
+  only at query time.
+- [ ] Confirm all core, enterprise, database, event, job, schema, and resource
+  kinds have validated producers.
+- [ ] Confirm all approved frameworks publish `route` nodes and canonical
+  `routes_to` edges with exact, convention, configuration, ambiguous, or
+  surfaced heuristic evidence.
+- [ ] Confirm search uses FTS5 and callers, callees, impact, explore, and node
+  trail share `compass.query/1`.
+- [ ] Confirm CLI, MCP, viewer, and VS Code schema fingerprints match.
+- [ ] Confirm heuristic rule and wiring-site evidence appears inline in
+  explore, node trail, the viewer, and VS Code.
+- [ ] Confirm clean and incremental graph bytes match across checkout roots.
+- [ ] Confirm real-repository qualification and macOS/Linux/Windows gates pass.
+- [ ] Inspect `git status --short` and verify unrelated user changes remain
+  unmodified and unstaged.
