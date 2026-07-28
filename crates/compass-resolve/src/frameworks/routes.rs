@@ -1,0 +1,594 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use compass_languages::{
+    Extraction, FrameworkLimitError, FrameworkLimits, RawEdgeRecord, RawFrameworkAnchor,
+    RawFrameworkFact, RawFrameworkOrigin, RawNodeRecord, RawRouteFact, make_id,
+};
+use compass_model::provenance::{
+    EvidenceConfidence, EvidenceOrigin, Provenance, ResolutionCandidate, ResolutionState,
+    SourceAnchor,
+};
+use serde_json::{Map, Value};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RouteStageRole {
+    Middleware,
+    Handler,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RouteStage {
+    pub position: u32,
+    pub role: RouteStageRole,
+    pub target: String,
+    pub provenance: Provenance,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedRoute {
+    pub route: RawRouteFact,
+    pub state: ResolutionState,
+    pub stages: Vec<RouteStage>,
+    pub candidates: Vec<ResolutionCandidate>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum FrameworkResolutionError {
+    #[error("invalid {framework} route: {detail}")]
+    InvalidRoute { framework: String, detail: String },
+    #[error(transparent)]
+    Limit(#[from] FrameworkLimitError),
+    #[error("framework alias expansion limit exceeded: observed {observed}, maximum {maximum}")]
+    AliasLimit { observed: usize, maximum: usize },
+}
+
+pub fn resolve_routes(
+    extraction: &Extraction,
+    limits: FrameworkLimits,
+) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
+    validate_fact_limits(extraction, limits)?;
+    let aliases = alias_map(extraction, limits)?;
+    let mut unique = BTreeMap::new();
+    for fact in &extraction.framework_facts {
+        let RawFrameworkFact::Route(route) = fact else {
+            continue;
+        };
+        route
+            .validate()
+            .map_err(|detail| FrameworkResolutionError::InvalidRoute {
+                framework: route.framework.clone(),
+                detail: detail.to_owned(),
+            })?;
+        let key = (
+            route.anchor.source_file.clone(),
+            route.framework.clone(),
+            route.operation.clone(),
+            route.normalized_path.clone(),
+            route.declaring_scope.clone(),
+        );
+        unique.entry(key).or_insert_with(|| route.clone());
+    }
+
+    unique
+        .into_values()
+        .map(|route| resolve_one_route(route, extraction, &aliases, limits))
+        .collect()
+}
+
+pub fn resolve_and_publish_framework_routes(
+    extraction: &mut Extraction,
+    limits: FrameworkLimits,
+) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
+    let resolved = resolve_routes(extraction, limits)?;
+    publish_resolved_routes(extraction, &resolved)?;
+    Ok(resolved)
+}
+
+pub fn publish_resolved_routes(
+    extraction: &mut Extraction,
+    routes: &[ResolvedRoute],
+) -> Result<(), FrameworkResolutionError> {
+    let mut existing_nodes = extraction
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
+    let mut existing_edges = extraction
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.source.clone(),
+                edge.target.clone(),
+                edge.string("relation"),
+                edge.string("source_location"),
+                edge.string("position"),
+            )
+        })
+        .collect::<HashSet<_>>();
+
+    for resolved in routes {
+        let route = &resolved.route;
+        let route_id = make_id(&[
+            "framework-route",
+            &route.framework,
+            &route.anchor.source_file,
+            &route.operation,
+            &route.normalized_path,
+            &route.declaring_scope,
+        ]);
+        if existing_nodes.insert(route_id.clone()) {
+            extraction.nodes.push(RawNodeRecord {
+                id: route_id.clone(),
+                attributes: route_attributes(resolved),
+            });
+        }
+        for stage in &resolved.stages {
+            if !existing_nodes.contains(&stage.target) {
+                continue;
+            }
+            let location = format!("L{}", route.anchor.start_line);
+            if !existing_edges.insert((
+                route_id.clone(),
+                stage.target.clone(),
+                "routes_to".to_owned(),
+                location,
+                stage.position.to_string(),
+            )) {
+                continue;
+            }
+            mark_stage_role(&mut extraction.nodes, &stage.target, stage.role);
+            extraction.edges.push(RawEdgeRecord {
+                source: route_id.clone(),
+                target: stage.target.clone(),
+                attributes: route_edge_attributes(resolved, stage),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn resolve_one_route(
+    route: RawRouteFact,
+    extraction: &Extraction,
+    aliases: &HashMap<String, String>,
+    limits: FrameworkLimits,
+) -> Result<ResolvedRoute, FrameworkResolutionError> {
+    let mut stages = Vec::new();
+    for (position, reference) in route.middleware_references.iter().enumerate() {
+        let candidates = resolve_reference(
+            reference,
+            &route.declaring_scope,
+            extraction,
+            aliases,
+            limits,
+        )?;
+        if let [candidate] = candidates.as_slice() {
+            stages.push(RouteStage {
+                position: u32::try_from(position).unwrap_or(u32::MAX),
+                role: RouteStageRole::Middleware,
+                target: candidate.node_id.clone(),
+                provenance: stage_provenance(&route, candidates),
+            });
+        }
+    }
+
+    let candidates = resolve_reference(
+        &route.handler_reference,
+        &route.declaring_scope,
+        extraction,
+        aliases,
+        limits,
+    )?;
+    let state = match candidates.len() {
+        0 => ResolutionState::Unresolved,
+        1 => ResolutionState::Exact,
+        _ => ResolutionState::Ambiguous,
+    };
+    if let [candidate] = candidates.as_slice() {
+        stages.push(RouteStage {
+            position: u32::try_from(route.middleware_references.len()).unwrap_or(u32::MAX),
+            role: RouteStageRole::Handler,
+            target: candidate.node_id.clone(),
+            provenance: stage_provenance(&route, candidates.clone()),
+        });
+    }
+    Ok(ResolvedRoute {
+        route,
+        state,
+        stages,
+        candidates,
+    })
+}
+
+fn resolve_reference(
+    reference: &str,
+    declaring_scope: &str,
+    extraction: &Extraction,
+    aliases: &HashMap<String, String>,
+    limits: FrameworkLimits,
+) -> Result<Vec<ResolutionCandidate>, FrameworkResolutionError> {
+    let reference = normalize_reference(reference);
+    let expanded = expand_alias(&reference, aliases);
+    let last = terminal_name(&expanded);
+    let scoped = [
+        format!("{declaring_scope}::{expanded}"),
+        format!("{declaring_scope}.{expanded}"),
+    ];
+    let mut candidates = Vec::new();
+    for node in &extraction.nodes {
+        if !is_route_target(node) {
+            continue;
+        }
+        let qualified = node.string("qualified_name");
+        let name = node
+            .attributes
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| node.label());
+        let normalized_name = normalize_reference(name);
+        let normalized_qualified = normalize_reference(&qualified);
+        let (score, reason) = if node.id == expanded {
+            (100_u8, "exact stable ID")
+        } else if normalized_qualified == expanded {
+            (95, "exact qualified name")
+        } else if scoped
+            .iter()
+            .any(|scope| normalize_reference(scope) == normalized_qualified)
+        {
+            (90, "declaring-scope qualified name")
+        } else if expanded != reference && normalized_qualified == expanded {
+            (85, "import/export alias")
+        } else if terminal_name(&normalized_qualified) == last
+            || normalize_reference(&normalized_name) == last
+        {
+            (70, "unique terminal name")
+        } else {
+            continue;
+        };
+        candidates.push((score, node, reason));
+    }
+    let Some(best_score) = candidates.iter().map(|(score, _, _)| *score).max() else {
+        return Ok(Vec::new());
+    };
+    let mut candidates = candidates
+        .into_iter()
+        .filter(|(score, _, _)| *score == best_score)
+        .map(|(score, node, reason)| ResolutionCandidate {
+            node_id: node.id.clone(),
+            reason: reason.to_owned(),
+            confidence: if score >= 85 {
+                EvidenceConfidence::Exact
+            } else {
+                EvidenceConfidence::Ambiguous
+            },
+            score: Some(f64::from(score) / 100.0),
+            anchor: node_anchor(node),
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+    candidates.dedup_by(|left, right| left.node_id == right.node_id);
+    if candidates.len() > limits.max_candidates {
+        return Err(FrameworkLimitError {
+            limit: "max_candidates",
+            maximum: limits.max_candidates,
+            observed: candidates.len(),
+        }
+        .into());
+    }
+    Ok(candidates)
+}
+
+fn validate_fact_limits(
+    extraction: &Extraction,
+    limits: FrameworkLimits,
+) -> Result<(), FrameworkResolutionError> {
+    let mut counts = HashMap::<&str, usize>::new();
+    for fact in &extraction.framework_facts {
+        let file = match fact {
+            RawFrameworkFact::Route(route) => route.anchor.source_file.as_str(),
+            RawFrameworkFact::Domain(domain) => domain.anchor.source_file.as_str(),
+        };
+        *counts.entry(file).or_default() += 1;
+    }
+    for count in counts.into_values() {
+        limits.check_facts(count)?;
+    }
+    Ok(())
+}
+
+fn alias_map(
+    extraction: &Extraction,
+    limits: FrameworkLimits,
+) -> Result<HashMap<String, String>, FrameworkResolutionError> {
+    let mut aliases = HashMap::new();
+    for node in &extraction.nodes {
+        let Some(local) = node
+            .attributes
+            .get("local_name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(imported) = node
+            .attributes
+            .get("imported_name")
+            .or_else(|| node.attributes.get("qualified_name"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        aliases.insert(local.to_owned(), imported.to_owned());
+        if aliases.len() > limits.max_alias_expansions {
+            return Err(FrameworkResolutionError::AliasLimit {
+                observed: aliases.len(),
+                maximum: limits.max_alias_expansions,
+            });
+        }
+    }
+    Ok(aliases)
+}
+
+fn expand_alias(reference: &str, aliases: &HashMap<String, String>) -> String {
+    let split = reference.find(['.', ':']).unwrap_or(reference.len());
+    let head = &reference[..split];
+    aliases.get(head).map_or_else(
+        || reference.to_owned(),
+        |expanded| format!("{expanded}{}", &reference[split..]),
+    )
+}
+
+fn is_route_target(node: &RawNodeRecord) -> bool {
+    matches!(
+        node.attributes
+            .get("symbol_kind")
+            .or_else(|| node.attributes.get("type"))
+            .and_then(Value::as_str),
+        Some("function" | "method" | "class" | "component")
+    )
+}
+
+fn normalize_reference(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(['"', '\'', '`'])
+        .trim_end_matches(".as_view()")
+        .trim_end_matches("()")
+        .replace("::", ".")
+}
+
+fn terminal_name(value: &str) -> String {
+    value
+        .rsplit(['.', ':', '#'])
+        .next()
+        .unwrap_or(value)
+        .trim_end_matches("()")
+        .to_owned()
+}
+
+fn stage_provenance(route: &RawRouteFact, candidates: Vec<ResolutionCandidate>) -> Provenance {
+    let anchor = source_anchor(&route.anchor);
+    let origin = evidence_origin(route.origin);
+    Provenance {
+        origin,
+        extractor: format!("compass.frameworks.{}", route.framework),
+        confidence: if origin == EvidenceOrigin::Heuristic {
+            EvidenceConfidence::Inferred
+        } else {
+            EvidenceConfidence::Exact
+        },
+        rule: route.rule.clone(),
+        anchors: (origin != EvidenceOrigin::Heuristic)
+            .then_some(anchor.clone())
+            .into_iter()
+            .collect(),
+        wiring_site: (origin == EvidenceOrigin::Heuristic).then_some(anchor),
+        score: None,
+        candidates: if origin == EvidenceOrigin::Heuristic {
+            candidates
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+fn route_attributes(resolved: &ResolvedRoute) -> Map<String, Value> {
+    let route = &resolved.route;
+    let mut attributes = Map::new();
+    attributes.insert(
+        "label".into(),
+        Value::String(format!("{} {}", route.operation, route.normalized_path)),
+    );
+    attributes.insert(
+        "name".into(),
+        Value::String(format!("{} {}", route.operation, route.normalized_path)),
+    );
+    attributes.insert(
+        "qualified_name".into(),
+        Value::String(format!(
+            "{}::{}::{}",
+            route.framework, route.operation, route.normalized_path
+        )),
+    );
+    attributes.insert("symbol_kind".into(), Value::String("route".into()));
+    attributes.insert("file_type".into(), Value::String("code".into()));
+    attributes.insert("framework".into(), Value::String(route.framework.clone()));
+    attributes.insert("operation".into(), Value::String(route.operation.clone()));
+    attributes.insert("path".into(), Value::String(route.normalized_path.clone()));
+    attributes.insert(
+        "original_path".into(),
+        Value::String(route.raw_path.clone()),
+    );
+    attributes.insert(
+        "declaring_scope".into(),
+        Value::String(route.declaring_scope.clone()),
+    );
+    attributes.insert(
+        "resolution".into(),
+        Value::String(resolution_name(resolved.state).to_owned()),
+    );
+    attributes.insert(
+        "middleware_count".into(),
+        Value::from(route.middleware_references.len() as u64),
+    );
+    add_evidence_attributes(&mut attributes, route, resolved.state, &resolved.candidates);
+    attributes
+}
+
+fn route_edge_attributes(resolved: &ResolvedRoute, stage: &RouteStage) -> Map<String, Value> {
+    let route = &resolved.route;
+    let mut attributes = Map::new();
+    attributes.insert("relation".into(), Value::String("routes_to".into()));
+    attributes.insert(
+        "stage".into(),
+        Value::String(
+            match stage.role {
+                RouteStageRole::Middleware => "middleware",
+                RouteStageRole::Handler => "handler",
+            }
+            .to_owned(),
+        ),
+    );
+    attributes.insert("position".into(), Value::from(stage.position));
+    attributes.insert("operation".into(), Value::String(route.operation.clone()));
+    attributes.insert("weight".into(), Value::from(1.0));
+    add_evidence_attributes(
+        &mut attributes,
+        route,
+        resolved.state,
+        &stage.provenance.candidates,
+    );
+    let stage_name = match stage.role {
+        RouteStageRole::Middleware => "middleware",
+        RouteStageRole::Handler => "handler",
+    };
+    let rule = route.rule.as_deref().map_or_else(
+        || format!("framework-route-stage:{stage_name}:{}", stage.position),
+        |rule| format!("{rule}|stage:{stage_name}:{}", stage.position),
+    );
+    attributes.insert("rule".into(), Value::String(rule));
+    attributes
+}
+
+fn add_evidence_attributes(
+    attributes: &mut Map<String, Value>,
+    route: &RawRouteFact,
+    state: ResolutionState,
+    candidates: &[ResolutionCandidate],
+) {
+    attributes.insert(
+        "source_anchor".into(),
+        serde_json::to_value(source_anchor(&route.anchor)).unwrap_or(Value::Null),
+    );
+    attributes.insert(
+        "_origin".into(),
+        Value::String(route.origin.as_str().to_owned()),
+    );
+    attributes.insert(
+        "extractor".into(),
+        Value::String(format!("compass.frameworks.{}", route.framework)),
+    );
+    attributes.insert(
+        "confidence".into(),
+        Value::String(
+            match state {
+                ResolutionState::Exact => "EXTRACTED",
+                ResolutionState::Ambiguous => "AMBIGUOUS",
+                ResolutionState::Unresolved => "INFERRED",
+            }
+            .to_owned(),
+        ),
+    );
+    if let Some(rule) = &route.rule {
+        attributes.insert("rule".into(), Value::String(rule.clone()));
+    }
+    if !candidates.is_empty() {
+        attributes.insert(
+            "candidates".into(),
+            serde_json::to_value(candidates).unwrap_or_else(|_| Value::Array(Vec::new())),
+        );
+    }
+}
+
+fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRole) {
+    let Some(node) = nodes.iter_mut().find(|node| node.id == target) else {
+        return;
+    };
+    let role = match role {
+        RouteStageRole::Middleware => "middleware",
+        RouteStageRole::Handler => "route_handler",
+    };
+    let roles = node
+        .attributes
+        .entry("roles")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(roles) = roles.as_array_mut() else {
+        return;
+    };
+    if !roles.iter().any(|item| item.as_str() == Some(role)) {
+        roles.push(Value::String(role.to_owned()));
+    }
+}
+
+fn node_anchor(node: &RawNodeRecord) -> Option<SourceAnchor> {
+    let source_file = node.attributes.get("source_file").and_then(Value::as_str)?;
+    let start_line = node
+        .attributes
+        .get("line_start")
+        .and_then(Value::as_u64)
+        .and_then(|line| u32::try_from(line).ok())
+        .unwrap_or(1);
+    Some(SourceAnchor {
+        file: source_file.to_owned(),
+        start_byte: node
+            .attributes
+            .get("start_byte")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        end_byte: node
+            .attributes
+            .get("end_byte")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        start_line,
+        start_column: 0,
+        end_line: node
+            .attributes
+            .get("line_end")
+            .and_then(Value::as_u64)
+            .and_then(|line| u32::try_from(line).ok())
+            .unwrap_or(start_line),
+        end_column: 0,
+    })
+}
+
+fn source_anchor(anchor: &RawFrameworkAnchor) -> SourceAnchor {
+    SourceAnchor {
+        file: anchor.source_file.clone(),
+        start_byte: anchor.start_byte,
+        end_byte: anchor.end_byte,
+        start_line: anchor.start_line,
+        start_column: anchor.start_column,
+        end_line: anchor.end_line,
+        end_column: anchor.end_column,
+    }
+}
+
+fn evidence_origin(origin: RawFrameworkOrigin) -> EvidenceOrigin {
+    match origin {
+        RawFrameworkOrigin::Ast => EvidenceOrigin::Ast,
+        RawFrameworkOrigin::Config => EvidenceOrigin::Config,
+        RawFrameworkOrigin::Convention => EvidenceOrigin::Convention,
+        RawFrameworkOrigin::Heuristic => EvidenceOrigin::Heuristic,
+    }
+}
+
+fn resolution_name(state: ResolutionState) -> &'static str {
+    match state {
+        ResolutionState::Exact => "exact",
+        ResolutionState::Ambiguous => "ambiguous",
+        ResolutionState::Unresolved => "unresolved",
+    }
+}

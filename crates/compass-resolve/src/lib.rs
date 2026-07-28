@@ -1,5 +1,6 @@
 //! Deterministic cross-file resolution over immutable extraction facts.
 
+pub mod frameworks;
 mod members;
 
 pub use members::resolve_language_calls;
@@ -178,6 +179,9 @@ pub fn resolve_with_root(
         merged
             .hyperedges
             .extend(extraction.hyperedges.iter().cloned());
+        merged
+            .framework_facts
+            .extend(extraction.framework_facts.iter().cloned());
     }
     finish_resolution(merged, language_facts, sources, root)
 }
@@ -197,6 +201,9 @@ pub fn resolve_owned_with_root(
         merged.nodes.append(&mut extraction.nodes);
         merged.edges.append(&mut extraction.edges);
         merged.hyperedges.append(&mut extraction.hyperedges);
+        merged
+            .framework_facts
+            .append(&mut extraction.framework_facts);
     }
     extractions.into_par_iter().for_each(drop);
     finish_resolution(merged, language_facts, sources, root)
@@ -232,6 +239,15 @@ fn finish_resolution(
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
+    if let Err(error) = frameworks::resolve_and_publish_framework_routes(
+        &mut merged,
+        compass_languages::FrameworkLimits::default(),
+    ) {
+        merged
+            .error
+            .get_or_insert_with(|| format!("framework resolution failed: {error}"));
+    }
+    profile_internal("resolver framework routes", &mut profile_started);
     merged
 }
 

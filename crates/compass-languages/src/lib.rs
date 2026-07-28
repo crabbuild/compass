@@ -13,6 +13,7 @@ mod elixir;
 mod engine;
 mod facts;
 mod fortran;
+pub mod frameworks;
 mod go;
 mod groovy;
 mod ids;
@@ -40,6 +41,10 @@ mod xaml;
 mod zig;
 
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
+pub use frameworks::{
+    FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
+    RawFrameworkOrigin, RawRouteFact,
+};
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use registry::{ExtractorKind, LanguageSpec, Registry};

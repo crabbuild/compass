@@ -761,14 +761,14 @@ candidate behavior.
 
 **Implementation:**
 
-- [ ] Define `RawFrameworkFact::Route(RawRouteFact)` and
+- [x] Define `RawFrameworkFact::Route(RawRouteFact)` and
   `RawFrameworkFact::Domain(RawDomainFact)`.
-- [ ] Add `framework_facts: Vec<RawFrameworkFact>` to `Extraction` with an
+- [x] Add `framework_facts: Vec<RawFrameworkFact>` to `Extraction` with an
   empty default so non-framework extractors remain unchanged.
-- [ ] Define `RawRouteFact` with framework, operation, raw and normalized path,
+- [x] Define `RawRouteFact` with framework, operation, raw and normalized path,
   declaring scope, route anchor, handler reference, ordered middleware
   references, provenance origin, and framework-specific detail.
-- [ ] Define resolver output as:
+- [x] Define resolver output as:
 
 ```rust
 pub struct ResolvedRoute {
@@ -786,21 +786,21 @@ pub struct RouteStage {
 }
 ```
 
-- [ ] Resolve exact handler IDs by qualified name, import/export aliases,
+- [x] Resolve exact handler IDs by qualified name, import/export aliases,
   declaring scope, and framework convention. If several candidates remain,
   return at most 20, sorted by stable ID, with reasons and confidence.
-- [ ] Centralize `FrameworkLimits` with `max_candidates: 20`,
+- [x] Centralize `FrameworkLimits` with `max_candidates: 20`,
   `max_include_depth: 32`, `max_alias_expansions: 1_000`, and
   `max_facts_per_file: 100_000`. Configuration parsers and resolvers fail with
   a diagnostic when a bound is reached; they do not continue partial
   recursive expansion silently.
-- [ ] Publish a `route` node and one `routes_to` edge per execution stage.
+- [x] Publish a `route` node and one `routes_to` edge per execution stage.
   Middleware edges carry `stage: "middleware"` and zero-based `position`; the
   final handler carries `stage: "handler"`.
-- [ ] Use `ast` for explicit bindings, `config` for routing files,
+- [x] Use `ast` for explicit bindings, `config` for routing files,
   `convention` for file-based routes, and `heuristic` only at a dynamic
   dispatch boundary with a rule and wiring site.
-- [ ] Reject URL-looking strings unless a recognized framework shape or
+- [x] Reject URL-looking strings unless a recognized framework shape or
   convention produced them.
 
 **Contract produced:** Framework packs only detect local shapes; the shared

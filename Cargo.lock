@@ -1325,11 +1325,16 @@ name = "compass-resolve"
 version = "0.1.10"
 dependencies = [
  "ahash",
+ "compass-graph",
  "compass-languages",
+ "compass-model",
  "rayon",
  "regex",
+ "serde",
  "serde_json",
  "sha1",
+ "tempfile",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
