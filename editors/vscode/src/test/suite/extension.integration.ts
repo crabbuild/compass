@@ -26,6 +26,7 @@ suite("Compass extension", () => {
       "compass.openArchitecture",
       "compass.openQuery",
       "compass.openHistory",
+      "compass.installCli",
       "compass.selectCli"
     ]) {
       assert.ok(commands.has(command), `${command} is registered`);

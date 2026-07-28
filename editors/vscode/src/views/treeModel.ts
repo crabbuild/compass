@@ -162,11 +162,11 @@ function cliAttentionNodes(
   if (discovery.kind === "missing") {
     return [{
       id: "cli-setup",
-      label: "Compass CLI needs attention",
-      description: "Not found",
-      tooltip: "Compass was not found in the configured location or on PATH.",
-      icon: "warning",
-      command: "compass.selectCli"
+      label: "Set up Compass",
+      description: "Not installed",
+      tooltip: "Install Compass or select an existing CLI to continue.",
+      icon: "rocket",
+      command: "compass.installCli"
     }];
   }
   const incompatible = sessions.find((session) => session.capabilityError);

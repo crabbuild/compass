@@ -116,12 +116,12 @@ describe("buildWorkspaceTree", () => {
       [available]
     );
     expect(missing.map((node) => node.label)).toEqual([
-      "Compass CLI needs attention",
+      "Set up Compass",
       "repo"
     ]);
     expect(missing[0]).toMatchObject({
-      description: "Not found",
-      command: "compass.selectCli"
+      description: "Not installed",
+      command: "compass.installCli"
     });
 
     const incompatible = buildWorkspaceTree(discovery, [{

@@ -6,12 +6,16 @@ exports.
 
 ## Requirements
 
-Install the `compass` CLI separately on the same machine or remote extension
-host where VS Code opens the workspace. The extension never bundles a native
-binary and never sends telemetry.
+If the `compass` CLI is missing, choose **Set up Compass** in the Compass
+activity bar. The onboarding page shows the exact official install command,
+opens a visible integrated terminal, runs it, and verifies the installed
+version and capabilities automatically. After verification, choose
+**Initialize repository** to continue into repository scope setup.
 
-If `compass` is not on `PATH`, set **Compass: CLI Path** or choose **Select
-Compass Binary** from the guided setup.
+Installation runs on the same machine or remote extension host where VS Code
+opens the workspace. The extension never bundles a native binary and never
+sends telemetry. If Compass already exists outside detected locations, set
+**Compass: CLI Path** or choose **Select Compass Binary** from onboarding.
 
 The CLI must support `compass capabilities --format json` and the versioned
 contracts advertised by the extension. If a non-Compass or incompatible binary
@@ -88,9 +92,12 @@ partial. An empty direction means that Compass found the function but has no
 represented relationship in that direction; it does not prove no runtime call
 exists.
 
-Compass discovers the CLI automatically from the configured location and then
-from `PATH`. A setup row appears only when the executable is missing or
-incompatible; a healthy CLI does not occupy the Workspace view.
+Compass discovers the CLI automatically from the configured location, `PATH`,
+and common user-local install directories. When it is missing, **Set up
+Compass** opens one-click installation for macOS, Linux, Windows x64, and
+Windows ARM64. The terminal remains available for troubleshooting, and failed
+verification offers retry or existing-binary selection. A healthy CLI does not
+occupy the Workspace view.
 
 In a multi-root workspace, Compass uses the repository containing the active
 editor. If no repository is implied and more than one is eligible, Compass asks
