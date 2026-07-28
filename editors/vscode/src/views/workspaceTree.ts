@@ -10,7 +10,7 @@ export class WorkspaceTree implements vscode.TreeDataProvider<TreeNode> {
 
   constructor(
     private readonly registry: SessionRegistry,
-    private readonly discovery: CompassDiscovery
+    private readonly discovery: () => CompassDiscovery
   ) {}
 
   refresh(): void {
@@ -23,6 +23,6 @@ export class WorkspaceTree implements vscode.TreeDataProvider<TreeNode> {
 
   getChildren(node?: TreeNode): TreeNode[] {
     if (node) return node.children ?? [];
-    return buildWorkspaceTree(this.discovery, this.registry.all());
+    return buildWorkspaceTree(this.discovery(), this.registry.all());
   }
 }

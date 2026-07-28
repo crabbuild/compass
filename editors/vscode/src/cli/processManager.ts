@@ -14,10 +14,24 @@ export type RunningCommand = {
 };
 
 export class CompassProcessManager {
+  private executable: string;
+
   constructor(
-    private readonly executable: string,
+    executable: string,
     private readonly spawn: Spawn = nodeSpawn
-  ) {}
+  ) {
+    this.executable = executable;
+  }
+
+  get executablePath(): string {
+    return this.executable;
+  }
+
+  useExecutable(executable: string): void {
+    const next = executable.trim();
+    if (!next) throw new Error("Compass executable path cannot be empty");
+    this.executable = next;
+  }
 
   run(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
     const command = this.startCommand(cwd, args);

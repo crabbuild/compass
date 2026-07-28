@@ -64,6 +64,32 @@ describe("CompassProcessManager", () => {
     });
   });
 
+  it("switches future launches to an activated executable", () => {
+    const first = childProcess();
+    const second = childProcess();
+    const spawn = vi.fn()
+      .mockReturnValueOnce(first.child)
+      .mockReturnValueOnce(second.child);
+    const processes = new CompassProcessManager("compass", spawn as never);
+
+    processes.startCommand("/repo", ["--version"]);
+    processes.useExecutable("/home/dev/.local/bin/compass");
+    processes.startCommand("/repo", ["capabilities", "--format", "json"]);
+
+    expect(processes.executablePath).toBe("/home/dev/.local/bin/compass");
+    expect(spawn.mock.calls.map(([file]) => file)).toEqual([
+      "compass",
+      "/home/dev/.local/bin/compass"
+    ]);
+  });
+
+  it("rejects an empty executable path", () => {
+    const processes = new CompassProcessManager("compass");
+    expect(() => processes.useExecutable("   "))
+      .toThrow("Compass executable path cannot be empty");
+    expect(processes.executablePath).toBe("compass");
+  });
+
   it("rejects malformed JSONL progress instead of throwing outside the command", async () => {
     const { child, stdout } = childProcess();
     const processes = new CompassProcessManager(
