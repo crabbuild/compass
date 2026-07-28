@@ -345,6 +345,9 @@ fn canonical_framework_reference(framework: &str, reference: &str) -> String {
         "laravel" | "drupal" => super::php::canonical_reference(reference),
         "rails" => super::ruby::canonical_reference(reference),
         "spring" | "play" => super::jvm::canonical_reference(reference),
+        "gin" | "chi" | "gorilla" | "axum" | "actix" | "rocket" | "aspnet" | "vapor" => {
+            super::native::canonical_reference(reference)
+        }
         _ => reference.to_owned(),
     }
 }

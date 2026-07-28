@@ -1,10 +1,14 @@
+mod csharp;
 mod file_routes;
+mod go;
 mod java;
 mod model;
 mod php;
 mod play;
 mod python;
 mod ruby;
+mod rust;
+mod swift;
 mod text;
 mod typescript;
 
@@ -31,6 +35,10 @@ pub(crate) fn detect(
         "php" => php::detect(path, source, root),
         "ruby" => ruby::detect(path, source, root),
         "java" => java::detect(path, source, root),
+        "go" => go::detect(path, source, root),
+        "rust" => rust::detect(path, source, root),
+        "csharp" => csharp::detect(path, source, root),
+        "swift" => swift::detect(path, source, root),
         "javascript" | "typescript" | "tsx" => {
             let mut facts = typescript::detect(path, source, root);
             typescript::attach_import_aliases(path, source, root, extraction);

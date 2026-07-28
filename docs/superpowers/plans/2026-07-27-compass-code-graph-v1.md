@@ -1049,18 +1049,18 @@ attributes, or macros rather than matching method names alone.
 
 **Implementation:**
 
-- [ ] Detect Gin group/engine verbs, chi methods, gorilla/mux
+- [x] Detect Gin group/engine verbs, chi methods, gorilla/mux
   `HandleFunc`/method chains, and nested path prefixes.
-- [ ] Detect Axum and Actix `.route(..., get(handler))` forms and Rocket
+- [x] Detect Axum and Actix `.route(..., get(handler))` forms and Rocket
   route attributes/macros, preserving macro or call anchors.
-- [ ] Detect ASP.NET HTTP method attributes on controller actions and compose
+- [x] Detect ASP.NET HTTP method attributes on controller actions and compose
   controller-level route attributes with action templates.
-- [ ] Detect Vapor application and route-group methods, including segmented
+- [x] Detect Vapor application and route-group methods, including segmented
   string paths and explicit `use:` handlers.
-- [ ] Resolve closures as anchored function-like symbols when they exist in
+- [x] Resolve closures as anchored function-like symbols when they exist in
   the structural graph. Do not invent exact handler symbols for opaque
   runtime values.
-- [ ] Require recognized imports, receiver types, namespaces, attributes, or
+- [x] Require recognized imports, receiver types, namespaces, attributes, or
   macros before emitting a route fact.
 
 **Contract produced:** All remaining release-one server frameworks publish
