@@ -116,6 +116,19 @@ describe("CliOnboarding", () => {
     mounted.root.unmount();
   });
 
+  it("retries the installer after an installer failure", () => {
+    const mounted = render({
+      kind: "error",
+      title: "Installation failed",
+      message: "The installer exited with code 1.",
+      canVerifyAgain: false
+    });
+
+    flushSync(() => button(mounted.container, "Try again").click());
+    expect(mounted.host.install).toHaveBeenCalledOnce();
+    mounted.root.unmount();
+  });
+
   it("does not offer automatic installation on an unsupported host", () => {
     const mounted = render({
       kind: "unsupported",

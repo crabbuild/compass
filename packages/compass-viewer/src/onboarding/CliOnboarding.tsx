@@ -147,9 +147,13 @@ export function CliOnboarding({ state, host }: Props) {
           </div>
         )}
         <Actions>
-          {state.canVerifyAgain && (
+          {state.canVerifyAgain ? (
             <button className="init-button init-button-primary" onClick={host.verifyAgain}>
               Verify again
+            </button>
+          ) : (
+            <button className="init-button init-button-primary" onClick={host.install}>
+              Try again
             </button>
           )}
           <button className="init-button init-button-secondary" onClick={host.showTerminal}>

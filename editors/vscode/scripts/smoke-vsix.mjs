@@ -19,6 +19,8 @@ for (const required of [
   "extension/dist/webviews/callGraph.js",
   "extension/dist/webviews/callGraphGuide.js",
   "extension/dist/webviews/history.js",
+  "extension/dist/webviews/onboarding.js",
+  "extension/dist/webviews/onboarding.css",
   "extension/media/icon.png"
 ]) {
   if (!listing.includes(required)) throw new Error(`VSIX is missing ${required}`);
