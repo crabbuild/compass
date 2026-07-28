@@ -1,5 +1,8 @@
+mod jvm;
+mod php;
 mod python;
 mod routes;
+mod ruby;
 mod typescript;
 
 pub use routes::{

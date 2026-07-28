@@ -47,6 +47,13 @@ impl Engine {
                 }
                 Ok(extraction)
             }
+            ExtractorKind::FrameworkConfig => {
+                let source = fs::read(path).map_err(|source| compass_files::FileError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                Ok(crate::frameworks::detect_config_file(path, &source))
+            }
         }
     }
 
@@ -64,6 +71,9 @@ impl Engine {
             ExtractorKind::Generic => self.extract_generic_source(path, spec, source),
             ExtractorKind::JsonConfig => self.extract_json_source(path, spec, source),
             ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
+            ExtractorKind::FrameworkConfig => {
+                Ok(crate::frameworks::detect_config_file(path, source))
+            }
             _ => self.extract(path),
         }
     }

@@ -48,6 +48,7 @@ pub fn resolve_routes(
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     validate_fact_limits(extraction, limits)?;
     let aliases = alias_map(extraction, limits)?;
+    let targets = RouteTargetIndex::new(extraction);
     let expanded = super::python::expand_django_includes(&extraction.framework_facts, limits)?;
     let mut unique = BTreeMap::new();
     for route in expanded {
@@ -69,7 +70,7 @@ pub fn resolve_routes(
 
     unique
         .into_values()
-        .map(|route| resolve_one_route(route, extraction, &aliases, limits))
+        .map(|route| resolve_one_route(route, &targets, &aliases, limits))
         .collect()
 }
 
@@ -148,7 +149,7 @@ pub fn publish_resolved_routes(
 
 fn resolve_one_route(
     route: RawRouteFact,
-    extraction: &Extraction,
+    targets: &RouteTargetIndex<'_>,
     aliases: &HashMap<String, String>,
     limits: FrameworkLimits,
 ) -> Result<ResolvedRoute, FrameworkResolutionError> {
@@ -156,8 +157,9 @@ fn resolve_one_route(
     for (position, reference) in route.middleware_references.iter().enumerate() {
         let candidates = resolve_reference(
             reference,
+            &route.framework,
             &route.declaring_scope,
-            extraction,
+            targets,
             aliases,
             limits,
         )?;
@@ -173,8 +175,9 @@ fn resolve_one_route(
 
     let candidates = resolve_reference(
         &route.handler_reference,
+        &route.framework,
         &route.declaring_scope,
-        extraction,
+        targets,
         aliases,
         limits,
     )?;
@@ -201,23 +204,25 @@ fn resolve_one_route(
 
 fn resolve_reference(
     reference: &str,
+    framework: &str,
     declaring_scope: &str,
-    extraction: &Extraction,
+    targets: &RouteTargetIndex<'_>,
     aliases: &HashMap<String, String>,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolutionCandidate>, FrameworkResolutionError> {
-    let reference = normalize_reference(reference);
+    let reference = canonical_framework_reference(framework, reference);
+    let reference = normalize_reference(&reference);
     let expanded = expand_alias(&reference, aliases);
     let last = terminal_name(&expanded);
+    let owner = expanded
+        .rsplit_once('.')
+        .map(|(owner, _)| normalize_reference(owner));
     let scoped = [
         format!("{declaring_scope}::{expanded}"),
         format!("{declaring_scope}.{expanded}"),
     ];
     let mut candidates = Vec::new();
-    for node in &extraction.nodes {
-        if !is_route_target(node) {
-            continue;
-        }
+    for node in &targets.nodes {
         let qualified = node.string("qualified_name");
         let name = node
             .attributes
@@ -228,6 +233,10 @@ fn resolve_reference(
         let normalized_qualified = normalize_reference(&qualified);
         let (score, reason) = if node.id == expanded {
             (100_u8, "exact stable ID")
+        } else if owner.as_deref().is_some_and(|owner| {
+            terminal_name(&normalized_name) == last && targets.has_matching_owner(node, owner)
+        }) {
+            (97, "owner-qualified member")
         } else if normalized_qualified == expanded {
             (95, "exact qualified name")
         } else if scoped
@@ -275,6 +284,69 @@ fn resolve_reference(
         .into());
     }
     Ok(candidates)
+}
+
+struct RouteTargetIndex<'a> {
+    nodes: Vec<&'a RawNodeRecord>,
+    parents: HashMap<&'a str, Vec<&'a RawNodeRecord>>,
+}
+
+impl<'a> RouteTargetIndex<'a> {
+    fn new(extraction: &'a Extraction) -> Self {
+        let nodes = extraction
+            .nodes
+            .iter()
+            .filter(|node| is_route_target(node))
+            .collect::<Vec<_>>();
+        let by_id = extraction
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect::<HashMap<_, _>>();
+        let mut parents = HashMap::<&str, Vec<&RawNodeRecord>>::new();
+        for edge in &extraction.edges {
+            if !matches!(
+                edge.attributes.get("relation").and_then(Value::as_str),
+                Some("contains" | "method" | "defines")
+            ) {
+                continue;
+            }
+            if let Some(parent) = by_id.get(edge.source.as_str()) {
+                parents
+                    .entry(edge.target.as_str())
+                    .or_default()
+                    .push(parent);
+            }
+        }
+        Self { nodes, parents }
+    }
+
+    fn has_matching_owner(&self, node: &RawNodeRecord, expected: &str) -> bool {
+        let expected_terminal = terminal_name(expected);
+        self.parents
+            .get(node.id.as_str())
+            .into_iter()
+            .flatten()
+            .any(|parent| {
+                [
+                    parent.string("qualified_name"),
+                    parent.string("name"),
+                    parent.label().to_owned(),
+                ]
+                .into_iter()
+                .map(|name| normalize_reference(&name))
+                .any(|name| name == expected || terminal_name(&name) == expected_terminal)
+            })
+    }
+}
+
+fn canonical_framework_reference(framework: &str, reference: &str) -> String {
+    match framework {
+        "laravel" | "drupal" => super::php::canonical_reference(reference),
+        "rails" => super::ruby::canonical_reference(reference),
+        "spring" | "play" => super::jvm::canonical_reference(reference),
+        _ => reference.to_owned(),
+    }
 }
 
 fn validate_fact_limits(
@@ -327,6 +399,7 @@ fn normalize_reference(value: &str) -> String {
         .trim_matches(['"', '\'', '`'])
         .trim_end_matches(".as_view()")
         .trim_end_matches("()")
+        .replace('\\', ".")
         .replace("::", ".")
 }
 
@@ -449,6 +522,14 @@ fn add_evidence_attributes(
     state: ResolutionState,
     candidates: &[ResolutionCandidate],
 ) {
+    attributes.insert(
+        "source_file".into(),
+        Value::String(route.anchor.source_file.clone()),
+    );
+    attributes.insert(
+        "source_location".into(),
+        Value::String(format!("L{}", route.anchor.start_line)),
+    );
     attributes.insert(
         "source_anchor".into(),
         serde_json::to_value(source_anchor(&route.anchor)).unwrap_or(Value::Null),

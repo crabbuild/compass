@@ -982,19 +982,19 @@ existing language symbol IDs.
 
 **Implementation:**
 
-- [ ] Detect Laravel `Route` verbs, `resource`, `Controller@action`, class
+- [x] Detect Laravel `Route` verbs, `resource`, `Controller@action`, class
   constants, and tuple syntax. Expand resource routes into stable individual
   route nodes with evidence pointing to the resource declaration.
-- [ ] Parse Drupal `*.routing.yml` for `_controller`, `_form`, and entity
+- [x] Parse Drupal `*.routing.yml` for `_controller`, `_form`, and entity
   handlers; connect recognized `hook_*` implementations in supported
   `.module`, `.theme`, `.install`, and `.inc` files.
-- [ ] Detect Rails verb routes using `to:` and hash-rocket syntax and resolve
+- [x] Detect Rails verb routes using `to:` and hash-rocket syntax and resolve
   `users#index` to controller class plus action method.
-- [ ] Detect Spring `@GetMapping`, `@PostMapping`, other composed mappings,
+- [x] Detect Spring `@GetMapping`, `@PostMapping`, other composed mappings,
   and method-level `@RequestMapping`; compose class and method prefixes.
-- [ ] Parse Play verb routes from `conf/routes` and resolve Java or Scala
+- [x] Parse Play verb routes from `conf/routes` and resolve Java or Scala
   controller actions, including static and injected controller forms.
-- [ ] Give YAML and route-file edges `config` provenance and exact line
+- [x] Give YAML and route-file edges `config` provenance and exact line
   anchors. Dynamic controller names remain bounded candidates or unresolved.
 
 **Contract produced:** PHP/Ruby/JVM handlers have the same canonical

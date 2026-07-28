@@ -15,6 +15,7 @@ pub enum ExtractorKind {
     Template,
     PackageManifest,
     McpConfig,
+    FrameworkConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,32 @@ impl Registry {
                 grammar: None,
                 kind: ExtractorKind::PackageManifest,
             });
+        }
+        if name.ends_with(".routing.yml") || name.ends_with(".routing.yaml") {
+            return Some(LanguageSpec {
+                name: "drupal-routing",
+                grammar: None,
+                kind: ExtractorKind::FrameworkConfig,
+            });
+        }
+        if name == "routes"
+            && path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .is_some_and(|parent| parent.eq_ignore_ascii_case("conf"))
+        {
+            return Some(LanguageSpec {
+                name: "play-routes",
+                grammar: None,
+                kind: ExtractorKind::FrameworkConfig,
+            });
+        }
+        if matches!(
+            extension_lower(path).as_deref(),
+            Some("module" | "theme" | "install")
+        ) {
+            return Some(spec("php", "php", ExtractorKind::Generic));
         }
         if name.ends_with(".blade.php") {
             return Some(spec("blade", "blade", ExtractorKind::Template));
@@ -110,9 +137,11 @@ impl Registry {
                 grammar: None,
                 kind: ExtractorKind::Markdown,
             },
-            "pas" | "pp" | "dpr" | "dpk" | "lpr" | "inc" => {
+            "pas" | "pp" | "dpr" | "dpk" | "lpr" => {
                 spec("pascal", "pascal", ExtractorKind::Generic)
             }
+            "inc" if looks_like_php(path) => spec("php", "php", ExtractorKind::Generic),
+            "inc" => spec("pascal", "pascal", ExtractorKind::Generic),
             "dfm" | "lfm" => LanguageSpec {
                 name: "pascal-form",
                 grammar: None,
@@ -162,6 +191,18 @@ impl Registry {
             "sln", "csproj", "xaml", "razor", "cls",
         ]
     }
+}
+
+fn extension_lower(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+}
+
+fn looks_like_php(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .is_some_and(|source| source.windows(5).any(|window| window == b"<?php"))
 }
 
 fn shebang_spec(path: &Path) -> Option<LanguageSpec> {

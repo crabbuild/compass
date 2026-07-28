@@ -1,6 +1,11 @@
 mod file_routes;
+mod java;
 mod model;
+mod php;
+mod play;
 mod python;
+mod ruby;
+mod text;
 mod typescript;
 
 pub use model::{
@@ -23,6 +28,9 @@ pub(crate) fn detect(
 ) {
     let facts = match language {
         "python" => python::detect(path, source, root),
+        "php" => php::detect(path, source, root),
+        "ruby" => ruby::detect(path, source, root),
+        "java" => java::detect(path, source, root),
         "javascript" | "typescript" | "tsx" => {
             let mut facts = typescript::detect(path, source, root);
             typescript::attach_import_aliases(path, source, root, extraction);
@@ -38,6 +46,25 @@ pub(crate) fn detect(
         return;
     }
     extraction.framework_facts.extend(facts);
+}
+
+pub(crate) fn detect_config_file(path: &Path, source: &[u8]) -> Extraction {
+    let mut extraction = Extraction::default();
+    let facts = if path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.ends_with(".routing.yml") || name.ends_with(".routing.yaml"))
+    {
+        php::detect_drupal_routing(path, source)
+    } else {
+        play::detect(path, source)
+    };
+    if let Err(error) = FrameworkLimits::default().check_facts(facts.len()) {
+        extraction.error = Some(format!("framework extraction failed: {error}"));
+    } else {
+        extraction.framework_facts = facts;
+    }
+    extraction
 }
 
 pub(crate) fn detect_template_file_route(path: &Path, source: &[u8], extraction: &mut Extraction) {
