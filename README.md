@@ -116,10 +116,16 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/crabbuild/compass/releases/latest/download/install.sh | sh
 ```
 
-On Windows, download the x86_64 or ARM64 archive and matching `.sha256`
-file from the [latest release](https://github.com/crabbuild/compass/releases/latest),
-verify the checksum, extract it, and add the directory containing
-`compass.exe` to `PATH`.
+On Windows x64 or ARM64, run the checksum-verifying PowerShell installer:
+
+```powershell
+irm https://github.com/crabbuild/compass/releases/latest/download/install.ps1 | iex
+```
+
+For an offline install, download the matching archive and `.sha256` file from
+the [latest release](https://github.com/crabbuild/compass/releases/latest),
+verify the checksum, extract it, and add the directory containing `compass.exe`
+to `PATH`.
 
 Or build from source with the pinned Rust 1.97.1+ toolchain:
 

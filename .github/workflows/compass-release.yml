@@ -132,3 +132,4 @@ jobs:
           files: |
             dist/*
             scripts/install.sh
+            scripts/install.ps1
