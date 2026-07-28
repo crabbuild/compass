@@ -53,7 +53,9 @@ separately from the 500 ms indexed cold-process budget.
 - Move root resolution, traversal, evidence merging, or limits into VS Code.
 - Change extraction or call-edge inference semantics.
 - Make Program IR a prerequisite for opening a call graph.
-- Change the legacy `compass program call-graph` response schema.
+- Change the current `compass program call-graph` response schema in this
+  performance-hardening PR. Program IR call graphs remain an active surface
+  intended for future semantic enhancements.
 - Promise that all supported languages have identical call precision.
 - Add a general-purpose cache framework for unrelated Compass commands.
 
