@@ -19,6 +19,7 @@ fn build_evidence(root: &Path) -> Result<BuildEvidence, Box<dyn std::error::Erro
             source_tree_digest: "tree".to_owned(),
             configuration_digest: "config".to_owned(),
             generation_id: "generation".to_owned(),
+            source_commit: None,
         },
     );
     evidence.files.push(FileRecord {
@@ -142,6 +143,38 @@ fn normalization_maps_declared_raw_aliases_without_publishing_them()
     assert!(!serialized.contains("\"kind\":\"imports_from\""));
     assert!(!serialized.contains("\"relation\""));
     assert!(serialized.contains("raw-relation:imports_from"));
+    Ok(())
+}
+
+#[test]
+fn normalization_treats_blank_external_source_paths_as_unanchored()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut graph = extraction(root);
+    graph.nodes[1].attributes.remove("source_anchor");
+    graph.nodes[1]
+        .attributes
+        .insert("source_file".to_owned(), json!(""));
+    graph.nodes[1]
+        .attributes
+        .insert("origin_file".to_owned(), json!("src/lib.rs"));
+    graph.nodes[1].attributes.remove("symbol_kind");
+    graph.edges.clear();
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let external = document
+        .nodes
+        .iter()
+        .find(|node| node.name == "callee")
+        .ok_or("missing external node")?;
+    assert_eq!(external.source, None);
+    assert_eq!(external.kind, NodeKind::Variable);
+    assert_eq!(
+        external.evidence[0].rule.as_deref(),
+        Some("external-symbol-placeholder")
+    );
+    assert!(external.evidence[0].wiring_site.is_some());
     Ok(())
 }
 

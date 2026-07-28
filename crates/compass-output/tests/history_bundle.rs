@@ -46,6 +46,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
         &destination,
         &HistoryBundleInput {
             document: &document,
+            graph_json: None,
             program: Some(program),
             analysis: Some(&analysis),
             labels: Some(&labels),
@@ -86,6 +87,7 @@ fn v1_renderer_publishes_a_valid_complete_bundle_atomically()
             &destination,
             &HistoryBundleInput {
                 document: &document,
+                graph_json: None,
                 program: None,
                 analysis: None,
                 labels: None,
@@ -115,6 +117,7 @@ fn unknown_renderer_fails_without_creating_destination() -> Result<(), Box<dyn s
             &destination,
             &HistoryBundleInput {
                 document: &document,
+                graph_json: None,
                 program: None,
                 analysis: None,
                 labels: None,

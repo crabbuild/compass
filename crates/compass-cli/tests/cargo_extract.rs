@@ -52,11 +52,7 @@ fn cargo_extract_emits_workspace_dependency_facts() -> Result<(), Box<dyn Error>
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|node| {
-            node["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("crate:"))
-        })
+        .filter(|node| node["kind"] == "package")
         .count();
     let dependency_edges = graph
         .get("links")
@@ -64,7 +60,7 @@ fn cargo_extract_emits_workspace_dependency_facts() -> Result<(), Box<dyn Error>
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|edge| edge["relation"] == "crate_depends_on")
+        .filter(|edge| edge["kind"] == "depends_on")
         .count();
     assert_eq!(crate_nodes, 2);
     assert_eq!(dependency_edges, 1);

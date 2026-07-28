@@ -913,6 +913,9 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         if program.program.providers != expected_providers {
             return Ok(None);
         }
+        if !analysis_ids_match_graph(&completed) {
+            return Ok(None);
+        }
         let code_files = detection
             .files
             .get("code")
@@ -1074,16 +1077,53 @@ impl NativeCompleteGraphBuilder {
     }
 }
 
+fn analysis_ids_match_graph(completed: &CompletedGraphArtifacts) -> bool {
+    let graph_ids = completed
+        .artifacts
+        .document
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let Some(communities) = completed
+        .artifacts
+        .analysis
+        .as_ref()
+        .and_then(|analysis| analysis.get("communities"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    let analysis_ids = communities
+        .values()
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    analysis_ids == graph_ids
+}
+
 fn graph_stamp_matches(path: &Path, commit: &compass_history::CommitId) -> bool {
     #[derive(serde::Deserialize)]
     struct GraphStamp {
-        built_at_commit: Option<String>,
+        graph: GraphStampMetadata,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct GraphStampMetadata {
+        build: GraphBuildStamp,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GraphBuildStamp {
+        source_commit: Option<String>,
     }
 
     fs::File::open(path)
         .ok()
         .and_then(|file| serde_json::from_reader::<_, GraphStamp>(file).ok())
-        .and_then(|stamp| stamp.built_at_commit)
+        .and_then(|stamp| stamp.graph.build.source_commit)
         .as_deref()
         == Some(commit.as_str())
 }
@@ -1198,7 +1238,7 @@ mod tests {
     }
 
     #[test]
-    fn native_builder_promotes_an_exact_current_code_only_snapshot()
+    fn native_builder_rejects_snapshot_with_pre_v1_analysis_ids()
     -> Result<(), Box<dyn std::error::Error>> {
         let (directory, commit, output) = current_snapshot_fixture()?;
         let options =
@@ -1209,16 +1249,11 @@ mod tests {
             None,
         );
 
-        let promoted = builder.promote_current(directory.path(), &commit)?;
-
-        assert!(promoted.is_some_and(|completed| {
-            completed
-                .artifacts
-                .document
-                .nodes
-                .iter()
-                .any(|node| node.source_file() == Some("service.rs"))
-        }));
+        assert!(
+            builder
+                .promote_current(directory.path(), &commit)?
+                .is_none()
+        );
         Ok(())
     }
 

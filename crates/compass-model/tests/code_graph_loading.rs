@@ -10,6 +10,7 @@ fn document() -> GraphDocument {
         source_tree_digest: "tree".to_owned(),
         configuration_digest: "config".to_owned(),
         generation_id: "generation".to_owned(),
+        source_commit: None,
     })
 }
 

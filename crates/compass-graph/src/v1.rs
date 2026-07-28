@@ -58,7 +58,9 @@ impl BuildEvidence {
             .map(|node| &node.attributes)
             .chain(extraction.edges.iter().map(|edge| &edge.attributes))
         {
-            if let Some(path) = optional_string(attributes, "source_file") {
+            if let Some(path) = optional_source_path(attributes, "source_file")
+                .or_else(|| optional_source_path(attributes, "origin_file"))
+            {
                 paths.insert(portable_path(&path, &repository_root)?);
             }
         }
@@ -148,6 +150,7 @@ impl BuildEvidence {
                 source_tree_digest,
                 configuration_digest,
                 generation_id,
+                source_commit: None,
             },
             files,
             coverage,
@@ -169,7 +172,7 @@ fn coverage_file_id(
     attributes: &Map<String, Value>,
     root: &Path,
 ) -> Result<Option<String>, GraphError> {
-    optional_string(attributes, "source_file")
+    optional_source_path(attributes, "source_file")
         .map(|path| portable_path(&path, root).map(|path| file_id(&path)))
         .transpose()
 }
@@ -268,6 +271,7 @@ pub fn normalize_document_v1(
     document: &compass_model::GraphDocument,
     repository_root: &Path,
     configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
 ) -> Result<GraphDocument, GraphError> {
     let extraction = Extraction {
         nodes: document
@@ -289,8 +293,9 @@ pub fn normalize_document_v1(
             .collect(),
         ..Extraction::default()
     };
-    let evidence =
+    let mut evidence =
         BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    evidence.build.source_commit = source_commit.map(str::to_owned);
     normalize_v1(extraction, evidence)
 }
 
@@ -567,7 +572,12 @@ fn normalize_node(
         .attributes
         .get("symbol_kind")
         .or_else(|| raw.attributes.get("type"))
-        .and_then(Value::as_str);
+        .and_then(Value::as_str)
+        .or_else(|| {
+            (optional_source_path(&raw.attributes, "source_file").is_none()
+                && optional_source_path(&raw.attributes, "origin_file").is_some())
+            .then_some("symbol")
+        });
     let file_type = raw
         .attributes
         .get("file_type")
@@ -581,9 +591,14 @@ fn normalize_node(
     let language = optional_any_string(&raw.attributes, &["language", "lang"]);
     let framework = optional_string(&raw.attributes, "framework");
     let source = raw_anchor(&raw.attributes, root, file_facts)?;
+    let external_wiring_site = if source.is_none() {
+        raw_origin_anchor(&raw.attributes, root, file_facts)?
+    } else {
+        None
+    };
     let source_path = match &source {
         Some(anchor) => anchor.file.clone(),
-        None => optional_string(&raw.attributes, "source_file")
+        None => optional_source_path(&raw.attributes, "source_file")
             .map(|path| portable_path(&path, root))
             .transpose()?
             .unwrap_or_default(),
@@ -606,10 +621,13 @@ fn normalize_node(
         .unwrap_or_default();
     let evidence = vec![normalize_provenance(
         &raw.attributes,
-        source.clone(),
+        source.clone().or_else(|| external_wiring_site.clone()),
         &raw.id,
         root,
-        None,
+        external_wiring_site
+            .as_ref()
+            .map(|_| "external-symbol-placeholder"),
+        external_wiring_site.is_some(),
     )?];
     let details = node_details(
         kind,
@@ -675,6 +693,7 @@ fn normalize_edge(
         &owner,
         root,
         normalization_rule,
+        heuristic,
     )?];
     let identity_rule = evidence.iter().find_map(|item| item.rule.as_deref());
     let id = edge_id(
@@ -720,9 +739,11 @@ fn normalize_provenance(
     record: &str,
     root: &Path,
     normalization_rule: Option<&str>,
+    heuristic_default: bool,
 ) -> Result<Provenance, GraphError> {
     let raw_origin = optional_any_string(attributes, &["_origin", "origin"]);
     let confidence = match optional_string(attributes, "confidence").as_deref() {
+        None if heuristic_default => EvidenceConfidence::Inferred,
         None | Some("EXTRACTED" | "exact") => EvidenceConfidence::Exact,
         Some("INFERRED" | "inferred") => EvidenceConfidence::Inferred,
         Some("AMBIGUOUS" | "ambiguous") => EvidenceConfidence::Ambiguous,
@@ -740,7 +761,8 @@ fn normalize_provenance(
         })
         .filter(|value| !value.trim().is_empty());
     let origin = match raw_origin.as_deref() {
-        None if normalization_rule == Some("indirect-call-resolution") => EvidenceOrigin::Heuristic,
+        None if heuristic_default => EvidenceOrigin::Heuristic,
+        Some("ast") if heuristic_default => EvidenceOrigin::Heuristic,
         None if optional_string(attributes, "context").as_deref() == Some("scip") => {
             EvidenceOrigin::Artifact
         }
@@ -1162,7 +1184,7 @@ fn raw_anchor(
         anchor.file = portable_path(&anchor.file, root)?;
         return Ok(Some(anchor));
     }
-    let Some(source_file) = optional_string(attributes, "source_file") else {
+    let Some(source_file) = optional_source_path(attributes, "source_file") else {
         return Ok(None);
     };
     let source_file = portable_path(&source_file, root)?;
@@ -1191,6 +1213,20 @@ fn raw_anchor(
         end_line,
         end_column,
     }))
+}
+
+fn raw_origin_anchor(
+    attributes: &Map<String, Value>,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> Result<Option<SourceAnchor>, GraphError> {
+    let Some(origin_file) = optional_source_path(attributes, "origin_file") else {
+        return Ok(None);
+    };
+    let origin_file = portable_path(&origin_file, root)?;
+    Ok(file_facts
+        .get(&origin_file)
+        .and_then(|file| file.full_file_anchor(origin_file)))
 }
 
 fn normalize_optional_anchor(
@@ -1277,6 +1313,10 @@ fn optional_string(attributes: &Map<String, Value>, key: &str) -> Option<String>
         .map(str::to_owned)
 }
 
+fn optional_source_path(attributes: &Map<String, Value>, key: &str) -> Option<String> {
+    optional_string(attributes, key).filter(|path| !path.trim().is_empty())
+}
+
 fn optional_u64(attributes: &Map<String, Value>, key: &str) -> Option<u64> {
     attributes.get(key).and_then(Value::as_u64)
 }
@@ -1314,6 +1354,23 @@ struct PublishedFileFacts {
 }
 
 impl PublishedFileFacts {
+    fn full_file_anchor(&self, file: String) -> Option<SourceAnchor> {
+        (self.byte_size > 0).then(|| {
+            let end_line_index = self.line_starts.len().saturating_sub(1);
+            let end_line_start = self.line_starts[end_line_index];
+            SourceAnchor {
+                file,
+                start_byte: 0,
+                end_byte: self.byte_size,
+                start_line: 1,
+                start_column: 0,
+                end_line: u32::try_from(end_line_index.saturating_add(1)).unwrap_or(u32::MAX),
+                end_column: u32::try_from(self.byte_size.saturating_sub(end_line_start))
+                    .unwrap_or(u32::MAX),
+            }
+        })
+    }
+
     fn byte_range(
         &self,
         start_line: u32,

@@ -935,7 +935,16 @@ fn build_graph_inner(
         enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
         let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
-        let published = normalize_document_v1(&document, &root, configuration_digest)?;
+        let source_commit = options
+            .built_at_commit
+            .clone()
+            .or_else(|| git_commit(&root));
+        let published = normalize_document_v1(
+            &document,
+            &root,
+            configuration_digest,
+            source_commit.as_deref(),
+        )?;
         write_json_atomic(output_dir.join("graph.json"), &published, false)?;
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         save_output_stats(&output_dir, nodes.len(), edges.len(), 0, false)?;
@@ -1139,6 +1148,7 @@ fn build_graph_inner(
             &labels,
             &root,
             configuration_digest,
+            commit.as_deref(),
         )?;
         write_json_atomic(output_dir.join("graph.json"), &published, false)?;
         profile_internal("graph.json v1 publication", &mut output_profile_started);
@@ -1507,7 +1517,6 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
         || {
             extraction.nodes.par_iter_mut().for_each(|node| {
                 normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
-                node.attributes.remove("origin_file");
                 node.attributes.remove("_callable");
                 node.attributes
                     .entry("_origin".to_owned())
@@ -2345,6 +2354,7 @@ fn published_v1_document(
     labels: &BTreeMap<usize, String>,
     root: &Path,
     configuration_digest: String,
+    source_commit: Option<&str>,
 ) -> Result<compass_model::code_graph::GraphDocument, CoreError> {
     let mut publication_source = document.clone();
     let node_communities = communities
@@ -2374,6 +2384,7 @@ fn published_v1_document(
         &publication_source,
         root,
         configuration_digest,
+        source_commit,
     )?)
 }
 

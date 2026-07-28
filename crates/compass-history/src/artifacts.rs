@@ -5,6 +5,7 @@ use std::path::{Component, Path};
 use compass_analysis::{AnalysisBundle, FunctionSummary};
 use compass_files::{write_bytes_atomic, write_json_atomic};
 use compass_ir::{EvidenceRecord, FunctionIr, ModuleIr, ProgramBundle, ProviderDescriptor};
+use compass_model::code_graph::GraphDocument as TrustedGraphDocument;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ const ANALYSIS_KIND: &[u8] = &[4];
 const METADATA_SCHEMA: &[u8] = &[1];
 const METADATA_KIND: &[u8] = &[5];
 const MOVED_NODE_FIELDS: [&str; 3] = ["community", "community_name", "norm_label"];
+const TRUSTED_GRAPH_CONTENT: &str = ".compass-history/graph.v1.json";
 
 /// All authoritative inputs needed to reconstruct a complete Compass output.
 #[derive(Clone, Debug, PartialEq)]
@@ -127,6 +129,21 @@ impl GraphArtifacts {
         artifact_registry(self)
     }
 
+    /// Return the canonical durable graph artifact retained by this realization.
+    pub fn graph_json_bytes(&self) -> Result<Vec<u8>, HistoryError> {
+        authoritative_graph_bytes(self)
+    }
+
+    /// Return authoritative sidecars intended for product output.
+    #[must_use]
+    pub fn export_sidecars(&self) -> BTreeMap<String, ArtifactContent> {
+        self.authoritative_sidecars
+            .iter()
+            .filter(|(path, _)| path.as_str() != TRUSTED_GRAPH_CONTENT)
+            .map(|(path, content)| (path.clone(), content.clone()))
+            .collect()
+    }
+
     /// Load the built-in authoritative Compass artifact contract.
     pub fn load(output_dir: &Path) -> Result<Self, HistoryError> {
         Self::load_with_registry(output_dir, &[])
@@ -151,8 +168,10 @@ impl GraphArtifacts {
             verify_registry_content(entry, &bytes)?;
             authoritative_sidecars.insert(entry.relative_path.clone(), bytes);
         }
+        let (document, trusted_graph) = load_trusted_graph(&output_dir.join("graph.json"))?;
+        authoritative_sidecars.insert(TRUSTED_GRAPH_CONTENT.to_owned(), trusted_graph);
         let artifacts = Self {
-            document: GraphDocument::load_for_recluster(&output_dir.join("graph.json"))?,
+            document,
             program: read_optional_program(&output_dir.join("program.json"))?,
             analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
             labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
@@ -626,7 +645,11 @@ impl GraphArtifacts {
         fs::create_dir_all(output_dir)
             .map_err(|source| crate::error::io_error(output_dir, source))?;
         validate_sidecar_paths(&self.authoritative_sidecars)?;
-        write_json_atomic(output_dir.join("graph.json"), &self.document, false)?;
+        if let Some(trusted) = self.authoritative_sidecars.get(TRUSTED_GRAPH_CONTENT) {
+            write_bytes_atomic(output_dir.join("graph.json"), trusted)?;
+        } else {
+            write_json_atomic(output_dir.join("graph.json"), &self.document, false)?;
+        }
         if let Some(program) = &self.program {
             write_bytes_atomic(output_dir.join("program.json"), &program.canonical_bytes()?)?;
         }
@@ -640,6 +663,9 @@ impl GraphArtifacts {
             write_json_atomic(output_dir.join("manifest.json"), value, false)?;
         }
         for (path, bytes) in &self.authoritative_sidecars {
+            if path == TRUSTED_GRAPH_CONTENT {
+                continue;
+            }
             let destination = output_dir.join(path);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)
@@ -654,6 +680,51 @@ impl GraphArtifacts {
         )?;
         Ok(())
     }
+}
+
+fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryError> {
+    let trusted = TrustedGraphDocument::load_for_recluster(path)?;
+    let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+    let graph = serde_json::to_value(&trusted.graph)?
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    let nodes = trusted
+        .nodes
+        .iter()
+        .map(|node| NodeRecord {
+            id: node.id.clone(),
+            attributes: node
+                .properties()
+                .filter(|(key, _)| *key != "id")
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect(),
+        })
+        .collect();
+    let links = trusted
+        .links
+        .iter()
+        .map(|edge| EdgeRecord {
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            attributes: edge
+                .properties()
+                .filter(|(key, _)| !matches!(*key, "source" | "target"))
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect(),
+        })
+        .collect();
+    Ok((
+        GraphDocument {
+            directed: trusted.directed,
+            multigraph: trusted.multigraph,
+            graph,
+            nodes,
+            links,
+            extras: BTreeMap::new(),
+        },
+        trusted_bytes,
+    ))
 }
 
 #[derive(Serialize)]
@@ -733,15 +804,29 @@ fn add_optional_analysis(
 fn artifact_registry(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
-    let graph_bytes = canonical_graph_bytes(&artifacts.document)?;
+    let graph_bytes = authoritative_graph_bytes(artifacts)?;
     artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
 }
 
 fn artifact_registry_from_canonical(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
-    let graph_bytes = canonical_json_bytes(&serde_json::to_value(&artifacts.document)?)?;
+    let graph_bytes = artifacts
+        .authoritative_sidecars
+        .get(TRUSTED_GRAPH_CONTENT)
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(|| canonical_json_bytes(&serde_json::to_value(&artifacts.document)?))?;
     artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
+}
+
+fn authoritative_graph_bytes(artifacts: &GraphArtifacts) -> Result<Vec<u8>, HistoryError> {
+    artifacts
+        .authoritative_sidecars
+        .get(TRUSTED_GRAPH_CONTENT)
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(|| canonical_graph_bytes(&artifacts.document))
 }
 
 fn artifact_registry_with_graph_bytes(
@@ -781,6 +866,9 @@ fn artifact_registry_with_graph_bytes(
         }
     }
     for (path, bytes) in &artifacts.authoritative_sidecars {
+        if path == TRUSTED_GRAPH_CONTENT {
+            continue;
+        }
         let mut entry = authoritative_entry(path, "application/octet-stream", bytes);
         entry.storage = Some(bytes.clone());
         registry.push(entry);
@@ -962,7 +1050,7 @@ fn verify_builtin_registry_content(
         .filter(|entry| entry.class == ArtifactClass::Authoritative)
     {
         let bytes = match entry.relative_path.as_str() {
-            "graph.json" => Some(canonical_graph_bytes(&artifacts.document)?),
+            "graph.json" => Some(authoritative_graph_bytes(artifacts)?),
             ".compass_analysis.json" => artifacts
                 .analysis
                 .as_ref()

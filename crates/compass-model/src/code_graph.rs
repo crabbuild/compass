@@ -353,6 +353,8 @@ pub struct BuildMetadata {
     pub source_tree_digest: String,
     pub configuration_digest: String,
     pub generation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_commit: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

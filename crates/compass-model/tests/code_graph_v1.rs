@@ -258,6 +258,7 @@ fn graph_metadata_constructor_pins_the_first_supported_schema()
         source_tree_digest: "sha256:source".to_owned(),
         configuration_digest: "sha256:config".to_owned(),
         generation_id: "sha256:generation".to_owned(),
+        source_commit: None,
     });
 
     let value = serde_json::to_value(metadata)?;

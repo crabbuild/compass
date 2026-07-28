@@ -2407,7 +2407,14 @@ fn normalize_graph(mut graph: serde_json::Value) -> serde_json::Value {
             .get_mut(field)
             .and_then(serde_json::Value::as_array_mut)
         {
-            records.sort_by_key(serde_json::Value::to_string);
+            records.sort_by_key(|record| {
+                record
+                    .get("id")
+                    .or_else(|| record.get("key"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            });
         }
     }
     graph

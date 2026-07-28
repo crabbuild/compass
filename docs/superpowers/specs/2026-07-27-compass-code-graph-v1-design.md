@@ -172,7 +172,8 @@ Compass keeps a NetworkX-compatible node-link envelope:
       "schemaFingerprint": "sha256:example-schema-fingerprint",
       "sourceTreeDigest": "sha256:example-source-tree-digest",
       "configurationDigest": "sha256:example-configuration-digest",
-      "generationId": "sha256:example-generation-id"
+      "generationId": "sha256:example-generation-id",
+      "sourceCommit": "0123456789abcdef0123456789abcdef01234567"
     },
     "files": [],
     "coverage": [],

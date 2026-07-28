@@ -25,6 +25,22 @@ pub struct QueryScores {
 
 #[must_use]
 pub fn score_nodes(graph: &Graph, terms: &[String], collect_per_term_seeds: bool) -> QueryScores {
+    if let [exact_id] = terms
+        && exact_id.starts_with("sha256:")
+        && let Some(node) = graph.node_index(exact_id)
+    {
+        return QueryScores {
+            ranked: vec![ScoredNode {
+                score: EXACT_MATCH_BONUS * 10.0,
+                node,
+            }],
+            best_seed_by_term: if collect_per_term_seeds {
+                HashMap::from([(exact_id.clone(), node)])
+            } else {
+                HashMap::new()
+            },
+        };
+    }
     let mut normalized_terms = Vec::new();
     let mut seen = HashSet::new();
     for term in terms {
@@ -411,6 +427,28 @@ mod tests {
             0.0
         );
         assert_eq!(singleton_score(20_000.0, 2_000.0, 3.0, 0.5), 22_003.5);
+    }
+
+    #[test]
+    fn canonical_v1_ids_resolve_without_tokenizing_the_digest() -> Result<(), Box<dyn Error>> {
+        let id = format!("sha256:{}", "a".repeat(64));
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [
+                {"id": id, "name": "Canonical target", "kind": "function"},
+                {"id": "legacy", "label": "sha256"}
+            ],
+            "links": []
+        }))?;
+        let graph = Graph::from_document(document)?;
+        let scores = score_nodes(&graph, std::slice::from_ref(&id), true);
+
+        assert_eq!(scores.ranked.len(), 1);
+        assert_eq!(graph.node(scores.ranked[0].node).id, id);
+        assert_eq!(
+            scores.best_seed_by_term.get(&id),
+            Some(&scores.ranked[0].node)
+        );
+        Ok(())
     }
 
     #[test]

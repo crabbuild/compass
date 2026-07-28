@@ -138,10 +138,13 @@ fn dedup_llm_resolves_ambiguous_semantic_entities() -> Result<(), Box<dyn Error>
         .ok_or("graph nodes are not an array")?
         .iter()
         .filter(|node| {
-            matches!(
-                node["id"].as_str(),
-                Some("customer_account_management" | "customer_identity_management")
-            )
+            node["kind"] == "resource"
+                && node["details"]["type"] == "resource"
+                && node["details"]["data"]["resourceKind"] == "concept"
+                && matches!(
+                    node["name"].as_str(),
+                    Some("Customer Account Management" | "Customer Identity Management")
+                )
         })
         .count();
     assert_eq!(surviving, 1, "ambiguous concepts were not merged: {graph}");

@@ -26,6 +26,7 @@ pub struct DerivedArtifactRequest {
 
 pub struct HistoryBundleInput<'a> {
     pub document: &'a GraphDocument,
+    pub graph_json: Option<&'a [u8]>,
     pub program: Option<&'a [u8]>,
     pub analysis: Option<&'a Value>,
     pub labels: Option<&'a Value>,
@@ -62,7 +63,11 @@ pub fn publish_history_bundle(
 }
 
 fn build_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), OutputError> {
-    write_json_atomic(staging.join("graph.json"), input.document, false)?;
+    if let Some(graph_json) = input.graph_json {
+        write_bytes_atomic(staging.join("graph.json"), graph_json)?;
+    } else {
+        write_json_atomic(staging.join("graph.json"), input.document, false)?;
+    }
     if let Some(program) = input.program {
         write_bytes_atomic(staging.join("program.json"), program)?;
     }
@@ -199,12 +204,22 @@ fn validate_requests(requests: &[DerivedArtifactRequest]) -> Result<(), OutputEr
 }
 
 fn validate_staging(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), OutputError> {
-    let restored = GraphDocument::load_for_recluster(&staging.join("graph.json"))
-        .map_err(|error| OutputError::InvalidHistoryBundle(error.to_string()))?;
-    if &restored != input.document {
-        return Err(OutputError::InvalidHistoryBundle(
-            "graph.json changed during bundle rendering".to_owned(),
-        ));
+    if let Some(expected) = input.graph_json {
+        let actual = fs::read(staging.join("graph.json"))
+            .map_err(|source| io(staging.join("graph.json"), source))?;
+        if actual != expected {
+            return Err(OutputError::InvalidHistoryBundle(
+                "graph.json changed during bundle rendering".to_owned(),
+            ));
+        }
+    } else {
+        let restored = GraphDocument::load_for_recluster(&staging.join("graph.json"))
+            .map_err(|error| OutputError::InvalidHistoryBundle(error.to_string()))?;
+        if &restored != input.document {
+            return Err(OutputError::InvalidHistoryBundle(
+                "graph.json changed during bundle rendering".to_owned(),
+            ));
+        }
     }
     if let Some(expected) = input.program {
         let actual = fs::read(staging.join("program.json"))
