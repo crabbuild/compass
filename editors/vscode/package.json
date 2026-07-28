@@ -128,6 +128,11 @@
         "command": "compass.selectCli",
         "title": "Compass: Select CLI Version",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "compass.installCli",
+        "title": "Compass: Install CLI",
+        "icon": "$(cloud-download)"
       }
     ],
     "submenus": [
@@ -254,8 +259,8 @@
         "steps": [
           {
             "id": "compass.cli",
-            "title": "Connect the Compass CLI",
-            "description": "Compass auto-detects installed CLI versions. Use **Select Compass CLI** to compare paths or choose a different version."
+            "title": "Install the Compass CLI",
+            "description": "Open **Compass: Install CLI** to install Compass in the integrated terminal, or select an existing executable."
           },
           {
             "id": "compass.init",
