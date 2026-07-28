@@ -83,4 +83,8 @@ if (watch) {
     "../../packages/compass-viewer/dist/viewer.css",
     "dist/webviews/viewer.css"
   );
+  await copyFile(
+    "../../packages/compass-viewer/src/onboarding.css",
+    "dist/webviews/onboarding.css"
+  );
 }

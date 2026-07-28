@@ -65,8 +65,8 @@ export async function openCliOnboardingPanel(
         title: "Compass was not found",
         message: "The installer finished, but Compass was not found in a configured, PATH, or common install location.",
         searched: discovery.searched.length > 0
-          ? discovery.searched
-          : [...searchedFallback],
+          ? discovery.searched.slice(0, 256).map((value) => value.slice(0, 8192))
+          : [...searchedFallback].slice(0, 256).map((value) => value.slice(0, 8192)),
         canVerifyAgain: true
       });
       return false;
@@ -117,7 +117,11 @@ export async function openCliOnboardingPanel(
   };
 
   const install = async (): Promise<void> => {
-    if (command.kind !== "supported" || state.kind === "installing") return;
+    if (
+      command.kind !== "supported"
+      || state.kind === "installing"
+      || state.kind === "verifying"
+    ) return;
     const run = ++executionId;
     await postState({
       kind: "installing",
@@ -209,6 +213,7 @@ export async function openCliOnboardingPanel(
       disposed = true;
       executionId += 1;
       currentPanel = undefined;
+      currentTerminal = undefined;
       for (const disposable of disposables) disposable.dispose();
     })
   );
@@ -304,10 +309,15 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   const styles = webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, "dist", "webviews", "viewer.css")
   );
+  const onboardingStyles = webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "dist", "webviews", "onboarding.css")
+  );
   const nonce = randomUUID().replaceAll("-", "");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-<link rel="stylesheet" href="${styles}"><title>Get started with Compass</title></head>
+<link rel="stylesheet" href="${styles}">
+<link rel="stylesheet" href="${onboardingStyles}">
+<title>Get started with Compass</title></head>
 <body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
 }
