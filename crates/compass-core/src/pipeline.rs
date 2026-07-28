@@ -14,7 +14,9 @@ use compass_graph::{
     dedupe_edges, dedupe_nodes, graph_insights, label_communities_by_hub,
     remap_communities_to_previous, score_communities,
 };
-use compass_languages::{Engine, Extraction, Registry, file_stem, make_id};
+use compass_languages::{
+    Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
+};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
     DetectionSummary, HtmlOptions, JsonExportOptions, OutputError, ReportOptions, TokenCost,
@@ -2047,8 +2049,19 @@ fn preserve_semantic_layer(
                 && !source_was_deleted(edge.attributes.get("source_file"), root)
         })
         .collect::<Vec<_>>();
-    extraction.nodes.append(&mut preserved_nodes);
-    extraction.edges.append(&mut preserved_edges);
+    extraction
+        .nodes
+        .extend(preserved_nodes.drain(..).map(|node| RawNodeRecord {
+            id: node.id,
+            attributes: node.attributes,
+        }));
+    extraction
+        .edges
+        .extend(preserved_edges.drain(..).map(|edge| RawEdgeRecord {
+            source: edge.source,
+            target: edge.target,
+            attributes: edge.attributes,
+        }));
     let new_hyperedge_ids = extraction
         .hyperedges
         .iter()
@@ -2361,8 +2374,8 @@ fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {
 fn write_raw_graph(
     path: &Path,
     extraction: &Extraction,
-    nodes: &[NodeRecord],
-    edges: &[EdgeRecord],
+    nodes: &[RawNodeRecord],
+    edges: &[RawEdgeRecord],
     purpose: BuildPurpose,
     tokens: (u64, u64),
 ) -> Result<(), CoreError> {
@@ -2379,8 +2392,8 @@ fn write_raw_graph(
 
 struct RawGraphOutput<'a> {
     extraction: &'a Extraction,
-    nodes: &'a [NodeRecord],
-    edges: &'a [EdgeRecord],
+    nodes: &'a [RawNodeRecord],
+    edges: &'a [RawEdgeRecord],
     purpose: BuildPurpose,
     tokens: (u64, u64),
 }
@@ -2781,7 +2794,10 @@ mod tests {
         let mut options = BuildOptions::new(build_root.path());
         options.precomputed_detection = Some(detection);
 
-        let error = build_local_graph(&options).expect_err("mismatched detection must fail");
+        let error = match build_local_graph(&options) {
+            Ok(_) => return Err("mismatched detection unexpectedly succeeded".into()),
+            Err(error) => error,
+        };
         assert!(matches!(error, CoreError::DetectionRootMismatch));
         Ok(())
     }
@@ -2799,14 +2815,14 @@ mod tests {
         let prefix_symbol_id = make_id(&[&file_stem(&source)]);
         let mut extraction = Extraction {
             nodes: vec![
-                NodeRecord {
+                RawNodeRecord {
                     id: file_id,
                     attributes: Map::from_iter([(
                         "source_file".to_owned(),
                         Value::String(source_text.clone()),
                     )]),
                 },
-                NodeRecord {
+                RawNodeRecord {
                     id: prefix_symbol_id.clone(),
                     attributes: Map::from_iter([(
                         "source_file".to_owned(),
@@ -2814,7 +2830,7 @@ mod tests {
                     )]),
                 },
             ],
-            edges: vec![EdgeRecord {
+            edges: vec![RawEdgeRecord {
                 source: "caller".to_owned(),
                 target: prefix_symbol_id.clone(),
                 attributes: Map::new(),
@@ -2846,14 +2862,14 @@ mod tests {
         let old_id = make_id(&[&external_text]);
         let source_id = "webapi".to_owned();
         let mut extraction = Extraction {
-            nodes: vec![NodeRecord {
+            nodes: vec![RawNodeRecord {
                 id: old_id.clone(),
                 attributes: Map::from_iter([(
                     "source_file".to_owned(),
                     Value::String(external_text),
                 )]),
             }],
-            edges: vec![EdgeRecord {
+            edges: vec![RawEdgeRecord {
                 source: source_id.clone(),
                 target: old_id,
                 attributes: Map::from_iter([(

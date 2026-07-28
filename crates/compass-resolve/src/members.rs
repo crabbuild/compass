@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use compass_languages::{Extraction, RawCall};
-use compass_model::{EdgeRecord, NodeRecord};
+use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 
 /// Apply the deterministic language-specific member-call passes to merged facts.

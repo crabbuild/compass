@@ -39,7 +39,7 @@ mod verilog;
 mod xaml;
 mod zig;
 
-pub use facts::{Extraction, RawCall};
+pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use registry::{ExtractorKind, LanguageSpec, Registry};

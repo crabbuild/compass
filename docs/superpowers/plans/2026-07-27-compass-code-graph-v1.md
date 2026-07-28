@@ -253,6 +253,7 @@ relocates the flexible types.
 **Files:**
 
 - Modify: `crates/compass-languages/src/facts.rs`
+- Modify: `crates/compass-languages/Cargo.toml`
 - Modify: `crates/compass-languages/src/lib.rs`
 - Modify: `crates/compass-languages/src/apex.rs`
 - Modify: `crates/compass-languages/src/bash.rs`
@@ -290,11 +291,14 @@ relocates the flexible types.
 - Modify: `crates/compass-resolve/src/members.rs`
 - Modify: `crates/compass-graph/src/dedup.rs`
 - Modify: `crates/compass-graph/src/lib.rs`
+- Modify: `crates/compass-graph/src/analyze.rs` (Rust 1.97 lint cleanup required by the verification gate)
+- Modify: `crates/compass-cli/src/dedup_commands.rs`
+- Modify: `crates/compass-core/src/pipeline.rs`
 - Test: `crates/compass-languages/tests/typed_extraction.rs`
 
 **Implementation:**
 
-- [ ] Define `RawNodeRecord` and `RawEdgeRecord` in `facts.rs` with the current
+- [x] Define `RawNodeRecord` and `RawEdgeRecord` in `facts.rs` with the current
   `id`/endpoint fields and flattened JSON maps. Change `Extraction` to:
 
 ```rust
@@ -307,12 +311,12 @@ pub struct Extraction {
     pub extensions: serde_json::Map<String, serde_json::Value>,
 }
 ```
-- [ ] Re-export the raw records from `compass-languages`. Update extractors
+- [x] Re-export the raw records from `compass-languages`. Update extractors
   mechanically to construct them; do not change producer semantics in this
   task.
-- [ ] Update resolution and deduplication signatures to consume raw records.
+- [x] Update resolution and deduplication signatures to consume raw records.
   Keep current string relations and attributes lossless through these phases.
-- [ ] Change `compass-graph::build`, `build_with_tiebreaker`, and
+- [x] Change `compass-graph::build`, `build_with_tiebreaker`, and
   `build_owned_with_tiebreaker` to accept raw extraction records. They may
   still return the current permissive document until Task 3 installs the v1
   normalization boundary.

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 

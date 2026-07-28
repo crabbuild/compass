@@ -191,12 +191,12 @@ fn surprising_connections_in(
         .collect::<HashSet<_>>()
         .len();
     if source_count > 1 {
-        let cross_file = cross_file_surprises(&graph, communities, top_n);
+        let cross_file = cross_file_surprises(graph, communities, top_n);
         if !cross_file.is_empty() {
             return cross_file;
         }
     }
-    cross_community_surprises(&graph, communities, top_n)
+    cross_community_surprises(graph, communities, top_n)
 }
 
 #[must_use]
@@ -217,7 +217,7 @@ fn suggest_questions_in(
     top_n: usize,
 ) -> Vec<SuggestedQuestion> {
     let node_community = invert_communities(communities);
-    let cohesion = community_cohesion_scores(&graph, communities, &node_community);
+    let cohesion = community_cohesion_scores(graph, communities, &node_community);
     let mut questions = Vec::new();
     for edge in &graph.edges {
         if edge_string(edge.record, "confidence") != "AMBIGUOUS" {
@@ -243,7 +243,7 @@ fn suggest_questions_in(
     }
 
     if !graph.edges.is_empty() {
-        let centrality = node_betweenness(&graph, graph.len() > 1000);
+        let centrality = node_betweenness(graph, graph.len() > 1000);
         let mut bridges = centrality
             .iter()
             .enumerate()
@@ -319,7 +319,7 @@ fn suggest_questions_in(
             .iter()
             .take(2)
             .map(|edge| {
-                let other = oriented_other(&graph, edge, node);
+                let other = oriented_other(graph, edge, node);
                 graph.nodes[other].label().to_owned()
             })
             .collect::<Vec<_>>();

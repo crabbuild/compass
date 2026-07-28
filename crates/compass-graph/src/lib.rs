@@ -13,6 +13,7 @@ pub use cluster::{
     ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
     label_communities_by_hub, remap_communities_to_previous, score_communities,
 };
+pub use compass_languages::{RawEdgeRecord, RawNodeRecord};
 use dedup::deduplicate_owned;
 pub use dedup::{
     AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
@@ -25,9 +26,14 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
-use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::{
+    EdgeRecord as LegacyEdgeRecord, GraphDocument, NodeRecord as LegacyNodeRecord,
+};
 use rayon::prelude::*;
 use serde_json::{Map, Value};
+
+type EdgeRecord = RawEdgeRecord;
+type NodeRecord = RawNodeRecord;
 
 /// Merge resolved extraction chunks, apply native entity deduplication, and build
 /// a node-link graph. This is the deterministic counterpart of `compass.build`.
@@ -238,9 +244,24 @@ fn build_from_owned_extraction(
         directed,
         multigraph,
         graph,
-        nodes,
-        links,
+        nodes: nodes.into_iter().map(publish_legacy_node).collect(),
+        links: links.into_iter().map(publish_legacy_edge).collect(),
         extras: BTreeMap::new(),
+    }
+}
+
+fn publish_legacy_node(record: RawNodeRecord) -> LegacyNodeRecord {
+    LegacyNodeRecord {
+        id: record.id,
+        attributes: record.attributes,
+    }
+}
+
+fn publish_legacy_edge(record: RawEdgeRecord) -> LegacyEdgeRecord {
+    LegacyEdgeRecord {
+        source: record.source,
+        target: record.target,
+        attributes: record.attributes,
     }
 }
 

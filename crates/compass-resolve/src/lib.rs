@@ -9,8 +9,9 @@ use std::path::Path;
 use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
-use compass_languages::{Extraction, RawCall, make_id};
-use compass_model::{EdgeRecord, NodeRecord};
+use compass_languages::{
+    Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord, make_id,
+};
 use rayon::prelude::*;
 use regex::Regex;
 use serde_json::{Map, Value};

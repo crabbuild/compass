@@ -1165,7 +1165,6 @@ version = "0.1.10"
 dependencies = [
  "compass-files",
  "compass-ir",
- "compass-model",
  "compass-program",
  "compass-tree-sitter-language-pack",
  "flate2",
@@ -1327,7 +1326,6 @@ version = "0.1.10"
 dependencies = [
  "ahash",
  "compass-languages",
- "compass-model",
  "rayon",
  "regex",
  "serde_json",
