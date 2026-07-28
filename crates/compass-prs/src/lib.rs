@@ -472,9 +472,9 @@ fn graph_file_index(
         communities.entry(source.clone()).or_default();
         *counts.entry(source.clone()).or_default() += 1;
         if let Some(community) = node
-            .attributes
-            .get("community")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+            .unsigned("community")
+            .and_then(|value| i64::try_from(value).ok())
+            .or_else(|| node.string("community").parse().ok())
         {
             communities.entry(source).or_default().insert(community);
         }
@@ -510,18 +510,13 @@ pub fn build_community_labels(
     let mut labels = BTreeMap::<i64, Vec<String>>::new();
     for node in &document.nodes {
         let Some(community) = node
-            .attributes
-            .get("community")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+            .unsigned("community")
+            .and_then(|value| i64::try_from(value).ok())
+            .or_else(|| node.string("community").parse().ok())
         else {
             continue;
         };
-        let label = node
-            .attributes
-            .get("label")
-            .and_then(Value::as_str)
-            .filter(|label| !label.is_empty())
-            .unwrap_or(&node.id);
+        let label = node.label();
         if !label.is_empty() && labels.entry(community).or_default().len() < top_n {
             labels.entry(community).or_default().push(label.to_owned());
         }

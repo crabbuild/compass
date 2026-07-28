@@ -36,6 +36,35 @@ impl NodeRecord {
     }
 
     #[must_use]
+    pub fn source_file(&self) -> Option<&str> {
+        self.attributes.get("source_file").and_then(Value::as_str)
+    }
+
+    #[must_use]
+    pub fn language_name(&self) -> Option<&str> {
+        self.attributes.get("language").and_then(Value::as_str)
+    }
+
+    #[must_use]
+    pub fn kind_name(&self) -> &str {
+        self.attributes
+            .get("symbol_kind")
+            .or_else(|| self.attributes.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or("symbol")
+    }
+
+    #[must_use]
+    pub fn digest(&self, key: &str) -> Option<&str> {
+        self.attributes.get(key).and_then(Value::as_str)
+    }
+
+    #[must_use]
+    pub fn unsigned(&self, key: &str) -> Option<u64> {
+        self.attributes.get(key).and_then(Value::as_u64)
+    }
+
+    #[must_use]
     pub fn property(&self, key: &str) -> Option<Value> {
         (key == "id")
             .then(|| Value::String(self.id.clone()))
@@ -67,6 +96,40 @@ impl EdgeRecord {
             .get(key)
             .and_then(value_as_python_string)
             .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn relation(&self) -> &str {
+        self.attributes
+            .get("relation")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn source_file(&self) -> Option<&str> {
+        self.attributes.get("source_file").and_then(Value::as_str)
+    }
+
+    #[must_use]
+    pub fn semantic_source(&self) -> &str {
+        self.attributes
+            .get("_src")
+            .and_then(Value::as_str)
+            .unwrap_or(&self.source)
+    }
+
+    #[must_use]
+    pub fn semantic_target(&self) -> &str {
+        self.attributes
+            .get("_tgt")
+            .and_then(Value::as_str)
+            .unwrap_or(&self.target)
+    }
+
+    #[must_use]
+    pub fn number(&self, key: &str) -> Option<f64> {
+        self.attributes.get(key).and_then(Value::as_f64)
     }
 
     #[must_use]

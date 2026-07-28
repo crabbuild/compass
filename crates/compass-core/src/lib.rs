@@ -63,13 +63,8 @@ impl ExportInputs {
         if communities.is_empty() {
             for node in &document.nodes {
                 let community = node
-                    .attributes
-                    .get("community")
-                    .and_then(|value| {
-                        value
-                            .as_u64()
-                            .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-                    })
+                    .unsigned("community")
+                    .or_else(|| node.string("community").parse().ok())
                     .and_then(|value| usize::try_from(value).ok());
                 if let Some(community) = community {
                     communities

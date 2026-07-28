@@ -239,14 +239,9 @@ fn communities(document: &GraphDocument) -> Communities {
     let mut communities = Communities::new();
     for node in &document.nodes {
         let community = node
-            .attributes
-            .get("community")
-            .and_then(|value| {
-                value
-                    .as_u64()
-                    .and_then(|value| usize::try_from(value).ok())
-                    .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
-            })
+            .unsigned("community")
+            .and_then(|value| usize::try_from(value).ok())
+            .or_else(|| node.string("community").parse().ok())
             .unwrap_or(0);
         communities
             .entry(community)

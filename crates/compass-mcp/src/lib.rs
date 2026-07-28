@@ -56,9 +56,8 @@ impl GraphContext {
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
             if let Some(community) = node
-                .attributes
-                .get("community")
-                .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+                .unsigned("community")
+                .or_else(|| node.string("community").parse().ok())
                 .and_then(|value| usize::try_from(value).ok())
             {
                 communities.entry(community).or_default().push(index);

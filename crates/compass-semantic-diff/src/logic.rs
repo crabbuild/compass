@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use compass_history::{SourceFileDelta, SourceHunk};
 use compass_model::NodeRecord;
-use serde_json::Value;
 
 const MAX_CONDITIONS_PER_FINDING: usize = 20;
 
@@ -172,25 +171,17 @@ fn bounded_condition(line: &str) -> String {
 }
 
 fn source_file(node: Option<&NodeRecord>) -> Option<&str> {
-    node?.attributes.get("source_file")?.as_str()
+    node?.source_file()
 }
 
 fn line_span(node: Option<&NodeRecord>) -> Option<(u32, u32)> {
     let node = node?;
-    let start = line_number(node.attributes.get("line_start")?)?;
+    let start = u32::try_from(node.unsigned("line_start")?).ok()?;
     let end = node
-        .attributes
-        .get("line_end")
-        .and_then(line_number)
+        .unsigned("line_end")
+        .and_then(|value| u32::try_from(value).ok())
         .unwrap_or(start);
     Some((start, end.max(start)))
-}
-
-fn line_number(value: &Value) -> Option<u32> {
-    value
-        .as_u64()
-        .and_then(|value| u32::try_from(value).ok())
-        .or_else(|| value.as_str()?.parse().ok())
 }
 
 fn overlaps(span: (u32, u32), start: u32, lines: u32) -> bool {

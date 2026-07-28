@@ -154,21 +154,14 @@ pub fn canvas_document(
                 && canvas_members.contains(edge.target.as_str())
         })
         .map(|edge| {
-            let weight = edge
-                .attributes
-                .get("weight")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0);
-            let relation = edge
-                .attributes
-                .get("relation")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let confidence = edge
-                .attributes
-                .get("confidence")
-                .and_then(Value::as_str)
-                .unwrap_or("EXTRACTED");
+            let weight = edge.number("weight").unwrap_or(1.0);
+            let relation = edge.relation();
+            let confidence = edge.string("confidence");
+            let confidence = if confidence.is_empty() {
+                "EXTRACTED"
+            } else {
+                &confidence
+            };
             let label = if relation.is_empty() {
                 format!("[{confidence}]")
             } else {

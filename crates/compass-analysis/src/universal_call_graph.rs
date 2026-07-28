@@ -595,11 +595,7 @@ fn coverage(
 }
 
 fn line(node: &NodeRecord, key: &str) -> Option<u64> {
-    node.attributes.get(key).and_then(|value| {
-        value
-            .as_u64()
-            .or_else(|| value.as_i64().and_then(|value| value.try_into().ok()))
-    })
+    node.unsigned(key)
 }
 
 fn source_line(location: &str) -> Option<u64> {

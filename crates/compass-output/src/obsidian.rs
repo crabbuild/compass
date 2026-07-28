@@ -533,18 +533,9 @@ impl<'a> GraphIndex<'a> {
 
 fn edge_insertion_key(edge: &EdgeRecord) -> (&str, &str, &str) {
     (
-        edge.attributes
-            .get("_src")
-            .and_then(Value::as_str)
-            .unwrap_or(&edge.source),
-        edge.attributes
-            .get("_tgt")
-            .and_then(Value::as_str)
-            .unwrap_or(&edge.target),
-        edge.attributes
-            .get("relation")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
+        edge.semantic_source(),
+        edge.semantic_target(),
+        edge.relation(),
     )
 }
 

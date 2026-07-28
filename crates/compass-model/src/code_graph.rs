@@ -645,6 +645,33 @@ impl EdgeRecord {
     }
 
     #[must_use]
+    pub const fn relation(&self) -> &'static str {
+        self.kind.as_str()
+    }
+
+    #[must_use]
+    pub fn source_file(&self) -> Option<&str> {
+        self.relationship_site
+            .as_ref()
+            .map(|anchor| anchor.file.as_str())
+    }
+
+    #[must_use]
+    pub fn semantic_source(&self) -> &str {
+        &self.source
+    }
+
+    #[must_use]
+    pub fn semantic_target(&self) -> &str {
+        &self.target
+    }
+
+    #[must_use]
+    pub fn number(&self, key: &str) -> Option<f64> {
+        self.property(key).and_then(|value| value.as_f64())
+    }
+
+    #[must_use]
     pub fn property(&self, key: &str) -> Option<Value> {
         match key {
             "id" | "key" => Some(Value::String(self.id.clone())),
@@ -700,6 +727,40 @@ impl NodeRecord {
     #[must_use]
     pub fn label(&self) -> &str {
         &self.name
+    }
+
+    #[must_use]
+    pub fn source_file(&self) -> Option<&str> {
+        self.source.as_ref().map(|anchor| anchor.file.as_str())
+    }
+
+    #[must_use]
+    pub fn language_name(&self) -> Option<&str> {
+        self.language.as_deref()
+    }
+
+    #[must_use]
+    pub const fn kind_name(&self) -> &'static str {
+        self.kind.as_str()
+    }
+
+    #[must_use]
+    pub fn digest(&self, key: &str) -> Option<&str> {
+        let details = self.symbol_details()?;
+        match key {
+            "signature_hash" => details
+                .signature_digest
+                .as_deref()
+                .or(details.overload_discriminator.as_deref()),
+            "implementation_hash" => details.implementation_digest.as_deref(),
+            "source_hash" => details.source_digest.as_deref(),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn unsigned(&self, key: &str) -> Option<u64> {
+        self.property(key).and_then(|value| value.as_u64())
     }
 
     #[must_use]

@@ -552,10 +552,8 @@ fn indexed_communities<'a>(
             .get(node.id.as_str())
             .copied()
             .or_else(|| {
-                node.attributes
-                    .get("community")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as usize)
+                node.unsigned("community")
+                    .and_then(|value| usize::try_from(value).ok())
             })
             .unwrap_or(0);
         output.entry(community).or_default().push(node);
@@ -1206,13 +1204,7 @@ fn mermaid_text(value: &str) -> String {
 fn include_edge(edge: &EdgeRecord) -> bool {
     let confidence = defaulted(edge, "confidence", "EXTRACTED");
     confidence == "EXTRACTED"
-        || (confidence == "INFERRED"
-            && edge
-                .attributes
-                .get("confidence_score")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0)
-                >= 0.85)
+        || (confidence == "INFERRED" && edge.number("confidence_score").unwrap_or(1.0) >= 0.85)
 }
 fn defaulted(edge: &EdgeRecord, key: &str, default: &str) -> String {
     let value = edge.string(key);
@@ -1223,16 +1215,10 @@ fn defaulted(edge: &EdgeRecord, key: &str, default: &str) -> String {
     }
 }
 fn edge_source(edge: &EdgeRecord) -> &str {
-    edge.attributes
-        .get("_src")
-        .and_then(Value::as_str)
-        .unwrap_or(&edge.source)
+    edge.semantic_source()
 }
 fn edge_target(edge: &EdgeRecord) -> &str {
-    edge.attributes
-        .get("_tgt")
-        .and_then(Value::as_str)
-        .unwrap_or(&edge.target)
+    edge.semantic_target()
 }
 fn detect_language<'a>(
     language: &'a str,

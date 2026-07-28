@@ -1026,11 +1026,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
     ) -> Result<Option<Vec<u8>>, MaterializeError> {
         let mut communities = compass_graph::Communities::new();
         for node in &completed.artifacts.document.nodes {
-            let community = node
-                .attributes
-                .get("community")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or_default() as usize;
+            let community = node.unsigned("community").unwrap_or_default() as usize;
             communities
                 .entry(community)
                 .or_default()
@@ -1215,15 +1211,14 @@ mod tests {
 
         let promoted = builder.promote_current(directory.path(), &commit)?;
 
-        assert!(
-            promoted.is_some_and(|completed| completed.artifacts.document.nodes.iter().any(
-                |node| node
-                    .attributes
-                    .get("source_file")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("service.rs")
-            ))
-        );
+        assert!(promoted.is_some_and(|completed| {
+            completed
+                .artifacts
+                .document
+                .nodes
+                .iter()
+                .any(|node| node.source_file() == Some("service.rs"))
+        }));
         Ok(())
     }
 

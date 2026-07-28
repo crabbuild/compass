@@ -378,9 +378,7 @@ pub(crate) fn node_values(
         );
         output.insert(
             "file_type".into(),
-            node.attributes
-                .get("file_type")
-                .cloned()
+            node.property("file_type")
                 .unwrap_or_else(|| Value::String(String::new())),
         );
         let source_location = sanitize_label(&node.string("source_location"));
@@ -388,17 +386,8 @@ pub(crate) fn node_values(
         let language = sanitize_label(&node.string("language"));
         let signature = sanitize_metadata(&node.string("signature"), 500);
         let (location_start, location_end) = source_line_range(&source_location);
-        let line_start = node
-            .attributes
-            .get("line_start")
-            .and_then(Value::as_u64)
-            .or(location_start);
-        let line_end = node
-            .attributes
-            .get("line_end")
-            .and_then(Value::as_u64)
-            .or(location_end)
-            .or(line_start);
+        let line_start = node.unsigned("line_start").or(location_start);
+        let line_end = node.unsigned("line_end").or(location_end).or(line_start);
         let display_kind = if symbol_kind.is_empty() {
             sanitize_label(&node.string("file_type"))
         } else {
@@ -579,16 +568,8 @@ fn node_tooltip(
 pub(crate) fn edge_value(edge: &EdgeRecord) -> Value {
     let confidence = defaulted(edge, "confidence", "EXTRACTED");
     let relation = edge.string("relation");
-    let source = edge
-        .attributes
-        .get("_src")
-        .and_then(Value::as_str)
-        .unwrap_or(&edge.source);
-    let target = edge
-        .attributes
-        .get("_tgt")
-        .and_then(Value::as_str)
-        .unwrap_or(&edge.target);
+    let source = edge.semantic_source();
+    let target = edge.semantic_target();
     let extracted = confidence == "EXTRACTED";
     let mut output = Map::new();
     output.insert("from".into(), Value::String(source.to_owned()));
@@ -802,10 +783,10 @@ fn degrees(document: &GraphDocument) -> HashMap<&str, usize> {
 }
 
 fn node_label(node: &NodeRecord) -> String {
-    match node.attributes.get("label") {
+    match node.property("label") {
         None => node.id.clone(),
         Some(Value::Null) => String::new(),
-        Some(value) => python_value_string(value),
+        Some(value) => python_value_string(&value),
     }
 }
 fn python_string(value: Option<&Value>) -> String {
