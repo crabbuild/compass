@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use compass_graph::{BuildEvidence, normalize_v1};
+use compass_graph::{BuildEvidence, extraction_from_v1, normalize_v1};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{BuildMetadata, EdgeKind, ExtractionStatus, FileRecord, NodeKind};
 use serde_json::{Map, Value, json};
@@ -214,5 +214,10 @@ fn build_evidence_derives_digests_generation_and_byte_anchors()
             .map(|anchor| anchor.end_byte),
         Some(10)
     );
+    let projected = extraction_from_v1(&graph);
+    let rebuilt_evidence = BuildEvidence::from_extraction(root, &projected, "sha256:config")?;
+    let rebuilt = normalize_v1(projected, rebuilt_evidence)?;
+    assert_eq!(rebuilt.nodes, graph.nodes);
+    assert_eq!(rebuilt.links, graph.links);
     Ok(())
 }

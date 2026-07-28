@@ -20,7 +20,7 @@ pub use dedup::{
     AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
     deduplicate_entities_with_tiebreaker,
 };
-pub use v1::{BuildEvidence, normalize_v1};
+pub use v1::{BuildEvidence, extraction_from_v1, normalize_document_v1, normalize_v1};
 
 use std::collections::BTreeMap;
 use std::path::Path;

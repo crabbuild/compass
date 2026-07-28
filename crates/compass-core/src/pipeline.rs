@@ -7,25 +7,28 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
-    Manifest, ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
+    Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
     ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
-    dedupe_edges, dedupe_nodes, graph_insights, label_communities_by_hub,
-    remap_communities_to_previous, score_communities,
+    dedupe_edges, dedupe_nodes, extraction_from_v1, graph_insights, label_communities_by_hub,
+    normalize_document_v1, remap_communities_to_previous, score_communities,
 };
 use compass_languages::{
     Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
+use compass_model::code_graph::{GraphDocument as V1GraphDocument, NodeKind};
+use compass_model::provenance::EvidenceOrigin;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
-    DetectionSummary, HtmlOptions, JsonExportOptions, OutputError, ReportOptions, TokenCost,
-    generate_report, graph_view_model_document, write_html, write_json,
+    DetectionSummary, HtmlOptions, OutputError, ReportOptions, TokenCost, generate_report,
+    graph_view_model_document, write_html,
 };
 use compass_resolve::{merge_decl_def_classes, resolve_owned_with_root};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::build_state::{
     ArtifactSeal, BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified,
@@ -349,11 +352,6 @@ fn build_graph_inner(
     }
     let manifest_path = output_dir.join("manifest.json");
     let prior_manifest = Manifest::load(&manifest_path, Some(&root));
-    let has_confirmed_deletion = prior_manifest
-        .entries()
-        .keys()
-        .any(|path| !Path::new(path).exists());
-
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
@@ -934,16 +932,11 @@ fn build_graph_inner(
     }
     if options.no_cluster {
         let (nodes, edges) = (dedupe_nodes(&resolved.nodes), dedupe_edges(&resolved.edges));
-        let tokens = semantic_tokens(semantic);
         enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
-        write_raw_graph(
-            &output_dir.join("graph.json"),
-            &resolved,
-            &nodes,
-            &edges,
-            options.purpose,
-            tokens,
-        )?;
+        let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+        let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        let published = normalize_document_v1(&document, &root, configuration_digest)?;
+        write_json_atomic(output_dir.join("graph.json"), &published, false)?;
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         save_output_stats(&output_dir, nodes.len(), edges.len(), 0, false)?;
         write_semantic_marker(&output_dir, semantic)?;
@@ -1136,27 +1129,19 @@ fn build_graph_inner(
             .and_then(|directory| git_commit(&directory))
     });
 
-    let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
     let graph_output = || -> Result<Duration, CoreError> {
         let started = Instant::now();
         let mut output_profile_started = Instant::now();
-        write_json(
+        let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        let published = published_v1_document(
             &document,
             &communities,
-            output_dir.join("graph.json"),
-            &JsonExportOptions {
-                force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
-                    !incomplete_semantic || layer.allow_partial
-                }),
-                built_at_commit: commit.as_deref(),
-                community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
-                    .then_some(&labels),
-            },
+            &labels,
+            &root,
+            configuration_digest,
         )?;
-        profile_internal(
-            "graph.json borrowed publication",
-            &mut output_profile_started,
-        );
+        write_json_atomic(output_dir.join("graph.json"), &published, false)?;
+        profile_internal("graph.json v1 publication", &mut output_profile_started);
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
                 output_dir.join(".compass_root"),
@@ -2006,24 +1991,50 @@ fn preserve_semantic_layer(
     root: &Path,
     refreshed: &HashSet<PathBuf>,
 ) {
-    let Ok(existing) = GraphDocument::load(graph_path) else {
+    let Ok(existing) = V1GraphDocument::load(graph_path) else {
         return;
     };
+    let mut existing_raw = extraction_from_v1(&existing);
+    let current_ast_by_key = extraction
+        .nodes
+        .iter()
+        .filter_map(|node| raw_node_match_key(node).map(|key| (key, node.id.clone())))
+        .collect::<HashMap<_, _>>();
+    let typed_ast_remap = existing
+        .nodes
+        .iter()
+        .filter(|node| node_has_origin(node, EvidenceOrigin::Ast))
+        .filter_map(|node| {
+            typed_node_match_key(node)
+                .and_then(|key| current_ast_by_key.get(&key))
+                .map(|current| (node.id.clone(), current.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    for edge in &mut existing_raw.edges {
+        if let Some(current) = typed_ast_remap.get(&edge.source) {
+            edge.source.clone_from(current);
+        }
+        if let Some(current) = typed_ast_remap.get(&edge.target) {
+            edge.target.clone_from(current);
+        }
+    }
     let ast_ids = extraction
         .nodes
         .iter()
         .map(|node| node.id.as_str())
         .collect::<std::collections::HashSet<_>>();
-    let mut preserved_nodes = existing
+    let preserved_node_ids = existing
+        .nodes
+        .iter()
+        .filter(|node| !node_has_origin(node, EvidenceOrigin::Ast))
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut preserved_nodes = existing_raw
         .nodes
         .into_iter()
         .filter(|node| {
             !ast_ids.contains(node.id.as_str())
-                && node
-                    .attributes
-                    .get("_origin")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("ast")
+                && preserved_node_ids.contains(node.id.as_str())
                 && !source_in_set(node.attributes.get("source_file"), root, refreshed)
                 && !source_was_deleted(node.attributes.get("source_file"), root)
         })
@@ -2034,19 +2045,17 @@ fn preserve_semantic_layer(
         .map(|node| node.id.clone())
         .chain(preserved_nodes.iter().map(|node| node.id.clone()))
         .collect::<std::collections::HashSet<_>>();
-    let mut preserved_edges = existing
-        .links
+    let mut preserved_edges = existing_raw
+        .edges
         .into_iter()
-        .filter(|edge| {
-            all_ids.contains(&edge.source)
-                && all_ids.contains(&edge.target)
-                && edge
-                    .attributes
-                    .get("_origin")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("ast")
-                && !source_in_set(edge.attributes.get("source_file"), root, refreshed)
-                && !source_was_deleted(edge.attributes.get("source_file"), root)
+        .zip(existing.links)
+        .filter_map(|(raw, typed)| {
+            (!edge_has_origin(&typed, EvidenceOrigin::Ast)
+                && all_ids.contains(&raw.source)
+                && all_ids.contains(&raw.target)
+                && !source_in_set(raw.attributes.get("source_file"), root, refreshed)
+                && !source_was_deleted(raw.attributes.get("source_file"), root))
+            .then_some(raw)
         })
         .collect::<Vec<_>>();
     extraction
@@ -2062,45 +2071,41 @@ fn preserve_semantic_layer(
             target: edge.target,
             attributes: edge.attributes,
         }));
-    let new_hyperedge_ids = extraction
-        .hyperedges
+}
+
+fn raw_node_match_key(node: &RawNodeRecord) -> Option<(String, String, String)> {
+    Some((
+        node.attributes.get("source_file")?.as_str()?.to_owned(),
+        node.label().to_owned(),
+        node.attributes
+            .get("symbol_kind")
+            .or_else(|| node.attributes.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("symbol")
+            .to_owned(),
+    ))
+}
+
+fn typed_node_match_key(
+    node: &compass_model::code_graph::NodeRecord,
+) -> Option<(String, String, String)> {
+    Some((
+        node.source_file()?.to_owned(),
+        node.label().to_owned(),
+        node.kind.as_str().to_owned(),
+    ))
+}
+
+fn node_has_origin(node: &compass_model::code_graph::NodeRecord, origin: EvidenceOrigin) -> bool {
+    node.evidence
         .iter()
-        .filter_map(|value| value.get("id").and_then(serde_json::Value::as_str))
-        .collect::<HashSet<_>>();
-    let existing_hyperedges = existing
-        .extras
-        .get("hyperedges")
-        .or_else(|| existing.graph.get("hyperedges"))
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|hyperedge| {
-            let Some(object) = hyperedge.as_object() else {
-                return false;
-            };
-            if object
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|id| new_hyperedge_ids.contains(id))
-                || source_in_set(object.get("source_file"), root, refreshed)
-                || source_was_deleted(object.get("source_file"), root)
-            {
-                return false;
-            }
-            ["nodes", "members", "node_ids"]
-                .into_iter()
-                .find_map(|key| object.get(key).and_then(serde_json::Value::as_array))
-                .is_none_or(|members| {
-                    members.iter().all(|member| {
-                        member
-                            .as_str()
-                            .is_some_and(|member| all_ids.contains(member))
-                    })
-                })
-        })
-        .collect::<Vec<_>>();
-    extraction.hyperedges.extend(existing_hyperedges);
+        .any(|evidence| evidence.origin == origin)
+}
+
+fn edge_has_origin(edge: &compass_model::code_graph::EdgeRecord, origin: EvidenceOrigin) -> bool {
+    edge.evidence
+        .iter()
+        .any(|evidence| evidence.origin == origin)
 }
 
 fn canonical_source_set(paths: &[PathBuf], root: &Path) -> HashSet<PathBuf> {
@@ -2157,7 +2162,7 @@ fn stale_semantic_sources(
     root: &Path,
     detected: &BTreeMap<String, Vec<String>>,
 ) -> HashSet<PathBuf> {
-    let Ok(existing) = GraphDocument::load(graph_path) else {
+    let Ok(existing) = V1GraphDocument::load(graph_path) else {
         return HashSet::new();
     };
     let live = detected
@@ -2168,45 +2173,23 @@ fn stale_semantic_sources(
     let mut stale = existing
         .nodes
         .iter()
-        .filter(|node| {
-            node.attributes
-                .get("_origin")
-                .and_then(serde_json::Value::as_str)
-                != Some("ast")
-        })
-        .filter_map(|node| semantic_source_under_root(node.attributes.get("source_file"), root))
+        .filter(|node| !node_has_origin(node, EvidenceOrigin::Ast))
+        .filter_map(|node| semantic_path_under_root(node.source_file(), root))
         .filter(|source| !live.contains(source))
         .collect::<HashSet<_>>();
     stale.extend(
         existing
             .links
             .iter()
-            .filter(|edge| {
-                edge.attributes
-                    .get("_origin")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("ast")
-            })
-            .filter_map(|edge| semantic_source_under_root(edge.attributes.get("source_file"), root))
-            .filter(|source| !live.contains(source)),
-    );
-    let hyperedges = existing
-        .extras
-        .get("hyperedges")
-        .or_else(|| existing.graph.get("hyperedges"))
-        .and_then(serde_json::Value::as_array);
-    stale.extend(
-        hyperedges
-            .into_iter()
-            .flatten()
-            .filter_map(|hyperedge| semantic_source_under_root(hyperedge.get("source_file"), root))
+            .filter(|edge| !edge_has_origin(edge, EvidenceOrigin::Ast))
+            .filter_map(|edge| semantic_path_under_root(edge.source_file(), root))
             .filter(|source| !live.contains(source)),
     );
     stale
 }
 
-fn semantic_source_under_root(value: Option<&serde_json::Value>, root: &Path) -> Option<PathBuf> {
-    let source = value.and_then(serde_json::Value::as_str)?;
+fn semantic_path_under_root(source: Option<&str>, root: &Path) -> Option<PathBuf> {
+    let source = source?;
     let path = Path::new(source);
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -2320,42 +2303,80 @@ fn save_build_manifest(
 }
 
 fn semantic_document_sources(graph_path: &Path, root: &Path) -> HashSet<PathBuf> {
-    let Ok(existing) = GraphDocument::load(graph_path) else {
+    let Ok(existing) = V1GraphDocument::load(graph_path) else {
         return HashSet::new();
     };
     existing
         .nodes
         .into_iter()
         .filter(|node| {
-            node.attributes
-                .get("_origin")
-                .and_then(serde_json::Value::as_str)
-                != Some("ast")
-                && matches!(
-                    node.attributes
-                        .get("file_type")
-                        .and_then(serde_json::Value::as_str),
-                    Some("document" | "concept" | "rationale" | "paper")
-                )
+            !node_has_origin(node, EvidenceOrigin::Ast) && node.kind == NodeKind::Resource
         })
         .filter_map(|node| {
-            node.attributes
-                .get("source_file")
-                .and_then(serde_json::Value::as_str)
-                .map(Path::new)
-                .map(|path| {
-                    if path.is_absolute() {
-                        canonical_identity(path)
-                    } else {
-                        canonical_identity(&root.join(path))
-                    }
-                })
+            node.source_file().map(Path::new).map(|path| {
+                if path.is_absolute() {
+                    canonical_identity(path)
+                } else {
+                    canonical_identity(&root.join(path))
+                }
+            })
         })
         .collect()
 }
 
 fn canonical_identity(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn graph_configuration_digest(
+    options: &BuildOptions,
+    output_dir: &Path,
+) -> Result<String, CoreError> {
+    let bytes = serde_json::to_vec(&build_profile(options)).map_err(|source| {
+        CoreError::SerializeExtraction {
+            path: output_dir.join("graph.json"),
+            source,
+        }
+    })?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+}
+
+fn published_v1_document(
+    document: &GraphDocument,
+    communities: &compass_graph::Communities,
+    labels: &BTreeMap<usize, String>,
+    root: &Path,
+    configuration_digest: String,
+) -> Result<compass_model::code_graph::GraphDocument, CoreError> {
+    let mut publication_source = document.clone();
+    let node_communities = communities
+        .iter()
+        .flat_map(|(community, members)| {
+            members
+                .iter()
+                .map(move |member| (member.as_str(), *community))
+        })
+        .collect::<HashMap<_, _>>();
+    for node in &mut publication_source.nodes {
+        let Some(&community_index) = node_communities.get(node.id.as_str()) else {
+            continue;
+        };
+        let community = u64::try_from(community_index)
+            .map_err(|_| CoreError::InvalidBuildState("community ID exceeds u64".to_owned()))?;
+        node.attributes
+            .insert("community".to_owned(), serde_json::Value::from(community));
+        if let Some(label) = labels.get(&community_index) {
+            node.attributes.insert(
+                "community_name".to_owned(),
+                serde_json::Value::String(label.clone()),
+            );
+        }
+    }
+    Ok(normalize_document_v1(
+        &publication_source,
+        root,
+        configuration_digest,
+    )?)
 }
 
 fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {
@@ -2369,63 +2390,6 @@ fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {
         root.join(path)
     };
     Registry::resolve(path).is_some() && !absolute.exists()
-}
-
-fn write_raw_graph(
-    path: &Path,
-    extraction: &Extraction,
-    nodes: &[RawNodeRecord],
-    edges: &[RawEdgeRecord],
-    purpose: BuildPurpose,
-    tokens: (u64, u64),
-) -> Result<(), CoreError> {
-    let document = RawGraphOutput {
-        extraction,
-        nodes,
-        edges,
-        purpose,
-        tokens,
-    };
-    write_json_ascii_atomic(path, &document, true, purpose == BuildPurpose::Update)?;
-    Ok(())
-}
-
-struct RawGraphOutput<'a> {
-    extraction: &'a Extraction,
-    nodes: &'a [RawNodeRecord],
-    edges: &'a [RawEdgeRecord],
-    purpose: BuildPurpose,
-    tokens: (u64, u64),
-}
-
-impl Serialize for RawGraphOutput<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-
-        if self.purpose == BuildPurpose::Extract {
-            let mut map = serializer.serialize_map(Some(5))?;
-            map.serialize_entry("nodes", self.nodes)?;
-            map.serialize_entry("edges", self.edges)?;
-            map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
-            map.serialize_entry("input_tokens", &self.tokens.0)?;
-            map.serialize_entry("output_tokens", &self.tokens.1)?;
-            map.end()
-        } else {
-            let fields = 4 + usize::from(!self.extraction.hyperedges.is_empty());
-            let mut map = serializer.serialize_map(Some(fields))?;
-            map.serialize_entry("input_tokens", &0_u64)?;
-            map.serialize_entry("output_tokens", &0_u64)?;
-            map.serialize_entry("nodes", self.nodes)?;
-            map.serialize_entry("links", self.edges)?;
-            if !self.extraction.hyperedges.is_empty() {
-                map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
-            }
-            map.end()
-        }
-    }
 }
 
 fn report_root_label(path: &Path) -> String {
@@ -2773,6 +2737,8 @@ fn absolutize_from(root: &Path, path: &Path) -> PathBuf {
 mod tests {
     use std::error::Error;
 
+    use compass_model::code_graph::GraphDocument as V1GraphDocument;
+    use compass_model::provenance::EvidenceOrigin;
     use serde_json::{Map, Value};
 
     use super::*;
@@ -3012,10 +2978,14 @@ mod tests {
         assert_eq!(overview["model"]["schema"], "compass.viewer.graph/1");
         assert!(cold.output_dir.join("manifest.json").is_file());
         assert!(!cold.output_dir.join(".compass_incomplete").exists());
-        let cold_graph = GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
         assert!(cold_graph.nodes.iter().all(|node| {
-            node.attributes.get("_origin").and_then(Value::as_str) == Some("ast")
-                && !Path::new(&node.string("source_file")).is_absolute()
+            node.evidence
+                .first()
+                .is_some_and(|evidence| evidence.origin == EvidenceOrigin::Ast)
+                && node
+                    .source_file()
+                    .is_none_or(|source| !Path::new(source).is_absolute())
         }));
         let cold_graph_bytes = fs::read(cold.output_dir.join("graph.json"))?;
         let cold_report_bytes = fs::read(cold.output_dir.join("GRAPH_REPORT.md"))?;
@@ -3038,13 +3008,13 @@ mod tests {
         let changed = build_local_graph(&options)?;
         assert_eq!(changed.files_extracted, 1);
         assert_eq!(changed.files_cached, 1);
-        let changed_graph = GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
         let changed_graph_bytes = fs::read(changed.output_dir.join("graph.json"))?;
         assert_ne!(
             changed_graph_bytes, cold_graph_bytes,
             "a body-only edit must update definition hashes"
         );
-        let identities = |document: &GraphDocument| {
+        let identities = |document: &V1GraphDocument| {
             (
                 document
                     .nodes
@@ -3054,23 +3024,18 @@ mod tests {
                 document
                     .links
                     .iter()
-                    .map(|edge| {
-                        (
-                            edge.source.clone(),
-                            edge.target.clone(),
-                            edge.string("relation"),
-                        )
-                    })
+                    .map(|edge| (edge.source.clone(), edge.target.clone(), edge.relation()))
                     .collect::<HashSet<_>>(),
             )
         };
         assert_eq!(identities(&changed_graph), identities(&cold_graph));
-        let implementation_hash = |document: &GraphDocument| {
+        let implementation_hash = |document: &V1GraphDocument| {
             document
                 .nodes
                 .iter()
                 .find(|node| node.label() == "work()")
-                .map(|node| node.string("implementation_hash"))
+                .and_then(|node| node.digest("implementation_hash"))
+                .map(str::to_owned)
         };
         assert_ne!(
             implementation_hash(&changed_graph),
@@ -3087,12 +3052,12 @@ mod tests {
         fs::remove_file(root.join("helper.py"))?;
         let deleted = build_local_graph(&options)?;
         assert_eq!(deleted.files_considered, 1);
-        let graph = GraphDocument::load(&deleted.output_dir.join("graph.json"))?;
+        let graph = V1GraphDocument::load(&deleted.output_dir.join("graph.json"))?;
         assert!(
             graph
                 .nodes
                 .iter()
-                .all(|node| node.string("source_file") != "helper.py")
+                .all(|node| node.source_file() != Some("helper.py"))
         );
         Ok(())
     }
@@ -3176,7 +3141,7 @@ mod tests {
     }
 
     #[test]
-    fn no_cluster_schema_tracks_command_purpose() -> Result<(), Box<dyn Error>> {
+    fn no_cluster_always_publishes_the_v1_contract() -> Result<(), Box<dyn Error>> {
         let extract_dir = tempfile::tempdir()?;
         fs::write(
             extract_dir.path().join("main.py"),
@@ -3188,9 +3153,11 @@ mod tests {
         let result = build_local_graph(&extract)?;
         let value: Value =
             serde_json::from_slice(&fs::read(result.output_dir.join("graph.json"))?)?;
-        assert!(value.get("edges").is_some());
-        assert!(value.get("links").is_none());
-        assert!(value.get("directed").is_none());
+        assert_eq!(value["graph"]["schema"], "compass.graph/1");
+        assert_eq!(value["directed"], true);
+        assert_eq!(value["multigraph"], true);
+        assert!(value.get("links").is_some());
+        assert!(value.get("edges").is_none());
         assert!(!result.output_dir.join("GRAPH_REPORT.md").exists());
         assert!(!result.output_dir.join(".compass_analysis.json").exists());
 
@@ -3200,8 +3167,10 @@ mod tests {
         update.no_cluster = true;
         let result = build_local_graph(&update)?;
         let bytes = fs::read(result.output_dir.join("graph.json"))?;
-        assert_eq!(bytes.last(), Some(&b'\n'));
         let value: Value = serde_json::from_slice(&bytes)?;
+        assert_eq!(value["graph"]["schema"], "compass.graph/1");
+        assert_eq!(value["directed"], true);
+        assert_eq!(value["multigraph"], true);
         assert!(value.get("links").is_some());
         assert!(value.get("edges").is_none());
         assert!(result.output_dir.join(".compass_root").is_file());

@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
-    BuildMetadata, ConfigNodeDetails, CoverageRecord, DatabaseNodeDetails, EdgeDetails, EdgeKind,
-    EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument,
-    GraphMetadata, ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind,
-    NodeRecord, NodeRole, QueryNodeDetails, ResourceKind, ResourceNodeDetails, RouteEdgeDetails,
-    RouteNodeDetails, RouteStage, SchemaNodeDetails, SymbolNodeDetails,
+    BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, DatabaseNodeDetails,
+    EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
+    GraphDiagnostic, GraphDocument, GraphMetadata, ImportExportNodeDetails, MessagingNodeDetails,
+    NodeDetails, NodeKind, NodeRecord, NodeRole, QueryNodeDetails, ResourceKind,
+    ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails, RouteStage, SchemaNodeDetails,
+    SymbolNodeDetails,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -212,6 +213,287 @@ pub fn normalize_v1(
     Ok(document)
 }
 
+/// Convert the canonical internal analysis graph at the sole v1 publication boundary.
+pub fn normalize_document_v1(
+    document: &compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+) -> Result<GraphDocument, GraphError> {
+    let extraction = Extraction {
+        nodes: document
+            .nodes
+            .iter()
+            .map(|node| RawNodeRecord {
+                id: node.id.clone(),
+                attributes: node.attributes.clone(),
+            })
+            .collect(),
+        edges: document
+            .links
+            .iter()
+            .map(|edge| RawEdgeRecord {
+                source: edge.source.clone(),
+                target: edge.target.clone(),
+                attributes: edge.attributes.clone(),
+            })
+            .collect(),
+        ..Extraction::default()
+    };
+    let evidence =
+        BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    normalize_v1(extraction, evidence)
+}
+
+/// Project trusted v1 records back into flexible facts for incremental recomposition.
+#[must_use]
+pub fn extraction_from_v1(document: &GraphDocument) -> Extraction {
+    Extraction {
+        nodes: document.nodes.iter().map(raw_node_from_v1).collect(),
+        edges: document.links.iter().map(raw_edge_from_v1).collect(),
+        ..Extraction::default()
+    }
+}
+
+fn raw_node_from_v1(node: &NodeRecord) -> RawNodeRecord {
+    let mut attributes = node
+        .properties()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect::<Map<_, _>>();
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String(node.kind.as_str().to_owned()),
+    );
+    if let Some(source) = &node.source {
+        attributes.insert(
+            "source_anchor".to_owned(),
+            serde_json::to_value(source).unwrap_or(Value::Null),
+        );
+    }
+    if let Some(evidence) = node.evidence.first() {
+        insert_raw_evidence(&mut attributes, evidence);
+    }
+    if let Some(details) = &node.details {
+        insert_raw_node_details(&mut attributes, details);
+    }
+    RawNodeRecord {
+        id: node.id.clone(),
+        attributes,
+    }
+}
+
+fn raw_edge_from_v1(edge: &EdgeRecord) -> RawEdgeRecord {
+    let mut attributes = edge
+        .properties()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect::<Map<_, _>>();
+    if let Some(site) = &edge.relationship_site {
+        attributes.insert(
+            "source_anchor".to_owned(),
+            serde_json::to_value(site).unwrap_or(Value::Null),
+        );
+    }
+    if let Some(evidence) = edge.evidence.first() {
+        insert_raw_evidence(&mut attributes, evidence);
+    }
+    if let Some(details) = &edge.details {
+        insert_raw_edge_details(&mut attributes, details);
+    }
+    RawEdgeRecord {
+        source: edge.source.clone(),
+        target: edge.target.clone(),
+        attributes,
+    }
+}
+
+fn insert_raw_evidence(attributes: &mut Map<String, Value>, evidence: &Provenance) {
+    attributes.insert(
+        "_origin".to_owned(),
+        Value::String(evidence.origin.as_str().to_owned()),
+    );
+    attributes.insert(
+        "confidence".to_owned(),
+        Value::String(evidence.confidence.legacy_str().to_owned()),
+    );
+    attributes.insert(
+        "extractor".to_owned(),
+        Value::String(evidence.extractor.clone()),
+    );
+    if let Some(rule) = &evidence.rule {
+        attributes.insert("rule".to_owned(), Value::String(rule.clone()));
+    }
+    if let Some(score) = evidence.score {
+        attributes.insert("confidence_score".to_owned(), Value::from(score));
+    }
+    if !evidence.candidates.is_empty() {
+        attributes.insert(
+            "candidates".to_owned(),
+            serde_json::to_value(&evidence.candidates).unwrap_or(Value::Null),
+        );
+    }
+}
+
+fn insert_raw_node_details(attributes: &mut Map<String, Value>, details: &NodeDetails) {
+    match details {
+        NodeDetails::File(_) | NodeDetails::Resource(_) => {}
+        NodeDetails::Symbol(details) => {
+            insert_optional_string(attributes, "signature", details.signature.as_ref());
+            insert_optional_string(
+                attributes,
+                "overload_discriminator",
+                details.overload_discriminator.as_ref(),
+            );
+            insert_optional_string(
+                attributes,
+                "declaring_type",
+                details.declaring_type.as_ref(),
+            );
+            insert_optional_string(
+                attributes,
+                "signature_hash",
+                details.signature_digest.as_ref(),
+            );
+            insert_optional_string(
+                attributes,
+                "implementation_hash",
+                details.implementation_digest.as_ref(),
+            );
+            insert_optional_string(attributes, "source_hash", details.source_digest.as_ref());
+            if !details.modifiers.is_empty() {
+                attributes.insert("modifiers".to_owned(), serde_json::json!(details.modifiers));
+            }
+        }
+        NodeDetails::ImportExport(details) => {
+            attributes.insert(
+                "specifier".to_owned(),
+                Value::String(details.specifier.clone()),
+            );
+            insert_optional_string(attributes, "imported_name", details.imported_name.as_ref());
+            insert_optional_string(attributes, "local_name", details.local_name.as_ref());
+            attributes.insert("type_only".to_owned(), Value::Bool(details.type_only));
+        }
+        NodeDetails::Route(details) => {
+            attributes.insert(
+                "operation".to_owned(),
+                Value::String(details.operation.clone()),
+            );
+            attributes.insert("path".to_owned(), Value::String(details.path.clone()));
+            insert_optional_string(attributes, "original_path", details.original_path.as_ref());
+            attributes.insert(
+                "declaring_scope".to_owned(),
+                Value::String(details.declaring_scope.clone()),
+            );
+            attributes.insert(
+                "resolution".to_owned(),
+                serde_json::to_value(details.resolution).unwrap_or(Value::Null),
+            );
+            attributes.insert(
+                "middleware_count".to_owned(),
+                Value::from(details.middleware_count),
+            );
+        }
+        NodeDetails::Component(details) => {
+            attributes.insert(
+                "component_type".to_owned(),
+                Value::String(details.component_type.clone()),
+            );
+        }
+        NodeDetails::Messaging(details) => {
+            attributes.insert(
+                "transport".to_owned(),
+                Value::String(details.transport.clone()),
+            );
+            attributes.insert("subject".to_owned(), Value::String(details.subject.clone()));
+            attributes.insert(
+                "declaring_scope".to_owned(),
+                Value::String(details.declaring_scope.clone()),
+            );
+        }
+        NodeDetails::Job(details) => {
+            insert_optional_string(attributes, "schedule", details.schedule.as_ref());
+            insert_optional_string(attributes, "queue", details.queue.as_ref());
+        }
+        NodeDetails::Schema(details) => {
+            insert_optional_string(attributes, "dialect", details.dialect.as_ref());
+            insert_optional_string(
+                attributes,
+                "logical_database",
+                details.logical_database.as_ref(),
+            );
+            insert_optional_string(attributes, "namespace", details.namespace.as_ref());
+        }
+        NodeDetails::Query(details) => {
+            insert_optional_string(attributes, "dialect", details.dialect.as_ref());
+            insert_optional_string(attributes, "operation", details.operation.as_ref());
+            insert_optional_string(attributes, "text_digest", details.text_digest.as_ref());
+        }
+        NodeDetails::Config(details) => {
+            attributes.insert("format".to_owned(), Value::String(details.format.clone()));
+            attributes.insert(
+                "key_path".to_owned(),
+                Value::String(details.key_path.clone()),
+            );
+        }
+        NodeDetails::Database(details) => {
+            attributes.insert(
+                "logical_database".to_owned(),
+                Value::String(details.logical_database.clone()),
+            );
+            insert_optional_string(
+                attributes,
+                "database_schema",
+                details.database_schema.as_ref(),
+            );
+        }
+    }
+}
+
+fn insert_raw_edge_details(attributes: &mut Map<String, Value>, details: &EdgeDetails) {
+    match details {
+        EdgeDetails::Call(details) => {
+            attributes.insert(
+                "dispatch".to_owned(),
+                serde_json::to_value(details.dispatch).unwrap_or(Value::Null),
+            );
+            insert_optional_string(attributes, "receiver_type", details.receiver_type.as_ref());
+            if let Some(count) = details.argument_count {
+                attributes.insert("argument_count".to_owned(), Value::from(count));
+            }
+        }
+        EdgeDetails::Route(details) => {
+            attributes.insert(
+                "stage".to_owned(),
+                serde_json::to_value(details.stage).unwrap_or(Value::Null),
+            );
+            if let Some(position) = details.position {
+                attributes.insert("position".to_owned(), Value::from(position));
+            }
+            insert_optional_string(attributes, "operation", details.operation.as_ref());
+        }
+        EdgeDetails::Messaging(details) => {
+            attributes.insert(
+                "transport".to_owned(),
+                Value::String(details.transport.clone()),
+            );
+            attributes.insert("subject".to_owned(), Value::String(details.subject.clone()));
+        }
+        EdgeDetails::Schedule(details) => {
+            insert_optional_string(attributes, "expression", details.expression.as_ref());
+        }
+        EdgeDetails::Mapping(details) => {
+            attributes.insert(
+                "mapping_kind".to_owned(),
+                Value::String(details.mapping_kind.clone()),
+            );
+        }
+    }
+}
+
+fn insert_optional_string(attributes: &mut Map<String, Value>, key: &str, value: Option<&String>) {
+    if let Some(value) = value {
+        attributes.insert(key.to_owned(), Value::String(value.clone()));
+    }
+}
+
 fn normalize_file_inventory(files: &mut [FileRecord], root: &Path) -> Result<(), GraphError> {
     for file in files {
         file.path = portable_path(&file.path, root)?;
@@ -296,7 +578,14 @@ fn normalize_node(
         &qualified_name,
         &raw.id,
         details.as_ref(),
+        source.as_ref(),
     )?;
+    let community = optional_u64(&raw.attributes, "community").map(|id| CommunityMetadata {
+        id,
+        label: optional_string(&raw.attributes, "community_name"),
+        score: optional_f64(&raw.attributes, "community_score"),
+        color: optional_string(&raw.attributes, "community_color"),
+    });
     Ok(NodeRecord {
         id,
         kind,
@@ -310,7 +599,7 @@ fn normalize_node(
         evidence,
         coverage: Vec::new(),
         diagnostics: Vec::new(),
-        community: None,
+        community,
     })
 }
 
@@ -733,6 +1022,7 @@ fn node_identity(
     qualified_name: &str,
     record: &str,
     details: Option<&NodeDetails>,
+    source: Option<&SourceAnchor>,
 ) -> Result<String, GraphError> {
     let id = match kind {
         NodeKind::File => file_id(source_path),
@@ -792,15 +1082,11 @@ fn node_identity(
             source_path,
             kind,
             qualified_name,
-            &optional_any_string(
-                attributes,
-                &[
-                    "overload_discriminator",
-                    "signature_hash",
-                    "source_location",
-                ],
-            )
-            .unwrap_or_default(),
+            &optional_any_string(attributes, &["overload_discriminator", "signature_hash"])
+                .or_else(|| {
+                    source.map(|anchor| format!("{}:{}", anchor.start_byte, anchor.end_byte))
+                })
+                .unwrap_or_default(),
         ),
     };
     Ok(id)
