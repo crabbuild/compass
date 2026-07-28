@@ -120,6 +120,36 @@
         "icon": "$(search)"
       },
       {
+        "command": "compass.searchSymbols",
+        "title": "Compass: Search Symbols",
+        "icon": "$(symbol-method)"
+      },
+      {
+        "command": "compass.showCodeCallers",
+        "title": "Compass: Show Typed Callers",
+        "icon": "$(references)"
+      },
+      {
+        "command": "compass.showCodeCallees",
+        "title": "Compass: Show Typed Callees",
+        "icon": "$(references)"
+      },
+      {
+        "command": "compass.showCodeImpact",
+        "title": "Compass: Show Change Impact",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "compass.exploreCode",
+        "title": "Compass: Explore Related Symbols",
+        "icon": "$(files)"
+      },
+      {
+        "command": "compass.showNodeTrail",
+        "title": "Compass: Show Node Trail",
+        "icon": "$(git-merge)"
+      },
+      {
         "command": "compass.openHistory",
         "title": "Compass: Open Codebase Evolution",
         "icon": "$(history)"
@@ -139,6 +169,10 @@
       {
         "id": "compass.callGraph",
         "label": "Compass Call Graph"
+      },
+      {
+        "id": "compass.codeGraph",
+        "label": "Compass Code Graph"
       }
     ],
     "configuration": {
@@ -234,6 +268,11 @@
           "submenu": "compass.callGraph",
           "when": "resourceScheme == file",
           "group": "navigation@90"
+        },
+        {
+          "submenu": "compass.codeGraph",
+          "when": "resourceScheme == file",
+          "group": "navigation@91"
         }
       ],
       "compass.callGraph": [
@@ -248,6 +287,28 @@
         {
           "command": "compass.openCallersAndCallees",
           "group": "1_direction@3"
+        }
+      ],
+      "compass.codeGraph": [
+        {
+          "command": "compass.showCodeCallers",
+          "group": "1_calls@1"
+        },
+        {
+          "command": "compass.showCodeCallees",
+          "group": "1_calls@2"
+        },
+        {
+          "command": "compass.showCodeImpact",
+          "group": "2_impact@1"
+        },
+        {
+          "command": "compass.exploreCode",
+          "group": "3_explore@1"
+        },
+        {
+          "command": "compass.showNodeTrail",
+          "group": "3_explore@2"
         }
       ]
     },

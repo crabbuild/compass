@@ -362,6 +362,7 @@ export function decodeCodeQueryResponse(value: unknown): CodeQueryResponse {
 }
 
 export type CodeQueryResponse = z.infer<typeof CodeQueryResponseSchema>;
+export type CodeQueryOperation = z.infer<typeof CodeQueryOperationSchema>;
 export type CodeQueryNode = z.infer<typeof CodeQueryNodeSchema>;
 export type CodeQueryEdge = z.infer<typeof CodeQueryEdgeSchema>;
 export type CodeQueryFile = z.infer<typeof CodeQueryFileSchema>;

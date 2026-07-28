@@ -81,6 +81,7 @@ export function GraphInspector({
   onFocus,
   onOpenSource,
   onOpenCommunity,
+  onQueryNode,
   onToggleCommunity,
   onSetAllVisible,
   collapsed,
@@ -100,6 +101,10 @@ export function GraphInspector({
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation, revision?: string): void;
   onOpenCommunity?: ((communityId: number) => void) | undefined;
+  onQueryNode?: ((
+    operation: "callers" | "callees" | "impact",
+    symbol: string
+  ) => void) | undefined;
   onToggleCommunity(communityId: number): void;
   onSetAllVisible(visible: boolean): void;
   collapsed: boolean;
@@ -329,6 +334,19 @@ export function GraphInspector({
             </dl>
             {selected.signature && (
               <code className="compass-signature-block">{selected.signature}</code>
+            )}
+            {onQueryNode && (
+              <div className="compass-code-query-actions" aria-label="Code graph queries">
+                <button type="button" onClick={() => onQueryNode("callers", selected.id)}>
+                  Callers
+                </button>
+                <button type="button" onClick={() => onQueryNode("callees", selected.id)}>
+                  Callees
+                </button>
+                <button type="button" onClick={() => onQueryNode("impact", selected.id)}>
+                  Impact
+                </button>
+              </div>
             )}
             <CodeEvidence
               evidence={selectedCodeEvidence}

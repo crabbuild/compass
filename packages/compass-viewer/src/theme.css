@@ -1302,6 +1302,27 @@ button:not(:disabled),
   margin-top: 16px;
 }
 
+.compass-code-query-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.compass-code-query-actions button {
+  padding: 5px 4px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font-size: 9px;
+}
+
+.compass-code-query-actions button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--compass-focus));
+  outline-offset: 1px;
+}
+
 .compass-code-evidence-ledger {
   display: grid;
   gap: 6px;

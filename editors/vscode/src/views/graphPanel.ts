@@ -4,6 +4,7 @@ import {
   GraphViewModelSchema,
   type GraphViewModel
 } from "@compass/viewer/contracts/graph";
+import type { CodeQueryResponse } from "@compass/viewer/contracts/codeQuery";
 import type { RepositorySession } from "../workspace/repositorySession";
 import { GraphToHostMessageSchema } from "../transport/messages";
 import { currentGraphExportArgs } from "./communityArguments";
@@ -17,6 +18,7 @@ import {
 import { CurrentGraphSnapshot } from "./graphSnapshot";
 import { openGraphSource } from "./sourceNavigation";
 import { graphStaticLoadingMarkup } from "../webviews/graphLoadingMarkup";
+import { codeQueryRequiresRebuild, runCodeQuery } from "./codeQueryClient";
 
 const LARGE_GRAPH_BYTES = 8 * 1024 * 1024;
 
@@ -24,7 +26,8 @@ export class GraphPanel {
   static async open(
     context: vscode.ExtensionContext,
     session: RepositorySession,
-    output: vscode.OutputChannel
+    output: vscode.OutputChannel,
+    queryResult?: CodeQueryResponse
   ): Promise<GraphPanel> {
     const panel = vscode.window.createWebviewPanel(
       "compass.graph",
@@ -36,7 +39,7 @@ export class GraphPanel {
         localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist")]
       }
     );
-    const graph = new GraphPanel(context, session, panel, output);
+    const graph = new GraphPanel(context, session, panel, output, queryResult);
     await graph.initialize();
     return graph;
   }
@@ -46,13 +49,17 @@ export class GraphPanel {
   private readonly snapshot = new CurrentGraphSnapshot();
   private snapshotReady: Promise<string> | undefined;
   private overview: GraphViewModel | undefined;
+  private queryResult: CodeQueryResponse | undefined;
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly session: RepositorySession,
     private readonly panel: vscode.WebviewPanel,
-    private readonly output: vscode.OutputChannel
-  ) {}
+    private readonly output: vscode.OutputChannel,
+    queryResult?: CodeQueryResponse
+  ) {
+    this.queryResult = queryResult;
+  }
 
   private async initialize(): Promise<void> {
     this.panel.webview.html = this.html();
@@ -68,6 +75,12 @@ export class GraphPanel {
       } else if (parsed.data.type === "showOutput") {
         this.output.show(true);
       } else if (parsed.data.type === "openSource") {
+        if (this.isStaleSource(parsed.data.source.file)) {
+          await this.offerRebuild(
+            `Compass did not open ${parsed.data.source.file} because its source digest is stale.`
+          );
+          return;
+        }
         try {
           await openGraphSource(this.session, parsed.data.repositoryId, parsed.data.source);
         } catch (error) {
@@ -75,11 +88,17 @@ export class GraphPanel {
             error instanceof Error ? error.message : String(error)
           );
         }
-      } else {
+      } else if (parsed.data.type === "openCommunity") {
         await this.openCommunity(
           parsed.data.requestId,
           parsed.data.repositoryId,
           parsed.data.communityId
+        );
+      } else {
+        await this.executeNodeQuery(
+          parsed.data.repositoryId,
+          parsed.data.operation,
+          parsed.data.symbol
         );
       }
     });
@@ -211,6 +230,63 @@ export class GraphPanel {
       repositoryId: this.session.id,
       model: this.overview
     });
+    if (this.queryResult) await this.publishQueryResult(this.queryResult);
+  }
+
+  private async executeNodeQuery(
+    repositoryId: string,
+    operation: "callers" | "callees" | "impact",
+    symbol: string
+  ): Promise<void> {
+    if (repositoryId !== this.session.id) {
+      void vscode.window.showErrorMessage(
+        "This code graph query belongs to another repository."
+      );
+      return;
+    }
+    try {
+      const result = await runCodeQuery(
+        this.session,
+        { operation, symbol },
+        this.controller.signal
+      );
+      this.queryResult = result;
+      await this.publishQueryResult(result);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.output.appendLine(`[code-query] ${detail}`);
+      if (codeQueryRequiresRebuild(detail)) {
+        await this.offerRebuild(detail);
+      } else {
+        void vscode.window.showErrorMessage(`Compass code query failed: ${detail}`);
+      }
+    }
+  }
+
+  private async publishQueryResult(result: CodeQueryResponse): Promise<void> {
+    await this.panel.webview.postMessage({
+      type: "codeQueryResult",
+      requestId: randomUUID(),
+      repositoryId: this.session.id,
+      result
+    });
+  }
+
+  private isStaleSource(file: string): boolean {
+    return this.queryResult?.diagnostics.some(
+      (diagnostic) => diagnostic.code === "stale_source_digest"
+        && (diagnostic.path === file || diagnostic.path === null)
+    ) ?? false;
+  }
+
+  private async offerRebuild(message: string): Promise<void> {
+    const action = await vscode.window.showWarningMessage(
+      message,
+      "Rebuild with Compass"
+    );
+    if (action === "Rebuild with Compass") {
+      await vscode.commands.executeCommand("compass.update", this.session.id);
+    }
   }
 
   private async postLoadStatus(

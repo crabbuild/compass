@@ -1586,23 +1586,23 @@ rebuild actions remain host responsibilities.
 
 **Implementation:**
 
-- [ ] Implement `codeQueryClient` through the existing Compass process
+- [x] Implement `codeQueryClient` through the existing Compass process
   manager. Pass literal argument arrays, require JSON output, validate it with
   `CodeQueryResponseSchema`, and support cancellation and process cleanup.
-- [ ] Register extension actions for symbol search, callers, callees, impact,
+- [x] Register extension actions for symbol search, callers, callees, impact,
   explore selection, and node trail. Add context-menu actions on graph nodes
   and editor symbols.
-- [ ] Send validated query responses to the graph webview through strict host
+- [x] Send validated query responses to the graph webview through strict host
   and webview message unions. The webview consumes Task 17’s components and
   does not read `graph.json`.
-- [ ] Open returned source anchors through VS Code APIs only after confirming
+- [x] Open returned source anchors through VS Code APIs only after confirming
   the normalized path remains inside the active repository. For stale source,
   show the diagnostic and offer rebuild rather than opening mismatched text.
-- [ ] On an unsupported graph schema, present “Rebuild with Compass” and invoke
+- [x] On an unsupported graph schema, present “Rebuild with Compass” and invoke
   the normal index/update workflow after user action.
-- [ ] Keep `routes_to` evidence visible when callers of a handler are shown,
+- [x] Keep `routes_to` evidence visible when callers of a handler are shown,
   including middleware order and heuristic wiring-site navigation.
-- [ ] Before editing `editors/vscode/package.json`, inspect and preserve the
+- [x] Before editing `editors/vscode/package.json`, inspect and preserve the
   existing user-owned modification; stage only intentional command/menu
   additions.
 

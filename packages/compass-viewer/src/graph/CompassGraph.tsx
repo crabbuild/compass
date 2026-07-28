@@ -39,6 +39,7 @@ const CHANGE_TYPES: Array<{
 export type GraphHost = {
   openSource(source: SourceLocation, revision?: string): void;
   openCommunity?(communityId: number): void;
+  queryNode?(operation: "callers" | "callees" | "impact", symbol: string): void;
 };
 
 export type CommunityGraphDetail = {
@@ -344,6 +345,7 @@ function CompassGraphView({
           onFocus={focus}
           onOpenSource={host.openSource}
           onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
+          onQueryNode={host.queryNode}
           onToggleCommunity={(communityId) => dispatch({
             type: "toggleCommunity",
             communityId
