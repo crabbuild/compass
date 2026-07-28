@@ -1,0 +1,382 @@
+schema = "compass.code-graph-qualification/1"
+
+[[repository]]
+name = "compass-polyglot-framework-corpus"
+url = "https://github.com/crabbuild/compass.git"
+commit = "9b9c9f788856417331628119d3e594d6fa563f0d"
+size_class = "large"
+language_family = "polyglot"
+frameworks = [
+  "django", "flask", "fastapi", "express", "nestjs", "laravel", "drupal",
+  "rails", "spring", "play", "gin", "chi", "gorilla-mux", "axum", "actix",
+  "rocket", "aspnet", "vapor", "react-router", "sveltekit", "vue-router",
+  "nuxt", "astro"
+]
+
+[[repository.flows]]
+framework = "django"
+name = "Django function view"
+query = "user_detail"
+source = "fixtures/code-graph/routes/python/django/project/urls.py"
+[[repository.flows]]
+framework = "django"
+name = "Django regular-expression route"
+query = "health"
+source = "fixtures/code-graph/routes/python/django/project/urls.py"
+[[repository.flows]]
+framework = "django"
+name = "Django class-based view"
+query = "AccountView"
+source = "fixtures/code-graph/routes/python/django/project/urls.py"
+
+[[repository.flows]]
+framework = "flask"
+name = "Flask application route"
+query = "health"
+source = "fixtures/code-graph/routes/python/flask_app.py"
+[[repository.flows]]
+framework = "flask"
+name = "Flask blueprint GET route"
+query = "user_detail"
+source = "fixtures/code-graph/routes/python/flask_app.py"
+[[repository.flows]]
+framework = "flask"
+name = "Flask blueprint PATCH route"
+query = "user_detail"
+source = "fixtures/code-graph/routes/python/flask_app.py"
+
+[[repository.flows]]
+framework = "fastapi"
+name = "FastAPI application GET"
+query = "health"
+source = "fixtures/code-graph/routes/python/fastapi_app.py"
+[[repository.flows]]
+framework = "fastapi"
+name = "FastAPI router POST"
+query = "create_user"
+source = "fixtures/code-graph/routes/python/fastapi_app.py"
+[[repository.flows]]
+framework = "fastapi"
+name = "FastAPI dependency middleware"
+query = "authenticate"
+source = "fixtures/code-graph/routes/python/fastapi_app.py"
+
+[[repository.flows]]
+framework = "express"
+name = "Express application health"
+query = "health"
+source = "fixtures/code-graph/routes/typescript/express.ts"
+[[repository.flows]]
+framework = "express"
+name = "Express router handler"
+query = "showUser"
+source = "fixtures/code-graph/routes/typescript/express.ts"
+[[repository.flows]]
+framework = "express"
+name = "Express middleware chain"
+query = "authenticate"
+source = "fixtures/code-graph/routes/typescript/express.ts"
+
+[[repository.flows]]
+framework = "nestjs"
+name = "NestJS HTTP query"
+query = "showUser"
+source = "fixtures/code-graph/routes/typescript/nest.ts"
+[[repository.flows]]
+framework = "nestjs"
+name = "NestJS HTTP mutation"
+query = "createUser"
+source = "fixtures/code-graph/routes/typescript/nest.ts"
+[[repository.flows]]
+framework = "nestjs"
+name = "NestJS GraphQL resolver"
+query = "user"
+source = "fixtures/code-graph/routes/typescript/nest.ts"
+
+[[repository.flows]]
+framework = "laravel"
+name = "Laravel tuple route"
+query = "UserController.index"
+source = "fixtures/code-graph/routes/php/laravel.php"
+[[repository.flows]]
+framework = "laravel"
+name = "Laravel controller action"
+query = "UserController.store"
+source = "fixtures/code-graph/routes/php/laravel.php"
+[[repository.flows]]
+framework = "laravel"
+name = "Laravel resource expansion"
+query = "PhotoController.show"
+source = "fixtures/code-graph/routes/php/laravel.php"
+
+[[repository.flows]]
+framework = "drupal"
+name = "Drupal controller route"
+query = "ExampleController.view"
+source = "fixtures/code-graph/routes/php/drupal.routing.yml"
+[[repository.flows]]
+framework = "drupal"
+name = "Drupal form route"
+query = "ExampleForm"
+source = "fixtures/code-graph/routes/php/drupal.routing.yml"
+[[repository.flows]]
+framework = "drupal"
+name = "Drupal hook binding"
+query = "hook_entity_type_build"
+source = "fixtures/code-graph/routes/php/drupal.module"
+
+[[repository.flows]]
+framework = "rails"
+name = "Rails symbol route"
+query = "UsersController.show"
+source = "fixtures/code-graph/routes/ruby/rails.rb"
+[[repository.flows]]
+framework = "rails"
+name = "Rails hash-rocket route"
+query = "UsersController.create"
+source = "fixtures/code-graph/routes/ruby/rails.rb"
+[[repository.flows]]
+framework = "rails"
+name = "Rails namespace route"
+query = "DashboardController.index"
+source = "fixtures/code-graph/routes/ruby/rails.rb"
+
+[[repository.flows]]
+framework = "spring"
+name = "Spring GET mapping"
+query = "SpringController.show"
+source = "fixtures/code-graph/routes/jvm/SpringController.java"
+[[repository.flows]]
+framework = "spring"
+name = "Spring POST mapping"
+query = "SpringController.create"
+source = "fixtures/code-graph/routes/jvm/SpringController.java"
+[[repository.flows]]
+framework = "spring"
+name = "Spring multi-method mapping"
+query = "SpringController.search"
+source = "fixtures/code-graph/routes/jvm/SpringController.java"
+
+[[repository.flows]]
+framework = "play"
+name = "Play Java GET action"
+query = "PlayController.show"
+source = "fixtures/code-graph/routes/jvm/play/conf/routes"
+[[repository.flows]]
+framework = "play"
+name = "Play Java POST action"
+query = "PlayController.create"
+source = "fixtures/code-graph/routes/jvm/play/conf/routes"
+[[repository.flows]]
+framework = "play"
+name = "Play Scala GET action"
+query = "ScalaController.show"
+source = "fixtures/code-graph/routes/jvm/play/conf/routes"
+
+[[repository.flows]]
+framework = "gin"
+name = "Gin GET handler"
+query = "listUsers"
+source = "fixtures/code-graph/routes/go/gin.go"
+[[repository.flows]]
+framework = "gin"
+name = "Gin POST handler"
+query = "createUser"
+source = "fixtures/code-graph/routes/go/gin.go"
+[[repository.flows]]
+framework = "gin"
+name = "Gin middleware"
+query = "auth"
+source = "fixtures/code-graph/routes/go/gin.go"
+
+[[repository.flows]]
+framework = "chi"
+name = "Chi path parameter"
+query = "showUser"
+source = "fixtures/code-graph/routes/go/chi.go"
+[[repository.flows]]
+framework = "chi"
+name = "Chi handler binding"
+query = "Routes"
+source = "fixtures/code-graph/routes/go/chi.go"
+[[repository.flows]]
+framework = "chi"
+name = "Chi imported router"
+query = "chi.Router"
+source = "fixtures/code-graph/routes/go/chi.go"
+
+[[repository.flows]]
+framework = "gorilla-mux"
+name = "Gorilla PUT method"
+query = "updateUser"
+source = "fixtures/code-graph/routes/go/gorilla.go"
+[[repository.flows]]
+framework = "gorilla-mux"
+name = "Gorilla PATCH method"
+query = "updateUser"
+source = "fixtures/code-graph/routes/go/gorilla.go"
+[[repository.flows]]
+framework = "gorilla-mux"
+name = "Gorilla router registration"
+query = "Routes"
+source = "fixtures/code-graph/routes/go/gorilla.go"
+
+[[repository.flows]]
+framework = "axum"
+name = "Axum GET handler"
+query = "show_user"
+source = "fixtures/code-graph/routes/rust/axum.rs"
+[[repository.flows]]
+framework = "axum"
+name = "Axum POST handler"
+query = "create_user"
+source = "fixtures/code-graph/routes/rust/axum.rs"
+[[repository.flows]]
+framework = "axum"
+name = "Axum router builder"
+query = "router"
+source = "fixtures/code-graph/routes/rust/axum.rs"
+
+[[repository.flows]]
+framework = "actix"
+name = "Actix GET handler"
+query = "list_users"
+source = "fixtures/code-graph/routes/rust/actix.rs"
+[[repository.flows]]
+framework = "actix"
+name = "Actix route builder"
+query = "app"
+source = "fixtures/code-graph/routes/rust/actix.rs"
+[[repository.flows]]
+framework = "actix"
+name = "Actix web registration"
+query = "list_users"
+source = "fixtures/code-graph/routes/rust/actix.rs"
+
+[[repository.flows]]
+framework = "rocket"
+name = "Rocket route attribute"
+query = "show_user"
+source = "fixtures/code-graph/routes/rust/rocket.rs"
+[[repository.flows]]
+framework = "rocket"
+name = "Rocket parameter route"
+query = "show_user"
+source = "fixtures/code-graph/routes/rust/rocket.rs"
+[[repository.flows]]
+framework = "rocket"
+name = "Rocket GET handler"
+query = "show_user"
+source = "fixtures/code-graph/routes/rust/rocket.rs"
+
+[[repository.flows]]
+framework = "aspnet"
+name = "ASP.NET GET action"
+query = "UsersController.Show"
+source = "fixtures/code-graph/routes/csharp/AspNetController.cs"
+[[repository.flows]]
+framework = "aspnet"
+name = "ASP.NET POST action"
+query = "UsersController.Create"
+source = "fixtures/code-graph/routes/csharp/AspNetController.cs"
+[[repository.flows]]
+framework = "aspnet"
+name = "ASP.NET controller template"
+query = "UsersController"
+source = "fixtures/code-graph/routes/csharp/AspNetController.cs"
+
+[[repository.flows]]
+framework = "vapor"
+name = "Vapor GET handler"
+query = "listUsers"
+source = "fixtures/code-graph/routes/swift/VaporRoutes.swift"
+[[repository.flows]]
+framework = "vapor"
+name = "Vapor POST handler"
+query = "createUser"
+source = "fixtures/code-graph/routes/swift/VaporRoutes.swift"
+[[repository.flows]]
+framework = "vapor"
+name = "Vapor grouped health"
+query = "routes"
+source = "fixtures/code-graph/routes/swift/VaporRoutes.swift"
+
+[[repository.flows]]
+framework = "react-router"
+name = "React Router JSX route"
+query = "AccountAlias"
+source = "fixtures/code-graph/routes/typescript/react-router.tsx"
+[[repository.flows]]
+framework = "react-router"
+name = "React Router data route"
+query = "UserPage"
+source = "fixtures/code-graph/routes/typescript/react-router.tsx"
+[[repository.flows]]
+framework = "react-router"
+name = "React Router loader"
+query = "loadUser"
+source = "fixtures/code-graph/routes/typescript/react-router.tsx"
+
+[[repository.flows]]
+framework = "sveltekit"
+name = "SvelteKit page route"
+query = "+page"
+source = "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte"
+[[repository.flows]]
+framework = "sveltekit"
+name = "SvelteKit server GET"
+query = "GET"
+source = "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts"
+[[repository.flows]]
+framework = "sveltekit"
+name = "SvelteKit catch-all page"
+query = "rest"
+source = "fixtures/code-graph/routes/typescript/sveltekit/src/routes/files/[...rest]/+page.svelte"
+
+[[repository.flows]]
+framework = "vue-router"
+name = "Vue Router component"
+query = "UserPage"
+source = "fixtures/code-graph/routes/typescript/vue-router.ts"
+[[repository.flows]]
+framework = "vue-router"
+name = "Vue Router parameter path"
+query = "users"
+source = "fixtures/code-graph/routes/typescript/vue-router.ts"
+[[repository.flows]]
+framework = "vue-router"
+name = "Vue Router history"
+query = "router"
+source = "fixtures/code-graph/routes/typescript/vue-router.ts"
+
+[[repository.flows]]
+framework = "nuxt"
+name = "Nuxt page route"
+query = "users"
+source = "fixtures/code-graph/routes/typescript/nuxt/pages/users/[id].vue"
+[[repository.flows]]
+framework = "nuxt"
+name = "Nuxt GET endpoint"
+query = "users.get"
+source = "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts"
+[[repository.flows]]
+framework = "nuxt"
+name = "Nuxt POST endpoint"
+query = "users"
+source = "fixtures/code-graph/routes/typescript/nuxt/server/api/users/[id].post.ts"
+
+[[repository.flows]]
+framework = "astro"
+name = "Astro page route"
+query = "about"
+source = "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro"
+[[repository.flows]]
+framework = "astro"
+name = "Astro GET endpoint"
+query = "GET"
+source = "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts"
+[[repository.flows]]
+framework = "astro"
+name = "Astro dynamic page"
+query = "slug"
+source = "fixtures/code-graph/routes/typescript/astro/src/pages/blog/[slug].astro"

@@ -43,7 +43,21 @@ export default async function generate(): Promise<void> {
       {
         id: "helper", label: "helper", kind: "function", community: 0, degree: 2,
         language: "rust", signature: "fn helper()", size: 24,
-        source: { file: "src/lib.rs", startLine: 5, endLine: 7 }
+        source: { file: "src/lib.rs", startLine: 5, endLine: 7 },
+        codeEvidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "rust.functions",
+          confidence: "exact",
+          anchor: {
+            file: "src/lib.rs", startByte: 40, endByte: 64,
+            startLine: 5, startColumn: 0, endLine: 7, endColumn: 1
+          },
+          rule: null,
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }]
       },
       {
         id: "file-only", label: "README", kind: "document", community: 1, degree: 1,
@@ -53,7 +67,28 @@ export default async function generate(): Promise<void> {
     ],
     edges: [
       { id: "e1", source: "run", target: "helper", relation: "calls", confidence: "extracted" },
-      { id: "e2", source: "helper", target: "store", relation: "uses", confidence: "inferred" },
+      {
+        id: "e2", source: "helper", target: "store", relation: "uses",
+        confidence: "inferred",
+        codeEvidence: [{
+          layer: "structural_graph",
+          origin: "heuristic",
+          extractor: "rust.dynamic-dispatch",
+          confidence: "ambiguous",
+          anchor: null,
+          rule: "trait-object-call",
+          wiringSite: {
+            file: "src/lib.rs", startByte: 52, endByte: 60,
+            startLine: 6, startColumn: 2, endLine: 6, endColumn: 10
+          },
+          resolution: "ambiguous",
+          candidates: [{
+            nodeId: "store",
+            reason: "compatible receiver type",
+            confidence: "ambiguous"
+          }]
+        }]
+      },
       { id: "e3", source: "run", target: "file-only", relation: "documents", confidence: "ambiguous" }
     ],
     communities: [

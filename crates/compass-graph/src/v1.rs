@@ -185,6 +185,8 @@ pub fn normalize_v1(
 ) -> Result<GraphDocument, GraphError> {
     normalize_file_inventory(&mut evidence.files, &evidence.repository_root)?;
     let file_facts = published_file_facts(&evidence)?;
+    let stub_wiring_sites =
+        collect_stub_wiring_sites(&extraction.edges, &evidence.repository_root, &file_facts)?;
 
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
     let mut nodes = BTreeMap::new();
@@ -195,7 +197,12 @@ pub fn normalize_v1(
                 "duplicate raw node ID cannot be resolved deterministically",
             ));
         }
-        let node = normalize_node(raw.clone(), &evidence.repository_root, &file_facts)?;
+        let node = normalize_node(
+            raw.clone(),
+            &evidence.repository_root,
+            &file_facts,
+            stub_wiring_sites.get(&raw.id),
+        )?;
         id_remap.insert(raw.id, node.id.clone());
         if let Some(existing) = nodes.get_mut(&node.id) {
             merge_normalized_node(existing, node)?;
@@ -295,6 +302,34 @@ pub fn normalize_v1(
     };
     validate_code_graph(&document)?;
     Ok(document)
+}
+
+fn collect_stub_wiring_sites(
+    edges: &[RawEdgeRecord],
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> Result<HashMap<String, SourceAnchor>, GraphError> {
+    let mut sites = HashMap::new();
+    for edge in edges {
+        let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
+            continue;
+        };
+        for endpoint in [&edge.source, &edge.target] {
+            sites
+                .entry(endpoint.clone())
+                .and_modify(|existing: &mut SourceAnchor| {
+                    if anchor_key(&anchor) < anchor_key(existing) {
+                        existing.clone_from(&anchor);
+                    }
+                })
+                .or_insert_with(|| anchor.clone());
+        }
+    }
+    Ok(sites)
+}
+
+fn anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
+    (&anchor.file, anchor.start_byte, anchor.end_byte)
 }
 
 fn merge_normalized_node(
@@ -693,6 +728,7 @@ fn normalize_node(
     raw: RawNodeRecord,
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
+    inferred_wiring_site: Option<&SourceAnchor>,
 ) -> Result<NodeRecord, GraphError> {
     let raw_kind = raw
         .attributes
@@ -700,9 +736,9 @@ fn normalize_node(
         .or_else(|| raw.attributes.get("type"))
         .and_then(Value::as_str)
         .or_else(|| {
-            (optional_source_path(&raw.attributes, "source_file").is_none()
-                && optional_source_path(&raw.attributes, "origin_file").is_some())
-            .then_some("symbol")
+            optional_source_path(&raw.attributes, "source_file")
+                .is_none()
+                .then_some("symbol")
         });
     let file_type = raw
         .attributes
@@ -719,6 +755,7 @@ fn normalize_node(
     let source = raw_anchor(&raw.attributes, root, file_facts)?;
     let external_wiring_site = if source.is_none() {
         raw_origin_anchor(&raw.attributes, root, file_facts)?
+            .or_else(|| inferred_wiring_site.cloned())
     } else {
         None
     };

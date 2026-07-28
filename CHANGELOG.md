@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Introduce the first supported Compass code graph contract,
+  `compass.graph/1`, as a strict versioned NetworkX-compatible multigraph with
+  structural, framework, enterprise, messaging, job, schema, configuration,
+  and database kinds.
+- Add explicit `routes_to` bindings for supported server and file-routing
+  frameworks, preserving middleware order and attributable heuristic wiring.
+- Add the shared `compass.query/1` search, callers, callees, impact, explore,
+  and node-trail contract across CLI, MCP, the viewer, and VS Code.
+- Hard-cut over graph persistence: artifacts without `compass.graph/1` are not
+  loaded through an adapter. Run `compass update` to rebuild them.
 - Correct C function identities by resolving the callable declarator before
   generic declaration names, including macro-heavy SQLite declarations.
 - Preserve repeated Markdown sections and rationale entries as distinct

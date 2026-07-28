@@ -126,3 +126,18 @@ test("traversal answers expose graph and source actions", async ({ page }) => {
     window as typeof window & { openedQueryGraph?: boolean }
   ).openedQueryGraph)).toBe(true);
 });
+
+test("typed graph query evidence exposes exact and heuristic provenance", async ({ page }) => {
+  await page.goto("/graph.html");
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("helper");
+  await page.getByRole("option", { name: /helper/i }).click();
+  await expect(page.getByRole("region", { name: "Node evidence" }))
+    .toContainText("Exact");
+  await expect(page.getByRole("region", { name: "Node evidence" }))
+    .toContainText("rust.functions");
+  const relationships = page.getByRole("region", { name: "Relationship evidence" });
+  await expect(relationships).toContainText("Ambiguous");
+  await expect(relationships).toContainText("trait-object-call");
+  await expect(relationships).toContainText("Wired at src/lib.rs:6");
+  await expect(relationships).toContainText("compatible receiver type");
+});

@@ -440,10 +440,6 @@ fn endpoint_kinds_are_valid(
                         | NodeKind::Component
                 )
         }
-        EdgeKind::Schedules => target.kind == NodeKind::Job,
-        EdgeKind::Triggers => {
-            source.kind == NodeKind::Job || source.kind == NodeKind::DatabaseTrigger
-        }
         EdgeKind::MapsTo => {
             matches!(
                 target.kind,
@@ -469,6 +465,8 @@ fn endpoint_kinds_are_valid(
         | EdgeKind::Subscribes
         | EdgeKind::Produces
         | EdgeKind::Consumes
+        | EdgeKind::Schedules
+        | EdgeKind::Triggers
         | EdgeKind::Tests
         | EdgeKind::DependsOn
         | EdgeKind::Documents => true,

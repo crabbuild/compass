@@ -129,6 +129,10 @@ test-product: ## Run the Compass CLI product contract
 test-release-scripts: ## Test packaging and download installer scripts
 	sh scripts/test_release_scripts.sh
 
+.PHONY: qualify-code-graph-v1
+qualify-code-graph-v1: ## Run the complete Compass code graph v1 fixture release gate
+	./scripts/qualify_code_graph_v1.sh --fixtures-only
+
 # ── Lint & Format ──────────────────────────────────────────────────
 
 .PHONY: fmt

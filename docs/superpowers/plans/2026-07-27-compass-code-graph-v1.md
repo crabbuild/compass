@@ -1658,12 +1658,12 @@ toy fixtures.
 
 **Implementation:**
 
-- [ ] Implement the coverage checker to fail when a declared node or edge kind
+- [x] Implement the coverage checker to fail when a declared node or edge kind
   has zero producers; a framework lacks positive, near-match, exact,
   ambiguous, unresolved, or incremental coverage; a heuristic edge lacks
   wiring evidence; clean and incremental bytes differ; or Rust/CLI/MCP/VS
   Code schema fingerprints differ.
-- [ ] Implement `qualify_code_graph_v1.sh --fixtures-only` to run:
+- [x] Implement `qualify_code_graph_v1.sh --fixtures-only` to run:
 
 ```bash
 cargo fmt --all -- --check
@@ -1675,28 +1675,28 @@ npm run build
 python3 scripts/check_code_graph_v1_coverage.py
 ```
 
-- [ ] Define the real-repository lock format with `name`, `url`, immutable
+- [x] Define the real-repository lock format with `name`, `url`, immutable
   40-hex `commit`, `size_class`, `language_family`, `frameworks`, and at least
   three named route-to-handler flows for every framework. Reject branches,
   tags, shortened hashes, duplicate size/language cells, or insufficient
   framework flows.
-- [ ] Make full qualification clone locked repositories into temporary
+- [x] Make full qualification clone locked repositories into temporary
   directories, build clean and incremental graphs, execute the declared
   queries, and record Compass revision, repository revision, graph digest,
   counts, coverage, unresolved/ambiguous totals, false exact resolutions,
   index time, and query latency.
-- [ ] Commit the generated evidence in
+- [x] Commit the generated evidence in
   `docs/design/code-graph-v1-qualification.md`. Qualification fails if any
   declared flow does not resolve as expected or if a bounded ambiguous result
   is reported as exact.
-- [ ] Add Linux fixture qualification to
+- [x] Add Linux fixture qualification to
   `.github/workflows/compass-ci.yml`. Run platform-sensitive suites on macOS,
   Linux, and Windows for path normalization, atomic publication, SQLite,
   process cancellation, source navigation, and VS Code packaging.
-- [ ] Document the hard cutover and rebuild requirement under the Unreleased
+- [x] Document the hard cutover and rebuild requirement under the Unreleased
   section of `CHANGELOG.md`; do not describe pre-contract graphs as a
   supported old v1.
-- [ ] Add `make qualify-code-graph-v1` as the release entry point.
+- [x] Add `make qualify-code-graph-v1` as the release entry point.
 
 **Contract produced:** Release engineering has a single command and an
 immutable evidence report for every vocabulary producer, framework, client,
@@ -1734,24 +1734,24 @@ framework has three real flows, and the cross-platform CI matrix is green.
 
 ## Final release review
 
-- [ ] Confirm the durable artifact is a NetworkX-compatible
+- [x] Confirm the durable artifact is a NetworkX-compatible
   `compass.graph/1` envelope and contains no `relation` aliases or flattened
   unknown attributes.
-- [ ] Confirm pre-contract artifacts rebuild on update and fail with rebuild
+- [x] Confirm pre-contract artifacts rebuild on update and fail with rebuild
   guidance on read-only paths; no adapter or dual representation exists.
-- [ ] Confirm Program IR remains `http://crab.build/compass/v1` and is joined
+- [x] Confirm Program IR remains `http://crab.build/compass/v1` and is joined
   only at query time.
-- [ ] Confirm all core, enterprise, database, event, job, schema, and resource
+- [x] Confirm all core, enterprise, database, event, job, schema, and resource
   kinds have validated producers.
-- [ ] Confirm all approved frameworks publish `route` nodes and canonical
+- [x] Confirm all approved frameworks publish `route` nodes and canonical
   `routes_to` edges with exact, convention, config, ambiguous, or
   surfaced heuristic evidence.
-- [ ] Confirm search uses FTS5 and callers, callees, impact, explore, and node
+- [x] Confirm search uses FTS5 and callers, callees, impact, explore, and node
   trail share `compass.query/1`.
-- [ ] Confirm CLI, MCP, viewer, and VS Code schema fingerprints match.
-- [ ] Confirm heuristic rule and wiring-site evidence appears inline in
+- [x] Confirm CLI, MCP, viewer, and VS Code schema fingerprints match.
+- [x] Confirm heuristic rule and wiring-site evidence appears inline in
   explore, node trail, the viewer, and VS Code.
-- [ ] Confirm clean and incremental graph bytes match across checkout roots.
+- [x] Confirm clean and incremental graph bytes match across checkout roots.
 - [ ] Confirm real-repository qualification and macOS/Linux/Windows gates pass.
-- [ ] Inspect `git status --short` and verify unrelated user changes remain
+- [x] Inspect `git status --short` and verify unrelated user changes remain
   unmodified and unstaged.
