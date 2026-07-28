@@ -449,7 +449,15 @@ fn endpoint_kinds_are_valid(
                 )
         }
         EdgeKind::Reads | EdgeKind::Writes => {
-            source.kind.is_callable()
+            (source.kind.is_callable()
+                || matches!(
+                    source.kind,
+                    NodeKind::Query
+                        | NodeKind::Migration
+                        | NodeKind::DatabaseView
+                        | NodeKind::DatabaseProcedure
+                        | NodeKind::DatabaseTrigger
+                ))
                 && matches!(
                     target.kind,
                     NodeKind::Database
@@ -475,8 +483,10 @@ fn endpoint_kinds_are_valid(
                 && target.kind == NodeKind::Job
         }
         EdgeKind::Triggers => {
-            source.kind == NodeKind::Job
-                && matches!(target.kind, NodeKind::Function | NodeKind::Method)
+            (source.kind == NodeKind::Job
+                && matches!(target.kind, NodeKind::Function | NodeKind::Method))
+                || (source.kind == NodeKind::DatabaseTrigger
+                    && target.kind == NodeKind::DatabaseTable)
         }
         EdgeKind::Tests => {
             source.roles.contains(&NodeRole::Test)

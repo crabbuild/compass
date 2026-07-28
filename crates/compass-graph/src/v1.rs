@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
-    BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, DatabaseNodeDetails,
-    EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
-    GraphDiagnostic, GraphDocument, GraphMetadata, ImportExportNodeDetails, MessagingNodeDetails,
-    NodeDetails, NodeKind, NodeRecord, NodeRole, QueryNodeDetails, ResourceKind,
-    ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails, RouteStage, SchemaNodeDetails,
-    SymbolNodeDetails,
+    BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, CoverageStatus,
+    DatabaseNodeDetails, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails,
+    FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata, ImportExportNodeDetails,
+    MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole, QueryNodeDetails,
+    ResourceKind, ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails, RouteStage,
+    SchemaNodeDetails, SymbolNodeDetails,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -108,6 +108,38 @@ impl BuildEvidence {
             generation.update(value.as_bytes());
         }
         let generation_id = format!("sha256:{:x}", generation.finalize());
+        let mut declared_coverage = BTreeSet::new();
+        for node in &extraction.nodes {
+            if let Some(kind) =
+                optional_any_string(&node.attributes, &["symbol_kind", "type", "file_type"])
+            {
+                declared_coverage.insert((
+                    format!("node:{kind}"),
+                    coverage_producer(&node.attributes),
+                    coverage_file_id(&node.attributes, &repository_root)?,
+                ));
+            }
+        }
+        for edge in &extraction.edges {
+            if let Some(relation) = optional_string(&edge.attributes, "relation") {
+                declared_coverage.insert((
+                    format!("edge:{relation}"),
+                    coverage_producer(&edge.attributes),
+                    coverage_file_id(&edge.attributes, &repository_root)?,
+                ));
+            }
+        }
+        let coverage = declared_coverage
+            .into_iter()
+            .map(|(capability, producer, file_id)| CoverageRecord {
+                capability,
+                producer,
+                status: CoverageStatus::Complete,
+                file_id,
+                reason: None,
+                anchor: None,
+            })
+            .collect();
         Ok(Self {
             repository_root,
             build: BuildMetadata {
@@ -118,10 +150,28 @@ impl BuildEvidence {
                 generation_id,
             },
             files,
-            coverage: Vec::new(),
+            coverage,
             diagnostics: Vec::new(),
         })
     }
+}
+
+fn coverage_producer(attributes: &Map<String, Value>) -> String {
+    optional_string(attributes, "extractor").unwrap_or_else(|| {
+        optional_any_string(attributes, &["language", "lang"]).map_or_else(
+            || "compass.languages.unknown".to_owned(),
+            |language| format!("compass.languages.{language}"),
+        )
+    })
+}
+
+fn coverage_file_id(
+    attributes: &Map<String, Value>,
+    root: &Path,
+) -> Result<Option<String>, GraphError> {
+    optional_string(attributes, "source_file")
+        .map(|path| portable_path(&path, root).map(|path| file_id(&path)))
+        .transpose()
 }
 
 /// Publish resolved raw facts as a validated, deterministic Compass graph v1 document.

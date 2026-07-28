@@ -1509,19 +1509,17 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
                 normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
                 node.attributes.remove("origin_file");
                 node.attributes.remove("_callable");
-                node.attributes.insert(
-                    "_origin".to_owned(),
-                    serde_json::Value::String("ast".to_owned()),
-                );
+                node.attributes
+                    .entry("_origin".to_owned())
+                    .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
             });
         },
         || {
             extraction.edges.par_iter_mut().for_each(|edge| {
                 normalize_source_attribute_cached(&mut edge.attributes, root, &canonical_sources);
-                edge.attributes.insert(
-                    "_origin".to_owned(),
-                    serde_json::Value::String("ast".to_owned()),
-                );
+                edge.attributes
+                    .entry("_origin".to_owned())
+                    .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
             });
         },
     );

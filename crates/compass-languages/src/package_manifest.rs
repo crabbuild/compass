@@ -51,13 +51,7 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
 
     let source_file = path.to_string_lossy().into_owned();
     let package_node_id = package_id(&info.name);
-    let mut attributes = Map::new();
-    attributes.insert("label".to_owned(), Value::String(info.name.clone()));
-    attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
-    attributes.insert("type".to_owned(), Value::String("package".to_owned()));
-    attributes.insert("ecosystem".to_owned(), Value::String(ecosystem.to_owned()));
-    attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
-    attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
+    let mut attributes = package_attributes(&info.name, ecosystem, &source_file);
     if let Some(version) = info.version.filter(is_truthy) {
         attributes.insert("version".to_owned(), version);
     }
@@ -75,6 +69,10 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         if dependency_id == package_node_id || !seen.insert(dependency_id.clone()) {
             continue;
         }
+        extraction.nodes.push(NodeRecord {
+            id: dependency_id.clone(),
+            attributes: package_attributes(&dependency, ecosystem, &source_file),
+        });
         let mut attributes = Map::new();
         attributes.insert(
             "relation".to_owned(),
@@ -89,6 +87,11 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
         attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
         attributes.insert("weight".to_owned(), json!(1.0));
+        attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
+        attributes.insert(
+            "extractor".to_owned(),
+            Value::String("compass.languages.package-manifest".to_owned()),
+        );
         extraction.edges.push(EdgeRecord {
             source: package_node_id.clone(),
             target: dependency_id,
@@ -96,6 +99,33 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         });
     }
     Ok(extraction)
+}
+
+fn package_attributes(name: &str, ecosystem: &str, source_file: &str) -> Map<String, Value> {
+    let mut attributes = Map::new();
+    attributes.insert("label".to_owned(), Value::String(name.to_owned()));
+    attributes.insert("name".to_owned(), Value::String(name.to_owned()));
+    attributes.insert("qualified_name".to_owned(), Value::String(name.to_owned()));
+    attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String("package".to_owned()),
+    );
+    attributes.insert("ecosystem".to_owned(), Value::String(ecosystem.to_owned()));
+    attributes.insert("language".to_owned(), Value::String(ecosystem.to_owned()));
+    attributes.insert(
+        "source_file".to_owned(),
+        Value::String(source_file.to_owned()),
+    );
+    attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
+    attributes.insert("line_start".to_owned(), Value::from(1));
+    attributes.insert("line_end".to_owned(), Value::from(1));
+    attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
+    attributes.insert(
+        "extractor".to_owned(),
+        Value::String("compass.languages.package-manifest".to_owned()),
+    );
+    attributes
 }
 
 struct PackageInfo {

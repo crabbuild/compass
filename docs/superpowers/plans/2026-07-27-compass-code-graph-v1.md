@@ -702,19 +702,19 @@ only evidence that can be tied to exact syntax or configuration anchors.
 
 **Implementation:**
 
-- [ ] Extend SQL extraction to emit raw facts for database, schema, table,
+- [x] Extend SQL extraction to emit raw facts for database, schema, table,
   view, column, index, constraint, procedure, trigger, query, and migration
   when the parsed statement provides an exact name and anchor.
-- [ ] Model SQL containment explicitly:
+- [x] Model SQL containment explicitly:
   database → database_schema → table/view/procedure, and table/view → columns,
   indexes, constraints, and triggers.
-- [ ] Emit `reads` and `writes` from exact SQL table references. Preserve
+- [x] Emit `reads` and `writes` from exact SQL table references. Preserve
   qualification and aliases in typed detail; do not resolve dynamic SQL
   strings as exact.
-- [ ] Emit packages, resources, and config keys from manifest, JSON, and
+- [x] Emit packages, resources, and config keys from manifest, JSON, and
   Terraform syntax. Use `depends_on`, `contains`, and `references` only when
   the source declares that relation.
-- [ ] Add producer identifiers to coverage metadata so the release gate can
+- [x] Add producer identifiers to coverage metadata so the release gate can
   prove which extractor emitted each declared kind and edge.
 
 **Contract produced:** The v1 vocabulary has anchored database and

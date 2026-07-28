@@ -27,7 +27,7 @@ fn apm_manifests_cover_scalar_versions_dependency_shapes_and_empty_inputs()
         &path,
         "name: fixture\nversion: true\ndependencies:\n  alpha: 1\n  false: 2\n  7: 3\n  null: 4\n  nested: {}\n",
     )?;
-    assert_eq!(mapping.nodes.len(), 1);
+    assert_eq!(mapping.nodes.len(), 6);
     assert_eq!(version(&mapping), Some(&Value::Bool(true)));
     assert_eq!(mapping.edges.len(), 5);
 
@@ -125,7 +125,7 @@ require (
 )
 "#,
     )?;
-    assert_eq!(module.nodes.len(), 1);
+    assert_eq!(module.nodes.len(), 3);
     assert_eq!(module.edges.len(), 2);
     assert!(extract(&go, "go 1.23\n")?.nodes.is_empty());
 
