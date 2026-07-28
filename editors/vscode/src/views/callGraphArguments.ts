@@ -6,6 +6,27 @@ type CallGraphRoot = {
   line: number;
 };
 
+export function callGraphCommandArguments(
+  request: readonly string[],
+  graphPath: string
+): string[] {
+  // Keep the editor interaction on the required structural graph. Program IR
+  // remains an explicit CLI enrichment because reparsing it on every reveal
+  // can be much more expensive than resolving the requested neighborhood.
+  return [
+    "call-graph",
+    ...request,
+    "--max-nodes",
+    "500",
+    "--max-edges",
+    "1000",
+    "--graph",
+    graphPath,
+    "--format",
+    "json"
+  ];
+}
+
 export function callGraphRootArguments(
   root: CallGraphRoot,
   direction: CallDirection,
