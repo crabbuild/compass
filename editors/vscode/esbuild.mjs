@@ -64,7 +64,8 @@ const builds = [
       architecture: "src/webviews/architecture.tsx",
       query: "src/webviews/query.tsx",
       history: "src/webviews/history.tsx",
-      initialize: "src/webviews/initialize.tsx"
+      initialize: "src/webviews/initialize.tsx",
+      onboarding: "src/webviews/onboarding.tsx"
     },
     outdir: "dist/webviews",
     format: "iife",

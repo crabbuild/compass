@@ -33,7 +33,7 @@ export type CliOnboardingState =
     kind: "error";
     title: string;
     message: string;
-    searched?: string[];
+    searched?: string[] | undefined;
     canVerifyAgain: boolean;
   }
   | {
