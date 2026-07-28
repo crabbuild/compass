@@ -140,6 +140,14 @@ jobs:
       - name: Native tests
         run: cargo test --workspace --lib --bins --locked --target ${{ matrix.target }}
 
+      - name: Test PowerShell installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p compass-cli --bin compass --target ${{ matrix.target }}
+          ./scripts/test_install_ps1.ps1 `
+            -CompassBinary "target/${{ matrix.target }}/release/compass.exe"
+
   dependency-audit:
     runs-on: ubuntu-24.04
     steps:
