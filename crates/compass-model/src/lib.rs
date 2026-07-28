@@ -1,8 +1,10 @@
 //! Typed model for Compass node-link graphs.
 
+pub mod code_graph;
 mod document;
 mod error;
 mod graph;
+pub mod provenance;
 mod query_index;
 mod validation;
 

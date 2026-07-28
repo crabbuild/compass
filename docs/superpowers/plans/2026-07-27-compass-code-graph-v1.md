@@ -146,13 +146,12 @@ facts out of `compass-model`.
 
 - Create: `crates/compass-model/src/code_graph.rs`
 - Create: `crates/compass-model/src/provenance.rs`
-- Create: `crates/compass-model/src/validation.rs`
 - Modify: `crates/compass-model/src/lib.rs`
 - Test: `crates/compass-model/tests/code_graph_v1.rs`
 
 **Implementation:**
 
-- [ ] Freeze the serialized node values as:
+- [x] Freeze the serialized node values as:
   `file`, `module`, `package`, `namespace`, `class`, `struct`, `interface`,
   `trait`, `protocol`, `enum`, `enum_member`, `type_alias`, `function`,
   `method`, `constructor`, `property`, `field`, `variable`, `constant`,
@@ -162,13 +161,13 @@ facts out of `compass-model`.
   `database_schema`, `database_table`, `database_view`, `database_column`,
   `database_index`, `database_constraint`, `database_procedure`, and
   `database_trigger`.
-- [ ] Freeze the serialized edge values as:
+- [x] Freeze the serialized edge values as:
   `contains`, `calls`, `imports`, `exports`, `extends`, `implements`,
   `references`, `type_of`, `returns`, `instantiates`, `overrides`,
   `decorates`, `routes_to`, `reads`, `writes`, `aliases`, `registers`,
   `handles`, `publishes`, `subscribes`, `produces`, `consumes`, `schedules`,
   `triggers`, `tests`, `depends_on`, `documents`, and `maps_to`.
-- [ ] Add serde `snake_case` enums with the exact closed vocabulary:
+- [x] Add serde `snake_case` enums with the exact closed vocabulary:
 
 ```rust
 pub enum NodeKind {
@@ -198,28 +197,29 @@ pub enum EdgeKind {
 }
 ```
 
-- [ ] Define `SourceAnchor`, `EvidenceOrigin`, `EvidenceConfidence`,
+- [x] Define `SourceAnchor`, `EvidenceOrigin`, `EvidenceConfidence`,
   `ResolutionState`, `ResolutionCandidate`, and `Provenance`.
-  `EvidenceOrigin` is exactly `ast`, `scip`, `configuration`, `convention`,
-  `heuristic`, or `program_ir`. This task establishes their serialized shape;
-  Task 3 adds construction and whole-graph invariants.
-- [ ] Define typed `NodeRecord`, `EdgeRecord`, `FileRecord`,
+  `EvidenceOrigin` is exactly `ast`, `config`, `convention`, `artifact`, or
+  `heuristic`. SCIP is an `artifact`; Program IR remains a separate query
+  evidence layer and is not a durable structural origin. This task establishes
+  the serialized shape; Task 3 adds construction and whole-graph invariants.
+- [x] Define typed `NodeRecord`, `EdgeRecord`, `FileRecord`,
   `GraphMetadata`, `CoverageRecord`, and `GraphDiagnostic`. Put kind-specific
   fields in tagged detail enums instead of a flattened attributes map. Keep
   community IDs, scores, colors, and labels typed and optional so existing
   clustering can enrich v1 nodes without reopening the vocabulary.
-- [ ] Give each edge both `id` and NetworkX `key`; require them to contain the
+- [x] Give each edge both `id` and NetworkX `key`; require them to contain the
   same deterministic identity. Use `kind`, never `relation`, as the published
   relationship field.
-- [ ] Apply `#[serde(deny_unknown_fields)]` to structured records. Unknown
+- [x] Apply `#[serde(deny_unknown_fields)]` to structured records. Unknown
   enum values and misspelled required fields must fail deserialization.
-- [ ] Export the module as `compass_model::code_graph` but do not replace the
+- [x] Export the module as `compass_model::code_graph` but do not replace the
   existing root-level flexible record exports yet.
 
 **Contract produced:** Later tasks can build against
 `compass_model::code_graph::{NodeRecord, EdgeRecord, NodeKind, EdgeKind,
-GraphMetadata}` without changing current extractors. The NetworkX envelope
-switches to these records in Task 3.
+GraphMetadata}` without changing current extractors. Task 3 constructs the v1
+envelope in parallel; Task 4 switches existing consumers to it.
 
 **Verification:**
 
@@ -793,7 +793,7 @@ pub struct RouteStage {
 - [ ] Publish a `route` node and one `routes_to` edge per execution stage.
   Middleware edges carry `stage: "middleware"` and zero-based `position`; the
   final handler carries `stage: "handler"`.
-- [ ] Use `ast` for explicit bindings, `configuration` for routing files,
+- [ ] Use `ast` for explicit bindings, `config` for routing files,
   `convention` for file-based routes, and `heuristic` only at a dynamic
   dispatch boundary with a rule and wiring site.
 - [ ] Reject URL-looking strings unless a recognized framework shape or
@@ -990,7 +990,7 @@ existing language symbol IDs.
   and method-level `@RequestMapping`; compose class and method prefixes.
 - [ ] Parse Play verb routes from `conf/routes` and resolve Java or Scala
   controller actions, including static and injected controller forms.
-- [ ] Give YAML and route-file edges `configuration` provenance and exact line
+- [ ] Give YAML and route-file edges `config` provenance and exact line
   anchors. Dynamic controller names remain bounded candidates or unresolved.
 
 **Contract produced:** PHP/Ruby/JVM handlers have the same canonical
@@ -1370,7 +1370,7 @@ heuristic impact, and return digest-verified source grouped by file.
   family: `calls`, `routes_to`, `imports`, `exports`, `references`,
   `depends_on`, `reads`, `writes`, `publishes`, `subscribes`, `produces`,
   `consumes`, `schedules`, `triggers`, and `maps_to`.
-- [ ] Default impact to exact/configuration/convention evidence. Add an
+- [ ] Default impact to exact/config/convention evidence. Add an
   explicit request option for heuristic edges and label every affected path
   with its weakest resolution/evidence state.
 - [ ] Implement explore by resolving several requested symbols, selecting a
@@ -1523,7 +1523,7 @@ VS Code webview cannot drift.
   `fixtures/contracts/compass-query-v1.fingerprint` with the fingerprint
   generated from the TypeScript enum/field manifest so Rust/TypeScript drift
   fails CI.
-- [ ] Render exact, configuration, convention, ambiguous, unresolved, and
+- [ ] Render exact, config, convention, ambiguous, unresolved, and
   heuristic states with text and icons. For heuristic edges, show rule,
   wiring file/line, extractor, confidence, and candidates inline.
 - [ ] Add `routes_to` and enterprise edge labels without collapsing them into
@@ -1740,7 +1740,7 @@ framework has three real flows, and the cross-platform CI matrix is green.
 - [ ] Confirm all core, enterprise, database, event, job, schema, and resource
   kinds have validated producers.
 - [ ] Confirm all approved frameworks publish `route` nodes and canonical
-  `routes_to` edges with exact, convention, configuration, ambiguous, or
+  `routes_to` edges with exact, convention, config, ambiguous, or
   surfaced heuristic evidence.
 - [ ] Confirm search uses FTS5 and callers, callees, impact, explore, and node
   trail share `compass.query/1`.
