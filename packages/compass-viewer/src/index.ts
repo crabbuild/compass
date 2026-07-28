@@ -14,6 +14,7 @@ export * from "./history/HistoryWorkspace";
 export * from "./history/ComparisonOverlay";
 export * from "./history/state";
 export * from "./initialize/InitializationWizard";
+export * from "./onboarding/CliOnboarding";
 export * from "./architecture/ArchitectureFlow";
 export * from "./lib/collectionView";
 export * from "./components/workbench/CollectionToolbar";
