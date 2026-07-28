@@ -55,7 +55,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }));
   }
 
-  const workspaceTree = new WorkspaceTree(registry, discovery);
+  const workspaceTree = new WorkspaceTree(registry, () => discovery);
   const statusBar = createCompassStatusBar(context, registry);
   const refresh = async () => {
     await registry.refresh();
