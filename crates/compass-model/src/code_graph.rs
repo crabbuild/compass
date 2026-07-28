@@ -1,7 +1,14 @@
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::provenance::{Provenance, ResolutionState, SourceAnchor};
+use crate::{GraphError, validate_code_graph};
 
 pub const CODE_GRAPH_SCHEMA_V1: &str = "compass.graph/1";
 
@@ -1017,4 +1024,131 @@ impl GraphDocument {
             links: Vec::new(),
         }
     }
+
+    /// Load and validate a trusted `compass.graph/1` artifact.
+    pub fn load(path: &Path) -> Result<Self, GraphError> {
+        if path.extension().and_then(|part| part.to_str()) != Some("json") {
+            return Err(GraphError::InvalidExtension(path.to_path_buf()));
+        }
+        Self::load_strict(path)
+    }
+
+    /// Load the complete graph for impact traversal.
+    ///
+    /// V1 records are already typed and compact projections are derived from
+    /// the content-addressed query index, so this retains the trusted document.
+    pub fn load_for_affected(path: &Path) -> Result<Self, GraphError> {
+        Self::load(path)
+    }
+
+    /// Load a graph without enforcing the filename extension.
+    pub fn load_for_recluster(path: &Path) -> Result<Self, GraphError> {
+        Self::load_strict(path)
+    }
+
+    #[must_use]
+    pub fn size_cap_exceeded(path: &Path) -> Option<(u64, u64)> {
+        let size = path.metadata().ok()?.len();
+        let cap = crate::graph::graph_size_cap();
+        (size > cap).then_some((size, cap))
+    }
+
+    fn load_strict(path: &Path) -> Result<Self, GraphError> {
+        if !path.exists() {
+            return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
+        }
+        if let Some((size, cap)) = Self::size_cap_exceeded(path) {
+            return Err(GraphError::TooLarge {
+                path: crate::graph::absolute_path(path),
+                size,
+                cap,
+            });
+        }
+        let bytes = fs::read(path).map_err(|source| GraphError::Read {
+            path: crate::graph::absolute_path(path),
+            source,
+        })?;
+        let digest = Sha256::digest(&bytes);
+        let digest = format!("{digest:x}");
+        if let Some(document) = load_content_cache(path, &digest) {
+            validate_code_graph(&document)?;
+            return Ok(document);
+        }
+
+        let value: Value = serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)?;
+        let found = value
+            .get("graph")
+            .and_then(|graph| graph.get("schema"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if found.as_deref() != Some(CODE_GRAPH_SCHEMA_V1) {
+            return Err(GraphError::UnsupportedGraphSchema { found });
+        }
+        let document = serde_json::from_value(value).map_err(GraphError::Corrupt)?;
+        validate_code_graph(&document)?;
+        let _ = write_content_cache(path, &digest, &document);
+        Ok(document)
+    }
+}
+
+const CONTENT_CACHE_MAGIC: &[u8; 8] = b"CGRPHV01";
+static CONTENT_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn content_cache_path(graph_path: &Path, digest: &str) -> PathBuf {
+    let file_name = graph_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("graph.json");
+    graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache")
+        .join(format!(".{file_name}.{digest}.compass-v1"))
+}
+
+fn load_content_cache(path: &Path, digest: &str) -> Option<GraphDocument> {
+    let mut reader = BufReader::new(File::open(content_cache_path(path, digest)).ok()?);
+    let mut magic = [0_u8; CONTENT_CACHE_MAGIC.len()];
+    std::io::Read::read_exact(&mut reader, &mut magic).ok()?;
+    if &magic != CONTENT_CACHE_MAGIC {
+        return None;
+    }
+    rmp_serde::from_read(reader).ok()
+}
+
+fn write_content_cache(
+    graph_path: &Path,
+    digest: &str,
+    document: &GraphDocument,
+) -> std::io::Result<()> {
+    let cache_path = content_cache_path(graph_path, digest);
+    if cache_path.exists() {
+        return Ok(());
+    }
+    let Some(parent) = cache_path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent)?;
+    let sequence = CONTENT_CACHE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = cache_path.with_extension(format!("tmp-{}-{sequence}", std::process::id()));
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)?;
+    let result = (|| {
+        let mut writer = BufWriter::new(file);
+        writer.write_all(CONTENT_CACHE_MAGIC)?;
+        rmp_serde::encode::write_named(&mut writer, document).map_err(std::io::Error::other)?;
+        writer.flush()?;
+        drop(writer);
+        match fs::rename(&temporary, &cache_path) {
+            Ok(()) => Ok(()),
+            Err(_error) if cache_path.exists() => Ok(()),
+            Err(error) => Err(error),
+        }
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
 }
