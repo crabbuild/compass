@@ -18,6 +18,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 compass-cypher = { path = "../compass-cypher", version = "0.1.4" }
 compass-model = { path = "../compass-model", version = "0.1.4" }
+compass-analysis = { path = "../compass-analysis", version = "0.1.4" }
+compass-ir = { path = "../compass-ir", version = "0.1.4" }
 unicode-normalization.workspace = true
 
 [dev-dependencies]

@@ -1295,8 +1295,10 @@ dependencies = [
 name = "compass-query"
 version = "0.1.10"
 dependencies = [
+ "compass-analysis",
  "compass-cypher",
  "compass-graphdb",
+ "compass-ir",
  "compass-model",
  "regex",
  "serde",

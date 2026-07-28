@@ -1206,12 +1206,12 @@ overwrite or silently contradict structural facts.
 
 **Implementation:**
 
-- [ ] Define bounded request types for search, callers/callees, impact,
+- [x] Define bounded request types for search, callers/callees, impact,
   explore, and node trail. Require explicit limits for depth, nodes, paths,
   candidates, source bytes, and total response bytes. The public names are
   `SearchRequest`, `CallRequest`, `ImpactRequest`, `ExploreRequest`, and
   `NodeTrailRequest`.
-- [ ] Define one additive response:
+- [x] Define one additive response:
 
 ```rust
 pub struct CodeQueryResponse {
@@ -1228,26 +1228,26 @@ pub struct CodeQueryResponse {
 }
 ```
 
-- [ ] Define the response members `SearchHit`, `QueryNode`, `QueryEdge`,
+- [x] Define the response members `SearchHit`, `QueryNode`, `QueryEdge`,
   `QueryFile`, `QueryPath`, `QueryDiagnostic`, and `CodeQueryLimits` in the
   same module. Do not reuse the existing CompassQL `QueryLimits` type.
-- [ ] Put evidence records on query nodes and edges with a `layer` of
+- [x] Put evidence records on query nodes and edges with a `layer` of
   `structural_graph` or `program_ir`. Preserve origin, confidence, anchor,
   rule, wiring site, and resolution state.
-- [ ] Add `compass-analysis` and `compass-ir` dependencies to
+- [x] Add `compass-analysis` and `compass-ir` dependencies to
   `compass-query`. Join Program evidence only through stable
   `graph_node_id`.
-- [ ] When Program IR has an orphan symbol or contradicts a structural fact,
+- [x] When Program IR has an orphan symbol or contradicts a structural fact,
   retain the structural record and add a typed diagnostic. Do not create a
   new durable node or change `graph.json`.
-- [ ] Return no match, ambiguous match, unresolved handler, incomplete
+- [x] Return no match, ambiguous match, unresolved handler, incomplete
   coverage, stale source, and bounded truncation as successful typed responses
   with diagnostics. Return corrupt authoritative artifacts, schema mismatch,
   unsafe paths, and violated graph invariants as `QueryError`.
-- [ ] Sort every response collection by a documented stable key. Search is
+- [x] Sort every response collection by a documented stable key. Search is
   the only operation that populates `results`; other operations return an
   empty array rather than omitting the field.
-- [ ] Generate a complete example response and a deterministic fingerprint of
+- [x] Generate a complete example response and a deterministic fingerprint of
   the Rust field/enum contract under `fixtures/contracts/`. Tasks 16–18 use
   these files for transport and TypeScript parity.
 

@@ -3,6 +3,7 @@
 mod affected;
 mod benchmark;
 mod cql;
+mod program_join;
 mod score;
 mod text;
 mod traversal;
@@ -13,6 +14,7 @@ pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
+pub use program_join::join_program_evidence;
 pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{TraversalMode, query_graph_text, render_explanation, render_shortest_path};

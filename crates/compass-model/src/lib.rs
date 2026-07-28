@@ -6,6 +6,7 @@ mod error;
 mod graph;
 pub mod identity;
 pub mod provenance;
+pub mod query_contract;
 mod query_index;
 mod validation;
 
