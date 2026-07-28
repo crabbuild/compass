@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::provenance::{Provenance, ResolutionState, SourceAnchor};
 
@@ -403,6 +404,12 @@ pub struct SymbolNodeDetails {
     pub overload_discriminator: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declaring_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_digest: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -623,6 +630,10 @@ pub struct EdgeRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<EdgeDetails>,
     pub evidence: Vec<Provenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<GraphDiagnostic>,
 }
@@ -631,6 +642,282 @@ impl EdgeRecord {
     #[must_use]
     pub fn has_networkx_identity(&self) -> bool {
         self.id == self.key
+    }
+
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<Value> {
+        match key {
+            "id" | "key" => Some(Value::String(self.id.clone())),
+            "source" | "_src" => Some(Value::String(self.source.clone())),
+            "target" | "_tgt" => Some(Value::String(self.target.clone())),
+            "kind" | "relation" => Some(Value::String(self.kind.as_str().to_owned())),
+            "source_file" => self
+                .relationship_site
+                .as_ref()
+                .map(|anchor| Value::String(anchor.file.clone())),
+            "source_location" => self.relationship_site.as_ref().map(|anchor| {
+                Value::String(format!(
+                    "L{}:{}-L{}:{}",
+                    anchor.start_line, anchor.start_column, anchor.end_line, anchor.end_column
+                ))
+            }),
+            "confidence" => self
+                .evidence
+                .first()
+                .map(|evidence| Value::String(evidence.confidence.legacy_str().to_owned())),
+            "confidence_score" => self
+                .evidence
+                .iter()
+                .find_map(|evidence| evidence.score)
+                .map(Value::from),
+            "_origin" => self
+                .evidence
+                .first()
+                .map(|evidence| Value::String(evidence.origin.as_str().to_owned())),
+            "weight" => self.weight.map(Value::from),
+            "context" => self.context.clone().map(Value::String),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn string(&self, key: &str) -> String {
+        self.property(key)
+            .as_ref()
+            .and_then(value_as_python_string)
+            .unwrap_or_default()
+    }
+
+    pub fn properties(&self) -> EdgePropertyProjection<'_> {
+        EdgePropertyProjection {
+            edge: self,
+            position: 0,
+        }
+    }
+}
+
+impl NodeRecord {
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<Value> {
+        match key {
+            "id" => Some(Value::String(self.id.clone())),
+            "label" | "name" => Some(Value::String(self.name.clone())),
+            "qualified_name" | "qualifiedName" => Some(Value::String(self.qualified_name.clone())),
+            "kind" | "type" | "symbol_kind" | "node_type" => {
+                Some(Value::String(self.kind.as_str().to_owned()))
+            }
+            "file_type" => Some(Value::String(
+                if self.kind == NodeKind::Resource {
+                    self.details
+                        .as_ref()
+                        .and_then(|details| match details {
+                            NodeDetails::Resource(details) => {
+                                Some(resource_kind_str(details.resource_kind))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or("document")
+                } else {
+                    "code"
+                }
+                .to_owned(),
+            )),
+            "language" => self.language.clone().map(Value::String),
+            "framework" => self.framework.clone().map(Value::String),
+            "source_file" => self
+                .source
+                .as_ref()
+                .map(|anchor| Value::String(anchor.file.clone())),
+            "source_location" => self.source.as_ref().map(|anchor| {
+                Value::String(format!(
+                    "L{}:{}-L{}:{}",
+                    anchor.start_line, anchor.start_column, anchor.end_line, anchor.end_column
+                ))
+            }),
+            "line_start" => self
+                .source
+                .as_ref()
+                .map(|anchor| Value::from(anchor.start_line)),
+            "line_end" => self
+                .source
+                .as_ref()
+                .map(|anchor| Value::from(anchor.end_line)),
+            "community" => self
+                .community
+                .as_ref()
+                .map(|community| Value::from(community.id)),
+            "community_name" => self
+                .community
+                .as_ref()
+                .and_then(|community| community.label.clone())
+                .map(Value::String),
+            "signature" => self.symbol_details().and_then(|details| {
+                details
+                    .signature
+                    .as_ref()
+                    .map(|value| Value::String(value.clone()))
+            }),
+            "signature_hash" => self.symbol_details().and_then(|details| {
+                details
+                    .signature_digest
+                    .as_ref()
+                    .or(details.overload_discriminator.as_ref())
+                    .map(|value| Value::String(value.clone()))
+            }),
+            "implementation_hash" => self.symbol_details().and_then(|details| {
+                details
+                    .implementation_digest
+                    .as_ref()
+                    .map(|value| Value::String(value.clone()))
+            }),
+            "source_hash" => self.symbol_details().and_then(|details| {
+                details
+                    .source_digest
+                    .as_ref()
+                    .map(|value| Value::String(value.clone()))
+            }),
+            "_origin" => self
+                .evidence
+                .first()
+                .map(|evidence| Value::String(evidence.origin.as_str().to_owned())),
+            "confidence" => self
+                .evidence
+                .first()
+                .map(|evidence| Value::String(evidence.confidence.legacy_str().to_owned())),
+            "roles" => Some(Value::Array(
+                self.roles
+                    .iter()
+                    .map(|role| {
+                        serde_json::to_value(role).unwrap_or_else(|_| Value::String(String::new()))
+                    })
+                    .collect(),
+            )),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn string(&self, key: &str) -> String {
+        self.property(key)
+            .as_ref()
+            .and_then(value_as_python_string)
+            .unwrap_or_default()
+    }
+
+    pub fn properties(&self) -> NodePropertyProjection<'_> {
+        NodePropertyProjection {
+            node: self,
+            position: 0,
+        }
+    }
+
+    fn symbol_details(&self) -> Option<&SymbolNodeDetails> {
+        match self.details.as_ref()? {
+            NodeDetails::Symbol(details) => Some(details),
+            _ => None,
+        }
+    }
+}
+
+const NODE_PROPERTY_KEYS: &[&str] = &[
+    "id",
+    "label",
+    "qualified_name",
+    "kind",
+    "roles",
+    "file_type",
+    "language",
+    "framework",
+    "source_file",
+    "source_location",
+    "line_start",
+    "line_end",
+    "signature",
+    "signature_hash",
+    "implementation_hash",
+    "source_hash",
+    "community",
+    "community_name",
+    "_origin",
+    "confidence",
+];
+
+const EDGE_PROPERTY_KEYS: &[&str] = &[
+    "id",
+    "key",
+    "source",
+    "target",
+    "kind",
+    "relation",
+    "source_file",
+    "source_location",
+    "confidence",
+    "confidence_score",
+    "_origin",
+    "weight",
+    "context",
+];
+
+pub struct NodePropertyProjection<'a> {
+    node: &'a NodeRecord,
+    position: usize,
+}
+
+impl Iterator for NodePropertyProjection<'_> {
+    type Item = (&'static str, Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(&key) = NODE_PROPERTY_KEYS.get(self.position) {
+            self.position += 1;
+            if let Some(value) = self.node.property(key) {
+                return Some((key, value));
+            }
+        }
+        None
+    }
+}
+
+pub struct EdgePropertyProjection<'a> {
+    edge: &'a EdgeRecord,
+    position: usize,
+}
+
+impl Iterator for EdgePropertyProjection<'_> {
+    type Item = (&'static str, Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(&key) = EDGE_PROPERTY_KEYS.get(self.position) {
+            self.position += 1;
+            if let Some(value) = self.edge.property(key) {
+                return Some((key, value));
+            }
+        }
+        None
+    }
+}
+
+fn resource_kind_str(kind: ResourceKind) -> &'static str {
+    match kind {
+        ResourceKind::Document => "document",
+        ResourceKind::Paper => "paper",
+        ResourceKind::Image => "image",
+        ResourceKind::Concept => "concept",
+        ResourceKind::Rationale => "rationale",
+    }
+}
+
+fn value_as_python_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        Value::Bool(value) => Some(if *value { "True" } else { "False" }.to_owned()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
     }
 }
 

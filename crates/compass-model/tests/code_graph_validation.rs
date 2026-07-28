@@ -90,6 +90,8 @@ fn document() -> GraphDocument {
         relationship_site: Some(anchor()),
         details: None,
         evidence: vec![evidence()],
+        weight: None,
+        context: None,
         diagnostics: Vec::new(),
     });
     document

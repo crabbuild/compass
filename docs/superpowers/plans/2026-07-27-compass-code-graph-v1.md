@@ -542,11 +542,11 @@ property projections, then migrates all durable consumers.
   re-exports of `code_graph::GraphDocument`, `NodeRecord`, and `EdgeRecord`.
   Remove the flattened durable definitions, export typed records at the crate
   root, and route `compass-graph::build*` through `normalize_v1`.
-- [ ] Add typed convenience accessors for frequently used structural fields:
+- [x] Add typed convenience accessors for frequently used structural fields:
   label, kind, roles, source anchor, language, framework, community, evidence,
   edge kind, and edge endpoints. These methods read typed fields and do not
   reconstruct a mutable attribute map.
-- [ ] Add read-only `NodePropertyProjection` and `EdgePropertyProjection`
+- [x] Add read-only `NodePropertyProjection` and `EdgePropertyProjection`
   iterators for generic consumers such as CompassQL, Cypher, GraphML, and JSON
   export. The projection has an explicit key registry and converts typed
   fields to `GraphProperty` values; unknown keys return `None`.

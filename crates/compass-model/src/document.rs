@@ -34,6 +34,21 @@ impl NodeRecord {
             .and_then(Value::as_str)
             .unwrap_or(&self.id)
     }
+
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<Value> {
+        (key == "id")
+            .then(|| Value::String(self.id.clone()))
+            .or_else(|| self.attributes.get(key).cloned())
+    }
+
+    pub fn properties(&self) -> impl Iterator<Item = (&str, Value)> {
+        std::iter::once(("id", Value::String(self.id.clone()))).chain(
+            self.attributes
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        )
+    }
 }
 
 /// One edge in `NetworkX` node-link form.
@@ -52,6 +67,28 @@ impl EdgeRecord {
             .get(key)
             .and_then(value_as_python_string)
             .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<Value> {
+        match key {
+            "source" => Some(Value::String(self.source.clone())),
+            "target" => Some(Value::String(self.target.clone())),
+            _ => self.attributes.get(key).cloned(),
+        }
+    }
+
+    pub fn properties(&self) -> impl Iterator<Item = (&str, Value)> {
+        [
+            ("source", Value::String(self.source.clone())),
+            ("target", Value::String(self.target.clone())),
+        ]
+        .into_iter()
+        .chain(
+            self.attributes
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        )
     }
 }
 

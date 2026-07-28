@@ -26,6 +26,19 @@ pub enum EvidenceOrigin {
     Heuristic,
 }
 
+impl EvidenceOrigin {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ast => "ast",
+            Self::Config => "config",
+            Self::Convention => "convention",
+            Self::Artifact => "artifact",
+            Self::Heuristic => "heuristic",
+        }
+    }
+}
+
 /// The strongest claim Compass can make from a piece of evidence.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +46,26 @@ pub enum EvidenceConfidence {
     Exact,
     Inferred,
     Ambiguous,
+}
+
+impl EvidenceConfidence {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Inferred => "inferred",
+            Self::Ambiguous => "ambiguous",
+        }
+    }
+
+    #[must_use]
+    pub const fn legacy_str(self) -> &'static str {
+        match self {
+            Self::Exact => "EXTRACTED",
+            Self::Inferred => "INFERRED",
+            Self::Ambiguous => "AMBIGUOUS",
+        }
+    }
 }
 
 /// The outcome of resolving a symbolic or framework reference.

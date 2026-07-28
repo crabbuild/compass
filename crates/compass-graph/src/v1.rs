@@ -294,6 +294,8 @@ fn normalize_edge(
         relationship_site,
         details,
         evidence,
+        weight: optional_f64(&raw.attributes, "weight"),
+        context: optional_string(&raw.attributes, "context"),
         diagnostics: Vec::new(),
     })
 }
@@ -634,6 +636,9 @@ fn node_details(
                 &["overload_discriminator", "signature_hash"],
             ),
             declaring_type: optional_string(attributes, "declaring_type"),
+            signature_digest: optional_string(attributes, "signature_hash"),
+            implementation_digest: optional_string(attributes, "implementation_hash"),
+            source_digest: optional_string(attributes, "source_hash"),
         })),
     };
     Ok(details)
