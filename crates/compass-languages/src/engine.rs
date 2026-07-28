@@ -214,6 +214,7 @@ impl Engine {
             add_python_rationale(path, source, root, &mut extraction);
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
+        crate::frameworks::detect(path, source, root, spec.name, &mut extraction);
         extraction
     }
 

@@ -843,19 +843,19 @@ belongs in `compass-resolve`, not in the AST visitor.
 
 **Implementation:**
 
-- [ ] Detect Django `path`, `re_path`, legacy `url`, `include`, class-based
+- [x] Detect Django `path`, `re_path`, legacy `url`, `include`, class-based
   `.as_view()`, and dotted handler strings in recognized URL modules.
-- [ ] Resolve `include()` recursively with cycle detection and a 32-file
+- [x] Resolve `include()` recursively with cycle detection and a 32-file
   nesting bound. Compose parent and child paths without discarding source
   anchors.
-- [ ] Detect Flask `@app.route` and blueprint routes, including declared HTTP
+- [x] Detect Flask `@app.route` and blueprint routes, including declared HTTP
   method arrays and blueprint prefixes.
-- [ ] Detect FastAPI `@app` and `@router` decorators for every standard HTTP
+- [x] Detect FastAPI `@app` and `@router` decorators for every standard HTTP
   method, router prefixes, and dependency/middleware execution stages that
   can be proven statically.
-- [ ] Resolve imported functions, bound methods, class-based views, aliases,
+- [x] Resolve imported functions, bound methods, class-based views, aliases,
   and dotted paths against existing Python symbol facts.
-- [ ] Leave dynamic import strings and computed route expressions unresolved
+- [x] Leave dynamic import strings and computed route expressions unresolved
   or heuristic; never report them as exact.
 
 **Contract produced:** Python framework files emit `route` nodes and ordered

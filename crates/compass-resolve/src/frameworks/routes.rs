@@ -48,11 +48,9 @@ pub fn resolve_routes(
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     validate_fact_limits(extraction, limits)?;
     let aliases = alias_map(extraction, limits)?;
+    let expanded = super::python::expand_django_includes(&extraction.framework_facts, limits)?;
     let mut unique = BTreeMap::new();
-    for fact in &extraction.framework_facts {
-        let RawFrameworkFact::Route(route) = fact else {
-            continue;
-        };
+    for route in expanded {
         route
             .validate()
             .map_err(|detail| FrameworkResolutionError::InvalidRoute {
@@ -66,7 +64,7 @@ pub fn resolve_routes(
             route.normalized_path.clone(),
             route.declaring_scope.clone(),
         );
-        unique.entry(key).or_insert_with(|| route.clone());
+        unique.entry(key).or_insert(route);
     }
 
     unique
