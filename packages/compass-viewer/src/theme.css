@@ -1298,6 +1298,207 @@ button:not(:disabled),
   margin-top: 16px;
 }
 
+.compass-code-evidence {
+  margin-top: 16px;
+}
+
+.compass-code-evidence-ledger {
+  display: grid;
+  gap: 6px;
+}
+
+.compass-code-evidence-entry {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--compass-line);
+  border-left-width: 3px;
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background, var(--background));
+}
+
+.compass-code-evidence-entry[data-status="exact"],
+.compass-code-evidence-entry[data-status="config"],
+.compass-code-evidence-entry[data-status="convention"] {
+  border-left-color: var(--vscode-testing-iconPassed, #2ea043);
+}
+
+.compass-code-evidence-entry[data-status="heuristic"] {
+  border-left-color: var(--vscode-charts-blue, #58a6ff);
+}
+
+.compass-code-evidence-entry[data-status="ambiguous"],
+.compass-code-evidence-entry[data-status="unresolved"] {
+  border-left-color: var(--vscode-editorWarning-foreground, #d29922);
+}
+
+.compass-code-evidence-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--foreground));
+}
+
+.compass-code-evidence-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.compass-code-evidence-copy {
+  min-width: 0;
+}
+
+.compass-code-evidence-status {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.compass-code-evidence-status strong {
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.compass-code-evidence-status span {
+  color: var(--compass-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.compass-code-evidence-copy dl {
+  display: grid;
+  gap: 3px;
+  margin: 7px 0 0;
+}
+
+.compass-code-evidence-copy dl > div {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.compass-code-evidence-copy dt {
+  color: var(--compass-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.compass-code-evidence-copy dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font: 9px/1.35 var(--compass-font-mono);
+}
+
+.compass-code-evidence-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: 9px/1.35 var(--compass-font-mono);
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+button.compass-code-evidence-source {
+  cursor: pointer;
+}
+
+button.compass-code-evidence-source:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid var(--vscode-focusBorder, var(--compass-focus));
+  outline-offset: 2px;
+}
+
+.compass-code-evidence-source svg {
+  width: 11px;
+  min-width: 11px;
+  height: 11px;
+}
+
+.compass-code-candidates {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--compass-line);
+}
+
+.compass-code-candidates > span {
+  color: var(--compass-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.compass-code-candidates ul {
+  display: grid;
+  gap: 5px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compass-code-candidates li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 6px;
+}
+
+.compass-code-candidates code {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font: 9px/1.35 var(--compass-font-mono);
+}
+
+.compass-code-candidates li > span {
+  grid-column: 1 / -1;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.compass-code-candidates small {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--compass-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.compass-code-diagnostic {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--vscode-editorWarning-foreground, #d29922);
+  border-radius: 3px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.compass-code-diagnostic[data-severity="info"] {
+  border-color: var(--vscode-charts-blue, #58a6ff);
+}
+
+.compass-code-diagnostic svg {
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
+}
+
+.compass-code-diagnostic strong {
+  color: var(--foreground);
+  text-transform: capitalize;
+}
+
 .compass-evidence-heading {
   display: flex;
   align-items: baseline;

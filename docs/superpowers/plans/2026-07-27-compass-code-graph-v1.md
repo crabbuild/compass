@@ -1520,23 +1520,23 @@ VS Code webview cannot drift.
 
 **Implementation:**
 
-- [ ] Mirror every `compass.query/1` enum and record in strict Zod schemas.
+- [x] Mirror every `compass.query/1` enum and record in strict Zod schemas.
   Reject unknown variants and unsafe source anchors. Export inferred
   TypeScript types from the schema module.
-- [ ] Decode `fixtures/contracts/compass-query-v1.example.json` and compare
+- [x] Decode `fixtures/contracts/compass-query-v1.example.json` and compare
   `fixtures/contracts/compass-query-v1.fingerprint` with the fingerprint
   generated from the TypeScript enum/field manifest so Rust/TypeScript drift
   fails CI.
-- [ ] Render exact, config, convention, ambiguous, unresolved, and
+- [x] Render exact, config, convention, ambiguous, unresolved, and
   heuristic states with text and icons. For heuristic edges, show rule,
   wiring file/line, extractor, confidence, and candidates inline.
-- [ ] Add `routes_to` and enterprise edge labels without collapsing them into
+- [x] Add `routes_to` and enterprise edge labels without collapsing them into
   generic references. Show middleware stage and position on route edges.
-- [ ] Integrate `CodeEvidence` into the graph inspector and query-result
+- [x] Integrate `CodeEvidence` into the graph inspector and query-result
   projection. Use text and icons in addition to color, expose diagnostics and
   truncation, and keep source actions callback-based so the package remains
   host-neutral.
-- [ ] Export the decoder, types, and evidence component from the viewer
+- [x] Export the decoder, types, and evidence component from the viewer
   package entry point.
 
 **Contract produced:** Browser clients share one strict decoder and evidence

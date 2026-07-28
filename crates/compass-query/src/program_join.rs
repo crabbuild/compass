@@ -81,6 +81,7 @@ pub fn join_program_evidence(response: &mut CodeQueryResponse, program: Option<&
                 rule: Some("graph_node_id".to_owned()),
                 wiring_site: None,
                 resolution: ResolutionState::Exact,
+                candidates: Vec::new(),
             });
         }
     }

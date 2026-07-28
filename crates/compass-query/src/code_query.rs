@@ -661,6 +661,7 @@ fn structural_evidence(evidence: &compass_model::provenance::Provenance) -> Quer
         } else {
             ResolutionState::Exact
         },
+        candidates: evidence.candidates.clone(),
     }
 }
 

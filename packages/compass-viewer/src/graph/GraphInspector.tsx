@@ -12,8 +12,10 @@ import type {
   GraphViewModel,
   SourceLocation
 } from "../contracts/graph";
+import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { ChangeEvidence, type GraphSourceRevisions } from "./ChangeEvidence";
 import { ChangedSymbolList } from "./ChangedSymbolList";
+import { CodeEvidence } from "./CodeEvidence";
 import { navigableSource } from "./sourceNavigation";
 
 function lineRange(node: GraphNode): string | undefined {
@@ -74,6 +76,7 @@ export function GraphInspector({
   hiddenCommunities,
   comparisonMode,
   sourceRevisions,
+  queryResult,
   onQueryChange,
   onFocus,
   onOpenSource,
@@ -92,6 +95,7 @@ export function GraphInspector({
   hiddenCommunities: ReadonlySet<number>;
   comparisonMode: boolean;
   sourceRevisions?: GraphSourceRevisions | undefined;
+  queryResult?: CodeQueryResponse | undefined;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation, revision?: string): void;
@@ -117,6 +121,17 @@ export function GraphInspector({
     () => new Map(model.nodes.map((node) => [node.id, node])),
     [model.nodes]
   );
+  const selectedQueryNode = selected
+    ? queryResult?.nodes.find((node) => node.id === selected.id)
+    : undefined;
+  const selectedCodeEvidence = selectedQueryNode?.evidence ?? selected?.codeEvidence ?? [];
+  const relationshipCodeEvidence = selected
+    ? (queryResult
+      ? queryResult.edges
+        .filter((edge) => edge.source === selected.id || edge.target === selected.id)
+        .flatMap((edge) => edge.evidence)
+      : connectedEdges.flatMap((edge) => edge.codeEvidence ?? []))
+    : [];
 
   const choose = (node: GraphNode) => {
     onFocus(node.id);
@@ -315,6 +330,18 @@ export function GraphInspector({
             {selected.signature && (
               <code className="compass-signature-block">{selected.signature}</code>
             )}
+            <CodeEvidence
+              evidence={selectedCodeEvidence}
+              diagnostics={queryResult?.diagnostics}
+              truncated={queryResult?.truncated}
+              title="Node evidence"
+              onOpenSource={onOpenSource}
+            />
+            <CodeEvidence
+              evidence={relationshipCodeEvidence}
+              title="Relationship evidence"
+              onOpenSource={onOpenSource}
+            />
             {model.stats.aggregated
               && selected.memberCount !== undefined
               && onOpenCommunity && (

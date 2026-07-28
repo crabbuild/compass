@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::code_graph::{EdgeDetails, EdgeKind, NodeDetails, NodeKind, NodeRole};
-use crate::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState, SourceAnchor};
+use crate::provenance::{
+    EvidenceConfidence, EvidenceOrigin, ResolutionCandidate, ResolutionState, SourceAnchor,
+};
 
 pub const CODE_QUERY_SCHEMA_V1: &str = "compass.query/1";
 
@@ -241,4 +243,6 @@ pub struct QueryEvidence {
     pub rule: Option<String>,
     pub wiring_site: Option<SourceAnchor>,
     pub resolution: ResolutionState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<ResolutionCandidate>,
 }

@@ -63,16 +63,17 @@ fn shared_query_contract_is_strict_bounded_and_deterministic()
 }
 
 #[test]
-fn checked_in_contract_fingerprint_matches_the_complete_example()
+fn checked_in_contract_fingerprint_matches_the_enum_and_field_manifest()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/contracts");
-    let bytes = fs::read(root.join("compass-query-v1.example.json"))?;
+    let bytes = fs::read(root.join("compass-query-v1.manifest.json"))?;
     let expected = fs::read_to_string(root.join("compass-query-v1.fingerprint"))?;
     assert_eq!(
         expected.trim(),
         format!("sha256:{}", compass_ir::hex_sha256(&bytes))
     );
-    let response = serde_json::from_slice::<CodeQueryResponse>(&bytes)?;
+    let example = fs::read(root.join("compass-query-v1.example.json"))?;
+    let response = serde_json::from_slice::<CodeQueryResponse>(&example)?;
     assert_eq!(response.schema, CODE_QUERY_SCHEMA_V1);
     Ok(())
 }

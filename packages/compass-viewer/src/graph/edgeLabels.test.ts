@@ -22,6 +22,18 @@ describe("formatGraphEdgeLabel", () => {
   ] as const)("formats %o as %s", (edge, expected) => {
     expect(formatGraphEdgeLabel(edge)).toBe(expected);
   });
+
+  it("keeps route stages and enterprise relations explicit", () => {
+    expect(formatGraphEdgeLabel({
+      relation: "routes_to",
+      details: {
+        type: "route",
+        data: { stage: "middleware", position: 1, operation: "GET" }
+      }
+    })).toBe("routes to · middleware 2 · GET");
+    expect(formatGraphEdgeLabel({ relation: "publishes" })).toBe("publishes");
+    expect(formatGraphEdgeLabel({ relation: "maps_to" })).toBe("maps to");
+  });
 });
 
 describe("shouldShowGraphEdgeLabel", () => {

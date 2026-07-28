@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CodeEdgeDetailsSchema, CodeEvidenceSchema } from "./codeQuery";
 
 export const GRAPH_VIEWER_SCHEMA = "compass.viewer.graph/1" as const;
 
@@ -37,6 +38,7 @@ export const GraphNodeSchema = z.object({
   learningStale: z.boolean().optional(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
   evidence: GraphRecordEvidenceSchema.optional(),
+  codeEvidence: z.array(CodeEvidenceSchema).optional(),
   source: SourceLocationSchema.optional(),
   color: z.object({
     background: z.string(),
@@ -51,6 +53,8 @@ export const GraphEdgeSchema = z.object({
   relation: z.string(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
   evidence: GraphRecordEvidenceSchema.optional(),
+  codeEvidence: z.array(CodeEvidenceSchema).optional(),
+  details: CodeEdgeDetailsSchema.nullable().optional(),
   confidence: z.enum([
     "extracted",
     "inferred",
