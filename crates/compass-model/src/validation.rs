@@ -5,7 +5,6 @@ use serde_json::Value;
 
 use crate::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument as CodeGraphDocument, NodeDetails, NodeKind,
-    NodeRole,
 };
 use crate::identity::{edge_id, file_id};
 use crate::provenance::{Provenance, SourceAnchor};
@@ -283,7 +282,12 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
             ));
             continue;
         };
-        if edge.source == edge.target && edge.kind != EdgeKind::References {
+        if edge.source == edge.target
+            && matches!(
+                edge.kind,
+                EdgeKind::Contains | EdgeKind::Extends | EdgeKind::Implements
+            )
+        {
             errors.push(format!("edge {} is an unsupported self-loop", edge.id));
         }
         if edge.evidence.is_empty() {
@@ -424,90 +428,48 @@ fn endpoint_kinds_are_valid(
     target: &crate::code_graph::NodeRecord,
 ) -> bool {
     match kind {
-        EdgeKind::Contains => source.kind.is_container(),
-        EdgeKind::Calls => {
-            source.kind.is_callable()
-                && (target.kind.is_callable() || target.kind.is_constructible())
-        }
-        EdgeKind::Extends => source.kind.is_type() && target.kind.is_type(),
-        EdgeKind::Implements => {
-            source.kind.is_type()
-                && matches!(
-                    target.kind,
-                    NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
-                )
-        }
-        EdgeKind::TypeOf => target.kind.is_type(),
-        EdgeKind::Returns => source.kind.is_callable(),
-        EdgeKind::Instantiates => source.kind.is_callable() && target.kind.is_constructible(),
-        EdgeKind::Overrides => source.kind.is_callable() && target.kind.is_callable(),
+        EdgeKind::Extends | EdgeKind::Implements => source.kind.is_type(),
         EdgeKind::RoutesTo => {
             source.kind == NodeKind::Route
                 && matches!(
                     target.kind,
-                    NodeKind::Function | NodeKind::Method | NodeKind::Class | NodeKind::Component
+                    NodeKind::File
+                        | NodeKind::Function
+                        | NodeKind::Method
+                        | NodeKind::Class
+                        | NodeKind::Component
                 )
         }
-        EdgeKind::Reads | EdgeKind::Writes => {
-            (source.kind.is_callable()
-                || matches!(
-                    source.kind,
-                    NodeKind::Query
-                        | NodeKind::Migration
-                        | NodeKind::DatabaseView
-                        | NodeKind::DatabaseProcedure
-                        | NodeKind::DatabaseTrigger
-                ))
-                && matches!(
-                    target.kind,
-                    NodeKind::Database
-                        | NodeKind::DatabaseSchema
-                        | NodeKind::DatabaseTable
-                        | NodeKind::DatabaseView
-                        | NodeKind::DatabaseColumn
-                        | NodeKind::ConfigKey
-                )
-        }
-        EdgeKind::Handles => {
-            source.kind.is_callable() && matches!(target.kind, NodeKind::Event | NodeKind::Message)
-        }
-        EdgeKind::Publishes => {
-            source.kind.is_callable()
-                && matches!(
-                    target.kind,
-                    NodeKind::Event | NodeKind::Message | NodeKind::Topic
-                )
-        }
-        EdgeKind::Schedules => {
-            (source.kind.is_callable() || source.kind == NodeKind::ConfigKey)
-                && target.kind == NodeKind::Job
-        }
+        EdgeKind::Schedules => target.kind == NodeKind::Job,
         EdgeKind::Triggers => {
-            (source.kind == NodeKind::Job
-                && matches!(target.kind, NodeKind::Function | NodeKind::Method))
-                || (source.kind == NodeKind::DatabaseTrigger
-                    && target.kind == NodeKind::DatabaseTable)
-        }
-        EdgeKind::Tests => {
-            source.roles.contains(&NodeRole::Test)
-                && !matches!(source.kind, NodeKind::File | NodeKind::Resource)
+            source.kind == NodeKind::Job || source.kind == NodeKind::DatabaseTrigger
         }
         EdgeKind::MapsTo => {
-            source.kind.is_type()
-                && matches!(
-                    target.kind,
-                    NodeKind::DatabaseTable | NodeKind::DatabaseView
-                )
+            matches!(
+                target.kind,
+                NodeKind::DatabaseTable | NodeKind::DatabaseView
+            )
         }
-        EdgeKind::Imports
+        EdgeKind::Contains
+        | EdgeKind::Calls
+        | EdgeKind::Imports
         | EdgeKind::Exports
+        | EdgeKind::TypeOf
+        | EdgeKind::Returns
+        | EdgeKind::Instantiates
+        | EdgeKind::Overrides
         | EdgeKind::References
         | EdgeKind::Decorates
+        | EdgeKind::Reads
+        | EdgeKind::Writes
         | EdgeKind::Aliases
         | EdgeKind::Registers
+        | EdgeKind::Handles
+        | EdgeKind::Publishes
         | EdgeKind::Subscribes
         | EdgeKind::Produces
         | EdgeKind::Consumes
+        | EdgeKind::Tests
         | EdgeKind::DependsOn
         | EdgeKind::Documents => true,
     }

@@ -202,6 +202,11 @@ fn classification_exercises_manifests_shebangs_media_papers_and_asset_exclusions
     let ordinary_pdf = directory.path().join("paper.pdf");
     fs::write(&ordinary_pdf, b"%PDF")?;
     assert_eq!(classify_file(&ordinary_pdf), Some(FileType::Paper));
+
+    let play_routes = directory.path().join("conf/routes");
+    fs::create_dir_all(play_routes.parent().ok_or("missing routes parent")?)?;
+    fs::write(&play_routes, "GET / controllers.Home.index\n")?;
+    assert_eq!(classify_file(&play_routes), Some(FileType::Code));
     Ok(())
 }
 

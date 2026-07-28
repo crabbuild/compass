@@ -162,6 +162,35 @@ fn ambiguous_unresolved_duplicate_and_near_match_routes_are_conservative() {
 }
 
 #[test]
+fn ambiguous_handlers_do_not_taint_exact_middleware_edges() {
+    let mut ambiguous = route("show_user");
+    ambiguous.middleware_references = vec!["authenticate".into()];
+    let mut extraction = Extraction {
+        nodes: vec![
+            node("middleware", "authenticate", "app.routes.authenticate"),
+            node("handler-a", "show_user", "app.show_user"),
+            node("handler-b", "show_user", "other.show_user"),
+        ],
+        framework_facts: vec![RawFrameworkFact::Route(ambiguous)],
+        ..Extraction::default()
+    };
+
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())
+            .unwrap_or_else(|_| std::process::abort());
+
+    assert_eq!(resolved[0].state, ResolutionState::Ambiguous);
+    let route_edges = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "routes_to")
+        .collect::<Vec<_>>();
+    assert_eq!(route_edges.len(), 1);
+    assert_eq!(route_edges[0].target, "middleware");
+    assert_eq!(route_edges[0].string("confidence"), "EXTRACTED");
+}
+
+#[test]
 fn heuristic_routes_surface_the_wiring_site_and_rule() {
     let mut heuristic = route("show_user");
     heuristic.origin = RawFrameworkOrigin::Heuristic;
@@ -261,4 +290,37 @@ fn synthetic_framework_routes_normalize_to_the_shared_typed_shape()
             if details.stage == RouteStage::Handler && details.position == Some(0)
     ));
     Ok(())
+}
+
+#[test]
+fn incremental_resolution_replaces_the_changed_handler_without_stale_targets() {
+    let mut first = route("first_handler");
+    first.normalized_path = "/incremental".to_owned();
+    first.raw_path = "/incremental".to_owned();
+    let base = Extraction {
+        nodes: vec![
+            node("first", "first_handler", "app.first_handler"),
+            node("second", "second_handler", "app.second_handler"),
+        ],
+        framework_facts: vec![RawFrameworkFact::Route(first.clone())],
+        ..Extraction::default()
+    };
+    let initial =
+        resolve_routes(&base, FrameworkLimits::default()).unwrap_or_else(|_| std::process::abort());
+    assert_eq!(initial[0].stages[0].target, "first");
+
+    first.handler_reference = "second_handler".to_owned();
+    let changed = Extraction {
+        framework_facts: vec![RawFrameworkFact::Route(first)],
+        ..base
+    };
+    let refreshed = resolve_routes(&changed, FrameworkLimits::default())
+        .unwrap_or_else(|_| std::process::abort());
+    assert_eq!(refreshed[0].stages[0].target, "second");
+    assert!(
+        refreshed[0]
+            .stages
+            .iter()
+            .all(|stage| stage.target != "first")
+    );
 }

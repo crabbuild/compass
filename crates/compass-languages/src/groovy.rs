@@ -349,8 +349,13 @@ impl State {
             let mut attributes = Map::new();
             attributes.insert("label".to_owned(), Value::String(name.to_owned()));
             attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+            attributes.insert("type".to_owned(), Value::String("class".to_owned()));
             attributes.insert("source_file".to_owned(), Value::String(String::new()));
             attributes.insert("source_location".to_owned(), Value::String(String::new()));
+            attributes.insert(
+                "origin_file".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
             self.extraction.nodes.push(NodeRecord {
                 id: id.clone(),
                 attributes,

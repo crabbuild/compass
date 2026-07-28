@@ -654,6 +654,7 @@ fn looks_like_paper(path: &Path) -> bool {
 
 pub fn classify_file(path: &Path) -> Option<FileType> {
     if is_package_manifest(path)
+        || is_play_routes_file(path)
         || path
             .file_name()
             .and_then(|value| value.to_str())
@@ -707,6 +708,7 @@ fn graphable_source(path: &Path) -> bool {
         return false;
     }
     if is_package_manifest(path)
+        || is_play_routes_file(path)
         || path
             .file_name()
             .and_then(|value| value.to_str())
@@ -718,6 +720,15 @@ fn graphable_source(path: &Path) -> bool {
         return shebang_is_code(path);
     }
     CODE_EXTENSIONS.contains(&ext.as_str())
+}
+
+fn is_play_routes_file(path: &Path) -> bool {
+    path.file_name().and_then(|value| value.to_str()) == Some("routes")
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|value| value.to_str())
+            .is_some_and(|parent| parent.eq_ignore_ascii_case("conf"))
 }
 
 fn generic_keyword_hit(name: &str) -> bool {

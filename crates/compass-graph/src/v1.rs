@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
     BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, CoverageStatus,
-    DatabaseNodeDetails, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails,
-    FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata, ImportExportNodeDetails,
-    MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole, QueryNodeDetails,
-    ResourceKind, ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails, RouteStage,
-    SchemaNodeDetails, SymbolNodeDetails,
+    DatabaseNodeDetails, DiagnosticSeverity, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus,
+    FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
+    ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole,
+    QueryNodeDetails, ResourceKind, ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails,
+    RouteStage, SchemaNodeDetails, SymbolNodeDetails,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -20,6 +20,7 @@ use compass_model::provenance::{
     SourceAnchor,
 };
 use compass_model::{GraphError, validate_code_graph};
+use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -186,7 +187,7 @@ pub fn normalize_v1(
     let file_facts = published_file_facts(&evidence)?;
 
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
-    let mut nodes = Vec::with_capacity(extraction.nodes.len());
+    let mut nodes = BTreeMap::new();
     for raw in extraction.nodes {
         if id_remap.contains_key(&raw.id) {
             return Err(raw_error(
@@ -196,10 +197,14 @@ pub fn normalize_v1(
         }
         let node = normalize_node(raw.clone(), &evidence.repository_root, &file_facts)?;
         id_remap.insert(raw.id, node.id.clone());
-        nodes.push(node);
+        if let Some(existing) = nodes.get_mut(&node.id) {
+            merge_normalized_node(existing, node)?;
+        } else {
+            nodes.insert(node.id.clone(), node);
+        }
     }
 
-    let mut links = Vec::with_capacity(extraction.edges.len());
+    let mut links = BTreeMap::new();
     for (index, raw) in extraction.edges.into_iter().enumerate() {
         let source = id_remap.get(&raw.source).ok_or_else(|| {
             raw_error(
@@ -213,16 +218,42 @@ pub fn normalize_v1(
                 &format!("target {} does not match a raw node", raw.target),
             )
         })?;
-        links.push(normalize_edge(
+        let edge = normalize_edge(
             raw,
             source,
             target,
             index,
             &evidence.repository_root,
             &file_facts,
-        )?);
+        )?;
+        if edge.source == edge.target
+            && matches!(
+                edge.kind,
+                EdgeKind::Contains | EdgeKind::Extends | EdgeKind::Implements
+            )
+        {
+            evidence.diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "dropped_structural_self_loop".to_owned(),
+                message: format!(
+                    "dropped impossible {} self-loop on {}",
+                    edge.kind.as_str(),
+                    edge.source
+                ),
+                anchor: edge.relationship_site,
+                related_ids: vec![edge.source],
+            });
+            continue;
+        }
+        if let Some(existing) = links.get_mut(&edge.id) {
+            merge_normalized_edge(existing, edge)?;
+        } else {
+            links.insert(edge.id.clone(), edge);
+        }
     }
 
+    let mut nodes = nodes.into_values().collect::<Vec<_>>();
+    let mut links = links.into_values().collect::<Vec<_>>();
     nodes.sort_by(|left, right| left.id.cmp(&right.id));
     links.sort_by(|left, right| {
         (
@@ -264,6 +295,101 @@ pub fn normalize_v1(
     };
     validate_code_graph(&document)?;
     Ok(document)
+}
+
+fn merge_normalized_node(
+    existing: &mut NodeRecord,
+    mut duplicate: NodeRecord,
+) -> Result<(), GraphError> {
+    if existing.kind != duplicate.kind
+        || existing.name != duplicate.name
+        || existing.qualified_name != duplicate.qualified_name
+        || existing.language != duplicate.language
+        || existing.framework != duplicate.framework
+        || existing.source != duplicate.source
+    {
+        return Err(raw_error(
+            &existing.id,
+            &format!(
+                "stable node identity collision has incompatible semantic records: \
+                 existing=({:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {}) \
+                 duplicate=({:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {})",
+                existing.kind,
+                existing.name,
+                existing.qualified_name,
+                existing.language,
+                existing.framework,
+                existing.source,
+                serialized(&existing.details),
+                duplicate.kind,
+                duplicate.name,
+                duplicate.qualified_name,
+                duplicate.language,
+                duplicate.framework,
+                duplicate.source,
+                serialized(&duplicate.details),
+            ),
+        ));
+    }
+    existing.roles.append(&mut duplicate.roles);
+    sort_dedup_serialized(&mut existing.roles);
+    existing.evidence.append(&mut duplicate.evidence);
+    sort_dedup_serialized(&mut existing.evidence);
+    existing.coverage.append(&mut duplicate.coverage);
+    sort_dedup_serialized(&mut existing.coverage);
+    existing.diagnostics.append(&mut duplicate.diagnostics);
+    sort_dedup_serialized(&mut existing.diagnostics);
+    existing.details = deterministic_option(existing.details.take(), duplicate.details);
+    existing.community = deterministic_option(existing.community.take(), duplicate.community);
+    Ok(())
+}
+
+fn merge_normalized_edge(
+    existing: &mut EdgeRecord,
+    mut duplicate: EdgeRecord,
+) -> Result<(), GraphError> {
+    if existing.source != duplicate.source
+        || existing.target != duplicate.target
+        || existing.kind != duplicate.kind
+        || existing.relationship_site != duplicate.relationship_site
+    {
+        return Err(raw_error(
+            &existing.id,
+            "stable edge identity collision has incompatible semantic records",
+        ));
+    }
+    existing.evidence.append(&mut duplicate.evidence);
+    sort_dedup_serialized(&mut existing.evidence);
+    existing.diagnostics.append(&mut duplicate.diagnostics);
+    sort_dedup_serialized(&mut existing.diagnostics);
+    existing.details = deterministic_option(existing.details.take(), duplicate.details);
+    existing.weight = deterministic_option(existing.weight.take(), duplicate.weight);
+    existing.context = deterministic_option(existing.context.take(), duplicate.context);
+    existing.deferred |= duplicate.deferred;
+    Ok(())
+}
+
+fn deterministic_option<T: Serialize>(left: Option<T>, right: Option<T>) -> Option<T> {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if serialized(&left) <= serialized(&right) {
+                Some(left)
+            } else {
+                Some(right)
+            }
+        }
+        (left @ Some(_), None) => left,
+        (None, right) => right,
+    }
+}
+
+fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
+    values.sort_by_cached_key(serialized);
+    values.dedup_by(|left, right| serialized(left) == serialized(right));
+}
+
+fn serialized<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_default()
 }
 
 /// Convert the canonical internal analysis graph at the sole v1 publication boundary.
@@ -679,8 +805,9 @@ fn normalize_edge(
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
 ) -> Result<EdgeRecord, GraphError> {
-    let owner = format!("edge[{index}]");
-    let raw_relation = required_string(&raw.attributes, "relation", &owner)?;
+    let position = format!("edge[{index}]");
+    let raw_relation = required_string(&raw.attributes, "relation", &position)?;
+    let owner = format!("{position} {source} -[{raw_relation}]-> {target}");
     let (kind, alias_rule, heuristic) = map_edge_kind(&raw_relation)
         .ok_or_else(|| raw_error(&owner, &format!("unknown raw relation {raw_relation:?}")))?;
     let relationship_site = raw_anchor(&raw.attributes, root, file_facts)?;
@@ -847,15 +974,15 @@ fn map_node_kind(
         "package" => NodeKind::Package,
         "namespace" => NodeKind::Namespace,
         "class" => NodeKind::Class,
-        "struct" => NodeKind::Struct,
+        "struct" | "record" => NodeKind::Struct,
         "interface" => NodeKind::Interface,
         "trait" => NodeKind::Trait,
         "protocol" => NodeKind::Protocol,
         "enum" => NodeKind::Enum,
         "enum_member" | "enum_constant" => NodeKind::EnumMember,
-        "type_alias" | "alias" => NodeKind::TypeAlias,
+        "type_alias" | "alias" | "type" => NodeKind::TypeAlias,
         "function" => NodeKind::Function,
-        "method" => NodeKind::Method,
+        "method" | "destructor" => NodeKind::Method,
         "constructor" => NodeKind::Constructor,
         "property" => NodeKind::Property,
         "field" => NodeKind::Field,
@@ -1144,22 +1271,33 @@ fn node_identity(
         | NodeKind::Resource
         | NodeKind::Schema
         | NodeKind::Query
-        | NodeKind::ConfigKey => domain_id(
-            kind,
-            &optional_string(attributes, "namespace").unwrap_or_default(),
-            qualified_name,
-        ),
-        _ => symbol_id(
-            language.unwrap_or("unknown"),
-            source_path,
-            kind,
-            qualified_name,
-            &optional_any_string(attributes, &["overload_discriminator", "signature_hash"])
-                .or_else(|| {
-                    source.map(|anchor| format!("{}:{}", anchor.start_byte, anchor.end_byte))
-                })
-                .unwrap_or_default(),
-        ),
+        | NodeKind::ConfigKey => {
+            let mut namespace =
+                optional_string(attributes, "namespace").unwrap_or_else(|| source_path.to_owned());
+            if let Some(anchor) = source {
+                namespace.push_str(&format!("@{}:{}", anchor.start_byte, anchor.end_byte));
+            }
+            domain_id(kind, &namespace, qualified_name)
+        }
+        _ => {
+            let overload =
+                optional_any_string(attributes, &["overload_discriminator", "signature_hash"]);
+            let position =
+                source.map(|anchor| format!("{}:{}", anchor.start_byte, anchor.end_byte));
+            let disambiguator = match (overload, position) {
+                (Some(overload), Some(position)) => format!("{overload}@{position}"),
+                (Some(overload), None) => overload,
+                (None, Some(position)) => position,
+                (None, None) => String::new(),
+            };
+            symbol_id(
+                language.unwrap_or("unknown"),
+                source_path,
+                kind,
+                qualified_name,
+                &disambiguator,
+            )
+        }
     };
     Ok(id)
 }

@@ -110,7 +110,7 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
                 attributes: domain_attributes(fact, symbol_kind, resolved.state),
             });
         }
-        let Some(source) = resolved.source_candidates.first() else {
+        if resolved.state != ResolutionState::Exact {
             diagnostics.push(json!({
                 "kind": "unresolved_domain_handler",
                 "framework": fact.framework,
@@ -118,7 +118,12 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
                 "name": fact.name,
                 "source": fact.anchor.source_file,
                 "line": fact.anchor.start_line,
+                "resolution": resolution_name(resolved.state),
+                "candidates": resolved.source_candidates,
             }));
+            continue;
+        }
+        let Some(source) = resolved.source_candidates.first() else {
             continue;
         };
         if fact.kind == "job" {

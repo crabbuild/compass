@@ -501,10 +501,15 @@ fn route_edge_attributes(resolved: &ResolvedRoute, stage: &RouteStage) -> Map<St
     attributes.insert("position".into(), Value::from(stage.position));
     attributes.insert("operation".into(), Value::String(route.operation.clone()));
     attributes.insert("weight".into(), Value::from(1.0));
+    let stage_state = match stage.provenance.confidence {
+        EvidenceConfidence::Exact => ResolutionState::Exact,
+        EvidenceConfidence::Ambiguous => ResolutionState::Ambiguous,
+        EvidenceConfidence::Inferred => ResolutionState::Unresolved,
+    };
     add_evidence_attributes(
         &mut attributes,
         route,
-        resolved.state,
+        stage_state,
         &stage.provenance.candidates,
     );
     let stage_name = match stage.role {

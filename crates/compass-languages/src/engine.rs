@@ -609,23 +609,21 @@ fn symbol_kind(kind: &str, is_class: bool, is_nested: bool) -> &'static str {
             "interface"
         } else if kind.contains("enum") {
             "enum"
-        } else if kind.contains("struct") {
+        } else if kind.contains("struct") || kind.contains("record") {
             "struct"
-        } else if kind.contains("record") {
-            "record"
         } else if kind.contains("protocol") {
             "protocol"
         } else if kind.contains("module") || kind.contains("object") {
             "module"
         } else if kind.contains("type_alias") {
-            "type"
+            "type_alias"
         } else {
             "class"
         }
+    } else if kind.contains("deinit") {
+        "method"
     } else if kind.contains("constructor") || kind.contains("init_declaration") {
         "constructor"
-    } else if kind.contains("deinit") {
-        "destructor"
     } else if kind.contains("method") || is_nested {
         "method"
     } else {
@@ -3586,5 +3584,15 @@ mod rationale_tests {
             tree.root_node().to_sexp()
         );
         Ok(())
+    }
+
+    #[test]
+    fn generic_symbols_emit_only_canonical_v1_kinds() {
+        assert_eq!(symbol_kind("record_declaration", true, false), "struct");
+        assert_eq!(
+            symbol_kind("type_alias_declaration", true, false),
+            "type_alias"
+        );
+        assert_eq!(symbol_kind("deinit_declaration", false, false), "method");
     }
 }
