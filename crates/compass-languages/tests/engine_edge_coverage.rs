@@ -72,6 +72,48 @@ impl ChangeSink for ChangeCounts {
 }
 
 #[test]
+fn generic_methods_include_their_declaring_class_in_semantic_identity() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("bundle.js");
+    let source = br#"
+class First {
+    constructor(e, t) { this.value = e + t; }
+}
+class Second {
+    constructor(e, t) { this.value = e * t; }
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let constructors = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == ".constructor()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(constructors.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        constructors
+            .iter()
+            .map(|node| node.string("lexical_owner"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["First", "Second"].into_iter().map(str::to_owned).collect()
+    );
+    assert_eq!(
+        constructors
+            .iter()
+            .map(|node| node.string("qualified_name"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["First::constructor", "Second::constructor"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    Ok(())
+}
+
+#[test]
 fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;

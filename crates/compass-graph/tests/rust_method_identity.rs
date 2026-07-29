@@ -54,3 +54,45 @@ impl ChangeSink for ChangeCounts {
     assert_ne!(methods[0].id, methods[1].id);
     Ok(())
 }
+
+#[test]
+fn generic_methods_in_distinct_classes_publish_distinct_stable_nodes() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let path = root.join("assets/bundle.js");
+    fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
+    fs::write(
+        &path,
+        r#"
+class First {
+    constructor(e, t) { this.value = e + t; }
+}
+class Second {
+    constructor(e, t) { this.value = e * t; }
+}
+"#,
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let flexible = build_from_extraction(&extraction, true, Some(root));
+    let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+    let methods = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Method && node.name == ".constructor()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", graph.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.qualified_name.as_str())
+            .collect::<BTreeSet<_>>(),
+        ["First::constructor", "Second::constructor"]
+            .into_iter()
+            .collect()
+    );
+    assert_ne!(methods[0].id, methods[1].id);
+    Ok(())
+}

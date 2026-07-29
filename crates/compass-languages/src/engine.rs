@@ -953,7 +953,7 @@ fn source_node_text(node: Node<'_>, source: &[u8]) -> String {
 }
 
 impl<'source, 'tree> ExtractState<'source, 'tree> {
-    fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<&str>) {
+    fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<(&str, &str)>) {
         let kind = node.kind();
         if self.config.import_types.contains(&kind) && !matches!(self.language, "kotlin" | "lua") {
             self.add_import(node);
@@ -962,11 +962,18 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if self.config.class_types.contains(&kind)
             && let Some(name) = self.declaration_name(node)
         {
-            let id = make_id(&[&self.stem, &name]);
+            let semantic_scope = parent_class.map_or_else(
+                || name.clone(),
+                |(_, parent_scope)| format!("{parent_scope}::{name}"),
+            );
+            let id = make_id(&[&self.stem, &semantic_scope]);
             self.add_node(&id, &name, line(node), true, None);
             self.types.insert(name.clone(), id.clone());
             self.callables.entry(name).or_default().push(id.clone());
-            let source = parent_class.unwrap_or(&self.file_id).to_owned();
+            let source = parent_class
+                .map(|(class_id, _)| class_id)
+                .unwrap_or(&self.file_id)
+                .to_owned();
             self.add_edge(&source, &id, "contains", line(node), None);
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
@@ -993,7 +1000,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                self.walk_declarations(child, Some(&id));
+                self.walk_declarations(child, Some((&id, &semantic_scope)));
             }
             return;
         }
@@ -1001,9 +1008,10 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if self.config.function_types.contains(&kind)
             && let Some(name) = self.function_name(node)
         {
+            let parent_id = parent_class.map(|(class_id, _)| class_id);
             let id = parent_class.map_or_else(
                 || make_id(&[&self.stem, &name]),
-                |class| make_id(&[class, &name]),
+                |(class_id, _)| make_id(&[class_id, &name]),
             );
             let label = if parent_class.is_some() {
                 format!(".{name}()")
@@ -1011,7 +1019,23 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 format!("{name}()")
             };
             self.add_node(&id, &label, line(node), true, None);
-            let source = parent_class.unwrap_or(&self.file_id).to_owned();
+            if let Some((_, semantic_owner)) = parent_class
+                && let Some(method) = self
+                    .extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|method| method.id == id)
+            {
+                method.attributes.insert(
+                    "lexical_owner".to_owned(),
+                    Value::String(semantic_owner.to_owned()),
+                );
+                method.attributes.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!("{semantic_owner}::{name}")),
+                );
+            }
+            let source = parent_id.unwrap_or(&self.file_id).to_owned();
             self.add_edge(
                 &source,
                 &id,
@@ -1048,7 +1072,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
 
         if self.language == "kotlin" && kind == "enum_entry" {
-            if let Some(class_id) = parent_class
+            if let Some((class_id, _)) = parent_class
                 && let Some(name_node) = first_descendant(node, "simple_identifier")
                     .or_else(|| first_descendant(node, "identifier"))
                 && let Some(name) = self.node_text(name_node).map(clean_name)
@@ -1061,7 +1085,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
 
         if self.language == "kotlin" && kind == "property_declaration" {
-            if let Some(class_id) = parent_class {
+            if let Some((class_id, _)) = parent_class {
                 self.add_kotlin_property_reference(node, class_id);
             }
             return;
@@ -1069,7 +1093,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
 
         if self.language == "scala"
             && matches!(kind, "val_definition" | "var_definition")
-            && let Some(class_id) = parent_class
+            && let Some((class_id, _)) = parent_class
         {
             self.add_scala_field_reference(node, class_id);
         }
