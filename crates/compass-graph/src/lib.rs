@@ -758,7 +758,7 @@ fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String
                 continue;
             }
             match merged.get(&key) {
-                Some(current) if current.to_string() <= value.to_string() => {}
+                Some(current) if json_value_is_at_most(current, &value) => {}
                 _ => {
                     merged.insert(key, value);
                 }
@@ -812,6 +812,12 @@ fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String
     }
     merged.insert(COALESCED_EDGE_EVIDENCE.to_owned(), Value::Array(snapshots));
     *existing = merged;
+}
+
+fn json_value_is_at_most(left: &Value, right: &Value) -> bool {
+    let left = left.to_string();
+    let right = right.to_string();
+    left <= right
 }
 
 fn edge_evidence_snapshots(attributes: &Map<String, Value>) -> Vec<Value> {
