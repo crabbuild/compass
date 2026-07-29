@@ -700,6 +700,10 @@ fn normalize_trusted_edge(
         .map_err(|error| raw_error(&position, &error.to_string()))?;
     let embedded_source = edge.source.clone();
     let embedded_target = edge.target.clone();
+    let embedded_has_ast = edge
+        .evidence
+        .iter()
+        .any(|evidence| evidence.origin == EvidenceOrigin::Ast);
     if edge
         .occurrence_rule
         .as_ref()
@@ -780,6 +784,16 @@ fn normalize_trusted_edge(
             &position,
             "changed trusted endpoints require current endpoint rewrite evidence",
         ));
+    }
+    if !embedded_has_ast
+        && added_evidence
+            .iter()
+            .any(|evidence| evidence.origin == EvidenceOrigin::Ast)
+    {
+        added_evidence.retain(|evidence| {
+            evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+        });
     }
     edge.evidence.append(&mut added_evidence);
     sort_dedup_serialized(&mut edge.evidence);
@@ -1118,6 +1132,12 @@ fn merge_normalized_edge(
     let current_ast_is_authoritative =
         existing_has_ast != duplicate_has_ast && (existing_has_ast || duplicate_has_ast);
     existing.evidence.append(&mut duplicate.evidence);
+    if current_ast_is_authoritative {
+        existing.evidence.retain(|evidence| {
+            evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+        });
+    }
     sort_dedup_serialized(&mut existing.evidence);
     existing.diagnostics.append(&mut duplicate.diagnostics);
     sort_dedup_serialized(&mut existing.diagnostics);
@@ -2112,6 +2132,42 @@ fn map_node_kind(
     Some((kind, None))
 }
 
+/// Resolve an extractor relation name through the complete v1 alias table.
+#[must_use]
+pub fn canonical_edge_kind(raw: &str) -> Option<EdgeKind> {
+    map_edge_kind(raw).map(|(kind, _, _)| kind)
+}
+
+/// Resolve raw edge source locations with the same byte-range semantics used
+/// by v1 publication, reading each referenced source file at most once.
+#[must_use]
+pub fn canonical_raw_edge_sites(edges: &[RawEdgeRecord], root: &Path) -> Vec<Option<SourceAnchor>> {
+    let mut file_facts = HashMap::new();
+    for edge in edges {
+        let Some(source_file) = optional_source_path(&edge.attributes, "source_file") else {
+            continue;
+        };
+        let Ok(portable) = portable_path(&source_file, root) else {
+            continue;
+        };
+        if file_facts.contains_key(&portable) {
+            continue;
+        }
+        let Ok(bytes) = fs::read(root.join(&portable)) else {
+            continue;
+        };
+        file_facts.insert(portable, PublishedFileFacts::from_bytes(&bytes, false));
+    }
+    edges
+        .iter()
+        .map(|edge| {
+            raw_anchor(&edge.attributes, root, &file_facts)
+                .ok()
+                .flatten()
+        })
+        .collect()
+}
+
 fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
     let mapped = match raw {
         "contains" => (EdgeKind::Contains, None, false),
@@ -2603,6 +2659,23 @@ struct PublishedFileFacts {
 }
 
 impl PublishedFileFacts {
+    fn from_bytes(bytes: &[u8], generated: bool) -> Self {
+        let mut line_starts = vec![0];
+        line_starts.extend(bytes.iter().enumerate().filter_map(|(index, byte)| {
+            if *byte == b'\n' {
+                u64::try_from(index).ok().map(|value| value + 1)
+            } else {
+                None
+            }
+        }));
+        Self {
+            content_digest: sha256_prefixed(bytes),
+            byte_size: bytes.len() as u64,
+            generated,
+            line_starts,
+        }
+    }
+
     fn full_file_anchor(&self, file: String) -> Option<SourceAnchor> {
         (self.byte_size > 0).then(|| {
             let end_line_index = self.line_starts.len().saturating_sub(1);
@@ -2665,22 +2738,9 @@ fn published_file_facts(
                     "file inventory digest or byte size does not match the source tree",
                 ));
             }
-            let mut line_starts = vec![0];
-            line_starts.extend(bytes.iter().enumerate().filter_map(|(index, byte)| {
-                if *byte == b'\n' {
-                    u64::try_from(index).ok().map(|value| value + 1)
-                } else {
-                    None
-                }
-            }));
             Ok((
                 file.path.clone(),
-                PublishedFileFacts {
-                    content_digest: file.content_digest.clone(),
-                    byte_size: file.byte_size,
-                    generated: file.generated,
-                    line_starts,
-                },
+                PublishedFileFacts::from_bytes(&bytes, file.generated),
             ))
         })
         .collect()

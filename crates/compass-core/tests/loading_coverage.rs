@@ -1,14 +1,43 @@
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use compass_core::{
-    BuildOptions, CoreError, ExportInputs, LoadedGraph, SemanticLayer, build_graph_with_layers,
+    BuildOptions, BuildPurpose, CoreError, ExportInputs, LoadedGraph, SemanticLayer,
+    build_graph_with_layers,
 };
 use compass_files::BuildGuard;
 use compass_languages::{Engine, Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::identity::edge_id;
 use serde_json::{Map, json};
 use sha2::{Digest, Sha256};
+
+fn semantic_edge_extraction(
+    path: &Path,
+    source: &[u8],
+    relation: &str,
+) -> Result<Extraction, Box<dyn Error>> {
+    let mut engine = Engine::default();
+    let mut extraction = engine.extract_source(path, source)?;
+    extraction.nodes.clear();
+    extraction.edges.retain(|edge| {
+        edge.attributes
+            .get("relation")
+            .and_then(serde_json::Value::as_str)
+            == Some(relation)
+    });
+    for edge in &mut extraction.edges {
+        edge.attributes
+            .insert("_origin".to_owned(), json!("semantic"));
+        edge.attributes
+            .insert("confidence".to_owned(), json!("INFERRED"));
+        edge.attributes
+            .insert("extractor".to_owned(), json!("test.semantic"));
+    }
+    extraction.raw_calls = None;
+    extraction.hyperedges.clear();
+    Ok(extraction)
+}
 
 #[test]
 fn export_inputs_fall_back_to_node_communities_and_tolerate_partial_sidecars()
@@ -400,6 +429,176 @@ fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(
 
     options.force = true;
     let clean = build_graph_with_layers(&options, None, &[])?;
+    let clean_graph =
+        compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
+    assert_eq!(incremental_graph.links, clean_graph.links);
+    Ok(())
+}
+
+#[test]
+fn incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("main.rs");
+    let initial_source = b"pub struct Widget;\nimpl Widget {\n    pub fn run(&self) {}\n}\n";
+    fs::write(&source, initial_source)?;
+    let initial_semantic =
+        semantic_edge_extraction(Path::new("main.rs"), initial_source, "method")?;
+    assert_eq!(initial_semantic.edges.len(), 1);
+
+    let mut options = BuildOptions::new(root.to_path_buf());
+    options.no_cluster = true;
+    options.no_viz = true;
+    let initial =
+        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let initial_graph =
+        compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
+    assert!(initial_graph.links.iter().any(|edge| {
+        edge.kind == compass_model::code_graph::EdgeKind::Contains
+            && edge.evidence.iter().any(|evidence| {
+                evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+            })
+    }));
+
+    let final_source =
+        b"// moved method site\npub struct Widget;\nimpl Widget {\n    pub fn run(&self) {}\n}\n";
+    fs::write(&source, final_source)?;
+    let incremental = build_graph_with_layers(&options, None, &[])?;
+    let incremental_graph =
+        compass_model::code_graph::GraphDocument::load(&incremental.output_dir.join("graph.json"))?;
+    let method_ids = incremental_graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == compass_model::code_graph::NodeKind::Method)
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    let incremental_methods = incremental_graph
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.kind == compass_model::code_graph::EdgeKind::Contains
+                && method_ids.contains(&edge.target.as_str())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        incremental_methods.len(),
+        1,
+        "stale alias edge survived beside fresh canonical edge: {incremental_methods:?}"
+    );
+    assert!(incremental_methods[0].evidence.iter().any(|evidence| {
+        evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+    }));
+
+    let final_semantic = semantic_edge_extraction(Path::new("main.rs"), final_source, "method")?;
+    let mut clean_options = BuildOptions::new(root.to_path_buf());
+    clean_options.output_root = Some(root.join("clean-out"));
+    clean_options.no_cluster = true;
+    clean_options.no_viz = true;
+    clean_options.force = true;
+    clean_options.purpose = BuildPurpose::Extract;
+    let clean = build_graph_with_layers(
+        &clean_options,
+        None,
+        &[serde_json::to_value(final_semantic)?],
+    )?;
+    let clean_graph =
+        compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
+    assert_eq!(incremental_graph.links, clean_graph.links);
+    Ok(())
+}
+
+#[test]
+fn refreshed_mixed_edge_drops_stale_incremental_endpoint_remap_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("main.rs");
+    let initial_source = b"pub fn caller() { target(); }\npub fn target() {}\n";
+    fs::write(&source, initial_source)?;
+    let initial_semantic = semantic_edge_extraction(Path::new("main.rs"), initial_source, "calls")?;
+    assert_eq!(initial_semantic.edges.len(), 1);
+
+    let mut options = BuildOptions::new(root.to_path_buf());
+    options.no_cluster = true;
+    options.no_viz = true;
+    let initial =
+        build_graph_with_layers(&options, None, &[serde_json::to_value(initial_semantic)?])?;
+    let graph_path = initial.output_dir.join("graph.json");
+    let mut initial_graph = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    let target_id = initial_graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.kind == compass_model::code_graph::NodeKind::Function
+                && (node.name == "target" || node.label() == "target()")
+        })
+        .map(|node| node.id.clone())
+        .ok_or("missing target function")?;
+    let stale_target_id = format!("stale:{target_id}");
+    initial_graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == target_id)
+        .ok_or("missing target node")?
+        .id
+        .clone_from(&stale_target_id);
+    for edge in &mut initial_graph.links {
+        if edge.source == target_id {
+            edge.source.clone_from(&stale_target_id);
+        }
+        if edge.target == target_id {
+            edge.target.clone_from(&stale_target_id);
+        }
+        edge.id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        edge.key.clone_from(&edge.id);
+    }
+    fs::write(&graph_path, serde_json::to_vec_pretty(&initial_graph)?)?;
+    compass_model::code_graph::GraphDocument::load(&graph_path)?;
+
+    let final_source =
+        b"// moved relationship site\npub fn caller() { target(); }\npub fn target() {}\n";
+    fs::write(&source, final_source)?;
+    let incremental = build_graph_with_layers(&options, None, &[])?;
+    let incremental_graph =
+        compass_model::code_graph::GraphDocument::load(&incremental.output_dir.join("graph.json"))?;
+    let incremental_calls = incremental_graph
+        .links
+        .iter()
+        .filter(|edge| edge.kind == compass_model::code_graph::EdgeKind::Calls)
+        .collect::<Vec<_>>();
+    assert_eq!(incremental_calls.len(), 1);
+    assert!(incremental_calls[0].evidence.iter().any(|evidence| {
+        evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+    }));
+    assert!(
+        incremental_calls[0]
+            .evidence
+            .iter()
+            .all(|evidence| evidence.rule.as_deref() != Some("incremental-ast-endpoint-remap")),
+        "stale endpoint remap evidence survived: {:?}",
+        incremental_calls[0].evidence
+    );
+    assert!(!serde_json::to_string(&incremental_graph)?.contains("incremental-ast-endpoint-remap"));
+
+    let final_semantic = semantic_edge_extraction(Path::new("main.rs"), final_source, "calls")?;
+    let mut clean_options = BuildOptions::new(root.to_path_buf());
+    clean_options.output_root = Some(root.join("clean-remap-out"));
+    clean_options.no_cluster = true;
+    clean_options.no_viz = true;
+    clean_options.force = true;
+    clean_options.purpose = BuildPurpose::Extract;
+    let clean = build_graph_with_layers(
+        &clean_options,
+        None,
+        &[serde_json::to_value(final_semantic)?],
+    )?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
     assert_eq!(incremental_graph.links, clean_graph.links);
