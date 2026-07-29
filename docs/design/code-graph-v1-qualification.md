@@ -1,94 +1,79 @@
 # Compass code graph v1 qualification
 
-Status: release gate
-Contract: `compass.graph/1` and `compass.query/1`
-Last fixture qualification: 2026-07-28
+Status: executable release gate
+Contracts: `compass.graph/1` and `compass.code-graph-qualification/2`
 
 ## Release claim
 
-Compass publishes one strict, directed, multigraph NetworkX node-link envelope.
-Pre-contract artifacts are not adapted or interpreted as an earlier v1: update
-rebuilds them and read-only consumers return rebuild guidance. Program IR keeps
-its independent `http://crab.build/compass/v1` artifact and is joined only by
-the query engine.
+The fixture qualification gate exercises the shipped `compass` binary and
+validates the graph it publishes. It does not infer support from registered
+parsers, source files, unit-test names, or documentation.
 
-The release gate checks:
+The checked-in manifests require:
 
-- all 45 node kinds and 28 edge kinds have production producers;
-- all 23 framework families have positive and near-match fixtures plus shared
-  exact, ambiguous, unresolved, heuristic-wiring, and incremental-resolution
-  coverage;
-- heuristic graph edges retain a rule and an exact wiring site;
-- cold, warm, restored, and checkout-root builds publish identical bytes;
-- Rust, CLI, MCP, the viewer, and VS Code consume the fingerprinted
-  `compass.query/1` enum/field manifest;
-- source paths, atomic graph publication, SQLite recovery, cancellation, and
-  VS Code packaging run on the supported platform matrix.
+- one exact, identity-bound positive flow for each advertised framework
+  family, including route operation, normalized path, source, handler kind,
+  handler language, relationship stage, resolution, and provenance;
+- executable near-match negatives that must not publish exact framework routes;
+- an observed production producer for every one of the 45 node kinds and 28
+  edge kinds;
+- an inventoried file, language, and current extractor version for every
+  language/extractor family in the corpus manifest;
+- distinct relationship sites for the repeated-occurrence fixture;
+- truthful partial/recovery coverage, empty-file handling, and a surfaced
+  missing-reference diagnostic.
 
-## Commands
+The oracle also validates durable identities, typed details, endpoint-kind
+compatibility, source bounds, known producers, direct and heuristic
+provenance, candidate bounds, external-placeholder scope, deferred placeholder
+wiring, non-recursive self-loops, and unresolved global hubs.
 
-Fixture and client qualification:
+## Command
 
-```bash
-make qualify-code-graph-v1
-```
-
-Locked repository qualification:
+Run the complete offline fixture gate from the repository root:
 
 ```bash
-./scripts/qualify_code_graph_v1.sh \
-  --repositories tests/qualification/code-graph-v1-repositories.toml
+./scripts/qualify_code_graph_v1.sh --fixtures-only
 ```
 
-The repository lock rejects symbolic refs and abbreviated object IDs. Each
-entry pins a unique size/language cell, and every declared framework has at
-least three named route-to-handler flows. The current polyglot lock uses an
-immutable Compass corpus commit so every supported language and framework can
-be exercised by the same current binary without network services or generated
-source.
+The script:
+
+1. validates both manifests before building;
+2. builds `compass-cli` once and uses that exact binary for every update;
+3. materializes the checked-in corpus in an isolated temporary directory;
+4. compares canonical graph bytes from clean, unchanged warm, forced, and
+   edit-then-restore updates;
+5. verifies that the checked-in source fixtures were not changed;
+6. executes every semantic assertion over the restored production graph; and
+7. prints one canonical JSON summary to standard output.
+
+Oracle self-tests and manifest-only validation can be run independently:
+
+```bash
+python3 -m unittest discover -s scripts/tests -p '*code_graph_v1*'
+python3 scripts/check_code_graph_v1_coverage.py
+```
 
 ## Evidence interpretation
 
-Qualification is fail-closed. A valid empty query remains a successful
-`compass.query/1` response, but any unknown schema, unsafe source path,
-unattributed heuristic edge, dangling endpoint, vocabulary producer gap,
-framework gap, or byte mismatch exits non-zero.
+Qualification is fail-closed. A missing or duplicate manifest identity,
+unknown field, unsafe fixture path, unobserved vocabulary producer, wrong
+handler binding, false exact relationship, unsupported provenance, unknown
+extractor, invalid anchor, endpoint violation, coverage contradiction, or byte
+mismatch exits non-zero with the failing invariant and identity.
 
-The locked mode prints JSON Lines containing the Compass checkout revision,
-repository revision, graph SHA-256, node/edge counts, cold and incremental
-index time, and symbol-search latency. These records are run evidence, not a
-portable performance promise; regressions are evaluated within the same CI
-runner class.
+The successful machine summary has schema
+`compass.code-graph-qualification-summary/1`. It records:
 
-## Recorded locked-corpus evidence
+- the exact Compass revision;
+- the combined manifest fingerprint;
+- the canonical production graph digest;
+- assertion counts and route-resolution counts;
+- coverage and diagnostic counts; and
+- booleans for clean/warm, clean/forced, clean/restored, and fixture-integrity
+  comparisons.
 
-The 2026-07-28 macOS arm64 qualification of
-`compass-polyglot-framework-corpus` at
-`9b9c9f788856417331628119d3e594d6fa563f0d` produced:
-
-- graph digest
-  `sha256:2f228d55d4b7b70c54bcfac8eb3beb5055627789cc9f7262921eb41db7b59253`;
-- 14,029 nodes and 41,628 edges across 25 emitted node kinds and 19 emitted
-  edge kinds;
-- 5,023 coverage records, 11 heuristic edges with wiring evidence, and six
-  surfaced normalization diagnostics;
-- 70 routes: 52 exact, 12 bounded ambiguous, and six unresolved; no exact route
-  lacked a handler `routes_to` edge;
-- all 69 declared framework flows had present source files, and all 23
-  framework families emitted route nodes;
-- byte-identical cold and unchanged incremental graphs;
-- 44,826.57 ms cold indexing, 6,519.54 ms unchanged indexing, and 9,820.17 ms
-  process-level CLI search latency on the qualification machine.
-
-Ambiguous and unresolved routes are retained as explicit query evidence; they
-are not counted as false exact resolution. The six diagnostics record
-impossible structural self-loops that the publisher dropped rather than
-silently representing as valid relationships.
-
-## Platform matrix
-
-Linux runs the complete fixture gate. macOS, Linux, and Windows run the
-deterministic publication, query-index recovery, process cancellation, and
-repository-contained source-navigation suites. The VS Code Electron test
-verifies the public command inventory, while package and VSIX smoke tests
-verify the shipped extension artifact.
+Digests and counts are deliberately generated by the command instead of copied
+into this document. They describe the exact revision, manifests, and binary
+that produced them and prevent stale prose from being presented as current
+release evidence.
