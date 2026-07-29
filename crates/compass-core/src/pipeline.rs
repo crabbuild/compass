@@ -1163,9 +1163,11 @@ fn build_graph_inner(
             &communities,
             &labels,
             &root,
-            &detection,
-            semantic,
-            &extraction_failures,
+            PublicationEvidence {
+                detection: &detection,
+                semantic,
+                extraction_failures: &extraction_failures,
+            },
             configuration_digest,
             commit.as_deref(),
         )?;
@@ -2377,14 +2379,18 @@ fn graph_configuration_digest(
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
+struct PublicationEvidence<'a> {
+    detection: &'a Detection,
+    semantic: Option<&'a SemanticLayer>,
+    extraction_failures: &'a BTreeMap<PathBuf, String>,
+}
+
 fn published_v1_document(
     document: &GraphDocument,
     communities: &compass_graph::Communities,
     labels: &BTreeMap<usize, String>,
     root: &Path,
-    detection: &Detection,
-    semantic: Option<&SemanticLayer>,
-    extraction_failures: &BTreeMap<PathBuf, String>,
+    evidence: PublicationEvidence<'_>,
     configuration_digest: String,
     source_commit: Option<&str>,
 ) -> Result<compass_model::code_graph::GraphDocument, CoreError> {
@@ -2417,7 +2423,12 @@ fn published_v1_document(
         root,
         configuration_digest,
         source_commit,
-        detection_inventory(detection, semantic, extraction_failures, root),
+        detection_inventory(
+            evidence.detection,
+            evidence.semantic,
+            evidence.extraction_failures,
+            root,
+        ),
     )?)
 }
 
