@@ -2213,19 +2213,50 @@ fn preserve_semantic_layer(
         mixed_edges.entry(key).or_default().push((index, site));
     }
     let mut refreshed_mixed_sites = HashMap::<usize, SourceAnchor>::new();
+    let mut semantic_only_mixed_edges = HashSet::<usize>::new();
     for (key, mut prior) in mixed_edges {
         let Some(current) = fresh_edge_sites.get(&key) else {
+            semantic_only_mixed_edges.extend(prior.into_iter().map(|(index, _)| index));
             continue;
         };
         prior.sort_by(|left, right| {
-            incremental_anchor_key(&left.1).cmp(&incremental_anchor_key(&right.1))
+            incremental_anchor_key(&left.1)
+                .cmp(&incremental_anchor_key(&right.1))
+                .then_with(|| left.0.cmp(&right.0))
         });
-        if prior.len() != current.len() {
-            dropped_edges.extend(prior.into_iter().map(|(index, _)| index));
-            continue;
+        // Exact shared sites are authoritative even when occurrence cardinality changed.
+        // Equal residual cardinality has one stable sorted bijection (the existing moved-site
+        // behavior). Unequal residual cardinality is ambiguous: fresh occurrences stay AST-only,
+        // while prior occurrences may survive only through semantic-only revalidation below.
+        let mut matched_current = vec![false; current.len()];
+        let mut unmatched_prior = Vec::new();
+        for (index, prior_site) in prior {
+            let exact = current
+                .iter()
+                .enumerate()
+                .position(|(current_index, site)| {
+                    !matched_current[current_index]
+                        && incremental_anchor_key(&prior_site) == incremental_anchor_key(site)
+                });
+            if let Some(current_index) = exact {
+                matched_current[current_index] = true;
+                refreshed_mixed_sites.insert(index, current[current_index].clone());
+            } else {
+                unmatched_prior.push((index, prior_site));
+            }
         }
-        for ((index, _), site) in prior.into_iter().zip(current.iter()) {
-            refreshed_mixed_sites.insert(index, site.clone());
+        let unmatched_current = current
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !matched_current[*index])
+            .map(|(_, site)| site)
+            .collect::<Vec<_>>();
+        if unmatched_prior.len() == unmatched_current.len() {
+            for ((index, _), site) in unmatched_prior.into_iter().zip(unmatched_current) {
+                refreshed_mixed_sites.insert(index, site.clone());
+            }
+        } else {
+            semantic_only_mixed_edges.extend(unmatched_prior.into_iter().map(|(index, _)| index));
         }
     }
     let prior_diagnostics = existing_raw.extensions.remove(GRAPH_DIAGNOSTICS_EXTENSION);
@@ -2280,6 +2311,10 @@ fn preserve_semantic_layer(
             }
             if let Some(site) = refreshed_mixed_sites.get(&index) {
                 refresh_preserved_mixed_edge(&mut raw.attributes, &raw.source, &raw.target, site);
+            } else if semantic_only_mixed_edges.contains(&index)
+                && !retain_preserved_mixed_edge_as_semantic_only(&mut raw.attributes)
+            {
+                return None;
             }
             Some(raw)
         })
@@ -2353,6 +2388,109 @@ fn refresh_preserved_mixed_edge(
     edge.relationship_site = Some(fresh_site.clone());
     *record = serde_json::to_value(edge).unwrap_or(serde_json::Value::Null);
     rebind_raw_anchor(attributes, fresh_site);
+}
+
+fn retain_preserved_mixed_edge_as_semantic_only(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let Some(record) = attributes.get_mut(TRUSTED_EDGE_RECORD_ATTRIBUTE) else {
+        return false;
+    };
+    let Ok(mut edge) =
+        serde_json::from_value::<compass_model::code_graph::EdgeRecord>(record.clone())
+    else {
+        return false;
+    };
+    edge.evidence.retain(|evidence| {
+        evidence.origin != EvidenceOrigin::Ast
+            && evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+    });
+    let Some(primary) = edge
+        .evidence
+        .iter()
+        .find(|evidence| {
+            evidence
+                .rule
+                .as_deref()
+                .and_then(EndpointRewriteRule::from_wire_name)
+                .is_none()
+        })
+        .cloned()
+    else {
+        // Endpoint rewrites describe transport, not an independently justified relationship.
+        // Without a non-AST producer assertion, an unmatched prior occurrence is stale.
+        return false;
+    };
+    edge.relationship_site = None;
+    *record = serde_json::to_value(edge).unwrap_or(serde_json::Value::Null);
+    for key in [
+        "source_file",
+        "source_location",
+        "source_anchor",
+        "start_byte",
+        "end_byte",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+        "_endpoint_rewrite_rules",
+        "_coalesced_edge_evidence",
+    ] {
+        attributes.remove(key);
+    }
+    project_preserved_semantic_evidence(attributes, &primary);
+    true
+}
+
+fn project_preserved_semantic_evidence(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    evidence: &compass_model::provenance::Provenance,
+) {
+    attributes.insert(
+        "_origin".to_owned(),
+        serde_json::Value::String(evidence.origin.as_str().to_owned()),
+    );
+    attributes.insert(
+        "confidence".to_owned(),
+        serde_json::Value::String(evidence.confidence.legacy_str().to_owned()),
+    );
+    attributes.insert(
+        "extractor".to_owned(),
+        serde_json::Value::String(evidence.extractor.clone()),
+    );
+    if let Some(rule) = &evidence.rule {
+        attributes.insert("rule".to_owned(), serde_json::Value::String(rule.clone()));
+    } else {
+        attributes.remove("rule");
+    }
+    if let Some(score) = evidence.score {
+        attributes.insert("confidence_score".to_owned(), score.into());
+    } else {
+        attributes.remove("confidence_score");
+    }
+    if evidence.candidates.is_empty() {
+        attributes.remove("candidates");
+    } else {
+        attributes.insert(
+            "candidates".to_owned(),
+            serde_json::to_value(&evidence.candidates).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let semantic_site = evidence
+        .wiring_site
+        .as_ref()
+        .or_else(|| evidence.anchors.first());
+    if let Some(site) = semantic_site {
+        attributes.insert(
+            "source_file".to_owned(),
+            serde_json::Value::String(site.file.clone()),
+        );
+        attributes.insert(
+            "source_anchor".to_owned(),
+            serde_json::to_value(site).unwrap_or(serde_json::Value::Null),
+        );
+    }
 }
 
 fn rebind_raw_anchor(
