@@ -43,6 +43,8 @@ mod verilog;
 mod xaml;
 mod zig;
 
+#[doc(hidden)]
+pub use builtins::is_language_builtin_global;
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
     FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,

@@ -5,7 +5,6 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
-use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
 use crate::{Extraction, RawCall, file_stem, make_id};
 
 const IMPORT_KEYWORDS: &[&str] = &["alias", "import", "require", "use"];
@@ -230,9 +229,7 @@ impl<'source, 'tree> State<'source, 'tree> {
                 break;
             }
         }
-        if let Some(callee) =
-            callee.filter(|callee| !LANGUAGE_BUILTIN_GLOBALS.contains(&callee.as_str()))
-        {
+        if let Some(callee) = callee {
             if let Some(target) = labels
                 .get(&callee)
                 .filter(|target| target.as_str() != caller)

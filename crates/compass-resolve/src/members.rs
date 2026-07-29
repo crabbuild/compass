@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use compass_languages::{Extraction, RawCall};
+use compass_languages::{Extraction, RawCall, is_language_builtin_global};
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 
@@ -689,52 +689,7 @@ fn is_builtin_type(indexes: &Indexes, owner: &str) -> bool {
     indexes
         .nodes
         .get(owner)
-        .is_some_and(|node| is_builtin(node.label()))
-}
-
-fn is_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "Number"
-            | "Boolean"
-            | "Object"
-            | "Array"
-            | "Symbol"
-            | "BigInt"
-            | "Date"
-            | "RegExp"
-            | "Error"
-            | "TypeError"
-            | "RangeError"
-            | "SyntaxError"
-            | "ReferenceError"
-            | "EvalError"
-            | "URIError"
-            | "Promise"
-            | "Map"
-            | "Set"
-            | "WeakMap"
-            | "WeakSet"
-            | "JSON"
-            | "Math"
-            | "Reflect"
-            | "Proxy"
-            | "Intl"
-            | "URL"
-            | "URLSearchParams"
-            | "FormData"
-            | "Blob"
-            | "File"
-            | "Headers"
-            | "Request"
-            | "Response"
-            | "AbortController"
-            | "AbortSignal"
-            | "TextEncoder"
-            | "TextDecoder"
-            | "console"
-    )
+        .is_some_and(|node| is_language_builtin_global("typescript", node.label()))
 }
 
 fn key(label: &str) -> String {
@@ -869,8 +824,8 @@ mod tests {
         ] {
             assert!(!is_type_like(&node(value)));
         }
-        assert!(is_builtin("Promise"));
-        assert!(!is_builtin("Custom"));
+        assert!(is_language_builtin_global("typescript", "Promise"));
+        assert!(!is_language_builtin_global("typescript", "Custom"));
         assert_eq!(key("HTTP_Client.run()"), "httpclientrun");
         assert_eq!(receiver(&call(Some(Some("service")))), Some("service"));
         assert_eq!(receiver(&call(Some(None))), None);

@@ -5,7 +5,6 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
 use crate::{Extraction, RawCall, make_id};
 
 const TRAIT_METHOD_BLOCKLIST: &[&str] = &[
@@ -462,7 +461,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                 ),
                 _ => (None, false, false),
             };
-            if let Some(callee) = callee.filter(|name| !builtin_global(name)) {
+            if let Some(callee) = callee {
                 if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
                     let pair = (
                         caller.to_owned(),
@@ -672,10 +671,6 @@ fn is_type_node(kind: &str) -> bool {
             | "tuple_type"
             | "array_type"
     )
-}
-
-fn builtin_global(name: &str) -> bool {
-    LANGUAGE_BUILTIN_GLOBALS.contains(&name)
 }
 
 fn line(node: Node<'_>) -> usize {

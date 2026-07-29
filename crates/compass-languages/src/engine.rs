@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use tree_sitter::{Node, Parser, Tree};
 
-use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
+use crate::builtins::is_language_builtin_global;
 use crate::config::{GenericConfig, generic_config};
 use crate::{
     CombinedExtraction, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
@@ -1431,7 +1431,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
         if self.config.call_types.contains(&kind)
             && let Some(call) = self.call_name(node)
-            && !LANGUAGE_BUILTIN_GLOBALS.contains(&call.name.as_str())
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
             let defer_member = call.member
@@ -1459,6 +1458,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             }) {
                 self.add_edge_at(caller, target, "calls", node, Some("call"));
             } else if target.is_none()
+                && !is_language_builtin_global(self.language, &call.name)
                 && !(self.language == "lua" && (call.member || call.name.contains('.')))
             {
                 self.extraction.raw_calls_mut().push(RawCall {
@@ -3660,7 +3660,7 @@ mod rationale_tests {
     }
 
     #[test]
-    fn rust_calls_named_like_shared_builtins_are_suppressed()
+    fn rust_calls_named_like_other_language_builtins_resolve_locally()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let source = directory.path().join("builtins.rs");
@@ -3676,10 +3676,17 @@ mod rationale_tests {
             .find(|node| node.label() == "caller()")
             .map(|node| node.id.as_str())
             .ok_or("missing caller")?;
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == caller
-                && edge.attributes.get("relation").and_then(Value::as_str) == Some("calls")
-        }));
+        assert_eq!(
+            extraction
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.source == caller
+                        && edge.attributes.get("relation").and_then(Value::as_str) == Some("calls")
+                })
+                .count(),
+            2
+        );
         Ok(())
     }
 

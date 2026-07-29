@@ -5,6 +5,7 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use crate::builtins::is_language_builtin_global;
 use crate::{Extraction, RawCall, make_id};
 
 const PREDECLARED_TYPES: &[&str] = &[
@@ -396,7 +397,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             } else {
                 (None, false)
             };
-            if let Some(callee) = callee.filter(|name| !builtin_global(name)) {
+            if let Some(callee) = callee {
                 if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
                     let pair = (
                         caller.to_owned(),
@@ -408,7 +409,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                         self.add_edge(caller, target, "calls", line(node), Some("call"));
                         crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
-                } else {
+                } else if !is_language_builtin_global("go", &callee) {
                     self.extraction.raw_calls_mut().push(RawCall {
                         caller_nid: caller.to_owned(),
                         callee,
@@ -563,13 +564,6 @@ fn collect_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tre
             collect_kind(child, kind, output);
         }
     }
-}
-
-fn builtin_global(name: &str) -> bool {
-    matches!(
-        name,
-        "String" | "Number" | "Boolean" | "Object" | "Array" | "len" | "print" | "min" | "max"
-    )
 }
 
 fn line(node: Node<'_>) -> usize {

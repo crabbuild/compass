@@ -11,7 +11,8 @@ use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
-    Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord, make_id,
+    Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
+    is_language_builtin_global, make_id,
 };
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
@@ -1149,7 +1150,6 @@ fn resolve_cross_file_calls_with_root_calls(
     for raw in raw_calls {
         if raw.callee.is_empty()
             || raw.is_member_call == Some(true)
-            || is_builtin(&raw.callee)
             || raw.extensions.get("is_mixin").and_then(Value::as_bool) == Some(true)
         {
             continue;
@@ -1174,6 +1174,18 @@ fn resolve_cross_file_calls_with_root_calls(
         let Some((target, import_evidence)) = selection else {
             continue;
         };
+        let same_file = source_by_id
+            .get(&target)
+            .is_some_and(|source| normalize_path(source) == normalize_path(&raw.source_file));
+        let language = raw
+            .lang
+            .as_deref()
+            .or_else(|| language_name_from_source(&raw.source_file));
+        if language.is_some_and(|language| {
+            is_language_builtin_global(language, &raw.callee) && !same_file && !import_evidence
+        }) {
+            continue;
+        }
         if raw
             .extensions
             .get("symbol_import_use")
@@ -2247,98 +2259,17 @@ fn is_javascript(source: &str) -> bool {
     )
 }
 
-fn is_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "Number"
-            | "Boolean"
-            | "Object"
-            | "Array"
-            | "Symbol"
-            | "BigInt"
-            | "Date"
-            | "RegExp"
-            | "Error"
-            | "TypeError"
-            | "RangeError"
-            | "SyntaxError"
-            | "ReferenceError"
-            | "EvalError"
-            | "URIError"
-            | "Promise"
-            | "Map"
-            | "Set"
-            | "WeakMap"
-            | "WeakSet"
-            | "JSON"
-            | "Math"
-            | "Reflect"
-            | "Proxy"
-            | "Intl"
-            | "parseInt"
-            | "parseFloat"
-            | "isNaN"
-            | "isFinite"
-            | "encodeURIComponent"
-            | "decodeURIComponent"
-            | "encodeURI"
-            | "decodeURI"
-            | "URL"
-            | "URLSearchParams"
-            | "FormData"
-            | "Blob"
-            | "File"
-            | "Headers"
-            | "Request"
-            | "Response"
-            | "AbortController"
-            | "AbortSignal"
-            | "TextEncoder"
-            | "TextDecoder"
-            | "console"
-            | "str"
-            | "int"
-            | "float"
-            | "bool"
-            | "list"
-            | "dict"
-            | "set"
-            | "tuple"
-            | "bytes"
-            | "len"
-            | "range"
-            | "enumerate"
-            | "zip"
-            | "map"
-            | "filter"
-            | "sum"
-            | "min"
-            | "max"
-            | "print"
-            | "open"
-            | "isinstance"
-            | "type"
-            | "super"
-            | "sorted"
-            | "reversed"
-            | "any"
-            | "all"
-            | "abs"
-            | "round"
-            | "next"
-            | "iter"
-            | "hash"
-            | "id"
-            | "repr"
-            | "callable"
-            | "getattr"
-            | "setattr"
-            | "hasattr"
-            | "delattr"
-            | "vars"
-            | "dir"
-    )
+fn language_name_from_source(source: &str) -> Option<&'static str> {
+    match extension(source).as_str() {
+        "py" | "pyi" => Some("python"),
+        "js" | "jsx" | "mjs" | "cjs" => Some("javascript"),
+        "ts" | "mts" | "cts" => Some("typescript"),
+        "tsx" => Some("tsx"),
+        "go" => Some("go"),
+        "rs" => Some("rust"),
+        "java" => Some("java"),
+        _ => None,
+    }
 }
 
 fn language_family(source: &str) -> Option<&'static str> {
@@ -2717,8 +2648,12 @@ mod tests {
         assert_eq!(language_family("README"), None);
         assert!(case_insensitive("query.SQL"));
         assert!(is_javascript("view.mjs"));
-        assert!(is_builtin("Promise"));
-        assert!(!is_builtin("project_function"));
+        assert!(is_language_builtin_global("javascript", "Promise"));
+        assert!(!is_language_builtin_global("rust", "Promise"));
+        assert!(!is_language_builtin_global(
+            "javascript",
+            "project_function"
+        ));
     }
 
     #[test]

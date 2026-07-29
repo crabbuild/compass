@@ -11,8 +11,8 @@ use crate::{file_stem, make_id};
 // SQL object references may contain quoted identifiers, including escaped
 // double quotes, and may be schema-qualified. Keep the quotes in the captured
 // label to preserve the source spelling and dialect-specific case semantics.
-const IDENTIFIER: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]+\]|[\w$]+)"#;
-const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]+\]|[\w$]+)(?:\.(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]+\]|[\w$]+))*"#;
+const IDENTIFIER: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)"#;
+const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)(?:\.(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+))*"#;
 
 pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
     State::new(path, source).run()
@@ -36,6 +36,25 @@ struct Statement {
     end: usize,
     kind: StatementKind,
     name: String,
+    name_start: usize,
+    name_end: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Site {
+    start: usize,
+    end: usize,
+}
+
+struct AccessBindings {
+    aliases: HashMap<String, String>,
+    cte_names: HashSet<String>,
+}
+
+impl Site {
+    const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
 }
 
 struct State<'a> {
@@ -106,7 +125,14 @@ impl<'a> State<'a> {
     }
 
     fn add_file_node(&mut self, label: &str) {
-        let mut attributes = self.base_attributes("file", label, label, 1, "ast");
+        let mut attributes = self.base_attributes(
+            "file",
+            label,
+            label,
+            Site::new(0, self.source.len()),
+            "artifact",
+            "sql-text-file",
+        );
         attributes.insert("file_type".into(), Value::String("code".into()));
         self.push_node(self.file_id.clone(), attributes);
     }
@@ -116,25 +142,22 @@ impl<'a> State<'a> {
             "database",
             &self.logical_database,
             &self.logical_database,
-            1,
+            Site::new(0, self.source.len()),
             "convention",
+            "sql-file-logical-database",
         );
         attributes.insert(
             "logical_database".into(),
             Value::String(self.logical_database.clone()),
-        );
-        attributes.insert(
-            "rule".into(),
-            Value::String("sql-file-logical-database".into()),
         );
         self.push_node(self.database_id.clone(), attributes);
         self.add_edge_with_origin(
             &self.file_id.clone(),
             &self.database_id.clone(),
             "contains",
-            1,
+            Site::new(0, self.source.len()),
             "convention",
-            Some("sql-file-logical-database"),
+            "sql-file-logical-database",
         );
     }
 
@@ -149,30 +172,33 @@ impl<'a> State<'a> {
             .unwrap_or("migration");
         let qualified_name = format!("{}::{name}", self.logical_database);
         let id = make_id(&["sql-migration", &self.source_file]);
-        let mut attributes =
-            self.base_attributes("migration", name, &qualified_name, 1, "convention");
-        attributes.insert(
-            "rule".into(),
-            Value::String("sql-migration-path-convention".into()),
+        let attributes = self.base_attributes(
+            "migration",
+            name,
+            &qualified_name,
+            Site::new(0, self.source.len()),
+            "convention",
+            "sql-migration-path-convention",
         );
         self.push_node(id.clone(), attributes);
         self.add_edge_with_origin(
             &self.file_id.clone(),
             &id,
             "contains",
-            1,
+            Site::new(0, self.source.len()),
             "convention",
-            Some("sql-migration-path-convention"),
+            "sql-migration-path-convention",
         );
     }
 
     fn add_declared_object(&mut self, statement: &Statement) {
-        let at = self.line_at(statement.offset);
+        let site = Site::new(statement.name_start, statement.name_end);
         match statement.kind {
             StatementKind::Database => {
                 // The per-file logical database remains the stable owner. An
                 // explicit CREATE DATABASE name enriches it without changing
                 // the identity of every dependent object in the same file.
+                let source_location = format!("L{}", self.line_at(site.start));
                 if let Some(node) = self
                     .extraction
                     .nodes
@@ -188,35 +214,88 @@ impl<'a> State<'a> {
                         Value::String(statement.name.clone()),
                     );
                     node.attributes
-                        .insert("_origin".into(), Value::String("ast".into()));
-                    node.attributes.remove("rule");
+                        .insert("_origin".into(), Value::String("artifact".into()));
+                    node.attributes.insert(
+                        "rule".into(),
+                        Value::String("sql-text-database-declaration".into()),
+                    );
+                    crate::facts::stamp_source_range(
+                        &mut node.attributes,
+                        self.source,
+                        site.start,
+                        site.end,
+                    );
                     node.attributes
-                        .insert("source_location".into(), Value::String(format!("L{at}")));
-                    node.attributes.insert("line_start".into(), Value::from(at));
-                    node.attributes.insert("line_end".into(), Value::from(at));
+                        .insert("source_location".into(), Value::String(source_location));
                 }
             }
             StatementKind::Schema => {
-                self.ensure_schema(&statement.name, at, "ast");
+                self.ensure_schema(
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-schema-declaration",
+                );
             }
             StatementKind::Table => {
-                let id = self.add_database_object("database_table", &statement.name, at, "ast");
+                let id = self.add_database_object(
+                    "database_table",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-table-declaration",
+                );
                 self.add_table_members(statement, &id);
             }
             StatementKind::View => {
-                self.add_database_object("database_view", &statement.name, at, "ast");
+                self.add_database_object(
+                    "database_view",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-view-declaration",
+                );
             }
             StatementKind::Procedure => {
-                self.add_database_object("database_procedure", &statement.name, at, "ast");
+                self.add_database_object(
+                    "database_procedure",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-procedure-declaration",
+                );
             }
             StatementKind::Trigger => {
-                self.add_database_object("database_trigger", &statement.name, at, "ast");
+                let id = self.add_database_object(
+                    "database_trigger",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-trigger-declaration",
+                );
+                let events = trigger_events(
+                    &self.masked[statement.offset..statement.end.min(self.masked.len())],
+                );
+                if !events.is_empty()
+                    && let Some(node) = self.extraction.nodes.iter_mut().find(|node| node.id == id)
+                {
+                    node.attributes.insert(
+                        "trigger_events".into(),
+                        Value::Array(events.into_iter().map(Value::String).collect()),
+                    );
+                }
             }
             StatementKind::Index => {
-                self.add_database_object("database_index", &statement.name, at, "ast");
+                self.add_database_object(
+                    "database_index",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-index-declaration",
+                );
             }
             StatementKind::AlterTable => {
-                self.ensure_table(&statement.name, at);
+                self.ensure_table(&statement.name, site);
                 self.add_alter_constraints(statement);
             }
         }
@@ -227,17 +306,25 @@ impl<'a> State<'a> {
             return;
         };
         match statement.kind {
-            StatementKind::View | StatementKind::Procedure | StatementKind::Trigger => {
+            StatementKind::View | StatementKind::Procedure => {
                 self.add_data_access(&source, statement.offset, statement.end);
+            }
+            StatementKind::Trigger => {
+                if let Some(target_end) = self.link_trigger_to_table(statement, &source)
+                    && let Some(body_start) = trigger_body_start(
+                        &self.masked,
+                        target_end,
+                        statement.end.min(self.masked.len()),
+                    )
+                {
+                    self.add_data_access(&source, body_start, statement.end);
+                }
             }
             StatementKind::Table | StatementKind::AlterTable => {
                 self.add_foreign_key_references(&source, statement.offset, statement.end);
             }
             StatementKind::Index => self.link_index_to_table(statement, &source),
             StatementKind::Database | StatementKind::Schema => {}
-        }
-        if statement.kind == StatementKind::Trigger {
-            self.link_trigger_to_table(statement, &source);
         }
     }
 
@@ -258,32 +345,60 @@ impl<'a> State<'a> {
             }
             let member_offset =
                 open + 1 + relative_offset + member.len() - member.trim_start().len();
-            let at = self.line_at(member_offset);
             if is_table_constraint(trimmed) {
-                let name = constraint_name(trimmed)
-                    .unwrap_or_else(|| format!("{}#constraint@{}", statement.name, member_offset));
+                let (name, site) = constraint_name(trimmed).map_or_else(
+                    || {
+                        (
+                            format!("{}#constraint@{}", statement.name, member_offset),
+                            Site::new(member_offset, member_offset + trimmed.len()),
+                        )
+                    },
+                    |(name, start, end)| {
+                        (name, Site::new(member_offset + start, member_offset + end))
+                    },
+                );
                 let qualified_name = format!("{}::{name}", statement.name);
-                let id = make_id(&["sql-constraint", &self.logical_database, &qualified_name]);
+                let identity = identifier_key(&format!("{}.{}", statement.name, name));
+                let id = make_id(&[
+                    "sql-constraint",
+                    &self.logical_database,
+                    &qualified_name,
+                    &identity,
+                ]);
                 let attributes = self.database_attributes(
                     "database_constraint",
                     &name,
                     &qualified_name,
-                    at,
-                    "ast",
+                    site,
+                    "artifact",
+                    "sql-text-table-constraint",
                 );
                 self.push_node(id.clone(), attributes);
-                self.add_edge(table_id, &id, "contains", at);
+                self.add_edge(table_id, &id, "contains", site, "sql-text-table-member");
                 continue;
             }
-            let Some(name) = first_identifier(trimmed) else {
+            let Some((name, start, end)) = first_identifier(trimmed) else {
                 continue;
             };
+            let site = Site::new(member_offset + start, member_offset + end);
             let qualified_name = format!("{}.{}", statement.name, name);
-            let id = make_id(&["sql-column", &self.logical_database, &qualified_name]);
-            let attributes =
-                self.database_attributes("database_column", &name, &qualified_name, at, "ast");
+            let identity = identifier_key(&qualified_name);
+            let id = make_id(&[
+                "sql-column",
+                &self.logical_database,
+                &qualified_name,
+                &identity,
+            ]);
+            let attributes = self.database_attributes(
+                "database_column",
+                &name,
+                &qualified_name,
+                site,
+                "artifact",
+                "sql-text-column-declaration",
+            );
             self.push_node(id.clone(), attributes);
-            self.add_edge(table_id, &id, "contains", at);
+            self.add_edge(table_id, &id, "contains", site, "sql-text-table-member");
         }
     }
 
@@ -300,13 +415,28 @@ impl<'a> State<'a> {
                 continue;
             };
             let name = name_match.as_str();
-            let at = self.line_at(statement.offset + name_match.start());
+            let site = Site::new(
+                statement.offset + name_match.start(),
+                statement.offset + name_match.end(),
+            );
             let qualified_name = format!("{}::{name}", statement.name);
-            let id = make_id(&["sql-constraint", &self.logical_database, &qualified_name]);
-            let attributes =
-                self.database_attributes("database_constraint", name, &qualified_name, at, "ast");
+            let identity = identifier_key(&format!("{}.{}", statement.name, name));
+            let id = make_id(&[
+                "sql-constraint",
+                &self.logical_database,
+                &qualified_name,
+                &identity,
+            ]);
+            let attributes = self.database_attributes(
+                "database_constraint",
+                name,
+                &qualified_name,
+                site,
+                "artifact",
+                "sql-text-alter-constraint",
+            );
             self.push_node(id.clone(), attributes);
-            self.add_edge(&table_id, &id, "contains", at);
+            self.add_edge(&table_id, &id, "contains", site, "sql-text-table-member");
         }
     }
 
@@ -319,9 +449,15 @@ impl<'a> State<'a> {
             let Some(name_match) = capture.get(1) else {
                 continue;
             };
-            let at = self.line_at(start + name_match.start());
-            let target = self.ensure_table(name_match.as_str(), at);
-            self.add_edge(source, &target, "references", at);
+            let site = Site::new(start + name_match.start(), start + name_match.end());
+            let target = self.ensure_table(name_match.as_str(), site);
+            self.add_edge(
+                source,
+                &target,
+                "references",
+                site,
+                "sql-text-foreign-key-reference",
+            );
         }
     }
 
@@ -336,81 +472,103 @@ impl<'a> State<'a> {
         let Some(name_match) = capture.get(1) else {
             return;
         };
-        let at = self.line_at(statement.offset + name_match.start());
-        let table = self.ensure_table(name_match.as_str(), at);
-        self.add_edge(&table, index_id, "contains", at);
+        let site = Site::new(
+            statement.offset + name_match.start(),
+            statement.offset + name_match.end(),
+        );
+        let table = self.ensure_table(name_match.as_str(), site);
+        self.add_edge(&table, index_id, "contains", site, "sql-text-index-target");
     }
 
-    fn link_trigger_to_table(&mut self, statement: &Statement, trigger_id: &str) {
+    fn link_trigger_to_table(&mut self, statement: &Statement, trigger_id: &str) -> Option<usize> {
         let body = self.masked[statement.offset..statement.end].to_owned();
         let Ok(regex) = Regex::new(&format!(r"(?i)\bON\s+({OBJECT_REFERENCE})")) else {
-            return;
+            return None;
         };
-        let Some(capture) = regex.captures(&body) else {
-            return;
-        };
-        let Some(name_match) = capture.get(1) else {
-            return;
-        };
-        let at = self.line_at(statement.offset + name_match.start());
-        let table = self.ensure_table(name_match.as_str(), at);
-        self.add_edge(&table, trigger_id, "contains", at);
-        self.add_edge(trigger_id, &table, "triggers", at);
+        let capture = regex.captures(&body)?;
+        let name_match = capture.get(1)?;
+        let site = Site::new(
+            statement.offset + name_match.start(),
+            statement.offset + name_match.end(),
+        );
+        let table = self.ensure_table(name_match.as_str(), site);
+        self.add_edge(
+            &table,
+            trigger_id,
+            "contains",
+            site,
+            "sql-text-trigger-target",
+        );
+        self.add_edge(
+            trigger_id,
+            &table,
+            "triggers",
+            site,
+            "sql-text-trigger-target",
+        );
+        Some(site.end)
     }
 
     fn add_queries(&mut self) {
-        let Ok(regex) = Regex::new(r"(?im)(?:^|;)\s*(SELECT|INSERT|UPDATE|DELETE|MERGE)\b") else {
-            return;
-        };
-        let matches = regex
-            .captures_iter(&self.masked)
-            .filter_map(|capture| {
-                let operation = capture.get(1)?;
-                Some((operation.start(), operation.as_str().to_ascii_lowercase()))
-            })
-            .collect::<Vec<_>>();
-        for (index, (start, operation)) in matches.iter().enumerate() {
-            let end = matches.get(index + 1).map_or_else(
-                || statement_end(&self.masked, *start).unwrap_or(self.masked.len()),
-                |next| next.0,
-            );
-            self.add_query(operation, *start, end);
+        for (statement_start, _, end, operation) in query_statements(&self.masked) {
+            self.add_query(&operation, statement_start, end);
         }
     }
 
-    fn add_query(&mut self, operation: &str, start: usize, end: usize) {
-        let at = self.line_at(start);
-        let qualified_name = format!("{}::{}@{}", self.logical_database, operation, start);
-        let id = make_id(&["sql-query", &self.source_file, &start.to_string()]);
-        let mut attributes = self.base_attributes("query", operation, &qualified_name, at, "ast");
+    fn add_query(&mut self, operation: &str, statement_start: usize, end: usize) {
+        let qualified_name = format!(
+            "{}::{}@{}",
+            self.logical_database, operation, statement_start
+        );
+        let id = make_id(&["sql-query", &self.source_file, &statement_start.to_string()]);
+        let site = Site::new(statement_start, end);
+        let mut attributes = self.base_attributes(
+            "query",
+            operation,
+            &qualified_name,
+            site,
+            "artifact",
+            "sql-text-query-statement",
+        );
         attributes.insert("dialect".into(), Value::String("sql".into()));
         attributes.insert("operation".into(), Value::String(operation.to_owned()));
         attributes.insert(
             "text_digest".into(),
             Value::String(sha256_prefixed(
-                self.source.get(start..end).unwrap_or_default(),
+                self.source.get(statement_start..end).unwrap_or_default(),
             )),
         );
-        attributes.insert("line_end".into(), Value::from(self.line_at(end)));
         self.push_node(id.clone(), attributes);
-        self.add_edge(&self.file_id.clone(), &id, "contains", at);
-        self.add_data_access(&id, start, end);
+        self.add_edge(
+            &self.file_id.clone(),
+            &id,
+            "contains",
+            site,
+            "sql-text-query-statement",
+        );
+        self.add_data_access(&id, statement_start, end);
     }
 
     fn add_data_access(&mut self, source: &str, start: usize, end: usize) {
         let body = self.masked[start..end.min(self.masked.len())].to_owned();
-        let read_patterns = [
-            format!(r"(?i)\b(?:FROM|JOIN|USING)\s+({OBJECT_REFERENCE})"),
+        let bindings = AccessBindings {
+            aliases: table_aliases(&body),
+            cte_names: cte_names(&body),
+        };
+        let read_patterns = [format!(
+            r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
+        )];
+        let write_patterns = [
+            format!(
+                r"(?i)\bINSERT\s+(?:OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)\s+)?INTO\s+({OBJECT_REFERENCE})"
+            ),
+            format!(r"(?i)\bUPDATE\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"),
+            format!(r"(?i)\bDELETE\s+(?:{IDENTIFIER}\s+)?FROM\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"),
+            format!(r"(?i)\bMERGE\s+(?:INTO\s+)?({OBJECT_REFERENCE})"),
             format!(r"(?i)\bSELECT\b[\s\S]*?\bINTO\s+({OBJECT_REFERENCE})"),
         ];
-        let write_patterns = [
-            format!(r"(?i)\bINSERT\s+INTO\s+({OBJECT_REFERENCE})"),
-            format!(r"(?i)\bUPDATE\s+({OBJECT_REFERENCE})"),
-            format!(r"(?i)\bDELETE\s+FROM\s+({OBJECT_REFERENCE})"),
-            format!(r"(?i)\bMERGE\s+INTO\s+({OBJECT_REFERENCE})"),
-        ];
-        self.add_access_matches(source, start, &body, &read_patterns, "reads");
-        self.add_access_matches(source, start, &body, &write_patterns, "writes");
+        self.add_access_matches(source, start, &body, &read_patterns, "reads", &bindings);
+        self.add_access_matches(source, start, &body, &write_patterns, "writes", &bindings);
     }
 
     fn add_access_matches(
@@ -420,6 +578,7 @@ impl<'a> State<'a> {
         body: &str,
         patterns: &[String],
         relation: &str,
+        bindings: &AccessBindings,
     ) {
         let mut emitted = HashSet::new();
         for pattern in patterns {
@@ -431,73 +590,105 @@ impl<'a> State<'a> {
                     continue;
                 };
                 let name = name_match.as_str();
-                if is_non_table_keyword(name)
-                    || !emitted.insert(normalized_identifier(name).to_ascii_lowercase())
+                let key = identifier_key(name);
+                if is_non_table_keyword(name) || bindings.cte_names.contains(&key) {
+                    continue;
+                }
+                let target_name = bindings.aliases.get(&key).map_or(name, String::as_str);
+                if is_non_table_keyword(target_name) || !emitted.insert(identifier_key(target_name))
                 {
                     continue;
                 }
-                let at = self.line_at(start + name_match.start());
-                let target = self.ensure_table(name, at);
-                self.add_edge(source, &target, relation, at);
+                let site = Site::new(start + name_match.start(), start + name_match.end());
+                let target = self.ensure_table(target_name, site);
+                self.add_edge(source, &target, relation, site, "sql-text-data-access");
             }
         }
     }
 
-    fn add_database_object(&mut self, kind: &str, name: &str, at: usize, origin: &str) -> String {
-        if let Some(existing) = self.object_id(name) {
+    fn add_database_object(
+        &mut self,
+        kind: &str,
+        name: &str,
+        site: Site,
+        origin: &str,
+        rule: &str,
+    ) -> String {
+        if let Some(existing) = self.exact_object_id(name) {
             return existing;
         }
-        let schema = schema_name(name);
+        let schema_source = schema_reference(name);
+        let schema = schema_source.as_deref().map(normalized_identifier);
         let qualified_name = normalized_identifier(name);
+        let identity = identifier_key(name);
         let id = make_id(&[
             kind,
             &self.logical_database,
             schema.as_deref().unwrap_or_default(),
             &qualified_name,
+            &identity,
         ]);
-        let attributes = self.database_attributes(kind, name, &qualified_name, at, origin);
+        let attributes = self.database_attributes(kind, name, &qualified_name, site, origin, rule);
         self.push_node(id.clone(), attributes);
         self.register_object(name, &id);
-        let parent = schema
+        let parent = schema_source
             .as_deref()
-            .map(|schema| self.ensure_schema(schema, at, origin))
+            .map(|schema| self.ensure_schema(schema, site, origin, "sql-text-schema-qualification"))
             .unwrap_or_else(|| self.database_id.clone());
-        self.add_edge(&parent, &id, "contains", at);
+        self.add_edge(&parent, &id, "contains", site, "sql-text-containment");
         id
     }
 
-    fn ensure_table(&mut self, name: &str, at: usize) -> String {
-        self.object_id(name)
-            .unwrap_or_else(|| self.add_database_object("database_table", name, at, "ast"))
+    fn ensure_table(&mut self, name: &str, site: Site) -> String {
+        self.object_id(name).unwrap_or_else(|| {
+            self.add_database_object(
+                "database_table",
+                name,
+                site,
+                "artifact",
+                "sql-text-table-reference",
+            )
+        })
     }
 
-    fn ensure_schema(&mut self, name: &str, at: usize, origin: &str) -> String {
+    fn ensure_schema(&mut self, name: &str, site: Site, origin: &str, rule: &str) -> String {
         let normalized = normalized_identifier(name);
-        let key = normalized.to_ascii_lowercase();
+        let key = identifier_key(name);
         if let Some(id) = self.schemas.get(&key) {
             return id.clone();
         }
-        let id = make_id(&["database_schema", &self.logical_database, &normalized]);
+        let id = make_id(&["database_schema", &self.logical_database, &normalized, &key]);
         let mut attributes =
-            self.database_attributes("database_schema", name, &normalized, at, origin);
+            self.database_attributes("database_schema", name, &normalized, site, origin, rule);
         attributes.insert("database_schema".into(), Value::String(normalized.clone()));
         self.push_node(id.clone(), attributes);
         self.schemas.insert(key, id.clone());
-        self.add_edge(&self.database_id.clone(), &id, "contains", at);
+        self.add_edge(
+            &self.database_id.clone(),
+            &id,
+            "contains",
+            site,
+            "sql-text-containment",
+        );
         id
     }
 
+    fn exact_object_id(&self, name: &str) -> Option<String> {
+        self.objects.get(&identifier_key(name)).cloned()
+    }
+
     fn object_id(&self, name: &str) -> Option<String> {
-        let normalized = normalized_identifier(name).to_ascii_lowercase();
-        self.objects.get(&normalized).cloned().or_else(|| {
+        self.exact_object_id(name).or_else(|| {
+            if qualified_identifier_parts(name).len() > 1 {
+                return None;
+            }
             let short = last_identifier(name).to_ascii_lowercase();
             self.short_object_names.get(&short).cloned().flatten()
         })
     }
 
     fn register_object(&mut self, name: &str, id: &str) {
-        let normalized = normalized_identifier(name).to_ascii_lowercase();
-        self.objects.insert(normalized, id.to_owned());
+        self.objects.insert(identifier_key(name), id.to_owned());
         let short = last_identifier(name).to_ascii_lowercase();
         self.short_object_names
             .entry(short)
@@ -514,11 +705,18 @@ impl<'a> State<'a> {
         kind: &str,
         name: &str,
         qualified_name: &str,
-        at: usize,
+        site: Site,
         origin: &str,
+        rule: &str,
     ) -> Map<String, Value> {
-        let mut attributes =
-            self.base_attributes(kind, &last_identifier(name), qualified_name, at, origin);
+        let mut attributes = self.base_attributes(
+            kind,
+            &last_identifier(name),
+            qualified_name,
+            site,
+            origin,
+            rule,
+        );
         attributes.insert(
             "logical_database".into(),
             Value::String(self.logical_database.clone()),
@@ -534,8 +732,9 @@ impl<'a> State<'a> {
         kind: &str,
         name: &str,
         qualified_name: &str,
-        at: usize,
+        site: Site,
         origin: &str,
+        rule: &str,
     ) -> Map<String, Value> {
         let mut attributes = Map::new();
         attributes.insert("label".into(), Value::String(name.to_owned()));
@@ -551,13 +750,16 @@ impl<'a> State<'a> {
             "source_file".into(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".into(), Value::String(format!("L{at}")));
-        attributes.insert("line_start".into(), Value::from(at));
-        attributes.insert("line_end".into(), Value::from(at));
         attributes.insert("_origin".into(), Value::String(origin.to_owned()));
+        attributes.insert("rule".into(), Value::String(rule.to_owned()));
         attributes.insert(
             "extractor".into(),
             Value::String("compass.languages.sql".into()),
+        );
+        crate::facts::stamp_source_range(&mut attributes, self.source, site.start, site.end);
+        attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{}", self.line_at(site.start))),
         );
         attributes
     }
@@ -568,8 +770,8 @@ impl<'a> State<'a> {
         }
     }
 
-    fn add_edge(&mut self, source: &str, target: &str, relation: &str, at: usize) {
-        self.add_edge_with_origin(source, target, relation, at, "ast", None);
+    fn add_edge(&mut self, source: &str, target: &str, relation: &str, site: Site, rule: &str) {
+        self.add_edge_with_origin(source, target, relation, site, "artifact", rule);
     }
 
     fn add_edge_with_origin(
@@ -577,15 +779,15 @@ impl<'a> State<'a> {
         source: &str,
         target: &str,
         relation: &str,
-        at: usize,
+        site: Site,
         origin: &str,
-        rule: Option<&str>,
+        rule: &str,
     ) {
         if !self.seen_edges.insert((
             source.to_owned(),
             target.to_owned(),
             relation.to_owned(),
-            at,
+            site.start,
         )) {
             return;
         }
@@ -596,16 +798,18 @@ impl<'a> State<'a> {
             "source_file".into(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".into(), Value::String(format!("L{at}")));
+        attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{}", self.line_at(site.start))),
+        );
         attributes.insert("weight".into(), Value::from(1.0));
         attributes.insert("_origin".into(), Value::String(origin.to_owned()));
         attributes.insert(
             "extractor".into(),
             Value::String("compass.languages.sql".into()),
         );
-        if let Some(rule) = rule {
-            attributes.insert("rule".into(), Value::String(rule.to_owned()));
-        }
+        attributes.insert("rule".into(), Value::String(rule.to_owned()));
+        crate::facts::stamp_source_range(&mut attributes, self.source, site.start, site.end);
         self.extraction.edges.push(EdgeRecord {
             source: source.to_owned(),
             target: target.to_owned(),
@@ -647,11 +851,14 @@ fn statements(source: &str) -> Vec<Statement> {
                 "ALTER TABLE" => StatementKind::AlterTable,
                 _ => return None,
             };
+            let name = capture.get(4)?;
             Some(Statement {
                 offset: full.start(),
                 end: 0,
                 kind,
-                name: capture.get(4)?.as_str().to_owned(),
+                name: name.as_str().to_owned(),
+                name_start: name.start(),
+                name_end: name.end(),
             })
         })
         .collect::<Vec<_>>();
@@ -670,6 +877,155 @@ fn statements(source: &str) -> Vec<Statement> {
 
 fn statement_end(source: &str, start: usize) -> Option<usize> {
     source[start..].find(';').map(|offset| start + offset + 1)
+}
+
+fn query_statements(source: &str) -> Vec<(usize, usize, usize, String)> {
+    let Ok(operation_pattern) = Regex::new(r"(?i)^(SELECT|INSERT|UPDATE|DELETE|MERGE)\b") else {
+        return Vec::new();
+    };
+    let mut output = Vec::new();
+    let mut segment_start = 0;
+    for segment_end in source
+        .match_indices(';')
+        .map(|(index, delimiter)| index + delimiter.len())
+        .chain(std::iter::once(source.len()))
+    {
+        let Some(segment) = source.get(segment_start..segment_end) else {
+            segment_start = segment_end;
+            continue;
+        };
+        let leading = segment.len() - segment.trim_start().len();
+        let statement_start = segment_start + leading;
+        let statement = segment.trim_start();
+        let operation = operation_pattern
+            .captures(statement)
+            .and_then(|capture| capture.get(1))
+            .map(|operation| {
+                (
+                    statement_start + operation.start(),
+                    operation.as_str().to_ascii_lowercase(),
+                )
+            })
+            .or_else(|| {
+                statement
+                    .get(..4)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("WITH"))
+                    .then(|| top_level_cte_operation(statement))
+                    .flatten()
+                    .map(|(offset, operation)| (statement_start + offset, operation))
+            });
+        if let Some((operation_start, operation)) = operation {
+            output.push((statement_start, operation_start, segment_end, operation));
+        }
+        segment_start = segment_end;
+    }
+    output
+}
+
+fn top_level_cte_operation(statement: &str) -> Option<(usize, String)> {
+    let bytes = statement.as_bytes();
+    let mut index = 0;
+    let mut depth = 0_u32;
+    let mut completed_cte = false;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'(' => {
+                depth = depth.saturating_add(1);
+                index += 1;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                completed_cte |= depth == 0;
+                index += 1;
+            }
+            byte if byte.is_ascii_alphabetic() || byte == b'_' => {
+                let start = index;
+                index += 1;
+                while bytes
+                    .get(index)
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+                {
+                    index += 1;
+                }
+                let token = &statement[start..index];
+                if depth == 0
+                    && completed_cte
+                    && matches!(
+                        token.to_ascii_uppercase().as_str(),
+                        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
+                    )
+                {
+                    return Some((start, token.to_ascii_lowercase()));
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+fn cte_names(statement: &str) -> HashSet<String> {
+    let Ok(pattern) = Regex::new(&format!(
+        r"(?i)(?:\bWITH\b|,)\s*({IDENTIFIER})(?:\s*\([^)]*\))?\s+AS\s*\("
+    )) else {
+        return HashSet::new();
+    };
+    pattern
+        .captures_iter(statement)
+        .filter_map(|capture| capture.get(1))
+        .map(|name| identifier_key(name.as_str()))
+        .collect()
+}
+
+fn table_aliases(statement: &str) -> HashMap<String, String> {
+    let Ok(pattern) = Regex::new(&format!(
+        r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})(?:\s+(?:AS\s+)?({IDENTIFIER}))?"
+    )) else {
+        return HashMap::new();
+    };
+    pattern
+        .captures_iter(statement)
+        .filter_map(|capture| {
+            let target = capture.get(1)?.as_str();
+            let alias = capture.get(2)?.as_str();
+            (!is_non_table_keyword(alias)).then(|| (identifier_key(alias), target.to_owned()))
+        })
+        .collect()
+}
+
+fn trigger_events(statement: &str) -> Vec<String> {
+    let Ok(start_pattern) = Regex::new(r"(?i)\b(?:BEFORE|AFTER|INSTEAD\s+OF)\b") else {
+        return Vec::new();
+    };
+    let Some(start) = start_pattern.find(statement) else {
+        return Vec::new();
+    };
+    let tail = &statement[start.end()..];
+    let Ok(boundary_pattern) = Regex::new(&format!(
+        r"(?i)\b(?:ON\s+{OBJECT_REFERENCE}|AS|BEGIN|EXECUTE)\b"
+    )) else {
+        return Vec::new();
+    };
+    let boundary = boundary_pattern
+        .find(tail)
+        .map_or(tail.len(), |item| item.start());
+    let Ok(event_pattern) = Regex::new(r"(?i)\b(INSERT|UPDATE|DELETE|TRUNCATE)\b") else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    event_pattern
+        .captures_iter(&tail[..boundary])
+        .filter_map(|capture| {
+            let event = capture.get(1)?.as_str().to_ascii_lowercase();
+            seen.insert(event.clone()).then_some(event)
+        })
+        .collect()
+}
+
+fn trigger_body_start(source: &str, start: usize, end: usize) -> Option<usize> {
+    let tail = source.get(start..end)?;
+    let marker = Regex::new(r"(?i)\b(?:FOR\s+EACH\s+ROW|AS|BEGIN)\b").ok()?;
+    marker.find(tail).map(|matched| start + matched.end())
 }
 
 fn matching_paren(source: &[u8], open: usize) -> Option<usize> {
@@ -815,20 +1171,28 @@ fn is_table_constraint(value: &str) -> bool {
     .any(|prefix| upper.starts_with(prefix))
 }
 
-fn constraint_name(value: &str) -> Option<String> {
+fn constraint_name(value: &str) -> Option<(String, usize, usize)> {
     let regex = Regex::new(&format!(r"(?i)^CONSTRAINT\s+({IDENTIFIER})")).ok()?;
-    regex
-        .captures(value.trim_start())
-        .and_then(|capture| capture.get(1))
-        .map(|name| name.as_str().to_owned())
+    let trimmed = value.trim_start();
+    let trim_offset = value.len() - trimmed.len();
+    let name = regex.captures(trimmed)?.get(1)?;
+    Some((
+        name.as_str().to_owned(),
+        trim_offset + name.start(),
+        trim_offset + name.end(),
+    ))
 }
 
-fn first_identifier(value: &str) -> Option<String> {
+fn first_identifier(value: &str) -> Option<(String, usize, usize)> {
     let regex = Regex::new(&format!(r"^({IDENTIFIER})")).ok()?;
-    regex
-        .captures(value.trim_start())
-        .and_then(|capture| capture.get(1))
-        .map(|name| name.as_str().to_owned())
+    let trimmed = value.trim_start();
+    let trim_offset = value.len() - trimmed.len();
+    let name = regex.captures(trimmed)?.get(1)?;
+    Some((
+        name.as_str().to_owned(),
+        trim_offset + name.start(),
+        trim_offset + name.end(),
+    ))
 }
 
 fn logical_database(path: &Path) -> String {
@@ -862,36 +1226,87 @@ fn is_migration_path(path: &Path) -> bool {
 }
 
 fn schema_name(name: &str) -> Option<String> {
-    let normalized = normalized_identifier(name);
-    normalized
-        .rsplit_once('.')
-        .map(|(schema, _)| schema.to_owned())
-        .filter(|schema| !schema.is_empty())
+    schema_reference(name).map(|schema| normalized_identifier(&schema))
+}
+
+fn schema_reference(name: &str) -> Option<String> {
+    let mut parts = qualified_identifier_parts(name);
+    (parts.len() > 1).then(|| {
+        parts.pop();
+        parts.join(".")
+    })
 }
 
 fn last_identifier(name: &str) -> String {
-    normalized_identifier(name)
-        .rsplit('.')
-        .next()
+    qualified_identifier_parts(name)
+        .last()
+        .map(|part| normalize_identifier_part(part))
         .unwrap_or_default()
-        .to_owned()
 }
 
 fn normalized_identifier(name: &str) -> String {
-    name.split('.')
-        .map(|part| {
-            let trimmed = part.trim();
-            if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-                || (trimmed.starts_with('`') && trimmed.ends_with('`'))
-                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
-            {
-                trimmed[1..trimmed.len().saturating_sub(1)].to_owned()
-            } else {
-                trimmed.to_owned()
-            }
-        })
+    qualified_identifier_parts(name)
+        .into_iter()
+        .map(normalize_identifier_part)
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn identifier_key(name: &str) -> String {
+    qualified_identifier_parts(name)
+        .into_iter()
+        .map(|part| normalize_identifier_part(part).to_lowercase())
+        .map(|part| format!("{}:{part}", part.len()))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn qualified_identifier_parts(name: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut delimiter = None;
+    let mut characters = name.char_indices().peekable();
+    while let Some((index, character)) = characters.next() {
+        match delimiter {
+            Some(']') if character == ']' => {
+                if characters.peek().is_some_and(|(_, next)| *next == ']') {
+                    characters.next();
+                } else {
+                    delimiter = None;
+                }
+            }
+            Some(quote) if character == quote => {
+                if characters.peek().is_some_and(|(_, next)| *next == quote) {
+                    characters.next();
+                } else {
+                    delimiter = None;
+                }
+            }
+            Some(_) => {}
+            None if character == '"' || character == '`' => delimiter = Some(character),
+            None if character == '[' => delimiter = Some(']'),
+            None if character == '.' => {
+                parts.push(&name[start..index]);
+                start = index + character.len_utf8();
+            }
+            None => {}
+        }
+    }
+    parts.push(&name[start..]);
+    parts
+}
+
+fn normalize_identifier_part(part: &str) -> String {
+    let trimmed = part.trim();
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        trimmed[1..trimmed.len() - 1].replace("\"\"", "\"")
+    } else if trimmed.len() >= 2 && trimmed.starts_with('`') && trimmed.ends_with('`') {
+        trimmed[1..trimmed.len() - 1].replace("``", "`")
+    } else if trimmed.len() >= 2 && trimmed.starts_with('[') && trimmed.ends_with(']') {
+        trimmed[1..trimmed.len() - 1].replace("]]", "]")
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 fn is_non_table_keyword(name: &str) -> bool {
@@ -910,6 +1325,17 @@ fn is_non_table_keyword(name: &str) -> bool {
             | "next"
             | "only"
             | "lateral"
+            | "on"
+            | "of"
+            | "into"
+            | "as"
+            | "when"
+            | "matched"
+            | "then"
+            | "update"
+            | "insert"
+            | "delete"
+            | "merge"
     )
 }
 
