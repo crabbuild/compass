@@ -228,7 +228,7 @@ fn missing_graph_and_unknown_tool_errors_are_stable() {
     let server = CompassMcp::new("definitely-missing-graph.json");
     assert_eq!(
         server.invoke("not_a_tool", Map::new()),
-        "Unknown tool: not_a_tool"
+        "Error executing not_a_tool: unknown tool: not_a_tool"
     );
     assert!(
         server

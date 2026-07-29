@@ -1290,7 +1290,7 @@ mod tests {
         let server = CompassMcp::new("missing.json");
         assert_eq!(
             server.invoke("not_a_tool", Map::new()),
-            "Unknown tool: not_a_tool"
+            "Error executing not_a_tool: unknown tool: not_a_tool"
         );
     }
 
