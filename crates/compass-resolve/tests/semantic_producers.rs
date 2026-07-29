@@ -5,7 +5,7 @@ use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{Engine, Extraction};
-use compass_model::code_graph::{EdgeKind, NodeKind};
+use compass_model::code_graph::{EdgeKind, GraphDocument, NodeKind};
 
 fn append(target: &mut Extraction, mut source: Extraction) {
     target.nodes.append(&mut source.nodes);
@@ -25,6 +25,74 @@ fn write(root: &Path, relative: &str, source: &[u8]) -> Result<(), Box<dyn Error
         fs::create_dir_all(parent)?;
     }
     fs::write(path, source)?;
+    Ok(())
+}
+
+fn assert_public_containment(
+    graph: &GraphDocument,
+    target_file: &str,
+    target_prefix: &str,
+    owner_prefix: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    let expected_name = target_prefix
+        .rsplit("::")
+        .next()
+        .unwrap_or(target_prefix)
+        .split('@')
+        .next()
+        .unwrap_or(target_prefix);
+    let target = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.qualified_name.starts_with(target_prefix)
+                && node.name == expected_name
+                && node.source_file() == Some(target_file)
+        })
+        .ok_or_else(|| format!("missing public target {target_prefix}"))?;
+    let target_site = target.source.as_ref().ok_or("missing target source")?;
+    let occurrences = graph
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.kind == EdgeKind::Contains && edge.relationship_site.as_ref() == Some(target_site)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "public containment for {target_prefix}, source={target_site:?}, target_edges={:#?}",
+        graph
+            .links
+            .iter()
+            .filter(|edge| edge.target == target.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(occurrences[0].target, target.id);
+    let owner = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == occurrences[0].source)
+        .ok_or("missing public containment owner")?;
+    if let Some(prefix) = owner_prefix {
+        assert!(
+            if prefix.ends_with('@') {
+                owner.qualified_name.starts_with(prefix)
+            } else {
+                owner.qualified_name == prefix
+            },
+            "owner={} expected={prefix}",
+            owner.qualified_name
+        );
+    } else {
+        assert_eq!(
+            owner.kind,
+            NodeKind::File,
+            "target={target:#?} occurrence={:#?} owner={owner:#?}",
+            occurrences[0]
+        );
+        assert_eq!(owner.source_file(), target.source_file());
+    }
     Ok(())
 }
 
@@ -98,9 +166,37 @@ class RuntimeService : BaseService {
     write(
         root,
         "mcp.json",
-        br#"{"mcpServers":{"runtime":{"command":"node","env":{"TOKEN":"secret"}}}}"#,
+        br#"{
+  "mcpServers": {
+    "runtime": {
+      "command": "node",
+      "env": {
+        "TOKEN": "secret"
+      }
+    }
+  }
+}"#,
     )?;
-    write(root, "guide.md", b"# Guide\n\n[Runtime](runtime.rs)\n")?;
+    write(
+        root,
+        "guide.md",
+        b"# Guide\n\n[One](runtime.rs)\n\n  [Two](runtime.rs)\n",
+    )?;
+    write(
+        root,
+        "rust_ownership.rs",
+        b"struct Shared {} mod one { trait Contract {} struct Item {} enum Mode { A } } mod two { trait Contract {} struct Item {} enum Mode { B } struct Shared {} }\n",
+    )?;
+    write(
+        root,
+        "ts_ownership.ts",
+        b"class Shared {} namespace One { class Item {} namespace Nested { class Leaf {} } } namespace Two { class Item {} class Shared {} }\n",
+    )?;
+    write(
+        root,
+        "CsharpOwnership.cs",
+        b"class Shared {} namespace One { class Item {} class Outer { class Leaf {} } } namespace Two { class Item {} class Shared {} }\n",
+    )?;
 
     let mut extraction = Extraction::default();
     let mut engine = Engine::default();
@@ -112,6 +208,9 @@ class RuntimeService : BaseService {
         "runtime.schema.json",
         "mcp.json",
         "guide.md",
+        "rust_ownership.rs",
+        "ts_ownership.ts",
+        "CsharpOwnership.cs",
     ] {
         append(&mut extraction, engine.extract(&root.join(path))?);
     }
@@ -216,5 +315,96 @@ class RuntimeService : BaseService {
         .ok_or("missing dependency target")?;
     assert_eq!(source.kind, NodeKind::Component);
     assert_eq!(target.kind, NodeKind::ConfigKey);
+
+    for (file, target, owner) in [
+        ("rust_ownership.rs", "Shared@", None),
+        ("rust_ownership.rs", "one::Contract@", Some("one")),
+        ("rust_ownership.rs", "one::Item@", Some("one")),
+        ("rust_ownership.rs", "one::Mode@", Some("one")),
+        ("rust_ownership.rs", "two::Contract@", Some("two")),
+        ("rust_ownership.rs", "two::Item@", Some("two")),
+        ("rust_ownership.rs", "two::Mode@", Some("two")),
+        ("rust_ownership.rs", "two::Shared@", Some("two")),
+        ("ts_ownership.ts", "Shared@", None),
+        ("ts_ownership.ts", "One::Item@", Some("One")),
+        ("ts_ownership.ts", "One::Nested::Leaf@", Some("One::Nested")),
+        ("ts_ownership.ts", "Two::Item@", Some("Two")),
+        ("ts_ownership.ts", "Two::Shared@", Some("Two")),
+        ("CsharpOwnership.cs", "Shared@", None),
+        ("CsharpOwnership.cs", "One::Item@", Some("One")),
+        ("CsharpOwnership.cs", "One::Outer@", Some("One")),
+        (
+            "CsharpOwnership.cs",
+            "One::Outer::Leaf@",
+            Some("One::Outer@"),
+        ),
+        ("CsharpOwnership.cs", "Two::Item@", Some("Two")),
+        ("CsharpOwnership.cs", "Two::Shared@", Some("Two")),
+    ] {
+        assert_public_containment(&graph, file, target, owner)?;
+    }
+
+    let mut document_sites = graph
+        .links
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Documents)
+        .filter_map(|edge| edge.relationship_site.as_ref())
+        .filter(|site| site.file == "guide.md")
+        .collect::<Vec<_>>();
+    document_sites.sort_by_key(|site| site.start_byte);
+    assert_eq!(document_sites.len(), 2);
+    assert_eq!(
+        (
+            document_sites[0].start_byte,
+            document_sites[0].end_byte,
+            document_sites[0].start_line,
+            document_sites[0].start_column,
+            document_sites[0].end_line,
+            document_sites[0].end_column,
+        ),
+        (9, 26, 3, 0, 3, 17)
+    );
+    assert_eq!(
+        (
+            document_sites[1].start_byte,
+            document_sites[1].end_byte,
+            document_sites[1].start_line,
+            document_sites[1].start_column,
+            document_sites[1].end_line,
+            document_sites[1].end_column,
+        ),
+        (30, 47, 5, 2, 5, 19)
+    );
+
+    let config = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::ConfigKey)
+        .and_then(|node| node.source.as_ref())
+        .ok_or("missing public config key source")?;
+    assert_eq!(
+        (
+            config.start_line,
+            config.start_column,
+            config.end_line,
+            config.end_column,
+        ),
+        (6, 8, 6, 15)
+    );
+    let dependency_site = dependency
+        .relationship_site
+        .as_ref()
+        .ok_or("missing public dependency site")?;
+    assert_eq!(
+        (
+            dependency_site.start_byte,
+            dependency_site.end_byte,
+            dependency_site.start_line,
+            dependency_site.start_column,
+            dependency_site.end_line,
+            dependency_site.end_column,
+        ),
+        (config.start_byte, config.end_byte, 6, 8, 6, 15)
+    );
     Ok(())
 }

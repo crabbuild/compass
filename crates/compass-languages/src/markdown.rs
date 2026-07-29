@@ -294,11 +294,11 @@ impl State<'_> {
         attributes.insert("start_line".to_owned(), json!(site.line));
         attributes.insert("end_line".to_owned(), json!(site.line));
         attributes.insert(
-            "start_column".to_owned(),
+            "column_start".to_owned(),
             json!(site.start_byte.saturating_sub(site.line_start)),
         );
         attributes.insert(
-            "end_column".to_owned(),
+            "column_end".to_owned(),
             json!(site.end_byte.saturating_sub(site.line_start)),
         );
         attributes.insert("weight".to_owned(), json!(1.0));

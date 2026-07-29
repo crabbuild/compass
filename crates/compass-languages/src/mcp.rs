@@ -362,8 +362,10 @@ fn stamp_span(attributes: &mut Map<String, Value>, span: SourceSpan) {
     attributes.insert("end_byte".to_owned(), json!(span.end_byte));
     attributes.insert("start_line".to_owned(), json!(span.start_line));
     attributes.insert("end_line".to_owned(), json!(span.end_line));
-    attributes.insert("start_column".to_owned(), json!(span.start_column));
-    attributes.insert("end_column".to_owned(), json!(span.end_column));
+    attributes.insert("line_start".to_owned(), json!(span.start_line));
+    attributes.insert("line_end".to_owned(), json!(span.end_line));
+    attributes.insert("column_start".to_owned(), json!(span.start_column));
+    attributes.insert("column_end".to_owned(), json!(span.end_column));
 }
 
 struct JsonKeyScanner<'source> {

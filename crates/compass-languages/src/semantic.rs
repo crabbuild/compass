@@ -13,18 +13,8 @@ pub(crate) fn enrich<'tree>(
     language: &'static str,
     extraction: &mut Extraction,
 ) {
-    let mut inventory = Vec::new();
-    let mut work = Work::default();
-    collect_inventory(
-        root,
-        source,
-        language,
-        &mut Vec::new(),
-        None,
-        &mut inventory,
-        &mut work,
-    );
-    let mut state = State::new(path, source, language, extraction, inventory, work);
+    let inventory = collect_inventory(root, source, language);
+    let mut state = State::new(path, source, language, extraction, inventory);
     match language {
         "rust" => state.rust(),
         "typescript" | "tsx" => state.typescript(),
@@ -37,9 +27,30 @@ pub(crate) fn enrich<'tree>(
 #[derive(Clone)]
 struct Item<'tree> {
     node: Node<'tree>,
-    scope: Vec<String>,
+    scope: Option<usize>,
+    owner_ast: Option<usize>,
+    declaration_ast: Option<usize>,
+}
+
+struct ScopeFrame {
+    parent: Option<usize>,
+    qualified: String,
+}
+
+#[derive(Default)]
+struct Inventory<'tree> {
+    items: Vec<Item<'tree>>,
+    scope_frames: Vec<ScopeFrame>,
+    calls_by_callable: HashMap<usize, Vec<Node<'tree>>>,
+    work: Work,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TraversalContext {
+    scope: Option<usize>,
     owner_ast: Option<usize>,
     callable_ast: Option<usize>,
+    declaration_ast: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -51,7 +62,7 @@ struct TypeRecord {
 struct CallableRecord {
     id: String,
     name: String,
-    scope: Vec<String>,
+    scope: Option<usize>,
     signature: String,
     ast_id: usize,
     is_test: bool,
@@ -60,6 +71,12 @@ struct CallableRecord {
 #[derive(Default)]
 struct Work {
     ast_visits: usize,
+    inventory_scan_visits: usize,
+    scope_frame_extensions: usize,
+    call_index_writes: usize,
+    call_index_reads: usize,
+    test_call_visits: usize,
+    callable_scan_visits: usize,
     index_lookups: usize,
     declarations: usize,
 }
@@ -71,10 +88,17 @@ struct State<'source, 'tree, 'extraction> {
     language: &'static str,
     extraction: &'extraction mut Extraction,
     inventory: Vec<Item<'tree>>,
+    scope_frames: Vec<ScopeFrame>,
+    calls_by_callable: HashMap<usize, Vec<Node<'tree>>>,
     inventory_index: HashMap<usize, usize>,
+    declaration_by_anchor: HashMap<(usize, usize), usize>,
+    declaration_node_index: HashMap<usize, Vec<usize>>,
     node_index: HashMap<String, usize>,
     anchor_index: HashMap<(usize, usize), Vec<usize>>,
     label_line_index: HashMap<(String, usize), Vec<usize>>,
+    claimed_unanchored_nodes: HashSet<usize>,
+    id_node_counts: HashMap<String, usize>,
+    retired_coalesced_ids: HashSet<String>,
     id_anchors: HashMap<String, HashSet<(usize, usize)>>,
     seen_edges: HashSet<(String, String, String, usize, usize)>,
     owner_ids: HashMap<usize, String>,
@@ -84,6 +108,8 @@ struct State<'source, 'tree, 'extraction> {
     callable_ast_index: HashMap<usize, CallableRecord>,
     callables_by_owner: HashMap<usize, Vec<CallableRecord>>,
     methods_by_owner: HashMap<(usize, String, String), Vec<String>>,
+    managed_containment: HashMap<(usize, usize), (String, String)>,
+    managed_containment_by_ast: HashMap<usize, (String, String)>,
     work: Work,
 }
 
@@ -93,19 +119,50 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         source: &'source [u8],
         language: &'static str,
         extraction: &'extraction mut Extraction,
-        inventory: Vec<Item<'tree>>,
-        work: Work,
+        inventory: Inventory<'tree>,
     ) -> Self {
+        let Inventory {
+            items: inventory,
+            scope_frames,
+            calls_by_callable,
+            work,
+        } = inventory;
+        let source_file = path.to_string_lossy().into_owned();
+        let file_id = make_id(&[&path.to_string_lossy()]);
+        if let Some(file) = extraction.nodes.iter_mut().find(|node| node.id == file_id) {
+            file.attributes
+                .insert("symbol_kind".to_owned(), Value::String("file".to_owned()));
+            for stale in [
+                "signature",
+                "signature_hash",
+                "implementation_hash",
+                "source_hash",
+                "qualified_name",
+            ] {
+                file.attributes.remove(stale);
+            }
+        }
         let mut node_index = HashMap::new();
         let inventory_index = inventory
             .iter()
             .enumerate()
             .map(|(index, item)| (item.node.id(), index))
             .collect();
+        let inventory_anchor_index = inventory
+            .iter()
+            .map(|item| ((item.node.start_byte(), item.node.end_byte()), item))
+            .collect::<HashMap<_, _>>();
+        let declaration_by_anchor = inventory_anchor_index
+            .iter()
+            .filter_map(|(anchor, item)| item.declaration_ast.map(|ast| (*anchor, ast)))
+            .collect();
+        let mut declaration_node_index = HashMap::<usize, Vec<usize>>::new();
         let mut anchor_index = HashMap::<(usize, usize), Vec<usize>>::new();
         let mut label_line_index = HashMap::<(String, usize), Vec<usize>>::new();
         let mut id_anchors = HashMap::<String, HashSet<(usize, usize)>>::new();
+        let mut id_node_counts = HashMap::<String, usize>::new();
         for (index, node) in extraction.nodes.iter().enumerate() {
+            *id_node_counts.entry(node.id.clone()).or_default() += 1;
             node_index.entry(node.id.clone()).or_insert(index);
             let line = node
                 .attributes
@@ -120,6 +177,15 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 .push(index);
             if let Some(anchor) = record_anchor(node) {
                 anchor_index.entry(anchor).or_default().push(index);
+                if let Some(declaration_ast) = inventory_anchor_index
+                    .get(&anchor)
+                    .and_then(|item| item.declaration_ast)
+                {
+                    declaration_node_index
+                        .entry(declaration_ast)
+                        .or_default()
+                        .push(index);
+                }
                 id_anchors
                     .entry(node.id.clone())
                     .or_default()
@@ -141,15 +207,22 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             .collect();
         Self {
             source,
-            source_file: path.to_string_lossy().into_owned(),
-            file_id: make_id(&[&path.to_string_lossy()]),
+            source_file,
+            file_id,
             language,
             extraction,
             inventory,
+            scope_frames,
+            calls_by_callable,
             inventory_index,
+            declaration_by_anchor,
+            declaration_node_index,
             node_index,
             anchor_index,
             label_line_index,
+            claimed_unanchored_nodes: HashSet::new(),
+            id_node_counts,
+            retired_coalesced_ids: HashSet::new(),
             id_anchors,
             seen_edges,
             owner_ids: HashMap::new(),
@@ -159,6 +232,8 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             callable_ast_index: HashMap::new(),
             callables_by_owner: HashMap::new(),
             methods_by_owner: HashMap::new(),
+            managed_containment: HashMap::new(),
+            managed_containment_by_ast: HashMap::new(),
             work,
         }
     }
@@ -168,6 +243,12 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             "_semantic_work".to_owned(),
             json!({
                 "ast_visits": self.work.ast_visits,
+                "inventory_scan_visits": self.work.inventory_scan_visits,
+                "scope_frame_extensions": self.work.scope_frame_extensions,
+                "call_index_writes": self.work.call_index_writes,
+                "call_index_reads": self.work.call_index_reads,
+                "test_call_visits": self.work.test_call_visits,
+                "callable_scan_visits": self.work.callable_scan_visits,
                 "index_lookups": self.work.index_lookups,
                 "declarations": self.work.declarations,
             }),
@@ -196,7 +277,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 &id,
                 item.node.child_by_field_name("type"),
                 item.node,
-                &item.scope,
+                item.scope,
             );
         }
         for item in self.items_of(&["enum_variant"]) {
@@ -210,7 +291,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let extra =
                 Map::from_iter([("declaring_type".to_owned(), Value::String(declaring_type))]);
             let id = self.ensure_member(&item, &owner, &name, "enum_member", Some(extra));
-            self.edge(&owner, &id, "contains", item.node, None);
+            self.contain(&owner, &id, item.node);
         }
         for item in self.items_of(&["const_item"]) {
             let Some(name) = node_name(item.node, self.source) else {
@@ -224,7 +305,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 &id,
                 item.node.child_by_field_name("type"),
                 item.node,
-                &item.scope,
+                item.scope,
             );
         }
         for item in self.items_of(&["macro_definition"]) {
@@ -242,6 +323,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         self.callable_semantics("rust");
         self.rust_overrides();
         self.rust_tests();
+        self.repair_managed_containment();
         self.prune_coalesced_base_shadows();
     }
 
@@ -279,13 +361,14 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 &id,
                 item.node.child_by_field_name("type"),
                 item.node,
-                &item.scope,
+                item.scope,
             );
         }
         self.callable_semantics("typescript");
         self.ts_exports();
         self.ts_decorators();
         self.ts_overrides();
+        self.repair_managed_containment();
         self.prune_coalesced_base_shadows();
     }
 
@@ -315,7 +398,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 &id,
                 item.node.child_by_field_name("type"),
                 item.node,
-                &item.scope,
+                item.scope,
             );
         }
         for item in self.items_of(&["variable_declarator"]) {
@@ -336,10 +419,11 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let id = self.ensure_member(&item, &owner, &name, kind, None);
             let declared_type = ancestor_of_kind(item.node, &["variable_declaration"])
                 .and_then(|node| node.child_by_field_name("type"));
-            self.typed_edge(&id, declared_type, item.node, &item.scope);
+            self.typed_edge(&id, declared_type, item.node, item.scope);
         }
         self.callable_semantics("csharp");
         self.csharp_overrides();
+        self.repair_managed_containment();
         self.prune_coalesced_base_shadows();
     }
 
@@ -348,24 +432,20 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let Some(name) = scope_node_name(item.node, self.source, self.language) else {
                 continue;
             };
-            let qualified = qualify(&item.scope, &name);
+            let qualified = self.qualify(item.scope, &name);
             let id = self.ensure_node(item.node, &name, &qualified, semantic_kind, None, None);
             self.register_owner(item.node.id(), id.clone());
             let owner = item
                 .owner_ast
                 .and_then(|ast| self.owner_ids.get(&ast).cloned())
                 .unwrap_or_else(|| self.file_id.clone());
-            self.edge(&owner, &id, "contains", item.node, None);
+            self.contain(&owner, &id, item.node);
         }
     }
 
     fn ensure_types(&mut self, kinds: &[(&str, &str)]) {
-        for item in self
-            .inventory
-            .clone()
-            .into_iter()
-            .filter(|item| kinds.iter().any(|(kind, _)| item.node.kind() == *kind))
-        {
+        let node_kinds = kinds.iter().map(|(kind, _)| *kind).collect::<Vec<_>>();
+        for item in self.items_of(&node_kinds) {
             let Some(name) = node_name(item.node, self.source) else {
                 continue;
             };
@@ -375,7 +455,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                     (item.node.kind() == *node_kind).then_some(*semantic)
                 })
                 .unwrap_or("class");
-            let logical_name = qualify(&item.scope, &name);
+            let logical_name = self.qualify(item.scope, &name);
             let qualified = format!("{logical_name}@{}", item.node.start_byte());
             let id = self.ensure_node(item.node, &name, &qualified, kind, None, None);
             self.register_owner(item.node.id(), id.clone());
@@ -387,7 +467,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 .owner_ast
                 .and_then(|ast| self.owner_ids.get(&ast).cloned())
                 .unwrap_or_else(|| self.file_id.clone());
-            self.edge(&owner, &id, "contains", item.node, None);
+            self.contain(&owner, &id, item.node);
         }
     }
 
@@ -396,7 +476,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let Some(type_node) = item.node.child_by_field_name("type") else {
                 continue;
             };
-            let Some(owner) = self.resolve_type(type_node, &item.scope) else {
+            let Some(owner) = self.resolve_type(type_node, item.scope) else {
                 continue;
             };
             self.register_owner(item.node.id(), owner);
@@ -487,7 +567,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         kind: &str,
     ) -> CallableRecord {
         let signature = callable_signature(item.node, self.source);
-        let logical = qualify(&item.scope, name);
+        let logical = self.qualify(item.scope, name);
         let qualified = format!("{logical}{signature}@{}", item.node.start_byte());
         let extra = Map::from_iter([
             ("signature".to_owned(), Value::String(signature.clone())),
@@ -504,7 +584,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             Some(&signature),
             Some(extra),
         );
-        self.edge(owner, &id, "contains", item.node, None);
+        self.contain(owner, &id, item.node);
         let is_test = self.language == "rust" && has_rust_test_attribute(item.node, self.source);
         if is_test {
             self.mark_test(&id, name, item.node);
@@ -512,7 +592,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         CallableRecord {
             id,
             name: name.to_owned(),
-            scope: item.scope.clone(),
+            scope: item.scope,
             signature,
             ast_id: item.node.id(),
             is_test,
@@ -520,7 +600,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
     }
 
     fn register_callable(&mut self, record: CallableRecord) {
-        let key = qualify(&record.scope, &record.name);
+        let key = self.qualify(record.scope, &record.name);
         if let Some(owner_ast) = self
             .item_by_ast(record.ast_id)
             .and_then(|item| item.owner_ast)
@@ -540,12 +620,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
     }
 
     fn callable_semantics(&mut self, family: &str) {
-        let callables = self
-            .callables
-            .values()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
+        let callables = self.callables_snapshot();
         for callable in callables {
             let Some(item) = self.item_by_ast(callable.ast_id).cloned() else {
                 continue;
@@ -580,12 +655,12 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                         None,
                         Some(extra),
                     );
-                    self.edge(&callable.id, &id, "contains", parameter, None);
+                    self.contain(&callable.id, &id, parameter);
                     self.typed_edge(
                         &id,
                         parameter.child_by_field_name("type"),
                         parameter,
-                        &item.scope,
+                        item.scope,
                     );
                 }
             }
@@ -598,7 +673,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 _ => None,
             };
             if let Some(return_type) = return_type
-                && let Some(target) = self.resolve_type(return_type, &item.scope)
+                && let Some(target) = self.resolve_type(return_type, item.scope)
             {
                 self.edge(
                     &callable.id,
@@ -619,7 +694,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let Some(type_node) = item.node.child_by_field_name("type") else {
                 continue;
             };
-            if let Some(target) = self.resolve_type(type_node, &item.scope) {
+            if let Some(target) = self.resolve_type(type_node, item.scope) {
                 self.edge(&source, &target, "aliases", type_node, Some("type-alias"));
             }
         }
@@ -630,7 +705,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let Some(trait_node) = item.node.child_by_field_name("trait") else {
                 continue;
             };
-            let Some(trait_id) = self.resolve_type(trait_node, &item.scope) else {
+            let Some(trait_id) = self.resolve_type(trait_node, item.scope) else {
                 continue;
             };
             let methods = self
@@ -657,32 +732,29 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
 
     fn rust_tests(&mut self) {
         let tests = self
-            .callables
-            .values()
-            .flatten()
+            .callables_snapshot()
+            .into_iter()
             .filter(|callable| callable.is_test)
-            .cloned()
             .collect::<Vec<_>>();
         for test in tests {
-            for item in self.inventory.clone().into_iter().filter(|item| {
-                item.node.kind() == "call_expression" && item.callable_ast == Some(test.ast_id)
-            }) {
-                let Some(function) = item.node.child_by_field_name("function") else {
+            self.work.call_index_reads += 1;
+            self.work.index_lookups += 1;
+            let calls = self
+                .calls_by_callable
+                .remove(&test.ast_id)
+                .unwrap_or_default();
+            for call in calls {
+                self.work.test_call_visits += 1;
+                let Some(function) = call.child_by_field_name("function") else {
                     continue;
                 };
                 let Some(name) = expression_name(function, self.source) else {
                     continue;
                 };
-                if let Some(target) = self.resolve_callable(&name, &test.scope, None)
+                if let Some(target) = self.resolve_callable(&name, test.scope, None)
                     && target != test.id
                 {
-                    self.edge(
-                        &test.id,
-                        &target,
-                        "tests",
-                        item.node,
-                        Some("direct-test-call"),
-                    );
+                    self.edge(&test.id, &target, "tests", call, Some("direct-test-call"));
                 }
             }
         }
@@ -710,8 +782,8 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                         continue;
                     }
                     let target = self
-                        .resolve_type_name(&local, &statement.scope)
-                        .or_else(|| self.resolve_callable(&local, &statement.scope, None));
+                        .resolve_type_name(&local, statement.scope)
+                        .or_else(|| self.resolve_callable(&local, statement.scope, None));
                     let Some(target) = target else {
                         continue;
                     };
@@ -745,7 +817,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                     .owner_ids
                     .get(&declaration.id())
                     .cloned()
-                    .or_else(|| self.resolve_callable(&name, &statement.scope, None));
+                    .or_else(|| self.resolve_callable(&name, statement.scope, None));
                 if let Some(target) = target {
                     self.emit_export(&statement, declaration, &name, &name, &target, false);
                 }
@@ -764,7 +836,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
     ) {
         let qualified = format!(
             "{}@{}",
-            qualify(&statement.scope, exported),
+            self.qualify(statement.scope, exported),
             site.start_byte()
         );
         let extra = Map::from_iter([
@@ -776,7 +848,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         let owner = self
             .closest_owner(statement)
             .unwrap_or_else(|| self.file_id.clone());
-        self.edge(&owner, &id, "contains", site, None);
+        self.contain(&owner, &id, site);
         self.edge(&id, target, "exports", site, Some("named-export-target"));
         if aliased {
             self.edge(&id, target, "aliases", site, Some("export-alias"));
@@ -812,12 +884,16 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             }) else {
                 continue;
             };
-            let qualified = format!("{}@{}", qualify(&item.scope, &name), item.node.start_byte());
+            let qualified = format!(
+                "{}@{}",
+                self.qualify(item.scope, &name),
+                item.node.start_byte()
+            );
             let id = self.ensure_node(item.node, &name, &qualified, "annotation", None, None);
             let owner = self
                 .closest_owner(&item)
                 .unwrap_or_else(|| self.file_id.clone());
-            self.edge(&owner, &id, "contains", item.node, None);
+            self.contain(&owner, &id, item.node);
             self.edge(&id, &target, "decorates", item.node, Some("decorator"));
         }
     }
@@ -836,13 +912,13 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let base = class_item
                 .node
                 .child_by_field_name("superclass")
-                .and_then(|node| self.resolve_type(node, &class_item.scope))
+                .and_then(|node| self.resolve_type(node, class_item.scope))
                 .or_else(|| {
                     descendants_bounded(class_item.node, &["class_heritage", "extends_clause"])
                         .into_iter()
                         .find_map(|heritage| {
                             type_reference(heritage, self.source)
-                                .and_then(|name| self.resolve_type_name(&name, &class_item.scope))
+                                .and_then(|name| self.resolve_type_name(&name, class_item.scope))
                         })
                 });
             let Some(base) = base else {
@@ -883,7 +959,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             let Some(base_node) = direct_named_children(base_list).first().copied() else {
                 continue;
             };
-            let Some(base) = self.resolve_type(base_node, &class_item.scope) else {
+            let Some(base) = self.resolve_type(base_node, class_item.scope) else {
                 continue;
             };
             let Some(method) = self.callable_by_ast(item.node.id()) else {
@@ -915,7 +991,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             item.node.start_byte()
         );
         let id = self.ensure_node(item.node, name, &qualified, kind, None, extra);
-        self.edge(owner, &id, "contains", item.node, None);
+        self.contain(owner, &id, item.node);
         id
     }
 
@@ -946,13 +1022,21 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             })
         };
         let existing = self
-            .anchor_index
-            .get(&anchor)
+            .declaration_node_index
+            .get(&node.id())
             .and_then(|indexes| {
                 indexes
                     .iter()
                     .find(|index| compatible_index(index))
                     .copied()
+            })
+            .or_else(|| {
+                self.anchor_index.get(&anchor).and_then(|indexes| {
+                    indexes
+                        .iter()
+                        .find(|index| compatible_index(index))
+                        .copied()
+                })
             })
             .or_else(|| {
                 self.label_line_index
@@ -963,19 +1047,53 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                     .and_then(|indexes| {
                         indexes
                             .iter()
-                            .find(|index| compatible_index(index))
+                            .find(|index| {
+                                compatible_index(index)
+                                    && self.extraction.nodes.get(**index).is_some_and(|record| {
+                                        record_anchor(record).is_some_and(|candidate| {
+                                            (candidate.0 >= anchor.0 && candidate.1 <= anchor.1)
+                                                || (anchor.0 >= candidate.0
+                                                    && anchor.1 <= candidate.1)
+                                        })
+                                    })
+                            })
                             .copied()
+                            .or_else(|| {
+                                indexes
+                                    .iter()
+                                    .find(|index| {
+                                        compatible_index(index)
+                                            && !self.claimed_unanchored_nodes.contains(index)
+                                            && self.extraction.nodes.get(**index).is_some_and(
+                                                |record| record_anchor(record).is_none(),
+                                            )
+                                    })
+                                    .copied()
+                            })
                     })
             });
         let index = if let Some(index) = existing {
+            if self
+                .extraction
+                .nodes
+                .get(index)
+                .is_some_and(|record| record_anchor(record).is_none())
+            {
+                self.claimed_unanchored_nodes.insert(index);
+            }
             let old_id = self.extraction.nodes[index].id.clone();
             let collision = self
                 .id_anchors
                 .get(&old_id)
-                .is_some_and(|anchors| anchors.len() > 1);
+                .is_some_and(|anchors| anchors.len() > 1)
+                || self
+                    .id_node_counts
+                    .get(&old_id)
+                    .is_some_and(|count| *count > 1);
             if collision {
                 self.extraction.nodes[index].id.clone_from(&desired);
                 self.node_index.insert(desired.clone(), index);
+                self.retired_coalesced_ids.insert(old_id);
             }
             index
         } else {
@@ -1089,12 +1207,20 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         });
     }
 
+    fn contain(&mut self, source: &str, target: &str, node: Node<'tree>) {
+        let expected = (source.to_owned(), target.to_owned());
+        self.managed_containment
+            .insert((node.start_byte(), node.end_byte()), expected.clone());
+        self.managed_containment_by_ast.insert(node.id(), expected);
+        self.edge(source, target, "contains", node, None);
+    }
+
     fn typed_edge(
         &mut self,
         source: &str,
         annotation: Option<Node<'tree>>,
         site: Node<'tree>,
-        scope: &[String],
+        scope: Option<usize>,
     ) {
         if let Some(annotation) = annotation
             && let Some(target) = self.resolve_type(annotation, scope)
@@ -1103,34 +1229,27 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         }
     }
 
-    fn resolve_type(&mut self, node: Node<'tree>, scope: &[String]) -> Option<String> {
+    fn resolve_type(&mut self, node: Node<'tree>, scope: Option<usize>) -> Option<String> {
         let reference = type_reference(node, self.source)?;
         self.resolve_type_name(&reference, scope)
     }
 
-    fn resolve_type_name(&mut self, reference: &str, scope: &[String]) -> Option<String> {
+    fn resolve_type_name(&mut self, reference: &str, scope: Option<usize>) -> Option<String> {
         self.work.index_lookups += 1;
         let reference = normalize_path(reference);
-        if reference.contains("::") {
-            for depth in (0..=scope.len()).rev() {
-                let prefix = &scope[..depth];
-                let candidate = qualify(prefix, &reference);
-                if let Some(records) = self.types.get(&candidate)
-                    && let [record] = records.as_slice()
-                {
-                    return Some(record.id.clone());
-                }
-            }
-            return None;
-        }
-        for depth in (0..=scope.len()).rev() {
-            let candidate = qualify(&scope[..depth], &reference);
+        let mut candidate_scope = scope;
+        loop {
+            let candidate = self.qualify(candidate_scope, &reference);
             if let Some(records) = self.types.get(&candidate) {
                 return match records.as_slice() {
                     [record] => Some(record.id.clone()),
                     _ => None,
                 };
             }
+            let Some(current) = candidate_scope else {
+                break;
+            };
+            candidate_scope = self.scope_frames[current].parent;
         }
         None
     }
@@ -1138,13 +1257,14 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
     fn resolve_callable(
         &mut self,
         name: &str,
-        scope: &[String],
+        scope: Option<usize>,
         signature: Option<&str>,
     ) -> Option<String> {
         self.work.index_lookups += 1;
         let name = normalize_path(name);
-        for depth in (0..=scope.len()).rev() {
-            let key = qualify(&scope[..depth], &name);
+        let mut candidate_scope = scope;
+        loop {
+            let key = self.qualify(candidate_scope, &name);
             if let Some(records) = self.callables.get(&key) {
                 let matches = records
                     .iter()
@@ -1155,8 +1275,19 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                     _ => None,
                 };
             }
+            let Some(current) = candidate_scope else {
+                break;
+            };
+            candidate_scope = self.scope_frames[current].parent;
         }
         None
+    }
+
+    fn qualify(&self, scope: Option<usize>, name: &str) -> String {
+        scope.map_or_else(
+            || name.to_owned(),
+            |scope| format!("{}::{name}", self.scope_frames[scope].qualified),
+        )
     }
 
     fn method_in_owner(&self, owner: &str, name: &str, signature: &str) -> Option<String> {
@@ -1217,6 +1348,12 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         self.callable_ast_index.get(&ast).cloned()
     }
 
+    fn callables_snapshot(&mut self) -> Vec<CallableRecord> {
+        let count = self.callables.values().map(Vec::len).sum::<usize>();
+        self.work.callable_scan_visits += count;
+        self.callables.values().flatten().cloned().collect()
+    }
+
     fn item_by_ast(&self, ast: usize) -> Option<&Item<'tree>> {
         self.inventory_index
             .get(&ast)
@@ -1228,7 +1365,8 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         self.owner_ids.insert(ast, id);
     }
 
-    fn items_of(&self, kinds: &[&str]) -> Vec<Item<'tree>> {
+    fn items_of(&mut self, kinds: &[&str]) -> Vec<Item<'tree>> {
+        self.work.inventory_scan_visits += self.inventory.len();
         self.inventory
             .iter()
             .filter(|item| kinds.contains(&item.node.kind()))
@@ -1278,70 +1416,140 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             .edges
             .retain(|edge| !removed.contains(&edge.source) && !removed.contains(&edge.target));
     }
-}
 
-fn collect_inventory<'tree>(
-    node: Node<'tree>,
-    source: &[u8],
-    language: &str,
-    scope: &mut Vec<String>,
-    callable_ast: Option<usize>,
-    output: &mut Vec<Item<'tree>>,
-    work: &mut Work,
-) {
-    work.ast_visits += 1;
-    let owner_ast = closest_scope_ancestor(node);
-    output.push(Item {
-        node,
-        scope: scope.clone(),
-        owner_ast,
-        callable_ast,
-    });
-    let mut next_callable = callable_ast;
-    if is_callable_kind(node.kind(), language) {
-        next_callable = Some(node.id());
-    }
-    let pushed = if is_scope_kind(node.kind(), language) {
-        scope_node_name(node, source, language).map(|name| {
-            scope.push(name);
-        })
-    } else {
-        None
-    };
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_inventory(child, source, language, scope, next_callable, output, work);
-    }
-    if pushed.is_some() {
-        scope.pop();
+    fn repair_managed_containment(&mut self) {
+        let live_ids = self
+            .extraction
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<HashSet<_>>();
+        let retired = self
+            .retired_coalesced_ids
+            .iter()
+            .filter(|id| !live_ids.contains(*id))
+            .cloned()
+            .collect::<HashSet<_>>();
+        self.extraction.edges.retain(|edge| {
+            if retired.contains(&edge.source) || retired.contains(&edge.target) {
+                return false;
+            }
+            if edge.string("relation") != "contains" {
+                return true;
+            }
+            let site = (edge_usize(edge, "start_byte"), edge_usize(edge, "end_byte"));
+            self.managed_containment
+                .get(&site)
+                .or_else(|| {
+                    self.declaration_by_anchor
+                        .get(&site)
+                        .and_then(|ast| self.managed_containment_by_ast.get(ast))
+                })
+                .is_none_or(|expected| edge.source == expected.0 && edge.target == expected.1)
+        });
     }
 }
 
-fn closest_scope_ancestor(node: Node<'_>) -> Option<usize> {
-    let mut parent = node.parent();
-    while let Some(candidate) = parent {
-        if matches!(
-            candidate.kind(),
-            "mod_item"
-                | "trait_item"
-                | "struct_item"
-                | "enum_item"
-                | "impl_item"
-                | "internal_module"
-                | "module_declaration"
-                | "namespace_declaration"
-                | "file_scoped_namespace_declaration"
-                | "class_declaration"
-                | "abstract_class_declaration"
-                | "interface_declaration"
-                | "struct_declaration"
-                | "record_declaration"
-        ) {
-            return Some(candidate.id());
+fn collect_inventory<'tree>(root: Node<'tree>, source: &[u8], language: &str) -> Inventory<'tree> {
+    let mut inventory = Inventory::default();
+    inventory.visit(root, source, language, TraversalContext::default());
+    inventory
+}
+
+impl<'tree> Inventory<'tree> {
+    fn visit(
+        &mut self,
+        node: Node<'tree>,
+        source: &[u8],
+        language: &str,
+        context: TraversalContext,
+    ) {
+        self.work.ast_visits += 1;
+        let declaration_ast = if is_semantic_declaration_kind(node.kind(), language) {
+            Some(node.id())
+        } else {
+            context.declaration_ast
+        };
+        self.items.push(Item {
+            node,
+            scope: context.scope,
+            owner_ast: context.owner_ast,
+            declaration_ast,
+        });
+        if node.kind() == "call_expression"
+            && let Some(callable_ast) = context.callable_ast
+        {
+            self.work.call_index_writes += 1;
+            self.work.index_lookups += 1;
+            self.calls_by_callable
+                .entry(callable_ast)
+                .or_default()
+                .push(node);
         }
-        parent = candidate.parent();
+        let mut next_callable = context.callable_ast;
+        if is_callable_kind(node.kind(), language) {
+            next_callable = Some(node.id());
+        }
+        let next_owner = if is_scope_kind(node.kind(), language) {
+            Some(node.id())
+        } else {
+            context.owner_ast
+        };
+        let next_scope = if is_scope_kind(node.kind(), language) {
+            scope_node_name(node, source, language).map_or(context.scope, |name| {
+                let qualified = context.scope.map_or_else(
+                    || name.clone(),
+                    |scope| format!("{}::{name}", self.scope_frames[scope].qualified),
+                );
+                let index = self.scope_frames.len();
+                self.scope_frames.push(ScopeFrame {
+                    parent: context.scope,
+                    qualified,
+                });
+                self.work.scope_frame_extensions += 1;
+                index.into()
+            })
+        } else {
+            context.scope
+        };
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit(
+                child,
+                source,
+                language,
+                TraversalContext {
+                    scope: next_scope,
+                    owner_ast: next_owner,
+                    callable_ast: next_callable,
+                    declaration_ast,
+                },
+            );
+        }
     }
-    None
+}
+
+fn is_semantic_declaration_kind(kind: &str, language: &str) -> bool {
+    is_scope_kind(kind, language)
+        || is_callable_kind(kind, language)
+        || matches!(
+            kind,
+            "field_declaration"
+                | "enum_variant"
+                | "const_item"
+                | "macro_definition"
+                | "property_signature"
+                | "public_field_definition"
+                | "required_parameter"
+                | "optional_parameter"
+                | "rest_pattern"
+                | "self_parameter"
+                | "parameter"
+                | "export_specifier"
+                | "decorator"
+                | "property_declaration"
+                | "variable_declarator"
+        )
 }
 
 fn is_scope_kind(kind: &str, language: &str) -> bool {
@@ -1576,14 +1784,6 @@ fn descendants_bounded<'tree>(node: Node<'tree>, kinds: &[&str]) -> Vec<Node<'tr
     }
     output.sort_by_key(Node::start_byte);
     output
-}
-
-fn qualify(scope: &[String], name: &str) -> String {
-    if scope.is_empty() {
-        name.to_owned()
-    } else {
-        format!("{}::{name}", scope.join("::"))
-    }
 }
 
 fn normalize_path(raw: &str) -> String {

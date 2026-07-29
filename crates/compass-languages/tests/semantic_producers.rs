@@ -20,6 +20,145 @@ fn relations(extraction: &Extraction) -> HashSet<String> {
         .collect()
 }
 
+fn assert_exact_containment(
+    extraction: &Extraction,
+    target_qualified_prefix: &str,
+    owner_qualified_prefix: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    let target = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            let qualified = node.string("qualified_name");
+            if target_qualified_prefix.ends_with('@') {
+                qualified.starts_with(target_qualified_prefix)
+            } else {
+                qualified == target_qualified_prefix
+            }
+        })
+        .ok_or_else(|| {
+            format!(
+                "missing target {target_qualified_prefix}: {:?}",
+                extraction
+                    .nodes
+                    .iter()
+                    .map(|node| node.string("qualified_name"))
+                    .collect::<Vec<_>>()
+            )
+        })?;
+    let owner = match owner_qualified_prefix {
+        Some(prefix) => extraction
+            .nodes
+            .iter()
+            .find(|node| {
+                let qualified = node.string("qualified_name");
+                if prefix.ends_with('@') {
+                    qualified.starts_with(prefix)
+                } else {
+                    qualified == prefix
+                }
+            })
+            .ok_or_else(|| format!("missing owner {prefix}"))?,
+        None => extraction
+            .nodes
+            .iter()
+            .find(|node| {
+                matches!(node.string("symbol_kind").as_str(), "file" | "source_file")
+                    || (node.string("qualified_name").is_empty() && node.label().contains('.'))
+            })
+            .ok_or_else(|| {
+                format!(
+                    "missing file owner: {:?}",
+                    extraction
+                        .nodes
+                        .iter()
+                        .map(|node| (node.label(), node.string("symbol_kind")))
+                        .collect::<Vec<_>>()
+                )
+            })?,
+    };
+    let start = target.attributes["start_byte"]
+        .as_u64()
+        .ok_or("missing target start byte")?;
+    let end = target.attributes["end_byte"]
+        .as_u64()
+        .ok_or("missing target end byte")?;
+    let occurrences = extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "contains"
+                && edge
+                    .attributes
+                    .get("start_byte")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(start)
+                && edge
+                    .attributes
+                    .get("end_byte")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(end)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "containment site {start}..{end} for {target_qualified_prefix}: {occurrences:#?}"
+    );
+    assert_eq!(occurrences[0].source, owner.id);
+    assert_eq!(occurrences[0].target, target.id);
+    Ok(())
+}
+
+fn assert_unique_node_ids(extraction: &Extraction) {
+    let ids = extraction
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        ids.len(),
+        extraction.nodes.len(),
+        "nodes={:#?}",
+        extraction.nodes
+    );
+}
+
+fn assert_containment_sites_belong_to_targets(extraction: &Extraction) {
+    for edge in extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "contains")
+    {
+        let Some(target) = extraction.nodes.iter().find(|node| node.id == edge.target) else {
+            continue;
+        };
+        if target.string("qualified_name").is_empty() {
+            continue;
+        }
+        let Some(site_start) = edge
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        let Some(site_end) = edge
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        let target_start = target.attributes["start_byte"].as_u64().unwrap_or_default();
+        let target_end = target.attributes["end_byte"].as_u64().unwrap_or_default();
+        assert!(
+            target_start <= site_start && site_end <= target_end,
+            "site={site_start}..{site_end} target={target:#?} edge={edge:#?}"
+        );
+    }
+}
+
 #[test]
 fn rust_semantics_publish_first_class_declarations_and_local_relationships()
 -> Result<(), Box<dyn Error>> {
@@ -403,6 +542,63 @@ class Service {
 }
 
 #[test]
+fn scoped_declaration_sites_rebind_every_legacy_containment_occurrence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+
+    let rust_path = directory.path().join("ownership.rs");
+    let rust_source = b"struct Shared {}\nmod one { trait Contract {} struct Item {} enum Mode { A } }\nmod two { trait Contract {} struct Item {} enum Mode { B } struct Shared {} }\n";
+    let rust = Engine::default().extract_source(&rust_path, rust_source)?;
+    for (target, owner) in [
+        ("Shared@", None),
+        ("one::Contract@", Some("one")),
+        ("one::Item@", Some("one")),
+        ("one::Mode@", Some("one")),
+        ("two::Contract@", Some("two")),
+        ("two::Item@", Some("two")),
+        ("two::Mode@", Some("two")),
+        ("two::Shared@", Some("two")),
+    ] {
+        assert_exact_containment(&rust, target, owner)?;
+    }
+    assert_unique_node_ids(&rust);
+    assert_containment_sites_belong_to_targets(&rust);
+
+    let ts_path = directory.path().join("ownership.ts");
+    let ts_source = b"class Shared {}\nnamespace One { class Item {} namespace Nested { class Leaf {} } }\nnamespace Two { class Item {} class Shared {} }\n";
+    let ts = Engine::default().extract_source(&ts_path, ts_source)?;
+    for (target, owner) in [
+        ("Shared@", None),
+        ("One::Item@", Some("One")),
+        ("One::Nested", Some("One")),
+        ("One::Nested::Leaf@", Some("One::Nested")),
+        ("Two::Item@", Some("Two")),
+        ("Two::Shared@", Some("Two")),
+    ] {
+        assert_exact_containment(&ts, target, owner)?;
+    }
+    assert_unique_node_ids(&ts);
+    assert_containment_sites_belong_to_targets(&ts);
+
+    let csharp_path = directory.path().join("Ownership.cs");
+    let csharp_source = b"class Shared {}\nnamespace One { class Item {} class Outer { class Leaf {} } }\nnamespace Two { class Item {} class Shared {} }\n";
+    let csharp = Engine::default().extract_source(&csharp_path, csharp_source)?;
+    for (target, owner) in [
+        ("Shared@", None),
+        ("One::Item@", Some("One")),
+        ("One::Outer@", Some("One")),
+        ("One::Outer::Leaf@", Some("One::Outer@")),
+        ("Two::Item@", Some("Two")),
+        ("Two::Shared@", Some("Two")),
+    ] {
+        assert_exact_containment(&csharp, target, owner)?;
+    }
+    assert_unique_node_ids(&csharp);
+    assert_containment_sites_belong_to_targets(&csharp);
+    Ok(())
+}
+
+#[test]
 fn semantic_modifiers_exports_decorators_and_test_attributes_are_ast_only()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -509,6 +705,16 @@ fn markdown_occurrences_fences_and_config_relationships_have_exact_ranges()
         "edges={:?}",
         extraction.edges
     );
+    assert_eq!(
+        documents[0].attributes["column_start"],
+        serde_json::json!(0)
+    );
+    assert_eq!(documents[0].attributes["column_end"], serde_json::json!(17));
+    assert_eq!(
+        documents[1].attributes["column_start"],
+        serde_json::json!(0)
+    );
+    assert_eq!(documents[1].attributes["column_end"], serde_json::json!(17));
 
     let mcp = directory.path().join("mcp.json");
     fs::write(
@@ -531,6 +737,8 @@ fn markdown_occurrences_fences_and_config_relationships_have_exact_ranges()
         .find(|node| node.string("symbol_kind") == "config_key")
         .ok_or("missing config key")?;
     assert_eq!(config.attributes["start_line"], serde_json::json!(6));
+    assert_eq!(config.attributes["column_start"], serde_json::json!(8));
+    assert_eq!(config.attributes["column_end"], serde_json::json!(15));
     assert!(config.attributes["start_byte"].as_u64() < config.attributes["end_byte"].as_u64());
     assert!(!format!("{extraction:?}").contains("do-not-publish"));
     let dependency = extraction
@@ -539,18 +747,19 @@ fn markdown_occurrences_fences_and_config_relationships_have_exact_ranges()
         .find(|edge| edge.string("relation") == "depends_on")
         .ok_or("missing config dependency")?;
     assert_eq!(dependency.attributes["start_line"], serde_json::json!(6));
+    assert_eq!(dependency.attributes["column_start"], serde_json::json!(8));
+    assert_eq!(dependency.attributes["column_end"], serde_json::json!(15));
     Ok(())
 }
 
 #[test]
 fn semantic_inventory_reports_bounded_deterministic_work() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
-    let path = directory.path().join("large.rs");
+    let path = directory.path().join("many_tests.rs");
     let mut source = String::new();
-    for index in 0..500 {
-        source.push_str(&format!(
-            "mod m{index} {{ pub struct Item{index} {{ pub value: u64 }} }}\n"
-        ));
+    source.push_str("fn target() {}\n");
+    for index in 0..64 {
+        source.push_str(&format!("#[test]\nfn checks_{index}() {{ target(); }}\n"));
     }
     let extraction = Engine::default().extract_source(&path, source.as_bytes())?;
     let work = extraction
@@ -559,19 +768,42 @@ fn semantic_inventory_reports_bounded_deterministic_work() -> Result<(), Box<dyn
         .and_then(serde_json::Value::as_object)
         .ok_or("missing semantic work counter")?;
     let visits = work["ast_visits"].as_u64().ok_or("missing visits")?;
-    let lookups = work["index_lookups"].as_u64().ok_or("missing lookups")?;
-    assert!(visits < 20_000, "work={work:?}");
-    assert!(lookups < 10_000, "work={work:?}");
+    let scans = work["inventory_scan_visits"]
+        .as_u64()
+        .ok_or("missing inventory scan visits")?;
+    assert!(scans < visits * 24, "work={work:?}");
+    assert_eq!(work["call_index_writes"], serde_json::json!(64));
+    assert_eq!(work["call_index_reads"], serde_json::json!(64));
+    assert_eq!(work["test_call_visits"], serde_json::json!(64));
+    assert_eq!(work["callable_scan_visits"], serde_json::json!(130));
     assert_eq!(
         extraction
-            .nodes
+            .edges
             .iter()
-            .filter(|node| {
-                node.string("symbol_kind") == "struct"
-                    && node.string("qualified_name").contains("Item")
-            })
+            .filter(|edge| edge.string("relation") == "tests")
             .count(),
-        500
+        64
+    );
+
+    let deep_path = directory.path().join("deep.rs");
+    let mut deep_source = String::new();
+    for index in 0..64 {
+        deep_source.push_str(&format!("mod level_{index} {{ "));
+    }
+    deep_source.push_str("struct Leaf {}");
+    for _ in 0..64 {
+        deep_source.push_str(" }");
+    }
+    let deep = Engine::default().extract_source(&deep_path, deep_source.as_bytes())?;
+    let deep_work = deep
+        .extensions
+        .get("_semantic_work")
+        .and_then(serde_json::Value::as_object)
+        .ok_or("missing deep semantic work counter")?;
+    assert_eq!(
+        deep_work["scope_frame_extensions"],
+        serde_json::json!(65),
+        "work={deep_work:?}"
     );
     Ok(())
 }
