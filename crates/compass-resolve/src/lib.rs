@@ -247,6 +247,9 @@ fn finish_resolution(
         &mut merged,
         compass_languages::FrameworkLimits::default(),
     ) {
+        if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+            eprintln!("[compass internal] framework route resolution failed: {error}");
+        }
         merged
             .error
             .get_or_insert_with(|| format!("framework resolution failed: {error}"));

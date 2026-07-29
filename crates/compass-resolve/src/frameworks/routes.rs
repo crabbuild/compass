@@ -317,12 +317,11 @@ fn resolve_reference(
     candidates.sort_by(|left, right| left.node_id.cmp(&right.node_id));
     candidates.dedup_by(|left, right| left.node_id == right.node_id);
     if candidates.len() > limits.max_candidates {
-        return Err(FrameworkLimitError {
-            limit: "max_candidates",
-            maximum: limits.max_candidates,
-            observed: candidates.len(),
+        candidates.truncate(limits.max_candidates);
+        for candidate in &mut candidates {
+            candidate.confidence = EvidenceConfidence::Ambiguous;
+            candidate.reason.push_str(" (candidate set truncated)");
         }
-        .into());
     }
     Ok(candidates)
 }
@@ -581,6 +580,7 @@ fn candidate_state(candidates: &[ResolutionCandidate]) -> ResolutionState {
     match candidates {
         [] => ResolutionState::Unresolved,
         [candidate] if candidate.confidence == EvidenceConfidence::Exact => ResolutionState::Exact,
+        [_] => ResolutionState::Unresolved,
         _ => ResolutionState::Ambiguous,
     }
 }

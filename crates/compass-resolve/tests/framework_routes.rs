@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 
 use compass_graph::{BuildEvidence, normalize_v1};
@@ -6,7 +5,9 @@ use compass_languages::{
     Extraction, FrameworkLimits, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin,
     RawNodeRecord, RawRouteFact,
 };
-use compass_model::code_graph::{EdgeDetails, EdgeKind, NodeKind, RouteStage, RouteStageDetails};
+use compass_model::code_graph::{
+    EdgeDetails, EdgeKind, NodeDetails, NodeKind, RouteStage, RouteStageDetails,
+};
 use compass_model::provenance::{EvidenceOrigin, ResolutionState, SourceAnchor};
 use compass_resolve::frameworks::{
     FrameworkResolutionError, RouteStageRole, resolve_and_publish_framework_routes, resolve_routes,
@@ -250,14 +251,14 @@ fn every_declared_stage_retains_resolution_without_publishing_ambiguous_edges() 
                 Some("authenticate"),
                 1,
             ),
-            (1, "audit", ResolutionState::Ambiguous, None, 1),
+            (1, "audit", ResolutionState::Unresolved, None, 1),
             (2, "missing", ResolutionState::Unresolved, None, 0),
             (3, "show_user", ResolutionState::Exact, Some("handler"), 1,),
         ]
     );
     assert_eq!(
         stages[1].provenance.confidence,
-        compass_model::provenance::EvidenceConfidence::Ambiguous
+        compass_model::provenance::EvidenceConfidence::Inferred
     );
     let route_edges = extraction
         .edges
@@ -382,7 +383,7 @@ fn heuristic_routes_surface_the_wiring_site_and_rule() {
 }
 
 #[test]
-fn candidate_and_fact_limits_fail_without_partial_publication() {
+fn candidate_limits_publish_deterministically_bounded_ambiguity() {
     let nodes = (0..21)
         .map(|index| node(&format!("handler-{index:02}"), "show_user", "show_user"))
         .collect();
@@ -391,29 +392,38 @@ fn candidate_and_fact_limits_fail_without_partial_publication() {
         framework_facts: vec![RawFrameworkFact::Route(route("show_user"))],
         ..Extraction::default()
     };
-    let original_ids = extraction
-        .nodes
-        .iter()
-        .map(|node| node.id.clone())
-        .collect::<HashSet<_>>();
-    let error =
-        match resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default()) {
-            Ok(_) => std::process::abort(),
-            Err(error) => error,
-        };
-    assert!(matches!(
-        error,
-        FrameworkResolutionError::Limit(error) if error.limit == "max_candidates"
-    ));
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())
+            .unwrap_or_else(|_| std::process::abort());
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].state, ResolutionState::Ambiguous);
+    assert_eq!(resolved[0].candidates.len(), 20);
+    assert_eq!(resolved[0].candidates[0].node_id, "handler-00");
+    assert_eq!(resolved[0].candidates[19].node_id, "handler-19");
     assert_eq!(
         extraction
             .nodes
             .iter()
-            .map(|node| node.id.clone())
-            .collect::<HashSet<_>>(),
-        original_ids
+            .filter(|node| node.string("symbol_kind") == "route")
+            .count(),
+        1
     );
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("relation") != "routes_to"),
+        "ambiguous candidates must not publish an exact route edge"
+    );
+}
 
+#[test]
+fn fact_limits_fail_without_partial_publication() {
+    let extraction = Extraction {
+        nodes: vec![node("handler", "show_user", "show_user")],
+        framework_facts: vec![RawFrameworkFact::Route(route("show_user"))],
+        ..Extraction::default()
+    };
     let limits = FrameworkLimits {
         max_facts_per_file: 0,
         ..FrameworkLimits::default()
@@ -489,6 +499,44 @@ fn synthetic_framework_routes_normalize_to_the_shared_typed_shape()
         binding.details,
         Some(EdgeDetails::Route(ref details))
             if details.stage == RouteStage::Handler && details.position == Some(0)
+    ));
+    Ok(())
+}
+
+#[test]
+fn single_low_confidence_route_candidate_normalizes_as_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/routes.rs"), vec![b'x'; 256])?;
+    fs::write(root.join("src/handlers.rs"), vec![b'x'; 256])?;
+    let mut candidate = node("handler", "show_user", "other.show_user");
+    candidate.attributes.insert(
+        "source_file".into(),
+        Value::String("src/handlers.rs".into()),
+    );
+    let mut extraction = Extraction {
+        nodes: vec![candidate],
+        framework_facts: vec![RawFrameworkFact::Route(route("show_user"))],
+        ..Extraction::default()
+    };
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    assert_eq!(resolved[0].state, ResolutionState::Unresolved);
+    assert_eq!(resolved[0].candidates.len(), 1);
+
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test")?;
+    let graph = normalize_v1(extraction, evidence)?;
+    let published = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Route)
+        .ok_or("missing typed route")?;
+    assert!(matches!(
+        published.details,
+        Some(NodeDetails::Route(ref details))
+            if details.resolution == ResolutionState::Unresolved
     ));
     Ok(())
 }
