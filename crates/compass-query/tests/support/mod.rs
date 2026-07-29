@@ -184,6 +184,7 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn write_endpoint_remap_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let root = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(root.join("src"))?;
