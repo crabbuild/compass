@@ -1012,3 +1012,279 @@ $body$ LANGUAGE plpgsql;
     );
     Ok(())
 }
+
+#[test]
+fn paired_semicolon_keyword_identifiers_publish_exact_strict_v1_lineage()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V11__quoted_keyword_content.sql");
+    let source = br#"
+CREATE TABLE "app"."semi;SELECT""tail" (id BIGINT);
+SELECT * FROM "app"."semi;SELECT""tail";
+CREATE TABLE `app`.`semi;UPDATE``tail` (id BIGINT);
+SELECT * FROM `app`.`semi;UPDATE``tail`;
+CREATE TABLE [app].[semi;DELETE]]tail] (id BIGINT);
+SELECT * FROM [app].[semi;DELETE]]tail];
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-quoted-keywords")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    let expected = [
+        (
+            "app.semi;SELECT\"tail",
+            br#""app"."semi;SELECT""tail""#.as_slice(),
+        ),
+        ("app.semi;UPDATE`tail", b"`app`.`semi;UPDATE``tail`"),
+        ("app.semi;DELETE]tail", b"[app].[semi;DELETE]]tail]"),
+    ];
+    for (qualified_name, spelling) in expected {
+        let table = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                node.kind == NodeKind::DatabaseTable && node.qualified_name == qualified_name
+            })
+            .ok_or_else(|| format!("missing table {qualified_name}"))?;
+        let node_anchor = table.source.as_ref().ok_or("missing table anchor")?;
+        assert_eq!(
+            source.get(node_anchor.start_byte as usize..node_anchor.end_byte as usize),
+            Some(spelling)
+        );
+        let read = graph
+            .links
+            .iter()
+            .find(|edge| edge.target == table.id && edge.kind == EdgeKind::Reads)
+            .ok_or_else(|| format!("missing read for {qualified_name}"))?;
+        let read_anchor = read
+            .relationship_site
+            .as_ref()
+            .ok_or("missing read anchor")?;
+        assert_eq!(
+            source.get(read_anchor.start_byte as usize..read_anchor.end_byte as usize),
+            Some(spelling)
+        );
+        assert!(read.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+                && item
+                    .rule
+                    .as_deref()
+                    .is_some_and(|rule| rule.starts_with("sql-text-"))
+        }));
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        3
+    );
+    assert!(
+        graph
+            .graph
+            .coverage
+            .iter()
+            .all(|record| record.capability != "sql:statement_boundary"),
+        "valid paired identifiers received recovery coverage: {:?}",
+        graph.graph.coverage
+    );
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "sql_incomplete_quoted_identifier"),
+        "valid paired identifiers received diagnostics: {:?}",
+        graph.graph.diagnostics
+    );
+    Ok(())
+}
+
+#[test]
+fn lexical_alias_scopes_publish_exact_outer_writes_in_strict_v1() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V12__alias_scopes.sql");
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+CREATE TABLE app.archive (id BIGINT);
+UPDATE u SET id = 1
+FROM app.users AS u
+WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 1)
+   OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 1);
+DELETE FROM u USING app.users AS u
+WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 2)
+   OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 2);
+MERGE INTO u USING app.users AS u
+ON EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 3)
+OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 3)
+WHEN MATCHED THEN UPDATE SET id = 3;
+UPDATE u SET id = 4
+WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 4);
+CREATE PROCEDURE app.refresh_aliases() AS $body$
+BEGIN
+  UPDATE u SET id = 5
+  FROM app.users AS u
+  WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 5)
+     OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 5);
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.capture_aliases AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  DELETE FROM u USING app.users AS u
+  WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 6);
+  MERGE INTO u USING app.users AS u
+  ON EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 7)
+  WHEN MATCHED THEN UPDATE SET id = 7;
+END;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-alias-scopes")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    let users = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.users")
+        .ok_or("missing users")?;
+    let audit = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.audit")
+        .ok_or("missing audit")?;
+    let archive = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.archive")
+        .ok_or("missing archive")?;
+    let physical_u = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "u")
+        .ok_or("same spelling outside nested alias scope must remain physical")?;
+    let queries = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Query)
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 4, "nodes={:?}", graph.nodes);
+    assert_eq!(
+        graph
+            .links
+            .iter()
+            .filter(|edge| {
+                queries.iter().any(|query| query.id == edge.source)
+                    && edge.target == users.id
+                    && edge.kind == EdgeKind::Writes
+            })
+            .count(),
+        3,
+        "top-level aliases resolved to the wrong target: {:?}",
+        graph.links
+    );
+    assert_eq!(
+        graph
+            .links
+            .iter()
+            .filter(|edge| {
+                queries.iter().any(|query| query.id == edge.source)
+                    && edge.target == physical_u.id
+                    && edge.kind == EdgeKind::Writes
+            })
+            .count(),
+        1
+    );
+    assert!(graph.links.iter().all(|edge| {
+        !queries.iter().any(|query| query.id == edge.source)
+            || edge.kind != EdgeKind::Writes
+            || (edge.target != audit.id && edge.target != archive.id)
+    }));
+
+    for (owner_name, expected_writes) in [("app.refresh_aliases", 1), ("app.capture_aliases", 2)] {
+        let owner = graph
+            .nodes
+            .iter()
+            .find(|node| node.qualified_name == owner_name)
+            .ok_or_else(|| format!("missing owner {owner_name}"))?;
+        let writes = graph
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.source == owner.id && edge.target == users.id && edge.kind == EdgeKind::Writes
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            writes.len(),
+            expected_writes,
+            "owner={owner_name}, links={:?}",
+            graph.links
+        );
+        assert_eq!(
+            writes
+                .iter()
+                .filter_map(|edge| edge.relationship_site.as_ref())
+                .map(|anchor| anchor.start_byte)
+                .collect::<HashSet<_>>()
+                .len(),
+            expected_writes
+        );
+        for write in writes {
+            let anchor = write
+                .relationship_site
+                .as_ref()
+                .ok_or("missing write anchor")?;
+            assert_eq!(
+                source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+                Some(b"u".as_slice())
+            );
+            assert!(write.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+                    && item
+                        .rule
+                        .as_deref()
+                        .is_some_and(|rule| rule.starts_with("sql-text-"))
+            }));
+        }
+    }
+    assert!(
+        graph.graph.coverage.iter().all(|record| {
+            record.capability != "sql:body_ownership"
+                && record.capability != "sql:statement_boundary"
+        }),
+        "valid alias scopes received partial coverage: {:?}",
+        graph.graph.coverage
+    );
+
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:sql-alias-scopes")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}

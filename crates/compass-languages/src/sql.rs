@@ -50,8 +50,14 @@ struct Site {
 }
 
 struct AccessBindings {
-    aliases: HashMap<String, String>,
+    aliases: Vec<ScopedAliasBinding>,
     ctes: Vec<ScopedCteBinding>,
+}
+
+struct ScopedAliasBinding {
+    name: String,
+    target: String,
+    visible: Site,
 }
 
 struct ScopedCteBinding {
@@ -647,7 +653,7 @@ impl<'a> State<'a> {
     fn add_data_access_statement(&mut self, source: &str, start: usize, end: usize) {
         let body = self.masked[start..end.min(self.masked.len())].to_owned();
         let bindings = AccessBindings {
-            aliases: table_aliases(&body),
+            aliases: scoped_alias_bindings(&body),
             ctes: scoped_cte_bindings(&body),
         };
         let read_patterns = [format!(
@@ -699,7 +705,8 @@ impl<'a> State<'a> {
                 {
                     continue;
                 }
-                let target_name = bindings.aliases.get(&key).map_or(name, String::as_str);
+                let target_name = resolve_scoped_alias(&bindings.aliases, &key, name_match.start())
+                    .map_or(name, String::as_str);
                 if is_reserved_object_reference(target_name)
                     || !emitted.insert((identifier_key(target_name), name_match.start()))
                 {
@@ -1307,30 +1314,10 @@ fn scan_statement_boundary(source: &str, start: usize, end: usize) -> StatementB
 
 fn quoted_identifier_pairing_limit(source: &str, open: usize, limit: usize) -> usize {
     let bytes = source.as_bytes();
-    let line_end = bytes[open.saturating_add(1).min(limit)..limit]
+    bytes[open.saturating_add(1).min(limit)..limit]
         .iter()
         .position(|byte| *byte == b'\n')
-        .map_or(limit, |offset| open + 1 + offset);
-    let mut index = open.saturating_add(1).min(line_end);
-    while index < line_end {
-        if bytes[index] == b';' {
-            let next = skip_sql_whitespace(source, index + 1);
-            if next < line_end && starts_sql_statement(source, next) {
-                return index + 1;
-            }
-        }
-        index += 1;
-    }
-    line_end
-}
-
-fn starts_sql_statement(source: &str, start: usize) -> bool {
-    [
-        "ALTER", "CREATE", "DELETE", "DROP", "INSERT", "MERGE", "SELECT", "TRUNCATE", "UPDATE",
-        "WITH",
-    ]
-    .iter()
-    .any(|keyword| consume_keyword(source, start, keyword).is_some())
+        .map_or(limit, |offset| open + 1 + offset)
 }
 
 fn incomplete_quote_recovery_end(source: &str, open: usize, limit: usize) -> usize {
@@ -1631,7 +1618,7 @@ fn scoped_cte_bindings(statement: &str) -> Vec<ScopedCteBinding> {
         let Some(parsed) = parse_ctes_at(statement, with_start) else {
             continue;
         };
-        let scope_end = enclosing_sql_scope_end(statement, with_start);
+        let scope_end = enclosing_sql_scope(statement, with_start).end;
         let recursive_start = parsed
             .entries
             .iter()
@@ -1655,7 +1642,7 @@ fn scoped_cte_bindings(statement: &str) -> Vec<ScopedCteBinding> {
     bindings
 }
 
-fn enclosing_sql_scope_end(statement: &str, position: usize) -> usize {
+fn enclosing_sql_scope(statement: &str, position: usize) -> Site {
     let bytes = statement.as_bytes();
     let mut stack = Vec::new();
     let mut index = 0;
@@ -1679,10 +1666,12 @@ fn enclosing_sql_scope_end(statement: &str, position: usize) -> usize {
         }
         index += 1;
     }
-    stack
-        .last()
-        .and_then(|open| balanced_paren_end(statement, *open))
-        .map_or(statement.len(), |end| end.saturating_sub(1))
+    let Some(open) = stack.last().copied() else {
+        return Site::new(0, statement.len());
+    };
+    let end =
+        balanced_paren_end(statement, open).map_or(statement.len(), |end| end.saturating_sub(1));
+    Site::new(open.saturating_add(1), end)
 }
 
 fn skip_sql_whitespace(statement: &str, mut index: usize) -> usize {
@@ -1778,21 +1767,61 @@ fn balanced_paren_end(statement: &str, open: usize) -> Option<usize> {
     None
 }
 
-fn table_aliases(statement: &str) -> HashMap<String, String> {
-    let Ok(pattern) = Regex::new(&format!(
-        r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})(?:\s+(?:AS\s+)?({IDENTIFIER}))?"
-    )) else {
-        return HashMap::new();
+fn scoped_alias_bindings(statement: &str) -> Vec<ScopedAliasBinding> {
+    let Ok(target_pattern) = Regex::new(&format!(r"(?i)^\s*(?:ONLY\s+)?({OBJECT_REFERENCE})"))
+    else {
+        return Vec::new();
     };
-    pattern
-        .captures_iter(statement)
-        .filter_map(|capture| {
-            let target = capture.get(1)?.as_str();
-            let alias = capture.get(2)?.as_str();
-            (!is_reserved_object_reference(alias))
-                .then(|| (identifier_key(alias), target.to_owned()))
+    let mut bindings = Vec::new();
+    for (_, keyword_end, word) in sql_word_spans(statement, 0) {
+        if !matches!(
+            word.to_ascii_uppercase().as_str(),
+            "FROM" | "JOIN" | "USING"
+        ) {
+            continue;
+        }
+        let tail = &statement[keyword_end..];
+        let Some(target) = target_pattern
+            .captures(tail)
+            .and_then(|capture| capture.get(1))
+        else {
+            continue;
+        };
+        let target_end = keyword_end + target.end();
+        let mut alias_start = skip_sql_whitespace(statement, target_end);
+        if let Some(as_end) = consume_keyword(statement, alias_start, "AS") {
+            alias_start = skip_sql_whitespace(statement, as_end);
+        }
+        let Some(alias_end) = parse_identifier_end(statement, alias_start) else {
+            continue;
+        };
+        let alias = &statement[alias_start..alias_end];
+        if is_reserved_object_reference(alias) {
+            continue;
+        }
+        bindings.push(ScopedAliasBinding {
+            name: identifier_key(alias),
+            target: target.as_str().to_owned(),
+            visible: enclosing_sql_scope(statement, alias_start),
+        });
+    }
+    bindings
+}
+
+fn resolve_scoped_alias<'a>(
+    bindings: &'a [ScopedAliasBinding],
+    name: &str,
+    occurrence: usize,
+) -> Option<&'a String> {
+    bindings
+        .iter()
+        .filter(|binding| {
+            binding.name == name
+                && occurrence >= binding.visible.start
+                && occurrence < binding.visible.end
         })
-        .collect()
+        .min_by_key(|binding| binding.visible.end.saturating_sub(binding.visible.start))
+        .map(|binding| &binding.target)
 }
 
 fn trigger_events(statement: &str) -> Vec<String> {

@@ -1290,3 +1290,233 @@ $body$ LANGUAGE plpgsql;
     );
     Ok(())
 }
+
+#[test]
+fn paired_identifier_quotes_keep_semicolon_keyword_content_exact()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."semi;SELECT""tail" (id BIGINT);
+SELECT * FROM "app"."semi;SELECT""tail";
+CREATE TABLE `app`.`semi;UPDATE``tail` (id BIGINT);
+SELECT * FROM `app`.`semi;UPDATE``tail`;
+CREATE TABLE [app].[semi;DELETE]]tail] (id BIGINT);
+SELECT * FROM [app].[semi;DELETE]]tail];
+"#;
+    let extraction = extract_sql_content(Path::new("db/quoted_keyword_content.sql"), source);
+    let expected = [
+        (
+            "app.semi;SELECT\"tail",
+            br#""app"."semi;SELECT""tail""#.as_slice(),
+        ),
+        ("app.semi;UPDATE`tail", b"`app`.`semi;UPDATE``tail`"),
+        ("app.semi;DELETE]tail", b"[app].[semi;DELETE]]tail]"),
+    ];
+    for (qualified_name, spelling) in expected {
+        let table = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+            .ok_or_else(|| format!("missing table {qualified_name}"))?;
+        let node_start = table
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing table start")?;
+        let node_end = table
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing table end")?;
+        assert_eq!(&source[node_start..node_end], spelling);
+
+        let read = extraction
+            .edges
+            .iter()
+            .find(|edge| edge.target == table.id && edge.string("relation") == "reads")
+            .ok_or_else(|| format!("missing read for {qualified_name}"))?;
+        let read_start = read
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing read start")?;
+        let read_end = read
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing read end")?;
+        assert_eq!(&source[read_start..read_end], spelling);
+        assert_eq!(read.string("_origin"), "artifact");
+        assert!(read.string("rule").starts_with("sql-text-"));
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        3
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "valid paired identifiers received recovery evidence: {:?}",
+        extraction.extensions
+    );
+    Ok(())
+}
+
+#[test]
+fn lexical_alias_scopes_keep_outer_writes_out_of_nested_and_sibling_shadows()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+CREATE TABLE app.archive (id BIGINT);
+UPDATE u SET id = 1
+FROM app.users AS u
+WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 1)
+   OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 1);
+DELETE FROM u USING app.users AS u
+WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 2)
+   OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 2);
+MERGE INTO u USING app.users AS u
+ON EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 3)
+OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 3)
+WHEN MATCHED THEN UPDATE SET id = 3;
+UPDATE u SET id = 4
+WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 4);
+CREATE PROCEDURE app.refresh_aliases() AS $body$
+BEGIN
+  UPDATE u SET id = 5
+  FROM app.users AS u
+  WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 5)
+     OR EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 5);
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.capture_aliases AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  DELETE FROM u USING app.users AS u
+  WHERE EXISTS (SELECT 1 FROM app.audit AS u WHERE u.id = 6);
+  MERGE INTO u USING app.users AS u
+  ON EXISTS (SELECT 1 FROM app.archive AS u WHERE u.id = 7)
+  WHEN MATCHED THEN UPDATE SET id = 7;
+END;
+"#;
+    let extraction = extract_sql_content(Path::new("db/alias_scopes.sql"), source);
+    let users = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.users")
+        .ok_or("missing users")?;
+    let audit = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.audit")
+        .ok_or("missing audit")?;
+    let archive = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.archive")
+        .ok_or("missing archive")?;
+    let physical_u = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "u")
+        .ok_or("same spelling outside nested alias scope must remain physical")?;
+    let queries = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "query")
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 4, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                queries.iter().any(|query| query.id == edge.source)
+                    && edge.target == users.id
+                    && edge.string("relation") == "writes"
+            })
+            .count(),
+        3,
+        "top-level aliases resolved to the wrong write target: {:?}",
+        extraction.edges
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                queries.iter().any(|query| query.id == edge.source)
+                    && edge.target == physical_u.id
+                    && edge.string("relation") == "writes"
+            })
+            .count(),
+        1,
+        "nested alias leaked into the physical outer target: {:?}",
+        extraction.edges
+    );
+    assert!(extraction.edges.iter().all(|edge| {
+        !queries.iter().any(|query| query.id == edge.source)
+            || edge.string("relation") != "writes"
+            || (edge.target != audit.id && edge.target != archive.id)
+    }));
+
+    for (owner_name, expected_writes) in [("app.refresh_aliases", 1), ("app.capture_aliases", 2)] {
+        let owner = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == owner_name)
+            .ok_or_else(|| format!("missing owner {owner_name}"))?;
+        let writes = extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == owner.id
+                    && edge.target == users.id
+                    && edge.string("relation") == "writes"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            writes.len(),
+            expected_writes,
+            "owner={owner_name}, edges={:?}",
+            extraction.edges
+        );
+        assert_eq!(
+            writes
+                .iter()
+                .filter_map(|edge| edge.attributes.get("start_byte"))
+                .filter_map(serde_json::Value::as_u64)
+                .collect::<HashSet<_>>()
+                .len(),
+            expected_writes
+        );
+        for write in writes {
+            let start = write
+                .attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing write start")?;
+            let end = write
+                .attributes
+                .get("end_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing write end")?;
+            assert_eq!(&source[start..end], b"u");
+            assert_eq!(write.string("_origin"), "artifact");
+        }
+    }
+    assert!(
+        extraction.extensions.is_empty(),
+        "{:?}",
+        extraction.extensions
+    );
+    Ok(())
+}
