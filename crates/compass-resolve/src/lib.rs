@@ -1823,7 +1823,7 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     let mut index = 0;
     while index < lines.len() {
         let line = lines[index];
-        let trimmed = line.trim_start();
+        let trimmed = line.trim_start_matches(is_python_inline_whitespace);
         if !starts_python_from_import(trimmed) {
             index += 1;
             continue;
@@ -1836,11 +1836,11 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
         let mut malformed = false;
         loop {
             let physical = if index + 1 == start_line {
-                lines[index].trim_start()
+                lines[index].trim_start_matches(is_python_inline_whitespace)
             } else {
-                lines[index].trim()
+                lines[index].trim_matches(is_python_inline_whitespace)
             };
-            let trimmed_end = physical.trim_end();
+            let trimmed_end = physical.trim_end_matches(is_python_inline_whitespace);
             let continued = trimmed_end.ends_with('\\');
             if continued
                 && original_lines
@@ -1858,7 +1858,7 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
             if !statement.is_empty() {
                 statement.push(' ');
             }
-            statement.push_str(logical.trim());
+            statement.push_str(logical.trim_matches(is_python_inline_whitespace));
             for character in logical.chars() {
                 match character {
                     '(' => depth = depth.saturating_add(1),
@@ -1873,7 +1873,10 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
             if malformed || (depth == 0 && !continued) {
                 break;
             }
-            if index + 1 >= lines.len() || starts_python_from_import(lines[index + 1].trim_start())
+            if index + 1 >= lines.len()
+                || starts_python_from_import(
+                    lines[index + 1].trim_start_matches(is_python_inline_whitespace),
+                )
             {
                 malformed = true;
                 break;
@@ -1881,7 +1884,9 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
             index += 1;
         }
         let end_line = index + 1;
-        let end_column = lines[index].trim_end().len();
+        let end_column = lines[index]
+            .trim_end_matches(is_python_inline_whitespace)
+            .len();
         let end_byte = line_starts[index] + end_column;
         if !malformed
             && depth == 0
@@ -1934,9 +1939,14 @@ fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImport
     {
         return None;
     }
-    let imports = imports.trim();
+    let imports = imports.trim_matches(is_python_inline_whitespace);
     let (imports, parenthesized) = if let Some(imports) = imports.strip_prefix('(') {
-        (imports.strip_suffix(')')?.trim(), true)
+        (
+            imports
+                .strip_suffix(')')?
+                .trim_matches(is_python_inline_whitespace),
+            true,
+        )
     } else {
         (imports, false)
     };
@@ -1944,29 +1954,31 @@ fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImport
         return None;
     }
     let pieces = imports.split(',').collect::<Vec<_>>();
-    if !parenthesized && pieces.last().is_some_and(|item| item.trim().is_empty()) {
+    if !parenthesized
+        && pieces
+            .last()
+            .is_some_and(|item| item.trim_matches(is_python_inline_whitespace).is_empty())
+    {
         return None;
     }
-    let wildcard_count = pieces.iter().filter(|item| item.trim() == "*").count();
+    let wildcard_count = pieces
+        .iter()
+        .filter(|item| item.trim_matches(is_python_inline_whitespace) == "*")
+        .count();
     if wildcard_count > 0 {
         return (!parenthesized && pieces.len() == 1).then(|| (module.to_owned(), Vec::new()));
     }
     let piece_count = pieces.len();
     let mut output = Vec::new();
     for (occurrence, item) in pieces.into_iter().enumerate() {
-        let item = item.trim();
+        let item = item.trim_matches(is_python_inline_whitespace);
         if item.is_empty() {
             if parenthesized && occurrence + 1 == piece_count {
                 continue;
             }
             return None;
         }
-        let parts = item.split_whitespace().collect::<Vec<_>>();
-        let (imported, local) = match parts.as_slice() {
-            [imported] => (*imported, *imported),
-            [imported, "as", local] => (*imported, *local),
-            _ => return None,
-        };
+        let (imported, local) = parse_python_import_item(item)?;
         if !valid_python_identifier(imported) || !valid_python_identifier(local) {
             return None;
         }
@@ -1977,6 +1989,21 @@ fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImport
         });
     }
     Some((module.to_owned(), output))
+}
+
+fn parse_python_import_item(item: &str) -> Option<(&str, &str)> {
+    let imported_end = item.find(is_python_inline_whitespace).unwrap_or(item.len());
+    let imported = &item[..imported_end];
+    let alias = &item[imported_end..];
+    if alias.is_empty() {
+        return Some((imported, imported));
+    }
+    let alias = alias
+        .trim_start_matches(is_python_inline_whitespace)
+        .strip_prefix("as")?
+        .strip_prefix(is_python_inline_whitespace)?
+        .trim_start_matches(is_python_inline_whitespace);
+    Some((imported, alias))
 }
 
 const fn is_python_inline_whitespace(character: char) -> bool {
@@ -1995,6 +2022,48 @@ fn valid_python_identifier(identifier: &str) -> bool {
         .next()
         .is_some_and(|character| character == '_' || character.is_alphabetic())
         && characters.all(|character| character == '_' || character.is_alphanumeric())
+        && !is_python_hard_keyword(identifier)
+}
+
+fn is_python_hard_keyword(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 fn mask_python_non_code(source: &str) -> String {
