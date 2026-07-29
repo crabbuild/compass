@@ -365,83 +365,76 @@ fn doc_twin_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
 }
 
 fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
-    let mut ordered = nodes.iter().collect::<Vec<_>>();
-    ordered.sort_by(|left, right| left.id.cmp(&right.id));
-    let ast_ids = nodes
-        .iter()
-        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) == Some("ast"))
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    let mut non_ast_sources = HashMap::<&str, HashSet<String>>::new();
+    let mut canonical = HashMap::<(String, String, String, String), Vec<String>>::new();
     for node in nodes
         .iter()
-        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) != Some("ast"))
+        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) == Some("ast"))
     {
-        non_ast_sources
-            .entry(node.id.as_str())
-            .or_default()
-            .insert(node.string("source_file"));
-    }
-    let mut canonical = HashMap::<(String, String), String>::new();
-    let mut collisions = HashSet::new();
-    for node in &ordered {
-        let label = node.label().trim();
-        let source = node.string("source_file");
-        let basename = Path::new(&source)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-        if label.is_empty() || basename.is_empty() {
-            continue;
-        }
-        let ast = node.attributes.get("_origin").and_then(Value::as_str) == Some("ast");
-        let located = node
-            .attributes
-            .get("source_location")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty());
-        if !ast && !located {
-            continue;
-        }
-        let key = (basename.to_owned(), label.to_owned());
-        if ast {
-            if canonical
-                .get(&key)
-                .is_some_and(|existing| ast_ids.contains(existing.as_str()))
-            {
-                collisions.insert(key.clone());
-            }
-            canonical.insert(key, node.id.clone());
-        } else if let Some(existing) = canonical.get(&key) {
-            let different_source = non_ast_sources
-                .get(existing.as_str())
-                .is_some_and(|sources| sources.iter().any(|candidate| candidate != &source));
-            if different_source {
-                collisions.insert(key);
-            }
-        } else {
-            canonical.insert(key, node.id.clone());
+        if let Some(identity) = ghost_semantic_identity(node) {
+            canonical.entry(identity).or_default().push(node.id.clone());
         }
     }
     let mut remap = HashMap::new();
-    for node in ordered {
+    for node in nodes {
         if node.attributes.get("_origin").and_then(Value::as_str) == Some("ast") {
             continue;
         }
-        let source = node.string("source_file");
-        let basename = Path::new(&source)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-        let key = (basename.to_owned(), node.label().trim().to_owned());
-        if key.0.is_empty() || key.1.is_empty() || collisions.contains(&key) {
+        let Some(identity) = ghost_semantic_identity(node) else {
             continue;
-        }
-        if let Some(target) = canonical.get(&key).filter(|target| *target != &node.id) {
+        };
+        if let Some([target]) = canonical.get(&identity).map(Vec::as_slice)
+            && target != &node.id
+        {
             remap.insert(node.id.clone(), target.clone());
         }
     }
     remap
+}
+
+fn ghost_semantic_identity(node: &NodeRecord) -> Option<(String, String, String, String)> {
+    let source = node.string("source_file");
+    let kind = node
+        .attributes
+        .get("symbol_kind")
+        .or_else(|| node.attributes.get("type"))
+        .or_else(|| node.attributes.get("file_type"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let qualified_name = node
+        .attributes
+        .get("qualified_name")
+        .or_else(|| node.attributes.get("qualifiedName"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| node.label())
+        .trim();
+    if source.is_empty() || kind.is_empty() || qualified_name.is_empty() {
+        return None;
+    }
+    let mut details = Map::new();
+    for key in [
+        "signature",
+        "declaring_type",
+        "overload_discriminator",
+        "resource_kind",
+        "config_path",
+        "package_name",
+        "database",
+        "database_schema",
+        "logical_database",
+        "transport",
+        "subject",
+    ] {
+        if let Some(value) = node.attributes.get(key) {
+            details.insert(key.to_owned(), value.clone());
+        }
+    }
+    Some((
+        source,
+        kind.to_owned(),
+        qualified_name.to_owned(),
+        Value::Object(details).to_string(),
+    ))
 }
 
 fn needed_legacy_aliases(

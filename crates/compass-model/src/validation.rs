@@ -282,12 +282,7 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
             ));
             continue;
         };
-        if edge.source == edge.target
-            && matches!(
-                edge.kind,
-                EdgeKind::Contains | EdgeKind::Extends | EdgeKind::Implements
-            )
-        {
+        if edge.source == edge.target && edge.kind != EdgeKind::Calls {
             errors.push(format!("edge {} is an unsupported self-loop", edge.id));
         }
         if edge.evidence.is_empty() {
@@ -441,6 +436,7 @@ fn endpoint_kinds_are_valid(
                     | NodeKind::Package
                     | NodeKind::Namespace
                     | NodeKind::Import
+                    | NodeKind::ConfigKey
             ) || source.kind.is_callable()
         }
         EdgeKind::Exports => source.kind.is_container() || source.kind == NodeKind::Export,
@@ -545,7 +541,12 @@ const fn is_executable(kind: NodeKind) -> bool {
     kind.is_callable()
         || matches!(
             kind,
-            NodeKind::Component | NodeKind::Job | NodeKind::Query | NodeKind::DatabaseTrigger
+            NodeKind::Component
+                | NodeKind::Job
+                | NodeKind::Query
+                | NodeKind::DatabaseView
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
         )
 }
 

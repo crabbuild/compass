@@ -372,15 +372,10 @@ pub fn normalize_v1(
                 &file_facts,
             )?,
         };
-        if edge.source == edge.target
-            && matches!(
-                edge.kind,
-                EdgeKind::Contains | EdgeKind::Extends | EdgeKind::Implements
-            )
-        {
+        if edge.source == edge.target && edge.kind != EdgeKind::Calls {
             evidence.diagnostics.push(GraphDiagnostic {
                 severity: DiagnosticSeverity::Warning,
-                code: "dropped_structural_self_loop".to_owned(),
+                code: "dropped_non_recursive_self_loop".to_owned(),
                 message: format!(
                     "dropped impossible {} self-loop on {}",
                     edge.kind.as_str(),
@@ -390,6 +385,40 @@ pub fn normalize_v1(
                 related_ids: vec![edge.source],
             });
             continue;
+        }
+        if matches!(edge.kind, EdgeKind::Extends | EdgeKind::Implements) {
+            let source_kind = nodes
+                .get(&edge.source)
+                .map(|node| node.kind)
+                .unwrap_or(NodeKind::Variable);
+            let target_kind = nodes
+                .get(&edge.target)
+                .map(|node| node.kind)
+                .unwrap_or(NodeKind::Variable);
+            let valid = source_kind.is_type()
+                && match edge.kind {
+                    EdgeKind::Extends => target_kind.is_type(),
+                    EdgeKind::Implements => matches!(
+                        target_kind,
+                        NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                    ),
+                    _ => false,
+                };
+            if !valid {
+                evidence.diagnostics.push(GraphDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "dropped_invalid_inheritance_target".to_owned(),
+                    message: format!(
+                        "dropped invalid {} endpoints {} -> {}",
+                        edge.kind.as_str(),
+                        source_kind.as_str(),
+                        target_kind.as_str()
+                    ),
+                    anchor: edge.relationship_site,
+                    related_ids: vec![edge.source, edge.target],
+                });
+                continue;
+            }
         }
         if let Some(existing) = links.get_mut(&edge.id) {
             merge_normalized_edge(existing, edge)?;
@@ -1017,7 +1046,7 @@ fn normalize_node(
         &qualified_name,
         &raw.id,
         details.as_ref(),
-        source.as_ref(),
+        source.as_ref().or(external_wiring_site.as_ref()),
     )?;
     let community = optional_u64(&raw.attributes, "community").map(|id| CommunityMetadata {
         id,
@@ -1486,7 +1515,7 @@ fn node_identity(
     qualified_name: &str,
     record: &str,
     details: Option<&NodeDetails>,
-    source: Option<&SourceAnchor>,
+    identity_site: Option<&SourceAnchor>,
 ) -> Result<String, GraphError> {
     let id = match kind {
         NodeKind::File => file_id(source_path),
@@ -1500,7 +1529,7 @@ fn node_identity(
                 &route.operation,
                 &route.path,
                 &route.declaring_scope,
-                source,
+                identity_site,
             )
         }
         NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue => {
@@ -1543,6 +1572,16 @@ fn node_identity(
             domain_id(kind, &namespace, qualified_name)
         }
         _ => {
+            let unresolved_scope;
+            let identity_source = if source_path.is_empty() {
+                unresolved_scope = identity_site.map_or_else(
+                    || format!("unresolved:{record}"),
+                    |site| format!("{}#{}:{}", site.file, site.start_byte, site.end_byte),
+                );
+                unresolved_scope.as_str()
+            } else {
+                source_path
+            };
             let overload =
                 optional_any_string(attributes, &["overload_discriminator", "signature_hash"]);
             let lexical_owner =
@@ -1555,7 +1594,7 @@ fn node_identity(
             };
             symbol_id(
                 language.unwrap_or("unknown"),
-                source_path,
+                identity_source,
                 kind,
                 qualified_name,
                 &disambiguator,

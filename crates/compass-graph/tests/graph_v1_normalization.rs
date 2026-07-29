@@ -219,6 +219,118 @@ fn normalization_treats_blank_external_source_paths_as_unanchored()
 }
 
 #[test]
+fn sourceless_placeholder_identity_is_scoped_to_each_wiring_site()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut graph = extraction(root);
+    graph.nodes[1].attributes.remove("source_anchor");
+    graph.nodes[1]
+        .attributes
+        .insert("source_file".to_owned(), json!(""));
+    graph.nodes[1].attributes.remove("symbol_kind");
+    graph.nodes[1]
+        .attributes
+        .insert("label".to_owned(), json!("Shared"));
+    graph.nodes[1]
+        .attributes
+        .insert("qualified_name".to_owned(), json!("Shared"));
+    let mut second = graph.nodes[1].clone();
+    second.id = "raw:second-external".to_owned();
+    graph.nodes.push(second);
+    graph.edges = vec![
+        RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "raw:b".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("references")),
+                ("source_anchor".to_owned(), anchor(root, 50)),
+            ]),
+        },
+        RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "raw:second-external".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("references")),
+                ("source_anchor".to_owned(), anchor(root, 70)),
+            ]),
+        },
+    ];
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let external_ids = document
+        .nodes
+        .iter()
+        .filter(|node| node.name == "Shared")
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(external_ids.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn normalization_drops_non_recursive_self_loops_and_invalid_inheritance_targets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut graph = extraction(root);
+    graph.nodes[0]
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("class"));
+    graph.nodes[1]
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("variable"));
+    let mut dependency = graph.nodes[0].clone();
+    dependency.id = "raw:dependency".to_owned();
+    dependency
+        .attributes
+        .insert("label".to_owned(), json!("dependency"));
+    dependency
+        .attributes
+        .insert("qualified_name".to_owned(), json!("dependency"));
+    dependency
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("package"));
+    graph.nodes.push(dependency);
+    graph.edges = vec![
+        RawEdgeRecord {
+            source: "raw:dependency".to_owned(),
+            target: "raw:dependency".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("imports")),
+                ("source_anchor".to_owned(), anchor(root, 50)),
+            ]),
+        },
+        RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "raw:b".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("extends")),
+                ("source_anchor".to_owned(), anchor(root, 70)),
+            ]),
+        },
+    ];
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    assert!(document.links.is_empty());
+    assert!(
+        document
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "dropped_non_recursive_self_loop")
+    );
+    assert!(
+        document
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "dropped_invalid_inheritance_target")
+    );
+    Ok(())
+}
+
+#[test]
 fn build_evidence_derives_digests_generation_and_byte_anchors()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

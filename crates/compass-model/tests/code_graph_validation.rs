@@ -169,6 +169,39 @@ fn top_level_calls_accept_file_and_module_sources_but_require_callable_targets()
 }
 
 #[test]
+fn non_recursive_self_loops_are_rejected_but_recursive_calls_are_valid() {
+    let mut graph = document();
+    graph.nodes = vec![node("handler", NodeKind::Function)];
+    graph.links[0].source = "handler".to_owned();
+    graph.links[0].target = "handler".to_owned();
+    graph.links[0].kind = EdgeKind::Calls;
+    let id = edge_id("handler", EdgeKind::Calls, "handler", Some(&anchor()), None);
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(validate_code_graph(&graph).is_ok());
+
+    graph.links[0].kind = EdgeKind::Imports;
+    let id = edge_id(
+        "handler",
+        EdgeKind::Imports,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    let errors = validate_code_graph(&graph)
+        .err()
+        .map(|error| error.errors)
+        .unwrap_or_default();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("unsupported self-loop"))
+    );
+}
+
+#[test]
 fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Contains, NodeKind::Function, NodeKind::File),

@@ -54,20 +54,34 @@ fn build_wrapper_remaps_document_twins_ghosts_edges_paths_and_hyperedges()
     );
     assert!(document.nodes.iter().any(|node| node.id == "ast_service"));
     assert!(
-        !document
+        document
             .nodes
             .iter()
             .any(|node| node.id == "semantic_service")
     );
-    assert_eq!(document.links.len(), 1);
-    assert_eq!(document.links[0].attributes["extra"], "merged");
-    assert_eq!(document.links[0].attributes["confidence_score"], 1.0);
-    assert!(document.links[0].string("source_file").starts_with("src/"));
+    assert_eq!(document.links.len(), 2);
+    let ast_edge = document
+        .links
+        .iter()
+        .find(|edge| edge.source == "ast_service")
+        .ok_or("missing AST edge")?;
+    assert_eq!(ast_edge.attributes["extra"], "merged");
+    assert_eq!(ast_edge.attributes["confidence_score"], 1.0);
+    assert!(ast_edge.string("source_file").starts_with("src/"));
+    assert!(
+        document
+            .links
+            .iter()
+            .any(|edge| edge.source == "semantic_service")
+    );
     let hyperedges = document.graph["hyperedges"]
         .as_array()
         .ok_or("missing hyperedges")?;
     assert_eq!(hyperedges.len(), 1);
-    assert_eq!(hyperedges[0]["nodes"], json!(["ast_service", "target"]));
+    assert_eq!(
+        hyperedges[0]["nodes"],
+        json!(["semantic_service", "target"])
+    );
 
     let deduplicated = build(
         std::slice::from_ref(&extraction),
@@ -126,6 +140,63 @@ fn cross_language_phantoms_are_dropped_while_supported_families_survive()
             .iter()
             .any(|edge| edge.source == "swift" && edge.target == "lua")
     );
+    Ok(())
+}
+
+#[test]
+fn ghost_coalescing_requires_matching_path_kind_qualified_name_and_details()
+-> Result<(), Box<dyn Error>> {
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes":[
+            {
+                "id":"config_dependency",
+                "label":"react",
+                "qualified_name":"dependencies.react",
+                "type":"config_key",
+                "file_type":"code",
+                "source_file":"config/package.json",
+                "source_location":"L2",
+                "_origin":"ast",
+                "config_path":"dependencies.react"
+            },
+            {
+                "id":"package_dependency",
+                "label":"react",
+                "qualified_name":"react",
+                "type":"package",
+                "file_type":"code",
+                "source_file":"config/package.json",
+                "source_location":"L2",
+                "_origin":"semantic",
+                "package_name":"react"
+            },
+            {
+                "id":"other_package_dependency",
+                "label":"react",
+                "qualified_name":"react",
+                "type":"package",
+                "file_type":"code",
+                "source_file":"services/package.json",
+                "source_location":"L2",
+                "_origin":"semantic",
+                "package_name":"react"
+            }
+        ],
+        "edges":[]
+    }))?;
+
+    let document = build_from_extraction(&extraction, true, None);
+
+    assert_eq!(document.nodes.len(), 3);
+    assert!(document.nodes.iter().any(|node| {
+        node.string("type") == "config_key" && node.string("source_file") == "config/package.json"
+    }));
+    assert!(document.nodes.iter().any(|node| {
+        node.string("type") == "package" && node.string("source_file") == "config/package.json"
+    }));
+    assert!(document.nodes.iter().any(|node| {
+        node.string("type") == "package" && node.string("source_file") == "services/package.json"
+    }));
     Ok(())
 }
 

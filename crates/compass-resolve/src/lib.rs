@@ -356,11 +356,17 @@ fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
         return;
     }
     for edge in &mut extraction.edges {
+        let mut rewritten = false;
         if let Some(target) = remap.get(&edge.source) {
             edge.source.clone_from(target);
+            rewritten = true;
         }
         if let Some(target) = remap.get(&edge.target) {
             edge.target.clone_from(target);
+            rewritten = true;
+        }
+        if rewritten {
+            stamp_endpoint_rewrite(edge, "csharp-namespace-canonicalization", 1.0);
         }
     }
     let mut index = 0_usize;
@@ -417,6 +423,7 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         {
             repointed.insert(edge.target.clone());
             edge.target.clone_from(target);
+            stamp_endpoint_rewrite(edge, "language-family-stub-resolution", 0.9);
         }
     }
     drop_unreferenced_nodes(extraction, &repointed);
@@ -538,6 +545,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         }
         repointed.insert(edge.target.clone());
         edge.target = target;
+        stamp_endpoint_rewrite(edge, "php-qualified-type-resolution", 1.0);
     }
     extraction.nodes.extend(new_nodes);
     drop_unreferenced_nodes(extraction, &repointed);
@@ -607,6 +615,7 @@ fn canonicalize_import_targets(extraction: &mut Extraction) {
             && let Some(target) = aliases.get(&edge.target)
         {
             edge.target.clone_from(target);
+            stamp_endpoint_rewrite(edge, "canonical-import-target", 1.0);
         }
     }
 }
@@ -676,46 +685,50 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
     }
     let mut remap = HashMap::new();
     for (stub, label) in stubs {
-        let candidates = types
-            .get(&label)
-            .filter(|items| items.len() == 1)
-            .or_else(|| {
-                types_ci
-                    .get(&label.to_ascii_lowercase())
-                    .filter(|items| items.len() == 1)
-            })
+        let families = stub_families.get(&stub);
+        let compatible_unique = |items: Option<&Vec<String>>| {
+            let compatible = items?
+                .iter()
+                .filter(|candidate| {
+                    let candidate_family = source_by_id
+                        .get(*candidate)
+                        .and_then(|source| language_family(source));
+                    families.is_none_or(HashSet::is_empty)
+                        || candidate_family
+                            .is_some_and(|family| families.is_some_and(|set| set.contains(family)))
+                })
+                .collect::<Vec<_>>();
+            (compatible.len() == 1).then(|| compatible[0].clone())
+        };
+        let candidate = compatible_unique(types.get(&label))
+            .or_else(|| compatible_unique(types_ci.get(&label.to_ascii_lowercase())))
             .or_else(|| {
                 if supertype_stubs.contains(stub.as_str()) {
                     return None;
                 }
-                let items = functions.get(&label).filter(|items| items.len() == 1)?;
-                let target = items.first()?;
-                let families = stub_families.get(&stub);
-                let candidate_family = source_by_id
-                    .get(target)
-                    .and_then(|source| language_family(source));
-                (families.is_none_or(HashSet::is_empty)
-                    || candidate_family.is_none()
-                    || candidate_family.is_some_and(|family| {
-                        families.is_some_and(|families| families.contains(family))
-                    }))
-                .then_some(items)
+                compatible_unique(functions.get(&label))
             });
-        if let Some(target) = candidates.and_then(|items| items.first())
-            && target != &stub
+        if let Some(target) = candidate
+            && target != stub
         {
-            remap.insert(stub, target.clone());
+            remap.insert(stub, target);
         }
     }
     if remap.is_empty() {
         return;
     }
     for edge in &mut extraction.edges {
+        let mut rewritten = false;
         if let Some(target) = remap.get(&edge.source) {
             edge.source.clone_from(target);
+            rewritten = true;
         }
         if let Some(target) = remap.get(&edge.target) {
             edge.target.clone_from(target);
+            rewritten = true;
+        }
+        if rewritten {
+            stamp_endpoint_rewrite(edge, "unique-stub-endpoint-resolution", 0.8);
         }
     }
     let referenced = extraction
@@ -836,6 +849,7 @@ fn disambiguate_colliding_node_ids_with_calls(
         let edge_key = source_key(&edge.string("source_file"), root);
         if let Some(new_id) = remap.get(&(edge.source.clone(), edge_key.clone())) {
             edge.source.clone_from(new_id);
+            stamp_endpoint_rewrite(edge, "source-scoped-node-disambiguation", 1.0);
         }
         let target_file = edge
             .attributes
@@ -853,8 +867,10 @@ fn disambiguate_colliding_node_ids_with_calls(
             && let Some(new_id) = header_remaps.get(&edge.target)
         {
             edge.target.clone_from(new_id);
+            stamp_endpoint_rewrite(edge, "header-import-disambiguation", 1.0);
         } else if let Some(new_id) = remap.get(&(edge.target.clone(), target_key)) {
             edge.target.clone_from(new_id);
+            stamp_endpoint_rewrite(edge, "source-scoped-node-disambiguation", 1.0);
         }
     }
     for raw in raw_calls {
@@ -2005,6 +2021,19 @@ fn resolved_edge(raw: &RawCall, target: &str, confidence: &str, score: f64) -> E
     }
 }
 
+fn stamp_endpoint_rewrite(edge: &mut EdgeRecord, rule: &str, score: f64) {
+    edge.attributes
+        .insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+    edge.attributes.insert(
+        "confidence".to_owned(),
+        Value::String("INFERRED".to_owned()),
+    );
+    edge.attributes
+        .insert("confidence_score".to_owned(), Value::from(score));
+    edge.attributes
+        .insert("rule".to_owned(), Value::String(rule.to_owned()));
+}
+
 fn string_attribute(node: &NodeRecord, key: &str) -> String {
     node.attributes
         .get(key)
@@ -2753,10 +2782,20 @@ mod tests {
                 .iter()
                 .all(|candidate| candidate.id != "func-stub")
         );
+        for edge in &extraction.edges {
+            assert_eq!(edge.string("_origin"), "heuristic");
+            assert_eq!(edge.string("rule"), "unique-stub-endpoint-resolution");
+            assert_eq!(
+                edge.attributes
+                    .get("confidence_score")
+                    .and_then(Value::as_f64),
+                Some(0.8)
+            );
+        }
     }
 
     #[test]
-    fn generic_stub_rewiring_matches_python_ascii_and_case_insensitive_fallbacks() {
+    fn generic_stub_rewiring_never_crosses_language_families() {
         let mut extraction = Extraction {
             nodes: vec![
                 node("php-result", "Result", "fixture.php", "class"),
@@ -2775,8 +2814,8 @@ mod tests {
 
         rewire_unique_stub_nodes(&mut extraction);
 
-        assert_eq!(extraction.edges[0].target, "php-result");
-        assert_eq!(extraction.edges[1].target, "imageref");
+        assert_eq!(extraction.edges[0].target, "rust-result");
+        assert_eq!(extraction.edges[1].target, "rust-image");
     }
 
     #[test]
