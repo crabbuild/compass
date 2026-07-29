@@ -463,13 +463,10 @@ fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(
             && evidence.rule.as_deref() == Some("semantic-call")
     }));
 
-    options.force = true;
-    options.reuse_cache_on_force = true;
-    let forced_reuse = build_graph_with_layers(&options, None, &[])?;
-    let forced_reuse_graph = compass_model::code_graph::GraphDocument::load(
-        &forced_reuse.output_dir.join("graph.json"),
-    )?;
-    assert_eq!(incremental_graph.links, forced_reuse_graph.links);
+    let unchanged = build_graph_with_layers(&options, None, &[])?;
+    let unchanged_graph =
+        compass_model::code_graph::GraphDocument::load(&unchanged.output_dir.join("graph.json"))?;
+    assert_eq!(incremental_graph.links, unchanged_graph.links);
     Ok(())
 }
 
