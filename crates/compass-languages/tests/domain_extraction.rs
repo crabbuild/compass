@@ -1520,3 +1520,255 @@ END;
     );
     Ok(())
 }
+
+#[test]
+fn unified_sql_lexer_preserves_marker_content_and_multiline_identifiers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."dash--SELECT" (id BIGINT);
+SELECT * FROM "app"."dash--SELECT";
+CREATE TABLE `app`.`block/*UPDATE*/tail` (id BIGINT);
+SELECT * FROM `app`.`block/*UPDATE*/tail`;
+CREATE TABLE [app].[apostrophe'SELECT] (id BIGINT);
+SELECT * FROM [app].[apostrophe'SELECT];
+CREATE TABLE "app"."multi
+double" (id BIGINT);
+SELECT * FROM "app"."multi
+double";
+CREATE TABLE `app`.`multi
+backtick` (id BIGINT);
+SELECT * FROM `app`.`multi
+backtick`;
+CREATE TABLE [app].[multi
+bracket] (id BIGINT);
+SELECT * FROM [app].[multi
+bracket];
+"#;
+    let extraction = extract_sql_content(Path::new("db/lexical_identifiers.sql"), source);
+    let expected = [
+        ("app.dash--SELECT", br#""app"."dash--SELECT""#.as_slice()),
+        ("app.block/*UPDATE*/tail", b"`app`.`block/*UPDATE*/tail`"),
+        ("app.apostrophe'SELECT", b"[app].[apostrophe'SELECT]"),
+        ("app.multi\ndouble", b"\"app\".\"multi\ndouble\""),
+        ("app.multi\nbacktick", b"`app`.`multi\nbacktick`"),
+        ("app.multi\nbracket", b"[app].[multi\nbracket]"),
+    ];
+    for (qualified_name, spelling) in expected {
+        let table = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+            .ok_or_else(|| format!("missing table {qualified_name:?}"))?;
+        let read = extraction
+            .edges
+            .iter()
+            .find(|edge| edge.target == table.id && edge.string("relation") == "reads")
+            .ok_or_else(|| format!("missing read for {qualified_name:?}"))?;
+        for attributes in [&table.attributes, &read.attributes] {
+            let start = attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing start")?;
+            let end = attributes
+                .get("end_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing end")?;
+            assert_eq!(&source[start..end], spelling);
+        }
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        6
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "valid lexical content received recovery evidence: {:?}",
+        extraction.extensions
+    );
+    Ok(())
+}
+
+#[test]
+fn same_line_malformed_identifiers_recover_before_same_style_valid_sql()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."double_users" (id BIGINT);
+CREATE TABLE `app`.`backtick_users` (id BIGINT);
+CREATE TABLE [app].[bracket_users] (id BIGINT);
+SELECT * FROM "broken; SELECT * FROM "app"."double_users"; CREATE TABLE "app"."after_double" (id BIGINT);
+SELECT * FROM `broken; SELECT * FROM `app`.`backtick_users`; CREATE TABLE `app`.`after_backtick` (id BIGINT);
+SELECT * FROM [broken; SELECT * FROM [app].[bracket_users]; CREATE TABLE [app].[after_bracket] (id BIGINT);
+"#;
+    let extraction = extract_sql_content(Path::new("db/same_line_recovery.sql"), source);
+    for target_name in [
+        "app.double_users",
+        "app.backtick_users",
+        "app.bracket_users",
+    ] {
+        let target = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        assert_eq!(
+            extraction
+                .edges
+                .iter()
+                .filter(|edge| edge.target == target.id && edge.string("relation") == "reads")
+                .count(),
+            1,
+            "target={target_name}, edges={:?}",
+            extraction.edges
+        );
+    }
+    for declaration in [
+        "app.after_double",
+        "app.after_backtick",
+        "app.after_bracket",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .any(|node| node.string("qualified_name") == declaration),
+            "missing recovered declaration {declaration}"
+        );
+    }
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| !node.string("qualified_name").contains("broken")),
+        "malformed span created a phantom node: {:?}",
+        extraction.nodes
+    );
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        3
+    );
+    let coverage = extraction
+        .extensions
+        .get("_compass_v1_graph_coverage")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing recovery coverage")?;
+    let diagnostics = extraction
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing recovery diagnostics")?;
+    assert_eq!(coverage.len(), 3, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 3, "diagnostics={diagnostics:?}");
+    for malformed in [b"\"broken".as_slice(), b"`broken", b"[broken"] {
+        let start = source
+            .windows(malformed.len())
+            .position(|window| window == malformed)
+            .ok_or("missing malformed opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b';')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery semicolon")?;
+        assert!(coverage.iter().any(|record| {
+            record
+                .get("anchor")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|anchor| {
+                    anchor.get("startByte").and_then(serde_json::Value::as_u64)
+                        == Some(start as u64)
+                        && anchor.get("endByte").and_then(serde_json::Value::as_u64)
+                            == Some(end as u64)
+                })
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn cte_aliases_never_materialize_as_exact_physical_write_targets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+WITH src AS (SELECT id FROM app.users)
+UPDATE s SET id = 1 FROM src AS s;
+WITH src AS (SELECT id FROM app.users)
+DELETE FROM s USING src AS s;
+WITH src AS (SELECT id FROM app.users)
+MERGE INTO s USING src AS s ON 1 = 1 WHEN MATCHED THEN UPDATE SET id = 3;
+WITH src AS (
+  WITH src AS (SELECT id FROM app.users)
+  SELECT id FROM src
+)
+UPDATE s SET id = 4 FROM src AS s;
+CREATE PROCEDURE app.refresh_cte_aliases() AS $body$
+BEGIN
+  WITH src AS (SELECT id FROM app.users), wrapper AS (SELECT id FROM src)
+  UPDATE s SET id = 5 FROM wrapper AS s;
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.capture_cte_alias AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  WITH src AS (SELECT id FROM app.users)
+  DELETE FROM s USING src AS s;
+END;
+"#;
+    let extraction = extract_sql_content(Path::new("db/cte_alias_writes.sql"), source);
+    for alias in ["src", "wrapper"] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != alias),
+            "CTE alias became a physical node {alias}: {:?}",
+            extraction.nodes
+        );
+    }
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("relation") != "writes"),
+        "unproven CTE updateability became an exact write: {:?}",
+        extraction.edges
+    );
+    let users = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.users")
+        .ok_or("missing users")?;
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.target == users.id && edge.string("relation") == "reads")
+            .count()
+            >= 6,
+        "underlying physical reads were lost: {:?}",
+        extraction.edges
+    );
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        4,
+        "routine or trigger body leaked as a query: {:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "{:?}",
+        extraction.extensions
+    );
+    Ok(())
+}

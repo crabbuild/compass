@@ -11,9 +11,8 @@ use crate::{file_stem, make_id};
 // SQL object references may contain quoted identifiers, including escaped
 // double quotes, and may be schema-qualified. Keep the quotes in the captured
 // label to preserve the source spelling and dialect-specific case semantics.
-const IDENTIFIER: &str =
-    r#"(?:"(?:""|[^"\r\n])*"|`(?:``|[^`\r\n])*`|\[(?:\]\]|[^\]\r\n])+\]|[\w$]+)"#;
-const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"\r\n])*"|`(?:``|[^`\r\n])*`|\[(?:\]\]|[^\]\r\n])+\]|[\w$]+)(?:\.(?:"(?:""|[^"\r\n])*"|`(?:``|[^`\r\n])*`|\[(?:\]\]|[^\]\r\n])+\]|[\w$]+))*"#;
+const IDENTIFIER: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)"#;
+const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)(?:\.(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+))*"#;
 
 pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
     State::new(path, source).run()
@@ -56,8 +55,13 @@ struct AccessBindings {
 
 struct ScopedAliasBinding {
     name: String,
-    target: String,
+    target: AliasTarget,
     visible: Site,
+}
+
+enum AliasTarget {
+    PhysicalTable(String),
+    Cte,
 }
 
 struct ScopedCteBinding {
@@ -82,12 +86,22 @@ struct ScannedStatement {
     issue: Option<BoundaryIssue>,
 }
 
+struct SqlLexicalOutput {
+    masked: String,
+    issues: Vec<BoundaryIssue>,
+}
+
 type QueryStatement = (usize, usize, usize, String);
 
 enum StatementBoundary {
     Complete(usize),
     EndOfInput(usize),
     IncompleteQuoted { end: usize, issue: BoundaryIssue },
+}
+
+enum DelimitedIdentifierScan {
+    Complete(usize),
+    Incomplete(usize),
 }
 
 impl StatementBoundary {
@@ -125,6 +139,7 @@ struct State<'a> {
     source: &'a [u8],
     text: &'a str,
     masked: String,
+    lexical_issues: Vec<BoundaryIssue>,
     source_file: String,
     logical_database: String,
     file_id: String,
@@ -142,11 +157,13 @@ impl<'a> State<'a> {
         let source_file = path.to_string_lossy().into_owned();
         let logical_database = logical_database(path);
         let text = std::str::from_utf8(source).unwrap_or_default();
+        let lexical = mask_sql_literals_and_comments(text);
         Self {
             path,
             source,
             text,
-            masked: mask_sql_literals_and_comments(text),
+            masked: lexical.masked,
+            lexical_issues: lexical.issues,
             file_id: make_id(&[&source_file]),
             database_id: make_id(&["sql-database", &logical_database]),
             source_file,
@@ -173,6 +190,9 @@ impl<'a> State<'a> {
         self.add_file_node(&label);
         self.add_database_node();
         self.add_migration_node();
+        for issue in self.lexical_issues.clone() {
+            self.add_boundary_issue_evidence(&issue);
+        }
 
         let declarations = statements(&self.masked);
         // Discover all declared objects first. Relationships can then resolve
@@ -602,6 +622,9 @@ impl<'a> State<'a> {
             self.add_boundary_issue_evidence(issue);
         }
         for (statement_start, _, end, operation) in queries {
+            if self.has_lexical_issue(statement_start, end) {
+                continue;
+            }
             self.add_query(&operation, statement_start, end);
         }
     }
@@ -646,15 +669,25 @@ impl<'a> State<'a> {
                 self.add_boundary_issue_evidence(&issue);
                 continue;
             }
+            if self.has_lexical_issue(statement.site.start, statement.site.end) {
+                continue;
+            }
             self.add_data_access_statement(source, statement.site.start, statement.site.end);
         }
     }
 
+    fn has_lexical_issue(&self, start: usize, end: usize) -> bool {
+        self.lexical_issues
+            .iter()
+            .any(|issue| issue.site.start < end && issue.site.end > start)
+    }
+
     fn add_data_access_statement(&mut self, source: &str, start: usize, end: usize) {
         let body = self.masked[start..end.min(self.masked.len())].to_owned();
+        let ctes = scoped_cte_bindings(&body);
         let bindings = AccessBindings {
-            aliases: scoped_alias_bindings(&body),
-            ctes: scoped_cte_bindings(&body),
+            aliases: scoped_alias_bindings(&body, &ctes),
+            ctes,
         };
         let read_patterns = [format!(
             r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
@@ -705,9 +738,19 @@ impl<'a> State<'a> {
                 {
                     continue;
                 }
-                let target_name = resolve_scoped_alias(&bindings.aliases, &key, name_match.start())
-                    .map_or(name, String::as_str);
+                let target_name =
+                    match resolve_scoped_alias(&bindings.aliases, &key, name_match.start()) {
+                        Some(AliasTarget::PhysicalTable(target)) => target.as_str(),
+                        Some(AliasTarget::Cte) => continue,
+                        None => name,
+                    };
+                let target_key = identifier_key(target_name);
                 if is_reserved_object_reference(target_name)
+                    || bindings.ctes.iter().any(|binding| {
+                        binding.name == target_key
+                            && name_match.start() >= binding.visible.start
+                            && name_match.start() < binding.visible.end
+                    })
                     || !emitted.insert((identifier_key(target_name), name_match.start()))
                 {
                     continue;
@@ -1276,59 +1319,85 @@ fn scan_statement_boundary(source: &str, start: usize, end: usize) -> StatementB
     let bytes = source.as_bytes();
     let limit = end.min(bytes.len());
     let mut index = start.min(limit);
+    let mut paren_depth = 0_u32;
     while index < limit {
         if let Some(delimiter) = identifier_delimiter(bytes[index]) {
-            let pairing_limit = quoted_identifier_pairing_limit(source, index, limit);
-            if let Some(quoted_end) =
-                quoted_identifier_end(bytes, index, delimiter).filter(|end| *end <= pairing_limit)
-            {
-                index = quoted_end;
-                continue;
+            match scan_delimited_identifier(source, index, delimiter, limit) {
+                DelimitedIdentifierScan::Complete(end) => {
+                    index = end;
+                    continue;
+                }
+                DelimitedIdentifierScan::Incomplete(recovery_end) => {
+                    let style = match bytes[index] {
+                        b'"' => "double-quoted",
+                        b'`' => "backtick-quoted",
+                        b'[' => "bracket-quoted",
+                        _ => "quoted",
+                    };
+                    return StatementBoundary::IncompleteQuoted {
+                        end: recovery_end,
+                        issue: BoundaryIssue {
+                            site: Site::new(index, recovery_end),
+                            reason: format!(
+                                "unterminated {style} SQL identifier; statement facts omitted"
+                            ),
+                        },
+                    };
+                }
             }
-            let recovery_end = incomplete_quote_recovery_end(source, index, limit);
-            let style = match bytes[index] {
-                b'"' => "double-quoted",
-                b'`' => "backtick-quoted",
-                b'[' => "bracket-quoted",
-                _ => "quoted",
-            };
-            return StatementBoundary::IncompleteQuoted {
-                end: recovery_end,
-                issue: BoundaryIssue {
-                    site: Site::new(index, recovery_end),
-                    reason: format!("unterminated {style} SQL identifier; statement facts omitted"),
-                },
-            };
         }
         if let Some(dollar_end) = paired_dollar_quote_end(source, index, limit) {
             index = dollar_end;
             continue;
         }
-        if bytes[index] == b';' {
-            return StatementBoundary::Complete(index + 1);
+        match bytes[index] {
+            b'(' => paren_depth = paren_depth.saturating_add(1),
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b';' if paren_depth == 0 => return StatementBoundary::Complete(index + 1),
+            _ => {}
         }
         index += 1;
     }
     StatementBoundary::EndOfInput(limit)
 }
 
-fn quoted_identifier_pairing_limit(source: &str, open: usize, limit: usize) -> usize {
+fn scan_delimited_identifier(
+    source: &str,
+    open: usize,
+    delimiter: u8,
+    limit: usize,
+) -> DelimitedIdentifierScan {
     let bytes = source.as_bytes();
-    bytes[open.saturating_add(1).min(limit)..limit]
-        .iter()
-        .position(|byte| *byte == b'\n')
-        .map_or(limit, |offset| open + 1 + offset)
-}
-
-fn incomplete_quote_recovery_end(source: &str, open: usize, limit: usize) -> usize {
-    let start = open.saturating_add(1).min(limit);
-    let bytes = source.as_bytes();
-    for (offset, byte) in bytes[start..limit].iter().enumerate() {
-        if *byte == b';' || *byte == b'\n' {
-            return start + offset + 1;
+    let limit = limit.min(bytes.len());
+    let mut index = open.saturating_add(1).min(limit);
+    let mut statement_recovery = None;
+    let mut fallback_recovery = None;
+    while index < limit {
+        if bytes[index] == delimiter {
+            if bytes.get(index + 1).copied() == Some(delimiter) {
+                index += 2;
+                continue;
+            }
+            return statement_recovery.map_or(
+                DelimitedIdentifierScan::Complete(index + 1),
+                DelimitedIdentifierScan::Incomplete,
+            );
         }
+        if fallback_recovery.is_none() && matches!(bytes[index], b';' | b'\n') {
+            fallback_recovery = Some(index + 1);
+        }
+        if statement_recovery.is_none() && bytes[index] == b';' {
+            let next = index + 1;
+            if bytes
+                .get(next)
+                .is_some_and(|byte| byte.is_ascii_whitespace())
+            {
+                statement_recovery = Some(next);
+            }
+        }
+        index += 1;
     }
-    limit
+    DelimitedIdentifierScan::Incomplete(fallback_recovery.unwrap_or(limit))
 }
 
 fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<ScannedStatement> {
@@ -1767,7 +1836,7 @@ fn balanced_paren_end(statement: &str, open: usize) -> Option<usize> {
     None
 }
 
-fn scoped_alias_bindings(statement: &str) -> Vec<ScopedAliasBinding> {
+fn scoped_alias_bindings(statement: &str, ctes: &[ScopedCteBinding]) -> Vec<ScopedAliasBinding> {
     let Ok(target_pattern) = Regex::new(&format!(r"(?i)^\s*(?:ONLY\s+)?({OBJECT_REFERENCE})"))
     else {
         return Vec::new();
@@ -1787,6 +1856,7 @@ fn scoped_alias_bindings(statement: &str) -> Vec<ScopedAliasBinding> {
         else {
             continue;
         };
+        let target_start = keyword_end + target.start();
         let target_end = keyword_end + target.end();
         let mut alias_start = skip_sql_whitespace(statement, target_end);
         if let Some(as_end) = consume_keyword(statement, alias_start, "AS") {
@@ -1799,9 +1869,19 @@ fn scoped_alias_bindings(statement: &str) -> Vec<ScopedAliasBinding> {
         if is_reserved_object_reference(alias) {
             continue;
         }
+        let target_key = identifier_key(target.as_str());
+        let target = if ctes.iter().any(|binding| {
+            binding.name == target_key
+                && target_start >= binding.visible.start
+                && target_start < binding.visible.end
+        }) {
+            AliasTarget::Cte
+        } else {
+            AliasTarget::PhysicalTable(target.as_str().to_owned())
+        };
         bindings.push(ScopedAliasBinding {
             name: identifier_key(alias),
-            target: target.as_str().to_owned(),
+            target,
             visible: enclosing_sql_scope(statement, alias_start),
         });
     }
@@ -1812,7 +1892,7 @@ fn resolve_scoped_alias<'a>(
     bindings: &'a [ScopedAliasBinding],
     name: &str,
     occurrence: usize,
-) -> Option<&'a String> {
+) -> Option<&'a AliasTarget> {
     bindings
         .iter()
         .filter(|binding| {
@@ -1914,72 +1994,108 @@ fn split_top_level(value: &str) -> Vec<(usize, &str)> {
     parts
 }
 
-fn mask_sql_literals_and_comments(value: &str) -> String {
+fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
     #[derive(Clone, Copy)]
-    enum Mode {
-        Sql,
-        String,
+    enum LexicalState {
+        Normal,
+        SingleQuoted,
         LineComment,
         BlockComment,
     }
 
     let source = value.as_bytes();
     let mut masked = source.to_vec();
-    let mut mode = Mode::Sql;
+    let mut issues = Vec::new();
+    let mut state = LexicalState::Normal;
     let mut index = 0;
     while index < source.len() {
-        match mode {
-            Mode::Sql if source[index] == b'\'' => {
+        match state {
+            LexicalState::Normal if identifier_delimiter(source[index]).is_some() => {
+                let delimiter = identifier_delimiter(source[index]).unwrap_or_default();
+                match scan_delimited_identifier(value, index, delimiter, source.len()) {
+                    DelimitedIdentifierScan::Complete(end) => index = end,
+                    DelimitedIdentifierScan::Incomplete(end) => {
+                        let style = match source[index] {
+                            b'"' => "double-quoted",
+                            b'`' => "backtick-quoted",
+                            b'[' => "bracket-quoted",
+                            _ => "quoted",
+                        };
+                        issues.push(BoundaryIssue {
+                            site: Site::new(index, end),
+                            reason: format!(
+                                "unterminated {style} SQL identifier; statement facts omitted"
+                            ),
+                        });
+                        for byte in &mut masked[index..end] {
+                            if !matches!(*byte, b';' | b'\n' | b'\r') {
+                                *byte = b' ';
+                            }
+                        }
+                        index = end;
+                    }
+                }
+            }
+            LexicalState::Normal if source[index] == b'\'' => {
                 masked[index] = b' ';
-                mode = Mode::String;
+                state = LexicalState::SingleQuoted;
                 index += 1;
             }
-            Mode::Sql if source[index] == b'-' && source.get(index + 1).copied() == Some(b'-') => {
+            LexicalState::Normal
+                if source[index] == b'-' && source.get(index + 1).copied() == Some(b'-') =>
+            {
                 masked[index] = b' ';
                 masked[index + 1] = b' ';
-                mode = Mode::LineComment;
+                state = LexicalState::LineComment;
                 index += 2;
             }
-            Mode::Sql if source[index] == b'/' && source.get(index + 1).copied() == Some(b'*') => {
+            LexicalState::Normal
+                if source[index] == b'/' && source.get(index + 1).copied() == Some(b'*') =>
+            {
                 masked[index] = b' ';
                 masked[index + 1] = b' ';
-                mode = Mode::BlockComment;
+                state = LexicalState::BlockComment;
                 index += 2;
             }
-            Mode::String
+            LexicalState::SingleQuoted
                 if source[index] == b'\'' && source.get(index + 1).copied() == Some(b'\'') =>
             {
                 masked[index] = b' ';
                 masked[index + 1] = b' ';
                 index += 2;
             }
-            Mode::String if source[index] == b'\'' => {
+            LexicalState::SingleQuoted if source[index] == b'\'' => {
                 masked[index] = b' ';
-                mode = Mode::Sql;
+                state = LexicalState::Normal;
                 index += 1;
             }
-            Mode::LineComment if source[index] == b'\n' => {
-                mode = Mode::Sql;
+            LexicalState::LineComment if source[index] == b'\n' => {
+                state = LexicalState::Normal;
                 index += 1;
             }
-            Mode::BlockComment
+            LexicalState::BlockComment
                 if source[index] == b'*' && source.get(index + 1).copied() == Some(b'/') =>
             {
                 masked[index] = b' ';
                 masked[index + 1] = b' ';
-                mode = Mode::Sql;
+                state = LexicalState::Normal;
                 index += 2;
             }
-            Mode::String | Mode::LineComment | Mode::BlockComment => {
+            LexicalState::SingleQuoted | LexicalState::LineComment | LexicalState::BlockComment => {
                 if source[index] != b'\n' {
                     masked[index] = b' ';
                 }
                 index += 1;
             }
-            Mode::Sql => index += 1,
+            LexicalState::Normal => {
+                index += dollar_quote_delimiter_at(value, index).map_or(1, str::len);
+            }
         }
     }
-    String::from_utf8(masked).unwrap_or_else(|_| value.to_owned())
+    SqlLexicalOutput {
+        masked: String::from_utf8(masked).unwrap_or_else(|_| value.to_owned()),
+        issues,
+    }
 }
 
 fn is_table_constraint(value: &str) -> bool {

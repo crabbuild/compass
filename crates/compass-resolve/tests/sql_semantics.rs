@@ -1288,3 +1288,281 @@ END;
     );
     Ok(())
 }
+
+#[test]
+fn unified_sql_lexing_publishes_only_proven_identifier_facts_in_strict_v1()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V13__unified_lexing.sql");
+    let source = br#"
+CREATE TABLE "app"."dash--SELECT" (id BIGINT);
+SELECT * FROM "app"."dash--SELECT";
+CREATE TABLE `app`.`block/*UPDATE*/tail` (id BIGINT);
+SELECT * FROM `app`.`block/*UPDATE*/tail`;
+CREATE TABLE [app].[apostrophe'SELECT] (id BIGINT);
+SELECT * FROM [app].[apostrophe'SELECT];
+CREATE TABLE "app"."multi
+double" (id BIGINT);
+SELECT * FROM "app"."multi
+double";
+CREATE TABLE `app`.`multi
+backtick` (id BIGINT);
+SELECT * FROM `app`.`multi
+backtick`;
+CREATE TABLE [app].[multi
+bracket] (id BIGINT);
+SELECT * FROM [app].[multi
+bracket];
+CREATE TABLE "app"."double_users" (id BIGINT);
+CREATE TABLE `app`.`backtick_users` (id BIGINT);
+CREATE TABLE [app].[bracket_users] (id BIGINT);
+SELECT * FROM "broken; SELECT * FROM "app"."double_users"; CREATE TABLE "app"."after_double" (id BIGINT);
+SELECT * FROM `broken; SELECT * FROM `app`.`backtick_users`; CREATE TABLE `app`.`after_backtick` (id BIGINT);
+SELECT * FROM [broken; SELECT * FROM [app].[bracket_users]; CREATE TABLE [app].[after_bracket] (id BIGINT);
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-unified-lexing")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    let expected = [
+        ("app.dash--SELECT", br#""app"."dash--SELECT""#.as_slice()),
+        ("app.block/*UPDATE*/tail", b"`app`.`block/*UPDATE*/tail`"),
+        ("app.apostrophe'SELECT", b"[app].[apostrophe'SELECT]"),
+        ("app.multi\ndouble", b"\"app\".\"multi\ndouble\""),
+        ("app.multi\nbacktick", b"`app`.`multi\nbacktick`"),
+        ("app.multi\nbracket", b"[app].[multi\nbracket]"),
+    ];
+    for (qualified_name, spelling) in expected {
+        let table = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                node.kind == NodeKind::DatabaseTable && node.qualified_name == qualified_name
+            })
+            .ok_or_else(|| format!("missing table {qualified_name:?}"))?;
+        let read = graph
+            .links
+            .iter()
+            .find(|edge| edge.target == table.id && edge.kind == EdgeKind::Reads)
+            .ok_or_else(|| format!("missing read for {qualified_name:?}"))?;
+        for anchor in [
+            table.source.as_ref().ok_or("missing table anchor")?,
+            read.relationship_site
+                .as_ref()
+                .ok_or("missing read anchor")?,
+        ] {
+            assert_eq!(
+                source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+                Some(spelling)
+            );
+        }
+        assert!(read.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+        }));
+    }
+    for target_name in [
+        "app.double_users",
+        "app.backtick_users",
+        "app.bracket_users",
+    ] {
+        let target = graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        assert_eq!(
+            graph
+                .links
+                .iter()
+                .filter(|edge| edge.target == target.id && edge.kind == EdgeKind::Reads)
+                .count(),
+            1
+        );
+    }
+    for declaration in [
+        "app.after_double",
+        "app.after_backtick",
+        "app.after_bracket",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == NodeKind::DatabaseTable
+                    && node.qualified_name == declaration),
+            "missing recovered declaration {declaration}"
+        );
+    }
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| !node.qualified_name.contains("broken")),
+        "malformed span created a phantom node: {:?}",
+        graph.nodes
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        9
+    );
+    let partials = graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|record| {
+            record.capability == "sql:statement_boundary"
+                && record.status == CoverageStatus::Partial
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = graph
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "sql_incomplete_quoted_identifier")
+        .collect::<Vec<_>>();
+    assert_eq!(partials.len(), 3, "coverage={:?}", graph.graph.coverage);
+    assert_eq!(
+        diagnostics.len(),
+        3,
+        "diagnostics={:?}",
+        graph.graph.diagnostics
+    );
+    for malformed in [b"\"broken".as_slice(), b"`broken", b"[broken"] {
+        let start = source
+            .windows(malformed.len())
+            .position(|window| window == malformed)
+            .ok_or("missing malformed opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b';')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery boundary")?;
+        assert!(partials.iter().any(|record| {
+            record.anchor.as_ref().is_some_and(|anchor| {
+                anchor.start_byte == start as u64
+                    && anchor.end_byte == end as u64
+                    && anchor.file == relative.to_string_lossy()
+            })
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn cte_alias_writes_are_omitted_from_strict_v1_without_phantom_tables() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V14__cte_alias_writes.sql");
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+WITH src AS (SELECT id FROM app.users)
+UPDATE s SET id = 1 FROM src AS s;
+WITH src AS (SELECT id FROM app.users)
+DELETE FROM s USING src AS s;
+WITH src AS (SELECT id FROM app.users)
+MERGE INTO s USING src AS s ON 1 = 1 WHEN MATCHED THEN UPDATE SET id = 3;
+WITH src AS (
+  WITH src AS (SELECT id FROM app.users)
+  SELECT id FROM src
+)
+UPDATE s SET id = 4 FROM src AS s;
+CREATE PROCEDURE app.refresh_cte_aliases() AS $body$
+BEGIN
+  WITH src AS (SELECT id FROM app.users), wrapper AS (SELECT id FROM src)
+  UPDATE s SET id = 5 FROM wrapper AS s;
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.capture_cte_alias AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  WITH src AS (SELECT id FROM app.users)
+  DELETE FROM s USING src AS s;
+END;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-cte-alias")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for alias in ["src", "wrapper"] {
+        assert!(
+            graph.nodes.iter().all(|node| node.qualified_name != alias),
+            "CTE alias became a physical node {alias}: {:?}",
+            graph.nodes
+        );
+    }
+    assert!(
+        graph.links.iter().all(|edge| edge.kind != EdgeKind::Writes),
+        "unproven CTE updateability became an exact write: {:?}",
+        graph.links
+    );
+    let users = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.users")
+        .ok_or("missing users")?;
+    let reads = graph
+        .links
+        .iter()
+        .filter(|edge| edge.target == users.id && edge.kind == EdgeKind::Reads)
+        .collect::<Vec<_>>();
+    assert!(reads.len() >= 6, "links={:?}", graph.links);
+    assert!(reads.iter().all(|edge| {
+        edge.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+                && item
+                    .rule
+                    .as_deref()
+                    .is_some_and(|rule| rule.starts_with("sql-text-"))
+        })
+    }));
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        4
+    );
+    assert!(
+        graph.graph.coverage.iter().all(|record| {
+            record.capability != "sql:body_ownership"
+                && record.capability != "sql:statement_boundary"
+        }),
+        "valid CTE aliases received partial coverage: {:?}",
+        graph.graph.coverage
+    );
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:sql-cte-alias")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
