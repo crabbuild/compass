@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.7
+## 0.1.8
 
 - Add first-run Compass CLI installation in a visible VS Code terminal on
   macOS, Linux, and Windows.
