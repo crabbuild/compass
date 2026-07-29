@@ -63,6 +63,31 @@ COMPASS_BIN="$QUALIFY_ROOT/target/debug/compass"
 evidence="$QUALIFY_TMP/evidence.jsonl"
 compass_revision="$(git rev-parse HEAD)"
 
+active_graph() {
+  python3 - "$1" <<'PY'
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[1])
+pointer = output / ".compass-active-generation"
+if not pointer.exists():
+    print(output / "graph.json")
+    raise SystemExit
+generation = pointer.read_text().strip()
+if (
+    not generation.startswith("generation-")
+    or generation in {".", ".."}
+    or "/" in generation
+    or "\\" in generation
+):
+    raise SystemExit(f"invalid active Compass generation: {generation!r}")
+active = output / ".compass-generations" / generation
+if not active.is_dir() or (active / ".compass-build-incomplete").exists():
+    raise SystemExit(f"incomplete active Compass generation: {active}")
+print(active / "graph.json")
+PY
+}
+
 while IFS=$'\t' read -r name url commit; do
   checkout="$QUALIFY_TMP/$name"
   echo "[code-graph-v1] clone $name at $commit"
@@ -76,13 +101,14 @@ while IFS=$'\t' read -r name url commit; do
   started="$(python3 -c 'import time; print(time.monotonic_ns())')"
   "$COMPASS_BIN" update "$checkout" --no-cluster --no-viz \
     >"$QUALIFY_TMP/$name.clean.log"
-  graph="$checkout/compass-out/graph.json"
+  graph="$(active_graph "$checkout/compass-out")"
   clean="$QUALIFY_TMP/$name.clean.graph.json"
   cp "$graph" "$clean"
   clean_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
 
   "$COMPASS_BIN" update "$checkout" --no-cluster --no-viz \
     >"$QUALIFY_TMP/$name.incremental.log"
+  graph="$(active_graph "$checkout/compass-out")"
   warm_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
   python3 scripts/check_code_graph_v1_coverage.py \
     --repositories "$repository_lock" \
