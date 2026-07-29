@@ -2547,6 +2547,258 @@ SELECT * FROM app.after_valid_bracket;
 }
 
 #[test]
+fn every_supported_dml_alias_role_keeps_later_dollar_literals_inert()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+UPDATE app.real AS $u$alias SET id = 1;
+SELECT $u$ FROM app.update_as_phantom $u$::text;
+UPDATE app.real $$alias SET id = 2;
+SELECT $$ FROM app.update_bare_phantom $$::text;
+INSERT INTO app.real AS $i$alias (id) VALUES (3);
+SELECT $i$ FROM app.insert_as_phantom $i$::text;
+INSERT INTO app.real $$alias (id) VALUES (4);
+SELECT $$ FROM app.insert_bare_phantom $$::text;
+MERGE INTO app.real AS $m$target USING app.real AS source
+ON 1 = 1 WHEN MATCHED THEN UPDATE SET id = 5;
+SELECT $m$ FROM app.merge_as_phantom $m$::text;
+MERGE INTO app.real $$target USING app.real source
+ON 1 = 1 WHEN MATCHED THEN UPDATE SET id = 6;
+SELECT $$ FROM app.merge_bare_phantom $$::text;
+DELETE $p$alias FROM app.real AS $p$alias WHERE id = 7;
+SELECT $p$ FROM app.delete_prefix_tagged_phantom $p$::text;
+DELETE $$alias FROM app.real AS $$alias WHERE id = 8;
+SELECT $$ FROM app.delete_prefix_bare_phantom $$::text;
+DELETE FROM app.real AS $d$alias WHERE id = 9;
+SELECT $d$ FROM app.delete_as_control_phantom $d$::text;
+DELETE FROM app.real $$alias WHERE id = 10;
+SELECT $$ FROM app.delete_bare_control_phantom $$::text;
+"#;
+    let extraction = extract_sql_content(Path::new("db/dml_alias_roles.sql"), source);
+    for phantom in [
+        "app.update_as_phantom",
+        "app.update_bare_phantom",
+        "app.insert_as_phantom",
+        "app.insert_bare_phantom",
+        "app.merge_as_phantom",
+        "app.merge_bare_phantom",
+        "app.delete_prefix_tagged_phantom",
+        "app.delete_prefix_bare_phantom",
+        "app.delete_as_control_phantom",
+        "app.delete_bare_control_phantom",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != phantom),
+            "DML alias borrowed a later literal and exposed {phantom}: {:?}",
+            extraction.nodes
+        );
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        20,
+        "DML aliases merged query occurrences: {:?}",
+        extraction.nodes
+    );
+    let real = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.real")
+        .ok_or("missing real table")?;
+    let writes = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.target == real.id && edge.string("relation") == "writes")
+        .collect::<Vec<_>>();
+    assert_eq!(writes.len(), 10, "edges={:?}", extraction.edges);
+    for write in writes {
+        let start = write
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing write start")?;
+        let end = write
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing write end")?;
+        assert_eq!(&source[start..end], b"app.real");
+    }
+    assert!(
+        extraction.extensions.is_empty(),
+        "valid DML aliases produced recovery evidence: {:?}",
+        extraction.extensions
+    );
+    let repeated = extract_sql_content(Path::new("db/dml_alias_roles.sql"), source);
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>(),
+        repeated
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    &edge.source,
+                    &edge.target,
+                    edge.string("relation"),
+                    edge.attributes.get("start_byte"),
+                    edge.attributes.get("end_byte"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        repeated
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    &edge.source,
+                    &edge.target,
+                    edge.string("relation"),
+                    edge.attributes.get("start_byte"),
+                    edge.attributes.get("end_byte"),
+                )
+            })
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn comments_and_prior_literals_cannot_create_dollar_identifier_roles()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+SELECT '' ||
+-- CREATE TABLE
+$dc$ FROM app.declaration_phantom $dc$::text;
+SELECT '' ||
+-- FROM
+$rt$ FROM app.read_target_phantom $rt$::text;
+SELECT '' ||
+-- FROM app.real AS
+$ra$ FROM app.read_alias_phantom $ra$::text;
+SELECT '' ||
+-- WITH prior AS (SELECT 1),
+$ct$ AS (SELECT * FROM app.cte_phantom) $ct$::text;
+SELECT '' ||
+-- CREATE INDEX fake ON
+$ic$ FROM app.index_comment_phantom $ic$::text;
+SELECT '' ||
+-- CREATE TRIGGER fake BEFORE UPDATE ON
+$tc$ FROM app.trigger_comment_phantom $tc$::text;
+SELECT 'CREATE INDEX fake';
+SELECT * FROM app.real r JOIN app.real s
+ON $is$ FROM app.index_single_phantom $is$::text = 'x';
+SELECT $old_index$ CREATE INDEX fake $old_index$;
+SELECT * FROM app.real r JOIN app.real s
+ON $id$ FROM app.index_dollar_phantom $id$::text = 'x';
+SELECT 'CREATE TRIGGER fake BEFORE UPDATE';
+SELECT * FROM app.real r JOIN app.real s
+ON $ts$ FROM app.trigger_single_phantom $ts$::text = 'x';
+SELECT $old_trigger$ CREATE TRIGGER fake BEFORE UPDATE $old_trigger$;
+SELECT * FROM app.real r JOIN app.real s
+ON $td$ FROM app.trigger_dollar_phantom $td$::text = 'x';
+"#;
+    let extraction = extract_sql_content(Path::new("db/dollar_role_poison.sql"), source);
+    for phantom in [
+        "app.declaration_phantom",
+        "app.read_target_phantom",
+        "app.read_alias_phantom",
+        "app.cte_phantom",
+        "app.index_comment_phantom",
+        "app.trigger_comment_phantom",
+        "app.index_single_phantom",
+        "app.index_dollar_phantom",
+        "app.trigger_single_phantom",
+        "app.trigger_dollar_phantom",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != phantom),
+            "inert producer text exposed {phantom}: {:?}",
+            extraction.nodes
+        );
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        14,
+        "poison text merged query occurrences: {:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "complete inert text produced recovery evidence: {:?}",
+        extraction.extensions
+    );
+    let repeated = extract_sql_content(Path::new("db/dollar_role_poison.sql"), source);
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>(),
+        repeated
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    &edge.source,
+                    &edge.target,
+                    edge.string("relation"),
+                    edge.attributes.get("start_byte"),
+                    edge.attributes.get("end_byte"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        repeated
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    &edge.source,
+                    &edge.target,
+                    edge.string("relation"),
+                    edge.attributes.get("start_byte"),
+                    edge.attributes.get("end_byte"),
+                )
+            })
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
 fn escaped_bracket_content_remains_one_greedy_identifier() -> Result<(), Box<dyn std::error::Error>>
 {
     let source = br#"

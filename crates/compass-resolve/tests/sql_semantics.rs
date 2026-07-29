@@ -92,6 +92,244 @@ END;
 }
 
 #[test]
+fn every_supported_dml_alias_role_preserves_strict_v1_occurrences() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V24__dml_alias_roles.sql");
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+UPDATE app.real AS $u$alias SET id = 1;
+SELECT $u$ FROM app.update_as_phantom $u$::text;
+UPDATE app.real $$alias SET id = 2;
+SELECT $$ FROM app.update_bare_phantom $$::text;
+INSERT INTO app.real AS $i$alias (id) VALUES (3);
+SELECT $i$ FROM app.insert_as_phantom $i$::text;
+INSERT INTO app.real $$alias (id) VALUES (4);
+SELECT $$ FROM app.insert_bare_phantom $$::text;
+MERGE INTO app.real AS $m$target USING app.real AS source
+ON 1 = 1 WHEN MATCHED THEN UPDATE SET id = 5;
+SELECT $m$ FROM app.merge_as_phantom $m$::text;
+MERGE INTO app.real $$target USING app.real source
+ON 1 = 1 WHEN MATCHED THEN UPDATE SET id = 6;
+SELECT $$ FROM app.merge_bare_phantom $$::text;
+DELETE $p$alias FROM app.real AS $p$alias WHERE id = 7;
+SELECT $p$ FROM app.delete_prefix_tagged_phantom $p$::text;
+DELETE $$alias FROM app.real AS $$alias WHERE id = 8;
+SELECT $$ FROM app.delete_prefix_bare_phantom $$::text;
+DELETE FROM app.real AS $d$alias WHERE id = 9;
+SELECT $d$ FROM app.delete_as_control_phantom $d$::text;
+DELETE FROM app.real $$alias WHERE id = 10;
+SELECT $$ FROM app.delete_bare_control_phantom $$::text;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:dml-alias-roles")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for phantom in [
+        "app.update_as_phantom",
+        "app.update_bare_phantom",
+        "app.insert_as_phantom",
+        "app.insert_bare_phantom",
+        "app.merge_as_phantom",
+        "app.merge_bare_phantom",
+        "app.delete_prefix_tagged_phantom",
+        "app.delete_prefix_bare_phantom",
+        "app.delete_as_control_phantom",
+        "app.delete_bare_control_phantom",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.qualified_name != phantom),
+            "DML alias exposed strict phantom {phantom}: {:?}",
+            graph.nodes
+        );
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        20
+    );
+    let real = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.real")
+        .ok_or("missing real table")?;
+    let writes = graph
+        .links
+        .iter()
+        .filter(|edge| edge.target == real.id && edge.kind == EdgeKind::Writes)
+        .collect::<Vec<_>>();
+    assert_eq!(writes.len(), 10, "links={:?}", graph.links);
+    for write in writes {
+        let anchor = write
+            .relationship_site
+            .as_ref()
+            .ok_or("missing write site")?;
+        assert_eq!(
+            source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+            Some(b"app.real".as_slice())
+        );
+        assert!(write.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+        }));
+    }
+    assert!(
+        graph
+            .graph
+            .coverage
+            .iter()
+            .all(|record| record.status != CoverageStatus::Partial)
+    );
+    assert!(graph.graph.diagnostics.is_empty());
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:dml-alias-roles")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn inert_producer_text_cannot_create_strict_v1_identifier_roles() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V25__dollar_role_poison.sql");
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+SELECT '' ||
+-- CREATE TABLE
+$dc$ FROM app.declaration_phantom $dc$::text;
+SELECT '' ||
+-- FROM
+$rt$ FROM app.read_target_phantom $rt$::text;
+SELECT '' ||
+-- FROM app.real AS
+$ra$ FROM app.read_alias_phantom $ra$::text;
+SELECT '' ||
+-- WITH prior AS (SELECT 1),
+$ct$ AS (SELECT * FROM app.cte_phantom) $ct$::text;
+SELECT '' ||
+-- CREATE INDEX fake ON
+$ic$ FROM app.index_comment_phantom $ic$::text;
+SELECT '' ||
+-- CREATE TRIGGER fake BEFORE UPDATE ON
+$tc$ FROM app.trigger_comment_phantom $tc$::text;
+SELECT 'CREATE INDEX fake';
+SELECT * FROM app.real r JOIN app.real s
+ON $is$ FROM app.index_single_phantom $is$::text = 'x';
+SELECT $old_index$ CREATE INDEX fake $old_index$;
+SELECT * FROM app.real r JOIN app.real s
+ON $id$ FROM app.index_dollar_phantom $id$::text = 'x';
+SELECT 'CREATE TRIGGER fake BEFORE UPDATE';
+SELECT * FROM app.real r JOIN app.real s
+ON $ts$ FROM app.trigger_single_phantom $ts$::text = 'x';
+SELECT $old_trigger$ CREATE TRIGGER fake BEFORE UPDATE $old_trigger$;
+SELECT * FROM app.real r JOIN app.real s
+ON $td$ FROM app.trigger_dollar_phantom $td$::text = 'x';
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:dollar-role-poison")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for phantom in [
+        "app.declaration_phantom",
+        "app.read_target_phantom",
+        "app.read_alias_phantom",
+        "app.cte_phantom",
+        "app.index_comment_phantom",
+        "app.trigger_comment_phantom",
+        "app.index_single_phantom",
+        "app.index_dollar_phantom",
+        "app.trigger_single_phantom",
+        "app.trigger_dollar_phantom",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.qualified_name != phantom),
+            "inert producer text exposed strict phantom {phantom}: {:?}",
+            graph.nodes
+        );
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        14
+    );
+    assert!(
+        graph
+            .graph
+            .coverage
+            .iter()
+            .all(|record| record.status != CoverageStatus::Partial)
+    );
+    assert!(graph.graph.diagnostics.is_empty());
+    let ids = graph
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(ids.len(), graph.nodes.len());
+    assert!(
+        graph
+            .links
+            .iter()
+            .all(|edge| ids.contains(edge.source.as_str()) && ids.contains(edge.target.as_str()))
+    );
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:dollar-role-poison")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
 fn escaped_bracket_identifier_is_exact_and_complete_in_strict_v1() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

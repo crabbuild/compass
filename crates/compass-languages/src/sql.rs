@@ -60,6 +60,12 @@ struct ScopedAliasBinding {
     visible: Site,
 }
 
+#[derive(Clone, Debug)]
+struct RelationAliasRole {
+    alias: Site,
+    target: Option<Site>,
+}
+
 enum AliasTarget {
     PhysicalTable(String),
     Cte,
@@ -1104,6 +1110,13 @@ fn sql_write_access_patterns() -> Vec<String> {
     ]
 }
 
+fn sql_alias_target_patterns() -> Vec<String> {
+    sql_read_access_patterns()
+        .into_iter()
+        .chain(sql_write_access_patterns())
+        .collect()
+}
+
 fn sql_declaration_pattern() -> Result<Regex, regex::Error> {
     Regex::new(&format!(
         r"(?ix)\b(?:
@@ -1716,6 +1729,15 @@ fn skip_dollar_quote(source: &str, start: usize) -> Option<usize> {
 
 fn paired_dollar_quote_end(source: &str, start: usize, end: usize) -> Option<usize> {
     let delimiter = dollar_quote_delimiter_at(source, start)?;
+    paired_dollar_quote_end_with_delimiter(source, start, end, delimiter)
+}
+
+fn paired_dollar_quote_end_with_delimiter(
+    source: &str,
+    start: usize,
+    end: usize,
+    delimiter: &str,
+) -> Option<usize> {
     let content_start = start + delimiter.len();
     let limit = end.min(source.len());
     let mut cursor = content_start;
@@ -1754,6 +1776,20 @@ fn first_line_end(source: &str, start: usize) -> usize {
 }
 
 fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
+    let statement_start = statement_start_before(source, start);
+    dollar_quote_delimiter_in_statement(source, start, statement_start)
+}
+
+fn dollar_quote_delimiter_in_statement(
+    source: &str,
+    start: usize,
+    statement_start: usize,
+) -> Option<&str> {
+    let delimiter = dollar_delimiter_syntax_at(source, start)?;
+    (!dollar_marker_in_statement_identifier(source, statement_start, start)).then_some(delimiter)
+}
+
+fn dollar_delimiter_syntax_at(source: &str, start: usize) -> Option<&str> {
     let bytes = source.as_bytes();
     if bytes.get(start).copied() != Some(b'$') {
         return None;
@@ -1787,10 +1823,14 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
         }
         end += 1;
     }
-    (!dollar_marker_in_protected_identifier(source, start)).then(|| &source[start..end])
+    Some(&source[start..end])
 }
 
-fn dollar_marker_in_protected_identifier(source: &str, marker: usize) -> bool {
+fn dollar_marker_in_statement_identifier(
+    source: &str,
+    statement_start: usize,
+    marker: usize,
+) -> bool {
     let component = unquoted_identifier_component_at(source, marker);
     if component.start < marker {
         return true;
@@ -1802,24 +1842,32 @@ fn dollar_marker_in_protected_identifier(source: &str, marker: usize) -> bool {
     if bytes.get(component.end).copied() == Some(b'.') {
         return true;
     }
+    let statement_start = statement_start.min(component.start);
+    let Some(statement) = source.get(statement_start..component.end) else {
+        return false;
+    };
+    let local_marker = marker.saturating_sub(statement_start);
     static DECLARATION_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
     if DECLARATION_PATTERN
         .get_or_init(|| sql_declaration_pattern().ok())
         .as_ref()
         .is_some_and(|pattern| {
-            pattern.captures_iter(source).any(|capture| {
+            pattern.captures_iter(statement).any(|capture| {
                 capture
-                    .get(4)
-                    .is_some_and(|name| marker >= name.start() && marker < name.end())
+                    .get(0)
+                    .is_some_and(|full| full.start() == skip_sql_whitespace(statement, 0))
+                    && capture.get(4).is_some_and(|name| {
+                        local_marker >= name.start() && local_marker < name.end()
+                    })
             })
         })
     {
         return true;
     }
-    if protected_data_access_identifier(source, marker) {
+    if protected_relation_identifier(statement, local_marker) {
         return true;
     }
-    protected_cte_identifier(source, marker)
+    protected_cte_identifier(statement, local_marker)
 }
 
 fn unquoted_identifier_component_at(source: &str, marker: usize) -> Site {
@@ -1842,29 +1890,24 @@ fn unquoted_identifier_component_at(source: &str, marker: usize) -> Site {
     Site::new(start, end)
 }
 
-fn protected_data_access_identifier(source: &str, marker: usize) -> bool {
-    static READ_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+fn protected_relation_identifier(statement: &str, marker: usize) -> bool {
     static TARGET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
-    let read_patterns = READ_PATTERNS.get_or_init(|| {
-        sql_read_access_patterns()
-            .into_iter()
-            .filter_map(|pattern| Regex::new(&pattern).ok())
-            .collect()
-    });
     let target_patterns = TARGET_PATTERNS.get_or_init(|| {
         sql_read_access_patterns()
             .into_iter()
             .chain(sql_write_access_patterns())
             .chain([
                 format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"),
-                format!(r"(?i)\bCREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?\bON\s+({OBJECT_REFERENCE})"),
-                format!(r"(?i)\bCREATE\s+TRIGGER[\s\S]*?\bON\s+({OBJECT_REFERENCE})"),
+                format!(
+                    r"(?ix)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?\bON\s+({OBJECT_REFERENCE})"
+                ),
+                format!(r"(?ix)^\s*CREATE\s+TRIGGER[\s\S]*?\bON\s+({OBJECT_REFERENCE})"),
             ])
             .filter_map(|pattern| Regex::new(&pattern).ok())
             .collect::<Vec<_>>()
     });
     for regex in target_patterns {
-        if regex.captures_iter(source).any(|capture| {
+        if regex.captures_iter(statement).any(|capture| {
             capture
                 .get(1)
                 .is_some_and(|target| marker >= target.start() && marker < target.end())
@@ -1872,58 +1915,109 @@ fn protected_data_access_identifier(source: &str, marker: usize) -> bool {
             return true;
         }
     }
-    for regex in read_patterns {
-        for capture in regex.captures_iter(source) {
-            let Some(target) = capture.get(1) else {
-                continue;
-            };
-            let mut alias_start = skip_sql_whitespace(source, target.end());
-            if let Some(as_end) = consume_keyword(source, alias_start, "AS") {
-                alias_start = skip_sql_whitespace(source, as_end);
-            }
-            let Some(alias_end) = parse_identifier_end(source, alias_start) else {
-                continue;
-            };
-            let alias = &source[alias_start..alias_end];
-            if !is_reserved_object_reference(alias) && marker >= alias_start && marker < alias_end {
-                return true;
-            }
-        }
-    }
-    false
+    relation_alias_roles(statement)
+        .iter()
+        .any(|role| marker >= role.alias.start && marker < role.alias.end)
 }
 
-fn protected_cte_identifier(source: &str, marker: usize) -> bool {
-    static CTE_PATTERNS: OnceLock<Option<(Regex, Regex)>> = OnceLock::new();
-    let Some((pattern, identifier_pattern)) = CTE_PATTERNS
-        .get_or_init(|| {
-            Regex::new(&format!(
-                r"(?ix)(?:\bWITH\s+(?:RECURSIVE\s+)?|,)\s*
-                    ({IDENTIFIER})\s*
-                    (?:\(([^)]*)\))?\s*
-                    AS\s+(?:NOT\s+)?(?:MATERIALIZED\s+)?\("
-            ))
-            .ok()
-            .zip(Regex::new(IDENTIFIER).ok())
-        })
+fn protected_cte_identifier(statement: &str, marker: usize) -> bool {
+    static WITH_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    let Some(with_pattern) = WITH_PATTERN
+        .get_or_init(|| Regex::new(r"(?i)\bWITH\b").ok())
         .as_ref()
     else {
         return false;
     };
-    pattern.captures_iter(source).any(|capture| {
-        capture
-            .get(1)
-            .is_some_and(|name| marker >= name.start() && marker < name.end())
-            || capture.get(2).is_some_and(|columns| {
-                identifier_pattern
-                    .find_iter(columns.as_str())
-                    .any(|column| {
-                        let start = columns.start() + column.start();
-                        let end = columns.start() + column.end();
-                        marker >= start && marker < end
-                    })
-            })
-    })
+    with_pattern
+        .find_iter(statement)
+        .any(|with_keyword| cte_identifier_at(statement, with_keyword.start(), marker))
+}
+
+fn cte_identifier_at(statement: &str, start: usize, marker: usize) -> bool {
+    let mut index = consume_keyword(statement, start, "WITH")
+        .map(|end| skip_sql_whitespace(statement, end))
+        .unwrap_or(statement.len());
+    if let Some(end) = consume_keyword(statement, index, "RECURSIVE") {
+        index = skip_sql_whitespace(statement, end);
+    }
+    loop {
+        let name_start = index;
+        let Some(name_end) = parse_identifier_end(statement, name_start) else {
+            return false;
+        };
+        if marker >= name_start && marker < name_end {
+            return true;
+        }
+        index = skip_sql_whitespace(statement, name_end);
+        if statement.as_bytes().get(index).copied() == Some(b'(') {
+            index += 1;
+            loop {
+                index = skip_sql_whitespace(statement, index);
+                if statement.as_bytes().get(index).copied() == Some(b')') {
+                    index = skip_sql_whitespace(statement, index + 1);
+                    break;
+                }
+                let Some(column_end) = parse_identifier_end(statement, index) else {
+                    return false;
+                };
+                if marker >= index && marker < column_end {
+                    return true;
+                }
+                index = skip_sql_whitespace(statement, column_end);
+                match statement.as_bytes().get(index).copied() {
+                    Some(b',') => index += 1,
+                    Some(b')') => {
+                        index = skip_sql_whitespace(statement, index + 1);
+                        break;
+                    }
+                    _ => return false,
+                }
+            }
+        }
+        let Some(as_end) = consume_keyword(statement, index, "AS") else {
+            return false;
+        };
+        index = skip_sql_whitespace(statement, as_end);
+        if let Some(not_end) = consume_keyword(statement, index, "NOT") {
+            index = skip_sql_whitespace(statement, not_end);
+            let Some(materialized_end) = consume_keyword(statement, index, "MATERIALIZED") else {
+                return false;
+            };
+            index = skip_sql_whitespace(statement, materialized_end);
+        } else if let Some(materialized_end) = consume_keyword(statement, index, "MATERIALIZED") {
+            index = skip_sql_whitespace(statement, materialized_end);
+        }
+        if statement.as_bytes().get(index).copied() != Some(b'(') {
+            return false;
+        }
+        let Some(body_end) = balanced_paren_end(statement, index) else {
+            return false;
+        };
+        index = skip_sql_whitespace(statement, body_end);
+        if statement.as_bytes().get(index).copied() != Some(b',') {
+            return false;
+        }
+        index = skip_sql_whitespace(statement, index + 1);
+    }
+}
+
+fn statement_start_before(source: &str, limit: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    let mut statement_start = 0;
+    while index < limit.min(bytes.len()) {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)
+                .filter(|end| *end <= limit)
+                .unwrap_or(limit);
+            continue;
+        }
+        if bytes[index] == b';' {
+            statement_start = index + 1;
+        }
+        index += 1;
+    }
+    statement_start
 }
 
 fn dollar_quote_close_has_boundary(source: &str, close_end: usize, limit: usize) -> bool {
@@ -2231,53 +2325,88 @@ fn balanced_paren_end(statement: &str, open: usize) -> Option<usize> {
     None
 }
 
+fn relation_alias_roles(statement: &str) -> Vec<RelationAliasRole> {
+    static TARGET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    static DELETE_PREFIX_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    let mut roles = Vec::new();
+    let mut seen = HashSet::new();
+    let target_patterns = TARGET_PATTERNS.get_or_init(|| {
+        sql_alias_target_patterns()
+            .into_iter()
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect()
+    });
+    for regex in target_patterns {
+        for capture in regex.captures_iter(statement) {
+            let Some(target) = capture.get(1) else {
+                continue;
+            };
+            let mut alias_start = skip_sql_whitespace(statement, target.end());
+            if let Some(as_end) = consume_keyword(statement, alias_start, "AS") {
+                alias_start = skip_sql_whitespace(statement, as_end);
+            }
+            let Some(alias_end) = parse_identifier_end(statement, alias_start) else {
+                continue;
+            };
+            let alias = &statement[alias_start..alias_end];
+            if is_reserved_object_reference(alias) || !seen.insert((alias_start, alias_end)) {
+                continue;
+            }
+            roles.push(RelationAliasRole {
+                alias: Site::new(alias_start, alias_end),
+                target: Some(Site::new(target.start(), target.end())),
+            });
+        }
+    }
+
+    let delete_prefix = DELETE_PREFIX_PATTERN.get_or_init(|| {
+        Regex::new(&format!(
+            r"(?ix)^\s*DELETE\s+
+          (?:(?:LOW_PRIORITY|QUICK|IGNORE)\s+)*
+          ({IDENTIFIER})"
+        ))
+        .ok()
+    });
+    if let Some(alias) = delete_prefix
+        .as_ref()
+        .and_then(|regex| regex.captures(statement).and_then(|capture| capture.get(1)))
+        && !is_reserved_object_reference(alias.as_str())
+        && seen.insert((alias.start(), alias.end()))
+    {
+        roles.push(RelationAliasRole {
+            alias: Site::new(alias.start(), alias.end()),
+            target: None,
+        });
+    }
+    roles
+}
+
 fn scoped_alias_bindings(statement: &str, ctes: &[ScopedCteBinding]) -> Vec<ScopedAliasBinding> {
-    let Ok(target_pattern) = Regex::new(&format!(r"(?i)^\s*(?:ONLY\s+)?({OBJECT_REFERENCE})"))
-    else {
-        return Vec::new();
-    };
     let mut bindings = Vec::new();
-    for (_, keyword_end, word) in sql_word_spans(statement, 0) {
-        if !matches!(
-            word.to_ascii_uppercase().as_str(),
-            "FROM" | "JOIN" | "USING"
-        ) {
-            continue;
-        }
-        let tail = &statement[keyword_end..];
-        let Some(target) = target_pattern
-            .captures(tail)
-            .and_then(|capture| capture.get(1))
-        else {
+    for role in relation_alias_roles(statement) {
+        let Some(target_site) = role.target else {
             continue;
         };
-        let target_start = keyword_end + target.start();
-        let target_end = keyword_end + target.end();
-        let mut alias_start = skip_sql_whitespace(statement, target_end);
-        if let Some(as_end) = consume_keyword(statement, alias_start, "AS") {
-            alias_start = skip_sql_whitespace(statement, as_end);
-        }
-        let Some(alias_end) = parse_identifier_end(statement, alias_start) else {
+        let Some(alias) = statement.get(role.alias.start..role.alias.end) else {
             continue;
         };
-        let alias = &statement[alias_start..alias_end];
-        if is_reserved_object_reference(alias) {
+        let Some(target) = statement.get(target_site.start..target_site.end) else {
             continue;
-        }
-        let target_key = identifier_key(target.as_str());
+        };
+        let target_key = identifier_key(target);
         let target = if ctes.iter().any(|binding| {
             binding.name == target_key
-                && target_start >= binding.visible.start
-                && target_start < binding.visible.end
+                && target_site.start >= binding.visible.start
+                && target_site.start < binding.visible.end
         }) {
             AliasTarget::Cte
         } else {
-            AliasTarget::PhysicalTable(target.as_str().to_owned())
+            AliasTarget::PhysicalTable(target.to_owned())
         };
         bindings.push(ScopedAliasBinding {
             name: identifier_key(alias),
             target,
-            visible: enclosing_sql_scope(statement, alias_start),
+            visible: enclosing_sql_scope(statement, role.alias.start),
         });
     }
     bindings
@@ -2404,6 +2533,8 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
     let mut issues = Vec::new();
     let mut state = LexicalState::Normal;
     let mut index = 0;
+    let mut statement_start = 0;
+    let mut paren_depth = 0_u32;
     while index < source.len() {
         match state {
             LexicalState::Normal if identifier_delimiter(source[index]).is_some() => {
@@ -2463,18 +2594,28 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
                 state = LexicalState::BlockComment;
                 index += 2;
             }
-            LexicalState::Normal
-                if dollar_quote_delimiter_at(value, index).is_some()
-                    && paired_dollar_quote_end(value, index, source.len()).is_some() =>
-            {
-                let delimiter = dollar_quote_delimiter_at(value, index).unwrap_or_default();
-                let span_end =
-                    paired_dollar_quote_end(value, index, source.len()).unwrap_or(source.len());
-                index += delimiter.len();
-                state = LexicalState::DollarQuoted {
-                    content_end: span_end.saturating_sub(delimiter.len()),
-                    span_end,
-                };
+            LexicalState::Normal if source[index] == b'$' => {
+                let clean = std::str::from_utf8(&masked).unwrap_or(value);
+                let delimiter = dollar_quote_delimiter_in_statement(clean, index, statement_start)
+                    .map(str::to_owned);
+                if let Some(delimiter) = delimiter
+                    && let Some(span_end) = paired_dollar_quote_end_with_delimiter(
+                        value,
+                        index,
+                        source.len(),
+                        &delimiter,
+                    )
+                {
+                    index += delimiter.len();
+                    state = LexicalState::DollarQuoted {
+                        content_end: span_end.saturating_sub(delimiter.len()),
+                        span_end,
+                    };
+                } else {
+                    index = unquoted_identifier_component_at(clean, index)
+                        .end
+                        .max(index + 1);
+                }
             }
             LexicalState::SingleQuoted
                 if source[index] == b'\'' && source.get(index + 1).copied() == Some(b'\'') =>
@@ -2520,6 +2661,12 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
                 index += 1;
             }
             LexicalState::Normal => {
+                match source[index] {
+                    b'(' => paren_depth = paren_depth.saturating_add(1),
+                    b')' => paren_depth = paren_depth.saturating_sub(1),
+                    b';' if paren_depth == 0 => statement_start = index + 1,
+                    _ => {}
+                }
                 index += 1;
             }
         }
