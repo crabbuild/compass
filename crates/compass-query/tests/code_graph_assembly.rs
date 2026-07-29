@@ -101,6 +101,102 @@ fn duplicate_edge_extraction(remapped_first: bool) -> Result<Extraction, serde_j
     }))
 }
 
+fn sequential_rewrite_extraction(
+    previous_rule: &str,
+    previous_score: f64,
+    line: u32,
+) -> Result<Extraction, serde_json::Error> {
+    serde_json::from_value(json!({
+        "nodes": [
+            {
+                "id": "ast_caller",
+                "label": "Caller",
+                "qualified_name": "crate::Caller",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/service.rs",
+                "source_location": "L1",
+                "_origin": "ast"
+            },
+            {
+                "id": "semantic_caller",
+                "label": "Caller",
+                "qualified_name": "crate::Caller",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/service.rs",
+                "source_location": "L1",
+                "_origin": "semantic"
+            },
+            {
+                "id": "target",
+                "label": "Target",
+                "qualified_name": "crate::Target",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/target.rs",
+                "source_location": "L1",
+                "_origin": "ast"
+            }
+        ],
+        "edges": [{
+            "source": "semantic_caller",
+            "target": "target",
+            "relation": "calls",
+            "confidence": "INFERRED",
+            "confidence_score": previous_score,
+            "rule": previous_rule,
+            "source_file": "src/service.rs",
+            "source_location": format!("L{line}"),
+            "_origin": "heuristic",
+            "extractor": format!("test.{previous_rule}")
+        }]
+    }))
+}
+
+#[test]
+fn preexisting_endpoint_rewrites_survive_later_graph_remaps()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    write_sources(directory.path())?;
+    for (previous_rule, previous_score, line) in [
+        ("unique-stub-endpoint-resolution", 0.81, 1),
+        ("graph-normalized-id-remap", 0.8, 2),
+    ] {
+        let graph = normalize_fixture(
+            directory.path(),
+            &sequential_rewrite_extraction(previous_rule, previous_score, line)?,
+        )?;
+        assert_eq!(graph.links.len(), 1);
+        let evidence = &graph.links[0].evidence;
+        assert!(evidence.iter().any(|item| {
+            item.origin == EvidenceOrigin::Heuristic
+                && item.confidence == EvidenceConfidence::Inferred
+                && item.rule.as_deref() == Some(previous_rule)
+                && item.score == Some(previous_score)
+                && item.extractor == format!("test.{previous_rule}")
+                && item
+                    .wiring_site
+                    .as_ref()
+                    .is_some_and(|site| site.start_line == line)
+        }));
+        assert!(evidence.iter().any(|item| {
+            item.origin == EvidenceOrigin::Heuristic
+                && item.confidence == EvidenceConfidence::Inferred
+                && item.rule.as_deref() == Some("graph-ghost-endpoint-remap")
+                && item.score == Some(0.95)
+                && item
+                    .wiring_site
+                    .as_ref()
+                    .is_some_and(|site| site.start_line == line)
+        }));
+    }
+    Ok(())
+}
+
 #[test]
 fn exact_and_remapped_duplicate_edges_are_order_independent_and_heuristic_gated()
 -> Result<(), Box<dyn std::error::Error>> {

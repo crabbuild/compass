@@ -247,6 +247,124 @@ fn every_graph_assembly_endpoint_remap_stamps_distinct_synthesized_evidence()
     Ok(())
 }
 
+fn direct_and_legacy_alias_collision(reverse: bool) -> Result<Extraction, serde_json::Error> {
+    let direct = json!({
+        "id": "service_helper",
+        "label": "Direct helper",
+        "qualified_name": "direct::helper",
+        "type": "function",
+        "file_type": "code",
+        "source_file": "src/direct.rs",
+        "source_location": "L1",
+        "_origin": "ast"
+    });
+    let legacy = json!({
+        "id": "src_service_helper",
+        "label": "Legacy helper",
+        "qualified_name": "legacy::helper",
+        "type": "function",
+        "file_type": "code",
+        "source_file": "src/service.rs",
+        "source_location": "L1",
+        "_origin": "ast"
+    });
+    let nodes = if reverse {
+        vec![legacy, direct]
+    } else {
+        vec![direct, legacy]
+    };
+    let members = if reverse {
+        json!(["target", "service helper"])
+    } else {
+        json!(["service helper", "target"])
+    };
+    let mut value = json!({
+        "nodes": nodes,
+        "edges": [{
+            "source": "service helper",
+            "target": "target",
+            "relation": "calls",
+            "source_file": "src/direct.rs",
+            "source_location": "L1",
+            "_origin": "ast"
+        }],
+        "hyperedges": [{
+            "id": "ambiguous-group",
+            "nodes": members,
+            "source_file": "src/direct.rs"
+        }]
+    });
+    value["nodes"].as_array_mut().expect("nodes").push(json!({
+        "id": "target",
+        "label": "Target",
+        "qualified_name": "crate::Target",
+        "type": "function",
+        "file_type": "code",
+        "source_file": "src/target.rs",
+        "source_location": "L1",
+        "_origin": "ast"
+    }));
+    serde_json::from_value(value)
+}
+
+#[test]
+fn direct_and_legacy_alias_candidates_union_and_omit_ambiguous_hyperedges()
+-> Result<(), Box<dyn Error>> {
+    let forward = build_from_extraction(&direct_and_legacy_alias_collision(false)?, true, None);
+    let reverse = build_from_extraction(&direct_and_legacy_alias_collision(true)?, true, None);
+
+    for document in [&forward, &reverse] {
+        assert!(document.links.is_empty());
+        assert!(document.graph.get("hyperedges").is_none());
+        let diagnostics = document.graph["_compass_v1_graph_diagnostics"]
+            .as_array()
+            .ok_or("missing collision diagnostics")?;
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic["code"] == "ambiguous_normalized_endpoint"
+                        && diagnostic["relatedIds"]
+                            == json!(["service_helper", "src_service_helper"])
+                })
+                .count(),
+            2
+        );
+    }
+    assert_eq!(
+        forward.graph["_compass_v1_graph_diagnostics"],
+        reverse.graph["_compass_v1_graph_diagnostics"]
+    );
+    Ok(())
+}
+
+#[test]
+fn one_ambiguous_member_omits_the_whole_hyperedge() -> Result<(), Box<dyn Error>> {
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes": [
+            {"id":"Candidate::Shared","label":"First","type":"function","file_type":"code","source_file":"src/first.rs","_origin":"ast"},
+            {"id":"candidate-shared","label":"Second","type":"function","file_type":"code","source_file":"src/second.rs","_origin":"ast"},
+            {"id":"target","label":"Target","type":"function","file_type":"code","source_file":"src/target.rs","_origin":"ast"}
+        ],
+        "edges": [],
+        "hyperedges": [{
+            "id": "ambiguous-group",
+            "nodes": ["candidate shared", "target"]
+        }]
+    }))?;
+
+    let document = build_from_extraction(&extraction, true, None);
+    assert!(document.graph.get("hyperedges").is_none());
+    assert!(
+        document.graph["_compass_v1_graph_diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic["code"] == "ambiguous_normalized_endpoint" }))
+    );
+    Ok(())
+}
+
 #[test]
 fn networkx_edge_order_preserves_node_and_incident_edge_order() -> Result<(), Box<dyn Error>> {
     let extraction: Extraction = serde_json::from_value(json!({

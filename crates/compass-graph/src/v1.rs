@@ -1224,6 +1224,7 @@ fn normalize_edge(
         relationship_site.clone(),
         &owner,
         root,
+        file_facts,
         normalization_rule,
         heuristic,
     )?;
@@ -1243,6 +1244,7 @@ fn normalize_edge(
                 constituent_site,
                 &owner,
                 root,
+                file_facts,
                 normalization_rule,
                 heuristic,
             )?;
@@ -1293,6 +1295,7 @@ fn append_raw_edge_evidence(
     relationship_site: Option<SourceAnchor>,
     owner: &str,
     root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
     normalization_rule: Option<&str>,
     heuristic_default: bool,
 ) -> Result<(), GraphError> {
@@ -1310,26 +1313,48 @@ fn append_raw_edge_evidence(
     else {
         return Ok(());
     };
-    let extractor = optional_string(attributes, "extractor")
-        .unwrap_or_else(|| "compass.graph.assembly".to_owned());
     for rewrite in rewrites {
+        let Some(rewrite) = rewrite.as_object() else {
+            continue;
+        };
         let Some(rule) = rewrite.get("rule").and_then(Value::as_str) else {
             continue;
         };
-        let provenance = Provenance {
-            origin: EvidenceOrigin::Heuristic,
-            extractor: extractor.clone(),
-            confidence: EvidenceConfidence::Inferred,
-            rule: Some(rule.to_owned()),
-            anchors: Vec::new(),
-            wiring_site: relationship_site.clone(),
-            score: rewrite.get("score").and_then(Value::as_f64),
-            candidates: Vec::new(),
-        };
-        provenance
-            .validate()
-            .map_err(|error| raw_error(owner, &error.to_string()))?;
-        evidence.push(provenance);
+        let mut rewrite_attributes = Map::new();
+        for key in [
+            "_origin",
+            "origin",
+            "confidence",
+            "extractor",
+            "source_file",
+            "source_location",
+            "source_anchor",
+            "line_start",
+            "line_end",
+            "column_start",
+            "column_end",
+            "start_byte",
+            "end_byte",
+            "candidates",
+        ] {
+            if let Some(value) = rewrite.get(key).or_else(|| attributes.get(key)) {
+                rewrite_attributes.insert(key.to_owned(), value.clone());
+            }
+        }
+        rewrite_attributes.insert("rule".to_owned(), Value::String(rule.to_owned()));
+        if let Some(score) = rewrite.get("score") {
+            rewrite_attributes.insert("score".to_owned(), score.clone());
+        }
+        let rewrite_site =
+            raw_anchor(&rewrite_attributes, root, file_facts)?.or(relationship_site.clone());
+        evidence.push(normalize_provenance(
+            &rewrite_attributes,
+            rewrite_site,
+            owner,
+            root,
+            Some(rule),
+            false,
+        )?);
     }
     Ok(())
 }

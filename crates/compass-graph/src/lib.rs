@@ -234,9 +234,8 @@ fn build_from_owned_extraction(
                 .insert(canonical);
         }
     }
-    let needed_aliases =
-        needed_legacy_aliases(&extraction, &endpoint_remap, &positions, &normalized);
-    add_unambiguous_legacy_aliases(&nodes, &needed_aliases, &mut normalized);
+    let needed_aliases = referenced_legacy_aliases(&extraction, &endpoint_remap, &positions);
+    add_legacy_alias_candidates(&nodes, &needed_aliases, &mut normalized);
     profile_internal("graph alias preparation", &mut profile_started);
 
     let mut source_edges = std::mem::take(&mut extraction.edges);
@@ -553,11 +552,10 @@ fn ghost_semantic_identity(node: &NodeRecord) -> Option<(String, String, String,
     ))
 }
 
-fn needed_legacy_aliases(
+fn referenced_legacy_aliases(
     extraction: &Extraction,
     endpoint_remap: &HashMap<String, String>,
     positions: &HashMap<String, usize>,
-    normalized: &EndpointAliases,
 ) -> HashSet<String> {
     let mut needed = HashSet::new();
     let mut inspect = |endpoint: &str| {
@@ -574,10 +572,7 @@ fn needed_legacy_aliases(
         } else {
             endpoint
         };
-        let alias = normalize_id(endpoint);
-        if !normalized.contains_key(&alias) {
-            needed.insert(alias);
-        }
+        needed.insert(normalize_id(endpoint));
     };
     for edge in &extraction.edges {
         inspect(&edge.source);
@@ -598,7 +593,7 @@ fn needed_legacy_aliases(
     needed
 }
 
-fn add_unambiguous_legacy_aliases(
+fn add_legacy_alias_candidates(
     nodes: &[NodeRecord],
     needed: &HashSet<String>,
     normalized: &mut EndpointAliases,
@@ -657,11 +652,7 @@ fn add_unambiguous_legacy_aliases(
             combined
         });
     for (alias, ids) in candidates {
-        if ids.len() == 1
-            && let Some(id) = ids.into_iter().next()
-        {
-            normalized.entry(alias).or_default().insert(id);
-        }
+        normalized.entry(alias).or_default().extend(ids);
     }
 }
 
@@ -718,12 +709,17 @@ fn stamp_endpoint_rewrite_attributes(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    entries.extend(rewrites.iter().map(|rewrite| {
-        serde_json::json!({
-            "rule": rewrite.rule,
-            "score": rewrite.score,
-        })
-    }));
+    if rewrites.is_empty() && entries.is_empty() {
+        return;
+    }
+    if let Some(previous) = rewrite_entry_from_attributes(attributes, None) {
+        entries.push(previous);
+    }
+    entries.extend(
+        rewrites
+            .iter()
+            .filter_map(|rewrite| rewrite_entry_from_attributes(attributes, Some(*rewrite))),
+    );
     entries.sort_by_cached_key(Value::to_string);
     entries.dedup();
     let Some(primary) = entries.first().and_then(Value::as_object) else {
@@ -743,6 +739,61 @@ fn stamp_endpoint_rewrite_attributes(
         attributes.insert("confidence_score".to_owned(), Value::from(score));
     }
     attributes.insert("_endpoint_rewrite_rules".to_owned(), Value::Array(entries));
+}
+
+fn rewrite_entry_from_attributes(
+    attributes: &Map<String, Value>,
+    rewrite: Option<EndpointRewriteEvidence>,
+) -> Option<Value> {
+    let rule = rewrite
+        .map(|item| item.rule)
+        .or_else(|| attributes.get("rule").and_then(Value::as_str))?;
+    if rule.trim().is_empty() {
+        return None;
+    }
+    let mut entry = Map::new();
+    for key in [
+        "_origin",
+        "origin",
+        "confidence",
+        "extractor",
+        "source_file",
+        "source_location",
+        "source_anchor",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+        "start_byte",
+        "end_byte",
+        "candidates",
+    ] {
+        if let Some(value) = attributes.get(key) {
+            entry.insert(key.to_owned(), value.clone());
+        }
+    }
+    entry.insert("rule".to_owned(), Value::String(rule.to_owned()));
+    let score = rewrite.map(|item| item.score).or_else(|| {
+        attributes
+            .get("confidence_score")
+            .or_else(|| attributes.get("score"))
+            .and_then(|value| {
+                value
+                    .as_f64()
+                    .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
+            })
+    });
+    if let Some(score) = score {
+        entry.insert("score".to_owned(), Value::from(score));
+    }
+    if rewrite.is_some() {
+        entry.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+        entry.insert(
+            "confidence".to_owned(),
+            Value::String("INFERRED".to_owned()),
+        );
+    }
+    Some(Value::Object(entry))
 }
 
 fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String, Value>) {
@@ -1236,6 +1287,7 @@ fn canonical_hyperedges(
         if let Some(members) = hyperedge.get("nodes").and_then(Value::as_array) {
             let mut valid = Vec::new();
             let mut rewrites = Vec::new();
+            let mut ambiguous = false;
             for member in members.iter().filter_map(Value::as_str) {
                 let (remapped, mut member_rewrites) =
                     remap_endpoint_with_evidence(member, rekey, rewrite_evidence);
@@ -1247,6 +1299,7 @@ fn canonical_hyperedges(
                         rewrites.push(evidence);
                     }
                     EndpointResolution::Ambiguous { alias, candidates } => {
+                        ambiguous = true;
                         diagnostics.push(ambiguous_endpoint_diagnostic(
                             member,
                             &alias,
@@ -1257,7 +1310,7 @@ fn canonical_hyperedges(
                     EndpointResolution::Missing => {}
                 }
             }
-            if valid.is_empty() {
+            if ambiguous || valid.is_empty() {
                 continue;
             }
             hyperedge.insert("nodes".to_owned(), Value::Array(valid));
