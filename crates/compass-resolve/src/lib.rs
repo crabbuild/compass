@@ -1376,10 +1376,9 @@ fn resolve_python_import_guided_with_calls(
                     resolved_edges.push(python_import_edge(
                         file_node,
                         target,
-                        "imports",
-                        "import",
+                        PythonImportResolution::SymbolImport,
                         source_file,
-                        imported.line,
+                        imported,
                     ));
                 }
             } else if let Some(target) = python_module_file(
@@ -1396,10 +1395,9 @@ fn resolve_python_import_guided_with_calls(
                 resolved_edges.push(python_import_edge(
                     file_node,
                     &target,
-                    "imports_from",
-                    "submodule_import",
+                    PythonImportResolution::SubmoduleImport,
                     source_file,
-                    imported.line,
+                    imported,
                 ));
             }
             if Path::new(source_file)
@@ -1412,10 +1410,9 @@ fn resolve_python_import_guided_with_calls(
                 resolved_edges.push(python_import_edge(
                     file_node,
                     &target,
-                    "re_exports",
-                    "export",
+                    PythonImportResolution::ModuleReExport,
                     source_file,
-                    imported.line,
+                    imported,
                 ));
             }
         }
@@ -1480,35 +1477,101 @@ fn resolve_python_import_guided_with_calls(
     resolved_edges
 }
 
+#[derive(Clone, Copy)]
+enum PythonImportResolution {
+    SymbolImport,
+    SubmoduleImport,
+    ModuleReExport,
+}
+
+impl PythonImportResolution {
+    const fn relation(self) -> &'static str {
+        match self {
+            Self::SymbolImport => "imports",
+            Self::SubmoduleImport => "imports_from",
+            Self::ModuleReExport => "re_exports",
+        }
+    }
+
+    const fn context(self) -> &'static str {
+        match self {
+            Self::SymbolImport => "import",
+            Self::SubmoduleImport => "submodule_import",
+            Self::ModuleReExport => "export",
+        }
+    }
+
+    const fn rule(self) -> &'static str {
+        match self {
+            Self::SymbolImport => "python-symbol-import-resolution",
+            Self::SubmoduleImport => "python-submodule-import-resolution",
+            Self::ModuleReExport => "python-module-re-export-resolution",
+        }
+    }
+}
+
 fn python_import_edge(
     source: &str,
     target: &str,
-    relation: &str,
-    context: &str,
+    resolution: PythonImportResolution,
     source_file: &str,
-    line: usize,
+    imported: &PythonImport,
 ) -> EdgeRecord {
+    let mut attributes = Map::from_iter([
+        (
+            "relation".to_owned(),
+            Value::String(resolution.relation().to_owned()),
+        ),
+        (
+            "context".to_owned(),
+            Value::String(resolution.context().to_owned()),
+        ),
+        (
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        ),
+        ("language".to_owned(), Value::String("python".to_owned())),
+        (
+            "extractor".to_owned(),
+            Value::String("compass.resolve.python-imports".to_owned()),
+        ),
+        ("_origin".to_owned(), Value::String("convention".to_owned())),
+        (
+            "rule".to_owned(),
+            Value::String(resolution.rule().to_owned()),
+        ),
+        ("weight".to_owned(), Value::from(1.0)),
+    ]);
+    insert_python_import_anchor(&mut attributes, source_file, imported);
     EdgeRecord {
         source: source.to_owned(),
         target: target.to_owned(),
-        attributes: Map::from_iter([
-            ("relation".to_owned(), Value::String(relation.to_owned())),
-            ("context".to_owned(), Value::String(context.to_owned())),
-            (
-                "confidence".to_owned(),
-                Value::String("EXTRACTED".to_owned()),
-            ),
-            (
-                "source_file".to_owned(),
-                Value::String(source_file.to_owned()),
-            ),
-            (
-                "source_location".to_owned(),
-                Value::String(format!("L{line}")),
-            ),
-            ("weight".to_owned(), Value::from(1.0)),
-        ]),
+        attributes,
     }
+}
+
+fn insert_python_import_anchor(
+    attributes: &mut Map<String, Value>,
+    source_file: &str,
+    imported: &PythonImport,
+) {
+    attributes.insert(
+        "source_file".to_owned(),
+        Value::String(source_file.to_owned()),
+    );
+    attributes.insert(
+        "source_location".to_owned(),
+        Value::String(format!("L{}", imported.start_line)),
+    );
+    attributes.insert("start_byte".to_owned(), Value::from(imported.start_byte));
+    attributes.insert("end_byte".to_owned(), Value::from(imported.end_byte));
+    attributes.insert("line_start".to_owned(), Value::from(imported.start_line));
+    attributes.insert("line_end".to_owned(), Value::from(imported.end_line));
+    attributes.insert(
+        "column_start".to_owned(),
+        Value::from(imported.start_column),
+    );
+    attributes.insert("column_end".to_owned(), Value::from(imported.end_column));
 }
 
 fn python_module_file(
@@ -1639,11 +1702,18 @@ fn resolve_python_class_uses(
                     "confidence".to_owned(),
                     Value::String("INFERRED".to_owned()),
                 );
-                attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
+                attributes.insert("language".to_owned(), Value::String("python".to_owned()));
                 attributes.insert(
-                    "source_location".to_owned(),
-                    Value::String(format!("L{}", imported.line)),
+                    "extractor".to_owned(),
+                    Value::String("compass.resolve.python-imports".to_owned()),
                 );
+                attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+                attributes.insert(
+                    "rule".to_owned(),
+                    Value::String("python-imported-class-use-inference".to_owned()),
+                );
+                attributes.insert("confidence_score".to_owned(), Value::from(0.8));
+                insert_python_import_anchor(&mut attributes, source_file, imported);
                 attributes.insert("weight".to_owned(), Value::from(0.8));
                 resolved_edges.push(EdgeRecord {
                     source: source_id.clone(),
@@ -1668,17 +1738,31 @@ struct PythonImport {
     module: String,
     imported: String,
     local: String,
-    line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    start_line: usize,
+    end_line: usize,
+    start_column: usize,
+    end_column: usize,
 }
 
 fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     let masked = mask_python_non_code(source);
     let lines = masked.lines().collect::<Vec<_>>();
+    let line_starts = std::iter::once(0)
+        .chain(
+            masked
+                .bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        )
+        .collect::<Vec<_>>();
     let mut output = Vec::new();
     let mut index = 0;
     while index < lines.len() {
         let line = lines[index];
-        let Some(rest) = line.trim().strip_prefix("from ") else {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix("from ") else {
             index += 1;
             continue;
         };
@@ -1687,12 +1771,17 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
             continue;
         };
         let start_line = index + 1;
+        let start_column = line.len() - trimmed.len();
+        let start_byte = line_starts[index] + start_column;
         let mut imports = first_imports.to_owned();
         while imports.contains('(') && !imports.contains(')') && index + 1 < lines.len() {
             index += 1;
             imports.push(' ');
             imports.push_str(lines[index].trim());
         }
+        let end_line = index + 1;
+        let end_column = lines[index].trim_end().len();
+        let end_byte = line_starts[index] + end_column;
         for item in imports
             .trim_matches(['(', ')'])
             .split(',')
@@ -1710,7 +1799,12 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
                     module: module.to_owned(),
                     imported: imported.to_owned(),
                     local: local.to_owned(),
-                    line: start_line,
+                    start_byte,
+                    end_byte,
+                    start_line,
+                    end_line,
+                    start_column,
+                    end_column,
                 });
             }
         }
@@ -2391,7 +2485,7 @@ mod tests {
         assert_eq!(imports[0].module, "pkg.api");
         assert_eq!(imports[0].imported, "Widget");
         assert_eq!(imports[0].local, "LocalWidget");
-        assert_eq!(imports[0].line, 1);
+        assert_eq!(imports[0].start_line, 1);
         assert_eq!(imports[1].imported, "helper");
         let aliases = python_import_aliases("from lib import run as execute");
         assert_eq!(
