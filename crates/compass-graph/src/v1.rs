@@ -769,6 +769,10 @@ pub fn normalize_document_v1_with_inventory(
     source_commit: Option<&str>,
     inventory: Vec<InventoryEvidence>,
 ) -> Result<GraphDocument, GraphError> {
+    let mut extensions = Map::new();
+    if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
+        extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
+    }
     let extraction = Extraction {
         nodes: document
             .nodes
@@ -787,6 +791,7 @@ pub fn normalize_document_v1_with_inventory(
                 attributes: edge.attributes.clone(),
             })
             .collect(),
+        extensions,
         ..Extraction::default()
     };
     let mut evidence =
@@ -1212,41 +1217,38 @@ fn normalize_edge(
     let normalization_rule = heuristic
         .then_some("indirect-call-resolution")
         .or(alias_rule);
-    let mut evidence = vec![normalize_provenance(
+    let mut evidence = Vec::new();
+    append_raw_edge_evidence(
+        &mut evidence,
         &raw.attributes,
         relationship_site.clone(),
         &owner,
         root,
         normalization_rule,
         heuristic,
-    )?];
-    if let Some(rewrites) = raw
+    )?;
+    if let Some(constituents) = raw
         .attributes
-        .get("_endpoint_rewrite_rules")
+        .get("_coalesced_edge_evidence")
         .and_then(Value::as_array)
     {
-        let extractor = optional_string(&raw.attributes, "extractor")
-            .unwrap_or_else(|| "compass.graph.assembly".to_owned());
-        for rewrite in rewrites.iter().skip(1) {
-            let Some(rule) = rewrite.get("rule").and_then(Value::as_str) else {
+        for constituent in constituents {
+            let Some(attributes) = constituent.as_object() else {
                 continue;
             };
-            let provenance = Provenance {
-                origin: EvidenceOrigin::Heuristic,
-                extractor: extractor.clone(),
-                confidence: EvidenceConfidence::Inferred,
-                rule: Some(rule.to_owned()),
-                anchors: Vec::new(),
-                wiring_site: relationship_site.clone(),
-                score: rewrite.get("score").and_then(Value::as_f64),
-                candidates: Vec::new(),
-            };
-            provenance
-                .validate()
-                .map_err(|error| raw_error(&owner, &error.to_string()))?;
-            evidence.push(provenance);
+            let constituent_site = raw_anchor(attributes, root, file_facts)?;
+            append_raw_edge_evidence(
+                &mut evidence,
+                attributes,
+                constituent_site,
+                &owner,
+                root,
+                normalization_rule,
+                heuristic,
+            )?;
         }
     }
+    sort_dedup_serialized(&mut evidence);
     let identity_rule = evidence.iter().find_map(|item| item.rule.as_deref());
     let id = edge_id(
         source,
@@ -1283,6 +1285,53 @@ fn normalize_edge(
             .unwrap_or(false),
         diagnostics: Vec::new(),
     })
+}
+
+fn append_raw_edge_evidence(
+    evidence: &mut Vec<Provenance>,
+    attributes: &Map<String, Value>,
+    relationship_site: Option<SourceAnchor>,
+    owner: &str,
+    root: &Path,
+    normalization_rule: Option<&str>,
+    heuristic_default: bool,
+) -> Result<(), GraphError> {
+    evidence.push(normalize_provenance(
+        attributes,
+        relationship_site.clone(),
+        owner,
+        root,
+        normalization_rule,
+        heuristic_default,
+    )?);
+    let Some(rewrites) = attributes
+        .get("_endpoint_rewrite_rules")
+        .and_then(Value::as_array)
+    else {
+        return Ok(());
+    };
+    let extractor = optional_string(attributes, "extractor")
+        .unwrap_or_else(|| "compass.graph.assembly".to_owned());
+    for rewrite in rewrites {
+        let Some(rule) = rewrite.get("rule").and_then(Value::as_str) else {
+            continue;
+        };
+        let provenance = Provenance {
+            origin: EvidenceOrigin::Heuristic,
+            extractor: extractor.clone(),
+            confidence: EvidenceConfidence::Inferred,
+            rule: Some(rule.to_owned()),
+            anchors: Vec::new(),
+            wiring_site: relationship_site.clone(),
+            score: rewrite.get("score").and_then(Value::as_f64),
+            candidates: Vec::new(),
+        };
+        provenance
+            .validate()
+            .map_err(|error| raw_error(owner, &error.to_string()))?;
+        evidence.push(provenance);
+    }
+    Ok(())
 }
 
 fn normalize_provenance(
