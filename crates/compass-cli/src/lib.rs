@@ -1217,9 +1217,11 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
         index += 1;
     }
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let graph_path = graph_override
-        .clone()
-        .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
+    let graph_path = graph_override.clone().unwrap_or_else(|| {
+        let output = root.join(&output_name);
+        compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+            .unwrap_or_else(|_| output.join("graph.json"))
+    });
     if !graph_path.exists() {
         return Outcome::failure(format!(
             "error: no graph found at {} — run `compass extract {}` first",
@@ -1227,16 +1229,10 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
             root.display()
         ));
     }
-    let output_dir = if graph_override.is_some()
-        && graph_path.parent().and_then(Path::file_name) == Path::new(&output_name).file_name()
-    {
-        graph_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
-    } else {
-        root.join(&output_name)
-    };
+    let output_dir = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     match cluster_existing_graph(&ClusterExistingOptions {
         graph_path,
         output_dir: output_dir.clone(),

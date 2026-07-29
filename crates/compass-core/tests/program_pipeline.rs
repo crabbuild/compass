@@ -255,6 +255,10 @@ fn invalid_explicit_artifact_does_not_replace_existing_program() -> Result<(), B
     let first = build_local_graph(&options)?;
     let program_path = first.output_dir.join("program.json");
     let before = fs::read(&program_path)?;
+    let pointer = directory
+        .path()
+        .join("compass-out/.compass-active-generation");
+    let active_before = fs::read_to_string(&pointer)?;
 
     options
         .program_artifacts
@@ -263,6 +267,7 @@ fn invalid_explicit_artifact_does_not_replace_existing_program() -> Result<(), B
         build_local_graph(&options),
         Err(CoreError::InvalidProgramInput(_))
     ));
+    assert_eq!(fs::read_to_string(pointer)?, active_before);
     assert_eq!(fs::read(program_path)?, before);
     Ok(())
 }

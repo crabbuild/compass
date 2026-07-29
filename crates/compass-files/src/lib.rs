@@ -57,6 +57,8 @@ pub enum FileError {
     TooLarge { path: PathBuf, limit: u64 },
     #[error("an interrupted graph build is recorded at {0}")]
     IncompleteBuild(PathBuf),
+    #[error("generation artifact is missing or unsafe: {0}")]
+    InvalidGenerationArtifact(PathBuf),
     #[error("invalid cache kind for operation: {0}")]
     InvalidCacheKind(String),
     #[error("invalid Compass project config at {path}: {source}")]

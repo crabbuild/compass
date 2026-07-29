@@ -147,7 +147,10 @@ pub(super) fn command_reflect(frontend: Frontend, args: &[String]) -> Outcome {
         index += 1;
     }
     if graph.is_none() {
-        let default_graph = PathBuf::from(&output_root).join("graph.json");
+        let output_directory = PathBuf::from(&output_root);
+        let default_graph =
+            compass_files::BuildGuard::resolve_artifact(&output_directory, "graph.json")
+                .unwrap_or_else(|_| output_directory.join("graph.json"));
         if default_graph.exists() {
             graph = Some(default_graph);
         }

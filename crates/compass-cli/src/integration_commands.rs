@@ -574,7 +574,9 @@ fn target_is_indexed(file_path: &str, root: &Path) -> bool {
     if file_path.is_empty() {
         return true;
     }
-    let manifest_path = output_root().join("manifest.json");
+    let output = output_root();
+    let manifest_path = compass_files::BuildGuard::resolve_artifact(&output, "manifest.json")
+        .unwrap_or_else(|_| output.join("manifest.json"));
     let Ok(metadata) = manifest_path.metadata() else {
         return true;
     };
@@ -942,7 +944,9 @@ fn output_root() -> PathBuf {
 }
 
 fn graph_path() -> PathBuf {
-    output_root().join("graph.json")
+    let output = output_root();
+    compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+        .unwrap_or_else(|_| output.join("graph.json"))
 }
 
 fn project_root() -> PathBuf {

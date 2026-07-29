@@ -37,10 +37,11 @@ pub(super) fn command_label(_frontend: Frontend, args: &[String]) -> Outcome {
         Err(error) => return Outcome::failure(error),
     };
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let graph_path = parsed
-        .graph_override
-        .clone()
-        .unwrap_or_else(|| parsed.root.join(&output_name).join("graph.json"));
+    let graph_path = parsed.graph_override.clone().unwrap_or_else(|| {
+        let output = parsed.root.join(&output_name);
+        compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+            .unwrap_or_else(|_| output.join("graph.json"))
+    });
     if !graph_path.exists() {
         let message = format!(
             "error: no graph found at {} — run `compass extract {}` first",
@@ -49,16 +50,10 @@ pub(super) fn command_label(_frontend: Frontend, args: &[String]) -> Outcome {
         );
         return Outcome::failure(message);
     }
-    let output_dir = if parsed.graph_override.is_some()
-        && graph_path.parent().and_then(Path::file_name) == Path::new(&output_name).file_name()
-    {
-        graph_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
-    } else {
-        parsed.root.join(&output_name)
-    };
+    let output_dir = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
 
     let environment = std::env::vars().collect::<HashMap<_, _>>();
     let global_providers = home_directory()

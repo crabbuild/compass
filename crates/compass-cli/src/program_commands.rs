@@ -57,8 +57,10 @@ struct CommonOptions {
 }
 
 fn default_program_path() -> PathBuf {
-    PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
-        .join("program.json")
+    let output =
+        PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
+    compass_files::BuildGuard::resolve_artifact(&output, "program.json")
+        .unwrap_or_else(|_| output.join("program.json"))
 }
 
 fn parse_common(

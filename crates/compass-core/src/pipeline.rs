@@ -10,14 +10,15 @@ use compass_files::{
     Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
-    ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
-    dedupe_edges, dedupe_nodes, extraction_from_v1, graph_insights, label_communities_by_hub,
-    normalize_document_v1, remap_communities_to_previous, score_communities,
+    ClusterOptions, EntityTiebreaker, InventoryEvidence,
+    build_owned_with_tiebreaker as build_document, cluster, dedupe_edges, dedupe_nodes,
+    extraction_from_v1, graph_insights, label_communities_by_hub,
+    normalize_document_v1_with_inventory, remap_communities_to_previous, score_communities,
 };
 use compass_languages::{
     Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
-use compass_model::code_graph::{GraphDocument as V1GraphDocument, NodeKind};
+use compass_model::code_graph::{ExtractionStatus, GraphDocument as V1GraphDocument, NodeKind};
 use compass_model::provenance::EvidenceOrigin;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
@@ -340,13 +341,14 @@ fn build_graph_inner(
         .output_root
         .as_deref()
         .map_or_else(|| root.clone(), absolutize);
-    let output_dir = output_root.join(&output_name);
-    fs::create_dir_all(&output_dir).map_err(|source| compass_files::FileError::Io {
-        path: output_dir.clone(),
+    let output_container = output_root.join(&output_name);
+    fs::create_dir_all(&output_container).map_err(|source| compass_files::FileError::Io {
+        path: output_container.clone(),
         source,
     })?;
-    let prior_build_complete = BuildGuard::ensure_complete(&output_dir).is_ok();
-    let guard = BuildGuard::begin(&output_dir)?;
+    let prior_build_complete = BuildGuard::ensure_complete(&output_container).is_ok();
+    let guard = BuildGuard::begin(&output_container)?;
+    let output_dir = guard.staging_directory().to_path_buf();
     if options.force || !prior_build_complete {
         remove_if_exists(&output_dir.join(BUILD_STATE_FILE))?;
     }
@@ -465,10 +467,10 @@ fn build_graph_inner(
                 remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
-            guard.commit()?;
+            let published_output_dir = commit_generation(guard, &output_container)?;
             return Ok(BuildResult {
                 root,
-                output_dir: output_dir.clone(),
+                output_dir: published_output_dir,
                 detection,
                 files_considered: state.stats.files,
                 files_extracted: 0,
@@ -526,10 +528,10 @@ fn build_graph_inner(
             stats.communities,
             unchanged_program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         return Ok(BuildResult {
             root,
-            output_dir: output_dir.clone(),
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: 0,
@@ -642,25 +644,38 @@ fn build_graph_inner(
             );
             Ok((path.clone(), combined.graph, source, prepared))
         };
-    let fresh = if missing.len() < 256 {
+    let fresh_outcomes = if missing.len() < 256 {
         let mut engine = Engine::default();
         missing
             .iter()
             .map(|path| extract_source(&mut engine, path))
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Vec<_>>()
     } else {
         let extract = || {
             missing
                 .par_iter()
                 .map_init(Engine::default, extract_source)
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Vec<_>>()
         };
         if let Some(pool) = &worker_pool {
-            pool.install(extract)?
+            pool.install(extract)
         } else {
-            extract()?
+            extract()
         }
     };
+    let mut extraction_failures = BTreeMap::new();
+    let fresh = missing
+        .iter()
+        .cloned()
+        .zip(fresh_outcomes)
+        .filter_map(|(path, outcome)| match outcome {
+            Ok(extracted) => Some(extracted),
+            Err(error) => {
+                extraction_failures.insert(path, error.to_string());
+                None
+            }
+        })
+        .collect::<Vec<_>>();
     profile_internal("tree-sitter combined extraction", &mut internal_started);
     let prepared = if options.force && !options.reuse_cache_on_force {
         fresh
@@ -894,10 +909,10 @@ fn build_graph_inner(
             0,
             program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         return Ok(BuildResult {
             root,
-            output_dir,
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: 0,
@@ -939,11 +954,12 @@ fn build_graph_inner(
             .built_at_commit
             .clone()
             .or_else(|| git_commit(&root));
-        let published = normalize_document_v1(
+        let published = normalize_document_v1_with_inventory(
             &document,
             &root,
             configuration_digest,
             source_commit.as_deref(),
+            detection_inventory(&detection, semantic, &extraction_failures, &root),
         )?;
         write_json_atomic(output_dir.join("graph.json"), &published, false)?;
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
@@ -974,11 +990,11 @@ fn build_graph_inner(
             0,
             program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         timings.publish = stage_started.elapsed();
         return Ok(BuildResult {
             root,
-            output_dir,
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: missing.len(),
@@ -1060,10 +1076,10 @@ fn build_graph_inner(
             communities,
             program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         return Ok(BuildResult {
             root,
-            output_dir: output_dir.clone(),
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: missing.len(),
@@ -1147,6 +1163,9 @@ fn build_graph_inner(
             &communities,
             &labels,
             &root,
+            &detection,
+            semantic,
+            &extraction_failures,
             configuration_digest,
             commit.as_deref(),
         )?;
@@ -1312,10 +1331,10 @@ fn build_graph_inner(
         program.as_ref(),
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    guard.commit()?;
+    let published_output_dir = commit_generation(guard, &output_container)?;
     Ok(BuildResult {
         root,
-        output_dir,
+        output_dir: published_output_dir,
         detection,
         files_considered: sources.len(),
         files_extracted: missing.len(),
@@ -1428,6 +1447,15 @@ fn publish_build_state(
         },
     )?;
     state.save(output_dir)
+}
+
+fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathBuf, CoreError> {
+    let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
+    if guard.staging_directory().join("program.json").is_file() {
+        artifacts.push("program.json");
+    }
+    guard.commit_with_artifacts(&artifacts)?;
+    Ok(BuildGuard::resolve_active_directory(output_container)?)
 }
 
 #[cfg(target_os = "macos")]
@@ -2025,23 +2053,21 @@ fn preserve_semantic_layer(
             edge.target.clone_from(current);
         }
     }
-    let ast_ids = extraction
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<std::collections::HashSet<_>>();
     let preserved_node_ids = existing
         .nodes
         .iter()
-        .filter(|node| !node_has_origin(node, EvidenceOrigin::Ast))
+        .filter(|node| {
+            node.evidence
+                .iter()
+                .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
+        })
         .map(|node| node.id.as_str())
         .collect::<HashSet<_>>();
     let mut preserved_nodes = existing_raw
         .nodes
         .into_iter()
         .filter(|node| {
-            !ast_ids.contains(node.id.as_str())
-                && preserved_node_ids.contains(node.id.as_str())
+            preserved_node_ids.contains(node.id.as_str())
                 && !source_in_set(node.attributes.get("source_file"), root, refreshed)
                 && !source_was_deleted(node.attributes.get("source_file"), root)
         })
@@ -2057,7 +2083,10 @@ fn preserve_semantic_layer(
         .into_iter()
         .zip(existing.links)
         .filter_map(|(raw, typed)| {
-            (!edge_has_origin(&typed, EvidenceOrigin::Ast)
+            (typed
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
                 && all_ids.contains(&raw.source)
                 && all_ids.contains(&raw.target)
                 && !source_in_set(raw.attributes.get("source_file"), root, refreshed)
@@ -2353,6 +2382,9 @@ fn published_v1_document(
     communities: &compass_graph::Communities,
     labels: &BTreeMap<usize, String>,
     root: &Path,
+    detection: &Detection,
+    semantic: Option<&SemanticLayer>,
+    extraction_failures: &BTreeMap<PathBuf, String>,
     configuration_digest: String,
     source_commit: Option<&str>,
 ) -> Result<compass_model::code_graph::GraphDocument, CoreError> {
@@ -2380,12 +2412,82 @@ fn published_v1_document(
             );
         }
     }
-    Ok(normalize_document_v1(
+    Ok(normalize_document_v1_with_inventory(
         &publication_source,
         root,
         configuration_digest,
         source_commit,
+        detection_inventory(detection, semantic, extraction_failures, root),
     )?)
+}
+
+fn detection_inventory(
+    detection: &Detection,
+    semantic: Option<&SemanticLayer>,
+    extraction_failures: &BTreeMap<PathBuf, String>,
+    root: &Path,
+) -> Vec<InventoryEvidence> {
+    let mut inventory = detection
+        .files
+        .iter()
+        .flat_map(|(category, paths)| {
+            paths.iter().map(move |path| {
+                let absolute = if Path::new(path).is_absolute() {
+                    PathBuf::from(path)
+                } else {
+                    root.join(path)
+                };
+                let status = if extraction_failures.contains_key(&absolute) {
+                    ExtractionStatus::ParseFailure
+                } else if semantic.is_some_and(|layer| {
+                    layer
+                        .partial_files
+                        .iter()
+                        .any(|partial| canonical_identity(partial) == canonical_identity(&absolute))
+                }) {
+                    ExtractionStatus::Partial
+                } else if source_is_generated(&absolute) {
+                    ExtractionStatus::Generated
+                } else {
+                    match category.as_str() {
+                        "image" | "video" => ExtractionStatus::Binary,
+                        "code" | "document" if Registry::resolve(Path::new(path)).is_some() => {
+                            ExtractionStatus::Extracted
+                        }
+                        _ => ExtractionStatus::Unsupported,
+                    }
+                };
+                InventoryEvidence {
+                    path: PathBuf::from(path),
+                    status,
+                    reason: extraction_failures.get(&absolute).cloned().or_else(|| {
+                        (status == ExtractionStatus::Unsupported)
+                            .then(|| format!("no extractor for detected {category} file"))
+                    }),
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    inventory.extend(detection.unclassified.iter().map(|path| InventoryEvidence {
+        path: PathBuf::from(path),
+        status: ExtractionStatus::Unsupported,
+        reason: Some("unclassified by detector".to_owned()),
+    }));
+    inventory.extend(detection.ignored.iter().map(|path| InventoryEvidence {
+        path: PathBuf::from(path),
+        status: ExtractionStatus::Excluded,
+        reason: Some("excluded by ignore policy".to_owned()),
+    }));
+    inventory
+}
+
+fn source_is_generated(path: &Path) -> bool {
+    fs::read(path).ok().is_some_and(|bytes| {
+        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(2_048)]);
+        ["DO NOT EDIT", "@generated", "Generated by"]
+            .iter()
+            .any(|marker| head.contains(marker))
+    })
 }
 
 fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {

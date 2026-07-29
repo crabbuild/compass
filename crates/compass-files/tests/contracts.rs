@@ -475,7 +475,7 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(slices.len() >= 2);
 
     let guard = BuildGuard::begin(directory.path())?;
-    assert!(BuildGuard::ensure_complete(directory.path()).is_err());
+    BuildGuard::ensure_complete(directory.path())?;
     guard.commit()?;
     BuildGuard::ensure_complete(directory.path())?;
     let not_a_directory = directory.path().join("not-a-directory");
@@ -483,10 +483,81 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(BuildGuard::begin(&not_a_directory.join("output")).is_err());
 
     let broken_guard = BuildGuard::begin(directory.path())?;
-    let marker = directory.path().join(".compass-build-incomplete");
+    let marker = broken_guard
+        .staging_directory()
+        .join(".compass-build-incomplete");
     fs::remove_file(&marker)?;
     fs::create_dir(&marker)?;
     assert!(broken_guard.commit().is_err());
+    Ok(())
+}
+
+#[test]
+fn build_guard_publishes_one_complete_generation_at_a_time() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let first = BuildGuard::begin(directory.path())?;
+    fs::write(first.staging_directory().join("graph.json"), "graph-one")?;
+    fs::write(
+        first.staging_directory().join("program.json"),
+        "program-one",
+    )?;
+    first.commit_with_artifacts(&["graph.json", "program.json"])?;
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one"
+    );
+
+    {
+        let failed = BuildGuard::begin(directory.path())?;
+        fs::write(failed.staging_directory().join("graph.json"), "graph-two")?;
+    }
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one"
+    );
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "program.json"
+        )?)?,
+        "program-one"
+    );
+
+    let incomplete = BuildGuard::begin(directory.path())?;
+    fs::remove_file(incomplete.staging_directory().join("program.json"))?;
+    assert!(
+        incomplete
+            .commit_with_artifacts(&["graph.json", "program.json"])
+            .is_err()
+    );
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one"
+    );
+
+    let second = BuildGuard::begin(directory.path())?;
+    fs::write(second.staging_directory().join("graph.json"), "graph-two")?;
+    fs::write(
+        second.staging_directory().join("program.json"),
+        "program-two",
+    )?;
+    second.commit_with_artifacts(&["graph.json", "program.json"])?;
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "program.json"
+        )?)?,
+        "program-two"
+    );
     Ok(())
 }
 
@@ -839,8 +910,8 @@ fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
     assert!(write_text_atomic(directory.path().join("not-a-directory/child"), "x").is_err());
 
     let guard = BuildGuard::begin(directory.path())?;
-    fs::remove_file(directory.path().join(".compass-build-incomplete"))?;
-    guard.commit()?;
+    fs::remove_file(guard.staging_directory().join(".compass-build-incomplete"))?;
+    assert!(guard.commit().is_err());
     Ok(())
 }
 

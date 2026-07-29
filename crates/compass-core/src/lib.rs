@@ -179,8 +179,10 @@ impl LoadedGraph {
 
 #[must_use]
 pub fn default_graph_path() -> PathBuf {
-    PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
-        .join("graph.json")
+    let output =
+        PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
+    compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+        .unwrap_or_else(|_| output.join("graph.json"))
 }
 
 fn load_learning_overlay(graph_path: &Path) -> HashMap<String, Map<String, Value>> {
