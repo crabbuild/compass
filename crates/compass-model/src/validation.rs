@@ -612,6 +612,7 @@ const fn is_lexical_member(kind: NodeKind) -> bool {
             | NodeKind::Trait
             | NodeKind::Protocol
             | NodeKind::Enum
+            | NodeKind::EnumMember
             | NodeKind::TypeAlias
             | NodeKind::Function
             | NodeKind::Method
