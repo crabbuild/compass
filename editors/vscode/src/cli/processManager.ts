@@ -3,10 +3,14 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:ch
 import type { ZodType } from "zod";
 import { ProgressEventSchema, type ProgressEvent } from "./contracts";
 
-const OUTPUT_LIMIT = 8 * 1024 * 1024;
+const DEFAULT_OUTPUT_LIMIT = 8 * 1024 * 1024;
 type Spawn = typeof nodeSpawn;
 
 export type CommandResult = { code: number; stdout: string; stderr: string };
+export type OutputLimits = {
+  stdoutBytes?: number;
+  stderrBytes?: number;
+};
 export type RunningCommand = {
   operationId: string;
   completed: Promise<CommandResult>;
@@ -33,18 +37,27 @@ export class CompassProcessManager {
     this.executable = next;
   }
 
-  run(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
-    const command = this.startCommand(cwd, args);
+  run(
+    cwd: string,
+    args: readonly string[],
+    signal?: AbortSignal,
+    limits?: OutputLimits
+  ): Promise<CommandResult> {
+    const command = this.startCommand(cwd, args, limits);
     const cancel = () => command.cancel();
     signal?.addEventListener("abort", cancel, { once: true });
     return command.completed.finally(() => signal?.removeEventListener("abort", cancel));
   }
 
-  startCommand(cwd: string, args: readonly string[]): RunningCommand {
+  startCommand(
+    cwd: string,
+    args: readonly string[],
+    limits?: OutputLimits
+  ): RunningCommand {
     const child = this.start(cwd, args);
     return {
       operationId: randomUUID(),
-      completed: collect(child),
+      completed: collect(child, true, limits),
       cancel: () => child.kill()
     };
   }
@@ -53,9 +66,10 @@ export class CompassProcessManager {
     cwd: string,
     args: readonly string[],
     schema: ZodType<T>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    limits?: OutputLimits
   ): Promise<T> {
-    const result = await this.run(cwd, args, signal);
+    const result = await this.run(cwd, args, signal, limits);
     if (result.code !== 0) throw new Error(result.stderr || `Compass exited with ${result.code}`);
     return schema.parse(JSON.parse(result.stdout));
   }
@@ -74,7 +88,7 @@ export class CompassProcessManager {
     child.stdout.on("data", (chunk: string) => {
       if (progressError) return;
       try {
-        buffered = bounded(buffered, chunk);
+        buffered = boundedPartial(buffered, chunk, DEFAULT_OUTPUT_LIMIT, "stdout");
         const lines = buffered.split(/\r?\n/);
         buffered = lines.pop() ?? "";
         for (const line of lines.filter(Boolean)) {
@@ -109,46 +123,88 @@ export class CompassProcessManager {
 
 function collect(
   child: ChildProcessWithoutNullStreams,
-  captureStdout = true
+  captureStdout = true,
+  limits: OutputLimits = {}
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
+    const stdout = new BoundedTextBuffer(
+      "stdout",
+      limits.stdoutBytes ?? DEFAULT_OUTPUT_LIMIT
+    );
+    const stderr = new BoundedTextBuffer(
+      "stderr",
+      limits.stderrBytes ?? DEFAULT_OUTPUT_LIMIT
+    );
     let streamError: unknown;
-    const append = (current: string, chunk: string): string => {
-      if (streamError) return current;
+    const append = (buffer: BoundedTextBuffer, chunk: string): void => {
+      if (streamError) return;
       try {
-        return bounded(current, chunk);
+        buffer.append(chunk);
       } catch (error) {
         streamError = error;
         child.kill();
-        return current;
       }
     };
     if (captureStdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
-        stdout = append(stdout, chunk);
+        append(stdout, chunk);
       });
     }
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
-      stderr = append(stderr, chunk);
+      append(stderr, chunk);
     });
     child.once("error", reject);
     child.once("close", (code) => {
       if (streamError) {
         reject(streamError);
       } else {
-        resolve({ code: code ?? 1, stdout, stderr });
+        resolve({ code: code ?? 1, stdout: stdout.value, stderr: stderr.value });
       }
     });
   });
 }
 
-function bounded(current: string, chunk: string): string {
-  if (current.length + chunk.length > OUTPUT_LIMIT) {
-    throw new Error("Compass output exceeded the 8 MiB safety limit");
+class BoundedTextBuffer {
+  private text = "";
+  private bytes = 0;
+
+  constructor(
+    private readonly stream: "stdout" | "stderr",
+    private readonly limit: number
+  ) {}
+
+  get value(): string {
+    return this.text;
+  }
+
+  append(chunk: string): void {
+    const nextBytes = Buffer.byteLength(chunk, "utf8");
+    if (this.bytes + nextBytes > this.limit) {
+      throw outputLimitError(this.stream, this.limit);
+    }
+    this.text += chunk;
+    this.bytes += nextBytes;
+  }
+}
+
+function boundedPartial(
+  current: string,
+  chunk: string,
+  limit: number,
+  stream: "stdout" | "stderr"
+): string {
+  if (
+    Buffer.byteLength(current, "utf8") + Buffer.byteLength(chunk, "utf8") > limit
+  ) {
+    throw outputLimitError(stream, limit);
   }
   return current + chunk;
+}
+
+function outputLimitError(stream: "stdout" | "stderr", limit: number): Error {
+  const mib = limit / (1024 * 1024);
+  const display = Number.isInteger(mib) ? mib.toFixed(0) : mib.toFixed(2);
+  return new Error(`Compass ${stream} exceeded the ${display} MiB safety limit`);
 }
