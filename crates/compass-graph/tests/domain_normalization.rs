@@ -173,6 +173,66 @@ fn package_manifests_publish_dependency_endpoints_instead_of_dangling_edges()
 }
 
 #[test]
+fn package_manifest_self_dependency_is_diagnostic_not_topology()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let path = root.join("go.mod");
+    fs::write(
+        &path,
+        "module example.test/app\nrequire example.test/app v1.2.3\n",
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-config")?;
+    let graph = normalize_v1(extraction, evidence)?;
+    assert!(graph.links.iter().all(|edge| edge.source != edge.target));
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "suppressed_dependency_self_loop" })
+    );
+    Ok(())
+}
+
+#[test]
+fn unresolved_java_inheritance_is_diagnostic_not_exact_topology()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("src/Child.java");
+    let source = b"package a;\nclass Child extends Missing {}\n";
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join(relative), source)?;
+
+    let extraction = Engine::default().extract_source(relative, source)?;
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-java")?;
+    let graph = normalize_v1(extraction, evidence)?;
+    assert!(
+        graph
+            .links
+            .iter()
+            .all(|edge| !matches!(edge.kind, EdgeKind::Extends | EdgeKind::Implements))
+    );
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "dropped_invalid_inheritance_target" })
+    );
+    let unresolved = graph
+        .nodes
+        .iter()
+        .find(|node| node.name == "Missing")
+        .ok_or("missing unresolved superclass")?;
+    assert_eq!(unresolved.evidence[0].origin, EvidenceOrigin::Heuristic);
+    Ok(())
+}
+
+#[test]
 fn terraform_publishes_resources_packages_config_keys_and_forward_references()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

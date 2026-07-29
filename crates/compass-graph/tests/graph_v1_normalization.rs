@@ -235,9 +235,6 @@ fn sourceless_placeholder_identity_is_scoped_to_each_wiring_site()
     graph.nodes[1]
         .attributes
         .insert("qualified_name".to_owned(), json!("Shared"));
-    let mut second = graph.nodes[1].clone();
-    second.id = "raw:second-external".to_owned();
-    graph.nodes.push(second);
     graph.edges = vec![
         RawEdgeRecord {
             source: "raw:a".to_owned(),
@@ -249,7 +246,7 @@ fn sourceless_placeholder_identity_is_scoped_to_each_wiring_site()
         },
         RawEdgeRecord {
             source: "raw:a".to_owned(),
-            target: "raw:second-external".to_owned(),
+            target: "raw:b".to_owned(),
             attributes: Map::from_iter([
                 ("relation".to_owned(), json!("references")),
                 ("source_anchor".to_owned(), anchor(root, 70)),
@@ -265,6 +262,12 @@ fn sourceless_placeholder_identity_is_scoped_to_each_wiring_site()
         .map(|node| node.id.as_str())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(external_ids.len(), 2);
+    let targets = document
+        .links
+        .iter()
+        .map(|edge| edge.target.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(targets.len(), 2);
     Ok(())
 }
 

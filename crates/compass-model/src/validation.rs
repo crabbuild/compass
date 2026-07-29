@@ -429,15 +429,15 @@ fn endpoint_kinds_are_valid(
                 && target.kind.is_callable()
         }
         EdgeKind::Imports => {
-            matches!(
+            (matches!(
                 source.kind,
                 NodeKind::File
                     | NodeKind::Module
                     | NodeKind::Package
                     | NodeKind::Namespace
                     | NodeKind::Import
-                    | NodeKind::ConfigKey
-            ) || source.kind.is_callable()
+            ) || source.kind.is_callable())
+                || (source.kind == NodeKind::ConfigKey && target.kind == NodeKind::Resource)
         }
         EdgeKind::Exports => source.kind.is_container() || source.kind == NodeKind::Export,
         EdgeKind::Extends => source.kind.is_type() && target.kind.is_type(),
@@ -480,7 +480,11 @@ fn endpoint_kinds_are_valid(
                 NodeKind::DatabaseTable | NodeKind::DatabaseView
             )
         }
-        EdgeKind::Reads | EdgeKind::Writes => is_executable(source.kind) && is_data(target.kind),
+        EdgeKind::Reads => {
+            (is_executable(source.kind) && is_data(target.kind))
+                || (source.kind == NodeKind::DatabaseView && target.kind == NodeKind::DatabaseTable)
+        }
+        EdgeKind::Writes => is_executable(source.kind) && is_data(target.kind),
         EdgeKind::Aliases => {
             matches!(
                 source.kind,
@@ -541,12 +545,7 @@ const fn is_executable(kind: NodeKind) -> bool {
     kind.is_callable()
         || matches!(
             kind,
-            NodeKind::Component
-                | NodeKind::Job
-                | NodeKind::Query
-                | NodeKind::DatabaseView
-                | NodeKind::DatabaseProcedure
-                | NodeKind::DatabaseTrigger
+            NodeKind::Component | NodeKind::Job | NodeKind::Query | NodeKind::DatabaseTrigger
         )
 }
 

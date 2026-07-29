@@ -201,6 +201,53 @@ fn ghost_coalescing_requires_matching_path_kind_qualified_name_and_details()
 }
 
 #[test]
+fn every_graph_assembly_endpoint_remap_stamps_distinct_synthesized_evidence()
+-> Result<(), Box<dyn Error>> {
+    let extraction: Extraction = serde_json::from_value(json!({
+        "nodes": [
+            {"id":"src_service","label":"service.rs","file_type":"code","source_file":"src/service.rs","source_location":"L1","_origin":"ast"},
+            {"id":"service_helper","label":"helper","qualified_name":"helper","type":"function","file_type":"code","source_file":"src/service.rs","source_location":"L1","_origin":"semantic"},
+            {"id":"guide","label":"Guide","qualified_name":"Guide","file_type":"document","source_file":"docs/guide.md","source_location":"L1","_origin":"semantic"},
+            {"id":"guide_doc","label":"Guide document","qualified_name":"Guide document","file_type":"document","source_file":"docs/guide.md","source_location":"L1","_origin":"semantic"},
+            {"id":"ast_worker","label":"Worker","qualified_name":"pkg::Worker","type":"function","file_type":"code","source_file":"src/worker.rs","source_location":"L1","_origin":"ast"},
+            {"id":"semantic_worker","label":"Worker","qualified_name":"pkg::Worker","type":"function","file_type":"code","source_file":"src/worker.rs","source_location":"L1","_origin":"semantic"},
+            {"id":"target","label":"Target","qualified_name":"pkg::Target","type":"function","file_type":"code","source_file":"src/target.rs","source_location":"L1","_origin":"ast"}
+        ],
+        "edges": [
+            {"source":"service_helper","target":"target","relation":"calls","source_file":"src/service.rs","source_location":"L1","_origin":"ast"},
+            {"source":"target","target":"guide","relation":"documents","source_file":"docs/guide.md","source_location":"L1","_origin":"ast"},
+            {"source":"semantic_worker","target":"target","relation":"calls","source_file":"src/worker.rs","source_location":"L1","_origin":"ast"}
+        ]
+    }))?;
+
+    let document = build_from_extraction(&extraction, true, None);
+    let rules = document
+        .links
+        .iter()
+        .filter_map(|edge| edge.attributes.get("rule").and_then(|value| value.as_str()))
+        .collect::<std::collections::HashSet<_>>();
+    for expected in [
+        "graph-semantic-id-remap",
+        "graph-document-twin-remap",
+        "graph-ghost-endpoint-remap",
+    ] {
+        assert!(rules.contains(expected), "missing {expected}");
+    }
+    assert!(document.links.iter().all(|edge| {
+        edge.string("_origin") == "heuristic"
+            && edge.string("confidence") == "INFERRED"
+            && edge
+                .attributes
+                .get("confidence_score")
+                .and_then(serde_json::Value::as_f64)
+                .is_some()
+            && !edge.string("source_file").is_empty()
+            && !edge.string("source_location").is_empty()
+    }));
+    Ok(())
+}
+
+#[test]
 fn networkx_edge_order_preserves_node_and_incident_edge_order() -> Result<(), Box<dyn Error>> {
     let extraction: Extraction = serde_json::from_value(json!({
         "nodes": [

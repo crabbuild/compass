@@ -40,6 +40,12 @@ use serde_json::{Map, Value};
 type EdgeRecord = RawEdgeRecord;
 type NodeRecord = RawNodeRecord;
 
+#[derive(Clone, Copy)]
+struct EndpointRewriteEvidence {
+    rule: &'static str,
+    score: f64,
+}
+
 /// Merge resolved extraction chunks, apply native entity deduplication, and build
 /// a node-link graph. This is the deterministic counterpart of `compass.build`.
 pub fn build(
@@ -161,6 +167,34 @@ fn build_from_owned_extraction(
     let mut endpoint_remap = rekey.clone();
     endpoint_remap.extend(doc_remap.clone());
     endpoint_remap.extend(ghost_remap.clone());
+    let mut endpoint_rewrite_evidence = HashMap::new();
+    for old in rekey.keys() {
+        endpoint_rewrite_evidence.insert(
+            old.clone(),
+            EndpointRewriteEvidence {
+                rule: "graph-semantic-id-remap",
+                score: 1.0,
+            },
+        );
+    }
+    for old in doc_remap.keys() {
+        endpoint_rewrite_evidence.insert(
+            old.clone(),
+            EndpointRewriteEvidence {
+                rule: "graph-document-twin-remap",
+                score: 1.0,
+            },
+        );
+    }
+    for old in ghost_remap.keys() {
+        endpoint_rewrite_evidence.insert(
+            old.clone(),
+            EndpointRewriteEvidence {
+                rule: "graph-ghost-endpoint-remap",
+                score: 0.95,
+            },
+        );
+    }
 
     let mut normalized = HashMap::<String, String>::new();
     for node in &nodes {
@@ -180,8 +214,18 @@ fn build_from_owned_extraction(
     for edge in &mut source_edges {
         let original_source = edge.source.clone();
         let original_target = edge.target.clone();
-        edge.source = remap_endpoint(&edge.source, &endpoint_remap);
-        edge.target = remap_endpoint(&edge.target, &endpoint_remap);
+        let (source, mut rewrites) =
+            remap_endpoint_with_evidence(&edge.source, &endpoint_remap, &endpoint_rewrite_evidence);
+        let (target, target_rewrites) =
+            remap_endpoint_with_evidence(&edge.target, &endpoint_remap, &endpoint_rewrite_evidence);
+        edge.source = source;
+        edge.target = target;
+        rewrites.extend(target_rewrites);
+        rewrites.sort_by_key(|rewrite| rewrite.rule);
+        rewrites.dedup_by_key(|rewrite| rewrite.rule);
+        if !rewrites.is_empty() {
+            stamp_graph_endpoint_rewrites(edge, &rewrites);
+        }
         if edge.source == edge.target
             && (doc_remap.contains_key(&remap_endpoint(&original_source, &rekey))
                 || doc_remap.contains_key(&remap_endpoint(&original_target, &rekey)))
@@ -563,6 +607,60 @@ fn remap_endpoint(value: &str, remap: &HashMap<String, String>) -> String {
         remaining -= 1;
     }
     current.to_owned()
+}
+
+fn remap_endpoint_with_evidence(
+    value: &str,
+    remap: &HashMap<String, String>,
+    evidence: &HashMap<String, EndpointRewriteEvidence>,
+) -> (String, Vec<EndpointRewriteEvidence>) {
+    let mut current = value;
+    let mut rewrites = Vec::new();
+    let mut remaining = remap.len() + 1;
+    while remaining > 0 {
+        let Some(next) = remap.get(current) else {
+            break;
+        };
+        if next == current {
+            break;
+        }
+        if let Some(item) = evidence.get(current) {
+            rewrites.push(*item);
+        }
+        current = next;
+        remaining -= 1;
+    }
+    (current.to_owned(), rewrites)
+}
+
+fn stamp_graph_endpoint_rewrites(edge: &mut EdgeRecord, rewrites: &[EndpointRewriteEvidence]) {
+    let Some(primary) = rewrites.first() else {
+        return;
+    };
+    edge.attributes
+        .insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+    edge.attributes.insert(
+        "confidence".to_owned(),
+        Value::String("INFERRED".to_owned()),
+    );
+    edge.attributes
+        .insert("rule".to_owned(), Value::String(primary.rule.to_owned()));
+    edge.attributes
+        .insert("confidence_score".to_owned(), Value::from(primary.score));
+    edge.attributes.insert(
+        "_endpoint_rewrite_rules".to_owned(),
+        Value::Array(
+            rewrites
+                .iter()
+                .map(|rewrite| {
+                    serde_json::json!({
+                        "rule": rewrite.rule,
+                        "score": rewrite.score,
+                    })
+                })
+                .collect(),
+        ),
+    );
 }
 
 fn networkx_edge_order(

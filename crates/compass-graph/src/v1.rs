@@ -285,6 +285,7 @@ pub fn normalize_v1(
     }
     normalize_file_inventory(&mut evidence.files, &evidence.repository_root)?;
     let file_facts = published_file_facts(&evidence)?;
+    split_sourceless_placeholders(&mut extraction, &evidence.repository_root, &file_facts)?;
     let stub_wiring_sites =
         collect_stub_wiring_sites(&extraction.edges, &evidence.repository_root, &file_facts)?;
 
@@ -521,6 +522,129 @@ fn collect_stub_wiring_sites(
         }
     }
     Ok(sites)
+}
+
+fn split_sourceless_placeholders(
+    extraction: &mut Extraction,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> Result<(), GraphError> {
+    let sourceless = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.attributes.get(TRUSTED_NODE_RECORD).is_none()
+                && optional_source_path(&node.attributes, "source_file").is_none()
+                && !node.attributes.contains_key("source_anchor")
+        })
+        .map(|node| node.id.clone())
+        .collect::<BTreeSet<_>>();
+    if sourceless.is_empty() {
+        return Ok(());
+    }
+    let node_attributes = extraction
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), node.attributes.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut scopes = HashMap::<String, BTreeSet<String>>::new();
+    for edge in &extraction.edges {
+        let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
+            continue;
+        };
+        for (endpoint, counterpart) in [(&edge.source, &edge.target), (&edge.target, &edge.source)]
+        {
+            if !sourceless.contains(endpoint) {
+                continue;
+            }
+            let counterpart_attributes = node_attributes.get(counterpart.as_str());
+            scopes
+                .entry(endpoint.clone())
+                .or_default()
+                .insert(placeholder_scope_key(
+                    &edge.attributes,
+                    counterpart_attributes,
+                    &anchor,
+                ));
+        }
+    }
+    let split_ids = scopes
+        .iter()
+        .filter(|(_, values)| values.len() > 1)
+        .map(|(id, values)| {
+            let clones = values
+                .iter()
+                .map(|scope| {
+                    let digest = Sha256::digest(scope.as_bytes());
+                    (scope.clone(), format!("{id}#wiring-{digest:x}"))
+                })
+                .collect::<BTreeMap<_, _>>();
+            (id.clone(), clones)
+        })
+        .collect::<HashMap<_, _>>();
+    if split_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut expanded = Vec::with_capacity(extraction.nodes.len() + split_ids.len());
+    for node in std::mem::take(&mut extraction.nodes) {
+        let Some(clones) = split_ids.get(&node.id) else {
+            expanded.push(node);
+            continue;
+        };
+        for (scope, clone_id) in clones {
+            let mut clone = node.clone();
+            clone.id.clone_from(clone_id);
+            clone
+                .attributes
+                .insert("declaring_scope".to_owned(), Value::String(scope.clone()));
+            expanded.push(clone);
+        }
+    }
+    extraction.nodes = expanded;
+
+    for edge in &mut extraction.edges {
+        let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
+            continue;
+        };
+        let original_source = edge.source.clone();
+        let original_target = edge.target.clone();
+        if let Some(clones) = split_ids.get(&original_source) {
+            let counterpart_attributes = node_attributes.get(&original_target);
+            let scope = placeholder_scope_key(&edge.attributes, counterpart_attributes, &anchor);
+            if let Some(clone_id) = clones.get(&scope) {
+                edge.source.clone_from(clone_id);
+            }
+        }
+        if let Some(clones) = split_ids.get(&original_target) {
+            let counterpart_attributes = node_attributes.get(&original_source);
+            let scope = placeholder_scope_key(&edge.attributes, counterpart_attributes, &anchor);
+            if let Some(clone_id) = clones.get(&scope) {
+                edge.target.clone_from(clone_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn placeholder_scope_key(
+    edge: &Map<String, Value>,
+    counterpart: Option<&Map<String, Value>>,
+    anchor: &SourceAnchor,
+) -> String {
+    let scoped = |keys: &[&str]| {
+        optional_any_string(edge, keys)
+            .or_else(|| counterpart.and_then(|attributes| optional_any_string(attributes, keys)))
+    };
+    [
+        scoped(&["language", "lang"]).unwrap_or_default(),
+        scoped(&["package", "package_name"]).unwrap_or_default(),
+        scoped(&["module", "namespace"]).unwrap_or_default(),
+        anchor.file.clone(),
+        anchor.start_byte.to_string(),
+        anchor.end_byte.to_string(),
+    ]
+    .join("\u{1f}")
 }
 
 fn anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
@@ -1088,7 +1212,7 @@ fn normalize_edge(
     let normalization_rule = heuristic
         .then_some("indirect-call-resolution")
         .or(alias_rule);
-    let evidence = vec![normalize_provenance(
+    let mut evidence = vec![normalize_provenance(
         &raw.attributes,
         relationship_site.clone(),
         &owner,
@@ -1096,6 +1220,33 @@ fn normalize_edge(
         normalization_rule,
         heuristic,
     )?];
+    if let Some(rewrites) = raw
+        .attributes
+        .get("_endpoint_rewrite_rules")
+        .and_then(Value::as_array)
+    {
+        let extractor = optional_string(&raw.attributes, "extractor")
+            .unwrap_or_else(|| "compass.graph.assembly".to_owned());
+        for rewrite in rewrites.iter().skip(1) {
+            let Some(rule) = rewrite.get("rule").and_then(Value::as_str) else {
+                continue;
+            };
+            let provenance = Provenance {
+                origin: EvidenceOrigin::Heuristic,
+                extractor: extractor.clone(),
+                confidence: EvidenceConfidence::Inferred,
+                rule: Some(rule.to_owned()),
+                anchors: Vec::new(),
+                wiring_site: relationship_site.clone(),
+                score: rewrite.get("score").and_then(Value::as_f64),
+                candidates: Vec::new(),
+            };
+            provenance
+                .validate()
+                .map_err(|error| raw_error(&owner, &error.to_string()))?;
+            evidence.push(provenance);
+        }
+    }
     let identity_rule = evidence.iter().find_map(|item| item.rule.as_deref());
     let id = edge_id(
         source,

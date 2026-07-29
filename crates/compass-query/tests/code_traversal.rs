@@ -86,3 +86,29 @@ fn node_trail_never_exceeds_node_or_edge_budgets() -> Result<(), Box<dyn std::er
     assert!(trail.paths.is_empty());
     Ok(())
 }
+
+#[test]
+fn node_trail_excludes_graph_assembly_endpoint_remaps_by_default()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_endpoint_remap_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let request = |include_heuristic| NodeTrailRequest {
+        source: "crate::Caller".to_owned(),
+        target: "crate::Target".to_owned(),
+        include_heuristic,
+        limits: CodeQueryLimits::default(),
+    };
+
+    assert!(engine.node_trail(request(false))?.paths.is_empty());
+    let enriched = engine.node_trail(request(true))?;
+    assert_eq!(enriched.paths.len(), 1);
+    assert!(enriched.edges.iter().any(|edge| {
+        edge.evidence.iter().any(|evidence| {
+            evidence.rule.as_deref() == Some("graph-ghost-endpoint-remap")
+                && evidence.wiring_site.is_some()
+        })
+    }));
+    Ok(())
+}

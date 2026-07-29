@@ -183,3 +183,61 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::write(path, serde_json::to_vec_pretty(&graph)?)?;
     Ok(())
 }
+
+pub fn write_endpoint_remap_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/service.rs"), "fn caller() {}\n")?;
+    fs::write(root.join("src/target.rs"), "fn target() {}\n")?;
+    let extraction: compass_languages::Extraction = serde_json::from_value(serde_json::json!({
+        "nodes": [
+            {
+                "id": "ast_caller",
+                "label": "Caller",
+                "qualified_name": "crate::Caller",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/service.rs",
+                "source_location": "L1",
+                "_origin": "ast"
+            },
+            {
+                "id": "semantic_caller",
+                "label": "Caller",
+                "qualified_name": "crate::Caller",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/service.rs",
+                "source_location": "L1",
+                "_origin": "semantic"
+            },
+            {
+                "id": "target",
+                "label": "Target",
+                "qualified_name": "crate::Target",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/target.rs",
+                "source_location": "L1",
+                "_origin": "ast"
+            }
+        ],
+        "edges": [{
+            "source": "semantic_caller",
+            "target": "target",
+            "relation": "calls",
+            "confidence": "EXTRACTED",
+            "source_file": "src/service.rs",
+            "source_location": "L1",
+            "_origin": "ast",
+            "extractor": "test.rust"
+        }]
+    }))?;
+    let flexible = compass_graph::build_from_extraction(&extraction, true, Some(root));
+    let graph = compass_graph::normalize_document_v1(&flexible, root, "sha256:test", None)?;
+    fs::write(path, serde_json::to_vec_pretty(&graph)?)?;
+    Ok(())
+}

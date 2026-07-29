@@ -28,7 +28,9 @@ unicode-normalization.workspace = true
 libc = "0.2"
 
 [dev-dependencies]
+compass-graph = { path = "../compass-graph", version = "0.1.4" }
 compass-graphdb = { path = "../compass-graphdb", version = "0.1.4" }
+compass-languages = { path = "../compass-languages", version = "0.1.4" }
 tempfile.workspace = true
 
 [lints]

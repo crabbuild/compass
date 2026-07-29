@@ -382,7 +382,7 @@ fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
 /// a JVM edge can still have exactly one JVM definition. This is the same
 /// conservative boundary used by Compass's Java/Groovy resolver.
 fn rewire_unique_family_stubs(extraction: &mut Extraction) {
-    let mut definitions = HashMap::<(String, &'static str), Vec<String>>::new();
+    let mut definitions = HashMap::<(String, &'static str), Vec<(String, String)>>::new();
     let mut stubs = HashMap::<String, String>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
@@ -398,9 +398,37 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
             definitions
                 .entry((label, family))
                 .or_default()
-                .push(node.id.clone());
+                .push((node.id.clone(), source));
         }
     }
+    let imports_by_source = extraction
+        .edges
+        .iter()
+        .filter(|edge| matches!(relation(edge), "imports" | "imports_from"))
+        .fold(
+            HashMap::<String, HashSet<String>>::new(),
+            |mut imports, edge| {
+                imports
+                    .entry(edge.source.clone())
+                    .or_default()
+                    .insert(edge.target.clone());
+                imports
+            },
+        );
+    let imports_by_file = extraction
+        .edges
+        .iter()
+        .filter(|edge| matches!(relation(edge), "imports" | "imports_from"))
+        .fold(
+            HashMap::<String, HashSet<String>>::new(),
+            |mut imports, edge| {
+                imports
+                    .entry(edge.string("source_file"))
+                    .or_default()
+                    .insert(edge.target.clone());
+                imports
+            },
+        );
 
     let repoint_relations = ["implements", "inherits", "extends", "imports", "references"];
     let mut repointed = HashSet::new();
@@ -418,11 +446,24 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         let Some(candidates) = definitions.get(&(label.clone(), family)) else {
             continue;
         };
-        if let [target] = candidates.as_slice()
-            && target != &edge.target
+        let source_scope = repository_scope(&source_file);
+        let compatible = candidates
+            .iter()
+            .filter(|(id, source)| {
+                repository_scope(source) == source_scope
+                    || imports_by_source
+                        .get(&edge.source)
+                        .is_some_and(|targets| targets.contains(id))
+                    || imports_by_file
+                        .get(&source_file)
+                        .is_some_and(|targets| targets.contains(id))
+            })
+            .collect::<Vec<_>>();
+        if let [target] = compatible.as_slice()
+            && target.0 != edge.target
         {
             repointed.insert(edge.target.clone());
-            edge.target.clone_from(target);
+            edge.target.clone_from(&target.0);
             stamp_endpoint_rewrite(edge, "language-family-stub-resolution", 0.9);
         }
     }
@@ -670,7 +711,21 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         .map(|(id, _)| id.as_str())
         .collect::<HashSet<_>>();
     let mut stub_families = HashMap::<String, HashSet<&'static str>>::new();
+    let mut stub_scopes = HashMap::<String, HashSet<String>>::new();
+    let mut stub_consumers = HashMap::<String, HashSet<String>>::new();
+    let mut imports = HashMap::<String, HashSet<String>>::new();
+    let mut imports_by_file = HashMap::<String, HashSet<String>>::new();
     for edge in &extraction.edges {
+        if matches!(relation(edge), "imports" | "imports_from") {
+            imports
+                .entry(edge.source.clone())
+                .or_default()
+                .insert(edge.target.clone());
+            imports_by_file
+                .entry(edge.string("source_file"))
+                .or_default()
+                .insert(edge.target.clone());
+        }
         let Some(family) = language_family(&edge.string("source_file")) else {
             continue;
         };
@@ -680,22 +735,57 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                     .entry(endpoint.clone())
                     .or_default()
                     .insert(family);
+                stub_scopes
+                    .entry(endpoint.clone())
+                    .or_default()
+                    .insert(repository_scope(&edge.string("source_file")));
+                let counterpart = if endpoint == &edge.source {
+                    &edge.target
+                } else {
+                    &edge.source
+                };
+                stub_consumers
+                    .entry(endpoint.clone())
+                    .or_default()
+                    .insert(counterpart.clone());
             }
         }
     }
     let mut remap = HashMap::new();
     for (stub, label) in stubs {
         let families = stub_families.get(&stub);
+        let scopes = stub_scopes.get(&stub);
+        let consumers = stub_consumers.get(&stub);
         let compatible_unique = |items: Option<&Vec<String>>| {
             let compatible = items?
                 .iter()
                 .filter(|candidate| {
-                    let candidate_family = source_by_id
-                        .get(*candidate)
-                        .and_then(|source| language_family(source));
-                    families.is_none_or(HashSet::is_empty)
-                        || candidate_family
-                            .is_some_and(|family| families.is_some_and(|set| set.contains(family)))
+                    let Some(candidate_source) = source_by_id.get(*candidate) else {
+                        return false;
+                    };
+                    let Some(candidate_family) = language_family(candidate_source) else {
+                        return false;
+                    };
+                    let family_compatible = families
+                        .is_some_and(|set| set.len() == 1 && set.contains(candidate_family));
+                    let scope_compatible = scopes.is_some_and(|set| {
+                        set.len() == 1 && set.contains(&repository_scope(candidate_source))
+                    });
+                    let explicitly_imported = consumers.is_some_and(|consumers| {
+                        consumers.iter().any(|consumer| {
+                            imports
+                                .get(consumer)
+                                .is_some_and(|targets| targets.contains(*candidate))
+                        })
+                    }) || scopes.is_some_and(|_| {
+                        extraction.edges.iter().any(|edge| {
+                            (edge.source == stub || edge.target == stub)
+                                && imports_by_file
+                                    .get(&edge.string("source_file"))
+                                    .is_some_and(|targets| targets.contains(*candidate))
+                        })
+                    });
+                    family_compatible && (scope_compatible || explicitly_imported)
                 })
                 .collect::<Vec<_>>();
             (compatible.len() == 1).then(|| compatible[0].clone())
@@ -2034,6 +2124,14 @@ fn stamp_endpoint_rewrite(edge: &mut EdgeRecord, rule: &str, score: f64) {
         .insert("rule".to_owned(), Value::String(rule.to_owned()));
 }
 
+fn repository_scope(source: &str) -> String {
+    Path::new(source)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn string_attribute(node: &NodeRecord, key: &str) -> String {
     node.attributes
         .get(key)
@@ -2816,6 +2914,115 @@ mod tests {
 
         assert_eq!(extraction.edges[0].target, "rust-result");
         assert_eq!(extraction.edges[1].target, "rust-image");
+    }
+
+    #[test]
+    fn stub_rewiring_requires_compatible_repository_scope() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "package-b-base",
+                    "Base",
+                    "packages/b/src/Base.java",
+                    "class",
+                ),
+                node("base", "Base", "", "stub"),
+                node(
+                    "package-a-child",
+                    "Child",
+                    "packages/a/src/Child.java",
+                    "class",
+                ),
+            ],
+            edges: vec![edge(
+                "package-a-child",
+                "base",
+                "extends",
+                "packages/a/src/Child.java",
+            )],
+            ..Extraction::default()
+        };
+
+        rewire_unique_family_stubs(&mut extraction);
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[0].target, "base");
+        assert!(extraction.nodes.iter().any(|node| node.id == "base"));
+    }
+
+    #[test]
+    fn stub_rewiring_retains_unknown_language_and_scope_as_unresolved() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "definition",
+                    "Shared",
+                    "packages/b/definition.custom",
+                    "class",
+                ),
+                node("shared", "Shared", "", "stub"),
+                node(
+                    "consumer",
+                    "Consumer",
+                    "packages/a/consumer.custom",
+                    "class",
+                ),
+            ],
+            edges: vec![edge(
+                "consumer",
+                "shared",
+                "references",
+                "packages/a/consumer.custom",
+            )],
+            ..Extraction::default()
+        };
+
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[0].target, "shared");
+        assert!(extraction.nodes.iter().any(|node| node.id == "shared"));
+    }
+
+    #[test]
+    fn explicit_import_evidence_allows_cross_scope_stub_rewiring() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "package-b-base",
+                    "Base",
+                    "packages/b/src/Base.java",
+                    "class",
+                ),
+                node("base", "Base", "", "stub"),
+                node(
+                    "package-a-child",
+                    "Child",
+                    "packages/a/src/Child.java",
+                    "class",
+                ),
+            ],
+            edges: vec![
+                edge(
+                    "package-a-child",
+                    "package-b-base",
+                    "imports",
+                    "packages/a/src/Child.java",
+                ),
+                edge(
+                    "package-a-child",
+                    "base",
+                    "extends",
+                    "packages/a/src/Child.java",
+                ),
+            ],
+            ..Extraction::default()
+        };
+
+        rewire_unique_family_stubs(&mut extraction);
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[1].target, "package-b-base");
+        assert!(extraction.nodes.iter().all(|node| node.id != "base"));
     }
 
     #[test]

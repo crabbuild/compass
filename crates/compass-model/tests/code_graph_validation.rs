@@ -207,6 +207,7 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
         (EdgeKind::Contains, NodeKind::Function, NodeKind::File),
         (EdgeKind::Calls, NodeKind::File, NodeKind::Class),
         (EdgeKind::Imports, NodeKind::Variable, NodeKind::Function),
+        (EdgeKind::Imports, NodeKind::ConfigKey, NodeKind::Method),
         (EdgeKind::Extends, NodeKind::Class, NodeKind::Function),
         (EdgeKind::Implements, NodeKind::Class, NodeKind::Class),
         (EdgeKind::TypeOf, NodeKind::Variable, NodeKind::Function),
@@ -214,6 +215,11 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
         (EdgeKind::Reads, NodeKind::Route, NodeKind::Class),
         (EdgeKind::Handles, NodeKind::Variable, NodeKind::Event),
         (EdgeKind::Publishes, NodeKind::Variable, NodeKind::Message),
+        (
+            EdgeKind::Publishes,
+            NodeKind::DatabaseView,
+            NodeKind::Message,
+        ),
         (EdgeKind::Schedules, NodeKind::Variable, NodeKind::Job),
         (EdgeKind::Documents, NodeKind::Variable, NodeKind::Class),
         (

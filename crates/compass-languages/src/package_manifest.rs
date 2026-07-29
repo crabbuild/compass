@@ -61,12 +61,25 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         attributes,
     });
     let mut seen = HashSet::new();
+    let mut diagnostics = Vec::new();
     for dependency in info.dependencies {
         if dependency.is_empty() {
             continue;
         }
         let dependency_id = package_id(&dependency);
-        if dependency_id == package_node_id || !seen.insert(dependency_id.clone()) {
+        if dependency_id == package_node_id {
+            diagnostics.push(json!({
+                "severity": "warning",
+                "code": "suppressed_dependency_self_loop",
+                "message": format!(
+                    "ignored self-dependency {dependency:?} declared by package {:?}",
+                    info.name
+                ),
+                "relatedIds": [package_node_id.clone()]
+            }));
+            continue;
+        }
+        if !seen.insert(dependency_id.clone()) {
             continue;
         }
         extraction.nodes.push(NodeRecord {
@@ -97,6 +110,12 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             target: dependency_id,
             attributes,
         });
+    }
+    if !diagnostics.is_empty() {
+        extraction.extensions.insert(
+            "_compass_v1_graph_diagnostics".to_owned(),
+            Value::Array(diagnostics),
+        );
     }
     Ok(extraction)
 }

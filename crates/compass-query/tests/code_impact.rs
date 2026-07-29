@@ -77,3 +77,29 @@ fn impact_applies_edge_and_node_budgets_before_publishing_records()
     }));
     Ok(())
 }
+
+#[test]
+fn impact_excludes_graph_assembly_endpoint_remaps_by_default()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_endpoint_remap_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let request = |include_heuristic| ImpactRequest {
+        symbol: "crate::Target".to_owned(),
+        include_heuristic,
+        limits: CodeQueryLimits::default(),
+    };
+
+    let exact = engine.impact(request(false))?;
+    assert!(!exact.nodes.iter().any(|node| node.name == "Caller"));
+    let enriched = engine.impact(request(true))?;
+    assert!(enriched.nodes.iter().any(|node| node.name == "Caller"));
+    assert!(enriched.edges.iter().any(|edge| {
+        edge.evidence.iter().any(|evidence| {
+            evidence.rule.as_deref() == Some("graph-ghost-endpoint-remap")
+                && evidence.wiring_site.is_some()
+        })
+    }));
+    Ok(())
+}

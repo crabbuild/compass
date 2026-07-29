@@ -1300,8 +1300,10 @@ version = "0.1.10"
 dependencies = [
  "compass-analysis",
  "compass-cypher",
+ "compass-graph",
  "compass-graphdb",
  "compass-ir",
+ "compass-languages",
  "compass-model",
  "libc",
  "regex",
