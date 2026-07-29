@@ -428,7 +428,35 @@ fn endpoint_kinds_are_valid(
     target: &crate::code_graph::NodeRecord,
 ) -> bool {
     match kind {
-        EdgeKind::Extends | EdgeKind::Implements => source.kind.is_type(),
+        EdgeKind::Contains => source.kind.is_container(),
+        EdgeKind::Calls => source.kind.is_callable() && target.kind.is_callable(),
+        EdgeKind::Imports => {
+            matches!(
+                source.kind,
+                NodeKind::File
+                    | NodeKind::Module
+                    | NodeKind::Package
+                    | NodeKind::Namespace
+                    | NodeKind::Import
+            )
+        }
+        EdgeKind::Exports => source.kind.is_container() || source.kind == NodeKind::Export,
+        EdgeKind::Extends => source.kind.is_type() && target.kind.is_type(),
+        EdgeKind::Implements => {
+            source.kind.is_type()
+                && matches!(
+                    target.kind,
+                    NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
+                )
+        }
+        EdgeKind::TypeOf => target.kind.is_type(),
+        EdgeKind::Returns => source.kind.is_callable(),
+        EdgeKind::Instantiates => source.kind.is_callable() && target.kind.is_constructible(),
+        EdgeKind::Overrides => source.kind.is_callable() && target.kind.is_callable(),
+        EdgeKind::Decorates => {
+            matches!(source.kind, NodeKind::Annotation | NodeKind::Macro)
+                || matches!(target.kind, NodeKind::Annotation | NodeKind::Macro)
+        }
         EdgeKind::RoutesTo => {
             source.kind == NodeKind::Route
                 && matches!(
@@ -442,35 +470,100 @@ fn endpoint_kinds_are_valid(
         }
         EdgeKind::MapsTo => {
             matches!(
+                source.kind,
+                NodeKind::Class
+                    | NodeKind::Struct
+                    | NodeKind::Schema
+                    | NodeKind::DatabaseTable
+                    | NodeKind::DatabaseView
+            ) && matches!(
                 target.kind,
                 NodeKind::DatabaseTable | NodeKind::DatabaseView
             )
         }
-        EdgeKind::Contains
-        | EdgeKind::Calls
-        | EdgeKind::Imports
-        | EdgeKind::Exports
-        | EdgeKind::TypeOf
-        | EdgeKind::Returns
-        | EdgeKind::Instantiates
-        | EdgeKind::Overrides
-        | EdgeKind::References
-        | EdgeKind::Decorates
-        | EdgeKind::Reads
-        | EdgeKind::Writes
-        | EdgeKind::Aliases
-        | EdgeKind::Registers
-        | EdgeKind::Handles
-        | EdgeKind::Publishes
-        | EdgeKind::Subscribes
-        | EdgeKind::Produces
-        | EdgeKind::Consumes
-        | EdgeKind::Schedules
-        | EdgeKind::Triggers
-        | EdgeKind::Tests
-        | EdgeKind::DependsOn
-        | EdgeKind::Documents => true,
+        EdgeKind::Reads | EdgeKind::Writes => is_executable(source.kind) && is_data(target.kind),
+        EdgeKind::Aliases => {
+            matches!(
+                source.kind,
+                NodeKind::Import | NodeKind::Export | NodeKind::TypeAlias
+            )
+        }
+        EdgeKind::Registers => is_executable(source.kind) || source.kind.is_container(),
+        EdgeKind::Handles => {
+            is_executable(source.kind)
+                && matches!(
+                    target.kind,
+                    NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue
+                )
+        }
+        EdgeKind::Publishes | EdgeKind::Produces => {
+            is_executable(source.kind)
+                && matches!(
+                    target.kind,
+                    NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue
+                )
+        }
+        EdgeKind::Subscribes | EdgeKind::Consumes => {
+            matches!(
+                source.kind,
+                NodeKind::Function
+                    | NodeKind::Method
+                    | NodeKind::Component
+                    | NodeKind::Job
+                    | NodeKind::Queue
+            ) && matches!(
+                target.kind,
+                NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue
+            )
+        }
+        EdgeKind::Schedules | EdgeKind::Triggers => {
+            is_executable(source.kind)
+                && matches!(
+                    target.kind,
+                    NodeKind::Function
+                        | NodeKind::Method
+                        | NodeKind::Job
+                        | NodeKind::Event
+                        | NodeKind::DatabaseTrigger
+                )
+        }
+        EdgeKind::Tests => {
+            matches!(
+                source.kind,
+                NodeKind::File | NodeKind::Function | NodeKind::Method | NodeKind::Class
+            )
+        }
+        EdgeKind::Documents => source.kind == NodeKind::Resource,
+        EdgeKind::References | EdgeKind::DependsOn => true,
     }
+}
+
+const fn is_executable(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || matches!(
+            kind,
+            NodeKind::Component | NodeKind::Job | NodeKind::Query | NodeKind::DatabaseTrigger
+        )
+}
+
+const fn is_data(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Property
+            | NodeKind::Field
+            | NodeKind::Variable
+            | NodeKind::Constant
+            | NodeKind::Parameter
+            | NodeKind::Resource
+            | NodeKind::Schema
+            | NodeKind::Query
+            | NodeKind::ConfigKey
+            | NodeKind::Database
+            | NodeKind::DatabaseSchema
+            | NodeKind::DatabaseTable
+            | NodeKind::DatabaseView
+            | NodeKind::DatabaseColumn
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

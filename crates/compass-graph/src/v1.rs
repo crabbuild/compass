@@ -24,6 +24,11 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+const TRUSTED_NODE_RECORD: &str = "_compass_v1_node_record";
+const TRUSTED_EDGE_RECORD: &str = "_compass_v1_edge_record";
+const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
+const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
+
 #[derive(Clone, Debug)]
 pub struct BuildEvidence {
     pub repository_root: PathBuf,
@@ -31,6 +36,13 @@ pub struct BuildEvidence {
     pub files: Vec<FileRecord>,
     pub coverage: Vec<CoverageRecord>,
     pub diagnostics: Vec<GraphDiagnostic>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InventoryEvidence {
+    pub path: PathBuf,
+    pub status: ExtractionStatus,
+    pub reason: Option<String>,
 }
 
 impl BuildEvidence {
@@ -158,6 +170,82 @@ impl BuildEvidence {
             diagnostics: Vec::new(),
         })
     }
+
+    pub fn include_inventory(
+        &mut self,
+        inventory: impl IntoIterator<Item = InventoryEvidence>,
+    ) -> Result<(), GraphError> {
+        for item in inventory {
+            let path = portable_path(&item.path.to_string_lossy(), &self.repository_root)?;
+            let absolute = self.repository_root.join(&path);
+            if !absolute.is_file() {
+                continue;
+            }
+            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                path: absolute,
+                source,
+            })?;
+            let record = FileRecord {
+                id: file_id(&path),
+                path: path.clone(),
+                language: None,
+                content_digest: sha256_prefixed(&bytes),
+                byte_size: bytes.len() as u64,
+                generated: item.status == ExtractionStatus::Generated,
+                extraction_status: item.status,
+                extractor_versions: vec![format!(
+                    "compass-languages/{}",
+                    env!("CARGO_PKG_VERSION")
+                )],
+                coverage: Vec::new(),
+                diagnostics: Vec::new(),
+            };
+            if let Some(existing) = self.files.iter_mut().find(|file| file.path == path) {
+                *existing = record;
+            } else {
+                self.files.push(record);
+            }
+            self.coverage.push(CoverageRecord {
+                capability: "file_inventory".to_owned(),
+                producer: "compass.files.detect".to_owned(),
+                status: match item.status {
+                    ExtractionStatus::Extracted => CoverageStatus::Complete,
+                    ExtractionStatus::Partial => CoverageStatus::Partial,
+                    ExtractionStatus::Unsupported => CoverageStatus::Unsupported,
+                    ExtractionStatus::Excluded => CoverageStatus::Excluded,
+                    ExtractionStatus::ParseFailure => CoverageStatus::Failed,
+                    ExtractionStatus::Generated | ExtractionStatus::Binary => {
+                        CoverageStatus::Indeterminate
+                    }
+                },
+                file_id: Some(file_id(&path)),
+                reason: item.reason,
+                anchor: None,
+            });
+        }
+        self.files.sort_by(|left, right| left.path.cmp(&right.path));
+        let mut source_tree = Sha256::new();
+        for file in &self.files {
+            source_tree.update((file.path.len() as u64).to_le_bytes());
+            source_tree.update(file.path.as_bytes());
+            source_tree.update((file.content_digest.len() as u64).to_le_bytes());
+            source_tree.update(file.content_digest.as_bytes());
+        }
+        self.build.source_tree_digest = format!("sha256:{:x}", source_tree.finalize());
+        let mut generation = Sha256::new();
+        for value in [
+            compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
+            self.build.builder_version.as_str(),
+            self.build.schema_fingerprint.as_str(),
+            self.build.source_tree_digest.as_str(),
+            self.build.configuration_digest.as_str(),
+        ] {
+            generation.update((value.len() as u64).to_le_bytes());
+            generation.update(value.as_bytes());
+        }
+        self.build.generation_id = format!("sha256:{:x}", generation.finalize());
+        Ok(())
+    }
 }
 
 fn coverage_producer(attributes: &Map<String, Value>) -> String {
@@ -180,9 +268,21 @@ fn coverage_file_id(
 
 /// Publish resolved raw facts as a validated, deterministic Compass graph v1 document.
 pub fn normalize_v1(
-    extraction: Extraction,
+    mut extraction: Extraction,
     mut evidence: BuildEvidence,
 ) -> Result<GraphDocument, GraphError> {
+    if let Some(value) = extraction.extensions.remove(TRUSTED_GRAPH_COVERAGE) {
+        let mut coverage = serde_json::from_value::<Vec<CoverageRecord>>(value)
+            .map_err(|error| raw_error("graph.coverage", &error.to_string()))?;
+        evidence.coverage.append(&mut coverage);
+        sort_dedup_serialized(&mut evidence.coverage);
+    }
+    if let Some(value) = extraction.extensions.remove(TRUSTED_GRAPH_DIAGNOSTICS) {
+        let mut diagnostics = serde_json::from_value::<Vec<GraphDiagnostic>>(value)
+            .map_err(|error| raw_error("graph.diagnostics", &error.to_string()))?;
+        evidence.diagnostics.append(&mut diagnostics);
+        sort_dedup_serialized(&mut evidence.diagnostics);
+    }
     normalize_file_inventory(&mut evidence.files, &evidence.repository_root)?;
     let file_facts = published_file_facts(&evidence)?;
     let stub_wiring_sites =
@@ -197,12 +297,16 @@ pub fn normalize_v1(
                 "duplicate raw node ID cannot be resolved deterministically",
             ));
         }
-        let node = normalize_node(
-            raw.clone(),
-            &evidence.repository_root,
-            &file_facts,
-            stub_wiring_sites.get(&raw.id),
-        )?;
+        let node = match raw.attributes.get(TRUSTED_NODE_RECORD) {
+            Some(value) => serde_json::from_value::<NodeRecord>(value.clone())
+                .map_err(|error| raw_error(&raw.id, &error.to_string()))?,
+            None => normalize_node(
+                raw.clone(),
+                &evidence.repository_root,
+                &file_facts,
+                stub_wiring_sites.get(&raw.id),
+            )?,
+        };
         id_remap.insert(raw.id, node.id.clone());
         if let Some(existing) = nodes.get_mut(&node.id) {
             merge_normalized_node(existing, node)?;
@@ -242,14 +346,32 @@ pub fn normalize_v1(
                 &format!("target {} does not match a raw node", raw.target),
             )
         })?;
-        let edge = normalize_edge(
-            raw,
-            source,
-            target,
-            index,
-            &evidence.repository_root,
-            &file_facts,
-        )?;
+        let edge = match raw.attributes.get(TRUSTED_EDGE_RECORD) {
+            Some(value) => {
+                let mut edge = serde_json::from_value::<EdgeRecord>(value.clone())
+                    .map_err(|error| raw_error(&format!("edge[{index}]"), &error.to_string()))?;
+                edge.source.clone_from(source);
+                edge.target.clone_from(target);
+                let identity_rule = edge.evidence.iter().find_map(|item| item.rule.as_deref());
+                edge.id = edge_id(
+                    source,
+                    edge.kind,
+                    target,
+                    edge.relationship_site.as_ref(),
+                    identity_rule,
+                );
+                edge.key.clone_from(&edge.id);
+                edge
+            }
+            None => normalize_edge(
+                raw,
+                source,
+                target,
+                index,
+                &evidence.repository_root,
+                &file_facts,
+            )?,
+        };
         if edge.source == edge.target
             && matches!(
                 edge.kind,
@@ -478,6 +600,22 @@ pub fn normalize_document_v1(
     configuration_digest: impl Into<String>,
     source_commit: Option<&str>,
 ) -> Result<GraphDocument, GraphError> {
+    normalize_document_v1_with_inventory(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        Vec::new(),
+    )
+}
+
+pub fn normalize_document_v1_with_inventory(
+    document: &compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<GraphDocument, GraphError> {
     let extraction = Extraction {
         nodes: document
             .nodes
@@ -500,6 +638,7 @@ pub fn normalize_document_v1(
     };
     let mut evidence =
         BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    evidence.include_inventory(inventory)?;
     evidence.build.source_commit = source_commit.map(str::to_owned);
     normalize_v1(extraction, evidence)
 }
@@ -507,9 +646,19 @@ pub fn normalize_document_v1(
 /// Project trusted v1 records back into flexible facts for incremental recomposition.
 #[must_use]
 pub fn extraction_from_v1(document: &GraphDocument) -> Extraction {
+    let mut extensions = Map::new();
+    extensions.insert(
+        TRUSTED_GRAPH_COVERAGE.to_owned(),
+        serde_json::to_value(&document.graph.coverage).unwrap_or(Value::Null),
+    );
+    extensions.insert(
+        TRUSTED_GRAPH_DIAGNOSTICS.to_owned(),
+        serde_json::to_value(&document.graph.diagnostics).unwrap_or(Value::Null),
+    );
     Extraction {
         nodes: document.nodes.iter().map(raw_node_from_v1).collect(),
         edges: document.links.iter().map(raw_edge_from_v1).collect(),
+        extensions,
         ..Extraction::default()
     }
 }
@@ -535,6 +684,10 @@ fn raw_node_from_v1(node: &NodeRecord) -> RawNodeRecord {
     if let Some(details) = &node.details {
         insert_raw_node_details(&mut attributes, details);
     }
+    attributes.insert(
+        TRUSTED_NODE_RECORD.to_owned(),
+        serde_json::to_value(node).unwrap_or(Value::Null),
+    );
     RawNodeRecord {
         id: node.id.clone(),
         attributes,
@@ -558,6 +711,10 @@ fn raw_edge_from_v1(edge: &EdgeRecord) -> RawEdgeRecord {
     if let Some(details) = &edge.details {
         insert_raw_edge_details(&mut attributes, details);
     }
+    attributes.insert(
+        TRUSTED_EDGE_RECORD.to_owned(),
+        serde_json::to_value(edge).unwrap_or(Value::Null),
+    );
     RawEdgeRecord {
         source: edge.source.clone(),
         target: edge.target.clone(),
@@ -1329,7 +1486,7 @@ fn node_identity(
     qualified_name: &str,
     record: &str,
     details: Option<&NodeDetails>,
-    source: Option<&SourceAnchor>,
+    _source: Option<&SourceAnchor>,
 ) -> Result<String, GraphError> {
     let id = match kind {
         NodeKind::File => file_id(source_path),
@@ -1380,22 +1537,19 @@ fn node_identity(
         | NodeKind::Schema
         | NodeKind::Query
         | NodeKind::ConfigKey => {
-            let mut namespace =
+            let namespace =
                 optional_string(attributes, "namespace").unwrap_or_else(|| source_path.to_owned());
-            if let Some(anchor) = source {
-                namespace.push_str(&format!("@{}:{}", anchor.start_byte, anchor.end_byte));
-            }
             domain_id(kind, &namespace, qualified_name)
         }
         _ => {
             let overload =
                 optional_any_string(attributes, &["overload_discriminator", "signature_hash"]);
-            let position =
-                source.map(|anchor| format!("{}:{}", anchor.start_byte, anchor.end_byte));
-            let disambiguator = match (overload, position) {
-                (Some(overload), Some(position)) => format!("{overload}@{position}"),
-                (Some(overload), None) => overload,
-                (None, Some(position)) => position,
+            let lexical_owner =
+                optional_any_string(attributes, &["lexical_owner", "declaring_scope"]);
+            let disambiguator = match (lexical_owner, overload) {
+                (Some(owner), Some(overload)) => format!("{owner}::{overload}"),
+                (Some(owner), None) => owner,
+                (None, Some(overload)) => overload,
                 (None, None) => String::new(),
             };
             symbol_id(

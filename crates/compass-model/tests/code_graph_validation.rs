@@ -141,6 +141,41 @@ fn whole_document_validation_rejects_an_invalid_endpoint_kind_pair() {
 }
 
 #[test]
+fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
+    for (kind, source_kind, target_kind) in [
+        (EdgeKind::Contains, NodeKind::Function, NodeKind::File),
+        (EdgeKind::Calls, NodeKind::File, NodeKind::Function),
+        (EdgeKind::Imports, NodeKind::Function, NodeKind::Function),
+        (EdgeKind::Extends, NodeKind::Class, NodeKind::Function),
+        (EdgeKind::Implements, NodeKind::Class, NodeKind::Class),
+        (EdgeKind::TypeOf, NodeKind::Variable, NodeKind::Function),
+        (EdgeKind::Instantiates, NodeKind::File, NodeKind::Class),
+        (EdgeKind::Reads, NodeKind::Route, NodeKind::Class),
+        (EdgeKind::Handles, NodeKind::Variable, NodeKind::Event),
+        (EdgeKind::Publishes, NodeKind::Variable, NodeKind::Message),
+        (EdgeKind::Schedules, NodeKind::Variable, NodeKind::Job),
+        (EdgeKind::Documents, NodeKind::Variable, NodeKind::Class),
+        (
+            EdgeKind::MapsTo,
+            NodeKind::Function,
+            NodeKind::DatabaseTable,
+        ),
+    ] {
+        let mut graph = document();
+        graph.nodes[0].kind = source_kind;
+        graph.nodes[1].kind = target_kind;
+        graph.links[0].kind = kind;
+        let id = edge_id("route", kind, "handler", Some(&anchor()), None);
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_err(),
+            "{kind:?} accepted {source_kind:?} -> {target_kind:?}"
+        );
+    }
+}
+
+#[test]
 fn heuristic_and_ambiguous_provenance_require_auditable_evidence() {
     let invalid = Provenance {
         origin: EvidenceOrigin::Heuristic,

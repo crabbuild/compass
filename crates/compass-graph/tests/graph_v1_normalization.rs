@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::Path;
 
-use compass_graph::{BuildEvidence, extraction_from_v1, normalize_v1};
+use compass_graph::{BuildEvidence, InventoryEvidence, extraction_from_v1, normalize_v1};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
-use compass_model::code_graph::{BuildMetadata, EdgeKind, ExtractionStatus, FileRecord, NodeKind};
+use compass_model::code_graph::{
+    BuildMetadata, CoverageRecord, CoverageStatus, DiagnosticSeverity, EdgeKind, ExtractionStatus,
+    FileRecord, GraphDiagnostic, NodeKind,
+};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -105,6 +108,43 @@ fn normalization_is_root_portable_order_independent_and_auditable()
         Some("indirect-call-resolution")
     );
     assert!(left.links[0].evidence[0].wiring_site.is_some());
+    Ok(())
+}
+
+#[test]
+fn symbol_identity_survives_leading_source_insertions() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut before = extraction(root);
+    let mut after = extraction(root);
+    for graph in [&mut before, &mut after] {
+        graph.nodes[0].attributes.insert(
+            "signature_hash".to_owned(),
+            json!("sha256:caller-signature"),
+        );
+        graph.nodes[0]
+            .attributes
+            .insert("lexical_owner".to_owned(), json!("crate"));
+    }
+    after.nodes[0]
+        .attributes
+        .insert("source_anchor".to_owned(), anchor(root, 110));
+
+    let before = normalize_v1(before, build_evidence(root)?)?;
+    let after = normalize_v1(after, build_evidence(root)?)?;
+    let before_id = &before
+        .nodes
+        .iter()
+        .find(|node| node.name == "caller")
+        .ok_or("missing caller")?
+        .id;
+    let after_id = &after
+        .nodes
+        .iter()
+        .find(|node| node.name == "caller")
+        .ok_or("missing caller")?
+        .id;
+    assert_eq!(before_id, after_id);
     Ok(())
 }
 
@@ -252,5 +292,112 @@ fn build_evidence_derives_digests_generation_and_byte_anchors()
     let rebuilt = normalize_v1(projected, rebuilt_evidence)?;
     assert_eq!(rebuilt.nodes, graph.nodes);
     assert_eq!(rebuilt.links, graph.links);
+    Ok(())
+}
+
+#[test]
+fn typed_incremental_projection_preserves_all_trusted_fields()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut graph = normalize_v1(extraction(root), build_evidence(root)?)?;
+    let mut second_evidence = graph.nodes[0].evidence[0].clone();
+    second_evidence.extractor = "test.second".to_owned();
+    graph.nodes[0].evidence.push(second_evidence);
+    let node_anchor = graph.nodes[0].source.clone();
+    let node_id = graph.nodes[0].id.clone();
+    let edge_anchor = graph.links[0].relationship_site.clone();
+    let edge_id = graph.links[0].id.clone();
+    graph.nodes[0].coverage.push(CoverageRecord {
+        capability: "node:function".to_owned(),
+        producer: "test.second".to_owned(),
+        status: CoverageStatus::Partial,
+        file_id: graph.graph.files.first().map(|file| file.id.clone()),
+        reason: Some("fixture partial".to_owned()),
+        anchor: node_anchor.clone(),
+    });
+    graph.nodes[0].diagnostics.push(GraphDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "fixture_node_warning".to_owned(),
+        message: "node warning".to_owned(),
+        anchor: node_anchor,
+        related_ids: vec![node_id],
+    });
+    graph.links[0].diagnostics.push(GraphDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "fixture_edge_warning".to_owned(),
+        message: "edge warning".to_owned(),
+        anchor: edge_anchor,
+        related_ids: vec![edge_id],
+    });
+    graph
+        .graph
+        .coverage
+        .push(graph.nodes[0].coverage[0].clone());
+    graph
+        .graph
+        .diagnostics
+        .push(graph.nodes[0].diagnostics[0].clone());
+
+    let projected = extraction_from_v1(&graph);
+    let rebuilt = normalize_v1(projected, build_evidence(root)?)?;
+    assert_eq!(rebuilt.nodes, graph.nodes);
+    assert_eq!(rebuilt.links, graph.links);
+    assert_eq!(rebuilt.graph.coverage, graph.graph.coverage);
+    assert_eq!(rebuilt.graph.diagnostics, graph.graph.diagnostics);
+    Ok(())
+}
+
+#[test]
+fn inventory_includes_detected_files_that_produced_no_facts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    for name in ["unsupported.xyz", "partial.rs", "generated.rs", "broken.rs"] {
+        fs::write(root.join(name), "opaque")?;
+    }
+    let extraction = Extraction::default();
+    let mut evidence = BuildEvidence::from_extraction(root, &extraction, "config")?;
+    evidence.include_inventory([
+        InventoryEvidence {
+            path: root.join("unsupported.xyz"),
+            status: ExtractionStatus::Unsupported,
+            reason: Some("no extractor".to_owned()),
+        },
+        InventoryEvidence {
+            path: root.join("partial.rs"),
+            status: ExtractionStatus::Partial,
+            reason: Some("partial semantic extraction".to_owned()),
+        },
+        InventoryEvidence {
+            path: root.join("generated.rs"),
+            status: ExtractionStatus::Generated,
+            reason: None,
+        },
+        InventoryEvidence {
+            path: root.join("broken.rs"),
+            status: ExtractionStatus::ParseFailure,
+            reason: Some("parser failed".to_owned()),
+        },
+    ])?;
+    let document = normalize_v1(extraction, evidence)?;
+    assert_eq!(document.graph.files.len(), 4);
+    for (status, coverage_status) in [
+        (ExtractionStatus::Unsupported, CoverageStatus::Unsupported),
+        (ExtractionStatus::Partial, CoverageStatus::Partial),
+        (ExtractionStatus::Generated, CoverageStatus::Indeterminate),
+        (ExtractionStatus::ParseFailure, CoverageStatus::Failed),
+    ] {
+        let file = document
+            .graph
+            .files
+            .iter()
+            .find(|file| file.extraction_status == status)
+            .ok_or("missing inventory status")?;
+        assert!(document.graph.coverage.iter().any(|coverage| {
+            coverage.file_id.as_deref() == Some(file.id.as_str())
+                && coverage.status == coverage_status
+        }));
+    }
     Ok(())
 }

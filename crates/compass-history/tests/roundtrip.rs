@@ -10,6 +10,7 @@ use compass_ir::{
     hex_sha256,
 };
 use compass_model::GraphDocument;
+use prolly::VersionedValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -40,6 +41,47 @@ fn empty_trusted_artifacts() -> Result<GraphArtifacts, Box<dyn std::error::Error
         canonical_json_bytes(&empty_trusted_graph())?,
     )?;
     Ok(GraphArtifacts::load(directory.path())?)
+}
+
+#[test]
+fn trusted_graph_partitions_store_full_typed_node_records() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let mut graph = empty_trusted_graph();
+    graph["nodes"] = json!([{
+        "id":"symbol:test",
+        "kind":"function",
+        "name":"test",
+        "qualifiedName":"fixture.test",
+        "evidence":[{
+            "origin":"semantic",
+            "extractor":"fixture",
+            "confidence":"exact"
+        }],
+        "coverage":[{
+            "capability":"node:function",
+            "producer":"fixture",
+            "status":"partial",
+            "reason":"fixture"
+        }],
+        "diagnostics":[{
+            "severity":"warning",
+            "code":"fixture",
+            "message":"fixture warning"
+        }]
+    }]);
+    std::fs::write(
+        directory.path().join("graph.json"),
+        canonical_json_bytes(&graph)?,
+    )?;
+    let partition = GraphArtifacts::load(directory.path())?.partition(&completion())?;
+    let record = VersionedValue::from_bytes(&partition.nodes[0].1)?;
+    assert_eq!(record.schema, "compass.graph.node.v1");
+    let payload: Value = serde_json::from_slice(&record.payload)?;
+    assert_eq!(payload["evidence"][0]["origin"], "semantic");
+    assert_eq!(payload["coverage"][0]["status"], "partial");
+    assert_eq!(payload["diagnostics"][0]["code"], "fixture");
+    Ok(())
 }
 
 fn completion() -> CompletionEvidence {
