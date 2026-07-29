@@ -15,8 +15,8 @@ use compass_languages::{
     is_language_builtin_global, make_id,
 };
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
-    preserve_occurrence_rule,
+    EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE,
+    append_endpoint_rewrite_evidence, preserve_occurrence_rule,
 };
 use rayon::prelude::*;
 use regex::Regex;
@@ -1331,6 +1331,21 @@ fn resolve_python_import_guided_with_calls(
             )
         })
         .collect::<HashSet<_>>();
+    let mut known_import_occurrences = extraction
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.source.clone(),
+                edge.target.clone(),
+                relation(edge).to_owned(),
+                edge.attributes
+                    .get(OCCURRENCE_RULE_ATTRIBUTE)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            )
+        })
+        .collect::<HashSet<_>>();
     let file_nodes = extraction
         .nodes
         .iter()
@@ -1372,7 +1387,15 @@ fn resolve_python_import_guided_with_calls(
             );
             if candidates.len() == 1 {
                 let target = &candidates[0];
-                if known.insert((file_node.clone(), target.clone(), "imports".to_owned())) {
+                if known_import_occurrences.insert((
+                    file_node.clone(),
+                    target.clone(),
+                    "imports".to_owned(),
+                    Some(python_import_occurrence_rule(
+                        PythonImportResolution::SymbolImport,
+                        imported,
+                    )),
+                )) {
                     resolved_edges.push(python_import_edge(
                         file_node,
                         target,
@@ -1387,10 +1410,14 @@ fn resolve_python_import_guided_with_calls(
                 &imported.module,
                 Some(&imported.imported),
                 &normalized_file_nodes,
-            ) && known.insert((
+            ) && known_import_occurrences.insert((
                 file_node.clone(),
                 target.clone(),
                 "imports_from".to_owned(),
+                Some(python_import_occurrence_rule(
+                    PythonImportResolution::SubmoduleImport,
+                    imported,
+                )),
             )) {
                 resolved_edges.push(python_import_edge(
                     file_node,
@@ -1405,7 +1432,15 @@ fn resolve_python_import_guided_with_calls(
                 .and_then(|name| name.to_str())
                 == Some("__init__.py")
                 && let Some(target) = module_file
-                && known.insert((file_node.clone(), target.clone(), "re_exports".to_owned()))
+                && known_import_occurrences.insert((
+                    file_node.clone(),
+                    target.clone(),
+                    "re_exports".to_owned(),
+                    Some(python_import_occurrence_rule(
+                        PythonImportResolution::ModuleReExport,
+                        imported,
+                    )),
+                ))
             {
                 resolved_edges.push(python_import_edge(
                     file_node,
@@ -1540,6 +1575,10 @@ fn python_import_edge(
             "rule".to_owned(),
             Value::String(resolution.rule().to_owned()),
         ),
+        (
+            OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+            Value::String(python_import_occurrence_rule(resolution, imported)),
+        ),
         ("weight".to_owned(), Value::from(1.0)),
     ]);
     insert_python_import_anchor(&mut attributes, source_file, imported);
@@ -1572,6 +1611,21 @@ fn insert_python_import_anchor(
         Value::from(imported.start_column),
     );
     attributes.insert("column_end".to_owned(), Value::from(imported.end_column));
+}
+
+fn python_import_occurrence_rule(
+    resolution: PythonImportResolution,
+    imported: &PythonImport,
+) -> String {
+    format!(
+        "{}@{}:{}:{}:{}:{}",
+        resolution.rule(),
+        imported.start_byte,
+        imported.end_byte,
+        imported.occurrence,
+        imported.imported,
+        imported.local
+    )
 }
 
 fn python_module_file(
@@ -1744,11 +1798,19 @@ struct PythonImport {
     end_line: usize,
     start_column: usize,
     end_column: usize,
+    occurrence: usize,
+}
+
+struct PythonImportItem {
+    occurrence: usize,
+    imported: String,
+    local: String,
 }
 
 fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     let masked = mask_python_non_code(source);
     let lines = masked.lines().collect::<Vec<_>>();
+    let original_lines = source.lines().collect::<Vec<_>>();
     let line_starts = std::iter::once(0)
         .chain(
             masked
@@ -1762,55 +1824,151 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.trim_start();
-        let Some(rest) = trimmed.strip_prefix("from ") else {
+        if !trimmed.starts_with("from ") {
             index += 1;
             continue;
-        };
-        let Some((module, first_imports)) = rest.split_once(" import ") else {
-            index += 1;
-            continue;
-        };
+        }
         let start_line = index + 1;
         let start_column = line.len() - trimmed.len();
         let start_byte = line_starts[index] + start_column;
-        let mut imports = first_imports.to_owned();
-        while imports.contains('(') && !imports.contains(')') && index + 1 < lines.len() {
+        let mut statement = String::new();
+        let mut depth = 0_usize;
+        let mut malformed = false;
+        loop {
+            let physical = if index + 1 == start_line {
+                lines[index].trim_start()
+            } else {
+                lines[index].trim()
+            };
+            let trimmed_end = physical.trim_end();
+            let continued = trimmed_end.ends_with('\\');
+            if continued
+                && original_lines
+                    .get(index)
+                    .is_none_or(|original| !original.ends_with('\\'))
+            {
+                malformed = true;
+                break;
+            }
+            let logical = if continued {
+                trimmed_end.strip_suffix('\\').unwrap_or(trimmed_end)
+            } else {
+                trimmed_end
+            };
+            if !statement.is_empty() {
+                statement.push(' ');
+            }
+            statement.push_str(logical.trim());
+            for character in logical.chars() {
+                match character {
+                    '(' => depth = depth.saturating_add(1),
+                    ')' if depth == 0 => {
+                        malformed = true;
+                        break;
+                    }
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if malformed || (depth == 0 && !continued) {
+                break;
+            }
+            if index + 1 >= lines.len() || lines[index + 1].trim_start().starts_with("from ") {
+                malformed = true;
+                break;
+            }
             index += 1;
-            imports.push(' ');
-            imports.push_str(lines[index].trim());
         }
         let end_line = index + 1;
         let end_column = lines[index].trim_end().len();
         let end_byte = line_starts[index] + end_column;
-        for item in imports
-            .trim_matches(['(', ')'])
-            .split(',')
-            .map(str::trim)
-            .filter(|item| !item.is_empty() && *item != "*")
+        if !malformed
+            && depth == 0
+            && let Some((module, items)) = parse_python_from_import(&statement)
         {
-            let item = item.split('#').next().unwrap_or_default().trim();
-            let (imported, local) = item
-                .split_once(" as ")
-                .map_or((item, item), |(imported, local)| {
-                    (imported.trim(), local.trim())
-                });
-            if !imported.is_empty() && !local.is_empty() {
+            for item in items {
                 output.push(PythonImport {
-                    module: module.to_owned(),
-                    imported: imported.to_owned(),
-                    local: local.to_owned(),
+                    module: module.clone(),
+                    imported: item.imported,
+                    local: item.local,
                     start_byte,
                     end_byte,
                     start_line,
                     end_line,
                     start_column,
                     end_column,
+                    occurrence: item.occurrence,
                 });
             }
         }
         index += 1;
     }
     output
+}
+
+fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImportItem>)> {
+    let rest = statement.strip_prefix("from ")?;
+    let (module, imports) = rest.split_once(" import ")?;
+    let module = module.trim();
+    if !valid_python_module(module) {
+        return None;
+    }
+    let imports = imports.trim();
+    let (imports, parenthesized) = if let Some(imports) = imports.strip_prefix('(') {
+        (imports.strip_suffix(')')?.trim(), true)
+    } else {
+        (imports, false)
+    };
+    if imports.is_empty() || imports.contains(['(', ')']) {
+        return None;
+    }
+    let pieces = imports.split(',').collect::<Vec<_>>();
+    if !parenthesized && pieces.last().is_some_and(|item| item.trim().is_empty()) {
+        return None;
+    }
+    let piece_count = pieces.len();
+    let mut output = Vec::new();
+    for (occurrence, item) in pieces.into_iter().enumerate() {
+        let item = item.trim();
+        if item.is_empty() {
+            if parenthesized && occurrence + 1 == piece_count {
+                continue;
+            }
+            return None;
+        }
+        if item == "*" {
+            continue;
+        }
+        let parts = item.split_whitespace().collect::<Vec<_>>();
+        let (imported, local) = match parts.as_slice() {
+            [imported] => (*imported, *imported),
+            [imported, "as", local] => (*imported, *local),
+            _ => return None,
+        };
+        if !valid_python_identifier(imported) || !valid_python_identifier(local) {
+            return None;
+        }
+        output.push(PythonImportItem {
+            occurrence,
+            imported: imported.to_owned(),
+            local: local.to_owned(),
+        });
+    }
+    Some((module.to_owned(), output))
+}
+
+fn valid_python_module(module: &str) -> bool {
+    let bare = module.trim_start_matches('.');
+    (!bare.is_empty() || module.starts_with('.'))
+        && (bare.is_empty() || bare.split('.').all(valid_python_identifier))
+}
+
+fn valid_python_identifier(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
 }
 
 fn mask_python_non_code(source: &str) -> String {
