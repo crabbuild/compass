@@ -1139,14 +1139,16 @@ name = "compass-ingest"
 version = "0.1.10"
 dependencies = [
  "compass-files",
- "compass-transcribe",
  "regex",
  "serde_json",
+ "sha1",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.19",
  "time",
  "ureq",
  "url",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -1384,6 +1386,7 @@ dependencies = [
 name = "compass-transcribe"
 version = "0.1.10"
 dependencies = [
+ "compass-ingest",
  "compass-whisper",
  "rubato",
  "serde",

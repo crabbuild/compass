@@ -694,9 +694,18 @@ window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
 window.historyCommunityGraphs=${JSON.stringify(details)};
 window.historyHostMessages=[];
+window.pendingHistoryGraph=null;
 window.historyBootstrapAttempts=0;
 window.historyGeneration=0;
 window.emitHistoryMessage=(message)=>window.postMessage(message,"*");
+window.releaseHistoryGraph=()=>{
+  if(!window.pendingHistoryGraph) {
+    throw new Error("No history graph response is pending");
+  }
+  const response=window.pendingHistoryGraph;
+  window.pendingHistoryGraph=null;
+  window.postMessage(response,"*");
+};
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.historyHostMessages.push(message);
   if(message.type==="ready" || message.type==="retryTimeline") {
@@ -733,7 +742,7 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     },120);
   } else if(message.type==="loadRevision") {
     const loadScenario=new URLSearchParams(window.location.search).get("load");
-    const delay=loadScenario==="slow" ? 500 : message.commit.startsWith("a") ? 180 : 120;
+    const delay=message.commit.startsWith("a") ? 180 : 120;
     if(loadScenario==="error") {
       setTimeout(()=>window.postMessage({
         type:"error",
@@ -742,13 +751,18 @@ window.acquireVsCodeApi=()=>({postMessage(message){
         message:"Fixture graph load failed"
       },"*"),delay);
     } else {
-      setTimeout(()=>window.postMessage({
+      const response={
         type:"graph",
         commit:message.commit,
         realization:"r-"+message.commit.slice(0,1),
         fingerprint:"f-"+message.commit.slice(0,1),
         graph:window.historyGraphs[message.commit]
-      },"*"),delay);
+      };
+      if(loadScenario==="manual") {
+        window.pendingHistoryGraph=response;
+      } else {
+        setTimeout(()=>window.postMessage(response,"*"),delay);
+      }
     }
   } else if(message.type==="changeCounts") {
     setTimeout(()=>window.postMessage({

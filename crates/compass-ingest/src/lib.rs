@@ -8,14 +8,15 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use compass_files::{write_bytes_atomic, write_text_atomic};
-use compass_transcribe::AudioDownloader as _;
-use compass_transcribe::downloader::{ManagedYtDlp, validate_public_url};
+use downloader::{AudioDownloader as _, ManagedYtDlp, validate_public_url};
 use regex::Regex;
 use serde_json::Value;
 use time::{OffsetDateTime, UtcOffset};
 use ureq::unversioned::resolver::{ResolvedSocketAddrs, Resolver};
 use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 use url::Url;
+
+pub mod downloader;
 
 const MAX_BINARY_BYTES: u64 = 52_428_800;
 const MAX_TEXT_BYTES: u64 = 10_485_760;

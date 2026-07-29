@@ -102,7 +102,10 @@ jobs:
         run: cargo nextest run --workspace --lib --bins --locked
 
       - name: Verify publishable crate archives
-        run: cargo package --workspace --locked --no-verify
+        run: |
+          cargo package --workspace --locked --no-verify \
+            --exclude compass-transcribe \
+            --exclude compass-whisper
 
       - name: Verify cargo install and standalone launch
         shell: bash

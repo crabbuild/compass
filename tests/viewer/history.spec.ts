@@ -1,7 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 test("timeline automatically opens an available revision without building", async ({ page }) => {
-  await page.goto("/history.html?load=slow");
+  await page.goto("/history.html?load=manual");
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      historyHostMessages: Array<Record<string, unknown>>;
+    }).historyHostMessages;
+    return messages.filter((message) => message.type === "loadRevision").length;
+  })).toBe(1);
   const loadingState = page.locator(
     ".history-graph-frame > .workbench-state[data-kind='running']"
   );
@@ -11,13 +17,10 @@ test("timeline automatically opens an available revision without building", asyn
   await expect(loadingState).toContainText("Compass is opening the stored graph");
   await expect(page.getByRole("listbox", { name: "Git commit timeline" })).toBeVisible();
   await expect(page.getByLabel("Revision A graph").getByText("graph available")).toBeVisible();
+  await page.evaluate(() => {
+    (window as typeof window & { releaseHistoryGraph(): void }).releaseHistoryGraph();
+  });
   await expect(page.getByText(/Viewing graph for aaaaaaaaa/)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const messages = (window as typeof window & {
-      historyHostMessages: Array<Record<string, unknown>>;
-    }).historyHostMessages;
-    return messages.filter((message) => message.type === "loadRevision").length;
-  })).toBe(1);
 });
 
 test("historical graph lazily enters a community and returns to its overview", async ({ page }) => {

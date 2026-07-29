@@ -8,17 +8,27 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use url::Url;
 use wait_timeout::ChildExt;
 
-use crate::audio::DEFAULT_MAX_SOURCE_BYTES;
-use crate::{AudioDownloader, audio_cache_key};
-
 const YT_DLP_VERSION: &str = "2026.06.09";
 const TOOL_USER_AGENT: &str = "compass/0.1 tool-fetch";
 const DEFAULT_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const DEFAULT_MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const PROCESS_OUTPUT_LIMIT: u64 = 64 * 1024;
+const CACHED_AUDIO_EXTENSIONS: &[&str] = &["m4a", "opus", "mp3", "ogg", "wav", "webm"];
+
+pub trait AudioDownloader {
+    fn download_audio(&mut self, url: &str, output_dir: &Path) -> Result<PathBuf, String>;
+}
+
+#[must_use]
+pub fn audio_cache_key(url: &str) -> String {
+    let digest = Sha1::digest(url.as_bytes());
+    format!("{digest:x}")[..12].to_owned()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolSpec {
@@ -660,7 +670,7 @@ pub fn yt_dlp_arguments(template: &Path, max_bytes: u64, url: &str) -> Vec<OsStr
 
 fn safe_cached_audio_path(input: &str, output_dir: &Path, max_bytes: u64) -> Option<PathBuf> {
     let key = audio_cache_key(input);
-    super::CACHED_AUDIO_EXTENSIONS
+    CACHED_AUDIO_EXTENSIONS
         .iter()
         .map(|extension| output_dir.join(format!("yt_{key}.{extension}")))
         .find(|candidate| safe_output_metadata(candidate, max_bytes).is_some())

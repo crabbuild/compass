@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Compass-owned bounded native Whisper inference core"
 keywords = ["whisper", "speech-to-text", "transcription"]
 categories = ["multimedia::audio", "science"]
+publish = false
 
 [dependencies]
 anyhow.workspace = true
