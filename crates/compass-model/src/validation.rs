@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument as CodeGraphDocument, NodeDetails, NodeKind,
+    NodeRole,
 };
 use crate::identity::{edge_id, file_id};
 use crate::provenance::{Provenance, SourceAnchor};
@@ -441,14 +442,19 @@ fn endpoint_kinds_are_valid(
     match kind {
         EdgeKind::Contains => {
             is_lexical_container(source.kind)
-                && (target.kind != NodeKind::File
-                    || matches!(
+                && if target.kind == NodeKind::File {
+                    matches!(
                         source.kind,
                         NodeKind::Module
                             | NodeKind::Package
                             | NodeKind::Namespace
                             | NodeKind::Resource
-                    ))
+                    )
+                } else if is_database_member(target.kind) {
+                    database_contains(source.kind, target.kind)
+                } else {
+                    is_lexical_member(target.kind)
+                }
         }
         EdgeKind::Calls => {
             is_call_source(source.kind)
@@ -482,7 +488,7 @@ fn endpoint_kinds_are_valid(
                     NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
                 )
         }
-        EdgeKind::TypeOf => target.kind.is_type(),
+        EdgeKind::TypeOf => is_typed_value(source.kind) && target.kind.is_type(),
         EdgeKind::Returns => source.kind.is_callable() && is_return_target(target.kind),
         EdgeKind::Instantiates => {
             (source.kind.is_callable()
@@ -493,7 +499,7 @@ fn endpoint_kinds_are_valid(
         EdgeKind::Overrides => source.kind.is_callable() && target.kind.is_callable(),
         EdgeKind::Decorates => {
             matches!(source.kind, NodeKind::Annotation | NodeKind::Macro)
-                || matches!(target.kind, NodeKind::Annotation | NodeKind::Macro)
+                && is_decoratable(target.kind)
         }
         EdgeKind::RoutesTo => {
             source.kind == NodeKind::Route
@@ -579,9 +585,12 @@ fn endpoint_kinds_are_valid(
             matches!(
                 source.kind,
                 NodeKind::File | NodeKind::Function | NodeKind::Method | NodeKind::Class
-            )
+            ) && source.roles.contains(&NodeRole::Test)
+                && is_test_target(target.kind)
         }
-        EdgeKind::Documents => source.kind == NodeKind::Resource,
+        EdgeKind::Documents => {
+            source.kind == NodeKind::Resource && is_documentable_target(target.kind)
+        }
         EdgeKind::References => {
             is_reference_source(source.kind) && is_reference_target(target.kind)
         }
@@ -589,6 +598,158 @@ fn endpoint_kinds_are_valid(
             is_dependency_endpoint(source.kind) && is_dependency_endpoint(target.kind)
         }
     }
+}
+
+const fn is_lexical_member(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Module
+            | NodeKind::Package
+            | NodeKind::Namespace
+            | NodeKind::Class
+            | NodeKind::Struct
+            | NodeKind::Interface
+            | NodeKind::Trait
+            | NodeKind::Protocol
+            | NodeKind::Enum
+            | NodeKind::TypeAlias
+            | NodeKind::Function
+            | NodeKind::Method
+            | NodeKind::Constructor
+            | NodeKind::Property
+            | NodeKind::Field
+            | NodeKind::Variable
+            | NodeKind::Constant
+            | NodeKind::Parameter
+            | NodeKind::Import
+            | NodeKind::Export
+            | NodeKind::Macro
+            | NodeKind::Annotation
+            | NodeKind::Route
+            | NodeKind::Component
+            | NodeKind::Resource
+            | NodeKind::Event
+            | NodeKind::Message
+            | NodeKind::Topic
+            | NodeKind::Queue
+            | NodeKind::Job
+            | NodeKind::Schema
+            | NodeKind::Query
+            | NodeKind::Migration
+            | NodeKind::ConfigKey
+    )
+}
+
+const fn is_database_member(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Database
+            | NodeKind::DatabaseSchema
+            | NodeKind::DatabaseTable
+            | NodeKind::DatabaseView
+            | NodeKind::DatabaseColumn
+            | NodeKind::DatabaseIndex
+            | NodeKind::DatabaseConstraint
+            | NodeKind::DatabaseProcedure
+            | NodeKind::DatabaseTrigger
+    )
+}
+
+const fn database_contains(source: NodeKind, target: NodeKind) -> bool {
+    matches!(
+        (source, target),
+        (
+            NodeKind::Database,
+            NodeKind::DatabaseSchema
+                | NodeKind::DatabaseTable
+                | NodeKind::DatabaseView
+                | NodeKind::DatabaseIndex
+                | NodeKind::DatabaseTrigger
+        ) | (
+            NodeKind::DatabaseSchema,
+            NodeKind::DatabaseTable
+                | NodeKind::DatabaseView
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
+        ) | (
+            NodeKind::DatabaseTable | NodeKind::DatabaseView,
+            NodeKind::DatabaseColumn
+                | NodeKind::DatabaseIndex
+                | NodeKind::DatabaseConstraint
+                | NodeKind::DatabaseTrigger
+        ) | (NodeKind::File, NodeKind::Database)
+    )
+}
+
+const fn is_typed_value(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Property
+            | NodeKind::Field
+            | NodeKind::Variable
+            | NodeKind::Constant
+            | NodeKind::Parameter
+            | NodeKind::Import
+            | NodeKind::Export
+            | NodeKind::TypeAlias
+    )
+}
+
+const fn is_decoratable(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Parameter
+                | NodeKind::Component
+                | NodeKind::Route
+                | NodeKind::Resource
+        )
+}
+
+const fn is_test_target(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || kind.is_type()
+        || kind.is_container()
+        || matches!(
+            kind,
+            NodeKind::Route
+                | NodeKind::Component
+                | NodeKind::Event
+                | NodeKind::Message
+                | NodeKind::Topic
+                | NodeKind::Queue
+                | NodeKind::Job
+                | NodeKind::Query
+                | NodeKind::Migration
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
+        )
+}
+
+const fn is_documentable_target(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || kind.is_type()
+        || kind.is_container()
+        || matches!(
+            kind,
+            NodeKind::Route
+                | NodeKind::Component
+                | NodeKind::Event
+                | NodeKind::Message
+                | NodeKind::Topic
+                | NodeKind::Queue
+                | NodeKind::Job
+                | NodeKind::Schema
+                | NodeKind::Query
+                | NodeKind::Migration
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
+        )
 }
 
 const fn is_lexical_container(kind: NodeKind) -> bool {

@@ -248,7 +248,10 @@ fn resolve_reference(
         format!("{declaring_scope}::{expanded}"),
         format!("{declaring_scope}.{expanded}"),
     ];
-    let mut candidates = Vec::new();
+    let retained_limit = limits.max_candidates.saturating_add(1);
+    let mut best_score = None;
+    let mut candidates = Vec::with_capacity(retained_limit);
+    let mut candidates_truncated = false;
     for node in &targets.nodes {
         let qualified = node.string("qualified_name");
         let name = node
@@ -294,14 +297,29 @@ fn resolve_reference(
         } else {
             continue;
         };
-        candidates.push((score, node, reason));
+        match best_score {
+            None => {
+                best_score = Some(score);
+                candidates.push((score, node, reason));
+            }
+            Some(best) if score > best => {
+                best_score = Some(score);
+                candidates.clear();
+                candidates.push((score, node, reason));
+                candidates_truncated = false;
+            }
+            Some(best) if score == best && candidates.len() < retained_limit => {
+                candidates.push((score, node, reason));
+            }
+            Some(best) if score == best => candidates_truncated = true,
+            Some(_) => {}
+        }
     }
-    let Some(best_score) = candidates.iter().map(|(score, _, _)| *score).max() else {
+    if best_score.is_none() {
         return Ok(Vec::new());
-    };
+    }
     let mut candidates = candidates
         .into_iter()
-        .filter(|(score, _, _)| *score == best_score)
         .map(|(score, node, reason)| ResolutionCandidate {
             node_id: node.id.clone(),
             reason: reason.to_owned(),
@@ -316,7 +334,7 @@ fn resolve_reference(
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.node_id.cmp(&right.node_id));
     candidates.dedup_by(|left, right| left.node_id == right.node_id);
-    if candidates.len() > limits.max_candidates {
+    if candidates.len() > limits.max_candidates || candidates_truncated {
         candidates.truncate(limits.max_candidates);
         for candidate in &mut candidates {
             candidate.confidence = EvidenceConfidence::Ambiguous;

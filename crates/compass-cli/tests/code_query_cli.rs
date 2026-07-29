@@ -129,3 +129,40 @@ fn typed_query_fails_closed_on_a_malformed_generation_pointer() -> Result<(), Bo
     assert!(outcome.stderr.contains("generation"));
     Ok(())
 }
+
+#[test]
+fn natural_query_reads_legacy_only_when_the_generation_pointer_is_absent()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("compass-out");
+    support::write_typed_graph(&output)?;
+
+    let legacy = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            output.join("graph.json").into_os_string(),
+        ],
+    );
+    assert_eq!(legacy.code, 0, "{}", legacy.stderr);
+
+    std::fs::write(output.join(".compass-active-generation"), "../escape")?;
+    let malformed = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            output.join("graph.json").into_os_string(),
+        ],
+    );
+    assert_ne!(malformed.code, 0);
+    assert!(
+        malformed.stderr.contains("generation"),
+        "{}",
+        malformed.stderr
+    );
+    Ok(())
+}

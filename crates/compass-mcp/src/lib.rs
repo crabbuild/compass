@@ -152,7 +152,10 @@ impl GraphStore {
 
     fn resolve(&self, project_path: Option<&str>) -> Result<PathBuf, String> {
         project_path.map_or_else(
-            || Ok(self.inner.default_graph.clone()),
+            || {
+                compass_files::BuildGuard::resolve_requested_artifact(&self.inner.default_graph)
+                    .map_err(|error| error.to_string())
+            },
             |project| {
                 let output = std::env::var_os("COMPASS_OUT")
                     .map(PathBuf::from)
@@ -1351,6 +1354,47 @@ mod tests {
         let result = server.invoke("graph_stats", args);
         assert!(result.contains("generation"), "{result}");
         assert!(!result.contains("Nodes: 2"), "{result}");
+        Ok(())
+    }
+
+    #[test]
+    fn default_public_graph_tracks_generation_changes_and_fails_closed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let output = temp.path().join("compass-out");
+        fs::create_dir_all(&output)?;
+        sample(&output.join("graph.json"))?;
+
+        let first = compass_files::BuildGuard::begin(&output)?;
+        fs::write(
+            first.staging_directory().join("graph.json"),
+            r#"{"directed":true,"nodes":[{"id":"generation-one"}],"links":[]}"#,
+        )?;
+        first.commit_with_artifacts(&["graph.json"])?;
+
+        let server = CompassMcp::new(output.join("graph.json"));
+        assert!(
+            server
+                .invoke("graph_stats", Map::new())
+                .contains("Nodes: 1")
+        );
+
+        let second = compass_files::BuildGuard::begin(&output)?;
+        fs::write(
+            second.staging_directory().join("graph.json"),
+            r#"{"directed":true,"nodes":[{"id":"a"},{"id":"b"},{"id":"c"}],"links":[]}"#,
+        )?;
+        second.commit_with_artifacts(&["graph.json"])?;
+        assert!(
+            server
+                .invoke("graph_stats", Map::new())
+                .contains("Nodes: 3")
+        );
+
+        fs::write(output.join(".compass-active-generation"), "../escape")?;
+        let malformed = server.invoke("graph_stats", Map::new());
+        assert!(malformed.contains("generation"), "{malformed}");
+        assert!(!malformed.contains("Nodes: 2"), "{malformed}");
         Ok(())
     }
 

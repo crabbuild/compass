@@ -443,6 +443,155 @@ fn route_stage_becomes_ambiguous_when_multiple_edges_bind_after_remap()
 }
 
 #[test]
+fn route_candidates_coalescing_to_one_semantic_node_become_exact()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut route = raw_node(root, "raw:route", "GET /items", 10);
+    route
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("route"));
+    route
+        .attributes
+        .insert("framework".to_owned(), json!("express"));
+    route
+        .attributes
+        .insert("operation".to_owned(), json!("GET"));
+    route.attributes.insert("path".to_owned(), json!("/items"));
+    route
+        .attributes
+        .insert("declaring_scope".to_owned(), json!("router"));
+    route.attributes.insert(
+        "stages".to_owned(),
+        json!([{
+            "stage": "handler",
+            "position": 0,
+            "reference": "handler",
+            "resolution": "ambiguous",
+            "target": null,
+            "candidates": [
+                {
+                    "nodeId": "raw:ast",
+                    "reason": "ast candidate",
+                    "confidence": "exact"
+                },
+                {
+                    "nodeId": "raw:semantic",
+                    "reason": "semantic candidate",
+                    "confidence": "inferred"
+                }
+            ]
+        }]),
+    );
+    let mut ast = raw_node(root, "raw:ast", "handler", 30);
+    ast.attributes.insert("_origin".to_owned(), json!("ast"));
+    let mut semantic = raw_node(root, "raw:semantic", "handler", 30);
+    semantic
+        .attributes
+        .insert("_origin".to_owned(), json!("semantic"));
+    let document = normalize_v1(
+        Extraction {
+            nodes: vec![route, ast, semantic],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    let route = document
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Route)
+        .ok_or("missing route")?;
+    let compass_model::code_graph::NodeDetails::Route(details) =
+        route.details.as_ref().ok_or("missing route details")?
+    else {
+        return Err("wrong route details".into());
+    };
+    let stage = &details.stages[0];
+    assert_eq!(
+        stage.resolution,
+        compass_model::provenance::ResolutionState::Exact
+    );
+    assert!(stage.target.is_some());
+    assert_eq!(stage.candidates.len(), 1);
+    assert_eq!(
+        stage.target.as_deref(),
+        stage
+            .candidates
+            .first()
+            .map(|candidate| candidate.node_id.as_str())
+    );
+    Ok(())
+}
+
+#[test]
+fn open_producer_shapes_normalize_into_the_closed_endpoint_matrix()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let test = raw_node(root, "raw:test", "tests_target", 10);
+    let target = raw_node(root, "raw:target", "target", 30);
+    let mut class = raw_node(root, "raw:class", "TargetType", 50);
+    class
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("class"));
+    let mut annotation = raw_node(root, "raw:annotation", "logged", 70);
+    annotation
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("annotation"));
+    let edge = |source: &str, relation: &str, target: &str, start| RawEdgeRecord {
+        source: source.to_owned(),
+        target: target.to_owned(),
+        attributes: Map::from_iter([
+            ("relation".to_owned(), json!(relation)),
+            ("extractor".to_owned(), json!("test.open-producer")),
+            ("source_anchor".to_owned(), anchor(root, start)),
+        ]),
+    };
+    let document = normalize_v1(
+        Extraction {
+            nodes: vec![test, target, class, annotation],
+            edges: vec![
+                edge("raw:test", "tests", "raw:target", 90),
+                edge("raw:test", "type_of", "raw:class", 110),
+                edge("raw:test", "decorates", "raw:annotation", 130),
+            ],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    let test = document
+        .nodes
+        .iter()
+        .find(|node| node.name == "tests_target")
+        .ok_or("missing test node")?;
+    assert!(
+        test.roles
+            .contains(&compass_model::code_graph::NodeRole::Test)
+    );
+    assert!(
+        document
+            .links
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::Tests && edge.source == test.id)
+    );
+    assert!(
+        document
+            .links
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::Returns && edge.source == test.id)
+    );
+    assert!(document.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Decorates
+            && document.nodes.iter().any(|node| {
+                node.id == edge.source
+                    && node.kind == compass_model::code_graph::NodeKind::Annotation
+            })
+            && edge.target == test.id
+    }));
+    Ok(())
+}
+
+#[test]
 fn normalization_rejects_unknown_aliases_and_missing_wiring_sites() {
     let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
     let root = directory.path();

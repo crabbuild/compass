@@ -59,8 +59,7 @@ struct CommonOptions {
 fn default_program_path() -> PathBuf {
     let output =
         PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
-    compass_files::BuildGuard::resolve_artifact(&output, "program.json")
-        .unwrap_or_else(|_| output.join("program.json"))
+    output.join("program.json")
 }
 
 fn parse_common(
@@ -111,16 +110,8 @@ fn parse_format(value: &str) -> Result<Format, String> {
 }
 
 pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
-    let resolved = if path.is_file() {
-        path.to_path_buf()
-    } else {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let name = path
-            .file_name()
-            .ok_or_else(|| format!("could not read {}", path.display()))?;
-        compass_files::BuildGuard::resolve_artifact(parent, Path::new(name))
-            .map_err(|error| error.to_string())?
-    };
+    let resolved = compass_files::BuildGuard::resolve_requested_artifact(path)
+        .map_err(|error| error.to_string())?;
     let metadata = fs::metadata(&resolved)
         .map_err(|error| format!("could not read {}: {error}", resolved.display()))?;
     if !metadata.is_file() {
@@ -553,7 +544,10 @@ fn call_graph(analysis: &AnalysisBundle, args: &[String], format: Format) -> Out
         return usage_error("provide exactly one of --symbol and --at");
     };
     let graph = match graph_path {
-        Some(path) => match GraphDocument::load(&path) {
+        Some(path) => match compass_files::BuildGuard::resolve_requested_artifact(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|resolved| GraphDocument::load(&resolved).map_err(|error| error.to_string()))
+        {
             Ok(graph) => Some(graph),
             Err(error) => {
                 return Outcome::failure_with_code(

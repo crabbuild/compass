@@ -18,7 +18,7 @@ use compass_model::identity::{
 use compass_model::provenance::{
     ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
     OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
-    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
 };
 use compass_model::{GraphError, validate_code_graph};
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ use serde_json::{Map, Value};
 pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/2";
 use sha2::{Digest, Sha256};
 
-const TRUSTED_NODE_RECORD: &str = "_compass_v1_node_record";
+const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
 const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
@@ -425,6 +425,7 @@ pub fn normalize_v1(
                 }
             }
         }
+        recompute_route_resolution(details);
     }
 
     let mut links = BTreeMap::new();
@@ -461,6 +462,33 @@ pub fn normalize_v1(
                 &file_facts,
             )?,
         };
+        if !trusted_edge
+            && edge.kind == EdgeKind::Tests
+            && let Some(source) = nodes.get_mut(&edge.source)
+        {
+            source.roles.push(NodeRole::Test);
+            sort_dedup_serialized(&mut source.roles);
+        }
+        if !trusted_edge
+            && edge.kind == EdgeKind::Decorates
+            && nodes
+                .get(&edge.target)
+                .is_some_and(|node| matches!(node.kind, NodeKind::Annotation | NodeKind::Macro))
+            && nodes
+                .get(&edge.source)
+                .is_some_and(|node| !matches!(node.kind, NodeKind::Annotation | NodeKind::Macro))
+        {
+            std::mem::swap(&mut edge.source, &mut edge.target);
+            let id = edge_id(
+                &edge.source,
+                edge.kind,
+                &edge.target,
+                edge.relationship_site.as_ref(),
+                edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+            );
+            edge.id.clone_from(&id);
+            edge.key = id;
+        }
         let source_kind = nodes
             .get(&edge.source)
             .map(|node| node.kind)
@@ -469,6 +497,19 @@ pub fn normalize_v1(
             .get(&edge.target)
             .map(|node| node.kind)
             .unwrap_or(NodeKind::Variable);
+        if !trusted_edge && edge.kind == EdgeKind::TypeOf && source_kind.is_callable() {
+            edge.kind = EdgeKind::Returns;
+            edge.details = None;
+            let id = edge_id(
+                &edge.source,
+                edge.kind,
+                &edge.target,
+                edge.relationship_site.as_ref(),
+                edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+            );
+            edge.id.clone_from(&id);
+            edge.key = id;
+        }
         if !trusted_edge && edge.kind == EdgeKind::Calls && target_kind.is_constructible() {
             edge.kind = EdgeKind::Instantiates;
             edge.details = None;
@@ -597,6 +638,7 @@ pub fn normalize_v1(
         if became_ambiguous {
             route_details.resolution = ResolutionState::Ambiguous;
         }
+        recompute_route_resolution(route_details);
     }
 
     let mut nodes = nodes.into_values().collect::<Vec<_>>();
@@ -903,6 +945,66 @@ fn placeholder_scope_key(
 
 fn anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
     (&anchor.file, anchor.start_byte, anchor.end_byte)
+}
+
+fn recompute_route_resolution(details: &mut RouteNodeDetails) {
+    for stage in &mut details.stages {
+        stage.candidates.sort_by(|left, right| {
+            left.node_id
+                .cmp(&right.node_id)
+                .then_with(|| serialized(left).cmp(&serialized(right)))
+        });
+        stage
+            .candidates
+            .dedup_by(|left, right| left.node_id == right.node_id);
+        let mut targets = stage
+            .candidates
+            .iter()
+            .map(|candidate| candidate.node_id.clone())
+            .collect::<BTreeSet<_>>();
+        if let Some(target) = &stage.target {
+            targets.insert(target.clone());
+        }
+        match targets.len() {
+            0 => {
+                stage.resolution = ResolutionState::Unresolved;
+                stage.target = None;
+            }
+            1 => {
+                let exact = stage.target.is_some()
+                    || stage.candidates.iter().any(|candidate| {
+                        candidate.confidence == EvidenceConfidence::Exact
+                            && Some(&candidate.node_id) == targets.iter().next()
+                    });
+                if exact {
+                    stage.resolution = ResolutionState::Exact;
+                    stage.target = targets.into_iter().next();
+                } else {
+                    stage.resolution = ResolutionState::Unresolved;
+                    stage.target = None;
+                }
+            }
+            _ => {
+                stage.resolution = ResolutionState::Ambiguous;
+                stage.target = None;
+            }
+        }
+    }
+    details.resolution = if details
+        .stages
+        .iter()
+        .any(|stage| stage.resolution == ResolutionState::Ambiguous)
+    {
+        ResolutionState::Ambiguous
+    } else if details
+        .stages
+        .iter()
+        .any(|stage| stage.resolution == ResolutionState::Unresolved)
+    {
+        ResolutionState::Unresolved
+    } else {
+        ResolutionState::Exact
+    };
 }
 
 fn merge_normalized_node(

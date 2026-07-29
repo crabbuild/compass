@@ -1,5 +1,5 @@
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeKind, NodeRecord,
+    BuildMetadata, EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeKind, NodeRecord, NodeRole,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -323,6 +323,74 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
 }
 
 #[test]
+fn endpoint_matrix_closes_relationships_that_require_both_endpoint_shapes() {
+    for (kind, source_kind, source_roles, target_kind) in [
+        (
+            EdgeKind::Contains,
+            NodeKind::Class,
+            Vec::new(),
+            NodeKind::DatabaseTable,
+        ),
+        (
+            EdgeKind::TypeOf,
+            NodeKind::Function,
+            Vec::new(),
+            NodeKind::Class,
+        ),
+        (
+            EdgeKind::Tests,
+            NodeKind::Function,
+            Vec::new(),
+            NodeKind::Function,
+        ),
+        (
+            EdgeKind::Tests,
+            NodeKind::Function,
+            vec![NodeRole::Test],
+            NodeKind::Parameter,
+        ),
+        (
+            EdgeKind::Documents,
+            NodeKind::Resource,
+            Vec::new(),
+            NodeKind::Parameter,
+        ),
+        (
+            EdgeKind::Decorates,
+            NodeKind::Function,
+            Vec::new(),
+            NodeKind::Annotation,
+        ),
+    ] {
+        let mut graph = document();
+        graph.nodes[0].kind = source_kind;
+        graph.nodes[0].roles = source_roles;
+        graph.nodes[1].kind = target_kind;
+        graph.links[0].kind = kind;
+        let id = edge_id("route", kind, "handler", Some(&anchor()), None);
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_err(),
+            "{kind:?} accepted {source_kind:?} -> {target_kind:?}"
+        );
+    }
+}
+
+#[test]
+fn tests_edge_accepts_an_explicit_test_role_and_testable_target() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Function;
+    graph.nodes[0].roles = vec![NodeRole::Test];
+    graph.nodes[1].kind = NodeKind::Function;
+    graph.links[0].kind = EdgeKind::Tests;
+    let id = edge_id("route", EdgeKind::Tests, "handler", Some(&anchor()), None);
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(validate_code_graph(&graph).is_ok());
+}
+
+#[test]
 fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Contains, NodeKind::Function, NodeKind::Method),
@@ -342,6 +410,17 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
             NodeKind::DatabaseTrigger,
             NodeKind::DatabaseTable,
         ),
+        (
+            EdgeKind::Contains,
+            NodeKind::Database,
+            NodeKind::DatabaseIndex,
+        ),
+        (
+            EdgeKind::Contains,
+            NodeKind::Database,
+            NodeKind::DatabaseTrigger,
+        ),
+        (EdgeKind::Contains, NodeKind::File, NodeKind::Database),
     ] {
         let mut graph = document();
         graph.nodes[0].kind = source_kind;

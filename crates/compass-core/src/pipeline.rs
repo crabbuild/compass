@@ -2189,6 +2189,9 @@ fn preserve_semantic_layer(
                 && !source_was_deleted(node.attributes.get("source_file"), root)
         })
         .collect::<Vec<_>>();
+    for node in &mut preserved_nodes {
+        strip_preserved_ast_node_evidence(&mut node.attributes);
+    }
     let all_ids = extraction
         .nodes
         .iter()
@@ -2228,6 +2231,21 @@ fn preserve_semantic_layer(
             target: edge.target,
             attributes: edge.attributes,
         }));
+}
+
+fn strip_preserved_ast_node_evidence(attributes: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(record) = attributes.get_mut(compass_model::provenance::TRUSTED_NODE_RECORD_ATTRIBUTE)
+    else {
+        return;
+    };
+    let Ok(mut node) =
+        serde_json::from_value::<compass_model::code_graph::NodeRecord>(record.clone())
+    else {
+        return;
+    };
+    node.evidence
+        .retain(|evidence| evidence.origin != EvidenceOrigin::Ast);
+    *record = serde_json::to_value(node).unwrap_or(serde_json::Value::Null);
 }
 
 fn has_exact_remap_site(attributes: &serde_json::Map<String, serde_json::Value>) -> bool {

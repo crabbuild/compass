@@ -119,6 +119,11 @@ pub struct Outcome {
     html_output: Option<PathBuf>,
 }
 
+pub(crate) fn resolve_output_artifact(output: &Path, name: &str) -> Result<PathBuf, String> {
+    compass_files::BuildGuard::resolve_requested_artifact(&output.join(name))
+        .map_err(|error| error.to_string())
+}
+
 impl Outcome {
     #[must_use]
     pub fn from_command_output(code: u8, stdout: String, stderr: String) -> Self {
@@ -627,7 +632,10 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
     let graph_path = graph_flag
         .filter(|path| !path.as_os_str().is_empty())
         .or_else(|| positional.filter(|path| !path.as_os_str().is_empty()))
-        .unwrap_or_else(default_graph_path);
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
+                .join("graph.json")
+        });
     Ok(Some(McpOptions {
         graph_path,
         transport,
@@ -1217,11 +1225,15 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
         index += 1;
     }
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let graph_path = graph_override.clone().unwrap_or_else(|| {
-        let output = root.join(&output_name);
-        compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
-            .unwrap_or_else(|_| output.join("graph.json"))
-    });
+    let requested_graph = graph_override
+        .clone()
+        .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested_graph) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if !graph_path.exists() {
         return Outcome::failure(format!(
             "error: no graph found at {} — run `compass extract {}` first",
@@ -1315,6 +1327,12 @@ fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
         }
         index += 1;
     }
+    graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if !graph_path.is_file() {
         return Outcome::failure(format!(
             "error: graph.json not found at {}",
@@ -1398,12 +1416,20 @@ fn command_merge_graphs(args: &[String]) -> Outcome {
                 .to_owned(),
         );
     }
-    for path in &paths {
+    let mut resolved_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path = match compass_files::BuildGuard::resolve_requested_artifact(&path) {
+            Ok(path) => path,
+            Err(error) => {
+                return Outcome::failure(format!("error: could not resolve graph: {error}"));
+            }
+        };
         if !path.exists() {
             return Outcome::failure(format!("error: not found: {}", path.display()));
         }
+        resolved_paths.push(path);
     }
-    match merge_graphs(&paths, &output) {
+    match merge_graphs(&resolved_paths, &output) {
         Ok(result) => {
             let mut lines = Vec::new();
             if result.naive_tags_collided {
@@ -1424,7 +1450,13 @@ fn command_merge_graphs(args: &[String]) -> Outcome {
 }
 
 fn command_benchmark(args: &[String]) -> Outcome {
-    let graph_path = args.first().map_or_else(default_graph_path, PathBuf::from);
+    let requested = args.first().map_or_else(default_graph_path, PathBuf::from);
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     let document = match compass_model::GraphDocument::load(&graph_path) {
         Ok(document) => document,
         Err(error) => return Outcome::failure(format!("error: {error}")),
@@ -2807,6 +2839,12 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             _ => index += 1,
         }
     }
+    graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if graph_explicit {
         let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
         if !labels_explicit {
@@ -3642,16 +3680,20 @@ fn frontend_name(frontend: Frontend) -> &'static str {
 }
 
 fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
+    let path = compass_files::BuildGuard::resolve_requested_artifact(path)
+        .map_err(|error| Outcome::failure(format!("error: could not resolve graph: {error}")))?;
     let result = if force_directed {
-        LoadedGraph::load_directed(path)
+        LoadedGraph::load_directed(&path)
     } else {
-        LoadedGraph::load(path)
+        LoadedGraph::load(&path)
     };
     result.map_err(graph_load_outcome)
 }
 
 fn load_affected(path: &Path) -> Result<LoadedGraph, Outcome> {
-    LoadedGraph::load_for_affected(path).map_err(graph_load_outcome)
+    let path = compass_files::BuildGuard::resolve_requested_artifact(path)
+        .map_err(|error| Outcome::failure(format!("error: could not resolve graph: {error}")))?;
+    LoadedGraph::load_for_affected(&path).map_err(graph_load_outcome)
 }
 
 fn graph_load_outcome(error: GraphError) -> Outcome {
@@ -3837,6 +3879,28 @@ mod mcp_option_tests {
         let options = parse_mcp_options(&args)?
             .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
         assert_eq!(options.graph_path, PathBuf::from("flag.json"));
+        Ok(())
+    }
+
+    #[test]
+    fn shared_cli_artifact_resolution_distinguishes_legacy_from_malformed_pointer()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let output = directory.path().join("compass-out");
+        fs::create_dir_all(&output)?;
+        fs::write(output.join("graph.json"), "{}")?;
+
+        assert_eq!(
+            resolve_output_artifact(&output, "graph.json")?,
+            output.join("graph.json"),
+            "pointer absence must retain documented legacy compatibility"
+        );
+
+        fs::write(output.join(".compass-active-generation"), "../escape")?;
+        let Err(error) = resolve_output_artifact(&output, "graph.json") else {
+            return Err("a malformed pointer must never fall back to the legacy graph".into());
+        };
+        assert!(error.contains("generation"), "{error}");
         Ok(())
     }
 

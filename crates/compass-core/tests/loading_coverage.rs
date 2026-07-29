@@ -258,34 +258,37 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
     let source = root.join("main.rs");
     fs::write(&source, "pub fn target() {}\n")?;
 
-    let initial_ast = Engine::default().extract(&source)?;
-    let mut semantic_target = initial_ast
-        .nodes
-        .iter()
-        .find(|node| node.label() == "target()")
-        .cloned()
-        .ok_or("missing target extraction")?;
-    semantic_target.id = "semantic-target".to_owned();
-    semantic_target
-        .attributes
-        .insert("_origin".to_owned(), json!("semantic"));
-    semantic_target
-        .attributes
-        .insert("extractor".to_owned(), json!("test.semantic"));
-    semantic_target
-        .attributes
-        .insert("source_file".to_owned(), json!("main.rs"));
-    let supplemental = serde_json::to_value(Extraction {
-        nodes: vec![semantic_target],
-        ..Extraction::default()
-    })?;
-
     let mut options = BuildOptions::new(root.to_path_buf());
     options.no_cluster = true;
     options.no_viz = true;
-    build_graph_with_layers(&options, None, std::slice::from_ref(&supplemental))?;
+    let initial = build_graph_with_layers(&options, None, &[])?;
+    let mut initial_graph =
+        compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
+    let initial_target = initial_graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.name == "target" || node.label() == "target()")
+        .ok_or("missing initial target")?;
+    let mut semantic_evidence = initial_target
+        .evidence
+        .first()
+        .cloned()
+        .ok_or("missing initial AST evidence")?;
+    semantic_evidence.origin = compass_model::provenance::EvidenceOrigin::Heuristic;
+    semantic_evidence.confidence = compass_model::provenance::EvidenceConfidence::Inferred;
+    semantic_evidence.rule = Some("semantic-extraction".to_owned());
+    semantic_evidence.wiring_site = initial_target.source.clone();
+    semantic_evidence.anchors.clear();
+    initial_target.evidence.push(semantic_evidence);
+    fs::write(
+        initial.output_dir.join("graph.json"),
+        serde_json::to_vec_pretty(&initial_graph)?,
+    )?;
 
-    fs::write(&source, "pub fn target(value: u32) { let _ = value; }\n")?;
+    fs::write(
+        &source,
+        "// moved\npub fn target(value: u32) { let _ = value; }\n",
+    )?;
     let incremental = build_graph_with_layers(&options, None, &[])?;
     let incremental_graph =
         compass_model::code_graph::GraphDocument::load(&incremental.output_dir.join("graph.json"))?;
@@ -310,7 +313,7 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
     );
 
     options.force = true;
-    let clean = build_graph_with_layers(&options, None, &[supplemental])?;
+    let clean = build_graph_with_layers(&options, None, &[])?;
     let clean_graph =
         compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
     let clean_target = clean_graph
@@ -319,6 +322,20 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
         .find(|node| node.name == "target" || node.label() == "target()")
         .ok_or("missing clean target")?;
     assert_eq!(incremental_target.details, clean_target.details);
+    assert_eq!(incremental_target.source, clean_target.source);
+    assert!(
+        incremental_target
+            .source
+            .as_ref()
+            .is_some_and(|anchor| anchor.start_byte > 0),
+        "target={incremental_target:?}"
+    );
+    assert!(
+        incremental_target.evidence.iter().any(|evidence| {
+            evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+        }),
+        "semantic evidence was not preserved: {incremental_target:?}"
+    );
     Ok(())
 }
 

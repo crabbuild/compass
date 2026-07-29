@@ -37,11 +37,16 @@ pub(super) fn command_label(_frontend: Frontend, args: &[String]) -> Outcome {
         Err(error) => return Outcome::failure(error),
     };
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let graph_path = parsed.graph_override.clone().unwrap_or_else(|| {
-        let output = parsed.root.join(&output_name);
-        compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
-            .unwrap_or_else(|_| output.join("graph.json"))
-    });
+    let requested_graph = parsed
+        .graph_override
+        .clone()
+        .unwrap_or_else(|| parsed.root.join(&output_name).join("graph.json"));
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested_graph) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if !graph_path.exists() {
         let message = format!(
             "error: no graph found at {} — run `compass extract {}` first",

@@ -146,15 +146,14 @@ pub(super) fn command_reflect(frontend: Frontend, args: &[String]) -> Outcome {
         }
         index += 1;
     }
-    if graph.is_none() {
-        let output_directory = PathBuf::from(&output_root);
-        let default_graph =
-            compass_files::BuildGuard::resolve_artifact(&output_directory, "graph.json")
-                .unwrap_or_else(|_| output_directory.join("graph.json"));
-        if default_graph.exists() {
-            graph = Some(default_graph);
+    let requested_graph = graph.unwrap_or_else(|| PathBuf::from(&output_root).join("graph.json"));
+    graph = match compass_files::BuildGuard::resolve_requested_artifact(&requested_graph) {
+        Ok(path) if path.exists() => Some(path),
+        Ok(_) => None,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
         }
-    }
+    };
     if let Some(graph_path) = graph.as_deref() {
         let parent = graph_path.parent().unwrap_or_else(|| Path::new("."));
         analysis.get_or_insert_with(|| parent.join(".compass_analysis.json"));

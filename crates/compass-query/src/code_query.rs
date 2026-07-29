@@ -17,6 +17,43 @@ use crate::source::{VerifiedSource, verified_source};
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
+const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
+
+struct TraversalBudget {
+    remaining_nodes: usize,
+    remaining_edges: usize,
+}
+
+impl TraversalBudget {
+    fn new(limits: &compass_model::query_contract::CodeQueryLimits) -> Self {
+        Self {
+            remaining_nodes: usize::try_from(limits.max_nodes).unwrap_or(usize::MAX),
+            remaining_edges: usize::try_from(limits.max_edges).unwrap_or(usize::MAX),
+        }
+    }
+
+    const fn can_start_pair(&self) -> bool {
+        self.remaining_nodes > 0 && self.remaining_edges > 0
+    }
+
+    fn consume_node(&mut self) -> bool {
+        if self.remaining_nodes == 0 {
+            false
+        } else {
+            self.remaining_nodes -= 1;
+            true
+        }
+    }
+
+    fn consume_edge(&mut self) -> bool {
+        if self.remaining_edges == 0 {
+            false
+        } else {
+            self.remaining_edges -= 1;
+            true
+        }
+    }
+}
 
 const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::Calls,
@@ -287,6 +324,19 @@ impl CodeQueryEngine {
 
     pub fn explore(&self, request: ExploreRequest) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
+        if request.symbols.len()
+            > usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX)
+        {
+            return Err(QueryError::new(
+                QueryErrorKind::InvalidParameter,
+                "too_many_explore_symbols",
+                format!(
+                    "explore requested {} symbols but maxCandidates is {}",
+                    request.symbols.len(),
+                    request.limits.max_candidates
+                ),
+            ));
+        }
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Explore, request.limits.clone());
         let mut seeds = Vec::new();
@@ -299,10 +349,15 @@ impl CodeQueryEngine {
         seeds.dedup();
         let mut ids = seeds.iter().cloned().collect::<HashSet<_>>();
         let mut edge_ids = HashSet::new();
+        let mut budget = TraversalBudget::new(&request.limits);
         for pair in seeds.windows(2) {
+            if !budget.can_start_pair() {
+                response.truncated = true;
+                break;
+            }
             if let [source, target] = pair
                 && let (Some((nodes, edges)), truncated) =
-                    self.shortest_path(source, target, true, &request.limits)
+                    self.shortest_path(source, target, true, &request.limits, &mut budget)
             {
                 response.truncated |= truncated;
                 ids.extend(nodes.iter().cloned());
@@ -335,8 +390,14 @@ impl CodeQueryEngine {
         let Some(target) = self.resolve_symbol(&request.target, &mut response) else {
             return Ok(response);
         };
-        let (path, truncated) =
-            self.shortest_path(&source, &target, request.include_heuristic, &request.limits);
+        let mut budget = TraversalBudget::new(&request.limits);
+        let (path, truncated) = self.shortest_path(
+            &source,
+            &target,
+            request.include_heuristic,
+            &request.limits,
+            &mut budget,
+        );
         response.truncated |= truncated;
         let Some((nodes, edges)) = path else {
             if truncated {
@@ -381,16 +442,18 @@ impl CodeQueryEngine {
             return Some(node.id.clone());
         }
         let normalized = normalize_symbol(query);
-        let mut exact = self
-            .graph
-            .nodes
-            .iter()
-            .filter(|node| {
-                normalize_symbol(&node.name) == normalized
-                    || normalize_symbol(&node.qualified_name) == normalized
-            })
-            .map(|node| node.id.clone())
-            .collect::<Vec<_>>();
+        let candidate_limit = usize::try_from(response.limits.max_candidates).unwrap_or(usize::MAX);
+        let mut exact = Vec::with_capacity(candidate_limit.saturating_add(1));
+        for node in &self.graph.nodes {
+            if normalize_symbol(&node.name) == normalized
+                || normalize_symbol(&node.qualified_name) == normalized
+            {
+                exact.push(node.id.clone());
+                if exact.len() > candidate_limit {
+                    break;
+                }
+            }
+        }
         exact.sort();
         exact.dedup();
         match exact.as_slice() {
@@ -446,14 +509,15 @@ impl CodeQueryEngine {
         target: &str,
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
+        budget: &mut TraversalBudget,
     ) -> BoundedPathResult {
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
-        let max_nodes = usize::try_from(limits.max_nodes).unwrap_or(usize::MAX);
-        let max_edges = usize::try_from(limits.max_edges).unwrap_or(usize::MAX);
+        if !budget.consume_node() {
+            return (None, true);
+        }
         let mut queue = VecDeque::from([(source.to_owned(), 0_usize)]);
         let mut visited = HashSet::from([source.to_owned()]);
         let mut predecessor = HashMap::<String, (String, String)>::new();
-        let mut traversed_edges = 0_usize;
         let mut truncated = false;
         while let Some((node, depth)) = queue.pop_front() {
             if node == target {
@@ -475,25 +539,22 @@ impl CodeQueryEngine {
             if depth >= max_depth {
                 continue;
             }
-            let mut adjacent = self
-                .adjacent_edges
-                .get(&node)
-                .into_iter()
-                .flatten()
-                .filter_map(|index| {
-                    let edge = &self.graph.links[*index];
-                    if !include_heuristic && is_heuristic(edge) {
-                        return None;
-                    }
-                    if edge.source == node {
-                        Some((edge.target.clone(), edge))
-                    } else if edge.target == node {
-                        Some((edge.source.clone(), edge))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
+            let mut adjacent = Vec::new();
+            for index in self.adjacent_edges.get(&node).into_iter().flatten() {
+                if !budget.consume_edge() {
+                    truncated = true;
+                    break;
+                }
+                let edge = &self.graph.links[*index];
+                if !include_heuristic && is_heuristic(edge) {
+                    continue;
+                }
+                if edge.source == node {
+                    adjacent.push((edge.target.clone(), edge));
+                } else if edge.target == node {
+                    adjacent.push((edge.source.clone(), edge));
+                }
+            }
             adjacent.sort_by(|left, right| {
                 evidence_quality(right.1)
                     .cmp(&evidence_quality(left.1))
@@ -503,12 +564,11 @@ impl CodeQueryEngine {
                 if visited.contains(&next) {
                     continue;
                 }
-                if visited.len() >= max_nodes || traversed_edges >= max_edges {
+                if !budget.consume_node() {
                     truncated = true;
                     continue;
                 }
                 visited.insert(next.clone());
-                traversed_edges += 1;
                 predecessor.insert(next.clone(), (node.clone(), edge.id.clone()));
                 queue.push_back((next, depth + 1));
             }
@@ -781,6 +841,16 @@ pub(crate) fn validate_limits(
             QueryErrorKind::InvalidParameter,
             "invalid_code_query_limits",
             "every code query limit must be greater than zero",
+        ));
+    }
+    if limits.max_candidates > MAX_CODE_QUERY_CANDIDATES {
+        return Err(QueryError::new(
+            QueryErrorKind::InvalidParameter,
+            "code_query_limit_exceeded",
+            format!(
+                "maxCandidates {} exceeds the hard cap {MAX_CODE_QUERY_CANDIDATES}",
+                limits.max_candidates
+            ),
         ));
     }
     Ok(())

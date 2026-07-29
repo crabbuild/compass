@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 
 use crate::cql::{QueryError, QueryErrorKind};
 
+const MAX_VERIFIED_SOURCE_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
 pub(crate) fn verified_source(
     root: &Path,
     relative: &str,
@@ -23,6 +25,19 @@ pub(crate) fn verified_source(
             QueryErrorKind::UnsafePath,
             "unsafe_source_path",
             format!("source path is not repository-relative: {relative}"),
+        ));
+    }
+    if fs::symlink_metadata(root)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(QueryError::new(
+            QueryErrorKind::UnsafePath,
+            "unsafe_source_path",
+            format!(
+                "repository root must not be a symbolic link: {}",
+                root.display()
+            ),
         ));
     }
     let canonical_root = fs::canonicalize(root).map_err(|error| {
@@ -73,6 +88,16 @@ pub(crate) fn verified_source(
             format!("{relative}: {error}"),
         )
     })?;
+    let opened_size = file.metadata().map_err(|error| {
+        QueryError::new(
+            QueryErrorKind::Internal,
+            "source_read_failed",
+            format!("{relative}: {error}"),
+        )
+    })?;
+    if opened_size.len() > MAX_VERIFIED_SOURCE_FILE_BYTES {
+        return Err(source_too_large(relative, opened_size.len()));
+    }
     let limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
     let retained_capacity = limit.min(1024 * 1024);
     let mut selected = Vec::with_capacity(retained_capacity);
@@ -80,7 +105,13 @@ pub(crate) fn verified_source(
     let mut buffer = [0_u8; 64 * 1024];
     let mut total = 0_u64;
     loop {
-        let read = file.read(&mut buffer).map_err(|error| {
+        let remaining_hard = MAX_VERIFIED_SOURCE_FILE_BYTES
+            .saturating_sub(total)
+            .saturating_add(1);
+        let read_limit = usize::try_from(remaining_hard)
+            .unwrap_or(usize::MAX)
+            .min(buffer.len());
+        let read = file.read(&mut buffer[..read_limit]).map_err(|error| {
             QueryError::new(
                 QueryErrorKind::Internal,
                 "source_read_failed",
@@ -90,8 +121,11 @@ pub(crate) fn verified_source(
         if read == 0 {
             break;
         }
-        digest.update(&buffer[..read]);
         total = total.saturating_add(read as u64);
+        if total > MAX_VERIFIED_SOURCE_FILE_BYTES {
+            return Err(source_too_large(relative, total));
+        }
+        digest.update(&buffer[..read]);
         let remaining = limit.saturating_sub(selected.len());
         selected.extend_from_slice(&buffer[..read.min(remaining)]);
     }
@@ -103,6 +137,16 @@ pub(crate) fn verified_source(
         source: String::from_utf8_lossy(&selected).into_owned(),
         truncated: total > max_bytes,
     })
+}
+
+fn source_too_large(relative: &str, size: u64) -> QueryError {
+    QueryError::new(
+        QueryErrorKind::MemoryLimit,
+        "source_file_too_large",
+        format!(
+            "{relative} is {size} bytes and exceeds the {MAX_VERIFIED_SOURCE_FILE_BYTES}-byte source verification cap"
+        ),
+    )
 }
 
 #[cfg(unix)]
@@ -123,7 +167,7 @@ fn open_beneath(root: &Path, relative: &Path) -> std::io::Result<File> {
 
     let mut directory = open(
         root,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY | OFlags::NOFOLLOW,
         Mode::empty(),
     )?;
     let components = relative.components().collect::<Vec<_>>();
@@ -159,4 +203,18 @@ fn open_beneath(_root: &Path, _relative: &Path) -> std::io::Result<File> {
 pub(crate) enum VerifiedSource {
     Fresh { source: String, truncated: bool },
     Stale { actual: String },
+}
+
+#[cfg(all(test, not(unix)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platforms_without_no_follow_traversal_fail_closed() {
+        let result = open_beneath(Path::new("."), Path::new("source.rs"));
+        assert!(matches!(
+            result,
+            Err(ref error) if error.kind() == std::io::ErrorKind::Unsupported
+        ));
+    }
 }
