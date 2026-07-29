@@ -870,7 +870,11 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
         if !self.is_default_current_snapshot_profile() {
             return Ok(None);
         }
-        let Some(output_dir) = self.working_tree_seed.as_ref() else {
+        let Some(output_container) = self.working_tree_seed.as_ref() else {
+            return Ok(None);
+        };
+        let Ok(output_dir) = compass_files::BuildGuard::resolve_active_directory(output_container)
+        else {
             return Ok(None);
         };
         if !graph_stamp_matches(&output_dir.join("graph.json"), commit) {
@@ -973,7 +977,9 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             });
         }
 
-        let output_dir = output_root.join("compass-out");
+        let output_container = output_root.join("compass-out");
+        let output_dir = compass_files::BuildGuard::resolve_active_directory(&output_container)
+            .map_err(|error| MaterializeError::Builder(error.to_string()))?;
         let detection = detect(
             checkout,
             &DetectOptions {
