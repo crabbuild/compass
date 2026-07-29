@@ -689,3 +689,326 @@ $body$ LANGUAGE plpgsql;
     );
     Ok(())
 }
+
+#[test]
+fn same_style_identifier_quotes_recover_at_the_original_strict_v1_boundary()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V9__same_style_quotes.sql");
+    let source = br#"
+CREATE TABLE "app"."double_users" (id BIGINT);
+CREATE TABLE `app`.`backtick_users` (id BIGINT);
+CREATE TABLE [app].[bracket_users] (id BIGINT);
+SELECT * FROM "broken;
+SELECT * FROM "app"."double_users";
+CREATE TABLE "app"."after_double" (id BIGINT);
+CREATE TABLE "broken_double_decl;
+CREATE TABLE "app"."after_double_decl" (id BIGINT);
+SELECT * FROM `broken;
+SELECT * FROM `app`.`backtick_users`;
+CREATE TABLE `app`.`after_backtick` (id BIGINT);
+CREATE TABLE `broken_backtick_decl;
+CREATE TABLE `app`.`after_backtick_decl` (id BIGINT);
+SELECT * FROM [broken;
+SELECT * FROM [app].[bracket_users];
+CREATE TABLE [app].[after_bracket] (id BIGINT);
+CREATE TABLE [broken_bracket_decl;
+CREATE TABLE [app].[after_bracket_decl] (id BIGINT);
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-same-quotes")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for expected in [
+        "app.after_double",
+        "app.after_double_decl",
+        "app.after_backtick",
+        "app.after_backtick_decl",
+        "app.after_bracket",
+        "app.after_bracket_decl",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == NodeKind::DatabaseTable
+                    && node.qualified_name == expected),
+            "missing recovered declaration {expected}: {:?}",
+            graph.nodes
+        );
+    }
+    let queries = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Query)
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 3, "nodes={:?}", graph.nodes);
+    for target_name in [
+        "app.double_users",
+        "app.backtick_users",
+        "app.bracket_users",
+    ] {
+        let target = graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        let read = graph
+            .links
+            .iter()
+            .find(|edge| {
+                edge.target == target.id
+                    && edge.kind == EdgeKind::Reads
+                    && queries.iter().any(|query| query.id == edge.source)
+            })
+            .ok_or_else(|| format!("missing read for {target_name}"))?;
+        assert!(read.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+                && item
+                    .rule
+                    .as_deref()
+                    .is_some_and(|rule| rule.starts_with("sql-text-"))
+        }));
+    }
+
+    let partials = graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|record| {
+            record.capability == "sql:statement_boundary"
+                && record.status == CoverageStatus::Partial
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = graph
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "sql_incomplete_quoted_identifier")
+        .collect::<Vec<_>>();
+    assert_eq!(partials.len(), 6, "coverage={:?}", graph.graph.coverage);
+    assert_eq!(
+        diagnostics.len(),
+        6,
+        "diagnostics={:?}",
+        graph.graph.diagnostics
+    );
+    for malformed in [
+        b"\"broken;".as_slice(),
+        b"\"broken_double_decl",
+        b"`broken;",
+        b"`broken_backtick_decl",
+        b"[broken;",
+        b"[broken_bracket_decl",
+    ] {
+        let start = source
+            .windows(malformed.len())
+            .position(|window| window == malformed)
+            .ok_or("missing malformed quote")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| matches!(*byte, b';' | b'\n'))
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery boundary")?;
+        assert!(partials.iter().any(|record| {
+            record.anchor.as_ref().is_some_and(|anchor| {
+                anchor.start_byte == start as u64
+                    && anchor.end_byte == end as u64
+                    && anchor.file == relative.to_string_lossy()
+            })
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.anchor.as_ref().is_some_and(|anchor| {
+                anchor.start_byte == start as u64
+                    && anchor.end_byte == end as u64
+                    && anchor.file == relative.to_string_lossy()
+            })
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn nested_cte_scopes_publish_only_physical_lineage_in_strict_v1() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V10__nested_ctes.sql");
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+WITH outer_cte AS (
+  WITH RECURSIVE inner_cte AS MATERIALIZED (
+    SELECT id FROM app.users
+    UNION ALL SELECT id FROM inner_cte
+  ), inner_two AS NOT MATERIALIZED (
+    SELECT inner_cte.id FROM inner_cte JOIN app.users ON app.users.id = inner_cte.id
+  ), scope_local AS (
+    SELECT id FROM inner_two
+  )
+  SELECT id FROM scope_local
+)
+INSERT INTO app.audit
+SELECT outer_cte.id FROM outer_cte JOIN scope_local ON scope_local.id = outer_cte.id;
+CREATE PROCEDURE app.refresh_nested() AS $body$
+BEGIN
+  WITH shadowed AS (
+    WITH shadowed AS NOT MATERIALIZED (
+      SELECT id FROM app.users
+    )
+    SELECT id FROM shadowed
+  ), second AS MATERIALIZED (
+    SELECT shadowed.id FROM shadowed JOIN app.users ON app.users.id = shadowed.id
+  )
+  INSERT INTO app.audit SELECT id FROM second;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-nested-ctes")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for alias in ["outer_cte", "inner_cte", "inner_two", "shadowed", "second"] {
+        assert!(
+            graph.nodes.iter().all(|node| node.qualified_name != alias),
+            "CTE alias became an exact node {alias}: {:?}",
+            graph.nodes
+        );
+    }
+    let users = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.users")
+        .ok_or("missing users")?;
+    let audit = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.audit")
+        .ok_or("missing audit")?;
+    let query = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Query)
+        .ok_or("missing query")?;
+    let procedure = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "app.refresh_nested")
+        .ok_or("missing procedure")?;
+    let scope_local = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "scope_local")
+        .ok_or("same spelling outside the nested CTE scope must remain a physical table")?;
+    assert_eq!(
+        graph
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.source == query.id
+                    && edge.target == scope_local.id
+                    && edge.kind == EdgeKind::Reads
+            })
+            .count(),
+        1,
+        "nested CTE scope leaked beyond its enclosing subquery: {:?}",
+        graph.links
+    );
+    for owner in [query, procedure] {
+        let reads = graph
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.source == owner.id && edge.target == users.id && edge.kind == EdgeKind::Reads
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reads.len(),
+            2,
+            "owner={}, links={:?}",
+            owner.id,
+            graph.links
+        );
+        assert_eq!(
+            reads
+                .iter()
+                .filter_map(|edge| edge.relationship_site.as_ref())
+                .map(|anchor| anchor.start_byte)
+                .collect::<HashSet<_>>()
+                .len(),
+            2
+        );
+        assert!(reads.iter().all(|edge| {
+            edge.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+                    && item
+                        .rule
+                        .as_deref()
+                        .is_some_and(|rule| rule.starts_with("sql-text-"))
+            })
+        }));
+        assert_eq!(
+            graph
+                .links
+                .iter()
+                .filter(|edge| {
+                    edge.source == owner.id
+                        && edge.target == audit.id
+                        && edge.kind == EdgeKind::Writes
+                })
+                .count(),
+            1,
+            "owner={}, links={:?}",
+            owner.id,
+            graph.links
+        );
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        1,
+        "routine CTE leaked as a file-owned query: {:?}",
+        graph.nodes
+    );
+    assert!(
+        graph.graph.coverage.iter().all(|record| {
+            record.capability != "sql:body_ownership"
+                && record.capability != "sql:statement_boundary"
+        }),
+        "valid nested CTEs received partial coverage: {:?}",
+        graph.graph.coverage
+    );
+
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:sql-nested-ctes")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}

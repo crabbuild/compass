@@ -11,8 +11,9 @@ use crate::{file_stem, make_id};
 // SQL object references may contain quoted identifiers, including escaped
 // double quotes, and may be schema-qualified. Keep the quotes in the captured
 // label to preserve the source spelling and dialect-specific case semantics.
-const IDENTIFIER: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)"#;
-const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)(?:\.(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+))*"#;
+const IDENTIFIER: &str =
+    r#"(?:"(?:""|[^"\r\n])*"|`(?:``|[^`\r\n])*`|\[(?:\]\]|[^\]\r\n])+\]|[\w$]+)"#;
+const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"\r\n])*"|`(?:``|[^`\r\n])*`|\[(?:\]\]|[^\]\r\n])+\]|[\w$]+)(?:\.(?:"(?:""|[^"\r\n])*"|`(?:``|[^`\r\n])*`|\[(?:\]\]|[^\]\r\n])+\]|[\w$]+))*"#;
 
 pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
     State::new(path, source).run()
@@ -50,7 +51,12 @@ struct Site {
 
 struct AccessBindings {
     aliases: HashMap<String, String>,
-    cte_names: HashSet<String>,
+    ctes: Vec<ScopedCteBinding>,
+}
+
+struct ScopedCteBinding {
+    name: String,
+    visible: Site,
 }
 
 struct BodyBoundary {
@@ -642,7 +648,7 @@ impl<'a> State<'a> {
         let body = self.masked[start..end.min(self.masked.len())].to_owned();
         let bindings = AccessBindings {
             aliases: table_aliases(&body),
-            cte_names: cte_names(&body),
+            ctes: scoped_cte_bindings(&body),
         };
         let read_patterns = [format!(
             r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
@@ -684,7 +690,13 @@ impl<'a> State<'a> {
                 };
                 let name = name_match.as_str();
                 let key = identifier_key(name);
-                if is_reserved_object_reference(name) || bindings.cte_names.contains(&key) {
+                if is_reserved_object_reference(name)
+                    || bindings.ctes.iter().any(|binding| {
+                        binding.name == key
+                            && name_match.start() >= binding.visible.start
+                            && name_match.start() < binding.visible.end
+                    })
+                {
                     continue;
                 }
                 let target_name = bindings.aliases.get(&key).map_or(name, String::as_str);
@@ -1259,8 +1271,9 @@ fn scan_statement_boundary(source: &str, start: usize, end: usize) -> StatementB
     let mut index = start.min(limit);
     while index < limit {
         if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            let pairing_limit = quoted_identifier_pairing_limit(source, index, limit);
             if let Some(quoted_end) =
-                quoted_identifier_end(bytes, index, delimiter).filter(|end| *end <= limit)
+                quoted_identifier_end(bytes, index, delimiter).filter(|end| *end <= pairing_limit)
             {
                 index = quoted_end;
                 continue;
@@ -1290,6 +1303,34 @@ fn scan_statement_boundary(source: &str, start: usize, end: usize) -> StatementB
         index += 1;
     }
     StatementBoundary::EndOfInput(limit)
+}
+
+fn quoted_identifier_pairing_limit(source: &str, open: usize, limit: usize) -> usize {
+    let bytes = source.as_bytes();
+    let line_end = bytes[open.saturating_add(1).min(limit)..limit]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(limit, |offset| open + 1 + offset);
+    let mut index = open.saturating_add(1).min(line_end);
+    while index < line_end {
+        if bytes[index] == b';' {
+            let next = skip_sql_whitespace(source, index + 1);
+            if next < line_end && starts_sql_statement(source, next) {
+                return index + 1;
+            }
+        }
+        index += 1;
+    }
+    line_end
+}
+
+fn starts_sql_statement(source: &str, start: usize) -> bool {
+    [
+        "ALTER", "CREATE", "DELETE", "DROP", "INSERT", "MERGE", "SELECT", "TRUNCATE", "UPDATE",
+        "WITH",
+    ]
+    .iter()
+    .any(|keyword| consume_keyword(source, start, keyword).is_some())
 }
 
 fn incomplete_quote_recovery_end(source: &str, open: usize, limit: usize) -> usize {
@@ -1507,26 +1548,33 @@ fn top_level_cte_operation(statement: &str) -> Option<(usize, String)> {
     .then_some((start, operation))
 }
 
-fn cte_names(statement: &str) -> HashSet<String> {
-    parse_ctes(statement)
-        .map(|parsed| parsed.names)
-        .unwrap_or_default()
+struct ParsedCte {
+    name: String,
+    body: Site,
 }
 
 struct ParsedCtes {
-    names: HashSet<String>,
+    entries: Vec<ParsedCte>,
+    recursive: bool,
     terminal_start: usize,
 }
 
 fn parse_ctes(statement: &str) -> Option<ParsedCtes> {
-    let mut index = skip_sql_whitespace(statement, 0);
+    parse_ctes_at(statement, skip_sql_whitespace(statement, 0))
+}
+
+fn parse_ctes_at(statement: &str, start: usize) -> Option<ParsedCtes> {
+    let mut index = start;
     index = consume_keyword(statement, index, "WITH")?;
     index = skip_sql_whitespace(statement, index);
-    if let Some(end) = consume_keyword(statement, index, "RECURSIVE") {
+    let recursive = if let Some(end) = consume_keyword(statement, index, "RECURSIVE") {
         index = skip_sql_whitespace(statement, end);
-    }
+        true
+    } else {
+        false
+    };
 
-    let mut names = HashSet::new();
+    let mut entries = Vec::new();
     loop {
         let name_start = index;
         let name_end = parse_identifier_end(statement, name_start)?;
@@ -1534,7 +1582,6 @@ fn parse_ctes(statement: &str) -> Option<ParsedCtes> {
         if is_reserved_object_reference(name) {
             return None;
         }
-        names.insert(identifier_key(name));
         index = skip_sql_whitespace(statement, name_end);
 
         if statement.as_bytes().get(index).copied() == Some(b'(') {
@@ -1555,17 +1602,87 @@ fn parse_ctes(statement: &str) -> Option<ParsedCtes> {
         if statement.as_bytes().get(index).copied() != Some(b'(') {
             return None;
         }
-        index = balanced_paren_end(statement, index)?;
+        let body_start = index + 1;
+        let body_end = balanced_paren_end(statement, index)?;
+        entries.push(ParsedCte {
+            name: identifier_key(name),
+            body: Site::new(body_start, body_end.saturating_sub(1)),
+        });
+        index = body_end;
         index = skip_sql_whitespace(statement, index);
         if statement.as_bytes().get(index).copied() == Some(b',') {
             index = skip_sql_whitespace(statement, index + 1);
             continue;
         }
         return Some(ParsedCtes {
-            names,
+            entries,
+            recursive,
             terminal_start: index,
         });
     }
+}
+
+fn scoped_cte_bindings(statement: &str) -> Vec<ScopedCteBinding> {
+    let mut bindings = Vec::new();
+    for (with_start, _, word) in sql_word_spans(statement, 0) {
+        if !word.eq_ignore_ascii_case("WITH") {
+            continue;
+        }
+        let Some(parsed) = parse_ctes_at(statement, with_start) else {
+            continue;
+        };
+        let scope_end = enclosing_sql_scope_end(statement, with_start);
+        let recursive_start = parsed
+            .entries
+            .iter()
+            .map(|entry| entry.body.start)
+            .min()
+            .unwrap_or(parsed.terminal_start);
+        for entry in parsed.entries {
+            let visible_start = if parsed.recursive {
+                recursive_start
+            } else {
+                entry.body.end
+            };
+            if visible_start < scope_end {
+                bindings.push(ScopedCteBinding {
+                    name: entry.name,
+                    visible: Site::new(visible_start, scope_end),
+                });
+            }
+        }
+    }
+    bindings
+}
+
+fn enclosing_sql_scope_end(statement: &str, position: usize) -> usize {
+    let bytes = statement.as_bytes();
+    let mut stack = Vec::new();
+    let mut index = 0;
+    while index < position.min(bytes.len()) {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)
+                .filter(|end| *end <= position)
+                .unwrap_or(position);
+            continue;
+        }
+        if let Some(end) = paired_dollar_quote_end(statement, index, position) {
+            index = end;
+            continue;
+        }
+        match bytes[index] {
+            b'(' => stack.push(index),
+            b')' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    stack
+        .last()
+        .and_then(|open| balanced_paren_end(statement, *open))
+        .map_or(statement.len(), |end| end.saturating_sub(1))
 }
 
 fn skip_sql_whitespace(statement: &str, mut index: usize) -> usize {

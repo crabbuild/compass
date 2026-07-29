@@ -1017,3 +1017,276 @@ $body$ LANGUAGE plpgsql;
     );
     Ok(())
 }
+
+#[test]
+fn unmatched_identifier_quotes_cannot_pair_with_later_same_style_sql()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."double_users" (id BIGINT);
+CREATE TABLE `app`.`backtick_users` (id BIGINT);
+CREATE TABLE [app].[bracket_users] (id BIGINT);
+SELECT * FROM "broken;
+SELECT * FROM "app"."double_users";
+CREATE TABLE "app"."after_double" (id BIGINT);
+CREATE TABLE "broken_double_decl;
+CREATE TABLE "app"."after_double_decl" (id BIGINT);
+SELECT * FROM `broken;
+SELECT * FROM `app`.`backtick_users`;
+CREATE TABLE `app`.`after_backtick` (id BIGINT);
+CREATE TABLE `broken_backtick_decl;
+CREATE TABLE `app`.`after_backtick_decl` (id BIGINT);
+SELECT * FROM [broken;
+SELECT * FROM [app].[bracket_users];
+CREATE TABLE [app].[after_bracket] (id BIGINT);
+CREATE TABLE [broken_bracket_decl;
+CREATE TABLE [app].[after_bracket_decl] (id BIGINT);
+"#;
+    let extraction = extract_sql_content(Path::new("db/same_style_quote_recovery.sql"), source);
+
+    for expected in [
+        "app.after_double",
+        "app.after_double_decl",
+        "app.after_backtick",
+        "app.after_backtick_decl",
+        "app.after_bracket",
+        "app.after_bracket_decl",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .any(|node| node.string("qualified_name") == expected),
+            "missing recovered declaration {expected}: {:?}",
+            extraction.nodes
+        );
+    }
+    let queries = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "query")
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 3, "nodes={:?}", extraction.nodes);
+    for target_name in [
+        "app.double_users",
+        "app.backtick_users",
+        "app.bracket_users",
+    ] {
+        let target = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        assert_eq!(
+            extraction
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.target == target.id
+                        && edge.string("relation") == "reads"
+                        && queries.iter().any(|query| query.id == edge.source)
+                })
+                .count(),
+            1,
+            "target={target_name}, edges={:?}",
+            extraction.edges
+        );
+    }
+
+    let coverage = extraction
+        .extensions
+        .get("_compass_v1_graph_coverage")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing boundary coverage")?;
+    let diagnostics = extraction
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing boundary diagnostics")?;
+    assert_eq!(coverage.len(), 6, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 6, "diagnostics={diagnostics:?}");
+    for malformed in [
+        b"\"broken;".as_slice(),
+        b"\"broken_double_decl",
+        b"`broken;",
+        b"`broken_backtick_decl",
+        b"[broken;",
+        b"[broken_bracket_decl",
+    ] {
+        let start = source
+            .windows(malformed.len())
+            .position(|window| window == malformed)
+            .ok_or("missing malformed quote")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| matches!(*byte, b';' | b'\n'))
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery boundary")?;
+        assert!(coverage.iter().any(|record| {
+            record
+                .get("anchor")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|anchor| {
+                    anchor.get("startByte").and_then(serde_json::Value::as_u64)
+                        == Some(start as u64)
+                        && anchor.get("endByte").and_then(serde_json::Value::as_u64)
+                            == Some(end as u64)
+                })
+        }));
+        assert!(diagnostics.iter().any(|record| {
+            record
+                .get("anchor")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|anchor| {
+                    anchor.get("startByte").and_then(serde_json::Value::as_u64)
+                        == Some(start as u64)
+                        && anchor.get("endByte").and_then(serde_json::Value::as_u64)
+                            == Some(end as u64)
+                })
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn nested_cte_bindings_are_excluded_only_within_their_lexical_scopes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+WITH outer_cte AS (
+  WITH RECURSIVE inner_cte AS MATERIALIZED (
+    SELECT id FROM app.users
+    UNION ALL SELECT id FROM inner_cte
+  ), inner_two AS NOT MATERIALIZED (
+    SELECT inner_cte.id FROM inner_cte JOIN app.users ON app.users.id = inner_cte.id
+  ), scope_local AS (
+    SELECT id FROM inner_two
+  )
+  SELECT id FROM scope_local
+)
+INSERT INTO app.audit
+SELECT outer_cte.id FROM outer_cte JOIN scope_local ON scope_local.id = outer_cte.id;
+CREATE PROCEDURE app.refresh_nested() AS $body$
+BEGIN
+  WITH shadowed AS (
+    WITH shadowed AS NOT MATERIALIZED (
+      SELECT id FROM app.users
+    )
+    SELECT id FROM shadowed
+  ), second AS MATERIALIZED (
+    SELECT shadowed.id FROM shadowed JOIN app.users ON app.users.id = shadowed.id
+  )
+  INSERT INTO app.audit SELECT id FROM second;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    let extraction = extract_sql_content(Path::new("db/nested_ctes.sql"), source);
+    for alias in ["outer_cte", "inner_cte", "inner_two", "shadowed", "second"] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != alias),
+            "CTE alias became a table {alias}: {:?}",
+            extraction.nodes
+        );
+    }
+
+    let users = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.users")
+        .ok_or("missing users")?;
+    let audit = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.audit")
+        .ok_or("missing audit")?;
+    let query = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "query")
+        .ok_or("missing top-level CTE query")?;
+    let procedure = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.refresh_nested")
+        .ok_or("missing procedure")?;
+    let scope_local = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "scope_local")
+        .ok_or("same spelling outside the nested CTE scope must remain a physical table")?;
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == query.id
+                    && edge.target == scope_local.id
+                    && edge.string("relation") == "reads"
+            })
+            .count(),
+        1,
+        "nested CTE scope leaked beyond its enclosing subquery: {:?}",
+        extraction.edges
+    );
+    for owner in [query, procedure] {
+        let reads = extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == owner.id
+                    && edge.target == users.id
+                    && edge.string("relation") == "reads"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reads.len(),
+            2,
+            "owner={}, edges={:?}",
+            owner.id,
+            extraction.edges
+        );
+        assert_eq!(
+            reads
+                .iter()
+                .filter_map(|edge| edge.attributes.get("start_byte"))
+                .filter_map(serde_json::Value::as_u64)
+                .collect::<HashSet<_>>()
+                .len(),
+            2
+        );
+        assert_eq!(
+            extraction
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.source == owner.id
+                        && edge.target == audit.id
+                        && edge.string("relation") == "writes"
+                })
+                .count(),
+            1,
+            "owner={}, edges={:?}",
+            owner.id,
+            extraction.edges
+        );
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        1,
+        "routine CTE leaked as a file-owned query: {:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "{:?}",
+        extraction.extensions
+    );
+    Ok(())
+}
