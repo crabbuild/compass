@@ -325,7 +325,9 @@ export function ArchitectureMap({
               const related = selected
                 || selection === undefined
                 || (selection.kind === "section" && connected.has(route.id));
-              const evidence = route.inferred > route.extracted ? "inferred" : "extracted";
+              const evidence = route.detailsAvailable === false
+                ? "aggregate"
+                : route.inferred > route.extracted ? "inferred" : "extracted";
               const focusDirection = selection?.kind === "section"
                 ? route.targetSection === selection.id
                   ? "incoming"

@@ -37,6 +37,11 @@ export type SearchRequest = PageRequest & {
 
 type IndexedNode = ArchitectureSymbol & { normalized: string };
 type IndexedCall = ArchitectureCall & { normalized: string };
+type AggregateRoute = {
+  sourceSection: string;
+  targetSection: string;
+  calls: number;
+};
 
 const EMPTY_SCOPES: Record<SourceScope, number> = {
   production: 0,
@@ -52,6 +57,7 @@ export class ArchitectureIndex {
   private readonly internalCalls = new Map<string, IndexedCall[]>();
   private readonly crossCalls: IndexedCall[];
   private readonly routes = new Map<string, IndexedCall[]>();
+  private readonly aggregateRoutes = new Map<string, AggregateRoute>();
 
   constructor(private readonly model: CallflowViewModel) {
     this.sections = model.sections.filter((section) => section.id !== "overview");
@@ -86,6 +92,14 @@ export class ArchitectureIndex {
       calls.push(call);
       this.routes.set(id, calls);
     }
+    if (model.legacyAggregateOnly) {
+      for (const link of model.overviewLinks) {
+        this.aggregateRoutes.set(
+          routeId(link.sourceSection, link.targetSection),
+          link
+        );
+      }
+    }
   }
 
   overview(
@@ -93,20 +107,21 @@ export class ArchitectureIndex {
     evidence: ArchitectureEvidence
   ): ArchitectureOverview {
     const sectionCounts = new Map<string, { incoming: number; outgoing: number }>();
-    const routes = [...this.routes.entries()]
+    const countRoute = (sourceSection: string, targetSection: string, calls: number) => {
+      sectionCounts.set(sourceSection, {
+        incoming: sectionCounts.get(sourceSection)?.incoming ?? 0,
+        outgoing: (sectionCounts.get(sourceSection)?.outgoing ?? 0) + calls
+      });
+      sectionCounts.set(targetSection, {
+        incoming: (sectionCounts.get(targetSection)?.incoming ?? 0) + calls,
+        outgoing: sectionCounts.get(targetSection)?.outgoing ?? 0
+      });
+    };
+    const routes: ArchitectureOverview["routes"] = [...this.routes.entries()]
       .map(([id, calls]) => {
         const visible = calls.filter((call) => this.includeCall(call, scope, evidence));
         if (visible.length === 0) return undefined;
-        sectionCounts.set(visible[0]!.sourceSection, {
-          incoming: sectionCounts.get(visible[0]!.sourceSection)?.incoming ?? 0,
-          outgoing:
-            (sectionCounts.get(visible[0]!.sourceSection)?.outgoing ?? 0) + visible.length
-        });
-        sectionCounts.set(visible[0]!.targetSection, {
-          incoming:
-            (sectionCounts.get(visible[0]!.targetSection)?.incoming ?? 0) + visible.length,
-          outgoing: sectionCounts.get(visible[0]!.targetSection)?.outgoing ?? 0
-        });
+        countRoute(visible[0]!.sourceSection, visible[0]!.targetSection, visible.length);
         return {
           id,
           sourceSection: visible[0]!.sourceSection,
@@ -114,11 +129,25 @@ export class ArchitectureIndex {
           calls: visible.length,
           extracted: visible.filter((call) => call.confidence === "extracted").length,
           inferred: visible.filter((call) => call.confidence === "inferred").length,
-          ambiguous: visible.filter((call) => call.confidence === "ambiguous").length
+          ambiguous: visible.filter((call) => call.confidence === "ambiguous").length,
+          detailsAvailable: true
         };
       })
-      .filter((route) => route !== undefined)
-      .sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
+      .filter((route) => route !== undefined);
+    if (evidence === "all") {
+      for (const [id, aggregate] of this.aggregateRoutes) {
+        countRoute(aggregate.sourceSection, aggregate.targetSection, aggregate.calls);
+        routes.push({
+          id,
+          ...aggregate,
+          extracted: 0,
+          inferred: 0,
+          ambiguous: 0,
+          detailsAvailable: false
+        });
+      }
+    }
+    routes.sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
 
     const sections = this.sections.map((section) => {
       const allNodes = section.nodes.map((node) => this.nodes.get(node.id)!);
@@ -187,7 +216,16 @@ export class ArchitectureIndex {
 
   routePage(request: RoutePageRequest): ArchitectureRoutePage {
     const calls = this.routes.get(request.routeId);
-    if (!calls) throw new Error(`Unknown architecture route '${request.routeId}'`);
+    if (!calls) {
+      const aggregate = this.aggregateRoutes.get(request.routeId);
+      if (!aggregate) throw new Error(`Unknown architecture route '${request.routeId}'`);
+      return {
+        routeId: request.routeId,
+        sourceSection: aggregate.sourceSection,
+        targetSection: aggregate.targetSection,
+        ...page([], request)
+      };
+    }
     const query = normalized(request.query);
     const items = calls
       .filter((call) => this.includeCall(call, request.scope, request.evidence))

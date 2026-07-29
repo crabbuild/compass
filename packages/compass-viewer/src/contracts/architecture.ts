@@ -46,7 +46,8 @@ export const ArchitectureRouteSummarySchema = z.object({
   calls: z.number().int().nonnegative(),
   extracted: z.number().int().nonnegative(),
   inferred: z.number().int().nonnegative(),
-  ambiguous: z.number().int().nonnegative()
+  ambiguous: z.number().int().nonnegative(),
+  detailsAvailable: z.boolean().optional()
 });
 
 export const ArchitectureOverviewSchema = z.object({

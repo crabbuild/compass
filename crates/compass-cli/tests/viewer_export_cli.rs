@@ -147,7 +147,7 @@ fn callflow_json_exposes_the_shared_architecture_model() -> Result<(), Box<dyn E
         String::from_utf8_lossy(&output.stderr)
     );
     let value: Value = serde_json::from_slice(&output.stdout)?;
-    assert_eq!(value["schema"], "compass.viewer.callflow/2");
+    assert_eq!(value["schema"], "compass.viewer.callflow/1");
     assert_eq!(value["statistics"]["inferred"], 1);
     assert_eq!(value["coverage"]["crossSection"], 1);
     assert_eq!(value["crossSectionCalls"][0]["source"], "run");

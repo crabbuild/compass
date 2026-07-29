@@ -97,7 +97,7 @@ The system keeps three authority layers:
 Compass output model
   complete symbols, internal calls, cross-subsystem calls, evidence, counts
           |
-          | validated compass.viewer.callflow/2 JSON (up to 128 MiB)
+          | validated compass.viewer.callflow/1 JSON (up to 128 MiB)
           v
 VS Code architecture controller
   owns full model, scope projection, search, paging, selection generation
@@ -126,8 +126,8 @@ The 128 MiB value is a safety ceiling, not a webview payload target.
 
 ### Call-flow contract
 
-The CLI contract advances to `compass.viewer.callflow/2`. Version 2 retains the
-existing provenance and statistics while adding:
+The CLI keeps `compass.viewer.callflow/1` and adds optional fields alongside the
+existing provenance and statistics:
 
 - section summary counts independent of loaded row arrays;
 - a source scope for each node: `production`, `test`, `generated`, `vendor`, or
@@ -142,9 +142,11 @@ The model exposes all three totals. Section derivation places otherwise
 unassigned nodes in `Other`; if an edge still cannot be represented, the UI
 discloses its count instead of presenting the view as complete.
 
-The capability report advertises `/2`, and the VS Code compatibility requirement
-expects `/2`. An older CLI receives the existing upgrade guidance rather than
-failing during hydration.
+The capability report and VS Code compatibility requirement continue to
+advertise `/1`. Original v1 payloads remain valid: the host preserves their
+subsystem and aggregate route totals, treats their nodes as visible, and clearly
+marks individual cross-route evidence as unavailable. Additive v1 payloads
+provide production scoping and complete caller/callee evidence.
 
 ### Host projection and messaging
 

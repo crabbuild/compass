@@ -5118,6 +5118,11 @@ body.vscode-high-contrast-light .architecture-call-table {
   stroke-dasharray: 6 5;
 }
 
+.architecture-routes g[data-evidence="aggregate"] .architecture-route-line {
+  stroke: var(--vscode-descriptionForeground, var(--muted-foreground));
+  stroke-dasharray: 3 5;
+}
+
 .architecture-route-hit {
   fill: none;
   stroke: transparent;
@@ -5514,6 +5519,27 @@ body.vscode-high-contrast-light .architecture-call-table {
   font-size: 10px;
   line-height: 1.5;
   text-align: center;
+}
+
+.architecture-legacy-route-note {
+  align-self: start;
+  margin: 12px;
+  padding: 12px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 6px;
+  background: var(--architecture-raised);
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.architecture-legacy-route-note strong {
+  color: var(--vscode-foreground, var(--foreground));
+  font-size: 11px;
+}
+
+.architecture-legacy-route-note p {
+  margin: 5px 0 0;
 }
 
 .architecture-loading-rows {

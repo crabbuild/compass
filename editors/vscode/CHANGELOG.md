@@ -10,6 +10,8 @@
   directional subsystem map and complete paged cross-subsystem call evidence.
 - Arrange subsystem maps into low-noise call-flow lanes with bundled routes,
   persistent drag positioning, focus highlighting, and collapsible details.
+- Continue negotiating `compass.viewer.callflow/1`; original v1 exports retain
+  aggregate routes while additive v1 exports provide complete call evidence.
 - Load architecture exports up to 128 MiB while keeping ordinary Compass
   commands at the 8 MiB safety ceiling.
 

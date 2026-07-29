@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::{CallflowOptions, CallflowSection, OutputError, derive_callflow_sections};
 
-pub const CALLFLOW_VIEWER_SCHEMA: &str = "compass.viewer.callflow/2";
+pub const CALLFLOW_VIEWER_SCHEMA: &str = "compass.viewer.callflow/1";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

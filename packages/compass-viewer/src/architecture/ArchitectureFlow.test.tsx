@@ -94,4 +94,43 @@ describe("ArchitectureFlow", () => {
     expect(screen.getByRole("button", { name: "Show architecture details" }))
       .toBeInTheDocument();
   });
+
+  it("discloses aggregate-only route evidence from original schema-v1 exports", () => {
+    const legacyOverview: ArchitectureOverview = {
+      ...overview,
+      sections: [
+        ...overview.sections,
+        {
+          id: "storage", name: "Storage", nodeCount: 1, totalNodeCount: 1,
+          internalCallCount: 0, incomingCalls: 7, outgoingCalls: 0,
+          scopes: { production: 1, test: 0, generated: 0, vendor: 0, unknown: 0 }
+        }
+      ],
+      routes: [{
+        id: "api→storage",
+        sourceSection: "api",
+        targetSection: "storage",
+        calls: 7,
+        extracted: 0,
+        inferred: 0,
+        ambiguous: 0,
+        detailsAvailable: false
+      }]
+    };
+    render(
+      <ArchitectureFlow
+        overview={legacyOverview}
+        sectionPage={page}
+        routePage={undefined}
+        searchPage={undefined}
+        loadingMessage={undefined}
+        host={host()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /api to storage, 7 calls/i }));
+    expect(screen.getByText("Aggregate route")).toBeInTheDocument();
+    expect(screen.getByText(/contains the route total but not its individual/i))
+      .toBeInTheDocument();
+  });
 });

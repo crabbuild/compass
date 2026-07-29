@@ -11,7 +11,7 @@ import { ArchitecturePanelController, ARCHITECTURE_STDOUT_LIMIT } from "./archit
 
 function callflowPayload(): string {
   return JSON.stringify({
-    schema: "compass.viewer.callflow/2",
+    schema: "compass.viewer.callflow/1",
     title: "Fixture — Architecture Flow",
     sections: [
       {
