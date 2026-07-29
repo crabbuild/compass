@@ -610,6 +610,8 @@ const fn is_import_target(kind: NodeKind) -> bool {
             NodeKind::Import
                 | NodeKind::Export
                 | NodeKind::TypeAlias
+                | NodeKind::Variable
+                | NodeKind::Constant
                 | NodeKind::Resource
                 | NodeKind::ConfigKey
         )
