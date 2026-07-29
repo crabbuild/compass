@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./contracts/callGraph": "./src/contracts/callGraph.ts",
     "./contracts/callflow": "./src/contracts/callflow.ts",
+    "./contracts/architecture": "./src/contracts/architecture.ts",
     "./contracts/graph": "./src/contracts/graph.ts",
     "./contracts/history": "./src/contracts/history.ts",
     "./graph/CompassBrandMark": "./src/graph/CompassBrandMark.tsx"
