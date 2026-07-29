@@ -349,7 +349,8 @@ pub fn normalize_v1(
                 &format!("target {} does not match a raw node", raw.target),
             )
         })?;
-        let edge = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
+        let trusted_edge = raw.attributes.contains_key(TRUSTED_EDGE_RECORD);
+        let mut edge = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
             Some(value) => normalize_trusted_edge(
                 raw,
                 value,
@@ -368,6 +369,38 @@ pub fn normalize_v1(
                 &file_facts,
             )?,
         };
+        let source_kind = nodes
+            .get(&edge.source)
+            .map(|node| node.kind)
+            .unwrap_or(NodeKind::Variable);
+        let target_kind = nodes
+            .get(&edge.target)
+            .map(|node| node.kind)
+            .unwrap_or(NodeKind::Variable);
+        if !trusted_edge && edge.kind == EdgeKind::Calls && target_kind.is_constructible() {
+            edge.kind = EdgeKind::Instantiates;
+            edge.details = None;
+            let id = edge_id(
+                &edge.source,
+                edge.kind,
+                &edge.target,
+                edge.relationship_site.as_ref(),
+                edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+            );
+            edge.id.clone_from(&id);
+            edge.key = id;
+            evidence.diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Info,
+                code: "normalized_constructor_call".to_owned(),
+                message: format!(
+                    "normalized calls endpoints {} -> {} to instantiates",
+                    source_kind.as_str(),
+                    target_kind.as_str()
+                ),
+                anchor: edge.relationship_site.clone(),
+                related_ids: vec![edge.source.clone(), edge.target.clone()],
+            });
+        }
         if edge.source == edge.target && edge.kind != EdgeKind::Calls {
             evidence.diagnostics.push(GraphDiagnostic {
                 severity: DiagnosticSeverity::Warning,
@@ -383,14 +416,6 @@ pub fn normalize_v1(
             continue;
         }
         if matches!(edge.kind, EdgeKind::Extends | EdgeKind::Implements) {
-            let source_kind = nodes
-                .get(&edge.source)
-                .map(|node| node.kind)
-                .unwrap_or(NodeKind::Variable);
-            let target_kind = nodes
-                .get(&edge.target)
-                .map(|node| node.kind)
-                .unwrap_or(NodeKind::Variable);
             let valid = source_kind.is_type()
                 && match edge.kind {
                     EdgeKind::Extends => target_kind.is_type(),

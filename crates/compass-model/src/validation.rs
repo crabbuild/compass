@@ -429,10 +429,24 @@ fn endpoint_kinds_are_valid(
     target: &crate::code_graph::NodeRecord,
 ) -> bool {
     match kind {
-        EdgeKind::Contains => source.kind.is_container(),
+        EdgeKind::Contains => {
+            is_lexical_container(source.kind)
+                && (target.kind != NodeKind::File
+                    || matches!(
+                        source.kind,
+                        NodeKind::Module
+                            | NodeKind::Package
+                            | NodeKind::Namespace
+                            | NodeKind::Resource
+                    ))
+        }
         EdgeKind::Calls => {
-            (source.kind.is_callable() || matches!(source.kind, NodeKind::File | NodeKind::Module))
-                && target.kind.is_callable()
+            is_call_source(source.kind)
+                && (target.kind.is_callable()
+                    || matches!(
+                        target.kind,
+                        NodeKind::Variable | NodeKind::Import | NodeKind::TypeAlias
+                    ))
         }
         EdgeKind::Imports => {
             (matches!(
@@ -456,7 +470,12 @@ fn endpoint_kinds_are_valid(
         }
         EdgeKind::TypeOf => target.kind.is_type(),
         EdgeKind::Returns => source.kind.is_callable(),
-        EdgeKind::Instantiates => source.kind.is_callable() && target.kind.is_constructible(),
+        EdgeKind::Instantiates => {
+            (source.kind.is_callable()
+                || source.kind.is_type()
+                || source.kind == NodeKind::Variable)
+                && target.kind.is_constructible()
+        }
         EdgeKind::Overrides => source.kind.is_callable() && target.kind.is_callable(),
         EdgeKind::Decorates => {
             matches!(source.kind, NodeKind::Annotation | NodeKind::Macro)
@@ -526,7 +545,7 @@ fn endpoint_kinds_are_valid(
             )
         }
         EdgeKind::Schedules | EdgeKind::Triggers => {
-            is_executable(source.kind)
+            (is_executable(source.kind)
                 && matches!(
                     target.kind,
                     NodeKind::Function
@@ -534,7 +553,10 @@ fn endpoint_kinds_are_valid(
                         | NodeKind::Job
                         | NodeKind::Event
                         | NodeKind::DatabaseTrigger
-                )
+                ))
+                || (kind == EdgeKind::Triggers
+                    && source.kind == NodeKind::DatabaseTrigger
+                    && target.kind == NodeKind::DatabaseTable)
         }
         EdgeKind::Tests => {
             matches!(
@@ -545,6 +567,16 @@ fn endpoint_kinds_are_valid(
         EdgeKind::Documents => source.kind == NodeKind::Resource,
         EdgeKind::References | EdgeKind::DependsOn => true,
     }
+}
+
+const fn is_lexical_container(kind: NodeKind) -> bool {
+    kind.is_container() || kind.is_callable() || matches!(kind, NodeKind::TypeAlias)
+}
+
+const fn is_call_source(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || kind.is_type()
+        || matches!(kind, NodeKind::File | NodeKind::Module | NodeKind::Variable)
 }
 
 const fn is_executable(kind: NodeKind) -> bool {
