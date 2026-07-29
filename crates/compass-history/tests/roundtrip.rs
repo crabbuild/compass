@@ -10,6 +10,7 @@ use compass_ir::{
     hex_sha256,
 };
 use compass_model::GraphDocument;
+use compass_model::identity::file_id;
 use prolly::VersionedValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -48,15 +49,41 @@ fn trusted_graph_partitions_store_full_typed_node_records() -> Result<(), Box<dy
 {
     let directory = tempfile::tempdir()?;
     let mut graph = empty_trusted_graph();
+    graph["graph"]["files"] = json!([{
+        "id":file_id("src/lib.rs"),
+        "path":"src/lib.rs",
+        "contentDigest":"sha256:fixture",
+        "byteSize":10,
+        "generated":false,
+        "extractionStatus":"extracted"
+    }]);
     graph["nodes"] = json!([{
         "id":"symbol:test",
         "kind":"function",
         "name":"test",
         "qualifiedName":"fixture.test",
+        "source":{
+            "file":"src/lib.rs",
+            "startByte":0,
+            "endByte":4,
+            "startLine":1,
+            "startColumn":0,
+            "endLine":1,
+            "endColumn":4
+        },
         "evidence":[{
             "origin":"config",
             "extractor":"fixture",
-            "confidence":"exact"
+            "confidence":"exact",
+            "anchors":[{
+                "file":"src/lib.rs",
+                "startByte":0,
+                "endByte":4,
+                "startLine":1,
+                "startColumn":0,
+                "endLine":1,
+                "endColumn":4
+            }]
         }],
         "coverage":[{
             "capability":"node:function",
