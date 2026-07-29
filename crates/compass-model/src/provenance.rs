@@ -6,6 +6,7 @@ pub const OCCURRENCE_RULE_ATTRIBUTE: &str = "_occurrence_rule";
 pub const ENDPOINT_REWRITE_RULES_ATTRIBUTE: &str = "_endpoint_rewrite_rules";
 pub const CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE: &str =
     "_consume_incremental_endpoint_remap";
+pub const COALESCED_NODE_EVIDENCE_ATTRIBUTE: &str = "_coalesced_node_evidence";
 pub const TRUSTED_EDGE_RECORD_ATTRIBUTE: &str = "_compass_v1_edge_record";
 pub const TRUSTED_NODE_RECORD_ATTRIBUTE: &str = "_compass_v1_node_record";
 

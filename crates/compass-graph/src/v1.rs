@@ -16,10 +16,10 @@ use compass_model::identity::{
     route_id, symbol_id,
 };
 use compass_model::provenance::{
-    CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE, ENDPOINT_REWRITE_RULES_ATTRIBUTE,
-    EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
-    OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState, SourceAnchor,
-    TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
+    COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
+    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
+    OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
+    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
 };
 use compass_model::{GraphError, validate_code_graph};
 use serde::{Deserialize, Serialize};
@@ -1791,7 +1791,7 @@ fn normalize_node(
         })
         .transpose()?
         .unwrap_or_default();
-    let evidence = vec![normalize_provenance(
+    let mut evidence = vec![normalize_provenance(
         &raw.attributes,
         source.clone().or_else(|| external_wiring_site.clone()),
         &raw.id,
@@ -1801,6 +1801,18 @@ fn normalize_node(
             .map(|_| "external-symbol-placeholder"),
         external_wiring_site.is_some(),
     )?];
+    if let Some(coalesced) = raw
+        .attributes
+        .get(COALESCED_NODE_EVIDENCE_ATTRIBUTE)
+        .and_then(Value::as_array)
+    {
+        for value in coalesced {
+            let provenance = serde_json::from_value::<Provenance>(value.clone())
+                .map_err(|error| raw_error(&raw.id, &error.to_string()))?;
+            evidence.push(provenance);
+        }
+        sort_dedup_serialized(&mut evidence);
+    }
     let details = node_details(
         kind,
         resource_kind,

@@ -25,9 +25,9 @@ use compass_model::code_graph::{
     NodeKind,
 };
 use compass_model::provenance::{
-    CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE, EndpointRewriteEvidence, EndpointRewriteRule,
-    EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
-    append_endpoint_rewrite_evidence,
+    COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
+    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
@@ -2264,13 +2264,56 @@ fn preserve_semantic_layer(
     }
     let prior_diagnostics = existing_raw.extensions.remove(GRAPH_DIAGNOSTICS_EXTENSION);
     append_graph_diagnostics(extraction, prior_diagnostics, remap_diagnostics);
+    for prior in &existing.nodes {
+        let Some(current_raw_id) = typed_ast_remap.get(&prior.id) else {
+            continue;
+        };
+        let Some(current) = extraction
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == *current_raw_id)
+        else {
+            continue;
+        };
+        let fresh_site = raw_source_anchor(&current.attributes, root);
+        let semantic_evidence = prior
+            .evidence
+            .iter()
+            .filter(|evidence| evidence.origin != EvidenceOrigin::Ast)
+            .cloned()
+            .map(|mut evidence| {
+                rebind_preserved_node_evidence(
+                    &mut evidence,
+                    prior.source.as_ref(),
+                    fresh_site.as_ref(),
+                );
+                evidence
+            })
+            .filter_map(|evidence| serde_json::to_value(evidence).ok())
+            .collect::<Vec<_>>();
+        if semantic_evidence.is_empty() {
+            continue;
+        }
+        let evidence = current
+            .attributes
+            .entry(COALESCED_NODE_EVIDENCE_ATTRIBUTE.to_owned())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        let Some(evidence) = evidence.as_array_mut() else {
+            continue;
+        };
+        evidence.extend(semantic_evidence);
+        evidence.sort_by_cached_key(serde_json::Value::to_string);
+        evidence.dedup();
+    }
     let preserved_node_ids = existing
         .nodes
         .iter()
         .filter(|node| {
-            node.evidence
-                .iter()
-                .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
+            !typed_ast_remap.contains_key(&node.id)
+                && node
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
         })
         .map(|node| node.id.as_str())
         .collect::<HashSet<_>>();
@@ -2570,6 +2613,51 @@ fn strip_preserved_ast_node_evidence(attributes: &mut serde_json::Map<String, se
     node.evidence
         .retain(|evidence| evidence.origin != EvidenceOrigin::Ast);
     *record = serde_json::to_value(node).unwrap_or(serde_json::Value::Null);
+}
+
+fn rebind_preserved_node_evidence(
+    evidence: &mut compass_model::provenance::Provenance,
+    prior_site: Option<&SourceAnchor>,
+    fresh_site: Option<&SourceAnchor>,
+) {
+    let (Some(prior_site), Some(fresh_site)) = (prior_site, fresh_site) else {
+        return;
+    };
+    if evidence.wiring_site.as_ref() == Some(prior_site) {
+        evidence.wiring_site = Some(fresh_site.clone());
+    }
+    for anchor in &mut evidence.anchors {
+        if anchor == prior_site {
+            anchor.clone_from(fresh_site);
+        }
+    }
+}
+
+fn raw_source_anchor(
+    attributes: &serde_json::Map<String, serde_json::Value>,
+    root: &Path,
+) -> Option<SourceAnchor> {
+    let mut site = attributes
+        .get("source_anchor")
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+        .or_else(|| {
+            Some(SourceAnchor {
+                file: attributes.get("source_file")?.as_str()?.to_owned(),
+                start_byte: attributes.get("start_byte")?.as_u64()?,
+                end_byte: attributes.get("end_byte")?.as_u64()?,
+                start_line: u32::try_from(attributes.get("line_start")?.as_u64()?).ok()?,
+                start_column: u32::try_from(attributes.get("column_start")?.as_u64()?).ok()?,
+                end_line: u32::try_from(attributes.get("line_end")?.as_u64()?).ok()?,
+                end_column: u32::try_from(attributes.get("column_end")?.as_u64()?).ok()?,
+            })
+        })?;
+    let path = Path::new(&site.file);
+    if path.is_absolute()
+        && let Ok(relative) = path.strip_prefix(root)
+    {
+        site.file = relative.to_string_lossy().replace('\\', "/");
+    }
+    Some(site)
 }
 
 fn has_exact_remap_site(attributes: &serde_json::Map<String, serde_json::Value>) -> bool {

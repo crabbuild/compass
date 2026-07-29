@@ -39,6 +39,41 @@ fn semantic_edge_extraction(
     Ok(extraction)
 }
 
+fn semantic_method_alias_extraction(
+    path: &Path,
+    source: &[u8],
+) -> Result<Extraction, Box<dyn Error>> {
+    let mut engine = Engine::default();
+    let mut extraction = engine.extract_source(path, source)?;
+    let method_ids = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "method")
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    extraction.edges.retain(|edge| {
+        edge.attributes
+            .get("relation")
+            .and_then(serde_json::Value::as_str)
+            == Some("contains")
+            && method_ids.contains(&edge.target)
+    });
+    extraction.nodes.clear();
+    for edge in &mut extraction.edges {
+        edge.attributes
+            .insert("relation".to_owned(), json!("method"));
+        edge.attributes
+            .insert("_origin".to_owned(), json!("semantic"));
+        edge.attributes
+            .insert("confidence".to_owned(), json!("INFERRED"));
+        edge.attributes
+            .insert("extractor".to_owned(), json!("test.semantic"));
+    }
+    extraction.raw_calls = None;
+    extraction.hyperedges.clear();
+    Ok(extraction)
+}
+
 #[test]
 fn export_inputs_fall_back_to_node_communities_and_tolerate_partial_sidecars()
 -> Result<(), Box<dyn Error>> {
@@ -337,7 +372,7 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
                 _ => None,
             });
     assert!(
-        incremental_signature.is_some_and(|signature| signature.contains("value")),
+        incremental_signature.is_some_and(|signature| signature.contains("u32")),
         "target={incremental_target:?}"
     );
 
@@ -362,8 +397,9 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
     assert!(
         incremental_target.evidence.iter().any(|evidence| {
             evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+                && evidence.wiring_site.as_ref() == incremental_target.source.as_ref()
         }),
-        "semantic evidence was not preserved: {incremental_target:?}"
+        "semantic evidence was not preserved at the fresh source site: {incremental_target:?}"
     );
     Ok(())
 }
@@ -883,8 +919,7 @@ fn incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites()
     let source = root.join("main.rs");
     let initial_source = b"pub struct Widget;\nimpl Widget {\n    pub fn run(&self) {}\n}\n";
     fs::write(&source, initial_source)?;
-    let initial_semantic =
-        semantic_edge_extraction(Path::new("main.rs"), initial_source, "method")?;
+    let initial_semantic = semantic_method_alias_extraction(Path::new("main.rs"), initial_source)?;
     assert_eq!(initial_semantic.edges.len(), 1);
 
     let mut options = BuildOptions::new(root.to_path_buf());
@@ -924,13 +959,15 @@ fn incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites()
     assert_eq!(
         incremental_methods.len(),
         1,
-        "stale alias edge survived beside fresh canonical edge: {incremental_methods:?}"
+        "stale alias edge survived beside fresh canonical edge: methods={method_ids:?} edges={:?}",
+        incremental_graph.links
     );
     assert!(incremental_methods[0].evidence.iter().any(|evidence| {
         evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
     }));
 
-    let final_semantic = semantic_edge_extraction(Path::new("main.rs"), final_source, "method")?;
+    let final_semantic = semantic_method_alias_extraction(Path::new("main.rs"), final_source)?;
+    assert_eq!(final_semantic.edges.len(), 1);
     let mut clean_options = BuildOptions::new(root.to_path_buf());
     clean_options.output_root = Some(root.join("clean-out"));
     clean_options.no_cluster = true;
