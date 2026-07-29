@@ -46,6 +46,7 @@ const SECRET_PRONE_EXTENSIONS: &[&str] = &[
     "tfvars",
 ];
 const SKIP_FILES: &[&str] = &[
+    ".git",
     "package-lock.json",
     "yarn.lock",
     "pnpm-lock.yaml",

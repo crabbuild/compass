@@ -162,6 +162,31 @@ fn historical_detection_ignores_caller_local_excludes_but_keeps_committed_rules(
 }
 
 #[test]
+fn detection_ignores_git_worktree_pointer_files() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::write(root.join(".git"), "gitdir: /tmp/example\n")?;
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+
+    let detection = compass_files::detect(
+        root,
+        &DetectOptions {
+            ignore_policy: IgnorePolicy::HistoricalCommit,
+            ..DetectOptions::default()
+        },
+    )?;
+    assert_eq!(detection.files["code"].len(), 1);
+    assert!(detection.files["code"][0].ends_with("main.rs"));
+    assert!(
+        detection
+            .unclassified
+            .iter()
+            .all(|path| !path.ends_with(".git"))
+    );
+    Ok(())
+}
+
+#[test]
 fn classification_exercises_manifests_shebangs_media_papers_and_asset_exclusions()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
