@@ -15,6 +15,9 @@ use crate::cql::{QueryError, QueryErrorKind};
 use crate::join_program_evidence;
 use crate::source::{VerifiedSource, verified_source};
 
+type GraphPath = (Vec<String>, Vec<String>);
+type BoundedPathResult = (Option<GraphPath>, bool);
+
 const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::Calls,
     EdgeKind::RoutesTo,
@@ -443,7 +446,7 @@ impl CodeQueryEngine {
         target: &str,
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
-    ) -> (Option<(Vec<String>, Vec<String>)>, bool) {
+    ) -> BoundedPathResult {
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
         let max_nodes = usize::try_from(limits.max_nodes).unwrap_or(usize::MAX);
         let max_edges = usize::try_from(limits.max_edges).unwrap_or(usize::MAX);
