@@ -32,6 +32,21 @@ fn node(id: &str, name: &str, qualified_name: &str) -> RawNodeRecord {
     }
 }
 
+fn import_alias(id: &str, source_file: &str, local_name: &str) -> RawNodeRecord {
+    RawNodeRecord {
+        id: id.to_owned(),
+        attributes: Map::from_iter([
+            ("label".into(), Value::String(local_name.to_owned())),
+            ("symbol_kind".into(), Value::String("import".into())),
+            ("file_type".into(), Value::String("code".into())),
+            ("source_file".into(), Value::String(source_file.to_owned())),
+            ("local_name".into(), Value::String(local_name.to_owned())),
+            ("module".into(), Value::String("./handler".into())),
+            ("imported_name".into(), Value::String("handler".into())),
+        ]),
+    }
+}
+
 fn route(handler: &str) -> RawRouteFact {
     RawRouteFact {
         framework: "synthetic".to_owned(),
@@ -407,6 +422,38 @@ fn candidate_and_fact_limits_fail_without_partial_publication() {
         resolve_routes(&extraction, limits),
         Err(FrameworkResolutionError::Limit(error))
             if error.limit == "max_facts_per_file"
+    ));
+}
+
+#[test]
+fn import_alias_limit_is_enforced_per_source_file() {
+    let limits = FrameworkLimits {
+        max_alias_expansions: 1,
+        ..FrameworkLimits::default()
+    };
+    let mut extraction = Extraction {
+        nodes: vec![
+            node("handler", "show_user", "app.routes.show_user"),
+            import_alias("first", "src/first.ts", "first"),
+            import_alias("second", "src/second.ts", "second"),
+        ],
+        framework_facts: vec![RawFrameworkFact::Route(route("show_user"))],
+        ..Extraction::default()
+    };
+    assert!(
+        resolve_routes(&extraction, limits).is_ok(),
+        "aliases in independent source files do not share an expansion budget"
+    );
+
+    extraction
+        .nodes
+        .push(import_alias("third", "src/first.ts", "third"));
+    assert!(matches!(
+        resolve_routes(&extraction, limits),
+        Err(FrameworkResolutionError::AliasLimit {
+            observed: 2,
+            maximum: 1
+        })
     ));
 }
 

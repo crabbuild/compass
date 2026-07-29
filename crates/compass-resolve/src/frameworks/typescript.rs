@@ -18,6 +18,7 @@ pub(super) fn import_alias_map(
     limits: FrameworkLimits,
 ) -> Result<ImportAliases, FrameworkResolutionError> {
     let mut aliases = HashMap::new();
+    let mut aliases_per_file = HashMap::new();
     for node in &extraction.nodes {
         let Some(source_file) = node
             .attributes
@@ -51,16 +52,23 @@ pub(super) fn import_alias_map(
         else {
             continue;
         };
+        let source_file = source_file.replace('\\', "/");
+        let key = (source_file.clone(), local.to_owned());
+        let is_new = !aliases.contains_key(&key);
         aliases.insert(
-            (source_file.replace('\\', "/"), local.to_owned()),
+            key,
             ImportAlias {
                 module: module.to_owned(),
                 imported: imported.to_owned(),
             },
         );
-        if aliases.len() > limits.max_alias_expansions {
+        let aliases_in_file = aliases_per_file.entry(source_file).or_insert(0_usize);
+        if is_new {
+            *aliases_in_file += 1;
+        }
+        if *aliases_in_file > limits.max_alias_expansions {
             return Err(FrameworkResolutionError::AliasLimit {
-                observed: aliases.len(),
+                observed: *aliases_in_file,
                 maximum: limits.max_alias_expansions,
             });
         }
