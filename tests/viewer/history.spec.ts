@@ -2,9 +2,15 @@ import { expect, test } from "@playwright/test";
 
 test("timeline automatically opens an available revision without building", async ({ page }) => {
   await page.goto("/history.html?load=slow");
+  const loadingState = page.locator(
+    ".history-graph-frame > .workbench-state[data-kind='running']"
+  );
+  await expect(
+    loadingState.getByRole("heading", { name: "Loading Revision A graph", exact: true })
+  ).toBeVisible();
+  await expect(loadingState).toContainText("Compass is opening the stored graph");
   await expect(page.getByRole("listbox", { name: "Git commit timeline" })).toBeVisible();
   await expect(page.getByLabel("Revision A graph").getByText("graph available")).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Loading Revision A graph");
   await expect(page.getByText(/Viewing graph for aaaaaaaaa/)).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     const messages = (window as typeof window & {

@@ -13,7 +13,7 @@ categories.workspace = true
 
 [dependencies]
 base64.workspace = true
-compass-ir = { path = "../compass-ir" }
+compass-ir = { path = "../compass-ir", version = "0.1.4" }
 protobuf.workspace = true
 scip.workspace = true
 serde.workspace = true

@@ -6,6 +6,7 @@ version = 2
 yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2024-0436", reason = "Candle's GEMM stack uses paste only as a compile-time proc macro; it contributes no runtime code, and Compass will remove this exception when Candle migrates to pastey" },
+  { id = "RUSTSEC-2021-0127", reason = "prolly-map 0.5.0 uses serde_cbor only to persist the versioned history map; this is an unmaintained advisory with no safe upgrade, and Compass will remove the exception when prolly-map migrates to a maintained CBOR implementation" },
 ]
 
 [licenses]
@@ -23,6 +24,12 @@ allow = [
   "NCSA",
   "Unicode-3.0",
   "Zlib",
+]
+# prolly-map 0.5.0 uses this exact xxhash implementation for content-addressed
+# history nodes. BSL-1.0 is OSI-approved; keep the exception crate/version scoped
+# instead of allowing the license for every future dependency.
+exceptions = [
+  { allow = ["BSL-1.0"], crate = "xxhash-rust@0.8.18" },
 ]
 
 [bans]

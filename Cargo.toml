@@ -31,7 +31,7 @@ members = [
     "vendor/compass-tree-sitter-language-pack",
 ]
 resolver = "3"
-exclude = ["fuzz"]
+exclude = ["fuzz", "vendor/gemm-common"]
 
 [workspace.package]
 version = "0.1.10"
@@ -126,3 +126,6 @@ codegen-units = 1
 lto = "thin"
 panic = "abort"
 strip = "symbols"
+
+[patch.crates-io]
+gemm-common = { path = "vendor/gemm-common" }
