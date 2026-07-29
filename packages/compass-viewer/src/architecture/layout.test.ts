@@ -49,4 +49,29 @@ describe("layoutArchitecture", () => {
     const high = layoutArchitecture(sections, routes);
     expect(high.routes[0]!.width).toBeGreaterThan(low.routes[0]!.width);
   });
+
+  it("creates aligned flow lanes and rounded orthogonal routes", () => {
+    const layout = layoutArchitecture(sections, routes);
+    expect(layout.lanes).toHaveLength(2);
+    expect(layout.lanes.map((lane) => lane.label)).toEqual(["Upstream", "Downstream"]);
+    expect(layout.routes[0]).toMatchObject({ direction: "forward" });
+    expect(layout.routes[0]!.path).toContain(" H ");
+    expect(layout.routes[0]!.path).toContain(" V ");
+    expect(layout.routes[0]!.path).toContain(" Q ");
+  });
+
+  it("applies dragged positions and reconnects routes to the moved cards", () => {
+    const automatic = layoutArchitecture(sections, routes);
+    const moved = layoutArchitecture(
+      sections,
+      routes,
+      undefined,
+      { api: { x: 420, y: 510 } }
+    );
+    expect(moved.nodes.find((node) => node.id === "api")).toMatchObject({
+      x: 420,
+      y: 510
+    });
+    expect(moved.routes[0]!.path).not.toBe(automatic.routes[0]!.path);
+  });
 });

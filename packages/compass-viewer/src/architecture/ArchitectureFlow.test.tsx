@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ArchitectureHost } from "./ArchitectureFlow";
 import { ArchitectureFlow } from "./ArchitectureFlow";
@@ -74,5 +74,24 @@ describe("ArchitectureFlow", () => {
     await waitFor(() => {
       expect(adapter.requestSection).toHaveBeenCalledWith("api", "symbols", 1, "");
     });
+  });
+
+  it("lets the map reclaim the detail panel space", () => {
+    render(
+      <ArchitectureFlow
+        overview={overview}
+        sectionPage={page}
+        routePage={undefined}
+        searchPage={undefined}
+        loadingMessage={undefined}
+        host={host()}
+      />
+    );
+
+    expect(screen.getByLabelText("Architecture selection details")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide architecture details" }));
+    expect(screen.queryByLabelText("Architecture selection details")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show architecture details" }))
+      .toBeInTheDocument();
   });
 });

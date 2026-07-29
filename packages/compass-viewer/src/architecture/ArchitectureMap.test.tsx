@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArchitectureOverview } from "../contracts/architecture";
 import { ArchitectureMap } from "./ArchitectureMap";
 
@@ -32,6 +32,10 @@ const overview: ArchitectureOverview = {
 };
 
 describe("ArchitectureMap", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("renders keyboard-accessible directed routes and a table alternative", () => {
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
     expect(screen.getByRole("img", { name: /2 subsystems and 1 directed routes/i }))
@@ -46,5 +50,42 @@ describe("ArchitectureMap", () => {
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: /api to storage, 30 calls/i }));
     expect(onSelect).toHaveBeenCalledWith({ kind: "route", id: "api→storage" });
+  });
+
+  it("repositions a dragged subsystem, reconnects its route, and remembers the drop", () => {
+    render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
+    const map = screen.getByRole("img", { name: /2 subsystems and 1 directed routes/i });
+    const api = screen.getByRole("button", { name: /^API, 20 visible symbols/i });
+    const initialTransform = api.getAttribute("transform");
+    Object.defineProperties(map, {
+      getScreenCTM: {
+        value: () => ({ inverse: () => ({}) })
+      },
+      createSVGPoint: {
+        value: () => ({
+          x: 0,
+          y: 0,
+          matrixTransform(this: { x: number; y: number }) {
+            return { x: this.x, y: this.y };
+          }
+        })
+      }
+    });
+    Object.defineProperties(api, {
+      setPointerCapture: { value: vi.fn() },
+      hasPointerCapture: { value: () => true },
+      releasePointerCapture: { value: vi.fn() }
+    });
+
+    fireEvent.pointerDown(api, { pointerId: 7, clientX: 356, clientY: 392 });
+    fireEvent.pointerMove(api, { pointerId: 7, clientX: 486, clientY: 472 });
+    fireEvent.pointerUp(api, { pointerId: 7, clientX: 486, clientY: 472 });
+
+    expect(api.getAttribute("transform")).not.toBe(initialTransform);
+    expect(window.localStorage.getItem(
+      "compass.architecture.layout.v1:Fixture:production:all"
+    )).toContain("\"api\"");
+    expect(screen.getByRole("button", { name: "Reset subsystem positions" }))
+      .not.toBeDisabled();
   });
 });

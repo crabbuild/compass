@@ -5,6 +5,8 @@ import {
   ArrowUpRightIcon,
   BoxIcon,
   FileCodeIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   SearchIcon,
   SlidersHorizontalIcon
 } from "lucide-react";
@@ -54,6 +56,7 @@ export function ArchitectureFlow({
   const [sectionTab, setSectionTab] = useState<"symbols" | "calls">("symbols");
   const [detailQuery, setDetailQuery] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
 
   useEffect(() => {
     if (!selection && firstSection) {
@@ -91,7 +94,7 @@ export function ArchitectureFlow({
   };
 
   return (
-    <div className="architecture-workspace">
+    <div className="architecture-workspace" data-inspector-open={inspectorOpen}>
       <aside className="architecture-rail">
         <header className="architecture-rail-header">
           <span>Architecture flow</span>
@@ -203,6 +206,18 @@ export function ArchitectureFlow({
               <option value="ambiguous">Ambiguous</option>
             </select>
           </label>
+          <button
+            className="architecture-inspector-toggle"
+            type="button"
+            aria-label={inspectorOpen ? "Hide architecture details" : "Show architecture details"}
+            aria-pressed={inspectorOpen}
+            title={inspectorOpen ? "Hide details" : "Show details"}
+            onClick={() => setInspectorOpen((value) => !value)}
+          >
+            {inspectorOpen
+              ? <PanelRightCloseIcon aria-hidden="true" />
+              : <PanelRightOpenIcon aria-hidden="true" />}
+          </button>
         </header>
 
         <div className="architecture-context-strip">
@@ -231,40 +246,42 @@ export function ArchitectureFlow({
         />
       </main>
 
-      <aside className="architecture-inspector" aria-label="Architecture selection details">
-        {selectedSection ? (
-          <SectionInspector
-            section={selectedSection}
-            page={displayedSectionPage}
-            tab={sectionTab}
-            query={detailQuery}
-            onTab={(tab) => {
-              setSectionTab(tab);
-            }}
-            onQuery={setDetailQuery}
-            onPage={(page) =>
-              host.requestSection(selectedSection.id, sectionTab, page, detailQuery)
-            }
-            onOpenSource={host.openSource}
-          />
-        ) : selectedRoute ? (
-          <RouteInspector
-            route={selectedRoute}
-            page={displayedRoutePage}
-            query={detailQuery}
-            sectionName={(id) =>
-              overview.sections.find((section) => section.id === id)?.name ?? id
-            }
-            onQuery={setDetailQuery}
-            onPage={(page) => host.requestRoute(selectedRoute.id, page, detailQuery)}
-            onOpenSource={host.openSource}
-          />
-        ) : (
-          <div className="architecture-inspector-empty">
-            Select a subsystem or directed route to inspect its complete evidence.
-          </div>
-        )}
-      </aside>
+      {inspectorOpen && (
+        <aside className="architecture-inspector" aria-label="Architecture selection details">
+          {selectedSection ? (
+            <SectionInspector
+              section={selectedSection}
+              page={displayedSectionPage}
+              tab={sectionTab}
+              query={detailQuery}
+              onTab={(tab) => {
+                setSectionTab(tab);
+              }}
+              onQuery={setDetailQuery}
+              onPage={(page) =>
+                host.requestSection(selectedSection.id, sectionTab, page, detailQuery)
+              }
+              onOpenSource={host.openSource}
+            />
+          ) : selectedRoute ? (
+            <RouteInspector
+              route={selectedRoute}
+              page={displayedRoutePage}
+              query={detailQuery}
+              sectionName={(id) =>
+                overview.sections.find((section) => section.id === id)?.name ?? id
+              }
+              onQuery={setDetailQuery}
+              onPage={(page) => host.requestRoute(selectedRoute.id, page, detailQuery)}
+              onOpenSource={host.openSource}
+            />
+          ) : (
+            <div className="architecture-inspector-empty">
+              Select a subsystem or directed route to inspect its complete evidence.
+            </div>
+          )}
+        </aside>
+      )}
     </div>
   );
 }
