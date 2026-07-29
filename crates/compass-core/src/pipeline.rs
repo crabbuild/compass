@@ -25,8 +25,9 @@ use compass_model::code_graph::{
     NodeKind,
 };
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
-    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
+    CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE, EndpointRewriteEvidence, EndpointRewriteRule,
+    EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    append_endpoint_rewrite_evidence,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
@@ -2110,6 +2111,7 @@ fn preserve_semantic_layer(
         })
         .collect::<HashMap<_, _>>();
     let mut dropped_edges = HashSet::new();
+    let mut remapped_edges = HashSet::new();
     let mut remap_diagnostics = Vec::new();
     let mut dropped_without_site = 0_usize;
     for (index, edge) in existing_raw.edges.iter_mut().enumerate() {
@@ -2156,6 +2158,7 @@ fn preserve_semantic_layer(
                 score: 1.0,
             },
         );
+        remapped_edges.insert(index);
     }
     if dropped_without_site > MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
         remap_diagnostics.push(GraphDiagnostic {
@@ -2312,7 +2315,10 @@ fn preserve_semantic_layer(
             if let Some(site) = refreshed_mixed_sites.get(&index) {
                 refresh_preserved_mixed_edge(&mut raw.attributes, &raw.source, &raw.target, site);
             } else if semantic_only_mixed_edges.contains(&index)
-                && !retain_preserved_mixed_edge_as_semantic_only(&mut raw.attributes)
+                && !retain_preserved_mixed_edge_as_semantic_only(
+                    &mut raw.attributes,
+                    remapped_edges.contains(&index),
+                )
             {
                 return None;
             }
@@ -2392,7 +2398,21 @@ fn refresh_preserved_mixed_edge(
 
 fn retain_preserved_mixed_edge_as_semantic_only(
     attributes: &mut serde_json::Map<String, serde_json::Value>,
+    remapped_in_current_pass: bool,
 ) -> bool {
+    if remapped_in_current_pass
+        && !attributes
+            .get("_endpoint_rewrite_rules")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|rewrites| {
+                rewrites.iter().any(|rewrite| {
+                    rewrite.get("rule").and_then(serde_json::Value::as_str)
+                        == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+                })
+            })
+    {
+        return false;
+    }
     let Some(record) = attributes.get_mut(TRUSTED_EDGE_RECORD_ATTRIBUTE) else {
         return false;
     };
@@ -2434,10 +2454,18 @@ fn retain_preserved_mixed_edge_as_semantic_only(
         "line_end",
         "column_start",
         "column_end",
-        "_endpoint_rewrite_rules",
         "_coalesced_edge_evidence",
     ] {
         attributes.remove(key);
+    }
+    if !remapped_in_current_pass {
+        attributes.remove("_endpoint_rewrite_rules");
+        attributes.remove(CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE);
+    } else {
+        attributes.insert(
+            CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE.to_owned(),
+            serde_json::Value::Bool(true),
+        );
     }
     project_preserved_semantic_evidence(attributes, &primary);
     true

@@ -16,9 +16,10 @@ use compass_model::identity::{
     route_id, symbol_id,
 };
 use compass_model::provenance::{
-    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
-    OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
-    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
+    CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE, ENDPOINT_REWRITE_RULES_ATTRIBUTE,
+    EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
+    OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState, SourceAnchor,
+    TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
 };
 use compass_model::{GraphError, validate_code_graph};
 use serde::{Deserialize, Serialize};
@@ -753,6 +754,32 @@ fn normalize_trusted_edge(
         edge.relationship_site.clone(),
         &evidence_context,
     )?;
+    let consume_incremental_endpoint_remap = match raw
+        .attributes
+        .get(CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE)
+    {
+        None => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => {
+            return Err(raw_error(
+                &position,
+                "incremental endpoint remap consumption marker must be true",
+            ));
+        }
+    };
+    if consume_incremental_endpoint_remap
+        && (embedded_has_ast
+            || edge.relationship_site.is_some()
+            || !added_evidence.iter().any(|evidence| {
+                evidence.rule.as_deref()
+                    == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+            }))
+    {
+        return Err(raw_error(
+            &position,
+            "semantic residue requires current incremental endpoint remap evidence",
+        ));
+    }
     if let Some(constituents) = raw
         .attributes
         .get(COALESCED_EDGE_EVIDENCE)
@@ -790,6 +817,15 @@ fn normalize_trusted_edge(
             .iter()
             .any(|evidence| evidence.origin == EvidenceOrigin::Ast)
     {
+        added_evidence.retain(|evidence| {
+            evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+        });
+    }
+    if consume_incremental_endpoint_remap {
+        // A current incremental remap may transport a site-less semantic assertion to its
+        // canonical endpoints, but it is not producer evidence for that assertion. Validation
+        // above consumes the exact rewrite proof before the transient fact is published.
         added_evidence.retain(|evidence| {
             evidence.rule.as_deref()
                 != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
