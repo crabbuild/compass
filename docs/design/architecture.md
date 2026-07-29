@@ -255,10 +255,12 @@ Owns untrusted semantic fragment handling and provider orchestration:
 Extracts bounded text from local files such as PDF, DOCX, and XLSX. Archive
 size and compression-ratio guards defend against decompression abuse.
 
-### `compass-transcribe` and `compass-whisper`
+### `compass-ingest`, `compass-transcribe`, and `compass-whisper`
 
-`compass-transcribe` owns bounded orchestration, media acquisition contracts,
-and backend traits. `compass-whisper` owns bounded native CPU inference
+`compass-ingest` owns bounded, verified URL and audio acquisition, including
+the managed downloader. `compass-transcribe` owns transcription orchestration,
+backend traits, and inference integration. It re-exports the downloader API for
+workspace compatibility. `compass-whisper` owns bounded native CPU inference
 internals. The public CLI does not expose a separate incomplete transcription
 product surface.
 
@@ -270,7 +272,7 @@ product surface.
 | `compass-global` | Persistent cross-project graph registry/management |
 | `compass-google-workspace` | Bounded Google Workspace shortcut export through `gws` |
 | `compass-graphdb` | Native Neo4j Bolt and FalkorDB RESP exporters |
-| `compass-ingest` | Bounded, SSRF-resistant URL ingestion |
+| `compass-ingest` | Bounded, verified URL and audio acquisition with SSRF defenses |
 | `compass-postgres` | Read-only PostgreSQL catalog introspection |
 | `compass-prs` | GitHub PR dashboard and graph-impact analysis |
 | `compass-reflect` | Deterministic session-memory aggregation and learning overlay |
