@@ -102,7 +102,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         self.extraction
     }
 
-    fn walk(&mut self, node: Node<'tree>, parent_impl: Option<&str>) {
+    fn walk(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str)>) {
         match node.kind() {
             "function_item" => {
                 self.add_function(node, parent_impl);
@@ -128,15 +128,30 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         }
     }
 
-    fn add_function(&mut self, node: Node<'tree>, parent_impl: Option<&str>) {
+    fn add_function(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str)>) {
         let Some(name_node) = node.child_by_field_name("name") else {
             return;
         };
         let name = self.text(name_node);
         let at = line(node);
-        let id = if let Some(parent) = parent_impl {
-            let id = make_id(&[parent, &name]);
+        let id = if let Some((parent, semantic_owner)) = parent_impl {
+            let id = make_id(&[parent, semantic_owner, &name]);
             self.add_node(&id, &format!(".{name}()"), at);
+            if let Some(method) = self
+                .extraction
+                .nodes
+                .iter_mut()
+                .find(|method| method.id == id)
+            {
+                method.attributes.insert(
+                    "lexical_owner".to_owned(),
+                    Value::String(semantic_owner.to_owned()),
+                );
+                method.attributes.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!("{semantic_owner}::{name}")),
+                );
+            }
             self.add_edge(parent, &id, "method", at, None);
             id
         } else {
@@ -284,6 +299,14 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         };
         let name = self.text(type_node).trim().to_owned();
         let id = make_id(&[&self.stem, &name]);
+        let semantic_owner = node
+            .child_by_field_name("trait")
+            .map(|trait_node| self.text(trait_node).trim().to_owned())
+            .filter(|trait_name| !trait_name.is_empty())
+            .map_or_else(
+                || name.clone(),
+                |trait_name| format!("{name} as {trait_name}"),
+            );
         let at = line(node);
         self.add_node(&id, &name, at);
         if let Some(trait_node) = node.child_by_field_name("trait") {
@@ -310,7 +333,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor) {
-                self.walk(child, Some(&id));
+                self.walk(child, Some((&id, &semantic_owner)));
             }
         }
     }

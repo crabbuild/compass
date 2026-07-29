@@ -17,6 +17,61 @@ fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), 
 }
 
 #[test]
+fn rust_methods_include_their_declaring_impl_in_semantic_identity() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("changes.rs");
+    let source = br#"
+trait ChangeSink {
+    fn change(&mut self);
+}
+struct ExactDiffWriter;
+struct ChangeCounts;
+impl ChangeSink for ExactDiffWriter {
+    fn change(&mut self) {}
+}
+impl ChangeSink for ChangeCounts {
+    fn change(&mut self) {}
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == ".change()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("lexical_owner"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            "ChangeCounts as ChangeSink",
+            "ExactDiffWriter as ChangeSink"
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    );
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("qualified_name"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            "ChangeCounts as ChangeSink::change",
+            "ExactDiffWriter as ChangeSink::change",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    );
+    Ok(())
+}
+
+#[test]
 fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
