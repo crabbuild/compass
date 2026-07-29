@@ -8,6 +8,21 @@ use compass_model::provenance::{
 };
 use compass_model::validate_code_graph;
 
+const CLOSED_ENDPOINT_REWRITE_RULES: [&str; 12] = [
+    "csharp-namespace-canonicalization",
+    "language-family-stub-resolution",
+    "php-qualified-type-resolution",
+    "canonical-import-target",
+    "unique-stub-endpoint-resolution",
+    "source-scoped-node-disambiguation",
+    "header-import-disambiguation",
+    "graph-semantic-id-remap",
+    "graph-document-twin-remap",
+    "graph-ghost-endpoint-remap",
+    "graph-normalized-id-remap",
+    "incremental-ast-endpoint-remap",
+];
+
 fn anchor() -> SourceAnchor {
     SourceAnchor {
         file: "src/lib.rs".to_owned(),
@@ -121,6 +136,40 @@ fn relationship_identity_uses_the_typed_occurrence_rule_not_sorted_evidence() {
     graph.links[0].id.clone_from(&id);
     graph.links[0].key = id;
 
+    assert!(validate_code_graph(&graph).is_ok());
+}
+
+#[test]
+fn typed_occurrence_identity_reserves_every_closed_rewrite_name() {
+    for rule in CLOSED_ENDPOINT_REWRITE_RULES {
+        let mut graph = document();
+        graph.links[0].occurrence_rule = OccurrenceRule::new(rule);
+        let id = edge_id(
+            "route",
+            EdgeKind::RoutesTo,
+            "handler",
+            Some(&anchor()),
+            Some(rule),
+        );
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_err(),
+            "closed occurrence rule {rule} was accepted"
+        );
+    }
+
+    let mut graph = document();
+    graph.links[0].occurrence_rule = OccurrenceRule::new("future-endpoint-remap");
+    let id = edge_id(
+        "route",
+        EdgeKind::RoutesTo,
+        "handler",
+        Some(&anchor()),
+        Some("future-endpoint-remap"),
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
     assert!(validate_code_graph(&graph).is_ok());
 }
 

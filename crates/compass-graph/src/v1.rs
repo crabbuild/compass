@@ -532,6 +532,18 @@ fn normalize_trusted_edge(
     let position = format!("edge[{index}]");
     let mut edge = serde_json::from_value::<EdgeRecord>(trusted)
         .map_err(|error| raw_error(&position, &error.to_string()))?;
+    let embedded_source = edge.source.clone();
+    let embedded_target = edge.target.clone();
+    if edge
+        .occurrence_rule
+        .as_ref()
+        .is_some_and(OccurrenceRule::is_endpoint_rewrite)
+    {
+        return Err(raw_error(
+            &position,
+            "trusted occurrence rule uses a reserved endpoint rewrite name",
+        ));
+    }
     for evidence in &edge.evidence {
         evidence
             .validate_endpoint_rewrite()
@@ -588,6 +600,20 @@ fn normalize_trusted_edge(
                 &evidence_context,
             )?;
         }
+    }
+    if (embedded_source != source || embedded_target != target)
+        && !added_evidence.iter().any(|evidence| {
+            evidence
+                .rule
+                .as_deref()
+                .and_then(EndpointRewriteRule::from_wire_name)
+                .is_some()
+        })
+    {
+        return Err(raw_error(
+            &position,
+            "changed trusted endpoints require current endpoint rewrite evidence",
+        ));
     }
     edge.evidence.append(&mut added_evidence);
     sort_dedup_serialized(&mut edge.evidence);

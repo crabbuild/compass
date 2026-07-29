@@ -130,6 +130,18 @@ fn trusted_exact_edge_extraction() -> Result<Extraction, serde_json::Error> {
                 "source_location": "L1",
                 "_origin": "ast",
                 "extractor": "test.ast"
+            },
+            {
+                "id": "alternate",
+                "label": "Alternate",
+                "qualified_name": "crate::Alternate",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/unique.rs",
+                "source_location": "L1",
+                "_origin": "ast",
+                "extractor": "test.ast"
             }
         ],
         "edges": [{
@@ -317,8 +329,14 @@ fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
     let directory = tempfile::tempdir()?;
     write_sources(directory.path())?;
     let baseline = normalize_fixture(directory.path(), &trusted_exact_edge_extraction()?)?;
-    let baseline_id = baseline.links[0].id.clone();
     let mut projected = compass_graph::extraction_from_v1(&baseline);
+    let alternate = projected
+        .nodes
+        .iter()
+        .find(|node| node.label() == "Alternate")
+        .map(|node| node.id.clone())
+        .ok_or("missing alternate projected node")?;
+    projected.edges[0].target = alternate;
     append_endpoint_rewrite_evidence(
         &mut projected.edges[0].attributes,
         EndpointRewriteEvidence {
@@ -329,7 +347,13 @@ fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
     let flexible = compass_graph::build_from_extraction(&projected, true, Some(directory.path()));
     let rebuilt =
         compass_graph::normalize_document_v1(&flexible, directory.path(), "sha256:test", None)?;
-    assert_eq!(rebuilt.links[0].id, baseline_id);
+    assert!(
+        rebuilt
+            .nodes
+            .iter()
+            .find(|node| node.id == rebuilt.links[0].target)
+            .is_some_and(|node| node.qualified_name == "crate::Alternate")
+    );
     assert!(rebuilt.links[0].evidence.iter().any(|evidence| {
         evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap")
             && evidence.origin == EvidenceOrigin::Heuristic
@@ -351,7 +375,7 @@ fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
         &directory.path().join("incremental-query-cache"),
     )?;
     let impact = |include_heuristic| ImpactRequest {
-        symbol: "crate::Target".to_owned(),
+        symbol: "crate::Alternate".to_owned(),
         include_heuristic,
         limits: CodeQueryLimits::default(),
     };
@@ -371,7 +395,7 @@ fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
     );
     let trail = |include_heuristic| NodeTrailRequest {
         source: "crate::Caller".to_owned(),
-        target: "crate::Target".to_owned(),
+        target: "crate::Alternate".to_owned(),
         include_heuristic,
         limits: CodeQueryLimits::default(),
     };

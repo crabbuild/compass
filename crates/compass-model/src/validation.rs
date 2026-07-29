@@ -248,6 +248,16 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
         if edge
             .occurrence_rule
             .as_ref()
+            .is_some_and(|rule| rule.is_endpoint_rewrite())
+        {
+            errors.push(format!(
+                "edge {} occurrence rule uses a reserved endpoint rewrite name",
+                edge.id
+            ));
+        }
+        if edge
+            .occurrence_rule
+            .as_ref()
             .is_some_and(|rule| rule.as_str().trim().is_empty())
         {
             errors.push(format!("edge {} has an empty occurrence rule", edge.id));

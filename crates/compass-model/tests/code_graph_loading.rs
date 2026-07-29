@@ -2,10 +2,28 @@ use std::fs;
 
 use compass_model::GraphError;
 use compass_model::code_graph::{
-    BuildMetadata, ExtractionStatus, FileRecord, GraphDocument, NodeKind, NodeRecord,
+    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
+    NodeRecord,
 };
-use compass_model::identity::file_id;
-use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+use compass_model::identity::{edge_id, file_id};
+use compass_model::provenance::{
+    EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
+};
+
+const CLOSED_ENDPOINT_REWRITE_RULES: [&str; 12] = [
+    "csharp-namespace-canonicalization",
+    "language-family-stub-resolution",
+    "php-qualified-type-resolution",
+    "canonical-import-target",
+    "unique-stub-endpoint-resolution",
+    "source-scoped-node-disambiguation",
+    "header-import-disambiguation",
+    "graph-semantic-id-remap",
+    "graph-document-twin-remap",
+    "graph-ghost-endpoint-remap",
+    "graph-normalized-id-remap",
+    "incremental-ast-endpoint-remap",
+];
 
 fn document() -> GraphDocument {
     GraphDocument::empty_v1(BuildMetadata {
@@ -69,6 +87,56 @@ fn document_with_evidence(evidence: Provenance) -> GraphDocument {
         community: None,
     });
     graph
+}
+
+fn document_with_occurrence(rule: &str) -> Result<GraphDocument, &'static str> {
+    let mut graph = document_with_evidence(Provenance {
+        origin: EvidenceOrigin::Ast,
+        extractor: "test.ast".to_owned(),
+        confidence: EvidenceConfidence::Exact,
+        rule: Some("producer-evidence".to_owned()),
+        anchors: vec![
+            endpoint_rewrite_evidence()
+                .wiring_site
+                .ok_or("missing anchor")?,
+        ],
+        wiring_site: None,
+        score: None,
+        candidates: Vec::new(),
+    });
+    let mut target = graph.nodes[0].clone();
+    target.id = "target".to_owned();
+    target.name = "target".to_owned();
+    target.qualified_name = "crate::target".to_owned();
+    graph.nodes.push(target);
+    let occurrence = OccurrenceRule::new(rule.to_owned()).ok_or("invalid occurrence rule")?;
+    let relationship_site = endpoint_rewrite_evidence()
+        .wiring_site
+        .ok_or("missing relationship site")?;
+    let id = edge_id(
+        "node",
+        EdgeKind::Calls,
+        "target",
+        Some(&relationship_site),
+        Some(rule),
+    );
+    graph.links.push(EdgeRecord {
+        id: id.clone(),
+        key: id,
+        source: "node".to_owned(),
+        target: "target".to_owned(),
+        kind: EdgeKind::Calls,
+        occurrence_rule: Some(occurrence),
+        relationship_site: Some(relationship_site),
+        details: None,
+        evidence: graph.nodes[0].evidence.clone(),
+        weight: None,
+        context: None,
+        deferred: false,
+        diagnostics: Vec::new(),
+    });
+    graph.multigraph = true;
+    Ok(graph)
 }
 
 #[test]
@@ -153,5 +221,27 @@ fn strict_loading_rejects_spoofed_or_incomplete_typed_endpoint_rewrites()
             "{case} endpoint rewrite was accepted"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn strict_loading_reserves_every_closed_rewrite_name_from_occurrence_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    for rule in CLOSED_ENDPOINT_REWRITE_RULES {
+        fs::write(
+            &graph_path,
+            serde_json::to_vec(&document_with_occurrence(rule)?)?,
+        )?;
+        assert!(
+            GraphDocument::load(&graph_path).is_err(),
+            "closed occurrence rule {rule} was accepted"
+        );
+    }
+
+    let arbitrary = document_with_occurrence("future-endpoint-remap")?;
+    fs::write(&graph_path, serde_json::to_vec(&arbitrary)?)?;
+    assert_eq!(GraphDocument::load(&graph_path)?, arbitrary);
     Ok(())
 }

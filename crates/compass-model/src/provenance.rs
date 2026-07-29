@@ -22,6 +22,11 @@ impl OccurrenceRule {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    #[must_use]
+    pub fn is_endpoint_rewrite(&self) -> bool {
+        EndpointRewriteRule::from_wire_name(self.as_str()).is_some()
+    }
 }
 
 /// Closed set of endpoint rewrites that can alter flexible graph facts.

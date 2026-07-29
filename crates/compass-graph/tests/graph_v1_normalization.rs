@@ -18,6 +18,21 @@ use compass_model::provenance::{
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
+const CLOSED_ENDPOINT_REWRITE_RULES: [&str; 12] = [
+    "csharp-namespace-canonicalization",
+    "language-family-stub-resolution",
+    "php-qualified-type-resolution",
+    "canonical-import-target",
+    "unique-stub-endpoint-resolution",
+    "source-scoped-node-disambiguation",
+    "header-import-disambiguation",
+    "graph-semantic-id-remap",
+    "graph-document-twin-remap",
+    "graph-ghost-endpoint-remap",
+    "graph-normalized-id-remap",
+    "incremental-ast-endpoint-remap",
+];
+
 fn build_evidence(root: &Path) -> Result<BuildEvidence, Box<dyn std::error::Error>> {
     let bytes = vec![b'x'; 500];
     fs::create_dir_all(root.join("src"))?;
@@ -719,6 +734,91 @@ fn trusted_incremental_rejects_conflicting_raw_occurrence_rule()
         error
             .to_string()
             .contains("conflicting raw occurrence rule"),
+        "unexpected error: {error}"
+    );
+    Ok(())
+}
+
+#[test]
+fn trusted_occurrence_identity_reserves_every_closed_rewrite_name()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let baseline = normalize_v1(trusted_producer_extraction(root), build_evidence(root)?)?;
+
+    for rule in CLOSED_ENDPOINT_REWRITE_RULES {
+        let mut spoofed = baseline.clone();
+        let edge = spoofed.links.first_mut().ok_or("missing trusted edge")?;
+        edge.occurrence_rule = compass_model::provenance::OccurrenceRule::new(rule);
+        edge.id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            Some(rule),
+        );
+        edge.key.clone_from(&edge.id);
+        let error = normalization_error(extraction_from_v1(&spoofed), build_evidence(root)?)?;
+        assert!(
+            error.contains("occurrence rule"),
+            "closed occurrence rule {rule} produced unexpected error: {error}"
+        );
+    }
+
+    let mut arbitrary = baseline;
+    let edge = arbitrary.links.first_mut().ok_or("missing trusted edge")?;
+    edge.occurrence_rule = compass_model::provenance::OccurrenceRule::new("future-endpoint-remap");
+    edge.id = edge_id(
+        &edge.source,
+        edge.kind,
+        &edge.target,
+        edge.relationship_site.as_ref(),
+        Some("future-endpoint-remap"),
+    );
+    edge.key.clone_from(&edge.id);
+    let rebuilt = normalize_v1(extraction_from_v1(&arbitrary), build_evidence(root)?)?;
+    assert_eq!(rebuilt.links, arbitrary.links);
+    Ok(())
+}
+
+#[test]
+fn trusted_redirect_requires_current_endpoint_rewrite_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut source = trusted_producer_extraction(root);
+    source
+        .nodes
+        .push(raw_node(root, "raw:alternate", "alternate", 70));
+    let direct = normalize_v1(source, build_evidence(root)?)?;
+    let mut first_projection = extraction_from_v1(&direct);
+    append_endpoint_rewrite_evidence(
+        &mut first_projection.edges[0].attributes,
+        EndpointRewriteEvidence {
+            rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
+            score: 1.0,
+        },
+    );
+    let baseline = normalize_v1(first_projection, build_evidence(root)?)?;
+    assert!(
+        baseline.links[0]
+            .evidence
+            .iter()
+            .any(|evidence| { evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap") })
+    );
+
+    let mut projected = extraction_from_v1(&baseline);
+    let alternate = projected
+        .nodes
+        .iter()
+        .find(|node| node.label() == "alternate")
+        .map(|node| node.id.clone())
+        .ok_or("missing alternate projected node")?;
+    projected.edges[0].target = alternate;
+
+    let error = normalization_error(projected, build_evidence(root)?)?;
+    assert!(
+        error.contains("current endpoint rewrite"),
         "unexpected error: {error}"
     );
     Ok(())
