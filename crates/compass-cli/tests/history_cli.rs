@@ -1637,7 +1637,10 @@ fn explicit_rebuild_ignores_the_mutable_current_snapshot() -> Result<(), Box<dyn
         "{}",
         String::from_utf8_lossy(&initialized.stderr)
     );
-    let graph_path = directory.path().join("compass-out/graph.json");
+    let graph_path = compass_files::BuildGuard::resolve_artifact(
+        &directory.path().join("compass-out"),
+        "graph.json",
+    )?;
     let mut current: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
     current["nodes"]
         .as_array_mut()
@@ -2331,7 +2334,10 @@ fn normal_graph_export_and_historical_queries_are_semantically_identical()
         "{}",
         String::from_utf8_lossy(&extracted.stderr)
     );
-    let graph_path = directory.path().join("compass-out/graph.json");
+    let graph_path = compass_files::BuildGuard::resolve_artifact(
+        &directory.path().join("compass-out"),
+        "graph.json",
+    )?;
     let original: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
 
     let built = run(compass, directory.path(), &["history", "build", "HEAD"])?;

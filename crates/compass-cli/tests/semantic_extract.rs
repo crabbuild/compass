@@ -115,7 +115,8 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
         .map_err(|error| format!("provider failed: {error}"))?;
 
     let output = corpus.path().join("compass-out");
-    let graph: Value = serde_json::from_slice(&fs::read(output.join("graph.json"))?)?;
+    let active = compass_files::BuildGuard::resolve_active_directory(&output)?;
+    let graph: Value = serde_json::from_slice(&fs::read(active.join("graph.json"))?)?;
     assert!(
         graph["nodes"].as_array().is_some_and(|nodes| {
             nodes.iter().any(|node| {
@@ -135,15 +136,15 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
         "{graph:#}"
     );
     let analysis: Value =
-        serde_json::from_slice(&fs::read(output.join(".compass_analysis.json"))?)?;
+        serde_json::from_slice(&fs::read(active.join(".compass_analysis.json"))?)?;
     assert_eq!(
         analysis["tokens"],
         serde_json::json!({"input":17,"output":9})
     );
     let marker: Value =
-        serde_json::from_slice(&fs::read(output.join(".compass_semantic_marker"))?)?;
+        serde_json::from_slice(&fs::read(active.join(".compass_semantic_marker"))?)?;
     assert_eq!(marker["output_tokens"], 9);
-    let manifest: Value = serde_json::from_slice(&fs::read(output.join("manifest.json"))?)?;
+    let manifest: Value = serde_json::from_slice(&fs::read(active.join("manifest.json"))?)?;
     assert!(
         manifest["guide.md"]["semantic_hash"]
             .as_str()
@@ -169,7 +170,8 @@ fn native_semantic_extract_uses_provider_then_runs_warm_without_network()
         String::from_utf8_lossy(&warm.stdout),
         String::from_utf8_lossy(&warm.stderr)
     );
-    let warm_graph: Value = serde_json::from_slice(&fs::read(output.join("graph.json"))?)?;
+    let warm_graph_path = compass_files::BuildGuard::resolve_artifact(&output, "graph.json")?;
+    let warm_graph: Value = serde_json::from_slice(&fs::read(warm_graph_path)?)?;
     assert!(warm_graph["nodes"].as_array().is_some_and(|nodes| {
         nodes
             .iter()

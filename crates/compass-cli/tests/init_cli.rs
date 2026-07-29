@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Cursor;
 use std::process::{Command, Stdio};
 
-use compass_files::ProjectConfig;
+use compass_files::{BuildGuard, ProjectConfig};
 use compass_model::GraphDocument;
 use serde_json::Value;
 
@@ -38,7 +38,10 @@ fn init_persists_scope_and_builds_only_matching_files() -> Result<(), Box<dyn Er
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(root.path().join(".compass/config.toml").is_file());
-    let graph = GraphDocument::load(&root.path().join("compass-out/graph.json"))?;
+    let graph = GraphDocument::load(&BuildGuard::resolve_artifact(
+        &root.path().join("compass-out"),
+        "graph.json",
+    )?)?;
     assert!(graph.nodes.iter().any(|node| node.label() == "included()"));
     assert!(!graph.nodes.iter().any(|node| node.label() == "excluded()"));
     Ok(())
@@ -66,7 +69,10 @@ fn init_refuses_overwrite_and_unmatched_scope() -> Result<(), Box<dyn Error>> {
     assert!(forced.status.success());
     let config = ProjectConfig::load(root.path())?.ok_or("missing forced config")?;
     assert_eq!(config.build.include, ["main.rs"]);
-    let graph = GraphDocument::load(&root.path().join("compass-out/graph.json"))?;
+    let graph = GraphDocument::load(&BuildGuard::resolve_artifact(
+        &root.path().join("compass-out"),
+        "graph.json",
+    )?)?;
     assert!(graph.nodes.iter().all(|node| node.label() != "other()"));
 
     let other = tempfile::tempdir()?;
@@ -112,7 +118,10 @@ fn update_reuses_scope_and_invalid_config_never_widens_it() -> Result<(), Box<dy
         "stderr: {}",
         String::from_utf8_lossy(&update.stderr)
     );
-    let graph = GraphDocument::load(&root.path().join("compass-out/graph.json"))?;
+    let graph = GraphDocument::load(&BuildGuard::resolve_artifact(
+        &root.path().join("compass-out"),
+        "graph.json",
+    )?)?;
     assert!(
         !graph
             .nodes

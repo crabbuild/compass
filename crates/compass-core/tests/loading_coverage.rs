@@ -4,6 +4,7 @@ use std::fs;
 use compass_core::{
     BuildOptions, CoreError, ExportInputs, LoadedGraph, SemanticLayer, build_graph_with_layers,
 };
+use compass_files::BuildGuard;
 use sha2::{Digest, Sha256};
 
 #[test]
@@ -205,9 +206,9 @@ fn incremental_update_preserves_then_replaces_owned_semantic_facts() -> Result<(
 
     fs::write(&source, "pub fn second() {}\n")?;
     build_graph_with_layers(&options, None, &[])?;
-    let preserved = compass_model::code_graph::GraphDocument::load(
-        &directory.path().join("compass-out/graph.json"),
-    )?;
+    let preserved_path =
+        BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "graph.json")?;
+    let preserved = compass_model::code_graph::GraphDocument::load(&preserved_path)?;
     assert!(
         preserved.nodes.iter().any(|node| node.label() == "A")
             && preserved.nodes.iter().any(|node| node.label() == "B")
@@ -233,9 +234,9 @@ fn incremental_update_preserves_then_replaces_owned_semantic_facts() -> Result<(
         allow_partial: false,
     };
     build_graph_with_layers(&options, Some(&replacement), &[])?;
-    let replaced = compass_model::code_graph::GraphDocument::load(
-        &directory.path().join("compass-out/graph.json"),
-    )?;
+    let replaced_path =
+        BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "graph.json")?;
+    let replaced = compass_model::code_graph::GraphDocument::load(&replaced_path)?;
     assert!(replaced.nodes.iter().any(|node| node.label() == "A2"));
     assert!(replaced.nodes.iter().any(|node| node.label() == "B2"));
     assert!(

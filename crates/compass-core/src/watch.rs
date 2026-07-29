@@ -922,8 +922,9 @@ mod tests {
 
         assert!(complete, "watch statuses: {:?}", statuses.lock());
         assert!(root.join("compass-out/needs_update").is_file());
-        let graph =
-            compass_model::code_graph::GraphDocument::load(&root.join("compass-out/graph.json"))?;
+        let graph_path =
+            compass_files::BuildGuard::resolve_artifact(&root.join("compass-out"), "graph.json")?;
+        let graph = compass_model::code_graph::GraphDocument::load(&graph_path)?;
         assert!(
             graph
                 .nodes
@@ -1049,8 +1050,9 @@ mod tests {
         stop.store(true, Ordering::Release);
         handle.join().map_err(|_| "watch thread panicked")??;
 
-        let graph =
-            compass_model::code_graph::GraphDocument::load(&root.join("compass-out/graph.json"))?;
+        let graph_path =
+            compass_files::BuildGuard::resolve_artifact(&root.join("compass-out"), "graph.json")?;
+        let graph = compass_model::code_graph::GraphDocument::load(&graph_path)?;
         assert!(
             graph
                 .nodes
@@ -1108,7 +1110,10 @@ mod tests {
         stop.store(true, Ordering::Release);
         handle.join().map_err(|_| "watch thread panicked")??;
 
-        assert!(root.join("compass-out/graph.json").is_file());
+        assert!(
+            compass_files::BuildGuard::resolve_artifact(&root.join("compass-out"), "graph.json")?
+                .is_file()
+        );
         let statuses = statuses.lock().map_err(|_| "status mutex poisoned")?;
         assert!(statuses.iter().any(|status| matches!(
             status,

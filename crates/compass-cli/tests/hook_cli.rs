@@ -173,7 +173,8 @@ fn native_hook_refresh_honors_recorded_scan_root() -> Result<(), Box<dyn Error>>
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let graph = std::fs::read_to_string(output_root.join("graph.json"))?;
+    let graph_path = compass_files::BuildGuard::resolve_artifact(&output_root, "graph.json")?;
+    let graph = std::fs::read_to_string(graph_path)?;
     assert!(graph.contains("hook_target"));
     assert!(!source_root.join("compass-out/graph.json").exists());
     Ok(())

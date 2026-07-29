@@ -6,6 +6,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use compass_files::BuildGuard;
 use serde_json::Value;
 
 mod support;
@@ -130,9 +131,9 @@ fn dedup_llm_resolves_ambiguous_semantic_entities() -> Result<(), Box<dyn Error>
         .map_err(|error| format!("provider failed: {error}"))?;
     assert!(saw_tiebreak.load(Ordering::SeqCst));
 
-    let graph: Value = serde_json::from_slice(&fs::read(
-        corpus.path().join("compass-out").join("graph.json"),
-    )?)?;
+    let graph_path =
+        BuildGuard::resolve_artifact(&corpus.path().join("compass-out"), "graph.json")?;
+    let graph: Value = serde_json::from_slice(&fs::read(graph_path)?)?;
     let surviving = graph["nodes"]
         .as_array()
         .ok_or("graph nodes are not an array")?
