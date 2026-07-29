@@ -826,10 +826,12 @@ fn normalize_trusted_edge(
 
 fn is_unresolved_external_node(node: &NodeRecord) -> bool {
     node.source.is_none()
-        && node
-            .evidence
-            .iter()
-            .any(|evidence| evidence.extractor == "compass.graph.external-placeholder")
+        && node.evidence.iter().any(|evidence| {
+            evidence.origin == EvidenceOrigin::Heuristic
+                && evidence.confidence == EvidenceConfidence::Inferred
+                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+                && evidence.wiring_site.is_some()
+        })
 }
 
 fn collect_stub_wiring_sites(
@@ -1029,13 +1031,31 @@ fn mark_external_placeholder(
             "external_identity_scope".to_owned(),
             Value::String(scope.to_owned()),
         );
-        if optional_any_string(attributes, &["language", "lang"]).is_none()
-            && let Some(language) = scope
-                .split('\u{1f}')
-                .next()
-                .filter(|value| !value.is_empty())
-        {
+        let mut parts = scope.split('\u{1f}');
+        let language = parts.next().unwrap_or_default();
+        let package = parts.next().unwrap_or_default();
+        let module = parts.next().unwrap_or_default();
+        for key in [
+            "language",
+            "lang",
+            "package",
+            "package_name",
+            "module",
+            "namespace",
+            "lexical_owner",
+            "declaring_scope",
+            "origin_file",
+        ] {
+            attributes.remove(key);
+        }
+        if !language.is_empty() {
             attributes.insert("language".to_owned(), Value::String(language.to_owned()));
+        }
+        if !package.is_empty() {
+            attributes.insert("package".to_owned(), Value::String(package.to_owned()));
+        }
+        if !module.is_empty() {
+            attributes.insert("module".to_owned(), Value::String(module.to_owned()));
         }
     }
     if attributes

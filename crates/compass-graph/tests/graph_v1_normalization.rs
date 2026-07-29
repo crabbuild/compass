@@ -163,6 +163,34 @@ fn raw_php_edge(
     }
 }
 
+fn add_inventory_file(
+    root: &Path,
+    evidence: &mut BuildEvidence,
+    relative: &str,
+    language: &str,
+    byte: u8,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = vec![byte; 500];
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, &bytes)?;
+    evidence.files.push(FileRecord {
+        id: format!("raw:{relative}"),
+        path: path.to_string_lossy().into_owned(),
+        language: Some(language.to_owned()),
+        content_digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
+        byte_size: bytes.len() as u64,
+        generated: false,
+        extraction_status: ExtractionStatus::Extracted,
+        extractor_versions: vec![format!("test.{language}")],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+    Ok(())
+}
+
 fn extraction(root: &Path) -> Extraction {
     Extraction {
         nodes: vec![
@@ -932,6 +960,176 @@ fn sourceless_implemented_placeholder_infers_a_deferred_interface()
         .ok_or("missing implementation edge")?;
     assert_eq!(implementation.target, external.id);
     assert!(implementation.deferred);
+    Ok(())
+}
+
+#[test]
+fn semantic_external_marker_defers_project_placeholder_edges_for_any_known_producer()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let dependency = RawNodeRecord {
+        id: "raw:dependency".to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!("Dependency.csproj")),
+            ("qualified_name".to_owned(), json!("Dependency.csproj")),
+            ("symbol_kind".to_owned(), json!("package")),
+            ("file_type".to_owned(), json!("code")),
+            ("language".to_owned(), json!("project-xml")),
+            (
+                "extractor".to_owned(),
+                json!("compass.languages.project-xml"),
+            ),
+            ("source_file".to_owned(), json!("Dependency.csproj")),
+        ]),
+    };
+    let graph = Extraction {
+        nodes: vec![raw_file_node(root, "raw:file", "src/lib.rs"), dependency],
+        edges: vec![raw_php_edge(
+            root,
+            "src/lib.rs",
+            "raw:file",
+            "raw:dependency",
+            "imports",
+            50,
+        )],
+        ..Extraction::default()
+    };
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let dependency = document
+        .nodes
+        .iter()
+        .find(|node| node.name == "Dependency.csproj")
+        .ok_or("missing project placeholder")?;
+    assert!(dependency.source.is_none());
+    assert!(dependency.evidence.iter().any(|evidence| {
+        evidence.extractor == "compass.languages.project-xml"
+            && evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Inferred
+            && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+            && evidence.wiring_site.is_some()
+    }));
+    let edge = document.links.first().ok_or("missing project import")?;
+    assert!(edge.deferred);
+    assert!(edge.evidence.iter().any(|evidence| {
+        evidence.extractor == "compass.graph.external-placeholder"
+            && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+            && evidence.wiring_site.is_some()
+    }));
+    Ok(())
+}
+
+#[test]
+fn authoritative_incident_scope_separates_precoalesced_java_and_typescript_placeholders()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut java_file = raw_file_node(root, "raw:java-file", "src/jpa.java");
+    java_file
+        .attributes
+        .insert("language".to_owned(), json!("java"));
+    let mut typescript_owner = raw_class_node(root, "raw:ts-owner", "src/typeorm.ts", "Order", 10);
+    typescript_owner
+        .attributes
+        .insert("language".to_owned(), json!("typescript"));
+    let mut global_entity = raw_external_node("raw:entity-global", "Entity");
+    global_entity
+        .attributes
+        .insert("language".to_owned(), json!("typescript"));
+    global_entity
+        .attributes
+        .insert("lexical_owner".to_owned(), json!("stale-global-owner"));
+    global_entity
+        .attributes
+        .insert("origin_file".to_owned(), json!("src/typeorm.ts"));
+    let mut duplicate_typescript_entity = raw_external_node("raw:entity-ts", "Entity");
+    duplicate_typescript_entity
+        .attributes
+        .insert("language".to_owned(), json!("java"));
+    duplicate_typescript_entity.attributes.insert(
+        "declaring_scope".to_owned(),
+        json!("stale-typescript-owner"),
+    );
+    let graph = Extraction {
+        nodes: vec![
+            java_file,
+            typescript_owner,
+            global_entity,
+            duplicate_typescript_entity,
+        ],
+        edges: vec![
+            raw_php_edge(
+                root,
+                "src/jpa.java",
+                "raw:java-file",
+                "raw:entity-global",
+                "imports",
+                20,
+            ),
+            raw_php_edge(
+                root,
+                "src/typeorm.ts",
+                "raw:ts-owner",
+                "raw:entity-global",
+                "references",
+                30,
+            ),
+            raw_php_edge(
+                root,
+                "src/typeorm.ts",
+                "raw:ts-owner",
+                "raw:entity-ts",
+                "references",
+                50,
+            ),
+        ],
+        ..Extraction::default()
+    };
+    let mut evidence = build_evidence(root)?;
+    add_inventory_file(root, &mut evidence, "src/jpa.java", "java", b'j')?;
+    add_inventory_file(root, &mut evidence, "src/typeorm.ts", "typescript", b't')?;
+
+    let document = normalize_v1(graph, evidence)?;
+    let entities = document
+        .nodes
+        .iter()
+        .filter(|node| node.qualified_name == "Entity" && node.source.is_none())
+        .collect::<Vec<_>>();
+    assert_eq!(entities.len(), 2, "nodes={:#?}", document.nodes);
+    let java = entities
+        .iter()
+        .find(|node| node.language.as_deref() == Some("java"))
+        .ok_or("missing Java placeholder")?;
+    let typescript = entities
+        .iter()
+        .find(|node| node.language.as_deref() == Some("typescript"))
+        .ok_or("missing TypeScript placeholder")?;
+    assert_ne!(java.id, typescript.id);
+    assert!(java.evidence.iter().all(|evidence| {
+        evidence
+            .wiring_site
+            .as_ref()
+            .is_some_and(|site| site.file == "src/jpa.java")
+    }));
+    assert!(typescript.evidence.iter().all(|evidence| {
+        evidence
+            .wiring_site
+            .as_ref()
+            .is_some_and(|site| site.file == "src/typeorm.ts")
+    }));
+    for edge in &document.links {
+        let file = edge
+            .relationship_site
+            .as_ref()
+            .map(|site| site.file.as_str());
+        match file {
+            Some("src/jpa.java") => assert_eq!(edge.target, java.id),
+            Some("src/typeorm.ts") => assert_eq!(edge.target, typescript.id),
+            _ => {}
+        }
+        assert!(edge.deferred);
+    }
     Ok(())
 }
 
