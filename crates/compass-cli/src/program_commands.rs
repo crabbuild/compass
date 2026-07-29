@@ -111,12 +111,22 @@ fn parse_format(value: &str) -> Result<Format, String> {
 }
 
 pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let resolved = if path.is_file() {
+        path.to_path_buf()
+    } else {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path
+            .file_name()
+            .ok_or_else(|| format!("could not read {}", path.display()))?;
+        compass_files::BuildGuard::resolve_artifact(parent, Path::new(name))
+            .map_err(|error| error.to_string())?
+    };
+    let metadata = fs::metadata(&resolved)
+        .map_err(|error| format!("could not read {}: {error}", resolved.display()))?;
     if !metadata.is_file() {
         return Err(format!(
             "Program IR is not a regular file: {}",
-            path.display()
+            resolved.display()
         ));
     }
     if metadata.len() > MAX_PROGRAM_BYTES {
@@ -124,10 +134,10 @@ pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
             "Program IR exceeds the {MAX_PROGRAM_BYTES}-byte safety limit"
         ));
     }
-    let bytes =
-        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let bytes = fs::read(&resolved)
+        .map_err(|error| format!("could not read {}: {error}", resolved.display()))?;
     let analysis: AnalysisBundle = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("invalid Program IR JSON at {}: {error}", path.display()))?;
+        .map_err(|error| format!("invalid Program IR JSON at {}: {error}", resolved.display()))?;
     analysis
         .validate()
         .map_err(|error| format!("invalid Program IR at {}: {error}", path.display()))?;

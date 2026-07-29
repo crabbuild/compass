@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 
 use compass_cli::{Frontend, run};
+use compass_files::BuildGuard;
 
 fn arguments<const N: usize>(values: [&str; N]) -> Vec<OsString> {
     values.into_iter().map(OsString::from).collect()
@@ -23,7 +24,10 @@ fn native_update_emits_and_reports_program_analysis() -> Result<(), Box<dyn Erro
     assert!(cold.stdout.contains(
         "Program analysis: 1 syntax analyzed, 0 syntax reused, 0 artifacts loaded, 0 artifacts reused, 0 artifact documents analyzed, 0 artifact documents reused, 1 modules, 2 summaries, 0 conflicts"
     ));
-    assert!(directory.path().join("compass-out/program.json").is_file());
+    assert!(
+        BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "program.json")?
+            .is_file()
+    );
     assert!(
         !directory
             .path()
@@ -143,7 +147,9 @@ fn program_commands_inspect_explain_and_query_canonical_ir() -> Result<(), Box<d
         "run"
     );
 
-    let document: serde_json::Value = serde_json::from_slice(&fs::read(&program)?)?;
+    let published_program =
+        BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "program.json")?;
+    let document: serde_json::Value = serde_json::from_slice(&fs::read(published_program)?)?;
     let call = document["program"]["modules"][0]["functions"]
         .as_array()
         .into_iter()
