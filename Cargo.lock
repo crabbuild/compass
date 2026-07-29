@@ -1286,6 +1286,7 @@ dependencies = [
 name = "compass-prs"
 version = "0.1.10"
 dependencies = [
+ "compass-files",
  "compass-model",
  "regex",
  "serde_json",

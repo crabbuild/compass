@@ -952,6 +952,17 @@ fn recompute_route_resolution(details: &mut RouteNodeDetails) {
         stage.candidates.sort_by(|left, right| {
             left.node_id
                 .cmp(&right.node_id)
+                .then_with(|| {
+                    route_candidate_confidence_rank(left.confidence)
+                        .cmp(&route_candidate_confidence_rank(right.confidence))
+                })
+                .then_with(|| match (left.score, right.score) {
+                    (Some(left), Some(right)) => right.total_cmp(&left),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                })
+                .then_with(|| right.anchor.is_some().cmp(&left.anchor.is_some()))
                 .then_with(|| serialized(left).cmp(&serialized(right)))
         });
         stage
@@ -1005,6 +1016,14 @@ fn recompute_route_resolution(details: &mut RouteNodeDetails) {
     } else {
         ResolutionState::Exact
     };
+}
+
+const fn route_candidate_confidence_rank(confidence: EvidenceConfidence) -> u8 {
+    match confidence {
+        EvidenceConfidence::Exact => 0,
+        EvidenceConfidence::Inferred => 1,
+        EvidenceConfidence::Ambiguous => 2,
+    }
 }
 
 fn merge_normalized_node(

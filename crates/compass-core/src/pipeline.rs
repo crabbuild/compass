@@ -24,7 +24,8 @@ use compass_model::code_graph::{
     NodeKind,
 };
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, SourceAnchor,
+    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin,
+    OCCURRENCE_RULE_ATTRIBUTE, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
     append_endpoint_rewrite_evidence,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
@@ -2168,6 +2169,64 @@ fn preserve_semantic_layer(
             related_ids: Vec::new(),
         });
     }
+    let mut fresh_edge_sites = HashMap::<IncrementalEdgeKey, Vec<SourceAnchor>>::new();
+    for edge in &extraction.edges {
+        let Some(key) = incremental_edge_key(edge) else {
+            continue;
+        };
+        let Some(site) = normalized_raw_edge_site(edge, root) else {
+            continue;
+        };
+        fresh_edge_sites.entry(key).or_default().push(site);
+    }
+    for sites in fresh_edge_sites.values_mut() {
+        sites.sort_by(|left, right| {
+            incremental_anchor_key(left).cmp(&incremental_anchor_key(right))
+        });
+    }
+    let mut mixed_edges = HashMap::<IncrementalEdgeKey, Vec<(usize, SourceAnchor)>>::new();
+    for (index, (raw, typed)) in existing_raw
+        .edges
+        .iter()
+        .zip(existing.links.iter())
+        .enumerate()
+    {
+        if dropped_edges.contains(&index)
+            || !typed
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin == EvidenceOrigin::Ast)
+            || !typed
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
+        {
+            continue;
+        }
+        let Some(key) = incremental_edge_key(raw) else {
+            continue;
+        };
+        let Some(site) = typed.relationship_site.clone() else {
+            continue;
+        };
+        mixed_edges.entry(key).or_default().push((index, site));
+    }
+    let mut refreshed_mixed_sites = HashMap::<usize, SourceAnchor>::new();
+    for (key, mut prior) in mixed_edges {
+        let Some(current) = fresh_edge_sites.get(&key) else {
+            continue;
+        };
+        prior.sort_by(|left, right| {
+            incremental_anchor_key(&left.1).cmp(&incremental_anchor_key(&right.1))
+        });
+        if prior.len() != current.len() {
+            dropped_edges.extend(prior.into_iter().map(|(index, _)| index));
+            continue;
+        }
+        for ((index, _), site) in prior.into_iter().zip(current.iter()) {
+            refreshed_mixed_sites.insert(index, site.clone());
+        }
+    }
     let prior_diagnostics = existing_raw.extensions.remove(GRAPH_DIAGNOSTICS_EXTENSION);
     append_graph_diagnostics(extraction, prior_diagnostics, remap_diagnostics);
     let preserved_node_ids = existing
@@ -2203,19 +2262,25 @@ fn preserve_semantic_layer(
         .into_iter()
         .zip(existing.links)
         .enumerate()
-        .filter_map(|(index, (raw, typed))| {
+        .filter_map(|(index, (mut raw, typed))| {
             if dropped_edges.contains(&index) {
                 return None;
             }
-            (typed
+            let preserve = typed
                 .evidence
                 .iter()
                 .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
                 && all_ids.contains(&raw.source)
                 && all_ids.contains(&raw.target)
                 && !source_in_set(raw.attributes.get("source_file"), root, refreshed)
-                && !source_was_deleted(raw.attributes.get("source_file"), root))
-            .then_some(raw)
+                && !source_was_deleted(raw.attributes.get("source_file"), root);
+            if !preserve {
+                return None;
+            }
+            if let Some(site) = refreshed_mixed_sites.get(&index) {
+                refresh_preserved_mixed_edge(&mut raw.attributes, site);
+            }
+            Some(raw)
         })
         .collect::<Vec<_>>();
     extraction
@@ -2231,6 +2296,135 @@ fn preserve_semantic_layer(
             target: edge.target,
             attributes: edge.attributes,
         }));
+}
+
+type IncrementalEdgeKey = (String, String, String, Option<String>);
+
+fn incremental_anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
+    (&anchor.file, anchor.start_byte, anchor.end_byte)
+}
+
+fn incremental_edge_key(edge: &RawEdgeRecord) -> Option<IncrementalEdgeKey> {
+    Some((
+        edge.source.clone(),
+        edge.target.clone(),
+        edge.attributes.get("relation")?.as_str()?.to_owned(),
+        edge.attributes
+            .get(OCCURRENCE_RULE_ATTRIBUTE)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+    ))
+}
+
+fn normalized_raw_edge_site(edge: &RawEdgeRecord, root: &Path) -> Option<SourceAnchor> {
+    let mut site = edge
+        .attributes
+        .get("source_anchor")
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+        .or_else(|| {
+            let attributes = &edge.attributes;
+            Some(SourceAnchor {
+                file: attributes.get("source_file")?.as_str()?.to_owned(),
+                start_byte: attributes.get("start_byte")?.as_u64()?,
+                end_byte: attributes.get("end_byte")?.as_u64()?,
+                start_line: u32::try_from(attributes.get("line_start")?.as_u64()?).ok()?,
+                start_column: u32::try_from(attributes.get("column_start")?.as_u64()?).ok()?,
+                end_line: u32::try_from(attributes.get("line_end")?.as_u64()?).ok()?,
+                end_column: u32::try_from(attributes.get("column_end")?.as_u64()?).ok()?,
+            })
+        })?;
+    let path = Path::new(&site.file);
+    if path.is_absolute()
+        && let Ok(relative) = path.strip_prefix(root)
+    {
+        site.file = relative.to_string_lossy().replace('\\', "/");
+    }
+    site.is_valid().then_some(site)
+}
+
+fn refresh_preserved_mixed_edge(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    fresh_site: &SourceAnchor,
+) {
+    let Some(record) = attributes.get_mut(TRUSTED_EDGE_RECORD_ATTRIBUTE) else {
+        return;
+    };
+    let Ok(mut edge) =
+        serde_json::from_value::<compass_model::code_graph::EdgeRecord>(record.clone())
+    else {
+        return;
+    };
+    let prior_site = edge.relationship_site.clone();
+    edge.evidence
+        .retain(|evidence| evidence.origin != EvidenceOrigin::Ast);
+    for evidence in &mut edge.evidence {
+        let is_endpoint_remap = evidence.rule.as_deref()
+            == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str());
+        if is_endpoint_remap || evidence.wiring_site.as_ref() == prior_site.as_ref() {
+            evidence.wiring_site = Some(fresh_site.clone());
+        }
+        for anchor in &mut evidence.anchors {
+            if is_endpoint_remap || Some(&*anchor) == prior_site.as_ref() {
+                anchor.clone_from(fresh_site);
+            }
+        }
+    }
+    edge.relationship_site = Some(fresh_site.clone());
+    *record = serde_json::to_value(edge).unwrap_or(serde_json::Value::Null);
+    rebind_raw_anchor(attributes, fresh_site);
+    if let Some(entries) = attributes
+        .get_mut(ENDPOINT_REWRITE_RULES_ATTRIBUTE)
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for entry in entries
+            .iter_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            if entry.get("rule").and_then(serde_json::Value::as_str)
+                == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+            {
+                rebind_raw_anchor(entry, fresh_site);
+            }
+        }
+        entries.sort_by_cached_key(serde_json::Value::to_string);
+        entries.dedup();
+    }
+}
+
+fn rebind_raw_anchor(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    fresh_site: &SourceAnchor,
+) {
+    attributes.insert(
+        "source_file".to_owned(),
+        serde_json::Value::String(fresh_site.file.clone()),
+    );
+    attributes.insert(
+        "source_location".to_owned(),
+        serde_json::Value::String(format!(
+            "L{}:{}-L{}:{}",
+            fresh_site.start_line,
+            fresh_site.start_column,
+            fresh_site.end_line,
+            fresh_site.end_column
+        )),
+    );
+    attributes.insert(
+        "source_anchor".to_owned(),
+        serde_json::to_value(fresh_site).unwrap_or(serde_json::Value::Null),
+    );
+    for (key, value) in [
+        ("start_byte", fresh_site.start_byte.into()),
+        ("end_byte", fresh_site.end_byte.into()),
+        ("line_start", fresh_site.start_line.into()),
+        ("line_end", fresh_site.end_line.into()),
+        ("column_start", fresh_site.start_column.into()),
+        ("column_end", fresh_site.end_column.into()),
+    ] {
+        if attributes.contains_key(key) {
+            attributes.insert(key.to_owned(), value);
+        }
+    }
 }
 
 fn strip_preserved_ast_node_evidence(attributes: &mut serde_json::Map<String, serde_json::Value>) {

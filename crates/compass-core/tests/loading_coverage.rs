@@ -340,6 +340,73 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
 }
 
 #[test]
+fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("main.rs");
+    fs::write(
+        &source,
+        "pub fn caller() { target(); }\npub fn target() {}\n",
+    )?;
+
+    let mut options = BuildOptions::new(root.to_path_buf());
+    options.no_cluster = true;
+    options.no_viz = true;
+    let initial = build_graph_with_layers(&options, None, &[])?;
+    let mut initial_graph =
+        compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
+    let initial_call = initial_graph
+        .links
+        .iter_mut()
+        .find(|edge| edge.kind == compass_model::code_graph::EdgeKind::Calls)
+        .ok_or("missing initial call")?;
+    let mut semantic_evidence = initial_call
+        .evidence
+        .first()
+        .cloned()
+        .ok_or("missing initial AST call evidence")?;
+    semantic_evidence.origin = compass_model::provenance::EvidenceOrigin::Heuristic;
+    semantic_evidence.confidence = compass_model::provenance::EvidenceConfidence::Inferred;
+    semantic_evidence.rule = Some("semantic-call".to_owned());
+    semantic_evidence.wiring_site = initial_call.relationship_site.clone();
+    semantic_evidence.anchors.clear();
+    initial_call.evidence.push(semantic_evidence);
+    fs::write(
+        initial.output_dir.join("graph.json"),
+        serde_json::to_vec_pretty(&initial_graph)?,
+    )?;
+
+    fs::write(
+        &source,
+        "// moved relationship site\npub fn caller() { target(); }\npub fn target() {}\n",
+    )?;
+    let incremental = build_graph_with_layers(&options, None, &[])?;
+    let incremental_graph =
+        compass_model::code_graph::GraphDocument::load(&incremental.output_dir.join("graph.json"))?;
+    let incremental_calls = incremental_graph
+        .links
+        .iter()
+        .filter(|edge| edge.kind == compass_model::code_graph::EdgeKind::Calls)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        incremental_calls.len(),
+        1,
+        "stale mixed-origin call survived beside fresh AST call: {incremental_calls:?}"
+    );
+    assert!(incremental_calls[0].evidence.iter().any(|evidence| {
+        evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+            && evidence.rule.as_deref() == Some("semantic-call")
+    }));
+
+    options.force = true;
+    let clean = build_graph_with_layers(&options, None, &[])?;
+    let clean_graph =
+        compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
+    assert_eq!(incremental_graph.links, clean_graph.links);
+    Ok(())
+}
+
+#[test]
 fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

@@ -575,8 +575,9 @@ fn target_is_indexed(file_path: &str, root: &Path) -> bool {
         return true;
     }
     let output = output_root();
-    let manifest_path = compass_files::BuildGuard::resolve_artifact(&output, "manifest.json")
-        .unwrap_or_else(|_| output.join("manifest.json"));
+    let Ok(manifest_path) = crate::resolve_output_artifact(&output, "manifest.json") else {
+        return false;
+    };
     let Ok(metadata) = manifest_path.metadata() else {
         return true;
     };
