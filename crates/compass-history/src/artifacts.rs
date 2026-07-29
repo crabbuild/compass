@@ -1415,25 +1415,27 @@ fn decode_node_map(
 ) -> Result<BTreeMap<Vec<u8>, NodeRecord>, HistoryError> {
     entries
         .iter()
-        .map(|(key, bytes)| {
-            let envelope = VersionedValue::from_bytes(bytes)?;
-            let node = match envelope.schema.as_str() {
-                "compass.node" => serde_json::from_slice(&envelope.payload)?,
-                "compass.graph.node.v1" => {
-                    let typed = serde_json::from_slice::<compass_model::code_graph::NodeRecord>(
-                        &envelope.payload,
-                    )?;
-                    compat_node(&typed)
-                }
-                schema => {
-                    return Err(HistoryError::InvalidArtifacts(format!(
-                        "unexpected node record schema {schema}"
-                    )));
-                }
-            };
-            Ok((key.clone(), node))
-        })
+        .map(|(key, bytes)| Ok((key.clone(), decode_compatible_node(bytes)?)))
         .collect()
+}
+
+pub(crate) fn decode_compatible_node(bytes: &[u8]) -> Result<NodeRecord, HistoryError> {
+    let envelope = VersionedValue::from_bytes(bytes)?;
+    match envelope.schema.as_str() {
+        "compass.node" => {
+            envelope.require_schema("compass.node", RECORD_VERSION)?;
+            serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
+        }
+        "compass.graph.node.v1" => {
+            envelope.require_schema("compass.graph.node.v1", RECORD_VERSION)?;
+            let typed =
+                serde_json::from_slice::<compass_model::code_graph::NodeRecord>(&envelope.payload)?;
+            Ok(compat_node(&typed))
+        }
+        schema => Err(HistoryError::InvalidArtifacts(format!(
+            "unexpected node record schema {schema}"
+        ))),
+    }
 }
 
 fn decode_edge_map(
@@ -1441,25 +1443,27 @@ fn decode_edge_map(
 ) -> Result<BTreeMap<Vec<u8>, EdgeRecord>, HistoryError> {
     entries
         .iter()
-        .map(|(key, bytes)| {
-            let envelope = VersionedValue::from_bytes(bytes)?;
-            let edge = match envelope.schema.as_str() {
-                "compass.edge" => serde_json::from_slice(&envelope.payload)?,
-                "compass.graph.edge.v1" => {
-                    let typed = serde_json::from_slice::<compass_model::code_graph::EdgeRecord>(
-                        &envelope.payload,
-                    )?;
-                    compat_edge(&typed)
-                }
-                schema => {
-                    return Err(HistoryError::InvalidArtifacts(format!(
-                        "unexpected edge record schema {schema}"
-                    )));
-                }
-            };
-            Ok((key.clone(), edge))
-        })
+        .map(|(key, bytes)| Ok((key.clone(), decode_compatible_edge(bytes)?)))
         .collect()
+}
+
+pub(crate) fn decode_compatible_edge(bytes: &[u8]) -> Result<EdgeRecord, HistoryError> {
+    let envelope = VersionedValue::from_bytes(bytes)?;
+    match envelope.schema.as_str() {
+        "compass.edge" => {
+            envelope.require_schema("compass.edge", RECORD_VERSION)?;
+            serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
+        }
+        "compass.graph.edge.v1" => {
+            envelope.require_schema("compass.graph.edge.v1", RECORD_VERSION)?;
+            let typed =
+                serde_json::from_slice::<compass_model::code_graph::EdgeRecord>(&envelope.payload)?;
+            Ok(compat_edge(&typed))
+        }
+        schema => Err(HistoryError::InvalidArtifacts(format!(
+            "unexpected edge record schema {schema}"
+        ))),
+    }
 }
 
 fn decode_value_map(
