@@ -196,6 +196,7 @@ impl<'tree> State<'_, 'tree> {
         let name = self.text(*name_node).to_owned();
         let id = make_id(&[&self.stem, &name]);
         self.add_node(id.clone(), &name, line(node));
+        self.set_node_kind(&id, "class", node);
         self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
         let mut colon = false;
         let mut cursor = node.walk();
@@ -252,6 +253,7 @@ impl<'tree> State<'_, 'tree> {
         let id = make_id(&[&self.stem, &name]);
         if !self.seen_nodes.contains(&id) {
             self.add_node(id.clone(), &name, line(node));
+            self.set_node_kind(&id, "class", node);
             self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
         }
         for definition in direct_children(node, "implementation_definition") {
@@ -269,6 +271,7 @@ impl<'tree> State<'_, 'tree> {
         let name = self.text(name_node).to_owned();
         let id = make_id(&[&self.stem, &name]);
         self.add_node(id.clone(), &format!("<{name}>"), line(node));
+        self.set_node_kind(&id, "protocol", node);
         self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
         for references in direct_children(node, "protocol_reference_list") {
             for base in direct_children(references, "identifier") {
@@ -303,6 +306,7 @@ impl<'tree> State<'_, 'tree> {
         let name = parts.join("");
         let id = make_id(&[&container, &name]);
         self.add_node(id.clone(), &format!("{prefix}{name}"), line(node));
+        self.set_node_kind(&id, "method", node);
         self.add_edge(&container, &id, "method", line(node), None);
         if node.kind() == "method_definition" {
             self.method_bodies.push(MethodBody {
@@ -479,6 +483,20 @@ impl<'tree> State<'_, 'tree> {
             Value::String(format!("L{at_line}")),
         );
         self.extraction.nodes.push(NodeRecord { id, attributes });
+    }
+
+    fn set_node_kind(&mut self, id: &str, kind: &str, node: Node<'_>) {
+        if let Some(record) = self
+            .extraction
+            .nodes
+            .iter_mut()
+            .find(|record| record.id == id)
+        {
+            record
+                .attributes
+                .insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
+            crate::facts::stamp_node_range(&mut record.attributes, node);
+        }
     }
 
     fn add_edge(

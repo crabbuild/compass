@@ -237,6 +237,7 @@ impl Engine {
             add_python_rationale(path, source, root, &mut extraction);
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
+        crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
         crate::frameworks::detect(path, source, root, spec.name, &mut extraction);
         if root.has_error() {
             extraction.extensions.insert(
@@ -687,6 +688,8 @@ fn symbol_kind(kind: &str, is_class: bool, is_nested: bool) -> &'static str {
     if is_class {
         if kind.contains("interface") {
             "interface"
+        } else if kind.contains("trait") {
+            "trait"
         } else if kind.contains("enum") {
             "enum"
         } else if kind.contains("struct") || kind.contains("record") {
@@ -695,7 +698,7 @@ fn symbol_kind(kind: &str, is_class: bool, is_nested: bool) -> &'static str {
             "protocol"
         } else if kind.contains("module") || kind.contains("object") {
             "module"
-        } else if kind.contains("type_alias") {
+        } else if kind.contains("type_alias") || kind == "type_item" {
             "type_alias"
         } else {
             "class"

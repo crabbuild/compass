@@ -110,9 +110,9 @@ struct State {
 }
 
 impl State {
-    fn add_server(&mut self, name: &str, specification: &Map<String, Value>) {
-        let server_id = make_id(&[&self.file_stem, "mcp_server", name]);
-        self.add_node(server_id.clone(), name, "mcp_server");
+    fn add_server(&mut self, server_name: &str, specification: &Map<String, Value>) {
+        let server_id = make_id(&[&self.file_stem, "mcp_server", server_name]);
+        self.add_node(server_id.clone(), server_name, "mcp_server");
         self.add_edge(&self.file_id.clone(), &server_id, "contains", None);
 
         if let Some(command) = specification
@@ -135,11 +135,35 @@ impl State {
         }
 
         if let Some(environment) = specification.get("env").and_then(Value::as_object) {
-            for name in environment.keys().filter(|name| !name.is_empty()) {
-                let environment_id = make_id(&["env_var", name]);
-                self.add_node(environment_id.clone(), name, "env_var");
+            for environment_name in environment.keys().filter(|name| !name.is_empty()) {
+                let environment_id = make_id(&[
+                    &self.file_stem,
+                    "mcp_server",
+                    server_name,
+                    "environment",
+                    environment_name,
+                ]);
+                self.add_environment_node(
+                    environment_id.clone(),
+                    environment_name,
+                    &format!("mcpServers.{server_name}.env.{environment_name}"),
+                );
                 self.add_edge(&server_id, &environment_id, "depends_on", None);
             }
+        }
+    }
+
+    fn add_environment_node(&mut self, id: String, label: &str, key_path: &str) {
+        self.add_node(id.clone(), label, "mcp_environment");
+        if let Some(node) = self.extraction.nodes.iter_mut().find(|node| node.id == id) {
+            node.attributes
+                .insert("format".to_owned(), Value::String("mcp".to_owned()));
+            node.attributes
+                .insert("key_path".to_owned(), Value::String(key_path.to_owned()));
+            node.attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(key_path.to_owned()),
+            );
         }
     }
 
@@ -157,7 +181,7 @@ impl State {
             "mcp_server" => "component",
             "mcp_command" => "function",
             "mcp_package" => "package",
-            "env_var" => "variable",
+            "mcp_environment" => "config_key",
             _ => return,
         };
         attributes.insert(
@@ -175,6 +199,7 @@ impl State {
             Value::String(self.source_file.clone()),
         );
         attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
+        attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
         attributes.insert("metadata".to_owned(), Value::Object(metadata));
         self.extraction.nodes.push(NodeRecord { id, attributes });
     }
@@ -200,6 +225,7 @@ impl State {
         );
         attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
         attributes.insert("weight".to_owned(), json!(1.0));
+        attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
         if let Some(context) = context {
             attributes.insert("context".to_owned(), Value::String(context.to_owned()));
         }

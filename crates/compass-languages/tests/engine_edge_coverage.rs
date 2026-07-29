@@ -38,7 +38,7 @@ impl ChangeSink for ChangeCounts {
     let methods = extraction
         .nodes
         .iter()
-        .filter(|node| node.label() == ".change()")
+        .filter(|node| node.label() == ".change()" && !node.string("lexical_owner").is_empty())
         .collect::<Vec<_>>();
 
     assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);

@@ -35,6 +35,7 @@ mod r;
 mod registry;
 mod rust_lang;
 mod scip;
+mod semantic;
 mod sql;
 mod swift;
 mod templates;

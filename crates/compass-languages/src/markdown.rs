@@ -182,6 +182,7 @@ impl State<'_> {
             "source_location".to_owned(),
             Value::String(format!("L{line}")),
         );
+        attributes.insert("_origin".to_owned(), Value::String("artifact".to_owned()));
         self.extraction.nodes.push(NodeRecord { id, attributes });
     }
 
@@ -200,6 +201,7 @@ impl State<'_> {
             "source_location".to_owned(),
             Value::String(format!("L{line}")),
         );
+        attributes.insert("_origin".to_owned(), Value::String("artifact".to_owned()));
         attributes.insert("weight".to_owned(), json!(1.0));
         self.extraction.edges.push(EdgeRecord {
             source,
@@ -217,7 +219,12 @@ impl State<'_> {
         if target_id == self.file_id || !self.linked_targets.insert(target_id.clone()) {
             return;
         }
-        self.add_edge(self.file_id.clone(), target_id, "references", line);
+        let relation = if is_documentable_source(&target) {
+            "documents"
+        } else {
+            "references"
+        };
+        self.add_edge(self.file_id.clone(), target_id, relation, line);
     }
 }
 
@@ -256,16 +263,82 @@ fn resolve_link(raw: &str, source_directory: &Path) -> Option<PathBuf> {
     } else {
         suffix.as_str()
     };
-    if !matches!(
-        suffix,
-        ".md" | ".mdx" | ".qmd" | ".markdown" | ".rst" | ".txt"
-    ) {
+    if !is_supported_local_link(suffix) {
         return None;
     }
     if !target.is_absolute() {
         target = source_directory.join(target);
     }
     Some(lexical_normalize(&target))
+}
+
+fn is_documentable_source(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "rs" | "py"
+                    | "js"
+                    | "jsx"
+                    | "ts"
+                    | "tsx"
+                    | "java"
+                    | "cs"
+                    | "go"
+                    | "c"
+                    | "cc"
+                    | "cpp"
+                    | "h"
+                    | "hpp"
+                    | "rb"
+                    | "php"
+                    | "swift"
+                    | "kt"
+                    | "kts"
+                    | "scala"
+                    | "dart"
+                    | "ex"
+                    | "exs"
+                    | "sql"
+            )
+        })
+}
+
+fn is_supported_local_link(suffix: &str) -> bool {
+    matches!(
+        suffix,
+        ".md"
+            | ".mdx"
+            | ".qmd"
+            | ".markdown"
+            | ".rst"
+            | ".txt"
+            | ".rs"
+            | ".py"
+            | ".js"
+            | ".jsx"
+            | ".ts"
+            | ".tsx"
+            | ".java"
+            | ".cs"
+            | ".go"
+            | ".c"
+            | ".cc"
+            | ".cpp"
+            | ".h"
+            | ".hpp"
+            | ".rb"
+            | ".php"
+            | ".swift"
+            | ".kt"
+            | ".kts"
+            | ".scala"
+            | ".dart"
+            | ".ex"
+            | ".exs"
+            | ".sql"
+    )
 }
 
 fn lexical_normalize(path: &Path) -> PathBuf {
