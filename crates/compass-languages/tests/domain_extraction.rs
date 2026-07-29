@@ -1772,3 +1772,345 @@ END;
     );
     Ok(())
 }
+
+#[test]
+fn quote_family_cross_product_separates_valid_pairs_from_proven_recovery()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."double_semi; SELECT" (id BIGINT);
+SELECT * FROM "app"."double_semi; SELECT";
+CREATE TABLE "app"."double_multi;
+SELECT" (id BIGINT);
+SELECT * FROM "app"."double_multi;
+SELECT";
+CREATE TABLE "app"."double_escaped; SELECT ""tail""" (id BIGINT);
+SELECT * FROM "app"."double_escaped; SELECT ""tail""";
+CREATE TABLE `app`.`backtick_semi; SELECT` (id BIGINT);
+SELECT * FROM `app`.`backtick_semi; SELECT`;
+CREATE TABLE `app`.`backtick_multi;
+SELECT` (id BIGINT);
+SELECT * FROM `app`.`backtick_multi;
+SELECT`;
+CREATE TABLE `app`.`backtick_escaped; SELECT ``tail``` (id BIGINT);
+SELECT * FROM `app`.`backtick_escaped; SELECT ``tail```;
+CREATE TABLE [app].[bracket_semi; SELECT] (id BIGINT);
+SELECT * FROM [app].[bracket_semi; SELECT];
+CREATE TABLE [app].[bracket_multi;
+SELECT] (id BIGINT);
+SELECT * FROM [app].[bracket_multi;
+SELECT];
+CREATE TABLE [app].[bracket_escaped; SELECT ]]tail] (id BIGINT);
+SELECT * FROM [app].[bracket_escaped; SELECT ]]tail];
+CREATE TABLE "app"."double_target" (id BIGINT);
+CREATE TABLE `app`.`backtick_target` (id BIGINT);
+CREATE TABLE [app].[bracket_target] (id BIGINT);
+SELECT * FROM "broken_double_ws; SELECT * FROM "app"."double_target";
+SELECT * FROM "broken_double_tight;SELECT * FROM "app"."double_target";
+SELECT * FROM `broken_backtick_ws; SELECT * FROM `app`.`backtick_target`;
+SELECT * FROM `broken_backtick_tight;SELECT * FROM `app`.`backtick_target`;
+SELECT * FROM [broken_bracket_ws; SELECT * FROM [app].[bracket_target];
+SELECT * FROM [broken_bracket_tight;SELECT * FROM [app].[bracket_target];
+"#;
+    let extraction = extract_sql_content(Path::new("db/quote_cross_product.sql"), source);
+    let exact_identifiers = [
+        (
+            "app.double_semi; SELECT",
+            br#""app"."double_semi; SELECT""#.as_slice(),
+        ),
+        (
+            "app.double_multi;\nSELECT",
+            b"\"app\".\"double_multi;\nSELECT\"".as_slice(),
+        ),
+        (
+            "app.double_escaped; SELECT \"tail\"",
+            br#""app"."double_escaped; SELECT ""tail""""#.as_slice(),
+        ),
+        (
+            "app.backtick_semi; SELECT",
+            b"`app`.`backtick_semi; SELECT`".as_slice(),
+        ),
+        (
+            "app.backtick_multi;\nSELECT",
+            b"`app`.`backtick_multi;\nSELECT`".as_slice(),
+        ),
+        (
+            "app.backtick_escaped; SELECT `tail`",
+            b"`app`.`backtick_escaped; SELECT ``tail```".as_slice(),
+        ),
+        (
+            "app.bracket_semi; SELECT",
+            b"[app].[bracket_semi; SELECT]".as_slice(),
+        ),
+        (
+            "app.bracket_multi;\nSELECT",
+            b"[app].[bracket_multi;\nSELECT]".as_slice(),
+        ),
+        (
+            "app.bracket_escaped; SELECT ]tail",
+            b"[app].[bracket_escaped; SELECT ]]tail]".as_slice(),
+        ),
+    ];
+    for (qualified_name, spelling) in exact_identifiers {
+        let table = extraction
+            .nodes
+            .iter()
+            .find(|node| {
+                node.string("symbol_kind") == "database_table"
+                    && node.string("qualified_name") == qualified_name
+            })
+            .ok_or_else(|| format!("missing valid paired identifier {qualified_name:?}"))?;
+        let read = extraction
+            .edges
+            .iter()
+            .find(|edge| edge.target == table.id && edge.string("relation") == "reads")
+            .ok_or_else(|| format!("missing read for {qualified_name:?}"))?;
+        for attributes in [&table.attributes, &read.attributes] {
+            let start = attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing exact start")?;
+            let end = attributes
+                .get("end_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing exact end")?;
+            assert_eq!(&source[start..end], spelling);
+        }
+    }
+    for target_name in [
+        "app.double_target",
+        "app.backtick_target",
+        "app.bracket_target",
+    ] {
+        let target = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        assert_eq!(
+            extraction
+                .edges
+                .iter()
+                .filter(|edge| edge.target == target.id && edge.string("relation") == "reads")
+                .count(),
+            2,
+            "later same-style statements were not independently retained: {:?}",
+            extraction.edges
+        );
+    }
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| !node.string("qualified_name").contains("broken_"))
+    );
+    let coverage = extraction
+        .extensions
+        .get("_compass_v1_graph_coverage")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing recovery coverage")?;
+    let diagnostics = extraction
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing recovery diagnostics")?;
+    assert_eq!(coverage.len(), 6, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 6, "diagnostics={diagnostics:?}");
+    for marker in [
+        b"\"broken_double_ws".as_slice(),
+        b"\"broken_double_tight",
+        b"`broken_backtick_ws",
+        b"`broken_backtick_tight",
+        b"[broken_bracket_ws",
+        b"[broken_bracket_tight",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing malformed marker")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b';')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery separator")?;
+        assert_eq!(
+            coverage
+                .iter()
+                .filter(|record| {
+                    record
+                        .get("anchor")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|anchor| {
+                            anchor.get("startByte").and_then(serde_json::Value::as_u64)
+                                == Some(start as u64)
+                                && anchor.get("endByte").and_then(serde_json::Value::as_u64)
+                                    == Some(end as u64)
+                        })
+                })
+                .count(),
+            1
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn paired_dollar_literals_are_inert_while_owned_routine_bodies_are_scanned()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+SELECT $outer$
+  FROM app.literal_phantom;
+  UPDATE app.literal_write SET id = 1;
+  "broken; SELECT * FROM app.quote_phantom
+  -- JOIN app.comment_phantom
+  /* DELETE FROM app.block_phantom */
+  (($inner$ INSERT INTO app.nested_phantom $inner$))
+$outer$ AS payload FROM app.real;
+INSERT INTO app.audit
+SELECT $value$ MERGE INTO app.merge_phantom USING app.other_phantom
+  'apostrophe' [broken] /* FROM app.hidden */
+$value$ FROM app.real;
+CREATE PROCEDURE app.refresh(
+  p_text TEXT DEFAULT $default$ FROM app.default_phantom; "broken $default$
+) AS $body$
+BEGIN
+  SELECT $literal$ FROM app.body_phantom; UPDATE app.body_write
+    -- FROM app.body_comment
+    /* JOIN app.body_block */
+    (($different$ DELETE FROM app.body_nested $different$))
+  $literal$ FROM app.real;
+  UPDATE app.audit SET id = 2;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    let extraction = extract_sql_content(Path::new("db/dollar_lexing.sql"), source);
+    for phantom in [
+        "app.literal_phantom",
+        "app.literal_write",
+        "app.quote_phantom",
+        "app.comment_phantom",
+        "app.block_phantom",
+        "app.nested_phantom",
+        "app.merge_phantom",
+        "app.other_phantom",
+        "app.hidden",
+        "app.default_phantom",
+        "app.body_phantom",
+        "app.body_write",
+        "app.body_comment",
+        "app.body_block",
+        "app.body_nested",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != phantom),
+            "dollar literal produced phantom {phantom}: {:?}",
+            extraction.nodes
+        );
+    }
+    let real = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.real")
+        .ok_or("missing real table")?;
+    let audit = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.audit")
+        .ok_or("missing audit table")?;
+    let routine = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.refresh")
+        .ok_or("missing routine")?;
+    let queries = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "query")
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                queries.iter().any(|query| query.id == edge.source)
+                    && edge.target == real.id
+                    && edge.string("relation") == "reads"
+            })
+            .count(),
+        2
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                queries.iter().any(|query| query.id == edge.source)
+                    && edge.target == audit.id
+                    && edge.string("relation") == "writes"
+            })
+            .count(),
+        1
+    );
+    for edge in extraction.edges.iter().filter(|edge| {
+        (edge.target == real.id && edge.string("relation") == "reads")
+            || (edge.target == audit.id && edge.string("relation") == "writes")
+    }) {
+        let start = edge
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing data-access start")?;
+        let end = edge
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing data-access end")?;
+        let expected = if edge.target == real.id {
+            b"app.real".as_slice()
+        } else {
+            b"app.audit".as_slice()
+        };
+        assert_eq!(&source[start..end], expected);
+        assert_eq!(edge.string("_origin"), "artifact");
+        assert_eq!(edge.string("rule"), "sql-text-data-access");
+    }
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == routine.id
+                    && edge.target == real.id
+                    && edge.string("relation") == "reads"
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == routine.id
+                    && edge.target == audit.id
+                    && edge.string("relation") == "writes"
+            })
+            .count(),
+        1
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "complete dollar spans produced diagnostics: {:?}",
+        extraction.extensions
+    );
+    Ok(())
+}

@@ -157,7 +157,39 @@ impl<'a> State<'a> {
         let source_file = path.to_string_lossy().into_owned();
         let logical_database = logical_database(path);
         let text = std::str::from_utf8(source).unwrap_or_default();
-        let lexical = mask_sql_literals_and_comments(text);
+        let mut lexical = mask_sql_literals_and_comments(text);
+        // The outer pass treats every paired dollar span as data. That makes
+        // ordinary literals and defaults invisible to fact discovery. A
+        // declaration pass over that view can still prove routine ownership
+        // because dollar delimiters remain visible. Only proven routine
+        // bodies are then lexed recursively and restored into the discovery
+        // view, so their SQL belongs to the routine rather than the file.
+        let routine_bodies = statements(&lexical.masked)
+            .into_iter()
+            .filter_map(|statement| {
+                matches!(
+                    statement.kind,
+                    StatementKind::Procedure | StatementKind::Trigger
+                )
+                .then_some(statement.body)
+                .flatten()
+            })
+            .collect::<Vec<_>>();
+        for body in routine_bodies {
+            let Some(body_source) = text.get(body.start..body.end) else {
+                continue;
+            };
+            let nested = mask_sql_literals_and_comments(body_source);
+            lexical
+                .masked
+                .replace_range(body.start..body.end, &nested.masked);
+            lexical
+                .issues
+                .extend(nested.issues.into_iter().map(|issue| BoundaryIssue {
+                    site: Site::new(body.start + issue.site.start, body.start + issue.site.end),
+                    reason: issue.reason,
+                }));
+        }
         Self {
             path,
             source,
@@ -1370,7 +1402,7 @@ fn scan_delimited_identifier(
     let bytes = source.as_bytes();
     let limit = limit.min(bytes.len());
     let mut index = open.saturating_add(1).min(limit);
-    let mut statement_recovery = None;
+    let mut statement_recoveries = Vec::new();
     let mut fallback_recovery = None;
     while index < limit {
         if bytes[index] == delimiter {
@@ -1378,26 +1410,191 @@ fn scan_delimited_identifier(
                 index += 2;
                 continue;
             }
-            return statement_recovery.map_or(
-                DelimitedIdentifierScan::Complete(index + 1),
-                DelimitedIdentifierScan::Incomplete,
-            );
+            let close_end = index + 1;
+            let invalid_outer_follower =
+                !identifier_close_has_valid_follower(source, close_end, limit);
+            let nested_bracket_opener = delimiter == b']'
+                && statement_recoveries.iter().any(|separator| {
+                    source
+                        .as_bytes()
+                        .get(*separator..index)
+                        .is_some_and(|tail| tail.contains(&b'['))
+                });
+            if (invalid_outer_follower || nested_bracket_opener)
+                && let Some(recovery) = statement_recoveries.iter().copied().find(|separator| {
+                    proven_statement_after_separator(source, *separator, limit).is_some()
+                })
+            {
+                return DelimitedIdentifierScan::Incomplete(recovery);
+            }
+            return DelimitedIdentifierScan::Complete(close_end);
         }
         if fallback_recovery.is_none() && matches!(bytes[index], b';' | b'\n') {
             fallback_recovery = Some(index + 1);
         }
-        if statement_recovery.is_none() && bytes[index] == b';' {
-            let next = index + 1;
-            if bytes
-                .get(next)
-                .is_some_and(|byte| byte.is_ascii_whitespace())
-            {
-                statement_recovery = Some(next);
-            }
+        if bytes[index] == b';' {
+            statement_recoveries.push(index + 1);
         }
         index += 1;
     }
     DelimitedIdentifierScan::Incomplete(fallback_recovery.unwrap_or(limit))
+}
+
+fn identifier_close_has_valid_follower(source: &str, close_end: usize, limit: usize) -> bool {
+    let bytes = source.as_bytes();
+    let next = skip_sql_whitespace(source, close_end);
+    if next >= limit.min(bytes.len()) {
+        return true;
+    }
+    matches!(
+        bytes[next],
+        b'.' | b','
+            | b';'
+            | b'('
+            | b')'
+            | b'='
+            | b'<'
+            | b'>'
+            | b'!'
+            | b'+'
+            | b'-'
+            | b'*'
+            | b'/'
+            | b'%'
+            | b':'
+            | b'|'
+    )
+}
+
+fn proven_statement_after_separator(source: &str, start: usize, limit: usize) -> Option<usize> {
+    let statement_start = skip_sql_whitespace(source, start);
+    let (_, keyword_end) = word_at(source, statement_start)?;
+    let keyword = source.get(statement_start..keyword_end)?;
+    if !matches!(
+        keyword.to_ascii_uppercase().as_str(),
+        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" | "CREATE" | "ALTER"
+    ) {
+        return None;
+    }
+    let statement_end = scan_proven_statement_boundary(source, statement_start, limit)?;
+    proven_statement_shape(source, statement_start, statement_end).then_some(statement_end)
+}
+
+fn scan_proven_statement_boundary(source: &str, start: usize, limit: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let limit = limit.min(bytes.len());
+    let mut index = start.min(limit);
+    let mut paren_depth = 0_u32;
+    while index < limit {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end_bounded(bytes, index, delimiter, limit)?;
+            continue;
+        }
+        if bytes[index] == b'\'' {
+            index = single_quoted_end(bytes, index, limit)?;
+            continue;
+        }
+        if bytes[index] == b'-' && bytes.get(index + 1).copied() == Some(b'-') {
+            index = source[index + 2..limit]
+                .find('\n')
+                .map_or(limit, |offset| index + 2 + offset + 1);
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1).copied() == Some(b'*') {
+            let close = source[index + 2..limit].find("*/")?;
+            index += close + 4;
+            continue;
+        }
+        if dollar_quote_delimiter_at(source, index).is_some() {
+            index = paired_dollar_quote_end(source, index, limit)?;
+            continue;
+        }
+        match bytes[index] {
+            b'(' => paren_depth = paren_depth.saturating_add(1),
+            b')' => {
+                if paren_depth == 0 {
+                    return None;
+                }
+                paren_depth -= 1;
+            }
+            b';' if paren_depth == 0 => return Some(index + 1),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn proven_statement_shape(source: &str, start: usize, end: usize) -> bool {
+    let words = sql_word_spans(&source[start..end], 0)
+        .into_iter()
+        .map(|(_, _, word)| word.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    match words.as_slice() {
+        [first, rest @ ..] if first == "SELECT" => !rest.is_empty(),
+        [first, rest @ ..] if first == "INSERT" => rest.iter().any(|word| word == "INTO"),
+        [first, rest @ ..] if first == "UPDATE" => !rest.is_empty(),
+        [first, rest @ ..] if first == "DELETE" => rest.iter().any(|word| word == "FROM"),
+        [first, rest @ ..] if first == "MERGE" => {
+            rest.iter().any(|word| word == "INTO" || word == "USING")
+        }
+        [first, rest @ ..] if first == "WITH" => rest.iter().any(|word| {
+            matches!(
+                word.as_str(),
+                "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
+            )
+        }),
+        [first, second, ..] if first == "CREATE" => matches!(
+            second.as_str(),
+            "DATABASE"
+                | "SCHEMA"
+                | "TABLE"
+                | "VIEW"
+                | "FUNCTION"
+                | "PROCEDURE"
+                | "TRIGGER"
+                | "INDEX"
+        ),
+        [first, second, ..] if first == "ALTER" => second == "TABLE",
+        _ => false,
+    }
+}
+
+fn quoted_identifier_end_bounded(
+    bytes: &[u8],
+    start: usize,
+    delimiter: u8,
+    limit: usize,
+) -> Option<usize> {
+    let mut index = start + 1;
+    while index < limit.min(bytes.len()) {
+        if bytes[index] != delimiter {
+            index += 1;
+            continue;
+        }
+        if index + 1 < limit && bytes.get(index + 1).copied() == Some(delimiter) {
+            index += 2;
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
+}
+
+fn single_quoted_end(bytes: &[u8], start: usize, limit: usize) -> Option<usize> {
+    let mut index = start + 1;
+    while index < limit.min(bytes.len()) {
+        if bytes[index] != b'\'' {
+            index += 1;
+            continue;
+        }
+        if index + 1 < limit && bytes.get(index + 1).copied() == Some(b'\'') {
+            index += 2;
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
 }
 
 fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<ScannedStatement> {
@@ -2001,6 +2198,7 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
         SingleQuoted,
         LineComment,
         BlockComment,
+        DollarQuoted { content_end: usize, span_end: usize },
     }
 
     let source = value.as_bytes();
@@ -2057,6 +2255,19 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
                 state = LexicalState::BlockComment;
                 index += 2;
             }
+            LexicalState::Normal
+                if dollar_quote_delimiter_at(value, index).is_some()
+                    && paired_dollar_quote_end(value, index, source.len()).is_some() =>
+            {
+                let delimiter = dollar_quote_delimiter_at(value, index).unwrap_or_default();
+                let span_end =
+                    paired_dollar_quote_end(value, index, source.len()).unwrap_or(source.len());
+                index += delimiter.len();
+                state = LexicalState::DollarQuoted {
+                    content_end: span_end.saturating_sub(delimiter.len()),
+                    span_end,
+                };
+            }
             LexicalState::SingleQuoted
                 if source[index] == b'\'' && source.get(index + 1).copied() == Some(b'\'') =>
             {
@@ -2081,6 +2292,19 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
                 state = LexicalState::Normal;
                 index += 2;
             }
+            LexicalState::DollarQuoted {
+                content_end,
+                span_end,
+            } if index >= content_end => {
+                index = span_end;
+                state = LexicalState::Normal;
+            }
+            LexicalState::DollarQuoted { .. } => {
+                if !matches!(source[index], b'\n' | b'\r') {
+                    masked[index] = b' ';
+                }
+                index += 1;
+            }
             LexicalState::SingleQuoted | LexicalState::LineComment | LexicalState::BlockComment => {
                 if source[index] != b'\n' {
                     masked[index] = b' ';
@@ -2088,7 +2312,7 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
                 index += 1;
             }
             LexicalState::Normal => {
-                index += dollar_quote_delimiter_at(value, index).map_or(1, str::len);
+                index += 1;
             }
         }
     }

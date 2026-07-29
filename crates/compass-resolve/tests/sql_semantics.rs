@@ -1566,3 +1566,364 @@ END;
     );
     Ok(())
 }
+
+#[test]
+fn quote_family_recovery_cross_product_is_conservative_and_exact_in_strict_v1()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V15__quote_cross_product.sql");
+    let source = br#"
+CREATE TABLE "app"."double_semi; SELECT" (id BIGINT);
+SELECT * FROM "app"."double_semi; SELECT";
+CREATE TABLE "app"."double_multi;
+SELECT" (id BIGINT);
+SELECT * FROM "app"."double_multi;
+SELECT";
+CREATE TABLE "app"."double_escaped; SELECT ""tail""" (id BIGINT);
+SELECT * FROM "app"."double_escaped; SELECT ""tail""";
+CREATE TABLE `app`.`backtick_semi; SELECT` (id BIGINT);
+SELECT * FROM `app`.`backtick_semi; SELECT`;
+CREATE TABLE `app`.`backtick_multi;
+SELECT` (id BIGINT);
+SELECT * FROM `app`.`backtick_multi;
+SELECT`;
+CREATE TABLE `app`.`backtick_escaped; SELECT ``tail``` (id BIGINT);
+SELECT * FROM `app`.`backtick_escaped; SELECT ``tail```;
+CREATE TABLE [app].[bracket_semi; SELECT] (id BIGINT);
+SELECT * FROM [app].[bracket_semi; SELECT];
+CREATE TABLE [app].[bracket_multi;
+SELECT] (id BIGINT);
+SELECT * FROM [app].[bracket_multi;
+SELECT];
+CREATE TABLE [app].[bracket_escaped; SELECT ]]tail] (id BIGINT);
+SELECT * FROM [app].[bracket_escaped; SELECT ]]tail];
+CREATE TABLE "app"."double_target" (id BIGINT);
+CREATE TABLE `app`.`backtick_target` (id BIGINT);
+CREATE TABLE [app].[bracket_target] (id BIGINT);
+SELECT * FROM "broken_double_ws; SELECT * FROM "app"."double_target";
+SELECT * FROM "broken_double_tight;SELECT * FROM "app"."double_target";
+SELECT * FROM `broken_backtick_ws; SELECT * FROM `app`.`backtick_target`;
+SELECT * FROM `broken_backtick_tight;SELECT * FROM `app`.`backtick_target`;
+SELECT * FROM [broken_bracket_ws; SELECT * FROM [app].[bracket_target];
+SELECT * FROM [broken_bracket_tight;SELECT * FROM [app].[bracket_target];
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:quote-cross-product")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for target_name in [
+        "app.double_target",
+        "app.backtick_target",
+        "app.bracket_target",
+    ] {
+        let target = graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        let reads = graph
+            .links
+            .iter()
+            .filter(|edge| edge.target == target.id && edge.kind == EdgeKind::Reads)
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), 2, "links={:?}", graph.links);
+        assert!(reads.iter().all(|edge| {
+            edge.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+            })
+        }));
+    }
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| !node.qualified_name.contains("broken_"))
+    );
+    for (qualified_name, spelling) in [
+        (
+            "app.double_semi; SELECT",
+            br#""app"."double_semi; SELECT""#.as_slice(),
+        ),
+        (
+            "app.double_multi;\nSELECT",
+            b"\"app\".\"double_multi;\nSELECT\"".as_slice(),
+        ),
+        (
+            "app.double_escaped; SELECT \"tail\"",
+            br#""app"."double_escaped; SELECT ""tail""""#.as_slice(),
+        ),
+        (
+            "app.backtick_semi; SELECT",
+            b"`app`.`backtick_semi; SELECT`".as_slice(),
+        ),
+        (
+            "app.backtick_multi;\nSELECT",
+            b"`app`.`backtick_multi;\nSELECT`".as_slice(),
+        ),
+        (
+            "app.backtick_escaped; SELECT `tail`",
+            b"`app`.`backtick_escaped; SELECT ``tail```".as_slice(),
+        ),
+        (
+            "app.bracket_semi; SELECT",
+            b"[app].[bracket_semi; SELECT]".as_slice(),
+        ),
+        (
+            "app.bracket_multi;\nSELECT",
+            b"[app].[bracket_multi;\nSELECT]".as_slice(),
+        ),
+        (
+            "app.bracket_escaped; SELECT ]tail",
+            b"[app].[bracket_escaped; SELECT ]]tail]".as_slice(),
+        ),
+    ] {
+        let table = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                node.kind == NodeKind::DatabaseTable && node.qualified_name == qualified_name
+            })
+            .ok_or_else(|| format!("missing valid paired identifier {qualified_name:?}"))?;
+        let read = graph
+            .links
+            .iter()
+            .find(|edge| edge.target == table.id && edge.kind == EdgeKind::Reads)
+            .ok_or_else(|| format!("missing read for {qualified_name:?}"))?;
+        for anchor in [
+            table.source.as_ref().ok_or("missing table source")?,
+            read.relationship_site.as_ref().ok_or("missing read site")?,
+        ] {
+            assert_eq!(
+                source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+                Some(spelling)
+            );
+        }
+    }
+    let partials = graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|record| {
+            record.capability == "sql:statement_boundary"
+                && record.status == CoverageStatus::Partial
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = graph
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "sql_incomplete_quoted_identifier")
+        .collect::<Vec<_>>();
+    assert_eq!(partials.len(), 6, "coverage={:?}", graph.graph.coverage);
+    assert_eq!(
+        diagnostics.len(),
+        6,
+        "diagnostics={:?}",
+        graph.graph.diagnostics
+    );
+    for marker in [
+        b"\"broken_double_ws".as_slice(),
+        b"\"broken_double_tight",
+        b"`broken_backtick_ws",
+        b"`broken_backtick_tight",
+        b"[broken_bracket_ws",
+        b"[broken_bracket_tight",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing malformed marker")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b';')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery separator")?;
+        assert_eq!(
+            partials
+                .iter()
+                .filter(|record| {
+                    record.anchor.as_ref().is_some_and(|anchor| {
+                        anchor.start_byte == start as u64
+                            && anchor.end_byte == end as u64
+                            && anchor.file == relative.to_string_lossy()
+                    })
+                })
+                .count(),
+            1
+        );
+    }
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:quote-cross-product")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn dollar_literals_are_inert_and_owned_bodies_remain_exact_in_strict_v1()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V16__dollar_lexing.sql");
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+SELECT $outer$
+  FROM app.literal_phantom;
+  UPDATE app.literal_write SET id = 1;
+  "broken; SELECT * FROM app.quote_phantom
+  -- JOIN app.comment_phantom
+  /* DELETE FROM app.block_phantom */
+  (($inner$ INSERT INTO app.nested_phantom $inner$))
+$outer$ AS payload FROM app.real;
+INSERT INTO app.audit
+SELECT $value$ MERGE INTO app.merge_phantom USING app.other_phantom
+  'apostrophe' [broken] /* FROM app.hidden */
+$value$ FROM app.real;
+CREATE PROCEDURE app.refresh(
+  p_text TEXT DEFAULT $default$ FROM app.default_phantom; "broken $default$
+) AS $body$
+BEGIN
+  SELECT $literal$ FROM app.body_phantom; UPDATE app.body_write
+    -- FROM app.body_comment
+    /* JOIN app.body_block */
+    (($different$ DELETE FROM app.body_nested $different$))
+  $literal$ FROM app.real;
+  UPDATE app.audit SET id = 2;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:dollar-lexing")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for phantom in [
+        "app.literal_phantom",
+        "app.literal_write",
+        "app.quote_phantom",
+        "app.comment_phantom",
+        "app.block_phantom",
+        "app.nested_phantom",
+        "app.merge_phantom",
+        "app.other_phantom",
+        "app.hidden",
+        "app.default_phantom",
+        "app.body_phantom",
+        "app.body_write",
+        "app.body_comment",
+        "app.body_block",
+        "app.body_nested",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.qualified_name != phantom),
+            "dollar literal produced phantom {phantom}: {:?}",
+            graph.nodes
+        );
+    }
+    let real = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.real")
+        .ok_or("missing real table")?;
+    let audit = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.audit")
+        .ok_or("missing audit table")?;
+    let routine = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "app.refresh")
+        .ok_or("missing routine")?;
+    let queries = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Query)
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 2, "nodes={:?}", graph.nodes);
+    let exact_edges = graph
+        .links
+        .iter()
+        .filter(|edge| {
+            (queries.iter().any(|query| query.id == edge.source)
+                && ((edge.target == real.id && edge.kind == EdgeKind::Reads)
+                    || (edge.target == audit.id && edge.kind == EdgeKind::Writes)))
+                || (edge.source == routine.id
+                    && ((edge.target == real.id && edge.kind == EdgeKind::Reads)
+                        || (edge.target == audit.id && edge.kind == EdgeKind::Writes)))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(exact_edges.len(), 5, "links={:?}", graph.links);
+    assert!(exact_edges.iter().all(|edge| {
+        let expected = if edge.target == real.id {
+            b"app.real".as_slice()
+        } else {
+            b"app.audit".as_slice()
+        };
+        edge.relationship_site.as_ref().is_some_and(|anchor| {
+            source.get(anchor.start_byte as usize..anchor.end_byte as usize) == Some(expected)
+        }) && edge.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+                && item.rule.as_deref() == Some("sql-text-data-access")
+        })
+    }));
+    assert!(graph.graph.coverage.iter().all(|record| {
+        record.capability != "sql:body_ownership" && record.capability != "sql:statement_boundary"
+    }));
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "sql_incomplete_quoted_identifier")
+    );
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:dollar-lexing")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
