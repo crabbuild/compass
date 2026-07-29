@@ -289,7 +289,7 @@ function secondHandler() {}
         .collect::<BTreeSet<_>>();
     assert_eq!(
         conflict_targets,
-        BTreeSet::from(["firstHandler", "secondHandler"])
+        BTreeSet::from(["firstHandler()", "secondHandler()"])
     );
     Ok(())
 }
