@@ -1218,15 +1218,18 @@ fn normalize_edge(
         .then_some("indirect-call-resolution")
         .or(alias_rule);
     let mut evidence = Vec::new();
+    let evidence_context = RawEdgeEvidenceContext {
+        owner: &owner,
+        root,
+        file_facts,
+        normalization_rule,
+        heuristic_default: heuristic,
+    };
     append_raw_edge_evidence(
         &mut evidence,
         &raw.attributes,
         relationship_site.clone(),
-        &owner,
-        root,
-        file_facts,
-        normalization_rule,
-        heuristic,
+        &evidence_context,
     )?;
     if let Some(constituents) = raw
         .attributes
@@ -1242,11 +1245,7 @@ fn normalize_edge(
                 &mut evidence,
                 attributes,
                 constituent_site,
-                &owner,
-                root,
-                file_facts,
-                normalization_rule,
-                heuristic,
+                &evidence_context,
             )?;
         }
     }
@@ -1289,23 +1288,27 @@ fn normalize_edge(
     })
 }
 
+struct RawEdgeEvidenceContext<'a> {
+    owner: &'a str,
+    root: &'a Path,
+    file_facts: &'a HashMap<String, PublishedFileFacts>,
+    normalization_rule: Option<&'a str>,
+    heuristic_default: bool,
+}
+
 fn append_raw_edge_evidence(
     evidence: &mut Vec<Provenance>,
     attributes: &Map<String, Value>,
     relationship_site: Option<SourceAnchor>,
-    owner: &str,
-    root: &Path,
-    file_facts: &HashMap<String, PublishedFileFacts>,
-    normalization_rule: Option<&str>,
-    heuristic_default: bool,
+    context: &RawEdgeEvidenceContext<'_>,
 ) -> Result<(), GraphError> {
     evidence.push(normalize_provenance(
         attributes,
         relationship_site.clone(),
-        owner,
-        root,
-        normalization_rule,
-        heuristic_default,
+        context.owner,
+        context.root,
+        context.normalization_rule,
+        context.heuristic_default,
     )?);
     let Some(rewrites) = attributes
         .get("_endpoint_rewrite_rules")
@@ -1345,13 +1348,13 @@ fn append_raw_edge_evidence(
         if let Some(score) = rewrite.get("score") {
             rewrite_attributes.insert("score".to_owned(), score.clone());
         }
-        let rewrite_site =
-            raw_anchor(&rewrite_attributes, root, file_facts)?.or(relationship_site.clone());
+        let rewrite_site = raw_anchor(&rewrite_attributes, context.root, context.file_facts)?
+            .or(relationship_site.clone());
         evidence.push(normalize_provenance(
             &rewrite_attributes,
             rewrite_site,
-            owner,
-            root,
+            context.owner,
+            context.root,
             Some(rule),
             false,
         )?);

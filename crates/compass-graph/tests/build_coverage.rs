@@ -268,17 +268,27 @@ fn direct_and_legacy_alias_collision(reverse: bool) -> Result<Extraction, serde_
         "source_location": "L1",
         "_origin": "ast"
     });
-    let nodes = if reverse {
+    let mut nodes = if reverse {
         vec![legacy, direct]
     } else {
         vec![direct, legacy]
     };
+    nodes.push(json!({
+        "id": "target",
+        "label": "Target",
+        "qualified_name": "crate::Target",
+        "type": "function",
+        "file_type": "code",
+        "source_file": "src/target.rs",
+        "source_location": "L1",
+        "_origin": "ast"
+    }));
     let members = if reverse {
         json!(["target", "service helper"])
     } else {
         json!(["service helper", "target"])
     };
-    let mut value = json!({
+    let value = json!({
         "nodes": nodes,
         "edges": [{
             "source": "service helper",
@@ -294,16 +304,6 @@ fn direct_and_legacy_alias_collision(reverse: bool) -> Result<Extraction, serde_
             "source_file": "src/direct.rs"
         }]
     });
-    value["nodes"].as_array_mut().expect("nodes").push(json!({
-        "id": "target",
-        "label": "Target",
-        "qualified_name": "crate::Target",
-        "type": "function",
-        "file_type": "code",
-        "source_file": "src/target.rs",
-        "source_location": "L1",
-        "_origin": "ast"
-    }));
     serde_json::from_value(value)
 }
 
