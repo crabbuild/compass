@@ -6,6 +6,10 @@
   macOS, Linux, and Windows.
 - Verify and activate installed or manually selected CLIs without reloading the
   editor.
+- Replace the architecture relationship grid with a production-first,
+  directional subsystem map and complete paged cross-subsystem call evidence.
+- Load architecture exports up to 128 MiB while keeping ordinary Compass
+  commands at the 8 MiB safety ceiling.
 
 ## 0.1.6
 
