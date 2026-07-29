@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use compass_core::{BuildOptions, build_local_graph};
+use compass_core::{BuildOptions, BuildPurpose, build_local_graph};
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
@@ -398,6 +398,79 @@ urlpatterns = [path("health/", views.health, name="health")]
     assert_eq!(forced_graph.graph.files, clean_graph.graph.files);
     assert_eq!(forced_graph.nodes, clean_graph.nodes);
     assert_eq!(forced_graph.links, clean_graph.links);
+    assert!(forced_graph.links.iter().all(|edge| {
+        edge.evidence
+            .iter()
+            .all(|evidence| evidence.rule.as_deref() != Some("incremental-ast-endpoint-remap"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn force_extract_with_cache_reuse_has_no_prior_published_semantic_input()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), "pub fn answer() -> usize { 42 }\n")?;
+    fs::write(
+        root.join("README.md"),
+        "# Example\n\nThe implementation is in [Rust](src/lib.rs).\n",
+    )?;
+
+    let mut options = BuildOptions::new(root);
+    options.purpose = BuildPurpose::Extract;
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.program_analysis = true;
+    options.max_workers = Some(2);
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+
+    let clean = build_local_graph(&options)?;
+    let clean_path = clean.output_dir.join("graph.json");
+    let clean_bytes = fs::read(&clean_path)?;
+    let clean_graph = GraphDocument::load(&clean_path)?;
+    let clean_document_coverage = clean_graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|coverage| coverage.capability == "node:document")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(!clean_document_coverage.is_empty());
+    assert!(clean_graph.nodes.iter().any(|node| {
+        node.kind == NodeKind::Resource
+            && node.source_file() == Some("README.md")
+            && node
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin == EvidenceOrigin::Artifact)
+    }));
+
+    options.force = true;
+    options.reuse_cache_on_force = true;
+    let forced = build_local_graph(&options)?;
+    let forced_path = forced.output_dir.join("graph.json");
+    let forced_bytes = fs::read(&forced_path)?;
+    let forced_graph = GraphDocument::load(&forced_path)?;
+    let forced_document_coverage = forced_graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|coverage| coverage.capability == "node:document")
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert_eq!(forced.files_considered, clean.files_considered);
+    assert_eq!(forced.files_extracted, 0);
+    assert_eq!(forced.files_cached, clean.files_considered);
+    assert_eq!(forced.program_syntax_analyzed, 0);
+    assert!(forced.program_syntax_reused > 0);
+    assert_eq!(forced_bytes, clean_bytes);
+    assert_eq!(forced_graph.graph.files, clean_graph.graph.files);
+    assert_eq!(forced_graph.nodes, clean_graph.nodes);
+    assert_eq!(forced_graph.links, clean_graph.links);
+    assert_eq!(forced_document_coverage, clean_document_coverage);
     assert!(forced_graph.links.iter().all(|edge| {
         edge.evidence
             .iter()

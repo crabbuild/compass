@@ -1370,11 +1370,7 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
         &source,
         "// shifted before target\npub fn target() { let _changed_again = \"second\"; }\n",
     )?;
-    options.force = true;
-    options.reuse_cache_on_force = true;
     let second_result = build_graph_with_layers(&options, None, &[])?;
-    options.force = false;
-    options.reuse_cache_on_force = false;
     let second_graph_path = second_result.output_dir.join("graph.json");
     let second = compass_model::code_graph::GraphDocument::load(&second_graph_path)?;
     assert_eq!(

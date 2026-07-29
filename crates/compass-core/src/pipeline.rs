@@ -57,8 +57,8 @@ pub struct BuildOptions {
     /// Explicit repository-private cache root used by exact history builds.
     pub cache_root: Option<PathBuf>,
     pub force: bool,
-    /// Preserve validated extraction and completed-output fast paths while
-    /// retaining force authorization for output replacement.
+    /// Reuse validated AST and Program cache entries while retaining force
+    /// authorization for output replacement.
     pub reuse_cache_on_force: bool,
     pub no_cluster: bool,
     pub no_viz: bool,
@@ -145,8 +145,12 @@ impl BuildOptions {
     }
 }
 
-const fn prior_graph_reuse_enabled(force: bool, reuse_cache_on_force: bool) -> bool {
+const fn cache_reuse_enabled(force: bool, reuse_cache_on_force: bool) -> bool {
     !force || reuse_cache_on_force
+}
+
+const fn prior_published_graph_input_enabled(force: bool) -> bool {
+    !force
 }
 
 #[derive(Clone, Debug)]
@@ -358,7 +362,8 @@ fn build_graph_inner(
         .output_root
         .as_deref()
         .map_or_else(|| root.clone(), absolutize);
-    let reuse_prior_graph = prior_graph_reuse_enabled(options.force, options.reuse_cache_on_force);
+    let reuse_cached_analysis = cache_reuse_enabled(options.force, options.reuse_cache_on_force);
+    let read_prior_published_graph = prior_published_graph_input_enabled(options.force);
     let output_container = output_root.join(&output_name);
     fs::create_dir_all(&output_container).map_err(|source| compass_files::FileError::Io {
         path: output_container.clone(),
@@ -430,7 +435,7 @@ fn build_graph_inner(
     timings.detect = stage_started.elapsed();
     stage_started = Instant::now();
     let mut internal_started = Instant::now();
-    let mut semantic_documents = if reuse_prior_graph {
+    let mut semantic_documents = if read_prior_published_graph {
         semantic_document_sources(&output_dir.join("graph.json"), &root)
     } else {
         HashSet::new()
@@ -460,7 +465,7 @@ fn build_graph_inner(
     );
 
     let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && reuse_prior_graph
+        && read_prior_published_graph
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
     let has_program_artifacts =
@@ -590,7 +595,7 @@ fn build_graph_inner(
     let mut cache = Cache::open(&root, cache_options)?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
-    if reuse_prior_graph {
+    if reuse_cached_analysis {
         for path in &sources {
             let cached = cache.load(path, &CacheKind::Ast, None, false)?;
             if let Some(value) = cached {
@@ -736,7 +741,7 @@ fn build_graph_inner(
         );
     }
     profile_internal("tree-sitter combined extraction", &mut internal_started);
-    let prepared = if !reuse_prior_graph {
+    let prepared = if !reuse_cached_analysis {
         fresh
             .iter()
             .filter_map(|(_, _, _, prepared)| prepared.clone())
@@ -748,7 +753,7 @@ fn build_graph_inner(
         let program_root = root.clone();
         let program_sources = sources.clone();
         let mut program_options = options.clone();
-        program_options.force = !reuse_prior_graph;
+        program_options.force = !reuse_cached_analysis;
         let program_cache_root = options.cache_root.clone();
         let program_output_cache_root = output_cache_root.map(Path::to_path_buf);
         let program_output_dir = output_dir.clone();
@@ -894,7 +899,7 @@ fn build_graph_inner(
     };
     profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
-    if reuse_prior_graph {
+    if read_prior_published_graph {
         let refreshed = semantic
             .map(|layer| {
                 let mut refreshed = canonical_source_set(&layer.refreshed_files, &root);
@@ -3569,11 +3574,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn force_prior_graph_reuse_requires_explicit_opt_in() {
-        assert!(prior_graph_reuse_enabled(false, false));
-        assert!(prior_graph_reuse_enabled(false, true));
-        assert!(!prior_graph_reuse_enabled(true, false));
-        assert!(prior_graph_reuse_enabled(true, true));
+    fn force_cache_reuse_never_authorizes_prior_published_graph_input() {
+        assert!(cache_reuse_enabled(false, false));
+        assert!(cache_reuse_enabled(false, true));
+        assert!(!cache_reuse_enabled(true, false));
+        assert!(cache_reuse_enabled(true, true));
+        assert!(prior_published_graph_input_enabled(false));
+        assert!(!prior_published_graph_input_enabled(true));
     }
 
     #[test]
