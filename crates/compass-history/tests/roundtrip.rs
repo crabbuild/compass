@@ -54,7 +54,7 @@ fn trusted_graph_partitions_store_full_typed_node_records() -> Result<(), Box<dy
         "name":"test",
         "qualifiedName":"fixture.test",
         "evidence":[{
-            "origin":"semantic",
+            "origin":"config",
             "extractor":"fixture",
             "confidence":"exact"
         }],
@@ -78,7 +78,7 @@ fn trusted_graph_partitions_store_full_typed_node_records() -> Result<(), Box<dy
     let record = VersionedValue::from_bytes(&partition.nodes[0].1)?;
     assert_eq!(record.schema, "compass.graph.node.v1");
     let payload: Value = serde_json::from_slice(&record.payload)?;
-    assert_eq!(payload["evidence"][0]["origin"], "semantic");
+    assert_eq!(payload["evidence"][0]["origin"], "config");
     assert_eq!(payload["coverage"][0]["status"], "partial");
     assert_eq!(payload["diagnostics"][0]["code"], "fixture");
     Ok(())
