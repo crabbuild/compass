@@ -145,7 +145,7 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Contains, NodeKind::Function, NodeKind::File),
         (EdgeKind::Calls, NodeKind::File, NodeKind::Function),
-        (EdgeKind::Imports, NodeKind::Function, NodeKind::Function),
+        (EdgeKind::Imports, NodeKind::Variable, NodeKind::Function),
         (EdgeKind::Extends, NodeKind::Class, NodeKind::Function),
         (EdgeKind::Implements, NodeKind::Class, NodeKind::Class),
         (EdgeKind::TypeOf, NodeKind::Variable, NodeKind::Function),

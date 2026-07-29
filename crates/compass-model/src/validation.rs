@@ -438,7 +438,7 @@ fn endpoint_kinds_are_valid(
                     | NodeKind::Package
                     | NodeKind::Namespace
                     | NodeKind::Import
-            )
+            ) || source.kind.is_callable()
         }
         EdgeKind::Exports => source.kind.is_container() || source.kind == NodeKind::Export,
         EdgeKind::Extends => source.kind.is_type() && target.kind.is_type(),
