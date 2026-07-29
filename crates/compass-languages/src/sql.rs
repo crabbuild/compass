@@ -1191,11 +1191,8 @@ fn body_statement_boundary(
         DollarBodySearch::Found(open) => {
             let delimiter = dollar_quote_delimiter_at(source, open)?;
             let content_start = open + delimiter.len();
-            if let Some(close_start) = source[content_start..]
-                .find(delimiter)
-                .map(|offset| content_start + offset)
-            {
-                let close_end = close_start + delimiter.len();
+            if let Some(close_end) = paired_dollar_quote_end(source, open, source.len()) {
+                let close_start = close_end.saturating_sub(delimiter.len());
                 let end = scan_statement_boundary(source, close_end, source.len()).end();
                 return Some(BodyBoundary {
                     end,
@@ -1432,7 +1429,7 @@ fn scan_delimited_identifier(
         if fallback_recovery.is_none() && matches!(bytes[index], b';' | b'\n') {
             fallback_recovery = Some(index + 1);
         }
-        if bytes[index] == b';' {
+        if matches!(bytes[index], b';' | b'\n') {
             statement_recoveries.push(index + 1);
         }
         index += 1;
@@ -1442,12 +1439,15 @@ fn scan_delimited_identifier(
 
 fn identifier_close_has_valid_follower(source: &str, close_end: usize, limit: usize) -> bool {
     let bytes = source.as_bytes();
-    let next = skip_sql_whitespace(source, close_end);
-    if next >= limit.min(bytes.len()) {
+    let limit = limit.min(bytes.len());
+    if close_end >= limit {
+        return true;
+    }
+    if bytes[close_end].is_ascii_whitespace() {
         return true;
     }
     matches!(
-        bytes[next],
+        bytes[close_end],
         b'.' | b','
             | b';'
             | b'('
@@ -1463,6 +1463,10 @@ fn identifier_close_has_valid_follower(source: &str, close_end: usize, limit: us
             | b'%'
             | b':'
             | b'|'
+            | b'&'
+            | b'^'
+            | b'~'
+            | b'?'
     )
 }
 
@@ -1487,7 +1491,14 @@ fn scan_proven_statement_boundary(source: &str, start: usize, limit: usize) -> O
     let mut paren_depth = 0_u32;
     while index < limit {
         if let Some(delimiter) = identifier_delimiter(bytes[index]) {
-            index = quoted_identifier_end_bounded(bytes, index, delimiter, limit)?;
+            if !identifier_opener_has_boundary(bytes, index) {
+                return None;
+            }
+            let close_end = quoted_identifier_end_bounded(bytes, index, delimiter, limit)?;
+            if !identifier_close_has_valid_follower(source, close_end, limit) {
+                return None;
+            }
+            index = close_end;
             continue;
         }
         if bytes[index] == b'\'' {
@@ -1510,6 +1521,7 @@ fn scan_proven_statement_boundary(source: &str, start: usize, limit: usize) -> O
             continue;
         }
         match bytes[index] {
+            b']' => return None,
             b'(' => paren_depth = paren_depth.saturating_add(1),
             b')' => {
                 if paren_depth == 0 {
@@ -1523,6 +1535,13 @@ fn scan_proven_statement_boundary(source: &str, start: usize, limit: usize) -> O
         index += 1;
     }
     None
+}
+
+fn identifier_opener_has_boundary(bytes: &[u8], start: usize) -> bool {
+    start == 0
+        || bytes
+            .get(start - 1)
+            .is_some_and(|byte| !is_sql_identifier_continuation(*byte))
 }
 
 fn proven_statement_shape(source: &str, start: usize, end: usize) -> bool {
@@ -1687,10 +1706,18 @@ fn skip_dollar_quote(source: &str, start: usize) -> Option<usize> {
 fn paired_dollar_quote_end(source: &str, start: usize, end: usize) -> Option<usize> {
     let delimiter = dollar_quote_delimiter_at(source, start)?;
     let content_start = start + delimiter.len();
-    source
-        .get(content_start..end.min(source.len()))?
-        .find(delimiter)
-        .map(|offset| content_start + offset + delimiter.len())
+    let limit = end.min(source.len());
+    let mut cursor = content_start;
+    while cursor <= limit {
+        let offset = source.get(cursor..limit)?.find(delimiter)?;
+        let close_start = cursor + offset;
+        let close_end = close_start + delimiter.len();
+        if dollar_quote_close_has_boundary(source, close_end, limit) {
+            return Some(close_end);
+        }
+        cursor = close_start + 1;
+    }
+    None
 }
 
 fn first_unquoted_semicolon(source: &str, start: usize) -> Option<usize> {
@@ -1720,6 +1747,13 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
     if bytes.get(start).copied() != Some(b'$') {
         return None;
     }
+    if start > 0
+        && bytes
+            .get(start - 1)
+            .is_some_and(|byte| is_sql_identifier_continuation(*byte))
+    {
+        return None;
+    }
     let mut end = start + 1;
     if bytes.get(end).copied() == Some(b'$') {
         return source.get(start..=end);
@@ -1738,6 +1772,18 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
         end += 1;
     }
     (bytes.get(end).copied() == Some(b'$')).then(|| &source[start..=end])
+}
+
+fn dollar_quote_close_has_boundary(source: &str, close_end: usize, limit: usize) -> bool {
+    close_end >= limit.min(source.len())
+        || source
+            .as_bytes()
+            .get(close_end)
+            .is_some_and(|byte| !is_sql_identifier_continuation(*byte))
+}
+
+fn is_sql_identifier_continuation(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || !byte.is_ascii()
 }
 
 fn query_statements(
@@ -2229,6 +2275,16 @@ fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
                             if !matches!(*byte, b';' | b'\n' | b'\r') {
                                 *byte = b' ';
                             }
+                        }
+                        if end > index
+                            && source.get(end - 1).copied() == Some(b'\n')
+                            && let Some(boundary) = masked.get_mut(end - 1)
+                        {
+                            // Keep the byte width stable while making a
+                            // proven newline recovery visible to every
+                            // statement consumer. Anchors and line data still
+                            // come from the untouched source bytes.
+                            *boundary = b';';
                         }
                         index = end;
                     }

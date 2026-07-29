@@ -1927,3 +1927,294 @@ $body$ LANGUAGE plpgsql;
     );
     Ok(())
 }
+
+#[test]
+fn quoted_alias_followers_and_multiline_recovery_are_exact_in_strict_v1()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V17__quote_boundaries.sql");
+    let source = br#"
+CREATE TABLE "app"."double; SELECT 1" (id BIGINT);
+CREATE TABLE "app"."after_double" (id BIGINT);
+CREATE TABLE `app`.`backtick; SELECT 1` (id BIGINT);
+CREATE TABLE `app`.`after_backtick` (id BIGINT);
+CREATE TABLE [app].[bracket; SELECT 1] (id BIGINT);
+CREATE TABLE [app].[after_bracket] (id BIGINT);
+SELECT * FROM "app"."double; SELECT 1" AS "d";
+SELECT * FROM "app"."double; SELECT 1" "d2" JOIN "app"."after_double" AS "ad" ON 1 = 1;
+SELECT * FROM `app`.`backtick; SELECT 1` AS `b`;
+SELECT * FROM `app`.`backtick; SELECT 1` `b2` JOIN `app`.`after_backtick` AS `ab` ON 1 = 1;
+SELECT * FROM [app].[bracket; SELECT 1] AS [r];
+SELECT * FROM [app].[bracket; SELECT 1] [r2] JOIN [app].[after_bracket] AS [ar] ON 1 = 1;
+SELECT "expr; SELECT 1"::text FROM "app"."after_double" WHERE 1 = 1;
+SELECT `expr; SELECT 1` + 1 FROM `app`.`after_backtick` WHERE 1 = 1;
+SELECT [expr; SELECT 1] = 1 FROM [app].[after_bracket] WHERE 1 = 1;
+SELECT * FROM "broken_double_ws
+ SELECT * FROM "app"."after_double";
+SELECT * FROM "broken_double_tight
+SELECT * FROM "app"."after_double";
+SELECT * FROM `broken_backtick_ws
+ SELECT * FROM `app`.`after_backtick`;
+SELECT * FROM `broken_backtick_tight
+SELECT * FROM `app`.`after_backtick`;
+SELECT * FROM [broken_bracket_ws
+ SELECT * FROM [app].[after_bracket];
+SELECT * FROM [broken_bracket_tight
+SELECT * FROM [app].[after_bracket];
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:quote-boundaries")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for (qualified_name, spelling, expected_reads) in [
+        (
+            "app.double; SELECT 1",
+            br#""app"."double; SELECT 1""#.as_slice(),
+            2,
+        ),
+        ("app.after_double", br#""app"."after_double""#.as_slice(), 4),
+        (
+            "app.backtick; SELECT 1",
+            b"`app`.`backtick; SELECT 1`".as_slice(),
+            2,
+        ),
+        (
+            "app.after_backtick",
+            b"`app`.`after_backtick`".as_slice(),
+            4,
+        ),
+        (
+            "app.bracket; SELECT 1",
+            b"[app].[bracket; SELECT 1]".as_slice(),
+            2,
+        ),
+        ("app.after_bracket", b"[app].[after_bracket]".as_slice(), 4),
+    ] {
+        let table = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                node.kind == NodeKind::DatabaseTable && node.qualified_name == qualified_name
+            })
+            .ok_or_else(|| format!("missing table {qualified_name}"))?;
+        let reads = graph
+            .links
+            .iter()
+            .filter(|edge| edge.target == table.id && edge.kind == EdgeKind::Reads)
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), expected_reads, "links={:?}", graph.links);
+        for read in reads {
+            let anchor = read.relationship_site.as_ref().ok_or("missing read site")?;
+            assert_eq!(
+                source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+                Some(spelling)
+            );
+            assert!(read.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+                    && item.rule.as_deref() == Some("sql-text-data-access")
+            }));
+        }
+    }
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| !node.qualified_name.contains("broken_"))
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        15
+    );
+    let partials = graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|record| {
+            record.capability == "sql:statement_boundary"
+                && record.status == CoverageStatus::Partial
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = graph
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "sql_incomplete_quoted_identifier")
+        .collect::<Vec<_>>();
+    assert_eq!(partials.len(), 6, "coverage={:?}", graph.graph.coverage);
+    assert_eq!(
+        diagnostics.len(),
+        6,
+        "diagnostics={:?}",
+        graph.graph.diagnostics
+    );
+    for marker in [
+        b"\"broken_double_ws".as_slice(),
+        b"\"broken_double_tight",
+        b"`broken_backtick_ws",
+        b"`broken_backtick_tight",
+        b"[broken_bracket_ws",
+        b"[broken_bracket_tight",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing malformed opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing recovery newline")?;
+        assert_eq!(
+            partials
+                .iter()
+                .filter(|record| {
+                    record.anchor.as_ref().is_some_and(|anchor| {
+                        anchor.start_byte == start as u64
+                            && anchor.end_byte == end as u64
+                            && anchor.file == relative.to_string_lossy()
+                    })
+                })
+                .count(),
+            1
+        );
+    }
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:quote-boundaries")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn dollar_delimiter_text_in_identifiers_stays_exact_in_strict_v1() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V18__dollar_identifiers.sql");
+    let source = br#"
+CREATE TABLE app.foo$tag$bar (id BIGINT);
+CREATE TABLE app.baz$tag$qux (id BIGINT);
+CREATE TABLE app.foo$$bar (id BIGINT);
+CREATE TABLE app.baz$$qux (id BIGINT);
+SELECT * FROM app.foo$tag$bar;
+SELECT * FROM app.baz$tag$qux;
+SELECT * FROM app.foo$$bar;
+SELECT * FROM app.baz$$qux;
+SELECT $tag$ FROM app.literal_phantom $tag$::text, $$ UPDATE app.write_phantom $$ || 'x'
+FROM app.foo$tag$bar;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:dollar-identifiers")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for (qualified_name, spelling, expected_reads) in [
+        ("app.foo$tag$bar", b"app.foo$tag$bar".as_slice(), 2),
+        ("app.baz$tag$qux", b"app.baz$tag$qux".as_slice(), 1),
+        ("app.foo$$bar", b"app.foo$$bar".as_slice(), 1),
+        ("app.baz$$qux", b"app.baz$$qux".as_slice(), 1),
+    ] {
+        let table = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                node.kind == NodeKind::DatabaseTable && node.qualified_name == qualified_name
+            })
+            .ok_or_else(|| format!("missing table {qualified_name}"))?;
+        let source_anchor = table.source.as_ref().ok_or("missing table source")?;
+        assert_eq!(
+            source.get(source_anchor.start_byte as usize..source_anchor.end_byte as usize),
+            Some(spelling)
+        );
+        let reads = graph
+            .links
+            .iter()
+            .filter(|edge| edge.target == table.id && edge.kind == EdgeKind::Reads)
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), expected_reads, "links={:?}", graph.links);
+        for read in reads {
+            let anchor = read.relationship_site.as_ref().ok_or("missing read site")?;
+            assert_eq!(
+                source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+                Some(spelling)
+            );
+            assert!(read.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+            }));
+        }
+    }
+    for phantom in ["app.literal_phantom", "app.write_phantom"] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.qualified_name != phantom)
+        );
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        5
+    );
+    assert!(graph.graph.coverage.iter().all(|record| {
+        record.capability != "sql:body_ownership" && record.capability != "sql:statement_boundary"
+    }));
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "sql_incomplete_quoted_identifier")
+    );
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:dollar-identifiers")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
