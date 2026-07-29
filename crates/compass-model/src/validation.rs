@@ -440,22 +440,7 @@ fn endpoint_kinds_are_valid(
     target: &crate::code_graph::NodeRecord,
 ) -> bool {
     match kind {
-        EdgeKind::Contains => {
-            is_lexical_container(source.kind)
-                && if target.kind == NodeKind::File {
-                    matches!(
-                        source.kind,
-                        NodeKind::Module
-                            | NodeKind::Package
-                            | NodeKind::Namespace
-                            | NodeKind::Resource
-                    )
-                } else if is_database_member(target.kind) {
-                    database_contains(source.kind, target.kind)
-                } else {
-                    is_lexical_member(target.kind)
-                }
-        }
+        EdgeKind::Contains => contains_endpoint_pair(source.kind, target.kind),
         EdgeKind::Calls => {
             is_call_source(source.kind)
                 && (target.kind.is_callable()
@@ -600,60 +585,135 @@ fn endpoint_kinds_are_valid(
     }
 }
 
-const fn is_lexical_member(kind: NodeKind) -> bool {
+const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
+    if matches!((source, target), (NodeKind::Schema, NodeKind::ConfigKey)) {
+        return true;
+    }
     matches!(
-        kind,
-        NodeKind::Module
-            | NodeKind::Package
-            | NodeKind::Namespace
-            | NodeKind::Class
-            | NodeKind::Struct
-            | NodeKind::Interface
-            | NodeKind::Trait
-            | NodeKind::Protocol
-            | NodeKind::Enum
-            | NodeKind::EnumMember
-            | NodeKind::TypeAlias
-            | NodeKind::Function
-            | NodeKind::Method
-            | NodeKind::Constructor
-            | NodeKind::Property
-            | NodeKind::Field
-            | NodeKind::Variable
-            | NodeKind::Constant
-            | NodeKind::Parameter
-            | NodeKind::Import
-            | NodeKind::Export
-            | NodeKind::Macro
-            | NodeKind::Annotation
-            | NodeKind::Route
-            | NodeKind::Component
-            | NodeKind::Resource
-            | NodeKind::Event
-            | NodeKind::Message
-            | NodeKind::Topic
-            | NodeKind::Queue
-            | NodeKind::Job
-            | NodeKind::Schema
-            | NodeKind::Query
-            | NodeKind::Migration
-            | NodeKind::ConfigKey
-    )
-}
-
-const fn is_database_member(kind: NodeKind) -> bool {
-    matches!(
-        kind,
-        NodeKind::Database
-            | NodeKind::DatabaseSchema
-            | NodeKind::DatabaseTable
-            | NodeKind::DatabaseView
-            | NodeKind::DatabaseColumn
-            | NodeKind::DatabaseIndex
-            | NodeKind::DatabaseConstraint
-            | NodeKind::DatabaseProcedure
-            | NodeKind::DatabaseTrigger
-    )
+        (source, target),
+        (
+            NodeKind::File,
+            NodeKind::Module
+                | NodeKind::Package
+                | NodeKind::Namespace
+                | NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Protocol
+                | NodeKind::Enum
+                | NodeKind::TypeAlias
+                | NodeKind::Function
+                | NodeKind::Method
+                | NodeKind::Constructor
+                | NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Parameter
+                | NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::Macro
+                | NodeKind::Annotation
+                | NodeKind::Route
+                | NodeKind::Component
+                | NodeKind::Resource
+                | NodeKind::Event
+                | NodeKind::Message
+                | NodeKind::Topic
+                | NodeKind::Queue
+                | NodeKind::Job
+                | NodeKind::Schema
+                | NodeKind::Query
+                | NodeKind::Migration
+                | NodeKind::ConfigKey
+                | NodeKind::Database
+        ) | (
+            NodeKind::Module | NodeKind::Package | NodeKind::Namespace,
+            NodeKind::File
+                | NodeKind::Module
+                | NodeKind::Package
+                | NodeKind::Namespace
+                | NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Protocol
+                | NodeKind::Enum
+                | NodeKind::TypeAlias
+                | NodeKind::Function
+                | NodeKind::Method
+                | NodeKind::Constructor
+                | NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Parameter
+                | NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::Macro
+                | NodeKind::Annotation
+                | NodeKind::Route
+                | NodeKind::Component
+                | NodeKind::Resource
+                | NodeKind::Event
+                | NodeKind::Message
+                | NodeKind::Topic
+                | NodeKind::Queue
+                | NodeKind::Job
+                | NodeKind::Schema
+                | NodeKind::Query
+                | NodeKind::Migration
+                | NodeKind::ConfigKey
+        ) | (
+            NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Protocol
+                | NodeKind::Enum
+                | NodeKind::Component
+                | NodeKind::Schema,
+            NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Protocol
+                | NodeKind::Enum
+                | NodeKind::TypeAlias
+                | NodeKind::Function
+                | NodeKind::Method
+                | NodeKind::Constructor
+                | NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Parameter
+                | NodeKind::Macro
+                | NodeKind::Annotation
+                | NodeKind::Component
+        ) | (
+            NodeKind::Function | NodeKind::Method | NodeKind::Constructor | NodeKind::TypeAlias,
+            NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Protocol
+                | NodeKind::Enum
+                | NodeKind::TypeAlias
+                | NodeKind::Function
+                | NodeKind::Method
+                | NodeKind::Constructor
+                | NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Parameter
+        ) | (
+            NodeKind::Resource,
+            NodeKind::File | NodeKind::Resource | NodeKind::ConfigKey
+        ) | (NodeKind::Schema, NodeKind::ConfigKey)
+    ) || database_contains(source, target)
 }
 
 const fn database_contains(source: NodeKind, target: NodeKind) -> bool {
@@ -751,10 +811,6 @@ const fn is_documentable_target(kind: NodeKind) -> bool {
                 | NodeKind::DatabaseProcedure
                 | NodeKind::DatabaseTrigger
         )
-}
-
-const fn is_lexical_container(kind: NodeKind) -> bool {
-    kind.is_container() || kind.is_callable() || matches!(kind, NodeKind::TypeAlias)
 }
 
 const fn is_call_source(kind: NodeKind) -> bool {

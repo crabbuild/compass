@@ -274,6 +274,8 @@ fn non_recursive_self_loops_are_rejected_but_recursive_calls_are_valid() {
 fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Contains, NodeKind::Function, NodeKind::File),
+        (EdgeKind::Contains, NodeKind::Database, NodeKind::Function),
+        (EdgeKind::Contains, NodeKind::Function, NodeKind::Queue),
         (EdgeKind::Calls, NodeKind::File, NodeKind::Class),
         (EdgeKind::Imports, NodeKind::Variable, NodeKind::Function),
         (EdgeKind::Imports, NodeKind::ConfigKey, NodeKind::Method),

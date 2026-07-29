@@ -573,12 +573,12 @@ fn route_candidates_coalescing_to_one_semantic_node_become_exact()
             "candidates": [
                 {
                     "nodeId": "raw:ast",
-                    "reason": "ast candidate",
+                    "reason": "z exact candidate",
                     "confidence": "exact"
                 },
                 {
                     "nodeId": "raw:semantic",
-                    "reason": "semantic candidate",
+                    "reason": "a inferred candidate",
                     "confidence": "inferred"
                 }
             ]
@@ -614,6 +614,10 @@ fn route_candidates_coalescing_to_one_semantic_node_become_exact()
     );
     assert!(stage.target.is_some());
     assert_eq!(stage.candidates.len(), 1);
+    assert_eq!(
+        stage.candidates[0].confidence,
+        compass_model::provenance::EvidenceConfidence::Exact
+    );
     assert_eq!(
         stage.target.as_deref(),
         stage

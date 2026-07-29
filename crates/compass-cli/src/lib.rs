@@ -1131,6 +1131,10 @@ fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
         index += 1;
     }
     let _ = frontend;
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+        Ok(path) => path,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
     match diagnose_graph_file(&graph_path, directed, max_examples, extract_path.as_deref()) {
         Ok(summary) if json_output => {
             match serde_json::to_string_pretty(&format_diagnostic_json(&summary)) {
