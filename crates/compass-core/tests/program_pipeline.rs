@@ -177,14 +177,14 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     let options = program_options(directory.path());
 
     let cold = build_local_graph(&options)?;
-    let output = cold.output_dir.join("program.json");
-    assert!(output.is_file());
+    let cold_output = cold.output_dir.join("program.json");
+    assert!(cold_output.is_file());
     assert!(!cold.output_dir.join(".compass_program.json").exists());
     assert_eq!(cold.program_modules, 1);
     assert!(cold.program_summaries >= 2);
     assert_eq!(cold.program_syntax_analyzed, 1);
     assert_eq!(cold.program_syntax_reused, 0);
-    let cold_bytes = fs::read(&output)?;
+    let cold_bytes = fs::read(&cold_output)?;
     let document: serde_json::Value = serde_json::from_slice(&cold_bytes)?;
     assert_eq!(
         document["program"]["schema"],
@@ -198,28 +198,40 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     let warm = build_local_graph(&options)?;
     assert_eq!(warm.program_syntax_analyzed, 0);
     assert_eq!(warm.program_syntax_reused, 1);
-    assert_eq!(fs::read(&output)?, cold_bytes);
+    let warm_output = warm.output_dir.join("program.json");
+    assert_eq!(fs::read(&warm_output)?, cold_bytes);
 
     let mut same_size_program_damage = cold_bytes.clone();
     same_size_program_damage[0] = b'[';
-    fs::write(&output, same_size_program_damage)?;
+    fs::write(&warm_output, same_size_program_damage)?;
     let repaired_same_size_program = build_local_graph(&options)?;
     assert_eq!(repaired_same_size_program.program_syntax_reused, 1);
-    assert_eq!(fs::read(&output)?, cold_bytes);
+    let repaired_program_output = repaired_same_size_program.output_dir.join("program.json");
+    assert_eq!(fs::read(&repaired_program_output)?, cold_bytes);
 
-    let graph_output = cold.output_dir.join("graph.json");
+    let graph_output = repaired_same_size_program.output_dir.join("graph.json");
     let graph_bytes = fs::read(&graph_output)?;
     let mut same_size_graph_damage = graph_bytes.clone();
     same_size_graph_damage[0] = b'[';
     fs::write(&graph_output, same_size_graph_damage)?;
     let repaired_same_size_graph = build_local_graph(&options)?;
     assert_eq!(repaired_same_size_graph.program_syntax_reused, 1);
-    assert_eq!(fs::read(&graph_output)?, graph_bytes);
+    assert_eq!(
+        fs::read(repaired_same_size_graph.output_dir.join("graph.json"))?,
+        graph_bytes
+    );
 
-    fs::write(&output, serde_json::to_vec_pretty(&document)?)?;
+    let repaired_graph_program = repaired_same_size_graph.output_dir.join("program.json");
+    fs::write(
+        &repaired_graph_program,
+        serde_json::to_vec_pretty(&document)?,
+    )?;
     let repaired = build_local_graph(&options)?;
     assert_eq!(repaired.program_syntax_reused, 1);
-    assert_eq!(fs::read(&output)?, cold_bytes);
+    assert_eq!(
+        fs::read(repaired.output_dir.join("program.json"))?,
+        cold_bytes
+    );
 
     fs::write(
         &source,
@@ -228,7 +240,10 @@ fn program_pipeline_is_deterministic_incremental_and_uses_program_json()
     let changed = build_local_graph(&options)?;
     assert_eq!(changed.program_syntax_analyzed, 1);
     assert_eq!(changed.program_syntax_reused, 0);
-    assert_ne!(fs::read(&output)?, cold_bytes);
+    assert_ne!(
+        fs::read(changed.output_dir.join("program.json"))?,
+        cold_bytes
+    );
     Ok(())
 }
 
@@ -309,7 +324,7 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     assert_eq!(warm.program_artifacts_reused, 1);
     assert_eq!(warm.program_artifact_documents_analyzed, 0);
     assert_eq!(warm.program_artifact_documents_reused, 0);
-    assert_eq!(fs::read(&program_path)?, first);
+    assert_eq!(fs::read(warm.output_dir.join("program.json"))?, first);
 
     fs::write(&unrelated, "export const unrelated = 2;\n")?;
     let unrelated_changed = build_local_graph(&options)?;
@@ -332,7 +347,7 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     assert_eq!(artifact_changed.program_artifacts_loaded, 1);
     assert_eq!(artifact_changed.program_artifact_documents_analyzed, 1);
     assert_eq!(artifact_changed.program_artifact_documents_reused, 0);
-    let second = fs::read(&program_path)?;
+    let second = fs::read(artifact_changed.output_dir.join("program.json"))?;
     assert_ne!(second, first);
     assert!(String::from_utf8_lossy(&second).contains("fixture 2.0"));
 
@@ -344,13 +359,16 @@ fn scip_cache_tracks_artifact_manifest_and_source_freshness() -> Result<(), Box<
     assert_eq!(stale.program_artifacts_reused, 1);
     assert_eq!(stale.program_artifact_documents_analyzed, 1);
     assert_eq!(stale.program_artifact_documents_reused, 0);
-    let stale_bytes = fs::read(&program_path)?;
+    let stale_bytes = fs::read(stale.output_dir.join("program.json"))?;
     assert!(!String::from_utf8_lossy(&stale_bytes).contains("fixture 2.0"));
 
     fs::remove_file(source)?;
     let deleted = build_local_graph(&options)?;
     assert_eq!(deleted.program_modules, 1);
-    assert!(!String::from_utf8_lossy(&fs::read(&program_path)?).contains("src/app.ts"));
+    assert!(
+        !String::from_utf8_lossy(&fs::read(deleted.output_dir.join("program.json"))?)
+            .contains("src/app.ts")
+    );
     Ok(())
 }
 
@@ -474,17 +492,23 @@ fn malformed_discovered_scip_and_obstructed_output_fail_closed() -> Result<(), B
     let first = build_local_graph(&options)?;
     let program_path = first.output_dir.join("program.json");
     let before = fs::read(&program_path)?;
+    let pointer = directory
+        .path()
+        .join("compass-out/.compass-active-generation");
+    let active_before = fs::read_to_string(&pointer)?;
 
     fs::write(directory.path().join("index.scip"), [0x12, 0x05, 0x01])?;
     assert!(build_local_graph(&options).is_err());
     assert_eq!(fs::read(&program_path)?, before);
-    assert!(first.output_dir.join(".compass-build-incomplete").is_file());
+    assert_eq!(fs::read_to_string(&pointer)?, active_before);
+    assert!(!first.output_dir.join(".compass-build-incomplete").exists());
 
     fs::remove_file(directory.path().join("index.scip"))?;
     fs::remove_file(&program_path)?;
     fs::create_dir(&program_path)?;
     assert!(build_local_graph(&options).is_err());
     assert!(program_path.is_dir());
-    assert!(first.output_dir.join(".compass-build-incomplete").is_file());
+    assert_eq!(fs::read_to_string(pointer)?, active_before);
+    assert!(!first.output_dir.join(".compass-build-incomplete").exists());
     Ok(())
 }
