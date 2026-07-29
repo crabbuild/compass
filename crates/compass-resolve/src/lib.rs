@@ -13,6 +13,10 @@ use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord, make_id,
 };
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
+    preserve_occurrence_rule,
+};
 use rayon::prelude::*;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -366,7 +370,11 @@ fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
             rewritten = true;
         }
         if rewritten {
-            stamp_endpoint_rewrite(edge, "csharp-namespace-canonicalization", 1.0);
+            stamp_endpoint_rewrite(
+                edge,
+                EndpointRewriteRule::CsharpNamespaceCanonicalization,
+                1.0,
+            );
         }
     }
     let mut index = 0_usize;
@@ -464,7 +472,7 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         {
             repointed.insert(edge.target.clone());
             edge.target.clone_from(&target.0);
-            stamp_endpoint_rewrite(edge, "language-family-stub-resolution", 0.9);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::LanguageFamilyStubResolution, 0.9);
         }
     }
     drop_unreferenced_nodes(extraction, &repointed);
@@ -586,7 +594,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         }
         repointed.insert(edge.target.clone());
         edge.target = target;
-        stamp_endpoint_rewrite(edge, "php-qualified-type-resolution", 1.0);
+        stamp_endpoint_rewrite(edge, EndpointRewriteRule::PhpQualifiedTypeResolution, 1.0);
     }
     extraction.nodes.extend(new_nodes);
     drop_unreferenced_nodes(extraction, &repointed);
@@ -656,7 +664,7 @@ fn canonicalize_import_targets(extraction: &mut Extraction) {
             && let Some(target) = aliases.get(&edge.target)
         {
             edge.target.clone_from(target);
-            stamp_endpoint_rewrite(edge, "canonical-import-target", 1.0);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
         }
     }
 }
@@ -818,7 +826,7 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
             rewritten = true;
         }
         if rewritten {
-            stamp_endpoint_rewrite(edge, "unique-stub-endpoint-resolution", 0.8);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::UniqueStubEndpointResolution, 0.8);
         }
     }
     let referenced = extraction
@@ -939,7 +947,11 @@ fn disambiguate_colliding_node_ids_with_calls(
         let edge_key = source_key(&edge.string("source_file"), root);
         if let Some(new_id) = remap.get(&(edge.source.clone(), edge_key.clone())) {
             edge.source.clone_from(new_id);
-            stamp_endpoint_rewrite(edge, "source-scoped-node-disambiguation", 1.0);
+            stamp_endpoint_rewrite(
+                edge,
+                EndpointRewriteRule::SourceScopedNodeDisambiguation,
+                1.0,
+            );
         }
         let target_file = edge
             .attributes
@@ -957,10 +969,14 @@ fn disambiguate_colliding_node_ids_with_calls(
             && let Some(new_id) = header_remaps.get(&edge.target)
         {
             edge.target.clone_from(new_id);
-            stamp_endpoint_rewrite(edge, "header-import-disambiguation", 1.0);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::HeaderImportDisambiguation, 1.0);
         } else if let Some(new_id) = remap.get(&(edge.target.clone(), target_key)) {
             edge.target.clone_from(new_id);
-            stamp_endpoint_rewrite(edge, "source-scoped-node-disambiguation", 1.0);
+            stamp_endpoint_rewrite(
+                edge,
+                EndpointRewriteRule::SourceScopedNodeDisambiguation,
+                1.0,
+            );
         }
     }
     for raw in raw_calls {
@@ -2175,17 +2191,12 @@ fn occurrence_site(attributes: &Map<String, Value>, source_file: &str, location:
     .unwrap_or_default()
 }
 
-fn stamp_endpoint_rewrite(edge: &mut EdgeRecord, rule: &str, score: f64) {
-    edge.attributes
-        .insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
-    edge.attributes.insert(
-        "confidence".to_owned(),
-        Value::String("INFERRED".to_owned()),
+fn stamp_endpoint_rewrite(edge: &mut EdgeRecord, rule: EndpointRewriteRule, score: f64) {
+    preserve_occurrence_rule(&mut edge.attributes);
+    append_endpoint_rewrite_evidence(
+        &mut edge.attributes,
+        EndpointRewriteEvidence { rule, score },
     );
-    edge.attributes
-        .insert("confidence_score".to_owned(), Value::from(score));
-    edge.attributes
-        .insert("rule".to_owned(), Value::String(rule.to_owned()));
 }
 
 fn repository_scope(source: &str) -> String {
@@ -2363,6 +2374,9 @@ fn extension(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    use compass_graph::{build_from_extraction, normalize_document_v1};
     use serde_json::json;
 
     fn node(id: &str, label: &str, source_file: &str, kind: &str) -> NodeRecord {
@@ -2945,15 +2959,164 @@ mod tests {
                 .all(|candidate| candidate.id != "func-stub")
         );
         for edge in &extraction.edges {
-            assert_eq!(edge.string("_origin"), "heuristic");
-            assert_eq!(edge.string("rule"), "unique-stub-endpoint-resolution");
-            assert_eq!(
-                edge.attributes
-                    .get("confidence_score")
-                    .and_then(Value::as_f64),
-                Some(0.8)
+            assert!(
+                edge.attributes["_endpoint_rewrite_rules"]
+                    .as_array()
+                    .is_some_and(|entries| entries.iter().any(|entry| {
+                        entry["rule"] == "unique-stub-endpoint-resolution" && entry["score"] == 0.8
+                    }))
             );
         }
+    }
+
+    #[test]
+    fn every_resolver_rewrite_family_preserves_occurrences_through_v1()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src"))?;
+        fs::write(root.join("src/lib.rs"), vec![b'x'; 500])?;
+        let rewrite_rules = [
+            EndpointRewriteRule::CsharpNamespaceCanonicalization,
+            EndpointRewriteRule::LanguageFamilyStubResolution,
+            EndpointRewriteRule::PhpQualifiedTypeResolution,
+            EndpointRewriteRule::CanonicalImportTarget,
+            EndpointRewriteRule::UniqueStubEndpointResolution,
+            EndpointRewriteRule::SourceScopedNodeDisambiguation,
+            EndpointRewriteRule::HeaderImportDisambiguation,
+        ];
+
+        for rewrite_rule in rewrite_rules {
+            let anchor = json!({
+                "file":root.join("src/lib.rs"),
+                "startByte":50,
+                "endByte":54,
+                "startLine":6,
+                "startColumn":0,
+                "endLine":6,
+                "endColumn":4
+            });
+            let mut remapped_same = EdgeRecord {
+                source: "pre-rewrite-caller".to_owned(),
+                target: "callee".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("calls")),
+                    ("rule".to_owned(), json!("producer-a")),
+                    ("extractor".to_owned(), json!("test.resolver")),
+                    ("_origin".to_owned(), json!("ast")),
+                    ("confidence".to_owned(), json!("EXTRACTED")),
+                    ("source_anchor".to_owned(), anchor.clone()),
+                ]),
+            };
+            stamp_endpoint_rewrite(&mut remapped_same, rewrite_rule, 0.9);
+            assert_eq!(remapped_same.string("_origin"), "ast");
+            assert_eq!(remapped_same.string("confidence"), "EXTRACTED");
+            assert_eq!(remapped_same.string("rule"), "producer-a");
+            assert_eq!(
+                remapped_same.string("_occurrence_rule"),
+                "producer-a",
+                "lost producer identity for {}",
+                rewrite_rule.as_str()
+            );
+            remapped_same.source = "caller".to_owned();
+            let mut remapped_distinct = remapped_same.clone();
+            remapped_distinct
+                .attributes
+                .insert("rule".to_owned(), json!("producer-b"));
+            remapped_distinct
+                .attributes
+                .insert("_occurrence_rule".to_owned(), json!("producer-b"));
+            let direct_same = EdgeRecord {
+                source: "caller".to_owned(),
+                target: "callee".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("calls")),
+                    ("rule".to_owned(), json!("producer-a")),
+                    ("extractor".to_owned(), json!("test.direct")),
+                    ("_origin".to_owned(), json!("ast")),
+                    ("confidence".to_owned(), json!("EXTRACTED")),
+                    ("source_anchor".to_owned(), anchor.clone()),
+                ]),
+            };
+            let node = |id: &str, qualified_name: &str, start_byte: u64| NodeRecord {
+                id: id.to_owned(),
+                attributes: Map::from_iter([
+                    ("label".to_owned(), json!(qualified_name)),
+                    ("qualified_name".to_owned(), json!(qualified_name)),
+                    ("symbol_kind".to_owned(), json!("function")),
+                    ("file_type".to_owned(), json!("code")),
+                    ("source_file".to_owned(), json!(root.join("src/lib.rs"))),
+                    ("extractor".to_owned(), json!("test.resolver")),
+                    ("_origin".to_owned(), json!("ast")),
+                    (
+                        "source_anchor".to_owned(),
+                        json!({
+                            "file":root.join("src/lib.rs"),
+                            "startByte":start_byte,
+                            "endByte":start_byte + 4,
+                            "startLine":start_byte / 10 + 1,
+                            "startColumn":0,
+                            "endLine":start_byte / 10 + 1,
+                            "endColumn":4
+                        }),
+                    ),
+                ]),
+            };
+            let extraction = Extraction {
+                nodes: vec![
+                    node("caller", "crate::caller", 10),
+                    node("callee", "crate::callee", 30),
+                ],
+                edges: vec![direct_same, remapped_same, remapped_distinct],
+                ..Extraction::default()
+            };
+
+            let flexible = build_from_extraction(&extraction, true, Some(root));
+            let typed = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+
+            assert_eq!(
+                flexible.links.len(),
+                2,
+                "flexible links for {}: {:?}",
+                rewrite_rule.as_str(),
+                flexible.links
+            );
+            assert_eq!(
+                typed.links.len(),
+                2,
+                "typed links for {}: {:?}",
+                rewrite_rule.as_str(),
+                typed.links
+            );
+            let producer_a = typed
+                .links
+                .iter()
+                .find(|edge| {
+                    edge.occurrence_rule
+                        .as_ref()
+                        .is_some_and(|rule| rule.as_str() == "producer-a")
+                })
+                .ok_or("missing producer-a occurrence")?;
+            assert!(
+                producer_a
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.rule.as_deref() == Some(rewrite_rule.as_str())),
+                "missing {} endpoint evidence: {:?}",
+                rewrite_rule.as_str(),
+                producer_a.evidence
+            );
+            assert!(
+                producer_a.evidence.iter().any(|evidence| {
+                    evidence.origin == compass_model::provenance::EvidenceOrigin::Ast
+                        && evidence.rule.as_deref() == Some("producer-a")
+                }),
+                "missing producer evidence for {}: {:?}",
+                rewrite_rule.as_str(),
+                producer_a.evidence
+            );
+        }
+        Ok(())
     }
 
     #[test]

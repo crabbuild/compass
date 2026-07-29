@@ -221,10 +221,19 @@ fn every_graph_assembly_endpoint_remap_stamps_distinct_synthesized_evidence()
     }))?;
 
     let document = build_from_extraction(&extraction, true, None);
-    let rules = document
+    let rewrite_entries = document
         .links
         .iter()
-        .filter_map(|edge| edge.attributes.get("rule").and_then(|value| value.as_str()))
+        .flat_map(|edge| {
+            edge.attributes["_endpoint_rewrite_rules"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    let rules = rewrite_entries
+        .iter()
+        .filter_map(|entry| entry.get("rule").and_then(|value| value.as_str()))
         .collect::<std::collections::HashSet<_>>();
     for expected in [
         "graph-semantic-id-remap",
@@ -234,15 +243,20 @@ fn every_graph_assembly_endpoint_remap_stamps_distinct_synthesized_evidence()
         assert!(rules.contains(expected), "missing {expected}");
     }
     assert!(document.links.iter().all(|edge| {
-        edge.string("_origin") == "heuristic"
-            && edge.string("confidence") == "INFERRED"
-            && edge
-                .attributes
-                .get("confidence_score")
-                .and_then(serde_json::Value::as_f64)
-                .is_some()
+        edge.string("_origin") == "ast"
+            && edge.string("rule").is_empty()
             && !edge.string("source_file").is_empty()
             && !edge.string("source_location").is_empty()
+    }));
+    assert!(rewrite_entries.iter().all(|entry| {
+        entry["_origin"] == "heuristic"
+            && entry["confidence"] == "INFERRED"
+            && entry["score"].as_f64().is_some()
+            && !entry["source_file"].as_str().unwrap_or_default().is_empty()
+            && !entry["source_location"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty()
     }));
     Ok(())
 }
@@ -610,10 +624,24 @@ fn endpoint_synthesis_rule_is_evidence_not_occurrence_identity() -> Result<(), B
         .as_object_mut()
         .ok_or("direct edge must be an object")?
         .remove("rule");
-    let synthesized = ruled_call(
+    let mut synthesized = ruled_call(
         "semantic_caller",
         "unique-stub-endpoint-resolution",
         "test.synthesized",
+    );
+    let synthesized_attributes = synthesized
+        .as_object_mut()
+        .ok_or("synthesized edge must be an object")?;
+    synthesized_attributes.remove("rule");
+    synthesized_attributes.insert(
+        "_endpoint_rewrite_rules".to_owned(),
+        json!([{
+            "_origin":"heuristic",
+            "confidence":"INFERRED",
+            "extractor":"test.synthesized",
+            "rule":"unique-stub-endpoint-resolution",
+            "score":0.8
+        }]),
     );
 
     let document = build_from_extraction(

@@ -1,6 +1,133 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 pub const MAX_RESOLUTION_CANDIDATES: usize = 20;
+pub const OCCURRENCE_RULE_ATTRIBUTE: &str = "_occurrence_rule";
+pub const ENDPOINT_REWRITE_RULES_ATTRIBUTE: &str = "_endpoint_rewrite_rules";
+
+/// Immutable producer rule used to distinguish relationship occurrences.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OccurrenceRule(String);
+
+impl OccurrenceRule {
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Option<Self> {
+        let value = value.into();
+        (!value.trim().is_empty()).then_some(Self(value))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Closed set of endpoint rewrites that can alter flexible graph facts.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EndpointRewriteRule {
+    CsharpNamespaceCanonicalization,
+    LanguageFamilyStubResolution,
+    PhpQualifiedTypeResolution,
+    CanonicalImportTarget,
+    UniqueStubEndpointResolution,
+    SourceScopedNodeDisambiguation,
+    HeaderImportDisambiguation,
+    GraphSemanticIdRemap,
+    GraphDocumentTwinRemap,
+    GraphGhostEndpointRemap,
+    GraphNormalizedIdRemap,
+}
+
+impl EndpointRewriteRule {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CsharpNamespaceCanonicalization => "csharp-namespace-canonicalization",
+            Self::LanguageFamilyStubResolution => "language-family-stub-resolution",
+            Self::PhpQualifiedTypeResolution => "php-qualified-type-resolution",
+            Self::CanonicalImportTarget => "canonical-import-target",
+            Self::UniqueStubEndpointResolution => "unique-stub-endpoint-resolution",
+            Self::SourceScopedNodeDisambiguation => "source-scoped-node-disambiguation",
+            Self::HeaderImportDisambiguation => "header-import-disambiguation",
+            Self::GraphSemanticIdRemap => "graph-semantic-id-remap",
+            Self::GraphDocumentTwinRemap => "graph-document-twin-remap",
+            Self::GraphGhostEndpointRemap => "graph-ghost-endpoint-remap",
+            Self::GraphNormalizedIdRemap => "graph-normalized-id-remap",
+        }
+    }
+}
+
+/// Typed evidence that an endpoint was rewritten after a producer emitted it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EndpointRewriteEvidence {
+    pub rule: EndpointRewriteRule,
+    pub score: f64,
+}
+
+/// Capture the open-ended producer rule before any endpoint mutation.
+pub fn preserve_occurrence_rule(attributes: &mut Map<String, Value>) {
+    if attributes.contains_key(OCCURRENCE_RULE_ATTRIBUTE) {
+        return;
+    }
+    let Some(rule) = attributes
+        .get("rule")
+        .and_then(Value::as_str)
+        .and_then(|rule| OccurrenceRule::new(rule.to_owned()))
+    else {
+        return;
+    };
+    attributes.insert(OCCURRENCE_RULE_ATTRIBUTE.to_owned(), Value::String(rule.0));
+}
+
+/// Append endpoint-rewrite evidence without replacing the producer's evidence.
+pub fn append_endpoint_rewrite_evidence(
+    attributes: &mut Map<String, Value>,
+    evidence: EndpointRewriteEvidence,
+) {
+    let mut entry = Map::new();
+    for key in [
+        "extractor",
+        "source_file",
+        "source_location",
+        "source_anchor",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+        "start_byte",
+        "end_byte",
+        "candidates",
+    ] {
+        if let Some(value) = attributes.get(key) {
+            entry.insert(key.to_owned(), value.clone());
+        }
+    }
+    entry.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+    entry.insert(
+        "confidence".to_owned(),
+        Value::String("INFERRED".to_owned()),
+    );
+    entry.insert(
+        "rule".to_owned(),
+        Value::String(evidence.rule.as_str().to_owned()),
+    );
+    entry.insert("score".to_owned(), Value::from(evidence.score));
+
+    let mut entries = attributes
+        .remove(ENDPOINT_REWRITE_RULES_ATTRIBUTE)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    entries.push(Value::Object(entry));
+    entries.sort_by_cached_key(Value::to_string);
+    entries.dedup();
+    attributes.insert(
+        ENDPOINT_REWRITE_RULES_ATTRIBUTE.to_owned(),
+        Value::Array(entries),
+    );
+}
 
 /// A repository-relative, half-open source range.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

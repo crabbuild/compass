@@ -69,6 +69,7 @@ fn projections_expose_only_registered_derived_properties() {
         source: "node".to_owned(),
         target: "target".to_owned(),
         kind: EdgeKind::Calls,
+        occurrence_rule: None,
         relationship_site: Some(anchor()),
         details: None,
         evidence: vec![evidence()],

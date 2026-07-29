@@ -651,6 +651,8 @@ pub struct EdgeRecord {
     pub target: String,
     pub kind: EdgeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence_rule: Option<crate::provenance::OccurrenceRule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relationship_site: Option<SourceAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<EdgeDetails>,

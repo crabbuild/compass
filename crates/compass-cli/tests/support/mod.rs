@@ -94,6 +94,7 @@ pub fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn std::error::Err
         source: "n:caller".to_owned(),
         target: "n:target".to_owned(),
         kind: EdgeKind::Calls,
+        occurrence_rule: None,
         relationship_site: Some(anchor),
         details: None,
         evidence: vec![evidence],

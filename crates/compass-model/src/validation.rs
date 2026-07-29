@@ -245,19 +245,25 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
 
     let mut edge_ids = HashSet::new();
     for edge in &document.links {
+        if edge
+            .occurrence_rule
+            .as_ref()
+            .is_some_and(|rule| rule.as_str().trim().is_empty())
+        {
+            errors.push(format!("edge {} has an empty occurrence rule", edge.id));
+        }
         if edge.id.trim().is_empty() || edge.id != edge.key {
             errors.push(format!(
                 "edge {} must have a non-empty id matching its NetworkX key",
                 edge.id
             ));
         }
-        let identity_rule = edge.evidence.iter().find_map(|item| item.rule.as_deref());
         let expected_id = edge_id(
             &edge.source,
             edge.kind,
             &edge.target,
             edge.relationship_site.as_ref(),
-            identity_rule,
+            edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
         );
         if edge.id != expected_id {
             errors.push(format!(

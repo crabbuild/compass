@@ -31,7 +31,10 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
-use compass_model::provenance::SourceAnchor;
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE, SourceAnchor,
+    append_endpoint_rewrite_evidence, preserve_occurrence_rule,
+};
 use compass_model::{
     EdgeRecord as LegacyEdgeRecord, GraphDocument, NodeRecord as LegacyNodeRecord,
 };
@@ -43,14 +46,7 @@ type NodeRecord = RawNodeRecord;
 type EndpointAliases = HashMap<String, BTreeSet<String>>;
 
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
-const OCCURRENCE_RULE: &str = "_occurrence_rule";
 const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
-
-#[derive(Clone, Copy)]
-struct EndpointRewriteEvidence {
-    rule: &'static str,
-    score: f64,
-}
 
 enum EndpointResolution {
     Exact(String),
@@ -196,7 +192,7 @@ fn build_from_owned_extraction(
         endpoint_rewrite_evidence.insert(
             old.clone(),
             EndpointRewriteEvidence {
-                rule: "graph-semantic-id-remap",
+                rule: EndpointRewriteRule::GraphSemanticIdRemap,
                 score: 1.0,
             },
         );
@@ -205,7 +201,7 @@ fn build_from_owned_extraction(
         endpoint_rewrite_evidence.insert(
             old.clone(),
             EndpointRewriteEvidence {
-                rule: "graph-document-twin-remap",
+                rule: EndpointRewriteRule::GraphDocumentTwinRemap,
                 score: 1.0,
             },
         );
@@ -214,7 +210,7 @@ fn build_from_owned_extraction(
         endpoint_rewrite_evidence.insert(
             old.clone(),
             EndpointRewriteEvidence {
-                rule: "graph-ghost-endpoint-remap",
+                rule: EndpointRewriteRule::GraphGhostEndpointRemap,
                 score: 0.95,
             },
         );
@@ -699,114 +695,13 @@ fn stamp_graph_endpoint_rewrites(edge: &mut EdgeRecord, rewrites: &[EndpointRewr
     stamp_endpoint_rewrite_attributes(&mut edge.attributes, rewrites);
 }
 
-fn preserve_occurrence_rule(attributes: &mut Map<String, Value>) {
-    if attributes.contains_key(OCCURRENCE_RULE) {
-        return;
-    }
-    let Some(rule) = attributes
-        .get("rule")
-        .and_then(Value::as_str)
-        .filter(|rule| !rule.trim().is_empty() && !is_endpoint_synthesis_rule(rule))
-    else {
-        return;
-    };
-    attributes.insert(OCCURRENCE_RULE.to_owned(), Value::String(rule.to_owned()));
-}
-
 fn stamp_endpoint_rewrite_attributes(
     attributes: &mut Map<String, Value>,
     rewrites: &[EndpointRewriteEvidence],
 ) {
-    let mut entries = attributes
-        .get("_endpoint_rewrite_rules")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if rewrites.is_empty() && entries.is_empty() {
-        return;
+    for rewrite in rewrites {
+        append_endpoint_rewrite_evidence(attributes, *rewrite);
     }
-    if let Some(previous) = rewrite_entry_from_attributes(attributes, None) {
-        entries.push(previous);
-    }
-    entries.extend(
-        rewrites
-            .iter()
-            .filter_map(|rewrite| rewrite_entry_from_attributes(attributes, Some(*rewrite))),
-    );
-    entries.sort_by_cached_key(Value::to_string);
-    entries.dedup();
-    let Some(primary) = entries.first().and_then(Value::as_object) else {
-        return;
-    };
-    let Some(rule) = primary.get("rule").and_then(Value::as_str) else {
-        return;
-    };
-    let score = primary.get("score").and_then(Value::as_f64);
-    attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
-    attributes.insert(
-        "confidence".to_owned(),
-        Value::String("INFERRED".to_owned()),
-    );
-    attributes.insert("rule".to_owned(), Value::String(rule.to_owned()));
-    if let Some(score) = score {
-        attributes.insert("confidence_score".to_owned(), Value::from(score));
-    }
-    attributes.insert("_endpoint_rewrite_rules".to_owned(), Value::Array(entries));
-}
-
-fn rewrite_entry_from_attributes(
-    attributes: &Map<String, Value>,
-    rewrite: Option<EndpointRewriteEvidence>,
-) -> Option<Value> {
-    let rule = rewrite
-        .map(|item| item.rule)
-        .or_else(|| attributes.get("rule").and_then(Value::as_str))?;
-    if rule.trim().is_empty() {
-        return None;
-    }
-    let mut entry = Map::new();
-    for key in [
-        "_origin",
-        "origin",
-        "confidence",
-        "extractor",
-        "source_file",
-        "source_location",
-        "source_anchor",
-        "line_start",
-        "line_end",
-        "column_start",
-        "column_end",
-        "start_byte",
-        "end_byte",
-        "candidates",
-    ] {
-        if let Some(value) = attributes.get(key) {
-            entry.insert(key.to_owned(), value.clone());
-        }
-    }
-    entry.insert("rule".to_owned(), Value::String(rule.to_owned()));
-    let score = rewrite.map(|item| item.score).or_else(|| {
-        attributes
-            .get("confidence_score")
-            .or_else(|| attributes.get("score"))
-            .and_then(|value| {
-                value
-                    .as_f64()
-                    .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
-            })
-    });
-    if let Some(score) = score {
-        entry.insert("score".to_owned(), Value::from(score));
-    }
-    if rewrite.is_some() {
-        entry.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
-        entry.insert(
-            "confidence".to_owned(),
-            Value::String("INFERRED".to_owned()),
-        );
-    }
-    Some(Value::Object(entry))
 }
 
 fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String, Value>) {
@@ -872,7 +767,6 @@ fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String
         } else {
             merged.remove("_endpoint_rewrite_rules");
         }
-        stamp_endpoint_rewrite_attributes(&mut merged, &[]);
     }
     merged.insert(COALESCED_EDGE_EVIDENCE.to_owned(), Value::Array(snapshots));
     merged.sort_keys();
@@ -1092,7 +986,7 @@ fn resolve_endpoint(
         return EndpointResolution::Rewritten {
             endpoint: candidates.iter().next().cloned().unwrap_or_default(),
             evidence: EndpointRewriteEvidence {
-                rule: "graph-normalized-id-remap",
+                rule: EndpointRewriteRule::GraphNormalizedIdRemap,
                 score: 0.8,
             },
         };
@@ -1318,41 +1212,12 @@ fn canonical_edge_anchor(attributes: &Map<String, Value>) -> Option<SourceAnchor
 }
 
 fn edge_rule_key(attributes: &Map<String, Value>) -> String {
-    if let Some(rule) = attributes
-        .get(OCCURRENCE_RULE)
+    attributes
+        .get(OCCURRENCE_RULE_ATTRIBUTE)
+        .or_else(|| attributes.get("rule"))
         .and_then(Value::as_str)
-        .filter(|rule| !is_endpoint_synthesis_rule(rule))
-    {
-        return rule.to_owned();
-    }
-    if attributes
-        .get("_endpoint_rewrite_rules")
-        .and_then(Value::as_array)
-        .is_some_and(|rules| !rules.is_empty())
-    {
-        return String::new();
-    }
-    let rule = attributes
-        .get("rule")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if is_endpoint_synthesis_rule(rule) {
-        String::new()
-    } else {
-        rule.to_owned()
-    }
-}
-
-fn is_endpoint_synthesis_rule(rule: &str) -> bool {
-    matches!(
-        rule,
-        "language-family-stub-resolution"
-            | "unique-stub-endpoint-resolution"
-            | "graph-semantic-id-remap"
-            | "graph-document-twin-remap"
-            | "graph-ghost-endpoint-remap"
-            | "graph-normalized-id-remap"
-    )
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn has_parallel_edges(links: &[EdgeRecord], directed: bool) -> bool {

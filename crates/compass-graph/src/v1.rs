@@ -16,7 +16,8 @@ use compass_model::identity::{
     route_id, symbol_id,
 };
 use compass_model::provenance::{
-    EvidenceConfidence, EvidenceOrigin, Provenance, ResolutionCandidate, ResolutionState,
+    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EvidenceConfidence, EvidenceOrigin,
+    OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
     SourceAnchor,
 };
 use compass_model::{GraphError, validate_code_graph};
@@ -353,13 +354,12 @@ pub fn normalize_v1(
                     .map_err(|error| raw_error(&format!("edge[{index}]"), &error.to_string()))?;
                 edge.source.clone_from(source);
                 edge.target.clone_from(target);
-                let identity_rule = edge.evidence.iter().find_map(|item| item.rule.as_deref());
                 edge.id = edge_id(
                     source,
                     edge.kind,
                     target,
                     edge.relationship_site.as_ref(),
-                    identity_rule,
+                    edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
                 );
                 edge.key.clone_from(&edge.id);
                 edge
@@ -705,6 +705,7 @@ fn merge_normalized_edge(
     if existing.source != duplicate.source
         || existing.target != duplicate.target
         || existing.kind != duplicate.kind
+        || existing.occurrence_rule != duplicate.occurrence_rule
         || existing.relationship_site != duplicate.relationship_site
     {
         return Err(raw_error(
@@ -861,6 +862,12 @@ fn raw_edge_from_v1(edge: &EdgeRecord) -> RawEdgeRecord {
         attributes.insert(
             "source_anchor".to_owned(),
             serde_json::to_value(site).unwrap_or(Value::Null),
+        );
+    }
+    if let Some(rule) = &edge.occurrence_rule {
+        attributes.insert(
+            OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+            Value::String(rule.as_str().to_owned()),
         );
     }
     if let Some(evidence) = edge.evidence.first() {
@@ -1250,13 +1257,13 @@ fn normalize_edge(
         }
     }
     sort_dedup_serialized(&mut evidence);
-    let identity_rule = evidence.iter().find_map(|item| item.rule.as_deref());
+    let occurrence_rule = raw_occurrence_rule(&raw.attributes);
     let id = edge_id(
         source,
         kind,
         target,
         relationship_site.as_ref(),
-        identity_rule,
+        occurrence_rule.as_ref().map(OccurrenceRule::as_str),
     );
     let details = (kind == EdgeKind::RoutesTo).then(|| {
         EdgeDetails::Route(RouteEdgeDetails {
@@ -1274,6 +1281,7 @@ fn normalize_edge(
         source: source.to_owned(),
         target: target.to_owned(),
         kind,
+        occurrence_rule,
         relationship_site,
         details,
         evidence,
@@ -1286,6 +1294,27 @@ fn normalize_edge(
             .unwrap_or(false),
         diagnostics: Vec::new(),
     })
+}
+
+fn raw_occurrence_rule(attributes: &Map<String, Value>) -> Option<OccurrenceRule> {
+    attributes
+        .get(OCCURRENCE_RULE_ATTRIBUTE)
+        .and_then(Value::as_str)
+        .and_then(|rule| OccurrenceRule::new(rule.to_owned()))
+        .or_else(|| {
+            attributes
+                .get(ENDPOINT_REWRITE_RULES_ATTRIBUTE)
+                .and_then(Value::as_array)
+                .filter(|rewrites| !rewrites.is_empty())
+                .is_none()
+                .then(|| {
+                    attributes
+                        .get("rule")
+                        .and_then(Value::as_str)
+                        .and_then(|rule| OccurrenceRule::new(rule.to_owned()))
+                })
+                .flatten()
+        })
 }
 
 struct RawEdgeEvidenceContext<'a> {

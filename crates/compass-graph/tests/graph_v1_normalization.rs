@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use compass_graph::{BuildEvidence, InventoryEvidence, extraction_from_v1, normalize_v1};
+use compass_graph::{
+    BuildEvidence, InventoryEvidence, build_from_extraction, extraction_from_v1,
+    normalize_document_v1, normalize_v1,
+};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
     BuildMetadata, CoverageRecord, CoverageStatus, DiagnosticSeverity, EdgeKind, ExtractionStatus,
@@ -85,6 +88,68 @@ fn extraction(root: &Path) -> Extraction {
         }],
         ..Extraction::default()
     }
+}
+
+fn remapped_heuristic_occurrences(root: &Path) -> Result<Extraction, serde_json::Error> {
+    serde_json::from_value(json!({
+        "nodes":[
+            {
+                "id":"ast_caller",
+                "label":"Caller",
+                "qualified_name":"crate::Caller",
+                "symbol_kind":"function",
+                "file_type":"code",
+                "source_file":root.join("src/lib.rs"),
+                "source_anchor":anchor(root, 10),
+                "_origin":"ast",
+                "extractor":"test.rust"
+            },
+            {
+                "id":"semantic_caller",
+                "label":"Caller",
+                "qualified_name":"crate::Caller",
+                "symbol_kind":"function",
+                "file_type":"code",
+                "source_file":root.join("src/lib.rs"),
+                "source_anchor":anchor(root, 10),
+                "_origin":"semantic",
+                "extractor":"test.rust"
+            },
+            {
+                "id":"callee",
+                "label":"callee()",
+                "qualified_name":"crate::callee",
+                "symbol_kind":"function",
+                "file_type":"code",
+                "source_file":root.join("src/lib.rs"),
+                "source_anchor":anchor(root, 30),
+                "_origin":"ast",
+                "extractor":"test.rust"
+            }
+        ],
+        "edges":[
+            {
+                "source":"semantic_caller",
+                "target":"callee",
+                "relation":"calls",
+                "rule":"rust-call-expression",
+                "extractor":"test.rust",
+                "_origin":"heuristic",
+                "confidence":"INFERRED",
+                "source_anchor":anchor(root, 50)
+            },
+            {
+                "source":"semantic_caller",
+                "target":"callee",
+                "relation":"calls",
+                "rule":"scip-call-reference",
+                "extractor":"test.rust",
+                "_origin":"heuristic",
+                "confidence":"INFERRED",
+                "source_anchor":anchor(root, 50)
+            }
+        ]
+    }))
 }
 
 #[test]
@@ -460,6 +525,43 @@ fn typed_incremental_projection_preserves_all_trusted_fields()
     assert_eq!(rebuilt.links, graph.links);
     assert_eq!(rebuilt.graph.coverage, graph.graph.coverage);
     assert_eq!(rebuilt.graph.diagnostics, graph.graph.diagnostics);
+    Ok(())
+}
+
+#[test]
+fn v1_publication_preserves_distinct_remapped_producer_occurrences()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), vec![b'x'; 500])?;
+    let extraction = remapped_heuristic_occurrences(root)?;
+
+    let flexible = build_from_extraction(&extraction, true, Some(root));
+    let typed = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+
+    assert_eq!(flexible.links.len(), 2, "links={:?}", flexible.links);
+    assert_eq!(typed.links.len(), 2, "links={:?}", typed.links);
+    assert_ne!(typed.links[0].id, typed.links[1].id);
+    Ok(())
+}
+
+#[test]
+fn trusted_incremental_round_trip_preserves_remapped_producer_occurrences()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), vec![b'x'; 500])?;
+    let extraction = remapped_heuristic_occurrences(root)?;
+    let flexible = build_from_extraction(&extraction, true, Some(root));
+    let typed = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+
+    let projected = extraction_from_v1(&typed);
+    let rebuilt = normalize_v1(projected, build_evidence(root)?)?;
+
+    assert_eq!(rebuilt.links, typed.links);
+    assert_eq!(rebuilt.links.len(), 2);
     Ok(())
 }
 

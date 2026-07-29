@@ -6,7 +6,9 @@ use compass_model::code_graph::{
     NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
-use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+use compass_model::provenance::{
+    EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
+};
 use sha2::{Digest, Sha256};
 
 fn anchor() -> SourceAnchor {
@@ -120,6 +122,7 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         source: "n:alias".to_owned(),
         target: "n:list".to_owned(),
         kind: EdgeKind::Aliases,
+        occurrence_rule: None,
         relationship_site: Some(anchor()),
         details: None,
         evidence: vec![evidence()],
@@ -141,6 +144,7 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             source: source.to_owned(),
             target: target.to_owned(),
             kind,
+            occurrence_rule: None,
             relationship_site: Some(anchor()),
             details: None,
             evidence: vec![evidence()],
@@ -163,6 +167,7 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         source: "n:heuristic".to_owned(),
         target: "n:list".to_owned(),
         kind: EdgeKind::Calls,
+        occurrence_rule: OccurrenceRule::new("dynamic-dispatch"),
         relationship_site: Some(anchor()),
         details: None,
         evidence: vec![Provenance {

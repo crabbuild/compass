@@ -3,7 +3,8 @@ use compass_model::code_graph::{
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
-    EvidenceConfidence, EvidenceOrigin, Provenance, ResolutionCandidate, SourceAnchor,
+    EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, ResolutionCandidate,
+    SourceAnchor,
 };
 use compass_model::validate_code_graph;
 
@@ -88,6 +89,7 @@ fn document() -> GraphDocument {
         source: "route".to_owned(),
         target: "handler".to_owned(),
         kind: EdgeKind::RoutesTo,
+        occurrence_rule: None,
         relationship_site: Some(anchor()),
         details: None,
         evidence: vec![evidence()],
@@ -102,6 +104,24 @@ fn document() -> GraphDocument {
 #[test]
 fn whole_document_validation_accepts_the_supported_route_shape() {
     assert!(validate_code_graph(&document()).is_ok());
+}
+
+#[test]
+fn relationship_identity_uses_the_typed_occurrence_rule_not_sorted_evidence() {
+    let mut graph = document();
+    graph.links[0].evidence[0].rule = Some("alphabetically-first-endpoint-rewrite".to_owned());
+    graph.links[0].occurrence_rule = OccurrenceRule::new("producer-rule");
+    let id = edge_id(
+        "route",
+        EdgeKind::RoutesTo,
+        "handler",
+        Some(&anchor()),
+        Some("producer-rule"),
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+
+    assert!(validate_code_graph(&graph).is_ok());
 }
 
 #[test]
