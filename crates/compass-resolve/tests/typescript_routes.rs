@@ -156,14 +156,79 @@ fn import_alias_metadata_and_near_matches_remain_conservative()
     assert!(resolved.iter().any(|route| {
         route.route.handler_reference == "AccountAlias"
             && route.state == ResolutionState::Exact
-            && route
-                .stages
-                .last()
-                .is_some_and(|stage| stage.target.ends_with("accountpage"))
+            && route.stages.last().is_some_and(|stage| {
+                stage
+                    .target
+                    .as_deref()
+                    .is_some_and(|target| target.ends_with("accountpage"))
+            })
     }));
 
     let near = source_extract(Path::new("src/not-routes.ts"), "near-matches.ts")?;
     assert_eq!(routes(&near).count(), 0);
+    Ok(())
+}
+
+#[test]
+fn import_aliases_are_scoped_by_declaring_module_and_keep_export_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = Engine::default();
+    let mut extraction = Extraction::default();
+    for (path, source) in [
+        (
+            "src/admin/routes.tsx",
+            r#"import { createBrowserRouter } from "react-router-dom";
+import { AdminPage as Screen } from "./AdminPage";
+export const router = createBrowserRouter([{ path: "/admin", Component: Screen }]);
+"#,
+        ),
+        (
+            "src/admin/AdminPage.tsx",
+            "export function AdminPage() { return null; }\n",
+        ),
+        (
+            "src/public/routes.tsx",
+            r#"import { createBrowserRouter } from "react-router-dom";
+import { PublicPage as Screen } from "./PublicPage";
+export const router = createBrowserRouter([{ path: "/public", Component: Screen }]);
+"#,
+        ),
+        (
+            "src/public/PublicPage.tsx",
+            "export function PublicPage() { return null; }\n",
+        ),
+    ] {
+        let mut source = engine.extract_source(Path::new(path), source.as_bytes())?;
+        extraction.nodes.append(&mut source.nodes);
+        extraction.edges.append(&mut source.edges);
+        extraction
+            .framework_facts
+            .append(&mut source.framework_facts);
+    }
+
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    let target_source = |path: &str| {
+        let target = resolved
+            .iter()
+            .find(|route| route.route.normalized_path == path)
+            .and_then(|route| route.stages.last())
+            .and_then(|stage| stage.target.as_deref())
+            .unwrap_or_default();
+        extraction
+            .nodes
+            .iter()
+            .find(|node| node.id == target)
+            .map(|node| node.string("source_file"))
+            .unwrap_or_default()
+    };
+    assert_eq!(target_source("/admin"), "src/admin/AdminPage.tsx");
+    assert_eq!(target_source("/public"), "src/public/PublicPage.tsx");
+    assert!(
+        resolved
+            .iter()
+            .all(|route| route.state == ResolutionState::Exact)
+    );
     Ok(())
 }
 

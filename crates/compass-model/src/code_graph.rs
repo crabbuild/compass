@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::provenance::{Provenance, ResolutionState, SourceAnchor};
+use crate::provenance::{Provenance, ResolutionCandidate, ResolutionState, SourceAnchor};
 use crate::{GraphError, validate_code_graph};
 
 pub const CODE_GRAPH_SCHEMA_V1: &str = "compass.graph/1";
@@ -434,7 +434,20 @@ pub struct ImportExportNodeDetails {
     pub type_only: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RouteStageDetails {
+    pub stage: RouteStage,
+    pub position: u32,
+    pub reference: String,
+    pub resolution: ResolutionState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<ResolutionCandidate>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RouteNodeDetails {
     pub operation: String,
@@ -445,6 +458,8 @@ pub struct RouteNodeDetails {
     pub resolution: ResolutionState,
     #[serde(default)]
     pub middleware_count: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stages: Vec<RouteStageDetails>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -518,7 +533,7 @@ pub struct DatabaseNodeDetails {
 }
 
 /// Closed, category-specific node payloads.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum NodeDetails {
     File(FileNodeDetails),

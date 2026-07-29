@@ -4,7 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use compass_graph::{BuildEvidence, normalize_v1};
-use compass_languages::{Engine, Extraction, FrameworkLimits, RawFrameworkFact};
+use compass_languages::{
+    Engine, Extraction, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
+    RawFrameworkOrigin, RawNodeRecord,
+};
 use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::ResolutionState;
 use compass_resolve::frameworks::resolve_and_publish_framework_domains;
@@ -183,6 +186,78 @@ fn absent_orm_targets_remain_diagnostic_without_synthetic_tables() -> Result<(),
     assert!(extraction.framework_facts.iter().any(|fact| {
         matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "orm_mapping")
     }));
+    Ok(())
+}
+
+#[test]
+fn sole_terminal_domain_candidate_remains_ambiguous_and_non_authoritative()
+-> Result<(), Box<dyn Error>> {
+    let fact = RawDomainFact {
+        framework: "synthetic".to_owned(),
+        kind: "message".to_owned(),
+        name: "orders.created".to_owned(),
+        declaring_scope: "app.handlers".to_owned(),
+        anchor: RawFrameworkAnchor {
+            source_file: "handlers.ts".to_owned(),
+            start_byte: 10,
+            end_byte: 30,
+            start_line: 2,
+            start_column: 0,
+            end_line: 2,
+            end_column: 20,
+        },
+        origin: RawFrameworkOrigin::Ast,
+        detail: serde_json::Map::from_iter([
+            (
+                "handler_reference".to_owned(),
+                serde_json::Value::String("handle".to_owned()),
+            ),
+            (
+                "transport".to_owned(),
+                serde_json::Value::String("synthetic".to_owned()),
+            ),
+        ]),
+    };
+    let mut extraction = Extraction {
+        nodes: vec![RawNodeRecord {
+            id: "other-handler".to_owned(),
+            attributes: serde_json::Map::from_iter([
+                (
+                    "label".to_owned(),
+                    serde_json::Value::String("handle".to_owned()),
+                ),
+                (
+                    "name".to_owned(),
+                    serde_json::Value::String("handle".to_owned()),
+                ),
+                (
+                    "qualified_name".to_owned(),
+                    serde_json::Value::String("other.handle".to_owned()),
+                ),
+                (
+                    "symbol_kind".to_owned(),
+                    serde_json::Value::String("function".to_owned()),
+                ),
+                (
+                    "source_file".to_owned(),
+                    serde_json::Value::String("other.ts".to_owned()),
+                ),
+            ]),
+        }],
+        framework_facts: vec![RawFrameworkFact::Domain(fact)],
+        ..Extraction::default()
+    };
+
+    let resolved =
+        resolve_and_publish_framework_domains(&mut extraction, FrameworkLimits::default())?;
+    assert_eq!(resolved[0].state, ResolutionState::Ambiguous);
+    assert_eq!(resolved[0].source_candidates.len(), 1);
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("relation") != "handles")
+    );
     Ok(())
 }
 

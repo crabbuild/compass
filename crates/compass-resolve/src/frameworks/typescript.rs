@@ -5,12 +5,28 @@ use serde_json::Value;
 
 use super::FrameworkResolutionError;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ImportAlias {
+    pub module: String,
+    pub imported: String,
+}
+
+pub(super) type ImportAliases = HashMap<(String, String), ImportAlias>;
+
 pub(super) fn import_alias_map(
     extraction: &Extraction,
     limits: FrameworkLimits,
-) -> Result<HashMap<String, String>, FrameworkResolutionError> {
+) -> Result<ImportAliases, FrameworkResolutionError> {
     let mut aliases = HashMap::new();
     for node in &extraction.nodes {
+        let Some(source_file) = node
+            .attributes
+            .get("source_file")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
         let Some(local) = node
             .attributes
             .get("local_name")
@@ -19,16 +35,29 @@ pub(super) fn import_alias_map(
         else {
             continue;
         };
-        let Some(imported) = node
+        let Some(module) = node
             .attributes
-            .get("imported_name")
-            .or_else(|| node.attributes.get("qualified_name"))
+            .get("module")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
         else {
             continue;
         };
-        aliases.insert(local.to_owned(), imported.to_owned());
+        let Some(imported) = node
+            .attributes
+            .get("imported_name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        aliases.insert(
+            (source_file.replace('\\', "/"), local.to_owned()),
+            ImportAlias {
+                module: module.to_owned(),
+                imported: imported.to_owned(),
+            },
+        );
         if aliases.len() > limits.max_alias_expansions {
             return Err(FrameworkResolutionError::AliasLimit {
                 observed: aliases.len(),

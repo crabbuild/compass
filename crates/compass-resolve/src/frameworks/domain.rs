@@ -67,10 +67,12 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
     for resolved in resolved {
         let fact = &resolved.fact;
         if fact.kind == "orm_mapping" {
-            if let ([model], [table]) = (
-                resolved.source_candidates.as_slice(),
-                resolved.target_candidates.as_slice(),
-            ) {
+            if resolved.state == ResolutionState::Exact
+                && let ([model], [table]) = (
+                    resolved.source_candidates.as_slice(),
+                    resolved.target_candidates.as_slice(),
+                )
+            {
                 push_edge(
                     extraction,
                     &mut edges,
@@ -90,6 +92,16 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
                     "line": fact.anchor.start_line,
                     "resolution": resolution_name(resolved.state),
                 }));
+            }
+            continue;
+        }
+        if fact.kind == "route_middleware" {
+            let middleware_id = route_middleware_id(fact);
+            if nodes.insert(middleware_id.clone()) {
+                extraction.nodes.push(RawNodeRecord {
+                    id: middleware_id,
+                    attributes: route_middleware_attributes(fact),
+                });
             }
             continue;
         }
@@ -179,6 +191,14 @@ fn resolve_one(
     extraction: &Extraction,
     limits: FrameworkLimits,
 ) -> Result<ResolvedDomainFact, FrameworkResolutionError> {
+    if fact.kind == "route_middleware" {
+        return Ok(ResolvedDomainFact {
+            fact: fact.clone(),
+            state: ResolutionState::Exact,
+            source_candidates: Vec::new(),
+            target_candidates: Vec::new(),
+        });
+    }
     if fact.kind == "orm_mapping" {
         let model = fact
             .detail
@@ -200,8 +220,20 @@ fn resolve_one(
         } else {
             format!("{schema}.{table}")
         };
-        let sources = resolve_reference(extraction, model, TargetKind::Type, limits)?;
-        let targets = resolve_reference(extraction, &table, TargetKind::DatabaseTable, limits)?;
+        let sources = resolve_reference(
+            extraction,
+            model,
+            TargetKind::Type,
+            &fact.anchor.source_file,
+            limits,
+        )?;
+        let targets = resolve_reference(
+            extraction,
+            &table,
+            TargetKind::DatabaseTable,
+            &fact.anchor.source_file,
+            limits,
+        )?;
         return Ok(ResolvedDomainFact {
             fact: fact.clone(),
             state: pair_state(&sources, &targets),
@@ -214,7 +246,13 @@ fn resolve_one(
         .get("handler_reference")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let candidates = resolve_reference(extraction, reference, TargetKind::Callable, limits)?;
+    let candidates = resolve_reference(
+        extraction,
+        reference,
+        TargetKind::Callable,
+        &fact.anchor.source_file,
+        limits,
+    )?;
     Ok(ResolvedDomainFact {
         fact: fact.clone(),
         state: single_state(&candidates),
@@ -234,6 +272,7 @@ fn resolve_reference(
     extraction: &Extraction,
     reference: &str,
     target_kind: TargetKind,
+    declaring_source: &str,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolutionCandidate>, FrameworkResolutionError> {
     if reference.trim().is_empty() {
@@ -272,6 +311,11 @@ fn resolve_reference(
             node.label().to_owned(),
         ];
         let normalized = names.iter().map(|name| normalize(name)).collect::<Vec<_>>();
+        let same_source = node
+            .attributes
+            .get("source_file")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source.replace('\\', "/") == declaring_source.replace('\\', "/"));
         let owner_match = owner.is_some_and(|owner| {
             parents
                 .get(node.id.as_str())
@@ -287,7 +331,7 @@ fn resolve_reference(
                 .map(|name| normalize(&name))
                 .any(|name| name == owner || terminal(&name) == terminal(owner))
         });
-        let score = if normalized.iter().any(|name| name == &expected) {
+        let score = if node.id == expected || normalized[0] == expected {
             100_u8
         } else if owner_match
             && normalized
@@ -295,6 +339,12 @@ fn resolve_reference(
                 .any(|name| terminal(name) == expected_terminal)
         {
             97
+        } else if same_source
+            && normalized
+                .iter()
+                .any(|name| terminal(name) == expected_terminal)
+        {
+            90
         } else if normalized
             .iter()
             .any(|name| terminal(name) == expected_terminal)
@@ -313,12 +363,12 @@ fn resolve_reference(
         .filter(|(score, _)| *score == best)
         .map(|(score, node)| ResolutionCandidate {
             node_id: node.id.clone(),
-            reason: if score >= 97 {
+            reason: if score >= 90 {
                 "exact domain reference".to_owned()
             } else {
                 "terminal domain reference".to_owned()
             },
-            confidence: if score >= 97 {
+            confidence: if score >= 90 {
                 compass_model::provenance::EvidenceConfidence::Exact
             } else {
                 compass_model::provenance::EvidenceConfidence::Ambiguous
@@ -381,6 +431,66 @@ fn domain_id(fact: &RawDomainFact) -> String {
     ])
 }
 
+fn route_middleware_id(fact: &RawDomainFact) -> String {
+    make_id(&[
+        "framework-route-middleware",
+        &fact.framework,
+        &fact.anchor.source_file,
+        &fact.name,
+    ])
+}
+
+fn route_middleware_attributes(fact: &RawDomainFact) -> Map<String, Value> {
+    Map::from_iter([
+        ("label".into(), Value::String(fact.name.clone())),
+        ("name".into(), Value::String(fact.name.clone())),
+        (
+            "qualified_name".into(),
+            Value::String(format!("{}::middleware::{}", fact.framework, fact.name)),
+        ),
+        ("symbol_kind".into(), Value::String("component".to_owned())),
+        ("file_type".into(), Value::String("code".to_owned())),
+        (
+            "component_type".into(),
+            Value::String("route_middleware".to_owned()),
+        ),
+        (
+            "roles".into(),
+            Value::Array(vec![Value::String("middleware".to_owned())]),
+        ),
+        ("framework".into(), Value::String(fact.framework.clone())),
+        (
+            "declaring_scope".into(),
+            Value::String(fact.declaring_scope.clone()),
+        ),
+        (
+            "source_file".into(),
+            Value::String(fact.anchor.source_file.clone()),
+        ),
+        (
+            "source_location".into(),
+            Value::String(format!("L{}", fact.anchor.start_line)),
+        ),
+        (
+            "source_anchor".into(),
+            serde_json::to_value(source_anchor(fact)).unwrap_or(Value::Null),
+        ),
+        (
+            "_origin".into(),
+            Value::String(fact.origin.as_str().to_owned()),
+        ),
+        (
+            "extractor".into(),
+            Value::String(format!("compass.frameworks.{}.domain", fact.framework)),
+        ),
+        ("confidence".into(), Value::String("EXTRACTED".to_owned())),
+        (
+            "rule".into(),
+            Value::String("route-middleware-file-convention".to_owned()),
+        ),
+    ])
+}
+
 fn domain_attributes(
     fact: &RawDomainFact,
     symbol_kind: &str,
@@ -394,6 +504,7 @@ fn domain_attributes(
             Value::String(format!("{}::{}::{}", fact.framework, fact.kind, fact.name)),
         ),
         ("symbol_kind".into(), Value::String(symbol_kind.to_owned())),
+        ("file_type".into(), Value::String("code".to_owned())),
         ("framework".into(), Value::String(fact.framework.clone())),
         (
             "declaring_scope".into(),
@@ -555,17 +666,23 @@ fn terminal(value: &str) -> &str {
 }
 
 fn single_state(candidates: &[ResolutionCandidate]) -> ResolutionState {
-    match candidates.len() {
-        0 => ResolutionState::Unresolved,
-        1 => ResolutionState::Exact,
+    match candidates {
+        [] => ResolutionState::Unresolved,
+        [candidate]
+            if candidate.confidence == compass_model::provenance::EvidenceConfidence::Exact =>
+        {
+            ResolutionState::Exact
+        }
         _ => ResolutionState::Ambiguous,
     }
 }
 
 fn pair_state(left: &[ResolutionCandidate], right: &[ResolutionCandidate]) -> ResolutionState {
-    if left.len() == 1 && right.len() == 1 {
+    let left = single_state(left);
+    let right = single_state(right);
+    if left == ResolutionState::Exact && right == ResolutionState::Exact {
         ResolutionState::Exact
-    } else if left.len() > 1 || right.len() > 1 {
+    } else if left == ResolutionState::Ambiguous || right == ResolutionState::Ambiguous {
         ResolutionState::Ambiguous
     } else {
         ResolutionState::Unresolved

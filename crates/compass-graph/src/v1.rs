@@ -9,7 +9,7 @@ use compass_model::code_graph::{
     FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
     ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole,
     QueryNodeDetails, ResourceKind, ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails,
-    RouteStage, SchemaNodeDetails, SymbolNodeDetails,
+    RouteStage, RouteStageDetails, SchemaNodeDetails, SymbolNodeDetails,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -210,6 +210,23 @@ pub fn normalize_v1(
             nodes.insert(node.id.clone(), node);
         }
     }
+    for node in nodes.values_mut() {
+        let Some(NodeDetails::Route(details)) = node.details.as_mut() else {
+            continue;
+        };
+        for stage in &mut details.stages {
+            if let Some(target) = stage.target.as_mut()
+                && let Some(published) = id_remap.get(target)
+            {
+                target.clone_from(published);
+            }
+            for candidate in &mut stage.candidates {
+                if let Some(published) = id_remap.get(&candidate.node_id) {
+                    candidate.node_id.clone_from(published);
+                }
+            }
+        }
+    }
 
     let mut links = BTreeMap::new();
     for (index, raw) in extraction.edges.into_iter().enumerate() {
@@ -256,6 +273,33 @@ pub fn normalize_v1(
             merge_normalized_edge(existing, edge)?;
         } else {
             links.insert(edge.id.clone(), edge);
+        }
+    }
+    for edge in links.values() {
+        let Some(EdgeDetails::Route(edge_details)) = edge.details.as_ref() else {
+            continue;
+        };
+        let Some(position) = edge_details.position else {
+            continue;
+        };
+        let Some(node) = nodes.get_mut(&edge.source) else {
+            continue;
+        };
+        let Some(NodeDetails::Route(route_details)) = node.details.as_mut() else {
+            continue;
+        };
+        let Some(stage) = route_details
+            .stages
+            .iter_mut()
+            .find(|stage| stage.position == position && stage.stage == edge_details.stage)
+        else {
+            continue;
+        };
+        stage.target = Some(edge.target.clone());
+        if stage.resolution == ResolutionState::Exact
+            && let [candidate] = stage.candidates.as_mut_slice()
+        {
+            candidate.node_id.clone_from(&edge.target);
         }
     }
 
@@ -606,6 +650,12 @@ fn insert_raw_node_details(attributes: &mut Map<String, Value>, details: &NodeDe
                 "middleware_count".to_owned(),
                 Value::from(details.middleware_count),
             );
+            if !details.stages.is_empty() {
+                attributes.insert(
+                    "stages".to_owned(),
+                    serde_json::to_value(&details.stages).unwrap_or(Value::Null),
+                );
+            }
         }
         NodeDetails::Component(details) => {
             attributes.insert(
@@ -799,6 +849,7 @@ fn normalize_node(
         &source_path,
         file_facts,
         &raw.id,
+        root,
     )?;
     let id = node_identity(
         kind,
@@ -990,6 +1041,24 @@ fn normalize_candidates(
     Ok(candidates)
 }
 
+fn route_stage_details(
+    attributes: &Map<String, Value>,
+    record: &str,
+    root: &Path,
+) -> Result<Vec<RouteStageDetails>, GraphError> {
+    let Some(stages) = attributes.get("stages") else {
+        return Ok(Vec::new());
+    };
+    let mut stages = serde_json::from_value::<Vec<RouteStageDetails>>(stages.clone())
+        .map_err(|error| raw_error(record, &format!("invalid route stages: {error}")))?;
+    for stage in &mut stages {
+        for candidate in &mut stage.candidates {
+            normalize_optional_anchor(&mut candidate.anchor, root)?;
+        }
+    }
+    Ok(stages)
+}
+
 fn map_node_kind(
     raw_kind: Option<&str>,
     file_type: &str,
@@ -1113,6 +1182,7 @@ fn node_details(
     source_path: &str,
     file_facts: &HashMap<String, PublishedFileFacts>,
     record: &str,
+    root: &Path,
 ) -> Result<Option<NodeDetails>, GraphError> {
     let details = match kind {
         NodeKind::File => {
@@ -1147,6 +1217,7 @@ fn node_details(
                 _ => ResolutionState::Exact,
             },
             middleware_count: optional_u32(attributes, "middleware_count").unwrap_or(0),
+            stages: route_stage_details(attributes, record, root)?,
         })),
         NodeKind::Resource => Some(NodeDetails::Resource(ResourceNodeDetails {
             resource_kind: resource_kind.unwrap_or(ResourceKind::Document),

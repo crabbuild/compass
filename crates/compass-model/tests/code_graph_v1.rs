@@ -1,8 +1,8 @@
 use compass_model::code_graph::{
     BuildMetadata, CODE_GRAPH_SCHEMA_V1, DiagnosticSeverity, EdgeKind, EdgeRecord, GraphMetadata,
-    NodeKind, NodeRecord, NodeRole,
+    NodeDetails, NodeKind, NodeRecord, NodeRole, RouteStage,
 };
-use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin};
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -176,6 +176,69 @@ fn typed_records_use_camel_case_fields_and_networkx_edge_identity()
     assert_eq!(value["kind"], "routes_to");
     assert_eq!(value["key"], value["id"]);
     assert!(value.get("relation").is_none());
+    Ok(())
+}
+
+#[test]
+fn route_details_retain_ordered_stage_resolution_and_candidates_on_the_wire()
+-> Result<(), Box<dyn std::error::Error>> {
+    let details: NodeDetails = serde_json::from_value(json!({
+        "type": "route",
+        "data": {
+            "operation": "GET",
+            "path": "/orders/{id}",
+            "declaringScope": "src.routes",
+            "resolution": "exact",
+            "middlewareCount": 2,
+            "stages": [
+                {
+                    "stage": "middleware",
+                    "position": 0,
+                    "reference": "authenticate",
+                    "resolution": "exact",
+                    "target": "node:authenticate",
+                    "candidates": [{
+                        "nodeId": "node:authenticate",
+                        "reason": "same-source route target",
+                        "confidence": "exact",
+                        "score": 0.9
+                    }]
+                },
+                {
+                    "stage": "middleware",
+                    "position": 1,
+                    "reference": "authorize",
+                    "resolution": "ambiguous",
+                    "candidates": [{
+                        "nodeId": "node:authorize-a",
+                        "reason": "unique terminal name",
+                        "confidence": "ambiguous",
+                        "score": 0.7
+                    }]
+                },
+                {
+                    "stage": "handler",
+                    "position": 2,
+                    "reference": "show",
+                    "resolution": "unresolved"
+                }
+            ]
+        }
+    }))?;
+    let NodeDetails::Route(route) = &details else {
+        return Err("expected route details".into());
+    };
+    assert_eq!(route.stages.len(), 3);
+    assert_eq!(route.stages[0].stage, RouteStage::Middleware);
+    assert_eq!(route.stages[0].resolution, ResolutionState::Exact);
+    assert_eq!(route.stages[0].target.as_deref(), Some("node:authenticate"));
+    assert_eq!(route.stages[1].candidates.len(), 1);
+    assert_eq!(route.stages[2].resolution, ResolutionState::Unresolved);
+
+    let value = serde_json::to_value(details)?;
+    assert_eq!(value["data"]["stages"][0]["reference"], "authenticate");
+    assert_eq!(value["data"]["stages"][1]["resolution"], "ambiguous");
+    assert!(value["data"]["stages"][1].get("target").is_none());
     Ok(())
 }
 

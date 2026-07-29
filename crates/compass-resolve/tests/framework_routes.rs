@@ -79,12 +79,12 @@ fn exact_routes_publish_ordered_middleware_and_handler_stages() {
         resolved[0]
             .stages
             .iter()
-            .map(|stage| (stage.position, stage.role, stage.target.as_str()))
+            .map(|stage| (stage.position, stage.role, stage.target.as_deref()))
             .collect::<Vec<_>>(),
         vec![
-            (0, RouteStageRole::Middleware, "auth"),
-            (1, RouteStageRole::Middleware, "authorize"),
-            (2, RouteStageRole::Handler, "handler"),
+            (0, RouteStageRole::Middleware, Some("auth")),
+            (1, RouteStageRole::Middleware, Some("authorize")),
+            (2, RouteStageRole::Handler, Some("handler")),
         ]
     );
     let route_nodes = extraction
@@ -142,7 +142,9 @@ fn ambiguous_unresolved_duplicate_and_near_match_routes_are_conservative() {
             .collect::<Vec<_>>(),
         vec!["handler-a", "handler-b"]
     );
-    assert!(ambiguous.stages.is_empty());
+    assert_eq!(ambiguous.stages.len(), 1);
+    assert_eq!(ambiguous.stages[0].state, ResolutionState::Ambiguous);
+    assert!(ambiguous.stages[0].target.is_none());
     assert!(
         resolved
             .iter()
@@ -188,6 +190,108 @@ fn ambiguous_handlers_do_not_taint_exact_middleware_edges() {
     assert_eq!(route_edges.len(), 1);
     assert_eq!(route_edges[0].target, "middleware");
     assert_eq!(route_edges[0].string("confidence"), "EXTRACTED");
+}
+
+#[test]
+fn every_declared_stage_retains_resolution_without_publishing_ambiguous_edges() {
+    let mut declared = route("show_user");
+    declared.middleware_references = vec!["authenticate".into(), "audit".into(), "missing".into()];
+    let mut audit = node("audit-node", "audit", "other.audit");
+    audit.attributes.insert(
+        "source_file".to_owned(),
+        Value::String("other/routes.rs".to_owned()),
+    );
+    let mut extraction = Extraction {
+        nodes: vec![
+            node("authenticate", "authenticate", "app.routes.authenticate"),
+            audit,
+            node("handler", "show_user", "app.routes.show_user"),
+        ],
+        framework_facts: vec![RawFrameworkFact::Route(declared)],
+        ..Extraction::default()
+    };
+
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())
+            .unwrap_or_else(|_| std::process::abort());
+    let stages = &resolved[0].stages;
+    assert_eq!(stages.len(), 4);
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| (
+                stage.position,
+                stage.reference.as_str(),
+                stage.state,
+                stage.target.as_deref(),
+                stage.candidates.len(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                0,
+                "authenticate",
+                ResolutionState::Exact,
+                Some("authenticate"),
+                1,
+            ),
+            (1, "audit", ResolutionState::Ambiguous, None, 1),
+            (2, "missing", ResolutionState::Unresolved, None, 0),
+            (3, "show_user", ResolutionState::Exact, Some("handler"), 1,),
+        ]
+    );
+    assert_eq!(
+        stages[1].provenance.confidence,
+        compass_model::provenance::EvidenceConfidence::Ambiguous
+    );
+    let route_edges = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "routes_to")
+        .collect::<Vec<_>>();
+    assert_eq!(route_edges.len(), 2);
+    assert!(
+        route_edges
+            .iter()
+            .all(|edge| edge.target != "audit" && edge.target != "missing")
+    );
+}
+
+#[test]
+fn conflicting_route_registrations_at_distinct_sites_are_retained() {
+    let first = route("first_handler");
+    let mut second = route("second_handler");
+    second.anchor.start_byte = 80;
+    second.anchor.end_byte = 112;
+    second.anchor.start_line = 5;
+    second.anchor.end_line = 5;
+    let mut extraction = Extraction {
+        nodes: vec![
+            node("first-handler", "first_handler", "app.routes.first_handler"),
+            node(
+                "second-handler",
+                "second_handler",
+                "app.routes.second_handler",
+            ),
+        ],
+        framework_facts: vec![
+            RawFrameworkFact::Route(first),
+            RawFrameworkFact::Route(second),
+        ],
+        ..Extraction::default()
+    };
+
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())
+            .unwrap_or_else(|_| std::process::abort());
+    assert_eq!(resolved.len(), 2);
+    let targets = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "routes_to")
+        .map(|edge| edge.target.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(targets, HashSet::from(["first-handler", "second-handler"]));
 }
 
 #[test]
@@ -299,15 +403,15 @@ fn incremental_resolution_replaces_the_changed_handler_without_stale_targets() {
     first.raw_path = "/incremental".to_owned();
     let base = Extraction {
         nodes: vec![
-            node("first", "first_handler", "app.first_handler"),
-            node("second", "second_handler", "app.second_handler"),
+            node("first", "first_handler", "app.routes.first_handler"),
+            node("second", "second_handler", "app.routes.second_handler"),
         ],
         framework_facts: vec![RawFrameworkFact::Route(first.clone())],
         ..Extraction::default()
     };
     let initial =
         resolve_routes(&base, FrameworkLimits::default()).unwrap_or_else(|_| std::process::abort());
-    assert_eq!(initial[0].stages[0].target, "first");
+    assert_eq!(initial[0].stages[0].target.as_deref(), Some("first"));
 
     first.handler_reference = "second_handler".to_owned();
     let changed = Extraction {
@@ -316,11 +420,11 @@ fn incremental_resolution_replaces_the_changed_handler_without_stale_targets() {
     };
     let refreshed = resolve_routes(&changed, FrameworkLimits::default())
         .unwrap_or_else(|_| std::process::abort());
-    assert_eq!(refreshed[0].stages[0].target, "second");
+    assert_eq!(refreshed[0].stages[0].target.as_deref(), Some("second"));
     assert!(
         refreshed[0]
             .stages
             .iter()
-            .all(|stage| stage.target != "first")
+            .all(|stage| stage.target.as_deref() != Some("first"))
     );
 }
