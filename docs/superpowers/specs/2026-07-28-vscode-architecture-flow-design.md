@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved direction; awaiting written-spec review
+**Status:** Approved
 
 **Implementation root:** `/Users/haipingfu/graphify/compass`
 
@@ -274,7 +274,9 @@ without logging source-derived graph content.
 
 ## Testing strategy
 
-Implementation follows red-green-refactor.
+Implementation is organized as context-rich production slices. Each slice is
+implemented first, followed immediately by focused regression tests and fresh
+verification before the next slice.
 
 ### Rust model tests
 
