@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
@@ -47,6 +47,7 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         seen_nodes: HashSet::new(),
         linked_targets: HashSet::new(),
         heading_stack: Vec::new(),
+        heading_occurrences: HashMap::new(),
     };
 
     state.add_node(
@@ -55,6 +56,7 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
         1,
+        None,
     );
 
     let mut in_code_block = false;
@@ -104,24 +106,35 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         };
         let level = markers.as_str().len();
         let title = title.as_str().trim();
-        let mut id = make_id(&[&state.stem, title]);
-        if state.seen_nodes.contains(&id) {
-            id = make_id(&[&state.stem, title, &line.to_string()]);
-        }
-        state.add_node(id.clone(), title, line);
         while state
             .heading_stack
             .last()
-            .is_some_and(|(parent_level, _)| *parent_level >= level)
+            .is_some_and(|(parent_level, _, _)| *parent_level >= level)
         {
             state.heading_stack.pop();
         }
+        let qualified_base = state.heading_stack.last().map_or_else(
+            || title.to_owned(),
+            |(_, _, parent_scope)| format!("{parent_scope}::{title}"),
+        );
+        let occurrence = state
+            .heading_occurrences
+            .entry(qualified_base.clone())
+            .or_default();
+        *occurrence += 1;
+        let qualified_name = if *occurrence == 1 {
+            qualified_base
+        } else {
+            format!("{qualified_base}#{occurrence}")
+        };
+        let id = make_id(&[&state.stem, &qualified_name]);
+        state.add_node(id.clone(), title, line, Some(&qualified_name));
         let parent = state
             .heading_stack
             .last()
-            .map_or_else(|| state.file_id.clone(), |(_, id)| id.clone());
+            .map_or_else(|| state.file_id.clone(), |(_, id, _)| id.clone());
         state.add_edge(parent, id.clone(), "contains", line);
-        state.heading_stack.push((level, id));
+        state.heading_stack.push((level, id, qualified_name));
     }
 
     state
@@ -143,16 +156,23 @@ struct State<'path> {
     extraction: Extraction,
     seen_nodes: HashSet<String>,
     linked_targets: HashSet<String>,
-    heading_stack: Vec<(usize, String)>,
+    heading_stack: Vec<(usize, String, String)>,
+    heading_occurrences: HashMap<String, usize>,
 }
 
 impl State<'_> {
-    fn add_node(&mut self, id: String, label: &str, line: usize) {
+    fn add_node(&mut self, id: String, label: &str, line: usize, qualified_name: Option<&str>) {
         if !self.seen_nodes.insert(id.clone()) {
             return;
         }
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(label.to_owned()));
+        if let Some(qualified_name) = qualified_name {
+            attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(qualified_name.to_owned()),
+            );
+        }
         attributes.insert("file_type".to_owned(), Value::String("document".to_owned()));
         attributes.insert(
             "source_file".to_owned(),

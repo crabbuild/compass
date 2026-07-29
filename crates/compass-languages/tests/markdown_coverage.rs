@@ -58,6 +58,19 @@ fn markdown_extracts_heading_hierarchy_and_only_local_document_links() -> Result
     }
     assert_eq!(labels.iter().filter(|label| **label == "Child").count(), 2);
     assert!(!labels.contains(&"Hidden"));
+    let child_scopes = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == "Child")
+        .map(|node| node.string("qualified_name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        child_scopes,
+        ["Root::Child", "Root::Child#2"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
 
     let references = extraction
         .edges
