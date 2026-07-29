@@ -20,6 +20,7 @@ pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
 
 struct State<'a> {
     path: &'a Path,
+    source: &'a [u8],
     text: String,
     source_file: String,
     stem: String,
@@ -30,7 +31,7 @@ struct State<'a> {
 }
 
 impl<'a> State<'a> {
-    fn new(path: &'a Path, source: &[u8]) -> Self {
+    fn new(path: &'a Path, source: &'a [u8]) -> Self {
         let source_file = path.to_string_lossy().into_owned();
         let text = strip_comments(std::str::from_utf8(source).unwrap_or_default());
         let mut stem = file_stem(path);
@@ -43,6 +44,7 @@ impl<'a> State<'a> {
         }
         Self {
             path,
+            source,
             text,
             source_file,
             stem,
@@ -537,13 +539,22 @@ impl<'a> State<'a> {
         ) {
             let values: Vec<_> = pattern
                 .captures_iter(body)
-                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+                .filter_map(|capture| {
+                    Some((
+                        capture.get(1)?.as_str().to_owned(),
+                        body_start + capture.get(0)?.start(),
+                        body_start + capture.get(0)?.end(),
+                    ))
+                })
                 .collect();
-            for route in values {
+            for (route, start, end) in values {
                 let normalized = route.replace(['/', '?', '=', '&'], "_");
                 let target = make_id(&["route", &normalized]);
                 self.add_node(&target, &format!("Route {route}"), "concept", None);
                 self.add_edge_with_context(owner, &target, "navigates", "route_path");
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    stamp_source_range(&mut edge.attributes, self.source, start, end);
+                }
             }
         }
         if let Ok(pattern) = Regex::new(
@@ -551,12 +562,21 @@ impl<'a> State<'a> {
         ) {
             let values: Vec<_> = pattern
                 .captures_iter(body)
-                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+                .filter_map(|capture| {
+                    Some((
+                        capture.get(1)?.as_str().to_owned(),
+                        body_start + capture.get(0)?.start(),
+                        body_start + capture.get(0)?.end(),
+                    ))
+                })
                 .collect();
-            for route in values {
+            for (route, start, end) in values {
                 let target = make_id(&["route", &route.replace('.', "_")]);
                 self.add_node(&target, &route, "concept", None);
                 self.add_edge_with_context(owner, &target, "navigates", "route_const");
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    stamp_source_range(&mut edge.attributes, self.source, start, end);
+                }
             }
         }
         if let Ok(pattern) = Regex::new(
@@ -564,12 +584,21 @@ impl<'a> State<'a> {
         ) {
             let values: Vec<_> = pattern
                 .captures_iter(body)
-                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+                .filter_map(|capture| {
+                    Some((
+                        capture.get(1)?.as_str().to_owned(),
+                        body_start + capture.get(0)?.start(),
+                        body_start + capture.get(0)?.end(),
+                    ))
+                })
                 .collect();
-            for route in values {
+            for (route, start, end) in values {
                 let target = make_id(&[&route]);
                 self.add_node(&target, &route, "code", None);
                 self.add_edge_with_context(owner, &target, "navigates", "route_object");
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    stamp_source_range(&mut edge.attributes, self.source, start, end);
+                }
             }
         }
     }
@@ -644,7 +673,7 @@ impl<'a> State<'a> {
             self.add_node(&target, &value, "code", None);
             self.add_edge_with_context(owner, &target, relation, context);
             if let Some(edge) = self.extraction.edges.last_mut() {
-                stamp_source_range(&mut edge.attributes, self.text.as_bytes(), start, end);
+                stamp_source_range(&mut edge.attributes, self.source, start, end);
             }
         }
     }
@@ -692,7 +721,7 @@ impl<'a> State<'a> {
     }
 
     fn line_at(&self, offset: usize) -> usize {
-        self.text.as_bytes()[..offset.min(self.text.len())]
+        self.source[..offset.min(self.source.len())]
             .iter()
             .filter(|byte| **byte == b'\n')
             .count()
@@ -735,7 +764,14 @@ fn strip_comments(source: &str) -> String {
         .replace_all(source, |captures: &regex::Captures<'_>| {
             let value = captures.get(0).map_or("", |value| value.as_str());
             if value.starts_with('/') {
-                String::new()
+                value
+                    .bytes()
+                    .map(|byte| match byte {
+                        b'\n' => '\n',
+                        b'\r' => '\r',
+                        _ => ' ',
+                    })
+                    .collect::<String>()
             } else {
                 value.to_owned()
             }

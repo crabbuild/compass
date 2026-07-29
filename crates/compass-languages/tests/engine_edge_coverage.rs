@@ -224,6 +224,92 @@ fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn 
     Ok(())
 }
 
+struct NavigationSite {
+    start: usize,
+    end: usize,
+    line: u64,
+    column: u64,
+}
+
+fn dart_navigation_sites(source: &[u8]) -> Result<Vec<NavigationSite>, Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("navigation.dart");
+    fs::write(&path, source)?;
+    let extraction = Engine::default().extract(&path)?;
+    extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "navigates" && edge.string("context") == "route_path"
+        })
+        .map(|edge| {
+            let start = edge.attributes["start_byte"]
+                .as_u64()
+                .ok_or("missing start_byte")?;
+            let end = edge.attributes["end_byte"]
+                .as_u64()
+                .ok_or("missing end_byte")?;
+            let line = edge.attributes["line_start"]
+                .as_u64()
+                .ok_or("missing line_start")?;
+            let column = edge.attributes["column_start"]
+                .as_u64()
+                .ok_or("missing column_start")?;
+            Ok(NavigationSite {
+                start: usize::try_from(start)?,
+                end: usize::try_from(end)?,
+                line,
+                column,
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn dart_ascii_navigation_range_slices_original_source() -> Result<(), Box<dyn Error>> {
+    let source = b"void run() { go('/home'); }\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (1, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_multiline_comment_preserves_navigation_bytes_and_lines() -> Result<(), Box<dyn Error>> {
+    let source = b"/* lead\ncomment */\nvoid run() { go('/home'); }\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (3, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dyn Error>> {
+    let source = "const label = 'café';\nvoid run() { go('/home'); }\n".as_bytes();
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (2, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_minified_navigation_keeps_same_line_occurrences_distinct() -> Result<(), Box<dyn Error>> {
+    let source = b"void run(){go('/a');go('/b');}\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 2);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/a'");
+    assert_eq!(&source[sites[1].start..sites[1].end], b"go('/b'");
+    assert_ne!(sites[0].start, sites[1].start);
+    Ok(())
+}
+
 #[test]
 fn repeated_razor_component_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

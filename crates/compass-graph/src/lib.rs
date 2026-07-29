@@ -43,6 +43,7 @@ type NodeRecord = RawNodeRecord;
 type EndpointAliases = HashMap<String, BTreeSet<String>>;
 
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
+const OCCURRENCE_RULE: &str = "_occurrence_rule";
 const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
 
 #[derive(Clone, Copy)]
@@ -241,6 +242,7 @@ fn build_from_owned_extraction(
 
     let mut source_edges = std::mem::take(&mut extraction.edges);
     for edge in &mut source_edges {
+        preserve_occurrence_rule(&mut edge.attributes);
         let original_source = edge.source.clone();
         let original_target = edge.target.clone();
         let (source, mut rewrites) =
@@ -302,6 +304,7 @@ fn build_from_owned_extraction(
             sanitize_numeric(&mut edge.attributes, "confidence_score");
             backfill_source_file(&mut edge, &nodes, &positions);
             normalize_attribute_path(&mut edge.attributes, "source_file", root);
+            normalize_source_anchor_path(&mut edge.attributes, root);
             if is_cross_language_phantom(&edge, &nodes, &positions) {
                 return (None, diagnostics);
             }
@@ -696,6 +699,20 @@ fn stamp_graph_endpoint_rewrites(edge: &mut EdgeRecord, rewrites: &[EndpointRewr
     stamp_endpoint_rewrite_attributes(&mut edge.attributes, rewrites);
 }
 
+fn preserve_occurrence_rule(attributes: &mut Map<String, Value>) {
+    if attributes.contains_key(OCCURRENCE_RULE) {
+        return;
+    }
+    let Some(rule) = attributes
+        .get("rule")
+        .and_then(Value::as_str)
+        .filter(|rule| !rule.trim().is_empty() && !is_endpoint_synthesis_rule(rule))
+    else {
+        return;
+    };
+    attributes.insert(OCCURRENCE_RULE.to_owned(), Value::String(rule.to_owned()));
+}
+
 fn stamp_endpoint_rewrite_attributes(
     attributes: &mut Map<String, Value>,
     rewrites: &[EndpointRewriteEvidence],
@@ -858,6 +875,7 @@ fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String
         stamp_endpoint_rewrite_attributes(&mut merged, &[]);
     }
     merged.insert(COALESCED_EDGE_EVIDENCE.to_owned(), Value::Array(snapshots));
+    merged.sort_keys();
     *existing = merged;
 }
 
@@ -1025,6 +1043,21 @@ fn normalize_attribute_path(attributes: &mut Map<String, Value>, key: &str, root
     };
     let normalized = normalize_source_file(value, root);
     attributes.insert(key.to_owned(), Value::String(normalized));
+}
+
+fn normalize_source_anchor_path(attributes: &mut Map<String, Value>, root: Option<&Path>) {
+    for key in ["source_anchor", "sourceAnchor", "anchor"] {
+        let Some(anchor) = attributes.get_mut(key).and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let Some(file) = anchor.get("file").and_then(Value::as_str) else {
+            continue;
+        };
+        anchor.insert(
+            "file".to_owned(),
+            Value::String(normalize_source_file(file, root)),
+        );
+    }
 }
 
 fn normalize_source_file(value: &str, root: Option<&Path>) -> String {
@@ -1237,14 +1270,9 @@ fn edge_occurrence_key(edge: &EdgeRecord) -> (String, String, String, String, St
 }
 
 fn edge_anchor_key(attributes: &Map<String, Value>) -> String {
-    if let Some(anchor) = attributes
-        .get("source_anchor")
-        .or_else(|| attributes.get("sourceAnchor"))
-        .or_else(|| attributes.get("anchor"))
-        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
-    {
+    if let Some(anchor) = canonical_edge_anchor(attributes) {
         return serde_json::to_string(&[
-            Value::String(anchor.file.replace('\\', "/")),
+            Value::String(anchor.file),
             Value::from(anchor.start_byte),
             Value::from(anchor.end_byte),
             Value::from(anchor.start_line),
@@ -1257,17 +1285,9 @@ fn edge_anchor_key(attributes: &Map<String, Value>) -> String {
     serde_json::to_string(&[
         attributes
             .get("source_file")
-            .cloned()
+            .and_then(Value::as_str)
+            .map(|file| Value::String(file.replace('\\', "/")))
             .unwrap_or(Value::Null),
-        attributes.get("start_byte").cloned().unwrap_or(Value::Null),
-        attributes.get("end_byte").cloned().unwrap_or(Value::Null),
-        attributes.get("line_start").cloned().unwrap_or(Value::Null),
-        attributes
-            .get("column_start")
-            .cloned()
-            .unwrap_or(Value::Null),
-        attributes.get("line_end").cloned().unwrap_or(Value::Null),
-        attributes.get("column_end").cloned().unwrap_or(Value::Null),
         attributes
             .get("source_location")
             .cloned()
@@ -1276,7 +1296,35 @@ fn edge_anchor_key(attributes: &Map<String, Value>) -> String {
     .unwrap_or_default()
 }
 
+fn canonical_edge_anchor(attributes: &Map<String, Value>) -> Option<SourceAnchor> {
+    if let Some(mut anchor) = attributes
+        .get("source_anchor")
+        .or_else(|| attributes.get("sourceAnchor"))
+        .or_else(|| attributes.get("anchor"))
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+    {
+        anchor.file = anchor.file.replace('\\', "/");
+        return Some(anchor);
+    }
+    Some(SourceAnchor {
+        file: attributes.get("source_file")?.as_str()?.replace('\\', "/"),
+        start_byte: attributes.get("start_byte")?.as_u64()?,
+        end_byte: attributes.get("end_byte")?.as_u64()?,
+        start_line: u32::try_from(attributes.get("line_start")?.as_u64()?).ok()?,
+        start_column: u32::try_from(attributes.get("column_start")?.as_u64()?).ok()?,
+        end_line: u32::try_from(attributes.get("line_end")?.as_u64()?).ok()?,
+        end_column: u32::try_from(attributes.get("column_end")?.as_u64()?).ok()?,
+    })
+}
+
 fn edge_rule_key(attributes: &Map<String, Value>) -> String {
+    if let Some(rule) = attributes
+        .get(OCCURRENCE_RULE)
+        .and_then(Value::as_str)
+        .filter(|rule| !is_endpoint_synthesis_rule(rule))
+    {
+        return rule.to_owned();
+    }
     if attributes
         .get("_endpoint_rewrite_rules")
         .and_then(Value::as_array)
@@ -1284,11 +1332,27 @@ fn edge_rule_key(attributes: &Map<String, Value>) -> String {
     {
         return String::new();
     }
-    attributes
+    let rule = attributes
         .get("rule")
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
+        .unwrap_or_default();
+    if is_endpoint_synthesis_rule(rule) {
+        String::new()
+    } else {
+        rule.to_owned()
+    }
+}
+
+fn is_endpoint_synthesis_rule(rule: &str) -> bool {
+    matches!(
+        rule,
+        "language-family-stub-resolution"
+            | "unique-stub-endpoint-resolution"
+            | "graph-semantic-id-remap"
+            | "graph-document-twin-remap"
+            | "graph-ghost-endpoint-remap"
+            | "graph-normalized-id-remap"
+    )
 }
 
 fn has_parallel_edges(links: &[EdgeRecord], directed: bool) -> bool {

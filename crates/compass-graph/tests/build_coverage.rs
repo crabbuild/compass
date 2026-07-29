@@ -522,6 +522,169 @@ fn graph_assembly_preserves_distinct_relationship_occurrences_and_merges_identic
     Ok(())
 }
 
+fn remapped_rule_extraction(
+    edges: Vec<serde_json::Value>,
+) -> Result<Extraction, serde_json::Error> {
+    serde_json::from_value(json!({
+        "nodes":[
+            {
+                "id":"ast_caller",
+                "label":"Caller",
+                "qualified_name":"crate::Caller",
+                "symbol_kind":"function",
+                "source_file":"src/lib.rs",
+                "_origin":"ast"
+            },
+            {
+                "id":"semantic_caller",
+                "label":"Caller",
+                "qualified_name":"crate::Caller",
+                "symbol_kind":"function",
+                "source_file":"src/lib.rs",
+                "_origin":"semantic"
+            },
+            {"id":"callee","label":"callee()"}
+        ],
+        "edges":edges
+    }))
+}
+
+fn ruled_call(source: &str, rule: &str, extractor: &str) -> serde_json::Value {
+    json!({
+        "source":source,
+        "target":"callee",
+        "relation":"calls",
+        "rule":rule,
+        "extractor":extractor,
+        "source_anchor":{
+            "file":"src/lib.rs",
+            "startByte":30,
+            "endByte":38,
+            "startLine":1,
+            "startColumn":30,
+            "endLine":1,
+            "endColumn":38
+        }
+    })
+}
+
+#[test]
+fn direct_and_remapped_same_rule_occurrences_merge_order_independently()
+-> Result<(), Box<dyn Error>> {
+    let direct = ruled_call("ast_caller", "rust-call-expression", "test.direct");
+    let remapped = ruled_call("semantic_caller", "rust-call-expression", "test.remapped");
+    let forward = build_from_extraction(
+        &remapped_rule_extraction(vec![direct.clone(), remapped.clone()])?,
+        true,
+        None,
+    );
+    let reverse = build_from_extraction(
+        &remapped_rule_extraction(vec![remapped, direct])?,
+        true,
+        None,
+    );
+
+    assert_eq!(serde_json::to_vec(&forward)?, serde_json::to_vec(&reverse)?);
+    assert_eq!(forward.links.len(), 1, "links={:?}", forward.links);
+    Ok(())
+}
+
+#[test]
+fn remapped_same_site_occurrences_with_distinct_producer_rules_remain_distinct()
+-> Result<(), Box<dyn Error>> {
+    let extraction = remapped_rule_extraction(vec![
+        ruled_call("semantic_caller", "rust-call-expression", "test.rust"),
+        ruled_call("semantic_caller", "scip-call-reference", "test.scip"),
+    ])?;
+
+    let document = build_from_extraction(&extraction, true, None);
+
+    assert_eq!(document.links.len(), 2, "links={:?}", document.links);
+    Ok(())
+}
+
+#[test]
+fn endpoint_synthesis_rule_is_evidence_not_occurrence_identity() -> Result<(), Box<dyn Error>> {
+    let mut direct = ruled_call("ast_caller", "", "test.direct");
+    direct
+        .as_object_mut()
+        .ok_or("direct edge must be an object")?
+        .remove("rule");
+    let synthesized = ruled_call(
+        "semantic_caller",
+        "unique-stub-endpoint-resolution",
+        "test.synthesized",
+    );
+
+    let document = build_from_extraction(
+        &remapped_rule_extraction(vec![direct, synthesized])?,
+        true,
+        None,
+    );
+
+    assert_eq!(document.links.len(), 1, "links={:?}", document.links);
+    Ok(())
+}
+
+#[test]
+fn structured_and_scalar_exact_anchors_merge_commutatively() -> Result<(), Box<dyn Error>> {
+    let structured = json!({
+        "source":"caller",
+        "target":"callee",
+        "relation":"calls",
+        "rule":"direct-call",
+        "extractor":"test.structured",
+        "source_anchor":{
+            "file":"src/lib.rs",
+            "startByte":30,
+            "endByte":38,
+            "startLine":2,
+            "startColumn":4,
+            "endLine":2,
+            "endColumn":12
+        }
+    });
+    let scalar = json!({
+        "source":"caller",
+        "target":"callee",
+        "relation":"calls",
+        "rule":"direct-call",
+        "extractor":"test.scalar",
+        "source_file":"src/lib.rs",
+        "source_location":"legacy-location-that-must-not-split-an-exact-range",
+        "start_byte":30,
+        "end_byte":38,
+        "line_start":2,
+        "column_start":4,
+        "line_end":2,
+        "column_end":12
+    });
+    let extraction = |edges| {
+        serde_json::from_value::<Extraction>(json!({
+            "nodes":[
+                {"id":"caller","label":"caller()"},
+                {"id":"callee","label":"callee()"}
+            ],
+            "edges":edges
+        }))
+    };
+
+    let forward = build_from_extraction(
+        &extraction(vec![structured.clone(), scalar.clone()])?,
+        true,
+        None,
+    );
+    let reverse = build_from_extraction(&extraction(vec![scalar, structured])?, true, None);
+
+    assert_eq!(serde_json::to_vec(&forward)?, serde_json::to_vec(&reverse)?);
+    assert_eq!(forward.links.len(), 1, "links={:?}", forward.links);
+    let evidence = forward.links[0].attributes["_coalesced_edge_evidence"]
+        .as_array()
+        .ok_or("missing coalesced evidence")?;
+    assert_eq!(evidence.len(), 2);
+    Ok(())
+}
+
 #[test]
 fn opposite_direction_relations_are_preserved_in_undirected_documents() -> Result<(), Box<dyn Error>>
 {
