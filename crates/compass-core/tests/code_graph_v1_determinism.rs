@@ -7,7 +7,7 @@ use compass_core::{BuildOptions, build_local_graph};
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
-use compass_model::provenance::ResolutionState;
+use compass_model::provenance::{EvidenceConfidence, ResolutionState};
 
 const SOURCE: &str = r#"
 pub struct Store;
@@ -109,24 +109,24 @@ def refresh_inventory():
         (
             "src/admin/routes.tsx",
             r#"import { createBrowserRouter } from "react-router-dom";
-import { AdminPage as Screen } from "./AdminPage";
+import Screen from "./AdminPage";
 export const router = createBrowserRouter([{ path: "/admin", Component: Screen }]);
 "#,
         ),
         (
             "src/admin/AdminPage.tsx",
-            "export function AdminPage() { return null; }\n",
+            "export default function AdminPage() { return null; }\n",
         ),
         (
             "src/public/routes.tsx",
             r#"import { createBrowserRouter } from "react-router-dom";
-import { PublicPage as Screen } from "./PublicPage";
+import Screen from "./PublicPage";
 export const router = createBrowserRouter([{ path: "/public", Component: Screen }]);
 "#,
         ),
         (
             "src/public/PublicPage.tsx",
-            "export function PublicPage() { return null; }\n",
+            "export default function PublicPage() { return null; }\n",
         ),
         (
             "nuxt/middleware/auth.ts",
@@ -270,26 +270,65 @@ function secondHandler() {}
             .count(),
         2
     );
-    let conflict_route = graph
+    let conflict_routes = graph
         .nodes
         .iter()
-        .find(|node| {
+        .filter(|node| {
             matches!(
                 node.details.as_ref(),
                 Some(NodeDetails::Route(details)) if details.path == "/conflict"
             )
         })
-        .ok_or("missing conflict route")?;
-    let conflict_targets = graph
-        .links
-        .iter()
-        .filter(|edge| edge.kind == EdgeKind::RoutesTo && edge.source == conflict_route.id)
-        .filter_map(|edge| graph.nodes.iter().find(|node| node.id == edge.target))
-        .map(|node| node.name.as_str())
-        .collect::<BTreeSet<_>>();
+        .collect::<Vec<_>>();
+    assert_eq!(conflict_routes.len(), 2);
+    let mut conflict_references = BTreeSet::new();
+    for route in conflict_routes {
+        let anchor = route.source.as_ref().ok_or("missing conflict anchor")?;
+        let Some(NodeDetails::Route(details)) = route.details.as_ref() else {
+            return Err("missing conflict route details".into());
+        };
+        let [stage] = details.stages.as_slice() else {
+            return Err("conflict route must have one handler stage".into());
+        };
+        assert_eq!(stage.stage, RouteStage::Handler);
+        assert_eq!(stage.position, 0);
+        assert_eq!(stage.resolution, ResolutionState::Exact);
+        assert_eq!(stage.candidates.len(), 1);
+        let target = stage
+            .target
+            .as_deref()
+            .ok_or("missing conflict stage target")?;
+        assert_eq!(stage.candidates[0].node_id, target);
+        conflict_references.insert(stage.reference.as_str());
+
+        let edges = graph
+            .links
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::RoutesTo && edge.source == route.id)
+            .collect::<Vec<_>>();
+        let [edge] = edges.as_slice() else {
+            return Err("conflict route must have one authoritative edge".into());
+        };
+        assert_eq!(edge.target, target);
+        assert_eq!(edge.relationship_site.as_ref(), Some(anchor));
+        assert!(
+            edge.evidence
+                .iter()
+                .all(|evidence| evidence.confidence == EvidenceConfidence::Exact)
+        );
+        let target_node = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == target)
+            .ok_or("missing conflict target node")?;
+        assert_eq!(
+            target_node.name.trim_end_matches("()"),
+            stage.reference.as_str()
+        );
+    }
     assert_eq!(
-        conflict_targets,
-        BTreeSet::from(["firstHandler()", "secondHandler()"])
+        conflict_references,
+        BTreeSet::from(["firstHandler", "secondHandler"])
     );
     Ok(())
 }

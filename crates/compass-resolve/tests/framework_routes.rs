@@ -6,8 +6,8 @@ use compass_languages::{
     Extraction, FrameworkLimits, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin,
     RawNodeRecord, RawRouteFact,
 };
-use compass_model::code_graph::{EdgeDetails, EdgeKind, NodeKind, RouteStage};
-use compass_model::provenance::{EvidenceOrigin, ResolutionState};
+use compass_model::code_graph::{EdgeDetails, EdgeKind, NodeKind, RouteStage, RouteStageDetails};
+use compass_model::provenance::{EvidenceOrigin, ResolutionState, SourceAnchor};
 use compass_resolve::frameworks::{
     FrameworkResolutionError, RouteStageRole, resolve_and_publish_framework_routes, resolve_routes,
 };
@@ -260,6 +260,7 @@ fn every_declared_stage_retains_resolution_without_publishing_ambiguous_edges() 
 #[test]
 fn conflicting_route_registrations_at_distinct_sites_are_retained() {
     let first = route("first_handler");
+    let duplicate = first.clone();
     let mut second = route("second_handler");
     second.anchor.start_byte = 80;
     second.anchor.end_byte = 112;
@@ -276,6 +277,7 @@ fn conflicting_route_registrations_at_distinct_sites_are_retained() {
         ],
         framework_facts: vec![
             RawFrameworkFact::Route(first),
+            RawFrameworkFact::Route(duplicate),
             RawFrameworkFact::Route(second),
         ],
         ..Extraction::default()
@@ -285,13 +287,61 @@ fn conflicting_route_registrations_at_distinct_sites_are_retained() {
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())
             .unwrap_or_else(|_| std::process::abort());
     assert_eq!(resolved.len(), 2);
-    let targets = extraction
-        .edges
+    let route_nodes = extraction
+        .nodes
         .iter()
-        .filter(|edge| edge.string("relation") == "routes_to")
-        .map(|edge| edge.target.as_str())
-        .collect::<HashSet<_>>();
-    assert_eq!(targets, HashSet::from(["first-handler", "second-handler"]));
+        .filter(|node| node.string("symbol_kind") == "route")
+        .collect::<Vec<_>>();
+    assert_eq!(route_nodes.len(), 2);
+    assert_ne!(route_nodes[0].id, route_nodes[1].id);
+
+    for route_node in route_nodes {
+        let anchor = route_node
+            .attributes
+            .get("source_anchor")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<SourceAnchor>(value).ok())
+            .unwrap_or_else(|| std::process::abort());
+        let stages = route_node
+            .attributes
+            .get("stages")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<Vec<RouteStageDetails>>(value).ok())
+            .unwrap_or_else(|| std::process::abort());
+        let [stage] = stages.as_slice() else {
+            std::process::abort();
+        };
+        let (expected_reference, expected_target, expected_line) =
+            if stage.reference == "first_handler" {
+                ("first_handler", "first-handler", 2)
+            } else {
+                ("second_handler", "second-handler", 5)
+            };
+        assert_eq!(anchor.start_line, expected_line);
+        assert_eq!(stage.reference, expected_reference);
+        assert_eq!(stage.resolution, ResolutionState::Exact);
+        assert_eq!(stage.target.as_deref(), Some(expected_target));
+        assert_eq!(stage.candidates.len(), 1);
+        assert_eq!(stage.candidates[0].node_id, expected_target);
+
+        let edges = extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "routes_to" && edge.source == route_node.id)
+            .collect::<Vec<_>>();
+        let [edge] = edges.as_slice() else {
+            std::process::abort();
+        };
+        assert_eq!(edge.target, expected_target);
+        assert_eq!(edge.string("confidence"), "EXTRACTED");
+        let edge_anchor = edge
+            .attributes
+            .get("source_anchor")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<SourceAnchor>(value).ok())
+            .unwrap_or_else(|| std::process::abort());
+        assert_eq!(edge_anchor, anchor);
+    }
 }
 
 #[test]

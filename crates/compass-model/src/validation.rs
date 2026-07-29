@@ -429,7 +429,10 @@ fn endpoint_kinds_are_valid(
 ) -> bool {
     match kind {
         EdgeKind::Contains => source.kind.is_container(),
-        EdgeKind::Calls => source.kind.is_callable() && target.kind.is_callable(),
+        EdgeKind::Calls => {
+            (source.kind.is_callable() || matches!(source.kind, NodeKind::File | NodeKind::Module))
+                && target.kind.is_callable()
+        }
         EdgeKind::Imports => {
             matches!(
                 source.kind,

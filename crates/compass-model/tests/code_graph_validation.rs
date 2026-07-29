@@ -141,10 +141,38 @@ fn whole_document_validation_rejects_an_invalid_endpoint_kind_pair() {
 }
 
 #[test]
+fn top_level_calls_accept_file_and_module_sources_but_require_callable_targets() {
+    for source_kind in [NodeKind::File, NodeKind::Module] {
+        let mut graph = document();
+        graph.nodes[0].kind = source_kind;
+        graph.links[0].kind = EdgeKind::Calls;
+        let id = edge_id("route", EdgeKind::Calls, "handler", Some(&anchor()), None);
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "rejected intentional {source_kind:?} -> function top-level call"
+        );
+    }
+
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::File;
+    graph.nodes[1].kind = NodeKind::Class;
+    graph.links[0].kind = EdgeKind::Calls;
+    let id = edge_id("route", EdgeKind::Calls, "handler", Some(&anchor()), None);
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(
+        validate_code_graph(&graph).is_err(),
+        "top-level calls must still target a callable node"
+    );
+}
+
+#[test]
 fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Contains, NodeKind::Function, NodeKind::File),
-        (EdgeKind::Calls, NodeKind::File, NodeKind::Function),
+        (EdgeKind::Calls, NodeKind::File, NodeKind::Class),
         (EdgeKind::Imports, NodeKind::Variable, NodeKind::Function),
         (EdgeKind::Extends, NodeKind::Class, NodeKind::Function),
         (EdgeKind::Implements, NodeKind::Class, NodeKind::Class),

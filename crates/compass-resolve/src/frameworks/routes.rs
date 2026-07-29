@@ -132,6 +132,12 @@ pub fn publish_resolved_routes(
             &route.operation,
             &route.normalized_path,
             &route.declaring_scope,
+            &route.anchor.start_byte.to_string(),
+            &route.anchor.end_byte.to_string(),
+            &route.anchor.start_line.to_string(),
+            &route.anchor.start_column.to_string(),
+            &route.anchor.end_line.to_string(),
+            &route.anchor.end_column.to_string(),
         ]);
         if existing_nodes.insert(route_id.clone()) {
             extraction.nodes.push(RawNodeRecord {
@@ -456,15 +462,19 @@ fn import_alias_matches(
         return false;
     }
     let expected_export = normalize_reference(&expected_export);
-    let name_matches = [
-        node.string("qualified_name"),
-        node.string("name"),
-        node.label().to_owned(),
-    ]
-    .into_iter()
-    .map(|name| normalize_reference(&name))
-    .any(|name| terminal_name(&name) == expected_export);
-    name_matches
+    let export_matches = if alias.imported == "default" && suffix.is_empty() {
+        node.attributes.get("export_name").and_then(Value::as_str) == Some("default")
+    } else {
+        [
+            node.string("qualified_name"),
+            node.string("name"),
+            node.label().to_owned(),
+        ]
+        .into_iter()
+        .map(|name| normalize_reference(&name))
+        .any(|name| terminal_name(&name) == expected_export)
+    };
+    export_matches
         && node
             .attributes
             .get("source_file")

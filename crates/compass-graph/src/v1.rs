@@ -1486,7 +1486,7 @@ fn node_identity(
     qualified_name: &str,
     record: &str,
     details: Option<&NodeDetails>,
-    _source: Option<&SourceAnchor>,
+    source: Option<&SourceAnchor>,
 ) -> Result<String, GraphError> {
     let id = match kind {
         NodeKind::File => file_id(source_path),
@@ -1500,6 +1500,7 @@ fn node_identity(
                 &route.operation,
                 &route.path,
                 &route.declaring_scope,
+                source,
             )
         }
         NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue => {

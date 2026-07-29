@@ -170,7 +170,7 @@ fn import_alias_metadata_and_near_matches_remain_conservative()
 }
 
 #[test]
-fn import_aliases_are_scoped_by_declaring_module_and_keep_export_identity()
+fn default_import_aliases_are_scoped_by_declaring_module_and_follow_default_exports()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = Engine::default();
     let mut extraction = Extraction::default();
@@ -178,24 +178,24 @@ fn import_aliases_are_scoped_by_declaring_module_and_keep_export_identity()
         (
             "src/admin/routes.tsx",
             r#"import { createBrowserRouter } from "react-router-dom";
-import { AdminPage as Screen } from "./AdminPage";
+import Screen from "./AdminPage";
 export const router = createBrowserRouter([{ path: "/admin", Component: Screen }]);
 "#,
         ),
         (
             "src/admin/AdminPage.tsx",
-            "export function AdminPage() { return null; }\n",
+            "export default function AdminPage() { return null; }\n",
         ),
         (
             "src/public/routes.tsx",
             r#"import { createBrowserRouter } from "react-router-dom";
-import { PublicPage as Screen } from "./PublicPage";
+import Screen from "./PublicPage";
 export const router = createBrowserRouter([{ path: "/public", Component: Screen }]);
 "#,
         ),
         (
             "src/public/PublicPage.tsx",
-            "export function PublicPage() { return null; }\n",
+            "export default function PublicPage() { return null; }\n",
         ),
     ] {
         let mut source = engine.extract_source(Path::new(path), source.as_bytes())?;

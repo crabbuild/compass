@@ -42,6 +42,7 @@ pub(super) fn attach_import_aliases(
     root: Node<'_>,
     extraction: &mut Extraction,
 ) {
+    attach_default_export_identities(path, source, root, extraction);
     let mut aliases = Vec::new();
     collect_import_aliases(root, source, &mut aliases);
     aliases.sort();
@@ -81,6 +82,62 @@ pub(super) fn attach_import_aliases(
                 ),
             ]),
         });
+    }
+}
+
+fn attach_default_export_identities(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+) {
+    let mut exports = Vec::new();
+    collect_default_export_identities(root, source, &mut exports);
+    let source_file = path.to_string_lossy();
+    for (name, line) in exports {
+        if let Some(target) = extraction.nodes.iter_mut().find(|node| {
+            node.attributes.get("source_file").and_then(Value::as_str) == Some(source_file.as_ref())
+                && node.attributes.get("line_start").and_then(Value::as_u64) == Some(line)
+                && node.label().trim_start_matches('.').trim_end_matches("()") == name
+        }) {
+            target
+                .attributes
+                .insert("export_name".into(), Value::String("default".into()));
+        }
+    }
+}
+
+fn collect_default_export_identities(
+    node: Node<'_>,
+    source: &[u8],
+    exports: &mut Vec<(String, u64)>,
+) {
+    if node.kind() == "export_statement"
+        && node_text(node, source)
+            .trim_start()
+            .starts_with("export default")
+    {
+        let mut cursor = node.walk();
+        if let Some(declaration) = node.named_children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "function_declaration" | "class_declaration" | "abstract_class_declaration"
+            )
+        }) && let Some(name) = declaration
+            .child_by_field_name("name")
+            .map(|name| node_text(name, source))
+            .filter(|name| is_identifier(name))
+        {
+            exports.push((
+                name.to_owned(),
+                u64::try_from(declaration.start_position().row + 1).unwrap_or(u64::MAX),
+            ));
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_default_export_identities(child, source, exports);
     }
 }
 
