@@ -514,3 +514,255 @@ SELECT enriched.id FROM enriched;
     );
     Ok(())
 }
+
+#[test]
+fn mysql_dml_modifiers_preserve_real_write_targets_and_omit_modifiers() {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+UPDATE LOW_PRIORITY IGNORE app.users SET id = 1;
+INSERT LOW_PRIORITY IGNORE INTO app.users(id) VALUES (1);
+DELETE LOW_PRIORITY QUICK IGNORE FROM app.users;
+UPDATE IGNORE LOW_PRIORITY app.users SET id = 2;
+"#;
+    let extraction = extract_sql_content(Path::new("db/mysql_modifiers.sql"), source);
+    let users = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.users")
+        .map(|node| node.id.as_str());
+    assert!(users.is_some(), "nodes={:?}", extraction.nodes);
+    let writes = extraction
+        .edges
+        .iter()
+        .filter(|edge| users == Some(edge.target.as_str()) && edge.string("relation") == "writes")
+        .collect::<Vec<_>>();
+    assert_eq!(writes.len(), 3, "edges={:?}", extraction.edges);
+    let write_sites = writes
+        .iter()
+        .filter_map(|edge| {
+            edge.attributes
+                .get("start_byte")
+                .and_then(|value| value.as_u64())
+        })
+        .collect::<HashSet<_>>();
+    assert_eq!(write_sites.len(), 3, "writes={writes:?}");
+
+    let qualified_names = extraction
+        .nodes
+        .iter()
+        .map(|node| node.string("qualified_name").to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    for modifier in [
+        "low_priority",
+        "high_priority",
+        "delayed",
+        "quick",
+        "ignore",
+    ] {
+        assert!(
+            !qualified_names.contains(modifier),
+            "modifier became an exact entity {modifier:?}: {:?}",
+            extraction.nodes
+        );
+    }
+}
+
+#[test]
+fn incomplete_routine_bodies_recover_without_absorbing_following_statements()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE PROCEDURE app.broken_begin() AS BEGIN
+  UPDATE app.users SET id = 1;
+SELECT * FROM app.users;
+CREATE TABLE app.after_begin (id BIGINT);
+CREATE PROCEDURE app.broken_dollar() AS $tag$
+  UPDATE app.users SET id = 2;
+SELECT * FROM app.users;
+CREATE TABLE app.after_dollar (id BIGINT);
+"#;
+    let extraction = extract_sql_content(Path::new("db/incomplete_bodies.sql"), source);
+    for expected in [
+        "app.broken_begin",
+        "app.after_begin",
+        "app.broken_dollar",
+        "app.after_dollar",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .any(|node| node.string("qualified_name") == expected),
+            "missing recovered declaration {expected:?}: {:?}",
+            extraction.nodes
+        );
+    }
+    for owner_name in ["app.broken_begin", "app.broken_dollar"] {
+        let owner = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == owner_name)
+            .ok_or_else(|| format!("missing {owner_name}"))?;
+        assert!(
+            extraction.edges.iter().all(|edge| {
+                edge.source != owner.id
+                    || !matches!(edge.string("relation").as_str(), "reads" | "writes")
+            }),
+            "incomplete routine received exact body ownership: owner={owner:?}, edges={:?}",
+            extraction.edges
+        );
+    }
+    let queries = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "query")
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 2, "nodes={:?}", extraction.nodes);
+    assert!(
+        queries
+            .iter()
+            .all(|query| extraction.edges.iter().any(|edge| {
+                edge.source == query.id
+                    && edge.string("relation") == "reads"
+                    && extraction.nodes.iter().any(|node| {
+                        node.id == edge.target && node.string("qualified_name") == "app.users"
+                    })
+            }))
+    );
+
+    let coverage = extraction
+        .extensions
+        .get("_compass_v1_graph_coverage")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing partial coverage")?;
+    assert_eq!(coverage.len(), 2, "coverage={coverage:?}");
+    assert!(coverage.iter().all(|record| {
+        record.get("status").and_then(serde_json::Value::as_str) == Some("partial")
+            && record.get("capability").and_then(serde_json::Value::as_str)
+                == Some("sql:body_ownership")
+            && record.get("anchor").is_some()
+    }));
+    let diagnostics = extraction
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing incomplete-body diagnostics")?;
+    assert_eq!(diagnostics.len(), 2, "diagnostics={diagnostics:?}");
+    Ok(())
+}
+
+#[test]
+fn routine_statement_scopes_exclude_recursive_materialized_ctes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+CREATE PROCEDURE app.refresh() AS $body$
+BEGIN
+  UPDATE app.users SET id = 1;
+  WITH RECURSIVE recent AS NOT MATERIALIZED (
+    SELECT id FROM app.users
+  ), enriched AS MATERIALIZED (
+    SELECT recent.id FROM recent JOIN app.users ON app.users.id = recent.id
+  )
+  INSERT INTO app.audit SELECT id FROM enriched;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    let extraction = extract_sql_content(Path::new("db/routine_cte.sql"), source);
+    for invalid in ["recent", "enriched", "RECURSIVE", "MATERIALIZED"] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != invalid),
+            "routine CTE became entity {invalid:?}: {:?}",
+            extraction.nodes
+        );
+    }
+    let procedure = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.refresh")
+        .ok_or("missing procedure")?;
+    let users = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.users")
+        .ok_or("missing users")?;
+    let audit = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.audit")
+        .ok_or("missing audit")?;
+    let reads = extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == procedure.id
+                && edge.target == users.id
+                && edge.string("relation") == "reads"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 2, "edges={:?}", extraction.edges);
+    assert_ne!(
+        reads[0].attributes.get("start_byte"),
+        reads[1].attributes.get("start_byte")
+    );
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == procedure.id
+            && edge.target == users.id
+            && edge.string("relation") == "writes"
+    }));
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == procedure.id
+            && edge.target == audit.id
+            && edge.string("relation") == "writes"
+    }));
+    Ok(())
+}
+
+#[test]
+fn statement_scanner_ignores_semicolons_in_escaped_quoted_identifiers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."semi;""colon" (id BIGINT);
+CREATE TABLE `app`.`semi;``colon` (id BIGINT);
+CREATE TABLE [app].[semi;]]colon] (id BIGINT);
+SELECT * FROM "app"."semi;""colon";
+SELECT * FROM `app`.`semi;``colon`;
+SELECT * FROM [app].[semi;]]colon];
+"#;
+    let extraction = extract_sql_content(Path::new("db/quoted_semicolons.sql"), source);
+    let tables = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "database_table")
+        .collect::<Vec<_>>();
+    assert_eq!(tables.len(), 3, "nodes={:?}", extraction.nodes);
+    assert!(tables.iter().all(|table| {
+        table.string("qualified_name") != "app"
+            && extraction
+                .edges
+                .iter()
+                .any(|edge| edge.target == table.id && edge.string("relation") == "reads")
+    }));
+    let queries = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "query")
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 3, "nodes={:?}", extraction.nodes);
+    for query in queries {
+        let end = query
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing query end")?;
+        assert_eq!(source.get(end.saturating_sub(1)), Some(&b';'));
+        assert_eq!(query.string("_origin"), "artifact");
+        assert!(query.string("rule").starts_with("sql-text-"));
+    }
+    Ok(())
+}

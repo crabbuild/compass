@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::{Extraction, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{file_stem, make_id};
@@ -38,6 +38,8 @@ struct Statement {
     name: String,
     name_start: usize,
     name_end: usize,
+    body: Option<Site>,
+    incomplete_body_reason: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,6 +51,12 @@ struct Site {
 struct AccessBindings {
     aliases: HashMap<String, String>,
     cte_names: HashSet<String>,
+}
+
+struct BodyBoundary {
+    end: usize,
+    body: Option<Site>,
+    incomplete_reason: Option<String>,
 }
 
 impl Site {
@@ -116,6 +124,7 @@ impl<'a> State<'a> {
         // forward references without producing dangling graph endpoints.
         for statement in &declarations {
             self.add_declared_object(statement);
+            self.add_incomplete_body_evidence(statement);
         }
         for statement in &declarations {
             self.add_statement_relationships(statement);
@@ -306,18 +315,26 @@ impl<'a> State<'a> {
             return;
         };
         match statement.kind {
-            StatementKind::View | StatementKind::Procedure => {
-                self.add_data_access(&source, statement.offset, statement.end);
+            StatementKind::View => {
+                self.add_data_access_statement(&source, statement.offset, statement.end);
+            }
+            StatementKind::Procedure => {
+                if statement.incomplete_body_reason.is_some() {
+                    return;
+                }
+                if let Some(body) = statement.body {
+                    self.add_data_access_statements(&source, body.start, body.end);
+                } else {
+                    self.add_data_access_statement(&source, statement.offset, statement.end);
+                }
             }
             StatementKind::Trigger => {
-                if let Some(target_end) = self.link_trigger_to_table(statement, &source)
-                    && let Some(body_start) = trigger_body_start(
-                        &self.masked,
-                        target_end,
-                        statement.end.min(self.masked.len()),
-                    )
-                {
-                    self.add_data_access(&source, body_start, statement.end);
+                self.link_trigger_to_table(statement, &source);
+                if statement.incomplete_body_reason.is_some() {
+                    return;
+                }
+                if let Some(body) = statement.body {
+                    self.add_data_access_statements(&source, body.start, body.end);
                 }
             }
             StatementKind::Table | StatementKind::AlterTable => {
@@ -561,10 +578,16 @@ impl<'a> State<'a> {
             site,
             "sql-text-query-statement",
         );
-        self.add_data_access(&id, statement_start, end);
+        self.add_data_access_statement(&id, statement_start, end);
     }
 
-    fn add_data_access(&mut self, source: &str, start: usize, end: usize) {
+    fn add_data_access_statements(&mut self, source: &str, start: usize, end: usize) {
+        for site in scan_statement_ranges(&self.masked, start, end) {
+            self.add_data_access_statement(source, site.start, site.end);
+        }
+    }
+
+    fn add_data_access_statement(&mut self, source: &str, start: usize, end: usize) {
         let body = self.masked[start..end.min(self.masked.len())].to_owned();
         let bindings = AccessBindings {
             aliases: table_aliases(&body),
@@ -575,10 +598,14 @@ impl<'a> State<'a> {
         )];
         let write_patterns = [
             format!(
-                r"(?i)\bINSERT\s+(?:OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)\s+)?INTO\s+({OBJECT_REFERENCE})"
+                r"(?i)\bINSERT\s+(?:(?:OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)|(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY)(?:\s+IGNORE)?|IGNORE)\s+)?(?:INTO\s+)?({OBJECT_REFERENCE})"
             ),
-            format!(r"(?i)\bUPDATE\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"),
-            format!(r"(?i)\bDELETE\s+(?:{IDENTIFIER}\s+)?FROM\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"),
+            format!(
+                r"(?i)\bUPDATE\s+(?:LOW_PRIORITY\s+)?(?:IGNORE\s+)?(?:ONLY\s+)?({OBJECT_REFERENCE})"
+            ),
+            format!(
+                r"(?i)\bDELETE\s+(?:LOW_PRIORITY\s+)?(?:QUICK\s+)?(?:IGNORE\s+)?(?:{IDENTIFIER}\s+)?FROM\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
+            ),
             format!(r"(?i)\bMERGE\s+(?:INTO\s+)?({OBJECT_REFERENCE})"),
             format!(r"(?i)\bSELECT\b[\s\S]*?\bINTO\s+({OBJECT_REFERENCE})"),
         ];
@@ -620,6 +647,55 @@ impl<'a> State<'a> {
                 self.add_edge(source, &target, relation, site, "sql-text-data-access");
             }
         }
+    }
+
+    fn add_incomplete_body_evidence(&mut self, statement: &Statement) {
+        let Some(reason) = statement.incomplete_body_reason.as_deref() else {
+            return;
+        };
+        let site = Site::new(statement.offset, statement.end);
+        let anchor = self.source_anchor(site);
+        let coverage = json!({
+            "capability": "sql:body_ownership",
+            "producer": "compass.languages.sql",
+            "status": "partial",
+            "reason": reason,
+            "anchor": anchor.clone(),
+        });
+        self.push_extension_record("_compass_v1_graph_coverage", coverage);
+        let diagnostic = json!({
+            "severity": "warning",
+            "code": "sql_incomplete_body_boundary",
+            "message": reason,
+            "anchor": anchor,
+        });
+        self.push_extension_record("_compass_v1_graph_diagnostics", diagnostic);
+    }
+
+    fn push_extension_record(&mut self, key: &str, record: Value) {
+        match self.extraction.extensions.get_mut(key) {
+            Some(Value::Array(records)) => records.push(record),
+            Some(_) => {}
+            None => {
+                self.extraction
+                    .extensions
+                    .insert(key.to_owned(), Value::Array(vec![record]));
+            }
+        }
+    }
+
+    fn source_anchor(&self, site: Site) -> Value {
+        let mut range = Map::new();
+        crate::facts::stamp_source_range(&mut range, self.source, site.start, site.end);
+        json!({
+            "file": self.source_file,
+            "startByte": range.get("start_byte").cloned().unwrap_or(Value::from(0)),
+            "endByte": range.get("end_byte").cloned().unwrap_or(Value::from(0)),
+            "startLine": range.get("line_start").cloned().unwrap_or(Value::from(1)),
+            "startColumn": range.get("column_start").cloned().unwrap_or(Value::from(0)),
+            "endLine": range.get("line_end").cloned().unwrap_or(Value::from(1)),
+            "endColumn": range.get("column_end").cloned().unwrap_or(Value::from(0)),
+        })
     }
 
     fn add_database_object(
@@ -898,6 +974,8 @@ fn statements(source: &str) -> Vec<Statement> {
                 name: name.as_str().to_owned(),
                 name_start: name.start(),
                 name_end: name.end(),
+                body: None,
+                incomplete_body_reason: None,
             })
         })
         .collect::<Vec<_>>();
@@ -906,16 +984,20 @@ fn statements(source: &str) -> Vec<Statement> {
         let next = declarations
             .get(index + 1)
             .map_or(source.len(), |statement| statement.offset);
-        declarations[index].end = body_statement_end(
+        let boundary = body_statement_boundary(
             source,
             declarations[index].offset,
             &declarations[index].kind,
-        )
-        .unwrap_or_else(|| {
-            statement_end(source, declarations[index].offset)
-                .unwrap_or(next)
-                .min(next)
-        });
+            next,
+        );
+        if let Some(boundary) = boundary {
+            declarations[index].end = boundary.end;
+            declarations[index].body = boundary.body;
+            declarations[index].incomplete_body_reason = boundary.incomplete_reason;
+        } else {
+            declarations[index].end =
+                scan_statement_end(source, declarations[index].offset, next).unwrap_or(next);
+        }
     }
     let mut top_level = Vec::<Statement>::new();
     for declaration in declarations {
@@ -930,35 +1012,61 @@ fn statements(source: &str) -> Vec<Statement> {
     top_level
 }
 
-fn statement_end(source: &str, start: usize) -> Option<usize> {
-    source[start..].find(';').map(|offset| start + offset + 1)
-}
-
-fn body_statement_end(source: &str, start: usize, kind: &StatementKind) -> Option<usize> {
+fn body_statement_boundary(
+    source: &str,
+    start: usize,
+    kind: &StatementKind,
+    recovery_limit: usize,
+) -> Option<BodyBoundary> {
     if !matches!(kind, StatementKind::Procedure | StatementKind::Trigger) {
         return None;
     }
-    if let Some(open) = next_dollar_quote(source, start) {
+    if let Some(open) = body_dollar_quote_opener(source, start) {
         let delimiter = dollar_quote_delimiter_at(source, open)?;
         let content_start = open + delimiter.len();
-        let close = source[content_start..]
+        if let Some(close_start) = source[content_start..recovery_limit.min(source.len())]
             .find(delimiter)
-            .map(|offset| content_start + offset + delimiter.len())
-            .unwrap_or(source.len());
-        return statement_end(source, close).or(Some(close));
+            .map(|offset| content_start + offset)
+        {
+            let close_end = close_start + delimiter.len();
+            let end = scan_statement_end(source, close_end, source.len()).unwrap_or(close_end);
+            return Some(BodyBoundary {
+                end,
+                body: Some(Site::new(content_start, close_start)),
+                incomplete_reason: None,
+            });
+        }
+        let end = scan_statement_end(source, start, source.len())
+            .unwrap_or_else(|| first_line_end(source, open).min(source.len()));
+        return Some(BodyBoundary {
+            end,
+            body: None,
+            incomplete_reason: Some(format!(
+                "unterminated SQL routine dollar delimiter {delimiter:?}; body ownership omitted"
+            )),
+        });
     }
-    compound_statement_end(source, start)
+    compound_body_boundary(source, start, recovery_limit)
 }
 
-fn compound_statement_end(source: &str, start: usize) -> Option<usize> {
+fn compound_body_boundary(
+    source: &str,
+    start: usize,
+    recovery_limit: usize,
+) -> Option<BodyBoundary> {
     let words = sql_word_spans(source, start);
-    let begin_index = words
-        .iter()
-        .position(|(_, _, word)| word.eq_ignore_ascii_case("BEGIN"))?;
+    let header_end = first_unquoted_semicolon(source, start).unwrap_or(source.len());
+    let begin_index = words.iter().position(|(word_start, _, word)| {
+        *word_start < header_end && word.eq_ignore_ascii_case("BEGIN")
+    })?;
+    let body_start = words[begin_index].1;
     let mut depth = 0_u32;
     let mut case_depth = 0_u32;
     let mut skipped_case_suffix = None;
-    for (position, (_, end, word)) in words.iter().enumerate().skip(begin_index) {
+    for (position, (word_start, end, word)) in words.iter().enumerate().skip(begin_index) {
+        if *word_start >= recovery_limit {
+            break;
+        }
         if skipped_case_suffix == Some(position) {
             continue;
         }
@@ -993,10 +1101,22 @@ fn compound_statement_end(source: &str, start: usize) -> Option<usize> {
         }
         depth = depth.saturating_sub(1);
         if depth == 0 {
-            return statement_end(source, *end).or(Some(*end));
+            return Some(BodyBoundary {
+                end: scan_statement_end(source, *end, source.len()).unwrap_or(*end),
+                body: Some(Site::new(body_start, *word_start)),
+                incomplete_reason: None,
+            });
         }
     }
-    Some(source.len())
+    let end = scan_statement_end(source, start, source.len())
+        .unwrap_or_else(|| first_line_end(source, body_start).min(source.len()));
+    Some(BodyBoundary {
+        end,
+        body: None,
+        incomplete_reason: Some(
+            "unterminated SQL compound routine body; body ownership omitted".to_owned(),
+        ),
+    })
 }
 
 fn sql_word_spans(source: &str, start: usize) -> Vec<(usize, usize, &str)> {
@@ -1029,38 +1149,74 @@ fn sql_word_spans(source: &str, start: usize) -> Vec<(usize, usize, &str)> {
     words
 }
 
-fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<(usize, usize)> {
+fn scan_statement_ranges(source: &str, start: usize, end: usize) -> Vec<Site> {
     let mut output = Vec::new();
-    let mut segment_start = 0;
-    let mut index = 0;
-    while index < source.len() {
-        if let Some(declaration) = declarations
-            .iter()
-            .find(|declaration| declaration.offset == index)
+    let mut cursor = start.min(source.len());
+    let limit = end.min(source.len());
+    while cursor < limit {
+        let statement_end = scan_statement_end(source, cursor, limit).unwrap_or(limit);
+        if source[cursor..statement_end]
+            .bytes()
+            .any(|byte| !byte.is_ascii_whitespace())
         {
-            let end = declaration.end.min(source.len());
-            output.push((segment_start, end));
-            segment_start = end;
-            index = end;
-            continue;
+            output.push(Site::new(cursor, statement_end));
         }
-        if let Some(end) = skip_dollar_quote(source, index) {
-            index = end;
-            continue;
+        if statement_end <= cursor {
+            break;
         }
-        if source.as_bytes()[index] == b';' {
-            output.push((segment_start, index + 1));
-            segment_start = index + 1;
-        }
-        index += 1;
-    }
-    if segment_start < source.len() {
-        output.push((segment_start, source.len()));
+        cursor = statement_end;
     }
     output
 }
 
-fn next_dollar_quote(source: &str, start: usize) -> Option<usize> {
+fn scan_statement_end(source: &str, start: usize, end: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let limit = end.min(bytes.len());
+    let mut index = start.min(limit);
+    while index < limit {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)
+                .filter(|quoted_end| *quoted_end <= limit)
+                .unwrap_or(limit);
+            continue;
+        }
+        if let Some(dollar_end) = paired_dollar_quote_end(source, index, limit) {
+            index = dollar_end;
+            continue;
+        }
+        if bytes[index] == b';' {
+            return Some(index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<Site> {
+    let mut output = Vec::new();
+    let mut cursor = 0;
+    while cursor < source.len() {
+        let statement_start = skip_sql_whitespace(source, cursor);
+        if let Some(declaration) = declarations
+            .iter()
+            .find(|declaration| declaration.offset == statement_start)
+        {
+            let end = declaration.end.min(source.len());
+            output.push(Site::new(cursor, end));
+            cursor = end;
+            continue;
+        }
+        let end = scan_statement_end(source, cursor, source.len()).unwrap_or(source.len());
+        if end <= cursor {
+            break;
+        }
+        output.push(Site::new(cursor, end));
+        cursor = end;
+    }
+    output
+}
+
+fn body_dollar_quote_opener(source: &str, start: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut index = start;
     while index < bytes.len() {
@@ -1071,18 +1227,47 @@ fn next_dollar_quote(source: &str, start: usize) -> Option<usize> {
         if dollar_quote_delimiter_at(source, index).is_some() {
             return Some(index);
         }
+        if bytes[index] == b';' {
+            return None;
+        }
         index += 1;
     }
     None
 }
 
 fn skip_dollar_quote(source: &str, start: usize) -> Option<usize> {
+    paired_dollar_quote_end(source, start, source.len())
+}
+
+fn paired_dollar_quote_end(source: &str, start: usize, end: usize) -> Option<usize> {
     let delimiter = dollar_quote_delimiter_at(source, start)?;
     let content_start = start + delimiter.len();
-    source[content_start..]
+    source
+        .get(content_start..end.min(source.len()))?
         .find(delimiter)
         .map(|offset| content_start + offset + delimiter.len())
-        .or(Some(source.len()))
+}
+
+fn first_unquoted_semicolon(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = start.min(bytes.len());
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
+            continue;
+        }
+        if bytes[index] == b';' {
+            return Some(index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn first_line_end(source: &str, start: usize) -> usize {
+    source[start..]
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset + 1)
 }
 
 fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
@@ -1091,6 +1276,16 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
         return None;
     }
     let mut end = start + 1;
+    if bytes.get(end).copied() == Some(b'$') {
+        return source.get(start..=end);
+    }
+    if !bytes
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+    {
+        return None;
+    }
+    end += 1;
     while bytes
         .get(end)
         .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
@@ -1108,12 +1303,12 @@ fn query_statements(
         return Vec::new();
     };
     let mut output = Vec::new();
-    for (segment_start, segment_end) in top_level_statement_ranges(source, declarations) {
-        let Some(segment) = source.get(segment_start..segment_end) else {
+    for site in top_level_statement_ranges(source, declarations) {
+        let Some(segment) = source.get(site.start..site.end) else {
             continue;
         };
         let leading = segment.len() - segment.trim_start().len();
-        let statement_start = segment_start + leading;
+        let statement_start = site.start + leading;
         if declarations.iter().any(|declaration| {
             statement_start >= declaration.offset && statement_start < declaration.end
         }) {
@@ -1138,7 +1333,7 @@ fn query_statements(
                     .map(|(offset, operation)| (statement_start + offset, operation))
             });
         if let Some((operation_start, operation)) = operation {
-            output.push((statement_start, operation_start, segment_end, operation));
+            output.push((statement_start, operation_start, site.end, operation));
         }
     }
     output
@@ -1353,12 +1548,6 @@ fn trigger_events(statement: &str) -> Vec<String> {
             seen.insert(event.clone()).then_some(event)
         })
         .collect()
-}
-
-fn trigger_body_start(source: &str, start: usize, end: usize) -> Option<usize> {
-    let tail = source.get(start..end)?;
-    let marker = Regex::new(r"(?i)\b(?:FOR\s+EACH\s+ROW|AS|BEGIN)\b").ok()?;
-    marker.find(tail).map(|matched| start + matched.end())
 }
 
 fn matching_paren(source: &[u8], open: usize) -> Option<usize> {
@@ -1711,6 +1900,7 @@ fn is_reserved_object_reference(name: &str) -> bool {
                 | "case"
                 | "create"
                 | "database"
+                | "delayed"
                 | "delete"
                 | "distinct"
                 | "else"
@@ -1723,7 +1913,9 @@ fn is_reserved_object_reference(name: &str) -> bool {
                 | "function"
                 | "group"
                 | "having"
+                | "high_priority"
                 | "if"
+                | "ignore"
                 | "index"
                 | "inner"
                 | "insert"
@@ -1731,6 +1923,7 @@ fn is_reserved_object_reference(name: &str) -> bool {
                 | "join"
                 | "lateral"
                 | "left"
+                | "low_priority"
                 | "materialized"
                 | "matched"
                 | "merge"
@@ -1744,6 +1937,7 @@ fn is_reserved_object_reference(name: &str) -> bool {
                 | "order"
                 | "outer"
                 | "procedure"
+                | "quick"
                 | "recursive"
                 | "replace"
                 | "returning"
