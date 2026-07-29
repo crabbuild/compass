@@ -766,3 +766,254 @@ SELECT * FROM [app].[semi;]]colon];
     }
     Ok(())
 }
+
+#[test]
+fn nested_ddl_stays_inside_proven_dollar_and_compound_owners()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE PROCEDURE app.refresh_dollar() AS $body$
+BEGIN
+  CREATE TEMP TABLE app.scratch_dollar (id BIGINT);
+  WITH recent AS (
+    SELECT id FROM app.users
+  )
+  INSERT INTO app.scratch_dollar SELECT id FROM recent;
+  INSERT INTO app.scratch_dollar SELECT id FROM app.users;
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.refresh_compound AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  CREATE TEMP TABLE app.scratch_compound (id BIGINT);
+  INSERT INTO app.scratch_compound SELECT id FROM app.users;
+END;
+"#;
+    let extraction = extract_sql_content(Path::new("db/nested_ddl.sql"), source);
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("symbol_kind") != "query"),
+        "body DML leaked as file-owned query: {:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction
+            .extensions
+            .get("_compass_v1_graph_coverage")
+            .is_none(),
+        "complete bodies received false partial coverage: {:?}",
+        extraction.extensions
+    );
+    assert!(
+        extraction
+            .extensions
+            .get("_compass_v1_graph_diagnostics")
+            .is_none(),
+        "complete bodies received false diagnostics: {:?}",
+        extraction.extensions
+    );
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("qualified_name") != "recent"),
+        "nested CTE became an entity: {:?}",
+        extraction.nodes
+    );
+
+    for (owner_name, target_name, expected_writes) in [
+        ("app.refresh_dollar", "app.scratch_dollar", 2),
+        ("app.refresh_compound", "app.scratch_compound", 1),
+    ] {
+        let owner = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == owner_name)
+            .ok_or_else(|| format!("missing owner {owner_name}"))?;
+        let target = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        let writes = extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == owner.id
+                    && edge.target == target.id
+                    && edge.string("relation") == "writes"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            writes.len(),
+            expected_writes,
+            "owner={owner_name}, edges={:?}",
+            extraction.edges
+        );
+        let sites = writes
+            .iter()
+            .filter_map(|edge| {
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(serde_json::Value::as_u64)
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(sites.len(), expected_writes);
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == owner.id
+                && edge.string("relation") == "reads"
+                && extraction.nodes.iter().any(|node| {
+                    node.id == edge.target && node.string("qualified_name") == "app.users"
+                })
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn unmatched_identifier_quotes_recover_with_bounded_partial_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+SELECT * FROM "broken;
+SELECT * FROM app.users;
+CREATE TABLE app.after_double (id BIGINT);
+SELECT * FROM `broken;
+SELECT * FROM app.users;
+CREATE TABLE app.after_backtick (id BIGINT);
+SELECT * FROM [broken;
+SELECT * FROM app.users;
+CREATE TABLE app.after_bracket (id BIGINT);
+"#;
+    let extraction = extract_sql_content(Path::new("db/unmatched_quotes.sql"), source);
+    for expected in [
+        "app.after_double",
+        "app.after_backtick",
+        "app.after_bracket",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .any(|node| node.string("qualified_name") == expected),
+            "missing recovered declaration {expected:?}: {:?}",
+            extraction.nodes
+        );
+    }
+    let queries = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "query")
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 3, "nodes={:?}", extraction.nodes);
+    assert!(
+        queries
+            .iter()
+            .all(|query| extraction.edges.iter().any(|edge| {
+                edge.source == query.id
+                    && edge.string("relation") == "reads"
+                    && extraction.nodes.iter().any(|node| {
+                        node.id == edge.target && node.string("qualified_name") == "app.users"
+                    })
+            }))
+    );
+
+    let coverage = extraction
+        .extensions
+        .get("_compass_v1_graph_coverage")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing quote coverage")?;
+    let diagnostics = extraction
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing quote diagnostics")?;
+    assert_eq!(coverage.len(), 3, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 3, "diagnostics={diagnostics:?}");
+    for record in coverage {
+        assert_eq!(
+            record.get("capability").and_then(serde_json::Value::as_str),
+            Some("sql:statement_boundary")
+        );
+        assert_eq!(
+            record.get("status").and_then(serde_json::Value::as_str),
+            Some("partial")
+        );
+        let anchor = record
+            .get("anchor")
+            .and_then(serde_json::Value::as_object)
+            .ok_or("missing quote anchor")?;
+        let start = anchor
+            .get("startByte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing quote anchor start")?;
+        let end = anchor
+            .get("endByte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing quote anchor end")?;
+        assert!(start < end && end <= source.len());
+        assert!(
+            !source[start..end].contains(&b'\n')
+                || source[start..end].last().copied() == Some(b'\n'),
+            "unbounded quote diagnostic: {:?}",
+            &source[start..end]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn dollar_quoted_defaults_do_not_replace_the_as_bound_executable_body()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE FUNCTION app.refresh(
+  arg text DEFAULT $$fallback$$
+) RETURNS void AS $body$
+BEGIN
+  SELECT * FROM app.users;
+  SELECT * FROM app.users;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    let extraction = extract_sql_content(Path::new("db/dollar_default.sql"), source);
+    let procedure = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.refresh")
+        .ok_or("missing function")?;
+    let users = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.users")
+        .ok_or("missing users")?;
+    let reads = extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == procedure.id
+                && edge.target == users.id
+                && edge.string("relation") == "reads"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 2, "edges={:?}", extraction.edges);
+    assert_ne!(
+        reads[0].attributes.get("start_byte"),
+        reads[1].attributes.get("start_byte")
+    );
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("symbol_kind") != "query")
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "{:?}",
+        extraction.extensions
+    );
+    Ok(())
+}

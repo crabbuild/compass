@@ -59,6 +59,49 @@ struct BodyBoundary {
     incomplete_reason: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct BoundaryIssue {
+    site: Site,
+    reason: String,
+}
+
+struct ScannedStatement {
+    site: Site,
+    issue: Option<BoundaryIssue>,
+}
+
+type QueryStatement = (usize, usize, usize, String);
+
+enum StatementBoundary {
+    Complete(usize),
+    EndOfInput(usize),
+    IncompleteQuoted { end: usize, issue: BoundaryIssue },
+}
+
+impl StatementBoundary {
+    const fn end(&self) -> usize {
+        match self {
+            Self::Complete(end) | Self::EndOfInput(end) | Self::IncompleteQuoted { end, .. } => {
+                *end
+            }
+        }
+    }
+
+    fn into_issue(self) -> Option<BoundaryIssue> {
+        match self {
+            Self::IncompleteQuoted { issue, .. } => Some(issue),
+            Self::Complete(_) | Self::EndOfInput(_) => None,
+        }
+    }
+
+    const fn recovery_end(&self, fallback: usize) -> usize {
+        match self {
+            Self::EndOfInput(_) => fallback,
+            Self::Complete(end) | Self::IncompleteQuoted { end, .. } => *end,
+        }
+    }
+}
+
 impl Site {
     const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
@@ -542,7 +585,11 @@ impl<'a> State<'a> {
     }
 
     fn add_queries(&mut self, declarations: &[Statement]) {
-        for (statement_start, _, end, operation) in query_statements(&self.masked, declarations) {
+        let (queries, issues) = query_statements(&self.masked, declarations);
+        for issue in &issues {
+            self.add_boundary_issue_evidence(issue);
+        }
+        for (statement_start, _, end, operation) in queries {
             self.add_query(&operation, statement_start, end);
         }
     }
@@ -582,8 +629,12 @@ impl<'a> State<'a> {
     }
 
     fn add_data_access_statements(&mut self, source: &str, start: usize, end: usize) {
-        for site in scan_statement_ranges(&self.masked, start, end) {
-            self.add_data_access_statement(source, site.start, site.end);
+        for statement in scan_statement_ranges(&self.masked, start, end) {
+            if let Some(issue) = statement.issue {
+                self.add_boundary_issue_evidence(&issue);
+                continue;
+            }
+            self.add_data_access_statement(source, statement.site.start, statement.site.end);
         }
     }
 
@@ -670,6 +721,29 @@ impl<'a> State<'a> {
             "anchor": anchor,
         });
         self.push_extension_record("_compass_v1_graph_diagnostics", diagnostic);
+    }
+
+    fn add_boundary_issue_evidence(&mut self, issue: &BoundaryIssue) {
+        let anchor = self.source_anchor(issue.site);
+        self.push_extension_record(
+            "_compass_v1_graph_coverage",
+            json!({
+                "capability": "sql:statement_boundary",
+                "producer": "compass.languages.sql",
+                "status": "partial",
+                "reason": issue.reason,
+                "anchor": anchor.clone(),
+            }),
+        );
+        self.push_extension_record(
+            "_compass_v1_graph_diagnostics",
+            json!({
+                "severity": "warning",
+                "code": "sql_incomplete_quoted_identifier",
+                "message": issue.reason,
+                "anchor": anchor,
+            }),
+        );
     }
 
     fn push_extension_record(&mut self, key: &str, record: Value) {
@@ -988,7 +1062,6 @@ fn statements(source: &str) -> Vec<Statement> {
             source,
             declarations[index].offset,
             &declarations[index].kind,
-            next,
         );
         if let Some(boundary) = boundary {
             declarations[index].end = boundary.end;
@@ -996,7 +1069,7 @@ fn statements(source: &str) -> Vec<Statement> {
             declarations[index].incomplete_body_reason = boundary.incomplete_reason;
         } else {
             declarations[index].end =
-                scan_statement_end(source, declarations[index].offset, next).unwrap_or(next);
+                scan_statement_boundary(source, declarations[index].offset, next).end();
         }
     }
     let mut top_level = Vec::<Statement>::new();
@@ -1016,44 +1089,53 @@ fn body_statement_boundary(
     source: &str,
     start: usize,
     kind: &StatementKind,
-    recovery_limit: usize,
 ) -> Option<BodyBoundary> {
     if !matches!(kind, StatementKind::Procedure | StatementKind::Trigger) {
         return None;
     }
-    if let Some(open) = body_dollar_quote_opener(source, start) {
-        let delimiter = dollar_quote_delimiter_at(source, open)?;
-        let content_start = open + delimiter.len();
-        if let Some(close_start) = source[content_start..recovery_limit.min(source.len())]
-            .find(delimiter)
-            .map(|offset| content_start + offset)
-        {
-            let close_end = close_start + delimiter.len();
-            let end = scan_statement_end(source, close_end, source.len()).unwrap_or(close_end);
+    match routine_body_dollar_opener(source, start) {
+        DollarBodySearch::Found(open) => {
+            let delimiter = dollar_quote_delimiter_at(source, open)?;
+            let content_start = open + delimiter.len();
+            if let Some(close_start) = source[content_start..]
+                .find(delimiter)
+                .map(|offset| content_start + offset)
+            {
+                let close_end = close_start + delimiter.len();
+                let end = scan_statement_boundary(source, close_end, source.len()).end();
+                return Some(BodyBoundary {
+                    end,
+                    body: Some(Site::new(content_start, close_start)),
+                    incomplete_reason: None,
+                });
+            }
+            let boundary = scan_statement_boundary(source, start, source.len());
+            let end = boundary.recovery_end(first_line_end(source, open).min(source.len()));
             return Some(BodyBoundary {
                 end,
-                body: Some(Site::new(content_start, close_start)),
-                incomplete_reason: None,
+                body: None,
+                incomplete_reason: Some(format!(
+                    "unterminated SQL routine dollar delimiter {delimiter:?}; body ownership omitted"
+                )),
             });
         }
-        let end = scan_statement_end(source, start, source.len())
-            .unwrap_or_else(|| first_line_end(source, open).min(source.len()));
-        return Some(BodyBoundary {
-            end,
-            body: None,
-            incomplete_reason: Some(format!(
-                "unterminated SQL routine dollar delimiter {delimiter:?}; body ownership omitted"
-            )),
-        });
+        DollarBodySearch::Ambiguous(site) => {
+            let boundary = scan_statement_boundary(source, start, source.len());
+            let end = boundary.recovery_end(first_line_end(source, site.start).min(source.len()));
+            return Some(BodyBoundary {
+                end,
+                body: None,
+                incomplete_reason: Some(
+                    "ambiguous SQL routine dollar body position; body ownership omitted".to_owned(),
+                ),
+            });
+        }
+        DollarBodySearch::None => {}
     }
-    compound_body_boundary(source, start, recovery_limit)
+    compound_body_boundary(source, start)
 }
 
-fn compound_body_boundary(
-    source: &str,
-    start: usize,
-    recovery_limit: usize,
-) -> Option<BodyBoundary> {
+fn compound_body_boundary(source: &str, start: usize) -> Option<BodyBoundary> {
     let words = sql_word_spans(source, start);
     let header_end = first_unquoted_semicolon(source, start).unwrap_or(source.len());
     let begin_index = words.iter().position(|(word_start, _, word)| {
@@ -1064,9 +1146,6 @@ fn compound_body_boundary(
     let mut case_depth = 0_u32;
     let mut skipped_case_suffix = None;
     for (position, (word_start, end, word)) in words.iter().enumerate().skip(begin_index) {
-        if *word_start >= recovery_limit {
-            break;
-        }
         if skipped_case_suffix == Some(position) {
             continue;
         }
@@ -1102,14 +1181,14 @@ fn compound_body_boundary(
         depth = depth.saturating_sub(1);
         if depth == 0 {
             return Some(BodyBoundary {
-                end: scan_statement_end(source, *end, source.len()).unwrap_or(*end),
+                end: scan_statement_boundary(source, *end, source.len()).end(),
                 body: Some(Site::new(body_start, *word_start)),
                 incomplete_reason: None,
             });
         }
     }
-    let end = scan_statement_end(source, start, source.len())
-        .unwrap_or_else(|| first_line_end(source, body_start).min(source.len()));
+    let boundary = scan_statement_boundary(source, start, source.len());
+    let end = boundary.recovery_end(first_line_end(source, body_start).min(source.len()));
     Some(BodyBoundary {
         end,
         body: None,
@@ -1149,17 +1228,22 @@ fn sql_word_spans(source: &str, start: usize) -> Vec<(usize, usize, &str)> {
     words
 }
 
-fn scan_statement_ranges(source: &str, start: usize, end: usize) -> Vec<Site> {
+fn scan_statement_ranges(source: &str, start: usize, end: usize) -> Vec<ScannedStatement> {
     let mut output = Vec::new();
     let mut cursor = start.min(source.len());
     let limit = end.min(source.len());
     while cursor < limit {
-        let statement_end = scan_statement_end(source, cursor, limit).unwrap_or(limit);
+        let boundary = scan_statement_boundary(source, cursor, limit);
+        let statement_end = boundary.end();
+        let issue = boundary.into_issue();
         if source[cursor..statement_end]
             .bytes()
             .any(|byte| !byte.is_ascii_whitespace())
         {
-            output.push(Site::new(cursor, statement_end));
+            output.push(ScannedStatement {
+                site: Site::new(cursor, statement_end),
+                issue,
+            });
         }
         if statement_end <= cursor {
             break;
@@ -1169,30 +1253,57 @@ fn scan_statement_ranges(source: &str, start: usize, end: usize) -> Vec<Site> {
     output
 }
 
-fn scan_statement_end(source: &str, start: usize, end: usize) -> Option<usize> {
+fn scan_statement_boundary(source: &str, start: usize, end: usize) -> StatementBoundary {
     let bytes = source.as_bytes();
     let limit = end.min(bytes.len());
     let mut index = start.min(limit);
     while index < limit {
         if let Some(delimiter) = identifier_delimiter(bytes[index]) {
-            index = quoted_identifier_end(bytes, index, delimiter)
-                .filter(|quoted_end| *quoted_end <= limit)
-                .unwrap_or(limit);
-            continue;
+            if let Some(quoted_end) =
+                quoted_identifier_end(bytes, index, delimiter).filter(|end| *end <= limit)
+            {
+                index = quoted_end;
+                continue;
+            }
+            let recovery_end = incomplete_quote_recovery_end(source, index, limit);
+            let style = match bytes[index] {
+                b'"' => "double-quoted",
+                b'`' => "backtick-quoted",
+                b'[' => "bracket-quoted",
+                _ => "quoted",
+            };
+            return StatementBoundary::IncompleteQuoted {
+                end: recovery_end,
+                issue: BoundaryIssue {
+                    site: Site::new(index, recovery_end),
+                    reason: format!("unterminated {style} SQL identifier; statement facts omitted"),
+                },
+            };
         }
         if let Some(dollar_end) = paired_dollar_quote_end(source, index, limit) {
             index = dollar_end;
             continue;
         }
         if bytes[index] == b';' {
-            return Some(index + 1);
+            return StatementBoundary::Complete(index + 1);
         }
         index += 1;
     }
-    None
+    StatementBoundary::EndOfInput(limit)
 }
 
-fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<Site> {
+fn incomplete_quote_recovery_end(source: &str, open: usize, limit: usize) -> usize {
+    let start = open.saturating_add(1).min(limit);
+    let bytes = source.as_bytes();
+    for (offset, byte) in bytes[start..limit].iter().enumerate() {
+        if *byte == b';' || *byte == b'\n' {
+            return start + offset + 1;
+        }
+    }
+    limit
+}
+
+fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<ScannedStatement> {
     let mut output = Vec::new();
     let mut cursor = 0;
     while cursor < source.len() {
@@ -1202,37 +1313,77 @@ fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<S
             .find(|declaration| declaration.offset == statement_start)
         {
             let end = declaration.end.min(source.len());
-            output.push(Site::new(cursor, end));
+            output.push(ScannedStatement {
+                site: Site::new(cursor, end),
+                issue: None,
+            });
             cursor = end;
             continue;
         }
-        let end = scan_statement_end(source, cursor, source.len()).unwrap_or(source.len());
+        let boundary = scan_statement_boundary(source, cursor, source.len());
+        let end = boundary.end();
+        let issue = boundary.into_issue();
         if end <= cursor {
             break;
         }
-        output.push(Site::new(cursor, end));
+        output.push(ScannedStatement {
+            site: Site::new(cursor, end),
+            issue,
+        });
         cursor = end;
     }
     output
 }
 
-fn body_dollar_quote_opener(source: &str, start: usize) -> Option<usize> {
+enum DollarBodySearch {
+    None,
+    Found(usize),
+    Ambiguous(Site),
+}
+
+fn routine_body_dollar_opener(source: &str, start: usize) -> DollarBodySearch {
     let bytes = source.as_bytes();
     let mut index = start;
+    let mut depth = 0_u32;
     while index < bytes.len() {
         if let Some(delimiter) = identifier_delimiter(bytes[index]) {
             index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
             continue;
         }
         if dollar_quote_delimiter_at(source, index).is_some() {
-            return Some(index);
+            if let Some(end) = paired_dollar_quote_end(source, index, source.len()) {
+                index = end;
+                continue;
+            }
+            return DollarBodySearch::Ambiguous(Site::new(index, first_line_end(source, index)));
         }
         if bytes[index] == b';' {
-            return None;
+            return DollarBodySearch::None;
+        }
+        match bytes[index] {
+            b'(' => {
+                depth = depth.saturating_add(1);
+                index += 1;
+                continue;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if depth == 0
+            && let Some(as_end) = consume_keyword(source, index, "AS")
+        {
+            let next = skip_sql_whitespace(source, as_end);
+            if dollar_quote_delimiter_at(source, next).is_some() {
+                return DollarBodySearch::Found(next);
+            }
         }
         index += 1;
     }
-    None
+    DollarBodySearch::None
 }
 
 fn skip_dollar_quote(source: &str, start: usize) -> Option<usize> {
@@ -1298,12 +1449,18 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
 fn query_statements(
     source: &str,
     declarations: &[Statement],
-) -> Vec<(usize, usize, usize, String)> {
+) -> (Vec<QueryStatement>, Vec<BoundaryIssue>) {
     let Ok(operation_pattern) = Regex::new(r"(?i)^(SELECT|INSERT|UPDATE|DELETE|MERGE)\b") else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut output = Vec::new();
-    for site in top_level_statement_ranges(source, declarations) {
+    let mut issues = Vec::new();
+    for scanned in top_level_statement_ranges(source, declarations) {
+        if let Some(issue) = scanned.issue {
+            issues.push(issue);
+            continue;
+        }
+        let site = scanned.site;
         let Some(segment) = source.get(site.start..site.end) else {
             continue;
         };
@@ -1336,7 +1493,7 @@ fn query_statements(
             output.push((statement_start, operation_start, site.end, operation));
         }
     }
-    output
+    (output, issues)
 }
 
 fn top_level_cte_operation(statement: &str) -> Option<(usize, String)> {

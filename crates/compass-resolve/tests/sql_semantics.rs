@@ -344,3 +344,348 @@ SELECT * FROM "app"."semi;""colon";
     }));
     Ok(())
 }
+
+#[test]
+fn nested_ddl_remains_owned_by_complete_routines_in_strict_v1() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V6__nested_ddl.sql");
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE PROCEDURE app.refresh_dollar() AS $body$
+BEGIN
+  CREATE TEMP TABLE app.scratch_dollar (id BIGINT);
+  WITH recent AS (
+    SELECT id FROM app.users
+  )
+  INSERT INTO app.scratch_dollar SELECT id FROM recent;
+  INSERT INTO app.scratch_dollar SELECT id FROM app.users;
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.refresh_compound AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  CREATE TEMP TABLE app.scratch_compound (id BIGINT);
+  INSERT INTO app.scratch_compound SELECT id FROM app.users;
+END;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-nested-ddl")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    assert!(
+        graph.nodes.iter().all(|node| node.kind != NodeKind::Query),
+        "body DML leaked as file-owned queries: {:?}",
+        graph.nodes
+    );
+    assert!(
+        graph.graph.coverage.iter().all(|record| {
+            record.capability != "sql:body_ownership"
+                && record.capability != "sql:statement_boundary"
+        }),
+        "complete routine received partial coverage: {:?}",
+        graph.graph.coverage
+    );
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "sql_incomplete_body_boundary"),
+        "complete routine received an incomplete-body diagnostic: {:?}",
+        graph.graph.diagnostics
+    );
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| node.qualified_name != "recent"),
+        "routine-local CTE became an entity: {:?}",
+        graph.nodes
+    );
+
+    let users = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.users")
+        .ok_or("missing users")?;
+    for (owner_name, target_name, expected_writes) in [
+        ("app.refresh_dollar", "app.scratch_dollar", 2),
+        ("app.refresh_compound", "app.scratch_compound", 1),
+    ] {
+        let owner = graph
+            .nodes
+            .iter()
+            .find(|node| node.qualified_name == owner_name)
+            .ok_or_else(|| format!("missing owner {owner_name}"))?;
+        let target = graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == target_name)
+            .ok_or_else(|| format!("missing target {target_name}"))?;
+        let writes = graph
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.source == owner.id && edge.target == target.id && edge.kind == EdgeKind::Writes
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            writes.len(),
+            expected_writes,
+            "owner={owner_name}, links={:?}",
+            graph.links
+        );
+        assert_eq!(
+            writes
+                .iter()
+                .filter_map(|edge| edge.relationship_site.as_ref())
+                .map(|anchor| anchor.start_byte)
+                .collect::<HashSet<_>>()
+                .len(),
+            expected_writes
+        );
+        assert!(writes.iter().all(|edge| {
+            edge.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+                    && item
+                        .rule
+                        .as_deref()
+                        .is_some_and(|rule| rule.starts_with("sql-text-"))
+            })
+        }));
+        assert!(graph.links.iter().any(|edge| {
+            edge.source == owner.id && edge.target == users.id && edge.kind == EdgeKind::Reads
+        }));
+    }
+
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:sql-nested-ddl")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .map(|node| (&node.id, node.kind))
+            .collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| (&node.id, node.kind))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn unmatched_identifier_quotes_publish_bounded_partial_strict_v1_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V7__unmatched_quotes.sql");
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+SELECT * FROM "broken;
+SELECT * FROM app.users;
+CREATE TABLE app.after_double (id BIGINT);
+SELECT * FROM `broken;
+SELECT * FROM app.users;
+CREATE TABLE app.after_backtick (id BIGINT);
+SELECT * FROM [broken;
+SELECT * FROM app.users;
+CREATE TABLE app.after_bracket (id BIGINT);
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-quotes")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for expected in [
+        "app.after_double",
+        "app.after_backtick",
+        "app.after_bracket",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == NodeKind::DatabaseTable
+                    && node.qualified_name == expected),
+            "missing recovered declaration {expected}: {:?}",
+            graph.nodes
+        );
+    }
+    let queries = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Query)
+        .collect::<Vec<_>>();
+    assert_eq!(queries.len(), 3, "nodes={:?}", graph.nodes);
+    assert!(queries.iter().all(|query| {
+        query
+            .source
+            .as_ref()
+            .and_then(|anchor| source.get(anchor.start_byte as usize..anchor.end_byte as usize))
+            .is_some_and(|statement| statement.starts_with(b"SELECT * FROM app.users"))
+    }));
+
+    let partials = graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|record| {
+            record.capability == "sql:statement_boundary"
+                && record.status == CoverageStatus::Partial
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = graph
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "sql_incomplete_quoted_identifier")
+        .collect::<Vec<_>>();
+    assert_eq!(partials.len(), 3, "coverage={:?}", graph.graph.coverage);
+    assert_eq!(
+        diagnostics.len(),
+        3,
+        "diagnostics={:?}",
+        graph.graph.diagnostics
+    );
+    for marker in *b"\"`[" {
+        let start = source
+            .iter()
+            .position(|byte| *byte == marker)
+            .ok_or("missing quote marker")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| matches!(*byte, b';' | b'\n'))
+            .map(|offset| start + offset + 1)
+            .ok_or("missing physical recovery boundary")?;
+        assert!(
+            partials.iter().any(|record| {
+                record.anchor.as_ref().is_some_and(|anchor| {
+                    anchor.start_byte == start as u64
+                        && anchor.end_byte == end as u64
+                        && anchor.file == relative.to_string_lossy()
+                })
+            }),
+            "marker={marker:?}, expected={start}..{end}, coverage={partials:?}"
+        );
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.anchor.as_ref().is_some_and(|anchor| {
+                anchor.start_byte == start as u64
+                    && anchor.end_byte == end as u64
+                    && anchor.file == relative.to_string_lossy()
+            })
+        }));
+    }
+
+    let users = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.users")
+        .ok_or("missing users")?;
+    let reads = graph
+        .links
+        .iter()
+        .filter(|edge| edge.target == users.id && edge.kind == EdgeKind::Reads)
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 3, "links={:?}", graph.links);
+    assert!(reads.iter().all(|edge| {
+        edge.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+        })
+    }));
+    Ok(())
+}
+
+#[test]
+fn dollar_quoted_defaults_do_not_shadow_the_strict_v1_routine_body() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V8__dollar_default.sql");
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE FUNCTION app.refresh(
+  arg text DEFAULT $$fallback$$
+) RETURNS void AS $body$
+BEGIN
+  SELECT * FROM app.users;
+  SELECT * FROM app.users;
+END;
+$body$ LANGUAGE plpgsql;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:sql-dollar-default")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    let procedure = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "app.refresh")
+        .ok_or("missing function")?;
+    let users = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::DatabaseTable && node.qualified_name == "app.users")
+        .ok_or("missing users")?;
+    let reads = graph
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.source == procedure.id && edge.target == users.id && edge.kind == EdgeKind::Reads
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 2, "links={:?}", graph.links);
+    assert_eq!(
+        reads
+            .iter()
+            .filter_map(|edge| edge.relationship_site.as_ref())
+            .map(|anchor| anchor.start_byte)
+            .collect::<HashSet<_>>()
+            .len(),
+        2
+    );
+    assert!(reads.iter().all(|edge| {
+        edge.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+                && item
+                    .rule
+                    .as_deref()
+                    .is_some_and(|rule| rule.starts_with("sql-text-"))
+        })
+    }));
+    assert!(
+        graph.nodes.iter().all(|node| node.kind != NodeKind::Query),
+        "body statements leaked into file-owned queries: {:?}",
+        graph.nodes
+    );
+    assert!(
+        graph.graph.coverage.iter().all(|record| {
+            record.capability != "sql:body_ownership"
+                && record.capability != "sql:statement_boundary"
+        }),
+        "valid body received partial coverage: {:?}",
+        graph.graph.coverage
+    );
+    Ok(())
+}
