@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
@@ -29,16 +29,21 @@ pub(crate) fn command(operation: &str, args: &[String]) -> Outcome {
 
 fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String> {
     let positional = positional(args);
-    let graph = PathBuf::from(option(args, "--graph").unwrap_or("compass-out/graph.json"));
-    let program = option(args, "--program").map(PathBuf::from);
+    let requested_graph =
+        PathBuf::from(option(args, "--graph").unwrap_or("compass-out/graph.json"));
     let cache = option(args, "--cache")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            graph
+            requested_graph
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("cache")
         });
+    let graph = resolve_generation_artifact(requested_graph)?;
+    let program = option(args, "--program")
+        .map(PathBuf::from)
+        .map(resolve_generation_artifact)
+        .transpose()?;
     let engine = open(&graph, program.as_deref(), &cache).map_err(|error| error.to_string())?;
     let limits = limits(args)?;
     match operation {
@@ -73,6 +78,18 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
         _ => unreachable!(),
     }
     .map_err(|error| error.to_string())
+}
+
+fn resolve_generation_artifact(path: PathBuf) -> Result<PathBuf, String> {
+    if path.is_file() {
+        return Ok(path);
+    }
+    let Some(name) = path.file_name() else {
+        return Ok(path);
+    };
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    compass_files::BuildGuard::resolve_artifact(parent, Path::new(name))
+        .map_err(|error| error.to_string())
 }
 
 fn limits(args: &[String]) -> Result<CodeQueryLimits, String> {

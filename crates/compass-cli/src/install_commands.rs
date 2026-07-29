@@ -256,7 +256,9 @@ fn command_install_compass(args: &[String]) -> Outcome {
         results.push(result);
     }
 
-    let graph_exists = scope.root().join("compass-out/graph.json").is_file();
+    let output = scope.root().join("compass-out");
+    let graph_exists = compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+        .is_ok_and(|path| path.is_file());
     let mut next_actions = Vec::new();
     if !graph_exists && scope.is_project() {
         next_actions

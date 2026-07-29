@@ -1788,16 +1788,16 @@ fn command_build_with_validation_inner(
     options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
+    let output_container = options
+        .output_root
+        .as_deref()
+        .map(absolute_cli_path)
+        .unwrap_or_else(|| root.clone())
+        .join(output_name);
     let extract_incremental = extract
         && !force
-        && options
-            .output_root
-            .as_deref()
-            .map(absolute_cli_path)
-            .unwrap_or_else(|| root.clone())
-            .join(output_name)
-            .join("graph.json")
-            .is_file();
+        && compass_files::BuildGuard::resolve_artifact(&output_container, "graph.json")
+            .is_ok_and(|path| path.is_file());
     let mut dedup_environment = std::env::vars().collect::<HashMap<_, _>>();
     if let Some(timeout) = api_timeout {
         dedup_environment.insert("COMPASS_API_TIMEOUT".to_owned(), timeout.to_string());

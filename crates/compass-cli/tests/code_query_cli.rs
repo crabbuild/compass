@@ -4,6 +4,7 @@ use std::error::Error;
 use std::ffi::OsString;
 
 use compass_cli::{Frontend, run};
+use compass_files::BuildGuard;
 use serde_json::Value;
 
 #[test]
@@ -58,6 +59,28 @@ fn typed_query_text_is_a_projection_of_the_same_response() -> Result<(), Box<dyn
     );
     assert_eq!(outcome.code, 0, "{}", outcome.stderr);
     assert!(outcome.stdout.contains("Search:"));
+    assert!(outcome.stdout.contains("Fixture.Target"));
+    Ok(())
+}
+
+#[test]
+fn typed_query_resolves_the_active_generation_from_the_public_path() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("compass-out");
+    let guard = BuildGuard::begin(&output)?;
+    support::write_typed_graph(guard.staging_directory())?;
+    guard.commit_with_artifacts(&["graph.json"])?;
+
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            output.join("graph.json").into_os_string(),
+        ],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
     assert!(outcome.stdout.contains("Fixture.Target"));
     Ok(())
 }
