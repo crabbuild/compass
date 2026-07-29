@@ -2383,3 +2383,275 @@ FROM app.foo$tag$bar;
     );
     Ok(())
 }
+
+#[test]
+fn escaped_bracket_content_remains_one_greedy_identifier() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source = br#"
+CREATE TABLE [app].[outer; SELECT [inner]] tail] (id BIGINT);
+CREATE TABLE [app].[after_bracket] (id BIGINT);
+SELECT * FROM [app].[outer; SELECT [inner]] tail] AS [o];
+SELECT * FROM [app].[outer; SELECT [inner]] tail] [bare]
+WHERE [expr; SELECT [inner]] tail] = 1;
+SELECT * FROM [app].[after_bracket];
+"#;
+    let extraction = extract_sql_content(Path::new("db/escaped_bracket.sql"), source);
+    let outer = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.outer; SELECT [inner] tail")
+        .ok_or("missing escaped bracket table")?;
+    let spelling = b"[app].[outer; SELECT [inner]] tail]";
+    let reads = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.target == outer.id && edge.string("relation") == "reads")
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 2, "edges={:?}", extraction.edges);
+    for attributes in
+        std::iter::once(&outer.attributes).chain(reads.into_iter().map(|edge| &edge.attributes))
+    {
+        let start = attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing exact start")?;
+        let end = attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing exact end")?;
+        assert_eq!(&source[start..end], spelling);
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        3
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "escaped bracket content produced recovery: {:?}",
+        extraction.extensions
+    );
+    Ok(())
+}
+
+#[test]
+fn malformed_openers_recover_before_every_supported_ddl_prefix()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE "app"."source_table" (id BIGINT);
+SELECT * FROM "broken_or_replace
+CREATE OR REPLACE VIEW "app"."later_view" AS SELECT * FROM "app"."source_table";
+SELECT * FROM `broken_or_alter
+CREATE OR ALTER VIEW `app`.`altered_view` AS SELECT * FROM `app`.`source_table`;
+SELECT * FROM [broken_global
+CREATE GLOBAL TEMP TABLE [app].[global_temp] (id BIGINT);
+SELECT * FROM "broken_local
+CREATE LOCAL TEMPORARY TABLE "app"."local_temp" (id BIGINT);
+SELECT * FROM `broken_unlogged
+CREATE UNLOGGED TABLE `app`.`unlogged_table` (id BIGINT);
+SELECT * FROM [broken_materialized
+CREATE MATERIALIZED VIEW [app].[materialized_view] AS SELECT * FROM [app].[source_table];
+SELECT * FROM "broken_unique_index
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "source_idx" ON "app"."source_table"(id);
+SELECT * FROM `broken_if_not_exists
+CREATE TABLE IF NOT EXISTS `app`.`safe_table` (id BIGINT);
+SELECT * FROM [broken_alter_table
+ALTER TABLE IF EXISTS [app].[safe_table] ADD COLUMN value BIGINT;
+SELECT * FROM "broken_semicolon_ws; CREATE TEMP TABLE "app"."semi_temp" (id BIGINT);
+SELECT * FROM `broken_semicolon_tight;CREATE OR REPLACE VIEW `app`.`semi_view` AS SELECT * FROM `app`.`source_table`;
+SELECT * FROM [broken_semicolon_bracket; CREATE UNLOGGED TABLE [app].[semi_unlogged] (id BIGINT);
+SELECT * FROM "app"."source_table";
+"#;
+    let extraction = extract_sql_content(Path::new("db/ddl_recovery.sql"), source);
+    for qualified_name in [
+        "app.later_view",
+        "app.altered_view",
+        "app.global_temp",
+        "app.local_temp",
+        "app.unlogged_table",
+        "app.materialized_view",
+        "source_idx",
+        "app.safe_table",
+        "app.semi_temp",
+        "app.semi_view",
+        "app.semi_unlogged",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .any(|node| node.string("qualified_name") == qualified_name),
+            "missing recovered declaration {qualified_name}: {:?}",
+            extraction.nodes
+        );
+    }
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| !node.string("qualified_name").contains("broken_"))
+    );
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        1,
+        "malformed prefixes merged into exact queries: {:?}",
+        extraction.nodes
+    );
+    let coverage = extraction
+        .extensions
+        .get("_compass_v1_graph_coverage")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing DDL recovery coverage")?;
+    let diagnostics = extraction
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing DDL recovery diagnostics")?;
+    assert_eq!(coverage.len(), 12, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 12, "diagnostics={diagnostics:?}");
+    for marker in [
+        b"\"broken_or_replace".as_slice(),
+        b"`broken_or_alter",
+        b"[broken_global",
+        b"\"broken_local",
+        b"`broken_unlogged",
+        b"[broken_materialized",
+        b"\"broken_unique_index",
+        b"`broken_if_not_exists",
+        b"[broken_alter_table",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing malformed DDL opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing DDL recovery newline")?;
+        assert_eq!(
+            coverage
+                .iter()
+                .filter(|record| {
+                    record
+                        .get("anchor")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|anchor| {
+                            anchor.get("startByte").and_then(serde_json::Value::as_u64)
+                                == Some(start as u64)
+                                && anchor.get("endByte").and_then(serde_json::Value::as_u64)
+                                    == Some(end as u64)
+                        })
+                })
+                .count(),
+            1
+        );
+    }
+    for marker in [
+        b"\"broken_semicolon_ws".as_slice(),
+        b"`broken_semicolon_tight",
+        b"[broken_semicolon_bracket",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing malformed DDL semicolon opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b';')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing DDL semicolon recovery")?;
+        assert_eq!(
+            coverage
+                .iter()
+                .filter(|record| {
+                    record
+                        .get("anchor")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|anchor| {
+                            anchor.get("startByte").and_then(serde_json::Value::as_u64)
+                                == Some(start as u64)
+                                && anchor.get("endByte").and_then(serde_json::Value::as_u64)
+                                    == Some(end as u64)
+                        })
+                })
+                .count(),
+            1
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn dollar_prefixed_identifier_components_do_not_borrow_literal_closers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE $tag$alpha (id BIGINT);
+CREATE TABLE app.$tag$beta (id BIGINT);
+CREATE TABLE $$gamma (id BIGINT);
+CREATE TABLE app.$$delta (id BIGINT);
+SELECT * FROM $tag$alpha;
+SELECT * FROM app.$tag$beta;
+SELECT * FROM $$gamma;
+SELECT * FROM app.$$delta;
+SELECT ($tag$ marker $other$ nested $other$ $tag$)::text FROM $tag$alpha;
+SELECT ($$ marker $$) || 'x' FROM app.$$delta;
+"#;
+    let extraction = extract_sql_content(Path::new("db/dollar_prefix_identifiers.sql"), source);
+    for (qualified_name, spelling, expected_reads) in [
+        ("$tag$alpha", b"$tag$alpha".as_slice(), 2),
+        ("app.$tag$beta", b"app.$tag$beta".as_slice(), 1),
+        ("$$gamma", b"$$gamma".as_slice(), 1),
+        ("app.$$delta", b"app.$$delta".as_slice(), 2),
+    ] {
+        let table = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+            .ok_or_else(|| format!("missing dollar-prefixed table {qualified_name}"))?;
+        let reads = extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.target == table.id && edge.string("relation") == "reads")
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), expected_reads, "edges={:?}", extraction.edges);
+        for attributes in
+            std::iter::once(&table.attributes).chain(reads.into_iter().map(|edge| &edge.attributes))
+        {
+            let start = attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing exact start")?;
+            let end = attributes
+                .get("end_byte")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("missing exact end")?;
+            assert_eq!(&source[start..end], spelling);
+        }
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        6
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "dollar-prefixed identifiers produced partial evidence: {:?}",
+        extraction.extensions
+    );
+    Ok(())
+}

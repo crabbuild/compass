@@ -1095,8 +1095,8 @@ impl<'a> State<'a> {
     }
 }
 
-fn statements(source: &str) -> Vec<Statement> {
-    let Ok(pattern) = Regex::new(&format!(
+fn sql_declaration_pattern() -> Result<Regex, regex::Error> {
+    Regex::new(&format!(
         r"(?ix)\b(?:
             CREATE\s+
                 (?:OR\s+(?:REPLACE|ALTER)\s+)?
@@ -1109,7 +1109,11 @@ fn statements(source: &str) -> Vec<Statement> {
                 \s+(?:IF\s+NOT\s+EXISTS\s+)?
           | ((?:ALTER)\s+TABLE)\s+(?:IF\s+EXISTS\s+)?
         )({OBJECT_REFERENCE})"
-    )) else {
+    ))
+}
+
+fn statements(source: &str) -> Vec<Statement> {
+    let Ok(pattern) = sql_declaration_pattern() else {
         return Vec::new();
     };
     let mut declarations = pattern
@@ -1401,23 +1405,19 @@ fn scan_delimited_identifier(
     let mut index = open.saturating_add(1).min(limit);
     let mut statement_recoveries = Vec::new();
     let mut fallback_recovery = None;
+    let mut saw_escaped_delimiter = false;
     while index < limit {
         if bytes[index] == delimiter {
             if bytes.get(index + 1).copied() == Some(delimiter) {
+                saw_escaped_delimiter = true;
                 index += 2;
                 continue;
             }
             let close_end = index + 1;
             let invalid_outer_follower =
                 !identifier_close_has_valid_follower(source, close_end, limit);
-            let nested_bracket_opener = delimiter == b']'
-                && statement_recoveries.iter().any(|separator| {
-                    source
-                        .as_bytes()
-                        .get(*separator..index)
-                        .is_some_and(|tail| tail.contains(&b'['))
-                });
-            if (invalid_outer_follower || nested_bracket_opener)
+            if !saw_escaped_delimiter
+                && (invalid_outer_follower || delimiter == b']')
                 && let Some(recovery) = statement_recoveries.iter().copied().find(|separator| {
                     proven_statement_after_separator(source, *separator, limit).is_some()
                 })
@@ -1545,6 +1545,7 @@ fn identifier_opener_has_boundary(bytes: &[u8], start: usize) -> bool {
 }
 
 fn proven_statement_shape(source: &str, start: usize, end: usize) -> bool {
+    let statement = &source[start..end];
     let words = sql_word_spans(&source[start..end], 0)
         .into_iter()
         .map(|(_, _, word)| word.to_ascii_uppercase())
@@ -1563,20 +1564,24 @@ fn proven_statement_shape(source: &str, start: usize, end: usize) -> bool {
                 "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
             )
         }),
-        [first, second, ..] if first == "CREATE" => matches!(
-            second.as_str(),
-            "DATABASE"
-                | "SCHEMA"
-                | "TABLE"
-                | "VIEW"
-                | "FUNCTION"
-                | "PROCEDURE"
-                | "TRIGGER"
-                | "INDEX"
-        ),
-        [first, second, ..] if first == "ALTER" => second == "TABLE",
+        [first, ..] if matches!(first.as_str(), "CREATE" | "ALTER") => {
+            proven_declaration_at_start(statement)
+        }
         _ => false,
     }
+}
+
+fn proven_declaration_at_start(statement: &str) -> bool {
+    let Ok(pattern) = sql_declaration_pattern() else {
+        return false;
+    };
+    let Some(capture) = pattern.captures(statement) else {
+        return false;
+    };
+    capture.get(0).is_some_and(|full| full.start() == 0)
+        && capture
+            .get(4)
+            .is_some_and(|name| !is_reserved_object_reference(name.as_str()))
 }
 
 fn quoted_identifier_end_bounded(
@@ -1756,22 +1761,80 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
     }
     let mut end = start + 1;
     if bytes.get(end).copied() == Some(b'$') {
-        return source.get(start..=end);
-    }
-    if !bytes
-        .get(end)
-        .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
-    {
-        return None;
-    }
-    end += 1;
-    while bytes
-        .get(end)
-        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-    {
+        end += 1;
+    } else {
+        if !bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+        {
+            return None;
+        }
+        end += 1;
+        while bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            end += 1;
+        }
+        if bytes.get(end).copied() != Some(b'$') {
+            return None;
+        }
         end += 1;
     }
-    (bytes.get(end).copied() == Some(b'$')).then(|| &source[start..=end])
+    dollar_quote_opener_has_literal_role(source, start).then(|| &source[start..end])
+}
+
+fn dollar_quote_opener_has_literal_role(source: &str, start: usize) -> bool {
+    let prefix = source.get(..start).unwrap_or_default().trim_end();
+    let Some(last) = prefix.as_bytes().last().copied() else {
+        return true;
+    };
+    if matches!(
+        last,
+        b'(' | b','
+            | b'='
+            | b'+'
+            | b'-'
+            | b'*'
+            | b'/'
+            | b'%'
+            | b'<'
+            | b'>'
+            | b'!'
+            | b'|'
+            | b'&'
+            | b'^'
+            | b'~'
+            | b':'
+            | b'?'
+    ) {
+        return true;
+    }
+    if last == b'.' || is_sql_identifier_continuation(last) && !last.is_ascii_alphabetic() {
+        return false;
+    }
+    let word_start = prefix
+        .as_bytes()
+        .iter()
+        .rposition(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+        .map_or(0, |position| position + 1);
+    matches!(
+        prefix[word_start..].to_ascii_uppercase().as_str(),
+        "AS" | "SELECT"
+            | "DISTINCT"
+            | "ALL"
+            | "DEFAULT"
+            | "VALUES"
+            | "VALUE"
+            | "RETURN"
+            | "RETURNING"
+            | "THEN"
+            | "ELSE"
+            | "WHEN"
+            | "CASE"
+            | "DO"
+            | "EXECUTE"
+    )
 }
 
 fn dollar_quote_close_has_boundary(source: &str, close_end: usize, limit: usize) -> bool {

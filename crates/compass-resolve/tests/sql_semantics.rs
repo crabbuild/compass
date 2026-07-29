@@ -92,6 +92,360 @@ END;
 }
 
 #[test]
+fn escaped_bracket_identifier_is_exact_and_complete_in_strict_v1() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V19__escaped_bracket.sql");
+    let source = br#"
+CREATE TABLE [app].[outer; SELECT [inner]] tail] (id BIGINT);
+CREATE TABLE [app].[after_bracket] (id BIGINT);
+SELECT * FROM [app].[outer; SELECT [inner]] tail] AS [o];
+SELECT * FROM [app].[outer; SELECT [inner]] tail] [bare]
+WHERE [expr; SELECT [inner]] tail] = 1;
+SELECT * FROM [app].[after_bracket];
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:escaped-bracket")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    let outer = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.kind == NodeKind::DatabaseTable
+                && node.qualified_name == "app.outer; SELECT [inner] tail"
+        })
+        .ok_or("missing escaped bracket table")?;
+    let spelling = b"[app].[outer; SELECT [inner]] tail]";
+    let source_anchor = outer.source.as_ref().ok_or("missing table source")?;
+    assert_eq!(
+        source.get(source_anchor.start_byte as usize..source_anchor.end_byte as usize),
+        Some(spelling.as_slice())
+    );
+    let reads = graph
+        .links
+        .iter()
+        .filter(|edge| edge.target == outer.id && edge.kind == EdgeKind::Reads)
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 2, "links={:?}", graph.links);
+    for read in reads {
+        let anchor = read.relationship_site.as_ref().ok_or("missing read site")?;
+        assert_eq!(
+            source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+            Some(spelling.as_slice())
+        );
+        assert!(read.evidence.iter().all(|item| {
+            item.origin == EvidenceOrigin::Artifact
+                && item.confidence == EvidenceConfidence::Exact
+                && item.anchors.len() == 1
+        }));
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        3
+    );
+    assert!(graph.graph.coverage.iter().all(|record| {
+        record.capability != "sql:statement_boundary" && record.capability != "sql:body_ownership"
+    }));
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "sql_incomplete_quoted_identifier")
+    );
+    Ok(())
+}
+
+#[test]
+fn supported_ddl_prefixes_recover_from_original_openers_in_strict_v1() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V20__ddl_recovery.sql");
+    let source = br#"
+CREATE TABLE "app"."source_table" (id BIGINT);
+SELECT * FROM "broken_or_replace
+CREATE OR REPLACE VIEW "app"."later_view" AS SELECT * FROM "app"."source_table";
+SELECT * FROM `broken_or_alter
+CREATE OR ALTER VIEW `app`.`altered_view` AS SELECT * FROM `app`.`source_table`;
+SELECT * FROM [broken_global
+CREATE GLOBAL TEMP TABLE [app].[global_temp] (id BIGINT);
+SELECT * FROM "broken_local
+CREATE LOCAL TEMPORARY TABLE "app"."local_temp" (id BIGINT);
+SELECT * FROM `broken_unlogged
+CREATE UNLOGGED TABLE `app`.`unlogged_table` (id BIGINT);
+SELECT * FROM [broken_materialized
+CREATE MATERIALIZED VIEW [app].[materialized_view] AS SELECT * FROM [app].[source_table];
+SELECT * FROM "broken_unique_index
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "source_idx" ON "app"."source_table"(id);
+SELECT * FROM `broken_if_not_exists
+CREATE TABLE IF NOT EXISTS `app`.`safe_table` (id BIGINT);
+SELECT * FROM [broken_alter_table
+ALTER TABLE IF EXISTS [app].[safe_table] ADD COLUMN value BIGINT;
+SELECT * FROM "broken_semicolon_ws; CREATE TEMP TABLE "app"."semi_temp" (id BIGINT);
+SELECT * FROM `broken_semicolon_tight;CREATE OR REPLACE VIEW `app`.`semi_view` AS SELECT * FROM `app`.`source_table`;
+SELECT * FROM [broken_semicolon_bracket; CREATE UNLOGGED TABLE [app].[semi_unlogged] (id BIGINT);
+SELECT * FROM "app"."source_table";
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:ddl-recovery")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for qualified_name in [
+        "app.later_view",
+        "app.altered_view",
+        "app.global_temp",
+        "app.local_temp",
+        "app.unlogged_table",
+        "app.materialized_view",
+        "source_idx",
+        "app.safe_table",
+        "app.semi_temp",
+        "app.semi_view",
+        "app.semi_unlogged",
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.qualified_name == qualified_name),
+            "missing recovered declaration {qualified_name}: {:?}",
+            graph.nodes
+        );
+    }
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| !node.qualified_name.contains("broken_"))
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        1
+    );
+    let partials = graph
+        .graph
+        .coverage
+        .iter()
+        .filter(|record| {
+            record.capability == "sql:statement_boundary"
+                && record.status == CoverageStatus::Partial
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = graph
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "sql_incomplete_quoted_identifier")
+        .collect::<Vec<_>>();
+    assert_eq!(partials.len(), 12, "coverage={:?}", graph.graph.coverage);
+    assert_eq!(
+        diagnostics.len(),
+        12,
+        "diagnostics={:?}",
+        graph.graph.diagnostics
+    );
+    for marker in [
+        b"\"broken_or_replace".as_slice(),
+        b"`broken_or_alter",
+        b"[broken_global",
+        b"\"broken_local",
+        b"`broken_unlogged",
+        b"[broken_materialized",
+        b"\"broken_unique_index",
+        b"`broken_if_not_exists",
+        b"[broken_alter_table",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing DDL opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing DDL recovery newline")?;
+        assert_eq!(
+            partials
+                .iter()
+                .filter(|record| {
+                    record.anchor.as_ref().is_some_and(|anchor| {
+                        anchor.start_byte == start as u64
+                            && anchor.end_byte == end as u64
+                            && anchor.file == relative.to_string_lossy()
+                    })
+                })
+                .count(),
+            1
+        );
+    }
+    for marker in [
+        b"\"broken_semicolon_ws".as_slice(),
+        b"`broken_semicolon_tight",
+        b"[broken_semicolon_bracket",
+    ] {
+        let start = source
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("missing DDL semicolon opener")?;
+        let end = source[start..]
+            .iter()
+            .position(|byte| *byte == b';')
+            .map(|offset| start + offset + 1)
+            .ok_or("missing DDL semicolon recovery")?;
+        assert_eq!(
+            partials
+                .iter()
+                .filter(|record| {
+                    record.anchor.as_ref().is_some_and(|anchor| {
+                        anchor.start_byte == start as u64
+                            && anchor.end_byte == end as u64
+                            && anchor.file == relative.to_string_lossy()
+                    })
+                })
+                .count(),
+            1
+        );
+    }
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence = BuildEvidence::from_extraction(root, &repeated, "sha256:ddl-recovery")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn dollar_prefixed_components_and_real_literals_are_distinct_in_strict_v1()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("db/migrations/V21__dollar_prefix_identifiers.sql");
+    let source = br#"
+CREATE TABLE $tag$alpha (id BIGINT);
+CREATE TABLE app.$tag$beta (id BIGINT);
+CREATE TABLE $$gamma (id BIGINT);
+CREATE TABLE app.$$delta (id BIGINT);
+SELECT * FROM $tag$alpha;
+SELECT * FROM app.$tag$beta;
+SELECT * FROM $$gamma;
+SELECT * FROM app.$$delta;
+SELECT ($tag$ marker $other$ nested $other$ $tag$)::text FROM $tag$alpha;
+SELECT ($$ marker $$) || 'x' FROM app.$$delta;
+"#;
+    fs::create_dir_all(root.join("db/migrations"))?;
+    fs::write(root.join(relative), source)?;
+    let extraction = extract_sql_content(relative, source);
+    let evidence =
+        BuildEvidence::from_extraction(root, &extraction, "sha256:dollar-prefix-identifiers")?;
+    let graph = normalize_v1(extraction, evidence)?;
+
+    for (qualified_name, spelling, expected_reads) in [
+        ("$tag$alpha", b"$tag$alpha".as_slice(), 2),
+        ("app.$tag$beta", b"app.$tag$beta".as_slice(), 1),
+        ("$$gamma", b"$$gamma".as_slice(), 1),
+        ("app.$$delta", b"app.$$delta".as_slice(), 2),
+    ] {
+        let table = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                node.kind == NodeKind::DatabaseTable && node.qualified_name == qualified_name
+            })
+            .ok_or_else(|| format!("missing dollar-prefixed table {qualified_name}"))?;
+        let source_anchor = table.source.as_ref().ok_or("missing table source")?;
+        assert_eq!(
+            source.get(source_anchor.start_byte as usize..source_anchor.end_byte as usize),
+            Some(spelling)
+        );
+        let reads = graph
+            .links
+            .iter()
+            .filter(|edge| edge.target == table.id && edge.kind == EdgeKind::Reads)
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), expected_reads, "links={:?}", graph.links);
+        for read in reads {
+            let anchor = read.relationship_site.as_ref().ok_or("missing read site")?;
+            assert_eq!(
+                source.get(anchor.start_byte as usize..anchor.end_byte as usize),
+                Some(spelling)
+            );
+            assert!(read.evidence.iter().all(|item| {
+                item.origin == EvidenceOrigin::Artifact
+                    && item.confidence == EvidenceConfidence::Exact
+                    && item.anchors.len() == 1
+            }));
+        }
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Query)
+            .count(),
+        6
+    );
+    assert!(graph.graph.coverage.iter().all(|record| {
+        record.capability != "sql:statement_boundary" && record.capability != "sql:body_ownership"
+    }));
+    assert!(
+        graph
+            .graph
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "sql_incomplete_quoted_identifier")
+    );
+    let repeated = extract_sql_content(relative, source);
+    let repeated_evidence =
+        BuildEvidence::from_extraction(root, &repeated, "sha256:dollar-prefix-identifiers")?;
+    let repeated_graph = normalize_v1(repeated, repeated_evidence)?;
+    assert_eq!(
+        graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+        repeated_graph
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        graph.links.iter().map(|edge| &edge.id).collect::<Vec<_>>(),
+        repeated_graph
+            .links
+            .iter()
+            .map(|edge| &edge.id)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
 fn hardened_sql_boundaries_publish_a_closed_strict_v1_graph() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
