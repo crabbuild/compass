@@ -19,7 +19,9 @@ use compass_languages::{
     Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
 use compass_model::code_graph::{ExtractionStatus, GraphDocument as V1GraphDocument, NodeKind};
-use compass_model::provenance::EvidenceOrigin;
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, append_endpoint_rewrite_evidence,
+};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
     DetectionSummary, HtmlOptions, OutputError, ReportOptions, TokenCost, generate_report,
@@ -2048,11 +2050,27 @@ fn preserve_semantic_layer(
         })
         .collect::<HashMap<_, _>>();
     for edge in &mut existing_raw.edges {
-        if let Some(current) = typed_ast_remap.get(&edge.source) {
+        let mut rewritten = false;
+        if let Some(current) = typed_ast_remap.get(&edge.source)
+            && current != &edge.source
+        {
             edge.source.clone_from(current);
+            rewritten = true;
         }
-        if let Some(current) = typed_ast_remap.get(&edge.target) {
+        if let Some(current) = typed_ast_remap.get(&edge.target)
+            && current != &edge.target
+        {
             edge.target.clone_from(current);
+            rewritten = true;
+        }
+        if rewritten {
+            append_endpoint_rewrite_evidence(
+                &mut edge.attributes,
+                EndpointRewriteEvidence {
+                    rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
+                    score: 1.0,
+                },
+            );
         }
     }
     let preserved_node_ids = existing

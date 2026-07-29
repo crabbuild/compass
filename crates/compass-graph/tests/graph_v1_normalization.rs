@@ -10,6 +10,9 @@ use compass_model::code_graph::{
     BuildMetadata, CoverageRecord, CoverageStatus, DiagnosticSeverity, EdgeKind, ExtractionStatus,
     FileRecord, GraphDiagnostic, NodeKind,
 };
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
+};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -150,6 +153,23 @@ fn remapped_heuristic_occurrences(root: &Path) -> Result<Extraction, serde_json:
             }
         ]
     }))
+}
+
+fn trusted_producer_extraction(root: &Path) -> Extraction {
+    let mut extraction = extraction(root);
+    extraction.edges[0]
+        .attributes
+        .insert("relation".to_owned(), json!("calls"));
+    extraction.edges[0]
+        .attributes
+        .insert("rule".to_owned(), json!("producer-rule"));
+    extraction.edges[0]
+        .attributes
+        .insert("_origin".to_owned(), json!("ast"));
+    extraction.edges[0]
+        .attributes
+        .insert("confidence".to_owned(), json!("EXTRACTED"));
+    extraction
 }
 
 #[test]
@@ -562,6 +582,114 @@ fn trusted_incremental_round_trip_preserves_remapped_producer_occurrences()
 
     assert_eq!(rebuilt.links, typed.links);
     assert_eq!(rebuilt.links.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn trusted_incremental_merges_new_constituent_resolver_and_graph_rewrite_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let baseline = normalize_v1(trusted_producer_extraction(root), build_evidence(root)?)?;
+    let baseline_id = baseline.links[0].id.clone();
+    let baseline_occurrence = baseline.links[0].occurrence_rule.clone();
+    let mut projected = extraction_from_v1(&baseline);
+    let edge = projected
+        .edges
+        .first_mut()
+        .ok_or("missing projected edge")?;
+    append_endpoint_rewrite_evidence(
+        &mut edge.attributes,
+        EndpointRewriteEvidence {
+            rule: EndpointRewriteRule::SourceScopedNodeDisambiguation,
+            score: 1.0,
+        },
+    );
+    edge.attributes.insert(
+        "_coalesced_edge_evidence".to_owned(),
+        json!([{
+            "_origin":"artifact",
+            "confidence":"EXTRACTED",
+            "extractor":"test.incremental.artifact",
+            "rule":"artifact-call-reference",
+            "source_anchor":anchor(root, 50)
+        }]),
+    );
+    let projected_source = edge.source.clone();
+    let mut semantic_source = projected
+        .nodes
+        .iter()
+        .find(|node| node.id == projected_source)
+        .cloned()
+        .ok_or("missing projected source")?;
+    semantic_source.id = "semantic-caller".to_owned();
+    semantic_source
+        .attributes
+        .insert("_origin".to_owned(), json!("semantic"));
+    semantic_source.attributes.remove("_compass_v1_node_record");
+    projected.nodes.push(semantic_source);
+    projected.edges[0].source = "semantic-caller".to_owned();
+
+    let flexible = build_from_extraction(&projected, true, Some(root));
+    let rebuilt = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+    let rebuilt_edge = rebuilt.links.first().ok_or("missing rebuilt edge")?;
+
+    assert_eq!(rebuilt_edge.id, baseline_id);
+    assert_eq!(rebuilt_edge.occurrence_rule, baseline_occurrence);
+    for expected in [
+        "producer-rule",
+        "artifact-call-reference",
+        "source-scoped-node-disambiguation",
+        "graph-ghost-endpoint-remap",
+    ] {
+        assert!(
+            rebuilt_edge
+                .evidence
+                .iter()
+                .any(|evidence| evidence.rule.as_deref() == Some(expected)),
+            "missing {expected}: {:?}",
+            rebuilt_edge.evidence
+        );
+    }
+    assert!(rebuilt_edge.evidence.iter().any(|evidence| {
+        evidence.rule.as_deref() == Some("source-scoped-node-disambiguation")
+            && evidence.wiring_site.as_ref().is_some_and(|site| {
+                site.file == "src/lib.rs" && site.start_byte == 50 && site.end_byte == 54
+            })
+    }));
+
+    let graph_path = root.join("graph.json");
+    fs::write(&graph_path, serde_json::to_vec_pretty(&rebuilt)?)?;
+    let loaded = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    assert_eq!(loaded.links, rebuilt.links);
+    let second_projection = extraction_from_v1(&loaded);
+    let second = normalize_v1(second_projection, build_evidence(root)?)?;
+    assert_eq!(second.links, rebuilt.links);
+    Ok(())
+}
+
+#[test]
+fn trusted_incremental_rejects_conflicting_raw_occurrence_rule()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let baseline = normalize_v1(trusted_producer_extraction(root), build_evidence(root)?)?;
+    let mut projected = extraction_from_v1(&baseline);
+    projected.edges[0]
+        .attributes
+        .insert("_occurrence_rule".to_owned(), json!("conflicting-producer"));
+
+    let error = match normalize_v1(projected, build_evidence(root)?) {
+        Ok(_) => return Err("conflicting raw occurrence identity was accepted".into()),
+        Err(error) => error,
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("conflicting raw occurrence rule"),
+        "unexpected error: {error}"
+    );
     Ok(())
 }
 

@@ -18,7 +18,7 @@ use compass_model::identity::{
 use compass_model::provenance::{
     ENDPOINT_REWRITE_RULES_ATTRIBUTE, EvidenceConfidence, EvidenceOrigin,
     OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
-    SourceAnchor,
+    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
 };
 use compass_model::{GraphError, validate_code_graph};
 use serde::Serialize;
@@ -26,9 +26,10 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 const TRUSTED_NODE_RECORD: &str = "_compass_v1_node_record";
-const TRUSTED_EDGE_RECORD: &str = "_compass_v1_edge_record";
+const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
+const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 
 #[derive(Clone, Debug)]
 pub struct BuildEvidence {
@@ -348,22 +349,16 @@ pub fn normalize_v1(
                 &format!("target {} does not match a raw node", raw.target),
             )
         })?;
-        let edge = match raw.attributes.get(TRUSTED_EDGE_RECORD) {
-            Some(value) => {
-                let mut edge = serde_json::from_value::<EdgeRecord>(value.clone())
-                    .map_err(|error| raw_error(&format!("edge[{index}]"), &error.to_string()))?;
-                edge.source.clone_from(source);
-                edge.target.clone_from(target);
-                edge.id = edge_id(
-                    source,
-                    edge.kind,
-                    target,
-                    edge.relationship_site.as_ref(),
-                    edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
-                );
-                edge.key.clone_from(&edge.id);
-                edge
-            }
+        let edge = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
+            Some(value) => normalize_trusted_edge(
+                raw,
+                value,
+                source,
+                target,
+                index,
+                &evidence.repository_root,
+                &file_facts,
+            )?,
             None => normalize_edge(
                 raw,
                 source,
@@ -498,6 +493,85 @@ pub fn normalize_v1(
     };
     validate_code_graph(&document)?;
     Ok(document)
+}
+
+fn normalize_trusted_edge(
+    raw: RawEdgeRecord,
+    trusted: Value,
+    source: &str,
+    target: &str,
+    index: usize,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> Result<EdgeRecord, GraphError> {
+    let position = format!("edge[{index}]");
+    let mut edge = serde_json::from_value::<EdgeRecord>(trusted)
+        .map_err(|error| raw_error(&position, &error.to_string()))?;
+    if let Some(raw_rule) = raw.attributes.get(OCCURRENCE_RULE_ATTRIBUTE) {
+        let raw_rule = raw_rule
+            .as_str()
+            .and_then(|rule| OccurrenceRule::new(rule.to_owned()))
+            .ok_or_else(|| {
+                raw_error(&position, "raw occurrence rule must be a non-empty string")
+            })?;
+        if edge.occurrence_rule.as_ref() != Some(&raw_rule) {
+            return Err(raw_error(
+                &position,
+                &format!(
+                    "conflicting raw occurrence rule {:?} does not match trusted typed identity {:?}",
+                    raw_rule.as_str(),
+                    edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+                ),
+            ));
+        }
+    }
+
+    let owner = format!("{position} {source} -[{}]-> {target}", edge.kind.as_str());
+    let mut added_evidence = Vec::new();
+    let evidence_context = RawEdgeEvidenceContext {
+        owner: &owner,
+        root,
+        file_facts,
+        normalization_rule: None,
+        heuristic_default: false,
+    };
+    append_raw_endpoint_rewrite_evidence(
+        &mut added_evidence,
+        &raw.attributes,
+        edge.relationship_site.clone(),
+        &evidence_context,
+    )?;
+    if let Some(constituents) = raw
+        .attributes
+        .get(COALESCED_EDGE_EVIDENCE)
+        .and_then(Value::as_array)
+    {
+        for constituent in constituents {
+            let Some(attributes) = constituent.as_object() else {
+                continue;
+            };
+            let constituent_site = raw_anchor(attributes, root, file_facts)?;
+            append_raw_edge_evidence(
+                &mut added_evidence,
+                attributes,
+                constituent_site,
+                &evidence_context,
+            )?;
+        }
+    }
+    edge.evidence.append(&mut added_evidence);
+    sort_dedup_serialized(&mut edge.evidence);
+    edge.source = source.to_owned();
+    edge.target = target.to_owned();
+    edge.id = edge_id(
+        source,
+        edge.kind,
+        target,
+        edge.relationship_site.as_ref(),
+        edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str),
+    );
+    edge.key.clone_from(&edge.id);
+    Ok(edge)
 }
 
 fn collect_stub_wiring_sites(
@@ -902,9 +976,13 @@ fn insert_raw_evidence(attributes: &mut Map<String, Value>, evidence: &Provenanc
     );
     if let Some(rule) = &evidence.rule {
         attributes.insert("rule".to_owned(), Value::String(rule.clone()));
+    } else {
+        attributes.remove("rule");
     }
     if let Some(score) = evidence.score {
         attributes.insert("confidence_score".to_owned(), Value::from(score));
+    } else {
+        attributes.remove("confidence_score");
     }
     if !evidence.candidates.is_empty() {
         attributes.insert(
@@ -1339,6 +1417,15 @@ fn append_raw_edge_evidence(
         context.normalization_rule,
         context.heuristic_default,
     )?);
+    append_raw_endpoint_rewrite_evidence(evidence, attributes, relationship_site, context)
+}
+
+fn append_raw_endpoint_rewrite_evidence(
+    evidence: &mut Vec<Provenance>,
+    attributes: &Map<String, Value>,
+    relationship_site: Option<SourceAnchor>,
+    context: &RawEdgeEvidenceContext<'_>,
+) -> Result<(), GraphError> {
     let Some(rewrites) = attributes
         .get("_endpoint_rewrite_rules")
         .and_then(Value::as_array)

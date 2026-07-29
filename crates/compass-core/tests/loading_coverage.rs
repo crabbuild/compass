@@ -5,6 +5,8 @@ use compass_core::{
     BuildOptions, CoreError, ExportInputs, LoadedGraph, SemanticLayer, build_graph_with_layers,
 };
 use compass_files::BuildGuard;
+use compass_languages::{Engine, Extraction, RawEdgeRecord, RawNodeRecord};
+use serde_json::{Map, json};
 use sha2::{Digest, Sha256};
 
 #[test]
@@ -245,5 +247,133 @@ fn incremental_update_preserves_then_replaces_owned_semantic_facts() -> Result<(
             .iter()
             .all(|edge| edge.kind != compass_model::code_graph::EdgeKind::References)
     );
+    Ok(())
+}
+
+#[test]
+fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("main.rs");
+    let notes = root.join("notes.md");
+    fs::write(&source, "pub fn target() {}\n")?;
+    fs::write(&notes, "# Semantic caller\n")?;
+    let ast = Engine::default().extract(&source)?;
+    let mut semantic_target = ast
+        .nodes
+        .iter()
+        .find(|node| node.label() == "target()")
+        .cloned()
+        .ok_or("missing raw target")?;
+    semantic_target.id = "semantic-target-alias".to_owned();
+    semantic_target
+        .attributes
+        .insert("_origin".to_owned(), json!("semantic"));
+    semantic_target
+        .attributes
+        .insert("extractor".to_owned(), json!("test.semantic"));
+    semantic_target
+        .attributes
+        .insert("source_file".to_owned(), json!("main.rs"));
+    if let Some(source_anchor) = semantic_target
+        .attributes
+        .get_mut("source_anchor")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        source_anchor.insert("file".to_owned(), json!("main.rs"));
+    }
+    let anchor = json!({
+        "file":"notes.md",
+        "startByte":0,
+        "endByte":10,
+        "startLine":1,
+        "startColumn":0,
+        "endLine":1,
+        "endColumn":10
+    });
+    let supplemental = Extraction {
+        nodes: vec![
+            RawNodeRecord {
+                id: "semantic-caller".to_owned(),
+                attributes: Map::from_iter([
+                    ("label".to_owned(), json!("Semantic caller")),
+                    ("qualified_name".to_owned(), json!("semantic::caller")),
+                    ("file_type".to_owned(), json!("concept")),
+                    ("source_file".to_owned(), json!("notes.md")),
+                    ("source_anchor".to_owned(), anchor.clone()),
+                    ("_origin".to_owned(), json!("semantic")),
+                    ("extractor".to_owned(), json!("test.semantic")),
+                ]),
+            },
+            semantic_target,
+        ],
+        edges: vec![RawEdgeRecord {
+            source: "semantic-caller".to_owned(),
+            target: "semantic-target-alias".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("references")),
+                ("rule".to_owned(), json!("semantic-reference")),
+                ("source_file".to_owned(), json!("notes.md")),
+                ("source_anchor".to_owned(), anchor),
+                ("_origin".to_owned(), json!("semantic")),
+                ("confidence".to_owned(), json!("INFERRED")),
+                ("extractor".to_owned(), json!("test.semantic")),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+    let mut options = BuildOptions::new(root.to_path_buf());
+    options.no_cluster = true;
+    options.no_viz = true;
+
+    let initial = build_graph_with_layers(&options, None, &[serde_json::to_value(supplemental)?])?;
+    let initial_graph =
+        compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
+    assert!(
+        initial_graph
+            .links
+            .iter()
+            .any(|edge| edge.kind == compass_model::code_graph::EdgeKind::References),
+        "initial links={:?}",
+        initial_graph.links
+    );
+    fs::write(&source, "pub fn target() { let _changed = true; }\n")?;
+    build_graph_with_layers(&options, None, &[])?;
+    let graph_path = BuildGuard::resolve_artifact(&root.join("compass-out"), "graph.json")?;
+    let first = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    let edge = first
+        .links
+        .iter()
+        .find(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
+        .ok_or("missing preserved semantic edge")?;
+
+    assert_eq!(
+        edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        Some("semantic-reference")
+    );
+    assert!(edge.evidence.iter().any(|evidence| {
+        evidence.rule.as_deref() == Some("semantic-reference")
+            && evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+    }));
+    assert!(
+        edge.evidence.iter().any(|evidence| {
+            evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap")
+                && evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+                && evidence
+                    .wiring_site
+                    .as_ref()
+                    .is_some_and(|site| site.file == "notes.md" && site.start_byte == 0)
+        }),
+        "evidence={:?}",
+        edge.evidence
+    );
+
+    let first_bytes = fs::read(&graph_path)?;
+    build_graph_with_layers(&options, None, &[])?;
+    let second_bytes = fs::read(&graph_path)?;
+    let second = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    assert_eq!(second.links, first.links);
+    assert_eq!(second_bytes, first_bytes);
     Ok(())
 }

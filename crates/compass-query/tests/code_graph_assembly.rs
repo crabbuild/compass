@@ -3,7 +3,10 @@ use std::path::Path;
 
 use compass_languages::Extraction;
 use compass_model::code_graph::GraphDocument;
-use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin};
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
+    append_endpoint_rewrite_evidence,
+};
 use compass_model::query_contract::{CodeQueryLimits, ImpactRequest, NodeTrailRequest};
 use compass_query::open;
 use serde_json::json;
@@ -98,6 +101,48 @@ fn duplicate_edge_extraction(remapped_first: bool) -> Result<Extraction, serde_j
             }
         ],
         "edges": edges
+    }))
+}
+
+fn trusted_exact_edge_extraction() -> Result<Extraction, serde_json::Error> {
+    serde_json::from_value(json!({
+        "nodes": [
+            {
+                "id": "caller",
+                "label": "Caller",
+                "qualified_name": "crate::Caller",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/service.rs",
+                "source_location": "L1",
+                "_origin": "ast",
+                "extractor": "test.ast"
+            },
+            {
+                "id": "target",
+                "label": "Target",
+                "qualified_name": "crate::Target",
+                "symbol_kind": "function",
+                "file_type": "code",
+                "language": "rust",
+                "source_file": "src/target.rs",
+                "source_location": "L1",
+                "_origin": "ast",
+                "extractor": "test.ast"
+            }
+        ],
+        "edges": [{
+            "source": "caller",
+            "target": "target",
+            "relation": "calls",
+            "rule": "producer-rule",
+            "confidence": "EXTRACTED",
+            "source_file": "src/service.rs",
+            "source_location": "L2",
+            "_origin": "ast",
+            "extractor": "test.ast"
+        }]
     }))
 }
 
@@ -248,6 +293,70 @@ fn exact_and_remapped_duplicate_edges_are_order_independent_and_heuristic_gated(
             .nodes
             .iter()
             .any(|node| node.name == "Caller")
+    );
+    let trail = |include_heuristic| NodeTrailRequest {
+        source: "crate::Caller".to_owned(),
+        target: "crate::Target".to_owned(),
+        include_heuristic,
+        limits: CodeQueryLimits::default(),
+    };
+    assert!(engine.node_trail(trail(false))?.paths.is_empty());
+    assert_eq!(engine.node_trail(trail(true))?.paths.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    write_sources(directory.path())?;
+    let baseline = normalize_fixture(directory.path(), &trusted_exact_edge_extraction()?)?;
+    let baseline_id = baseline.links[0].id.clone();
+    let mut projected = compass_graph::extraction_from_v1(&baseline);
+    append_endpoint_rewrite_evidence(
+        &mut projected.edges[0].attributes,
+        EndpointRewriteEvidence {
+            rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
+            score: 1.0,
+        },
+    );
+    let flexible = compass_graph::build_from_extraction(&projected, true, Some(directory.path()));
+    let rebuilt =
+        compass_graph::normalize_document_v1(&flexible, directory.path(), "sha256:test", None)?;
+    assert_eq!(rebuilt.links[0].id, baseline_id);
+    assert!(rebuilt.links[0].evidence.iter().any(|evidence| {
+        evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap")
+            && evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.wiring_site.is_some()
+    }));
+
+    let graph_path = directory.path().join("incremental.json");
+    fs::write(&graph_path, serde_json::to_vec_pretty(&rebuilt)?)?;
+    let loaded = GraphDocument::load(&graph_path)?;
+    assert_eq!(loaded.links, rebuilt.links);
+    let engine = open(
+        &graph_path,
+        None,
+        &directory.path().join("incremental-query-cache"),
+    )?;
+    let impact = |include_heuristic| ImpactRequest {
+        symbol: "crate::Target".to_owned(),
+        include_heuristic,
+        limits: CodeQueryLimits::default(),
+    };
+    assert!(
+        !engine
+            .impact(impact(false))?
+            .nodes
+            .iter()
+            .any(|node| node.qualified_name == "crate::Caller")
+    );
+    assert!(
+        engine
+            .impact(impact(true))?
+            .nodes
+            .iter()
+            .any(|node| node.qualified_name == "crate::Caller")
     );
     let trail = |include_heuristic| NodeTrailRequest {
         source: "crate::Caller".to_owned(),

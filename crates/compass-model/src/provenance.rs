@@ -4,6 +4,7 @@ use serde_json::{Map, Value};
 pub const MAX_RESOLUTION_CANDIDATES: usize = 20;
 pub const OCCURRENCE_RULE_ATTRIBUTE: &str = "_occurrence_rule";
 pub const ENDPOINT_REWRITE_RULES_ATTRIBUTE: &str = "_endpoint_rewrite_rules";
+pub const TRUSTED_EDGE_RECORD_ATTRIBUTE: &str = "_compass_v1_edge_record";
 
 /// Immutable producer rule used to distinguish relationship occurrences.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ pub enum EndpointRewriteRule {
     GraphDocumentTwinRemap,
     GraphGhostEndpointRemap,
     GraphNormalizedIdRemap,
+    IncrementalAstEndpointRemap,
 }
 
 impl EndpointRewriteRule {
@@ -55,6 +57,7 @@ impl EndpointRewriteRule {
             Self::GraphDocumentTwinRemap => "graph-document-twin-remap",
             Self::GraphGhostEndpointRemap => "graph-ghost-endpoint-remap",
             Self::GraphNormalizedIdRemap => "graph-normalized-id-remap",
+            Self::IncrementalAstEndpointRemap => "incremental-ast-endpoint-remap",
         }
     }
 }
@@ -69,7 +72,9 @@ pub struct EndpointRewriteEvidence {
 
 /// Capture the open-ended producer rule before any endpoint mutation.
 pub fn preserve_occurrence_rule(attributes: &mut Map<String, Value>) {
-    if attributes.contains_key(OCCURRENCE_RULE_ATTRIBUTE) {
+    if attributes.contains_key(OCCURRENCE_RULE_ATTRIBUTE)
+        || attributes.contains_key(TRUSTED_EDGE_RECORD_ATTRIBUTE)
+    {
         return;
     }
     let Some(rule) = attributes
