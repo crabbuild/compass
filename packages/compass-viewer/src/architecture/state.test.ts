@@ -7,17 +7,28 @@ import {
 } from "./state";
 
 const model: CallflowViewModel = {
-  schema: "compass.viewer.callflow/1",
+  schema: "compass.viewer.callflow/2",
   title: "Fixture",
   sections: [
     {
       id: "api",
       name: "API",
       communities: [],
+      nodeCount: 3,
+      internalCallCount: 2,
       nodes: [
-        { id: "a", label: "authenticate", kind: "function", sourceFile: "src/api.ts" },
-        { id: "b", label: "database", kind: "function", sourceFile: "src/db.ts" },
-        { id: "c", label: "cache", kind: "function", sourceFile: "src/cache.ts" }
+        {
+          id: "a", label: "authenticate", kind: "function",
+          sourceFile: "src/api.ts", scope: "production"
+        },
+        {
+          id: "b", label: "database", kind: "function",
+          sourceFile: "src/db.ts", scope: "production"
+        },
+        {
+          id: "c", label: "cache", kind: "function",
+          sourceFile: "src/cache.ts", scope: "production"
+        }
       ],
       edges: [
         { source: "a", target: "b", relation: "calls", confidence: "extracted" },
@@ -28,13 +39,20 @@ const model: CallflowViewModel = {
       id: "storage",
       name: "Storage",
       communities: [],
+      nodeCount: 1,
+      internalCallCount: 0,
       nodes: [
-        { id: "d", label: "database adapter", kind: "class", sourceFile: "src/store.ts" }
+        {
+          id: "d", label: "database adapter", kind: "class",
+          sourceFile: "src/store.ts", scope: "production"
+        }
       ],
       edges: []
     }
   ],
   overviewLinks: [],
+  crossSectionCalls: [],
+  coverage: { internal: 2, crossSection: 0, unassigned: 0 },
   reportHighlights: [],
   statistics: {
     nodes: 4,

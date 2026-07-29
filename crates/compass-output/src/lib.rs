@@ -24,9 +24,9 @@ pub use callflow::{
     derive_callflow_sections, write_callflow_html,
 };
 pub use callflow_model::{
-    CALLFLOW_VIEWER_SCHEMA, CallflowProvenance, CallflowStatistics, CallflowViewEdge,
-    CallflowViewLink, CallflowViewModel, CallflowViewNode, CallflowViewSection,
-    callflow_view_model,
+    CALLFLOW_VIEWER_SCHEMA, CallflowCoverage, CallflowCrossSectionCall, CallflowProvenance,
+    CallflowSourceScope, CallflowStatistics, CallflowViewEdge, CallflowViewLink, CallflowViewModel,
+    CallflowViewNode, CallflowViewSection, callflow_view_model,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};

@@ -55,4 +55,25 @@ describe("compatibilityIssue", () => {
     expect(compatibilityIssue(compatible, undefined, COMPASS_REQUIREMENTS.calls))
       .toContain("'call_graph' feature");
   });
+
+  it("requires the complete architecture flow contract", () => {
+    const report: CapabilityReport = {
+      ...compatible,
+      contracts: {
+        ...compatible.contracts,
+        callflow_viewer: "compass.viewer.callflow/2"
+      }
+    };
+
+    expect(compatibilityIssue(report, undefined, COMPASS_REQUIREMENTS.architecture))
+      .toBeUndefined();
+    expect(compatibilityIssue({
+      ...report,
+      contracts: {
+        ...report.contracts,
+        callflow_viewer: "compass.viewer.callflow/1"
+      }
+    }, undefined, COMPASS_REQUIREMENTS.architecture))
+      .toContain("requires 'compass.viewer.callflow/2'");
+  });
 });
