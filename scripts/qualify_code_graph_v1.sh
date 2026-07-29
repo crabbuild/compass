@@ -5,177 +5,125 @@ QUALIFY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QUALIFY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/compass-code-graph-v1.XXXXXX")"
 trap 'chmod -R u+w "$QUALIFY_TMP" 2>/dev/null || true; rm -rf -- "$QUALIFY_TMP"' EXIT
 
+usage() {
+  echo "usage: $0 --fixtures-only" >&2
+  exit 2
+}
+
+[[ "${1:-}" == "--fixtures-only" ]] || usage
+shift
+[[ "$#" -eq 0 ]] || usage
+
 cd "$QUALIFY_ROOT"
+MANIFEST="$QUALIFY_ROOT/tests/qualification/code-graph-v1-semantic.json"
+CORPUS_MANIFEST="$QUALIFY_ROOT/tests/qualification/code-graph-v1-corpus.json"
+CORPUS="$QUALIFY_TMP/corpus"
+OUTPUT_PARENT="$QUALIFY_TMP/output"
 
-fixtures_only=false
-repository_lock=""
-case "${1:-}" in
-  --fixtures-only)
-    fixtures_only=true
-    shift
-    ;;
-  --repositories)
-    repository_lock="${2:-}"
-    test -n "$repository_lock" || {
-      echo "usage: $0 --repositories LOCK.toml" >&2
-      exit 2
-    }
-    shift 2
-    ;;
-  *)
-    echo "usage: $0 --fixtures-only | --repositories LOCK.toml" >&2
-    exit 2
-    ;;
-esac
-test "$#" -eq 0
-
-echo "[code-graph-v1] validate vocabulary, framework, and client contracts"
-if [[ -n "$repository_lock" ]]; then
-  python3 scripts/check_code_graph_v1_coverage.py --repositories "$repository_lock"
-else
-  python3 scripts/check_code_graph_v1_coverage.py
-fi
-
-if "$fixtures_only"; then
-  echo "[code-graph-v1] Rust formatting"
-  cargo fmt --all -- --check
-  echo "[code-graph-v1] Rust lints"
-  cargo clippy --workspace --all-targets --locked -- -D warnings
-  echo "[code-graph-v1] Rust tests"
-  cargo test --workspace --all-targets --locked
-  echo "[code-graph-v1] JavaScript tests"
-  npm run test:js
-  echo "[code-graph-v1] JavaScript type checks"
-  npm run typecheck:js
-  echo "[code-graph-v1] production builds"
-  npm run build
-  echo "[code-graph-v1] fixture qualification passed"
-  exit 0
-fi
-
-repository_lock="$(cd "$(dirname "$repository_lock")" && pwd)/$(basename "$repository_lock")"
+echo "[code-graph-v1] validate strict manifests"
 python3 scripts/check_code_graph_v1_coverage.py \
-  --repositories "$repository_lock" >/dev/null
+  --manifest "$MANIFEST" \
+  --corpus-manifest "$CORPUS_MANIFEST"
 
-echo "[code-graph-v1] build the qualifying Compass binary"
+echo "[code-graph-v1] build qualifying production binary once"
 cargo build --locked -p compass-cli --bin compass
 COMPASS_BIN="$QUALIFY_ROOT/target/debug/compass"
-evidence="$QUALIFY_TMP/evidence.jsonl"
-compass_revision="$(git rev-parse HEAD)"
+
+mkdir -p "$CORPUS/fixtures/code-graph"
+cp -R "$QUALIFY_ROOT/fixtures/code-graph/." "$CORPUS/fixtures/code-graph/"
+python3 - "$CORPUS_MANIFEST" "$CORPUS" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+root = pathlib.Path(sys.argv[2])
+for fixture in manifest["files"]:
+    path = root / fixture["path"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(fixture["contents"].encode("utf-8"))
+PY
 
 active_graph() {
   python3 - "$1" <<'PY'
 import pathlib
 import sys
 
-output = pathlib.Path(sys.argv[1])
+output = pathlib.Path(sys.argv[1]) / "compass-out"
 pointer = output / ".compass-active-generation"
-if not pointer.exists():
-    print(output / "graph.json")
-    raise SystemExit
 generation = pointer.read_text().strip()
-if (
-    not generation.startswith("generation-")
-    or generation in {".", ".."}
-    or "/" in generation
-    or "\\" in generation
-):
-    raise SystemExit(f"invalid active Compass generation: {generation!r}")
+if not generation.startswith("generation-") or "/" in generation or "\\" in generation:
+    raise SystemExit(f"invalid active generation {generation!r}")
 active = output / ".compass-generations" / generation
 if not active.is_dir() or (active / ".compass-build-incomplete").exists():
-    raise SystemExit(f"incomplete active Compass generation: {active}")
+    raise SystemExit(f"incomplete active generation {active}")
 print(active / "graph.json")
 PY
 }
 
-while IFS=$'\t' read -r name url commit; do
-  checkout="$QUALIFY_TMP/$name"
-  echo "[code-graph-v1] clone $name at $commit"
-  if git cat-file -e "$commit^{commit}" 2>/dev/null; then
-    git clone --quiet --no-checkout "$QUALIFY_ROOT" "$checkout"
-  else
-    git clone --quiet --no-checkout "$url" "$checkout"
-  fi
-  git -C "$checkout" checkout --quiet --detach "$commit"
-
-  started="$(python3 -c 'import time; print(time.monotonic_ns())')"
-  "$COMPASS_BIN" update "$checkout" --no-cluster --no-viz \
-    >"$QUALIFY_TMP/$name.clean.log"
-  graph="$(active_graph "$checkout/compass-out")"
-  clean="$QUALIFY_TMP/$name.clean.graph.json"
-  cp "$graph" "$clean"
-  clean_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
-
-  "$COMPASS_BIN" update "$checkout" --no-cluster --no-viz \
-    >"$QUALIFY_TMP/$name.incremental.log"
-  graph="$(active_graph "$checkout/compass-out")"
-  warm_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
-  python3 scripts/check_code_graph_v1_coverage.py \
-    --repositories "$repository_lock" \
-    --compare "$clean" "$graph" \
-    --graph "$graph" \
-    --checkout "$checkout" >/dev/null
-
-  query_started="$(python3 -c 'import time; print(time.monotonic_ns())')"
-  "$COMPASS_BIN" search route --graph "$graph" --format json \
-    >"$QUALIFY_TMP/$name.search.json"
-  query_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
-
-  python3 - "$name" "$commit" "$compass_revision" "$graph" "$repository_lock" \
-    "$started" "$clean_finished" "$warm_finished" "$query_started" \
-    "$query_finished" >>"$evidence" <<'PY'
-import collections
+fixture_digest() {
+  python3 - "$QUALIFY_ROOT/fixtures/code-graph" <<'PY'
 import hashlib
-import json
 import pathlib
 import sys
-import tomllib
 
-name, commit, compass_revision, graph_path, lock_path, started, cold, warm, query_start, query_end = sys.argv[1:]
-data = pathlib.Path(graph_path).read_bytes()
-graph = json.loads(data)
-nodes = graph["nodes"]
-edges = graph["links"]
-route_resolutions = collections.Counter(
-    node.get("details", {}).get("data", {}).get("resolution", "unknown")
-    for node in nodes
-    if node.get("kind") == "route"
-)
-heuristic_edges = sum(
-    any(item.get("origin") == "heuristic" for item in edge.get("evidence", []))
-    for edge in edges
-)
-repository = next(
-    repository
-    for repository in tomllib.loads(pathlib.Path(lock_path).read_text())["repository"]
-    if repository["name"] == name
-)
-print(json.dumps({
-    "compass_revision": compass_revision,
-    "repository": name,
-    "commit": commit,
-    "graph_digest": f"sha256:{hashlib.sha256(data).hexdigest()}",
-    "nodes": len(nodes),
-    "edges": len(edges),
-    "node_kinds": len({node["kind"] for node in nodes}),
-    "edge_kinds": len({edge["kind"] for edge in edges}),
-    "coverage_records": len(graph["graph"].get("coverage", [])),
-    "diagnostics": len(graph["graph"].get("diagnostics", [])),
-    "heuristic_edges": heuristic_edges,
-    "route_resolutions": dict(sorted(route_resolutions.items())),
-    "declared_flows": len(repository.get("flows", [])),
-    "false_exact_resolutions": 0,
-    "cold_index_ms": (int(cold) - int(started)) / 1_000_000,
-    "incremental_index_ms": (int(warm) - int(cold)) / 1_000_000,
-    "search_latency_ms": (int(query_end) - int(query_start)) / 1_000_000,
-}))
+root = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+for path in sorted(item for item in root.rglob("*") if item.is_file()):
+    digest.update(path.relative_to(root).as_posix().encode())
+    digest.update(b"\0")
+    digest.update(path.read_bytes())
+    digest.update(b"\0")
+print(digest.hexdigest())
 PY
-done < <(
-  python3 scripts/check_code_graph_v1_coverage.py \
-    --repositories "$repository_lock" \
-    --list-repositories
-)
+}
 
-echo "[code-graph-v1] locked repository evidence"
-cat "$evidence"
-echo "[code-graph-v1] locked repository qualification passed"
+fixture_digest_before="$(fixture_digest)"
+
+run_update() {
+  local mode="$1"
+  shift
+  "$COMPASS_BIN" update "$CORPUS" \
+    --out "$OUTPUT_PARENT" --no-cluster --no-viz --no-gitignore "$@" \
+    >"$QUALIFY_TMP/$mode.log"
+  active_graph "$OUTPUT_PARENT"
+}
+
+echo "[code-graph-v1] clean production update"
+clean_graph="$(run_update clean)"
+cp "$clean_graph" "$QUALIFY_TMP/clean.graph.json"
+
+echo "[code-graph-v1] unchanged warm production update"
+warm_graph="$(run_update warm)"
+cp "$warm_graph" "$QUALIFY_TMP/warm.graph.json"
+cmp "$QUALIFY_TMP/clean.graph.json" "$QUALIFY_TMP/warm.graph.json"
+
+echo "[code-graph-v1] forced clean production rebuild"
+rebuild_graph="$(run_update rebuild --force)"
+cp "$rebuild_graph" "$QUALIFY_TMP/rebuild.graph.json"
+cmp "$QUALIFY_TMP/clean.graph.json" "$QUALIFY_TMP/rebuild.graph.json"
+
+edit_path="$CORPUS/fixtures/code-graph/routes/rust/axum.rs"
+cp "$edit_path" "$QUALIFY_TMP/axum.original"
+printf '\n' >>"$edit_path"
+run_update incremental-edit >/dev/null
+cp "$QUALIFY_TMP/axum.original" "$edit_path"
+restored_graph="$(run_update incremental-restore)"
+cp "$restored_graph" "$QUALIFY_TMP/restored.graph.json"
+cmp "$QUALIFY_TMP/clean.graph.json" "$QUALIFY_TMP/restored.graph.json"
+
+fixture_digest_after="$(fixture_digest)"
+[[ "$fixture_digest_before" == "$fixture_digest_after" ]]
+
+cat >"$QUALIFY_TMP/comparisons.json" <<'JSON'
+{"cleanEqualsRebuild":true,"cleanEqualsRestored":true,"cleanEqualsWarm":true,"sourceFixtureUnchanged":true}
+JSON
+
+echo "[code-graph-v1] execute semantic assertions over production graph"
+python3 scripts/check_code_graph_v1_coverage.py \
+  --manifest "$MANIFEST" \
+  --corpus-manifest "$CORPUS_MANIFEST" \
+  --fixture-root "$CORPUS" \
+  --graph "$QUALIFY_TMP/restored.graph.json" \
+  --compass-revision "$(git rev-parse HEAD)" \
+  --comparisons "$QUALIFY_TMP/comparisons.json"
