@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::{Extraction, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
@@ -721,22 +722,8 @@ impl<'a> State<'a> {
             aliases: scoped_alias_bindings(&body, &ctes),
             ctes,
         };
-        let read_patterns = [format!(
-            r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
-        )];
-        let write_patterns = [
-            format!(
-                r"(?i)\bINSERT\s+(?:(?:OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)|(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY)(?:\s+IGNORE)?|IGNORE)\s+)?(?:INTO\s+)?({OBJECT_REFERENCE})"
-            ),
-            format!(
-                r"(?i)\bUPDATE\s+(?:LOW_PRIORITY\s+)?(?:IGNORE\s+)?(?:ONLY\s+)?({OBJECT_REFERENCE})"
-            ),
-            format!(
-                r"(?i)\bDELETE\s+(?:LOW_PRIORITY\s+)?(?:QUICK\s+)?(?:IGNORE\s+)?(?:{IDENTIFIER}\s+)?FROM\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
-            ),
-            format!(r"(?i)\bMERGE\s+(?:INTO\s+)?({OBJECT_REFERENCE})"),
-            format!(r"(?i)\bSELECT\b[\s\S]*?\bINTO\s+({OBJECT_REFERENCE})"),
-        ];
+        let read_patterns = sql_read_access_patterns();
+        let write_patterns = sql_write_access_patterns();
         self.add_access_matches(source, start, &body, &read_patterns, "reads", &bindings);
         self.add_access_matches(source, start, &body, &write_patterns, "writes", &bindings);
     }
@@ -1095,6 +1082,28 @@ impl<'a> State<'a> {
     }
 }
 
+fn sql_read_access_patterns() -> Vec<String> {
+    vec![format!(
+        r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
+    )]
+}
+
+fn sql_write_access_patterns() -> Vec<String> {
+    vec![
+        format!(
+            r"(?i)\bINSERT\s+(?:(?:OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)|(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY)(?:\s+IGNORE)?|IGNORE)\s+)?(?:INTO\s+)?({OBJECT_REFERENCE})"
+        ),
+        format!(
+            r"(?i)\bUPDATE\s+(?:LOW_PRIORITY\s+)?(?:IGNORE\s+)?(?:ONLY\s+)?({OBJECT_REFERENCE})"
+        ),
+        format!(
+            r"(?i)\bDELETE\s+(?:LOW_PRIORITY\s+)?(?:QUICK\s+)?(?:IGNORE\s+)?(?:{IDENTIFIER}\s+)?FROM\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
+        ),
+        format!(r"(?i)\bMERGE\s+(?:INTO\s+)?({OBJECT_REFERENCE})"),
+        format!(r"(?i)\bSELECT\b[\s\S]*?\bINTO\s+({OBJECT_REFERENCE})"),
+    ]
+}
+
 fn sql_declaration_pattern() -> Result<Regex, regex::Error> {
     Regex::new(&format!(
         r"(?ix)\b(?:
@@ -1405,19 +1414,16 @@ fn scan_delimited_identifier(
     let mut index = open.saturating_add(1).min(limit);
     let mut statement_recoveries = Vec::new();
     let mut fallback_recovery = None;
-    let mut saw_escaped_delimiter = false;
     while index < limit {
         if bytes[index] == delimiter {
             if bytes.get(index + 1).copied() == Some(delimiter) {
-                saw_escaped_delimiter = true;
                 index += 2;
                 continue;
             }
             let close_end = index + 1;
             let invalid_outer_follower =
                 !identifier_close_has_valid_follower(source, close_end, limit);
-            if !saw_escaped_delimiter
-                && (invalid_outer_follower || delimiter == b']')
+            if invalid_outer_follower
                 && let Some(recovery) = statement_recoveries.iter().copied().find(|separator| {
                     proven_statement_after_separator(source, *separator, limit).is_some()
                 })
@@ -1781,60 +1787,143 @@ fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
         }
         end += 1;
     }
-    dollar_quote_opener_has_literal_role(source, start).then(|| &source[start..end])
+    (!dollar_marker_in_protected_identifier(source, start)).then(|| &source[start..end])
 }
 
-fn dollar_quote_opener_has_literal_role(source: &str, start: usize) -> bool {
-    let prefix = source.get(..start).unwrap_or_default().trim_end();
-    let Some(last) = prefix.as_bytes().last().copied() else {
-        return true;
-    };
-    if matches!(
-        last,
-        b'(' | b','
-            | b'='
-            | b'+'
-            | b'-'
-            | b'*'
-            | b'/'
-            | b'%'
-            | b'<'
-            | b'>'
-            | b'!'
-            | b'|'
-            | b'&'
-            | b'^'
-            | b'~'
-            | b':'
-            | b'?'
-    ) {
+fn dollar_marker_in_protected_identifier(source: &str, marker: usize) -> bool {
+    let component = unquoted_identifier_component_at(source, marker);
+    if component.start < marker {
         return true;
     }
-    if last == b'.' || is_sql_identifier_continuation(last) && !last.is_ascii_alphabetic() {
+    let bytes = source.as_bytes();
+    if component.start > 0 && bytes.get(component.start - 1).copied() == Some(b'.') {
+        return true;
+    }
+    if bytes.get(component.end).copied() == Some(b'.') {
+        return true;
+    }
+    static DECLARATION_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    if DECLARATION_PATTERN
+        .get_or_init(|| sql_declaration_pattern().ok())
+        .as_ref()
+        .is_some_and(|pattern| {
+            pattern.captures_iter(source).any(|capture| {
+                capture
+                    .get(4)
+                    .is_some_and(|name| marker >= name.start() && marker < name.end())
+            })
+        })
+    {
+        return true;
+    }
+    if protected_data_access_identifier(source, marker) {
+        return true;
+    }
+    protected_cte_identifier(source, marker)
+}
+
+fn unquoted_identifier_component_at(source: &str, marker: usize) -> Site {
+    let bytes = source.as_bytes();
+    let mut start = marker.min(bytes.len());
+    while start > 0
+        && bytes
+            .get(start - 1)
+            .is_some_and(|byte| is_sql_identifier_continuation(*byte))
+    {
+        start -= 1;
+    }
+    let mut end = marker.min(bytes.len());
+    while bytes
+        .get(end)
+        .is_some_and(|byte| is_sql_identifier_continuation(*byte))
+    {
+        end += 1;
+    }
+    Site::new(start, end)
+}
+
+fn protected_data_access_identifier(source: &str, marker: usize) -> bool {
+    static READ_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    static TARGET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    let read_patterns = READ_PATTERNS.get_or_init(|| {
+        sql_read_access_patterns()
+            .into_iter()
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect()
+    });
+    let target_patterns = TARGET_PATTERNS.get_or_init(|| {
+        sql_read_access_patterns()
+            .into_iter()
+            .chain(sql_write_access_patterns())
+            .chain([
+                format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"),
+                format!(r"(?i)\bCREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?\bON\s+({OBJECT_REFERENCE})"),
+                format!(r"(?i)\bCREATE\s+TRIGGER[\s\S]*?\bON\s+({OBJECT_REFERENCE})"),
+            ])
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect::<Vec<_>>()
+    });
+    for regex in target_patterns {
+        if regex.captures_iter(source).any(|capture| {
+            capture
+                .get(1)
+                .is_some_and(|target| marker >= target.start() && marker < target.end())
+        }) {
+            return true;
+        }
+    }
+    for regex in read_patterns {
+        for capture in regex.captures_iter(source) {
+            let Some(target) = capture.get(1) else {
+                continue;
+            };
+            let mut alias_start = skip_sql_whitespace(source, target.end());
+            if let Some(as_end) = consume_keyword(source, alias_start, "AS") {
+                alias_start = skip_sql_whitespace(source, as_end);
+            }
+            let Some(alias_end) = parse_identifier_end(source, alias_start) else {
+                continue;
+            };
+            let alias = &source[alias_start..alias_end];
+            if !is_reserved_object_reference(alias) && marker >= alias_start && marker < alias_end {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn protected_cte_identifier(source: &str, marker: usize) -> bool {
+    static CTE_PATTERNS: OnceLock<Option<(Regex, Regex)>> = OnceLock::new();
+    let Some((pattern, identifier_pattern)) = CTE_PATTERNS
+        .get_or_init(|| {
+            Regex::new(&format!(
+                r"(?ix)(?:\bWITH\s+(?:RECURSIVE\s+)?|,)\s*
+                    ({IDENTIFIER})\s*
+                    (?:\(([^)]*)\))?\s*
+                    AS\s+(?:NOT\s+)?(?:MATERIALIZED\s+)?\("
+            ))
+            .ok()
+            .zip(Regex::new(IDENTIFIER).ok())
+        })
+        .as_ref()
+    else {
         return false;
-    }
-    let word_start = prefix
-        .as_bytes()
-        .iter()
-        .rposition(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
-        .map_or(0, |position| position + 1);
-    matches!(
-        prefix[word_start..].to_ascii_uppercase().as_str(),
-        "AS" | "SELECT"
-            | "DISTINCT"
-            | "ALL"
-            | "DEFAULT"
-            | "VALUES"
-            | "VALUE"
-            | "RETURN"
-            | "RETURNING"
-            | "THEN"
-            | "ELSE"
-            | "WHEN"
-            | "CASE"
-            | "DO"
-            | "EXECUTE"
-    )
+    };
+    pattern.captures_iter(source).any(|capture| {
+        capture
+            .get(1)
+            .is_some_and(|name| marker >= name.start() && marker < name.end())
+            || capture.get(2).is_some_and(|columns| {
+                identifier_pattern
+                    .find_iter(columns.as_str())
+                    .any(|column| {
+                        let start = columns.start() + column.start();
+                        let end = columns.start() + column.end();
+                        marker >= start && marker < end
+                    })
+            })
+    })
 }
 
 fn dollar_quote_close_has_boundary(source: &str, close_end: usize, limit: usize) -> bool {

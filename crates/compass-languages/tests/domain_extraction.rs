@@ -1024,7 +1024,6 @@ fn unmatched_identifier_quotes_cannot_pair_with_later_same_style_sql()
     let source = br#"
 CREATE TABLE "app"."double_users" (id BIGINT);
 CREATE TABLE `app`.`backtick_users` (id BIGINT);
-CREATE TABLE [app].[bracket_users] (id BIGINT);
 SELECT * FROM "broken;
 SELECT * FROM "app"."double_users";
 CREATE TABLE "app"."after_double" (id BIGINT);
@@ -1035,11 +1034,6 @@ SELECT * FROM `app`.`backtick_users`;
 CREATE TABLE `app`.`after_backtick` (id BIGINT);
 CREATE TABLE `broken_backtick_decl;
 CREATE TABLE `app`.`after_backtick_decl` (id BIGINT);
-SELECT * FROM [broken;
-SELECT * FROM [app].[bracket_users];
-CREATE TABLE [app].[after_bracket] (id BIGINT);
-CREATE TABLE [broken_bracket_decl;
-CREATE TABLE [app].[after_bracket_decl] (id BIGINT);
 "#;
     let extraction = extract_sql_content(Path::new("db/same_style_quote_recovery.sql"), source);
 
@@ -1048,8 +1042,6 @@ CREATE TABLE [app].[after_bracket_decl] (id BIGINT);
         "app.after_double_decl",
         "app.after_backtick",
         "app.after_backtick_decl",
-        "app.after_bracket",
-        "app.after_bracket_decl",
     ] {
         assert!(
             extraction
@@ -1065,12 +1057,8 @@ CREATE TABLE [app].[after_bracket_decl] (id BIGINT);
         .iter()
         .filter(|node| node.string("symbol_kind") == "query")
         .collect::<Vec<_>>();
-    assert_eq!(queries.len(), 3, "nodes={:?}", extraction.nodes);
-    for target_name in [
-        "app.double_users",
-        "app.backtick_users",
-        "app.bracket_users",
-    ] {
+    assert_eq!(queries.len(), 2, "nodes={:?}", extraction.nodes);
+    for target_name in ["app.double_users", "app.backtick_users"] {
         let target = extraction
             .nodes
             .iter()
@@ -1102,15 +1090,13 @@ CREATE TABLE [app].[after_bracket_decl] (id BIGINT);
         .get("_compass_v1_graph_diagnostics")
         .and_then(serde_json::Value::as_array)
         .ok_or("missing boundary diagnostics")?;
-    assert_eq!(coverage.len(), 6, "coverage={coverage:?}");
-    assert_eq!(diagnostics.len(), 6, "diagnostics={diagnostics:?}");
+    assert_eq!(coverage.len(), 4, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 4, "diagnostics={diagnostics:?}");
     for malformed in [
         b"\"broken;".as_slice(),
         b"\"broken_double_decl",
         b"`broken;",
         b"`broken_backtick_decl",
-        b"[broken;",
-        b"[broken_bracket_decl",
     ] {
         let start = source
             .windows(malformed.len())
@@ -1600,17 +1586,11 @@ fn same_line_malformed_identifiers_recover_before_same_style_valid_sql()
     let source = br#"
 CREATE TABLE "app"."double_users" (id BIGINT);
 CREATE TABLE `app`.`backtick_users` (id BIGINT);
-CREATE TABLE [app].[bracket_users] (id BIGINT);
 SELECT * FROM "broken; SELECT * FROM "app"."double_users"; CREATE TABLE "app"."after_double" (id BIGINT);
 SELECT * FROM `broken; SELECT * FROM `app`.`backtick_users`; CREATE TABLE `app`.`after_backtick` (id BIGINT);
-SELECT * FROM [broken; SELECT * FROM [app].[bracket_users]; CREATE TABLE [app].[after_bracket] (id BIGINT);
 "#;
     let extraction = extract_sql_content(Path::new("db/same_line_recovery.sql"), source);
-    for target_name in [
-        "app.double_users",
-        "app.backtick_users",
-        "app.bracket_users",
-    ] {
+    for target_name in ["app.double_users", "app.backtick_users"] {
         let target = extraction
             .nodes
             .iter()
@@ -1627,11 +1607,7 @@ SELECT * FROM [broken; SELECT * FROM [app].[bracket_users]; CREATE TABLE [app].[
             extraction.edges
         );
     }
-    for declaration in [
-        "app.after_double",
-        "app.after_backtick",
-        "app.after_bracket",
-    ] {
+    for declaration in ["app.after_double", "app.after_backtick"] {
         assert!(
             extraction
                 .nodes
@@ -1654,7 +1630,7 @@ SELECT * FROM [broken; SELECT * FROM [app].[bracket_users]; CREATE TABLE [app].[
             .iter()
             .filter(|node| node.string("symbol_kind") == "query")
             .count(),
-        3
+        2
     );
     let coverage = extraction
         .extensions
@@ -1666,9 +1642,9 @@ SELECT * FROM [broken; SELECT * FROM [app].[bracket_users]; CREATE TABLE [app].[
         .get("_compass_v1_graph_diagnostics")
         .and_then(serde_json::Value::as_array)
         .ok_or("missing recovery diagnostics")?;
-    assert_eq!(coverage.len(), 3, "coverage={coverage:?}");
-    assert_eq!(diagnostics.len(), 3, "diagnostics={diagnostics:?}");
-    for malformed in [b"\"broken".as_slice(), b"`broken", b"[broken"] {
+    assert_eq!(coverage.len(), 2, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 2, "diagnostics={diagnostics:?}");
+    for malformed in [b"\"broken".as_slice(), b"`broken"] {
         let start = source
             .windows(malformed.len())
             .position(|window| window == malformed)
@@ -1803,13 +1779,10 @@ CREATE TABLE [app].[bracket_escaped; SELECT ]]tail] (id BIGINT);
 SELECT * FROM [app].[bracket_escaped; SELECT ]]tail];
 CREATE TABLE "app"."double_target" (id BIGINT);
 CREATE TABLE `app`.`backtick_target` (id BIGINT);
-CREATE TABLE [app].[bracket_target] (id BIGINT);
 SELECT * FROM "broken_double_ws; SELECT * FROM "app"."double_target";
 SELECT * FROM "broken_double_tight;SELECT * FROM "app"."double_target";
 SELECT * FROM `broken_backtick_ws; SELECT * FROM `app`.`backtick_target`;
 SELECT * FROM `broken_backtick_tight;SELECT * FROM `app`.`backtick_target`;
-SELECT * FROM [broken_bracket_ws; SELECT * FROM [app].[bracket_target];
-SELECT * FROM [broken_bracket_tight;SELECT * FROM [app].[bracket_target];
 "#;
     let extraction = extract_sql_content(Path::new("db/quote_cross_product.sql"), source);
     let exact_identifiers = [
@@ -1878,11 +1851,7 @@ SELECT * FROM [broken_bracket_tight;SELECT * FROM [app].[bracket_target];
             assert_eq!(&source[start..end], spelling);
         }
     }
-    for target_name in [
-        "app.double_target",
-        "app.backtick_target",
-        "app.bracket_target",
-    ] {
+    for target_name in ["app.double_target", "app.backtick_target"] {
         let target = extraction
             .nodes
             .iter()
@@ -1915,15 +1884,13 @@ SELECT * FROM [broken_bracket_tight;SELECT * FROM [app].[bracket_target];
         .get("_compass_v1_graph_diagnostics")
         .and_then(serde_json::Value::as_array)
         .ok_or("missing recovery diagnostics")?;
-    assert_eq!(coverage.len(), 6, "coverage={coverage:?}");
-    assert_eq!(diagnostics.len(), 6, "diagnostics={diagnostics:?}");
+    assert_eq!(coverage.len(), 4, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 4, "diagnostics={diagnostics:?}");
     for marker in [
         b"\"broken_double_ws".as_slice(),
         b"\"broken_double_tight",
         b"`broken_backtick_ws",
         b"`broken_backtick_tight",
-        b"[broken_bracket_ws",
-        b"[broken_bracket_tight",
     ] {
         let start = source
             .windows(marker.len())
@@ -2209,7 +2176,6 @@ fn multiline_malformed_identifiers_recover_at_each_original_opener()
     let source = br#"
 CREATE TABLE "app"."double_target" (id BIGINT);
 CREATE TABLE `app`.`backtick_target` (id BIGINT);
-CREATE TABLE [app].[bracket_target] (id BIGINT);
 SELECT * FROM "broken_double_ws
  SELECT * FROM "app"."double_target";
 SELECT * FROM "broken_double_tight
@@ -2218,17 +2184,9 @@ SELECT * FROM `broken_backtick_ws
  SELECT * FROM `app`.`backtick_target`;
 SELECT * FROM `broken_backtick_tight
 SELECT * FROM `app`.`backtick_target`;
-SELECT * FROM [broken_bracket_ws
- SELECT * FROM [app].[bracket_target];
-SELECT * FROM [broken_bracket_tight
-SELECT * FROM [app].[bracket_target];
 "#;
     let extraction = extract_sql_content(Path::new("db/multiline_recovery.sql"), source);
-    for target_name in [
-        "app.double_target",
-        "app.backtick_target",
-        "app.bracket_target",
-    ] {
+    for target_name in ["app.double_target", "app.backtick_target"] {
         let target = extraction
             .nodes
             .iter()
@@ -2257,7 +2215,7 @@ SELECT * FROM [app].[bracket_target];
             .iter()
             .filter(|node| node.string("symbol_kind") == "query")
             .count(),
-        6,
+        4,
         "malformed prefixes became queries: {:?}",
         extraction.nodes
     );
@@ -2271,15 +2229,13 @@ SELECT * FROM [app].[bracket_target];
         .get("_compass_v1_graph_diagnostics")
         .and_then(serde_json::Value::as_array)
         .ok_or("missing diagnostics")?;
-    assert_eq!(coverage.len(), 6, "coverage={coverage:?}");
-    assert_eq!(diagnostics.len(), 6, "diagnostics={diagnostics:?}");
+    assert_eq!(coverage.len(), 4, "coverage={coverage:?}");
+    assert_eq!(diagnostics.len(), 4, "diagnostics={diagnostics:?}");
     for marker in [
         b"\"broken_double_ws".as_slice(),
         b"\"broken_double_tight",
         b"`broken_backtick_ws",
         b"`broken_backtick_tight",
-        b"[broken_bracket_ws",
-        b"[broken_bracket_tight",
     ] {
         let start = source
             .windows(marker.len())
@@ -2385,6 +2341,212 @@ FROM app.foo$tag$bar;
 }
 
 #[test]
+fn dollar_identifier_roles_and_expression_literals_are_lexically_distinct()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.real (id BIGINT);
+CREATE TABLE $target$writes (id BIGINT);
+CREATE TABLE $$writes (id BIGINT);
+INSERT INTO $target$writes SELECT id FROM app.real;
+UPDATE $$writes SET id = 1;
+SELECT * FROM app.real AS $tag$alias;
+SELECT * FROM app.real $$bare;
+WITH $tag$cte($$column, $q$other) AS (
+  SELECT id, id FROM app.real
+) SELECT * FROM $tag$cte;
+SELECT * FROM app.real
+WHERE $tag$ FROM app.where_phantom $tag$::text IS NOT NULL;
+SELECT * FROM app.real AS r
+JOIN app.real AS $join$alias
+  ON $$ SELECT * FROM app.on_phantom $$ = 'x'
+GROUP BY r.id
+HAVING $having$ FROM app.having_phantom $having$ IS NOT NULL;
+"#;
+    let extraction = extract_sql_content(Path::new("db/dollar_roles.sql"), source);
+    let real = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.real")
+        .ok_or("missing real table")?;
+    let reads = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.target == real.id && edge.string("relation") == "reads")
+        .collect::<Vec<_>>();
+    assert_eq!(reads.len(), 7, "edges={:?}", extraction.edges);
+    for read in reads {
+        let start = read
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing read start")?;
+        let end = read
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing read end")?;
+        assert_eq!(&source[start..end], b"app.real");
+    }
+    for (target_name, spelling) in [
+        ("$target$writes", b"$target$writes".as_slice()),
+        ("$$writes", b"$$writes".as_slice()),
+    ] {
+        let target = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .ok_or_else(|| format!("missing dollar write target {target_name}"))?;
+        let write = extraction
+            .edges
+            .iter()
+            .find(|edge| edge.target == target.id && edge.string("relation") == "writes")
+            .ok_or_else(|| format!("missing dollar write for {target_name}"))?;
+        let start = write
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing write start")?;
+        let end = write
+            .attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing write end")?;
+        assert_eq!(&source[start..end], spelling);
+    }
+    for phantom in [
+        "$tag$alias",
+        "$$bare",
+        "$tag$cte",
+        "$$column",
+        "$q$other",
+        "$join$alias",
+        "app.where_phantom",
+        "app.on_phantom",
+        "app.having_phantom",
+    ] {
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.string("qualified_name") != phantom),
+            "dollar role created phantom {phantom}: {:?}",
+            extraction.nodes
+        );
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        7,
+        "literal masking merged or split statements: {:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "valid dollar roles produced recovery evidence: {:?}",
+        extraction.extensions
+    );
+    let repeated = extract_sql_content(Path::new("db/dollar_roles.sql"), source);
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>(),
+        repeated
+            .nodes
+            .iter()
+            .map(|node| &node.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    &edge.source,
+                    &edge.target,
+                    edge.string("relation"),
+                    edge.attributes.get("start_byte"),
+                    edge.attributes.get("end_byte"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        repeated
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    &edge.source,
+                    &edge.target,
+                    edge.string("relation"),
+                    edge.attributes.get("start_byte"),
+                    edge.attributes.get("end_byte"),
+                )
+            })
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn unescaped_inner_bracket_is_part_of_one_greedy_identifier()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE [outer; SELECT [inner tail] (id BIGINT);
+SELECT * FROM [outer; SELECT [inner tail];
+CREATE TABLE app.after_valid_bracket (id BIGINT);
+SELECT * FROM app.after_valid_bracket;
+"#;
+    let extraction = extract_sql_content(Path::new("db/greedy_bracket.sql"), source);
+    let outer = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "outer; SELECT [inner tail")
+        .ok_or("missing greedy bracket table")?;
+    let spelling = b"[outer; SELECT [inner tail]";
+    let read = extraction
+        .edges
+        .iter()
+        .find(|edge| edge.target == outer.id && edge.string("relation") == "reads")
+        .ok_or("missing greedy bracket read")?;
+    for attributes in [&outer.attributes, &read.attributes] {
+        let start = attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing exact start")?;
+        let end = attributes
+            .get("end_byte")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("missing exact end")?;
+        assert_eq!(&source[start..end], spelling);
+    }
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "query")
+            .count(),
+        2
+    );
+    assert!(
+        extraction.extensions.is_empty(),
+        "lexically complete bracket identifier produced recovery: {:?}",
+        extraction.extensions
+    );
+    Ok(())
+}
+
+#[test]
 fn escaped_bracket_content_remains_one_greedy_identifier() -> Result<(), Box<dyn std::error::Error>>
 {
     let source = br#"
@@ -2448,23 +2610,23 @@ SELECT * FROM "broken_or_replace
 CREATE OR REPLACE VIEW "app"."later_view" AS SELECT * FROM "app"."source_table";
 SELECT * FROM `broken_or_alter
 CREATE OR ALTER VIEW `app`.`altered_view` AS SELECT * FROM `app`.`source_table`;
-SELECT * FROM [broken_global
+SELECT * FROM "broken_global
 CREATE GLOBAL TEMP TABLE [app].[global_temp] (id BIGINT);
 SELECT * FROM "broken_local
 CREATE LOCAL TEMPORARY TABLE "app"."local_temp" (id BIGINT);
 SELECT * FROM `broken_unlogged
 CREATE UNLOGGED TABLE `app`.`unlogged_table` (id BIGINT);
-SELECT * FROM [broken_materialized
+SELECT * FROM `broken_materialized
 CREATE MATERIALIZED VIEW [app].[materialized_view] AS SELECT * FROM [app].[source_table];
 SELECT * FROM "broken_unique_index
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "source_idx" ON "app"."source_table"(id);
 SELECT * FROM `broken_if_not_exists
 CREATE TABLE IF NOT EXISTS `app`.`safe_table` (id BIGINT);
-SELECT * FROM [broken_alter_table
+SELECT * FROM "broken_alter_table
 ALTER TABLE IF EXISTS [app].[safe_table] ADD COLUMN value BIGINT;
 SELECT * FROM "broken_semicolon_ws; CREATE TEMP TABLE "app"."semi_temp" (id BIGINT);
 SELECT * FROM `broken_semicolon_tight;CREATE OR REPLACE VIEW `app`.`semi_view` AS SELECT * FROM `app`.`source_table`;
-SELECT * FROM [broken_semicolon_bracket; CREATE UNLOGGED TABLE [app].[semi_unlogged] (id BIGINT);
+SELECT * FROM "broken_semicolon_bracket; CREATE UNLOGGED TABLE [app].[semi_unlogged] (id BIGINT);
 SELECT * FROM "app"."source_table";
 "#;
     let extraction = extract_sql_content(Path::new("db/ddl_recovery.sql"), source);
@@ -2521,13 +2683,13 @@ SELECT * FROM "app"."source_table";
     for marker in [
         b"\"broken_or_replace".as_slice(),
         b"`broken_or_alter",
-        b"[broken_global",
+        b"\"broken_global",
         b"\"broken_local",
         b"`broken_unlogged",
-        b"[broken_materialized",
+        b"`broken_materialized",
         b"\"broken_unique_index",
         b"`broken_if_not_exists",
-        b"[broken_alter_table",
+        b"\"broken_alter_table",
     ] {
         let start = source
             .windows(marker.len())
@@ -2559,7 +2721,7 @@ SELECT * FROM "app"."source_table";
     for marker in [
         b"\"broken_semicolon_ws".as_slice(),
         b"`broken_semicolon_tight",
-        b"[broken_semicolon_bracket",
+        b"\"broken_semicolon_bracket",
     ] {
         let start = source
             .windows(marker.len())
