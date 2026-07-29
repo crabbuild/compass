@@ -118,7 +118,7 @@ impl BuildGuard {
         let generation = self
             .generation_directory
             .file_name()
-            .expect("generation directory has a name")
+            .ok_or_else(|| FileError::InvalidGenerationArtifact(self.generation_directory.clone()))?
             .to_string_lossy();
         write_text_atomic(&pointer, &generation)?;
         self.committed = true;
