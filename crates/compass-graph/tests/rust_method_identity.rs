@@ -96,3 +96,44 @@ class Second {
     assert_ne!(methods[0].id, methods[1].id);
     Ok(())
 }
+
+#[test]
+fn php_methods_in_distinct_classes_publish_distinct_stable_nodes() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let path = root.join("routes/controllers.php");
+    fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
+    fs::write(
+        &path,
+        r#"<?php
+class FirstController {
+    public function index() {}
+}
+class SecondController {
+    public function index() {}
+}
+"#,
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let flexible = build_from_extraction(&extraction, true, Some(root));
+    let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+    let methods = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Method && node.name == ".index()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", graph.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.qualified_name.as_str())
+            .collect::<BTreeSet<_>>(),
+        ["FirstController::index", "SecondController::index"]
+            .into_iter()
+            .collect()
+    );
+    assert_ne!(methods[0].id, methods[1].id);
+    Ok(())
+}

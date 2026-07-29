@@ -114,6 +114,50 @@ class Second {
 }
 
 #[test]
+fn php_methods_include_their_declaring_class_in_semantic_identity() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("controllers.php");
+    let source = br#"<?php
+class FirstController {
+    public function index() {}
+}
+class SecondController {
+    public function index() {}
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == ".index()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("lexical_owner"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["FirstController", "SecondController"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("qualified_name"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["FirstController::index", "SecondController::index"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    Ok(())
+}
+
+#[test]
 fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;

@@ -290,12 +290,35 @@ impl<'tree> State<'_, 'tree> {
             || make_id(&[&self.stem, &name]),
             |class| make_id(&[class, &name]),
         );
+        let semantic_owner = parent_class.and_then(|class| {
+            self.extraction
+                .nodes
+                .iter()
+                .find(|node| node.id == class)
+                .map(|node| node.label().to_owned())
+        });
         let label = if parent_class.is_some() {
             format!(".{name}()")
         } else {
             format!("{name}()")
         };
         self.add_node(id.clone(), &label, line(node), true, true);
+        if let Some(semantic_owner) = semantic_owner
+            && let Some(method) = self
+                .extraction
+                .nodes
+                .iter_mut()
+                .find(|method| method.id == id)
+        {
+            method.attributes.insert(
+                "lexical_owner".to_owned(),
+                Value::String(semantic_owner.clone()),
+            );
+            method.attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!("{semantic_owner}::{name}")),
+            );
+        }
         let owner = parent_class.unwrap_or(&self.file_id).to_owned();
         self.add_edge(
             &owner,
