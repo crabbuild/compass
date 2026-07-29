@@ -394,6 +394,124 @@ fn normalization_is_root_portable_order_independent_and_auditable()
 }
 
 #[test]
+fn framework_and_domain_scopes_are_root_portable() -> Result<(), Box<dyn std::error::Error>> {
+    let left_directory = tempfile::tempdir()?;
+    let right_directory = tempfile::tempdir()?;
+    let graph_at = |root: &Path| -> Result<_, Box<dyn std::error::Error>> {
+        let source = root.join("src/lib.rs");
+        let source_string = source.to_string_lossy().into_owned();
+        let dotted_scope = source
+            .with_extension("")
+            .to_string_lossy()
+            .replace(['/', '\\'], ".")
+            .trim_start_matches('.')
+            .to_owned();
+        let handler_id = format!("route-component:{source_string}");
+
+        let mut route = raw_node(root, "raw:route", "GET /items", 10);
+        route
+            .attributes
+            .insert("symbol_kind".to_owned(), json!("route"));
+        route
+            .attributes
+            .insert("framework".to_owned(), json!("example"));
+        route
+            .attributes
+            .insert("operation".to_owned(), json!("GET"));
+        route.attributes.insert("path".to_owned(), json!("/items"));
+        route
+            .attributes
+            .insert("declaring_scope".to_owned(), json!(dotted_scope));
+        route.attributes.insert(
+            "stages".to_owned(),
+            json!([{
+                "stage": "handler",
+                "position": 0,
+                "reference": "handler",
+                "resolution": "exact",
+                "target": handler_id,
+                "candidates": []
+            }]),
+        );
+        route.attributes.insert(
+            "candidates".to_owned(),
+            json!([{
+                "nodeId": handler_id,
+                "reason": "exact extractor-local ID",
+                "confidence": "exact"
+            }]),
+        );
+
+        let mut handler = raw_node(root, &handler_id, "handler", 30);
+        handler
+            .attributes
+            .insert("symbol_kind".to_owned(), json!("component"));
+        handler
+            .attributes
+            .insert("component_type".to_owned(), json!("route"));
+        handler
+            .attributes
+            .insert("declaring_scope".to_owned(), json!(source_string));
+
+        let mut message = raw_node(root, "raw:message", "orders.created", 50);
+        message
+            .attributes
+            .insert("symbol_kind".to_owned(), json!("message"));
+        message
+            .attributes
+            .insert("transport".to_owned(), json!("kafka"));
+        message
+            .attributes
+            .insert("subject".to_owned(), json!("orders.created"));
+        message
+            .attributes
+            .insert("declaring_scope".to_owned(), json!(source_string));
+
+        let mut schema = raw_node(root, "raw:schema", "schema", 70);
+        schema
+            .attributes
+            .insert("symbol_kind".to_owned(), json!("schema"));
+        schema
+            .attributes
+            .insert("namespace".to_owned(), json!(source_string));
+
+        let mut extraction = Extraction {
+            nodes: vec![route, handler, message, schema],
+            ..Extraction::default()
+        };
+        extraction.extensions.insert(
+            "_compass_v1_graph_diagnostics".to_owned(),
+            json!([{
+                "severity": "warning",
+                "code": "test_raw_related_id",
+                "message": "raw diagnostic references are remapped",
+                "relatedIds": [handler_id]
+            }]),
+        );
+        normalize_v1(extraction, build_evidence(root)?).map_err(Into::into)
+    };
+
+    let left = graph_at(left_directory.path())?;
+    let right = graph_at(right_directory.path())?;
+    assert_eq!(left, right);
+    assert!(left.nodes.iter().all(|node| {
+        node.evidence.iter().all(|evidence| {
+            evidence
+                .candidates
+                .iter()
+                .all(|candidate| !candidate.node_id.contains("route-component:"))
+        })
+    }));
+    assert!(left.graph.diagnostics.iter().all(|diagnostic| {
+        diagnostic
+            .related_ids
+            .iter()
+            .all(|related_id| !related_id.contains("route-component:"))
+    }));
+    Ok(())
+}
+
+#[test]
 fn symbol_identity_survives_leading_source_insertions() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

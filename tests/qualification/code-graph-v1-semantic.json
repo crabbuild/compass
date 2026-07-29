@@ -549,7 +549,7 @@
       "path": "/api/users/{id}",
       "routeSource": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts",
       "handler": {
-        "qualifiedNameTemplate": "{fixtureRoot}/fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts::GET"
+        "qualifiedName": "sveltekit::route-component::GET::/api/users/{id}"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts",
       "relationship": "routes_to",
@@ -603,7 +603,7 @@
       "path": "/users",
       "routeSource": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
       "handler": {
-        "qualifiedNameTemplate": "{fixtureRoot}/fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts::GET"
+        "qualifiedName": "nuxt::route-component::GET::/users"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
       "relationship": "routes_to",
@@ -630,7 +630,7 @@
       "path": "/api/items/{id}",
       "routeSource": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
       "handler": {
-        "qualifiedNameTemplate": "{fixtureRoot}/fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts::GET"
+        "qualifiedName": "astro::route-component::GET::/api/items/{id}"
       },
       "handlerSource": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
       "relationship": "routes_to",

@@ -290,11 +290,11 @@ fn file_routes_emit_convention_components_and_exact_bindings()
             .filter(|route| {
                 route.framework == expected_framework && route.normalized_path == expected_path
             })
-            .map(|route| route.operation.as_str())
+            .map(|route| route.operation.clone())
             .collect::<HashSet<_>>();
         assert_eq!(
             operations,
-            expected_operations.into_iter().collect(),
+            expected_operations.into_iter().map(str::to_owned).collect(),
             "{name}"
         );
         let resolved =
@@ -306,11 +306,17 @@ fn file_routes_emit_convention_components_and_exact_bindings()
                     .last()
                     .is_some_and(|stage| stage.role == RouteStageRole::Handler)
         }));
-        assert!(extraction.nodes.iter().any(|node| {
-            node.string("symbol_kind") == "component"
-                && node.string("_origin") == "convention"
-                && !node.string("rule").is_empty()
-        }));
+        for operation in &operations {
+            assert!(extraction.nodes.iter().any(|node| {
+                node.string("symbol_kind") == "component"
+                    && node.string("_origin") == "convention"
+                    && !node.string("rule").is_empty()
+                    && node.string("qualified_name")
+                        == format!(
+                            "{expected_framework}::route-component::{operation}::{expected_path}"
+                        )
+            }));
+        }
         assert!(extraction.edges.iter().any(|edge| {
             edge.string("relation") == "routes_to"
                 && edge.string("_origin") == "convention"

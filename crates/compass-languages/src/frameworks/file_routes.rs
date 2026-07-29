@@ -165,7 +165,14 @@ fn one_route(
 ) -> Vec<RawFrameworkFact> {
     let original_path = convention_path(relative);
     let normalized_path = normalize_dynamic_segments(&original_path);
-    let handler = ensure_route_component(path, framework, operation, source, extraction);
+    let handler = ensure_route_component(
+        path,
+        framework,
+        operation,
+        &normalized_path,
+        source,
+        extraction,
+    );
     vec![RawFrameworkFact::Route(RawRouteFact {
         framework: framework.to_owned(),
         operation: operation.to_owned(),
@@ -188,13 +195,15 @@ fn ensure_route_component(
     path: &Path,
     framework: &str,
     operation: &str,
+    route_path: &str,
     source: &[u8],
     extraction: &mut Extraction,
 ) -> String {
     let source_file = path.to_string_lossy().into_owned();
     let id = make_id(&["route-component", framework, &source_file, operation]);
+    let qualified_name = format!("{framework}::route-component::{operation}::{route_path}");
     if extraction.nodes.iter().any(|node| node.id == id) {
-        return id;
+        return qualified_name;
     }
     let name = path
         .file_name()
@@ -208,7 +217,7 @@ fn ensure_route_component(
             ("name".into(), Value::String(name.to_owned())),
             (
                 "qualified_name".into(),
-                Value::String(format!("{source_file}::{operation}")),
+                Value::String(qualified_name.clone()),
             ),
             ("symbol_kind".into(), Value::String("component".into())),
             ("component_type".into(), Value::String("route".into())),
@@ -263,7 +272,7 @@ fn ensure_route_component(
             ]),
         });
     }
-    id
+    qualified_name
 }
 
 fn exported_http_methods(source: &str) -> Vec<String> {

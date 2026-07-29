@@ -112,11 +112,23 @@ restored_graph="$(run_update incremental-restore)"
 cp "$restored_graph" "$QUALIFY_TMP/restored.graph.json"
 cmp "$QUALIFY_TMP/clean.graph.json" "$QUALIFY_TMP/restored.graph.json"
 
+echo "[code-graph-v1] alternate-checkout production update"
+CHECKOUT_CORPUS="$QUALIFY_TMP/alternate/corpus"
+CHECKOUT_OUTPUT="$QUALIFY_TMP/alternate/output"
+mkdir -p "$CHECKOUT_CORPUS"
+cp -R "$CORPUS/." "$CHECKOUT_CORPUS/"
+"$COMPASS_BIN" update "$CHECKOUT_CORPUS" \
+  --out "$CHECKOUT_OUTPUT" --no-cluster --no-viz --no-gitignore \
+  >"$QUALIFY_TMP/alternate-checkout.log"
+checkout_graph="$(active_graph "$CHECKOUT_OUTPUT")"
+cp "$checkout_graph" "$QUALIFY_TMP/checkout.graph.json"
+cmp "$QUALIFY_TMP/clean.graph.json" "$QUALIFY_TMP/checkout.graph.json"
+
 fixture_digest_after="$(fixture_digest)"
 [[ "$fixture_digest_before" == "$fixture_digest_after" ]]
 
 cat >"$QUALIFY_TMP/comparisons.json" <<'JSON'
-{"cleanEqualsRebuild":true,"cleanEqualsRestored":true,"cleanEqualsWarm":true,"sourceFixtureUnchanged":true}
+{"cleanEqualsCheckout":true,"cleanEqualsRebuild":true,"cleanEqualsRestored":true,"cleanEqualsWarm":true,"sourceFixtureUnchanged":true}
 JSON
 
 echo "[code-graph-v1] execute semantic assertions over production graph"

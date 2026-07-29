@@ -461,6 +461,7 @@ pub fn normalize_v1(
         }
     }
     for node in nodes.values_mut() {
+        remap_provenance_candidates(&mut node.evidence, &id_remap);
         let Some(NodeDetails::Route(details)) = node.details.as_mut() else {
             continue;
         };
@@ -513,6 +514,7 @@ pub fn normalize_v1(
                 &file_facts,
             )?,
         };
+        remap_provenance_candidates(&mut edge.evidence, &id_remap);
         if !trusted_edge
             && edge.kind == EdgeKind::Tests
             && let Some(source) = nodes.get_mut(&edge.source)
@@ -722,6 +724,26 @@ pub fn normalize_v1(
 
     let mut nodes = nodes.into_values().collect::<Vec<_>>();
     let mut links = links.into_values().collect::<Vec<_>>();
+    for node in &mut nodes {
+        for diagnostic in &mut node.diagnostics {
+            remap_diagnostic_ids(diagnostic, &id_remap);
+        }
+    }
+    for file in &mut evidence.files {
+        for diagnostic in &mut file.diagnostics {
+            remap_diagnostic_ids(diagnostic, &id_remap);
+        }
+    }
+    for diagnostic in &mut evidence.diagnostics {
+        remap_diagnostic_ids(diagnostic, &id_remap);
+    }
+    for coverage in &mut evidence.coverage {
+        if let Some(file_id) = coverage.file_id.as_mut()
+            && let Some(published) = id_remap.get(file_id)
+        {
+            file_id.clone_from(published);
+        }
+    }
     nodes.sort_by(|left, right| left.id.cmp(&right.id));
     links.sort_by(|left, right| {
         (
@@ -765,6 +787,16 @@ pub fn normalize_v1(
     };
     validate_code_graph(&document)?;
     Ok(document)
+}
+
+fn remap_diagnostic_ids(diagnostic: &mut GraphDiagnostic, id_remap: &HashMap<String, String>) {
+    for related_id in &mut diagnostic.related_ids {
+        if let Some(published) = id_remap.get(related_id) {
+            related_id.clone_from(published);
+        }
+    }
+    diagnostic.related_ids.sort();
+    diagnostic.related_ids.dedup();
 }
 
 fn normalize_trusted_edge(
@@ -1177,25 +1209,7 @@ fn anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
 
 fn recompute_route_resolution(details: &mut RouteNodeDetails) {
     for stage in &mut details.stages {
-        stage.candidates.sort_by(|left, right| {
-            left.node_id
-                .cmp(&right.node_id)
-                .then_with(|| {
-                    route_candidate_confidence_rank(left.confidence)
-                        .cmp(&route_candidate_confidence_rank(right.confidence))
-                })
-                .then_with(|| match (left.score, right.score) {
-                    (Some(left), Some(right)) => right.total_cmp(&left),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                })
-                .then_with(|| right.anchor.is_some().cmp(&left.anchor.is_some()))
-                .then_with(|| serialized(left).cmp(&serialized(right)))
-        });
-        stage
-            .candidates
-            .dedup_by(|left, right| left.node_id == right.node_id);
+        sort_dedup_candidates(&mut stage.candidates);
         let mut targets = stage
             .candidates
             .iter()
@@ -1806,6 +1820,76 @@ fn normalize_logical_database_scope(
     Ok(())
 }
 
+fn normalize_source_derived_scopes(
+    attributes: &mut Map<String, Value>,
+    root: &Path,
+) -> Result<(), GraphError> {
+    let Some(source_file) = optional_source_path(attributes, "source_file").or_else(|| {
+        attributes
+            .get("source_anchor")
+            .or_else(|| attributes.get("sourceAnchor"))
+            .or_else(|| attributes.get("anchor"))
+            .and_then(Value::as_object)
+            .and_then(|anchor| anchor.get("file"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }) else {
+        return Ok(());
+    };
+    let portable_source = portable_path(&source_file, root)?;
+    let source_path = Path::new(&source_file);
+    let portable_source_path = Path::new(&portable_source);
+    let dotted_components = |path: &Path| {
+        path.with_extension("")
+            .components()
+            .filter_map(|component| component.as_os_str().to_str())
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    let dotted_trimmed = |path: &Path| {
+        path.with_extension("")
+            .to_string_lossy()
+            .replace(['/', '\\'], ".")
+            .trim_start_matches('.')
+            .to_owned()
+    };
+    let source_scopes = [
+        source_file.clone(),
+        dotted_components(source_path),
+        dotted_trimmed(source_path),
+    ];
+    let portable_scopes = [
+        portable_source.clone(),
+        dotted_components(portable_source_path),
+        dotted_trimmed(portable_source_path),
+    ];
+    let dotted_roots = [dotted_components(root), dotted_trimmed(root)];
+
+    for key in ["declaring_scope", "namespace"] {
+        let Some(scope) = optional_string(attributes, key) else {
+            continue;
+        };
+        if let Some(index) = source_scopes
+            .iter()
+            .position(|candidate| candidate == &scope)
+        {
+            attributes.insert(
+                key.to_owned(),
+                Value::String(portable_scopes[index].clone()),
+            );
+        } else if let Some(relative) = dotted_roots.iter().find_map(|dotted_root| {
+            scope
+                .strip_prefix(dotted_root)
+                .and_then(|suffix| suffix.strip_prefix('.'))
+        }) {
+            attributes.insert(key.to_owned(), Value::String(relative.to_owned()));
+        } else if Path::new(&scope).is_absolute() {
+            attributes.insert(key.to_owned(), Value::String(portable_path(&scope, root)?));
+        }
+    }
+    Ok(())
+}
+
 fn normalize_node(
     mut raw: RawNodeRecord,
     root: &Path,
@@ -1813,6 +1897,7 @@ fn normalize_node(
     inferred_wiring_site: Option<&SourceAnchor>,
 ) -> Result<NodeRecord, GraphError> {
     normalize_logical_database_scope(&mut raw.attributes, root)?;
+    normalize_source_derived_scopes(&mut raw.attributes, root)?;
     let raw_kind = raw
         .attributes
         .get("symbol_kind")
@@ -2330,8 +2415,40 @@ fn normalize_candidates(
     for candidate in &mut candidates {
         normalize_optional_anchor(&mut candidate.anchor, root)?;
     }
-    candidates.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+    sort_dedup_candidates(&mut candidates);
     Ok(candidates)
+}
+
+fn remap_provenance_candidates(evidence: &mut Vec<Provenance>, id_remap: &HashMap<String, String>) {
+    for provenance in evidence.iter_mut() {
+        for candidate in &mut provenance.candidates {
+            if let Some(published) = id_remap.get(&candidate.node_id) {
+                candidate.node_id.clone_from(published);
+            }
+        }
+        sort_dedup_candidates(&mut provenance.candidates);
+    }
+    sort_dedup_serialized(evidence);
+}
+
+fn sort_dedup_candidates(candidates: &mut Vec<ResolutionCandidate>) {
+    candidates.sort_by(|left, right| {
+        left.node_id
+            .cmp(&right.node_id)
+            .then_with(|| {
+                route_candidate_confidence_rank(left.confidence)
+                    .cmp(&route_candidate_confidence_rank(right.confidence))
+            })
+            .then_with(|| match (left.score, right.score) {
+                (Some(left), Some(right)) => right.total_cmp(&left),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+            .then_with(|| right.anchor.is_some().cmp(&left.anchor.is_some()))
+            .then_with(|| serialized(left).cmp(&serialized(right)))
+    });
+    candidates.dedup_by(|left, right| left.node_id == right.node_id);
 }
 
 fn route_stage_details(
