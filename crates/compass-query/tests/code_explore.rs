@@ -47,3 +47,28 @@ fn explore_never_reads_unsafe_relative_paths() -> Result<(), Box<dyn std::error:
     assert!(open(&graph_path, None, &directory.path().join("cache")).is_err());
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn explore_rejects_a_source_symlink_that_escapes_the_repository()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let outside = tempfile::tempdir()?;
+    let outside_source = outside.path().join("lib.rs");
+    fs::write(&outside_source, "code")?;
+    fs::remove_file(directory.path().join("src/lib.rs"))?;
+    symlink(outside_source, directory.path().join("src/lib.rs"))?;
+
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let result = engine.explore(ExploreRequest {
+        symbols: vec!["Api.caller".to_owned(), "Store.callee".to_owned()],
+        root: directory.path().to_string_lossy().into_owned(),
+        limits: CodeQueryLimits::default(),
+    });
+    assert!(result.is_err());
+    Ok(())
+}

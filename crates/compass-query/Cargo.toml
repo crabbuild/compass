@@ -24,6 +24,9 @@ compass-analysis = { path = "../compass-analysis", version = "0.1.4" }
 compass-ir = { path = "../compass-ir", version = "0.1.4" }
 unicode-normalization.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 compass-graphdb = { path = "../compass-graphdb", version = "0.1.4" }
 tempfile.workspace = true

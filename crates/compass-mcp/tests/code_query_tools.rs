@@ -9,6 +9,8 @@ use compass_model::code_graph::{
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+use rmcp::ServiceExt;
+use rmcp::model::CallToolRequestParams;
 use serde_json::{Map, Value, json};
 
 fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn Error>> {
@@ -157,4 +159,44 @@ fn code_query_tool_schemas_are_closed_and_bounded() {
                 .is_some()
         );
     }
+}
+
+#[tokio::test]
+async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = write_typed_graph(directory.path())?;
+    let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
+    let server_task = tokio::spawn(async move {
+        let running = CompassMcp::new(graph)
+            .serve(server_transport)
+            .await
+            .map_err(|error| error.to_string())?;
+        running.waiting().await.map_err(|error| error.to_string())
+    });
+    let client = ().serve(client_transport).await?;
+    let response = client
+        .call_tool(
+            CallToolRequestParams::new("search_symbols")
+                .with_arguments(Map::from_iter([("query".to_owned(), json!("Target"))])),
+        )
+        .await?;
+    assert_eq!(
+        response
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("schema"))
+            .and_then(Value::as_str),
+        Some("compass.query/1")
+    );
+    assert!(!response.content.is_empty());
+    assert!(
+        client
+            .call_tool(CallToolRequestParams::new("search_symbols"))
+            .await
+            .is_err()
+    );
+    client.cancel().await?;
+    server_task.await?.map_err(std::io::Error::other)?;
+    Ok(())
 }

@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use compass_ir::ProgramBundle;
@@ -39,9 +39,22 @@ pub struct CodeQueryEngine {
     pub(crate) connection: Connection,
     pub(crate) graph_path: PathBuf,
     pub(crate) index_path: PathBuf,
+    pub(crate) adjacent_edges: HashMap<String, Vec<usize>>,
 }
 
 impl CodeQueryEngine {
+    pub(crate) fn build_adjacency(graph: &GraphDocument) -> HashMap<String, Vec<usize>> {
+        let mut adjacent = HashMap::<String, Vec<usize>>::new();
+        for (index, edge) in graph.links.iter().enumerate() {
+            adjacent.entry(edge.source.clone()).or_default().push(index);
+            adjacent.entry(edge.target.clone()).or_default().push(index);
+        }
+        for edges in adjacent.values_mut() {
+            edges.sort_by(|left, right| graph.links[*left].id.cmp(&graph.links[*right].id));
+        }
+        adjacent
+    }
+
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
         let query = fts_query(&request.query)?;
@@ -208,6 +221,7 @@ impl CodeQueryEngine {
         let mut queue =
             VecDeque::from([(seed.clone(), Vec::<String>::new(), Vec::<String>::new())]);
         let mut visited = HashSet::from([seed.clone()]);
+        let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
         let mut selected_edges = HashSet::new();
         while let Some((node, path_nodes, path_edges)) = queue.pop_front() {
             if path_edges.len() >= max_depth {
@@ -225,12 +239,17 @@ impl CodeQueryEngine {
                 .collect::<Vec<_>>();
             incoming.sort_by(|left, right| left.id.cmp(&right.id));
             for edge in incoming {
-                selected_edges.insert(edge.id.clone());
+                if selected_edges.len() >= max_edges {
+                    response.truncated = true;
+                    break;
+                }
                 if visited.insert(edge.source.clone()) {
                     if visited.len() > max_nodes {
+                        visited.remove(&edge.source);
                         response.truncated = true;
                         break;
                     }
+                    selected_edges.insert(edge.id.clone());
                     let mut nodes = path_nodes.clone();
                     if nodes.is_empty() {
                         nodes.push(seed.clone());
@@ -242,6 +261,8 @@ impl CodeQueryEngine {
                         .paths
                         .push(path_record(&nodes, &edges, &self.graph));
                     queue.push_back((edge.source.clone(), nodes, edges));
+                } else {
+                    selected_edges.insert(edge.id.clone());
                 }
             }
             if response.truncated {
@@ -277,9 +298,10 @@ impl CodeQueryEngine {
         let mut edge_ids = HashSet::new();
         for pair in seeds.windows(2) {
             if let [source, target] = pair
-                && let Some((nodes, edges)) =
+                && let (Some((nodes, edges)), truncated) =
                     self.shortest_path(source, target, true, &request.limits)
             {
+                response.truncated |= truncated;
                 ids.extend(nodes.iter().cloned());
                 edge_ids.extend(edges.iter().cloned());
                 response
@@ -310,9 +332,13 @@ impl CodeQueryEngine {
         let Some(target) = self.resolve_symbol(&request.target, &mut response) else {
             return Ok(response);
         };
-        let Some((nodes, edges)) =
-            self.shortest_path(&source, &target, request.include_heuristic, &request.limits)
-        else {
+        let (path, truncated) =
+            self.shortest_path(&source, &target, request.include_heuristic, &request.limits);
+        response.truncated |= truncated;
+        let Some((nodes, edges)) = path else {
+            if truncated {
+                return self.finish_response(&mut response);
+            }
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::NoMatch,
                 message: format!("No bounded trail connects {source} and {target}"),
@@ -417,26 +443,42 @@ impl CodeQueryEngine {
         target: &str,
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
-    ) -> Option<(Vec<String>, Vec<String>)> {
+    ) -> (Option<(Vec<String>, Vec<String>)>, bool) {
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
-        let mut queue = VecDeque::from([(
-            source.to_owned(),
-            vec![source.to_owned()],
-            Vec::<String>::new(),
-        )]);
+        let max_nodes = usize::try_from(limits.max_nodes).unwrap_or(usize::MAX);
+        let max_edges = usize::try_from(limits.max_edges).unwrap_or(usize::MAX);
+        let mut queue = VecDeque::from([(source.to_owned(), 0_usize)]);
         let mut visited = HashSet::from([source.to_owned()]);
-        while let Some((node, nodes, edges)) = queue.pop_front() {
+        let mut predecessor = HashMap::<String, (String, String)>::new();
+        let mut traversed_edges = 0_usize;
+        let mut truncated = false;
+        while let Some((node, depth)) = queue.pop_front() {
             if node == target {
-                return Some((nodes, edges));
+                let mut nodes = vec![target.to_owned()];
+                let mut edges = Vec::new();
+                let mut cursor = target;
+                while cursor != source {
+                    let Some((previous, edge)) = predecessor.get(cursor) else {
+                        return (None, truncated);
+                    };
+                    edges.push(edge.clone());
+                    nodes.push(previous.clone());
+                    cursor = previous;
+                }
+                nodes.reverse();
+                edges.reverse();
+                return (Some((nodes, edges)), truncated);
             }
-            if edges.len() >= max_depth {
+            if depth >= max_depth {
                 continue;
             }
             let mut adjacent = self
-                .graph
-                .links
-                .iter()
-                .filter_map(|edge| {
+                .adjacent_edges
+                .get(&node)
+                .into_iter()
+                .flatten()
+                .filter_map(|index| {
+                    let edge = &self.graph.links[*index];
                     if !include_heuristic && is_heuristic(edge) {
                         return None;
                     }
@@ -455,16 +497,20 @@ impl CodeQueryEngine {
                     .then_with(|| left.1.id.cmp(&right.1.id))
             });
             for (next, edge) in adjacent {
-                if visited.insert(next.clone()) {
-                    let mut next_nodes = nodes.clone();
-                    next_nodes.push(next.clone());
-                    let mut next_edges = edges.clone();
-                    next_edges.push(edge.id.clone());
-                    queue.push_back((next, next_nodes, next_edges));
+                if visited.contains(&next) {
+                    continue;
                 }
+                if visited.len() >= max_nodes || traversed_edges >= max_edges {
+                    truncated = true;
+                    continue;
+                }
+                visited.insert(next.clone());
+                traversed_edges += 1;
+                predecessor.insert(next.clone(), (node.clone(), edge.id.clone()));
+                queue.push_back((next, depth + 1));
             }
         }
-        None
+        (None, truncated)
     }
 
     fn add_verified_files(

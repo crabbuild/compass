@@ -1193,6 +1193,7 @@ version = "0.1.10"
 dependencies = [
  "axum",
  "compass-core",
+ "compass-files",
  "compass-graph",
  "compass-model",
  "compass-prs",
@@ -1302,6 +1303,7 @@ dependencies = [
  "compass-graphdb",
  "compass-ir",
  "compass-model",
+ "libc",
  "regex",
  "rusqlite",
  "serde",

@@ -63,3 +63,26 @@ fn node_trail_returns_a_stable_evidence_aware_path() -> Result<(), Box<dyn std::
     assert_eq!(trail.paths[0].edge_ids.len(), 3);
     Ok(())
 }
+
+#[test]
+fn node_trail_never_exceeds_node_or_edge_budgets() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let trail = engine.node_trail(NodeTrailRequest {
+        source: "dependent".to_owned(),
+        target: "Store.callee".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits {
+            max_nodes: 2,
+            max_edges: 1,
+            ..CodeQueryLimits::default()
+        },
+    })?;
+    assert!(trail.truncated);
+    assert!(trail.nodes.len() <= 2);
+    assert!(trail.edges.len() <= 1);
+    assert!(trail.paths.is_empty());
+    Ok(())
+}

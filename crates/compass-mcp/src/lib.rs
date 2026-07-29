@@ -128,7 +128,9 @@ impl GraphStore {
                 let output = std::env::var_os("COMPASS_OUT")
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("compass-out"));
-                Path::new(project).join(output).join("graph.json")
+                let output = Path::new(project).join(output);
+                compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+                    .unwrap_or_else(|_| output.join("graph.json"))
             },
         )
     }
@@ -195,20 +197,13 @@ impl CompassMcp {
     /// Invoke a graph tool without a transport, primarily for compatibility tests.
     #[must_use]
     pub fn invoke(&self, name: &str, mut arguments: Map<String, Value>) -> String {
-        if !tool_specs().iter().any(|tool| tool.name == name) {
-            return format!("Unknown tool: {name}");
-        }
-        let project_path = arguments
-            .remove("project_path")
-            .and_then(|value| value.as_str().map(str::to_owned));
-        let context = match self.store.load(project_path.as_deref()) {
-            Ok(context) => context,
-            Err(error) => return format!("Error executing {name}: {error}"),
-        };
-        match invoke_tool(name, &arguments, &context) {
-            Ok(output) => output,
-            Err(error) => format!("Error executing {name}: {error}"),
-        }
+        self.invoke_result(name, &mut arguments)
+            .map(|result| {
+                result
+                    .structured_content
+                    .map_or(result.text, |value| value.to_string())
+            })
+            .unwrap_or_else(|error| format!("Error executing {name}: {error}"))
     }
 
     /// Read a compass resource without a transport.
@@ -249,8 +244,16 @@ impl ServerHandler for CompassMcp {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        let output = self.invoke(&request.name, request.arguments.unwrap_or_default());
-        Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+        let mut arguments = request.arguments.unwrap_or_default();
+        let result = self
+            .invoke_result(&request.name, &mut arguments)
+            .map_err(|error| ErrorData::invalid_params(error, None))?;
+        let mut response = result.structured_content.map_or_else(
+            || CallToolResult::success(Vec::new()),
+            CallToolResult::structured,
+        );
+        response.content = vec![ContentBlock::text(result.text)];
+        Ok(response)
     }
 
     async fn list_resources(
@@ -277,6 +280,60 @@ impl ServerHandler for CompassMcp {
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(text, request.uri).with_mime_type(mime),
         ]))
+    }
+}
+
+struct ToolInvocation {
+    text: String,
+    structured_content: Option<Value>,
+}
+
+impl CompassMcp {
+    fn invoke_result(
+        &self,
+        name: &str,
+        arguments: &mut Map<String, Value>,
+    ) -> Result<ToolInvocation, String> {
+        if !tool_specs().iter().any(|tool| tool.name == name) {
+            return Err(format!("unknown tool: {name}"));
+        }
+        let project_path = arguments
+            .remove("project_path")
+            .and_then(|value| value.as_str().map(str::to_owned));
+        let context = self.store.load(project_path.as_deref())?;
+        if matches!(
+            name,
+            "search_symbols"
+                | "get_callers"
+                | "get_callees"
+                | "get_impact"
+                | "explore_code"
+                | "get_node"
+        ) {
+            let response = code_query::invoke(name, arguments, &context.path)?;
+            let text = format!(
+                "{:?}: {} nodes, {} edges, {} paths{}",
+                response.operation,
+                response.nodes.len(),
+                response.edges.len(),
+                response.paths.len(),
+                if response.truncated {
+                    " (truncated)"
+                } else {
+                    ""
+                }
+            );
+            return Ok(ToolInvocation {
+                text,
+                structured_content: Some(
+                    serde_json::to_value(response).map_err(|error| error.to_string())?,
+                ),
+            });
+        }
+        Ok(ToolInvocation {
+            text: invoke_tool(name, arguments, &context)?,
+            structured_content: None,
+        })
     }
 }
 
@@ -442,7 +499,7 @@ fn invoke_tool(
 ) -> Result<String, String> {
     match name {
         "search_symbols" | "get_callers" | "get_callees" | "get_impact" | "explore_code"
-        | "get_node" => code_query::invoke(name, arguments, &context.path),
+        | "get_node" => Err("code query tool requires typed invocation".to_owned()),
         "query_graph" => tool_query_graph(arguments, context),
         "get_neighbors" => tool_get_neighbors(arguments, context),
         "get_community" => tool_get_community(arguments, context),

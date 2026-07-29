@@ -47,3 +47,33 @@ fn impact_reports_bounds_as_typed_truncation() -> Result<(), Box<dyn std::error:
     }));
     Ok(())
 }
+
+#[test]
+fn impact_applies_edge_and_node_budgets_before_publishing_records()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let response = engine.impact(ImpactRequest {
+        symbol: "UserService.list".to_owned(),
+        include_heuristic: true,
+        limits: CodeQueryLimits {
+            max_nodes: 2,
+            max_edges: 1,
+            ..CodeQueryLimits::default()
+        },
+    })?;
+    assert!(response.truncated);
+    assert!(response.nodes.len() <= 2);
+    assert!(response.edges.len() <= 1);
+    let node_ids = response
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(response.edges.iter().all(|edge| {
+        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
+    }));
+    Ok(())
+}

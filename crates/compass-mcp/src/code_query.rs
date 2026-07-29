@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use compass_model::query_contract::{
-    CallRequest, CodeQueryLimits, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
+    CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
+    NodeTrailRequest, SearchRequest,
 };
 use compass_query::open;
 use serde_json::{Map, Value, json};
@@ -49,14 +50,14 @@ pub(super) fn invoke(
     name: &str,
     arguments: &Map<String, Value>,
     graph_path: &Path,
-) -> Result<String, String> {
+) -> Result<CodeQueryResponse, String> {
     let cache = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache");
     let engine = open(graph_path, None, &cache).map_err(|error| error.to_string())?;
     let limits = limits(arguments)?;
-    let response = match name {
+    match name {
         "search_symbols" => engine.search(SearchRequest {
             query: required_string(arguments, "query")?,
             limits,
@@ -102,8 +103,7 @@ pub(super) fn invoke(
         }),
         _ => return Err(format!("unknown code query tool {name}")),
     }
-    .map_err(|error| error.to_string())?;
-    serde_json::to_string(&response).map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())
 }
 
 fn limits(arguments: &Map<String, Value>) -> Result<CodeQueryLimits, String> {

@@ -66,12 +66,14 @@ pub fn open(
     }
     let connection = Connection::open_with_flags(&index_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(sql_error)?;
+    let adjacent_edges = CodeQueryEngine::build_adjacency(&graph);
     Ok(CodeQueryEngine {
         graph,
         program,
         connection,
         graph_path: graph_path.to_path_buf(),
         index_path,
+        adjacent_edges,
     })
 }
 
