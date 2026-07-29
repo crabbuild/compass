@@ -16,6 +16,7 @@ use compass_graph::{
     normalize_document_v1_with_inventory, remap_communities_to_previous, score_communities,
 };
 use compass_languages::{
+    EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
     Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
 use compass_model::code_graph::{
@@ -630,7 +631,11 @@ fn build_graph_inner(
                 .to_string_lossy()
                 .replace('\\', "/");
             let language = Registry::resolve(path).map_or("", |spec| spec.name);
-            let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+            let mut combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+            if bytes.is_empty() {
+                combined.graph = Extraction::default();
+                combined.program = None;
+            }
             let prepared = combined.program.map(|batch| PreparedSyntaxInput {
                 source_file,
                 language: language.to_owned(),
@@ -674,18 +679,40 @@ fn build_graph_inner(
         }
     };
     let mut extraction_failures = BTreeMap::new();
-    let fresh = missing
+    let mut fresh = missing
         .iter()
         .cloned()
         .zip(fresh_outcomes)
         .filter_map(|(path, outcome)| match outcome {
             Ok(extracted) => Some(extracted),
             Err(error) => {
-                extraction_failures.insert(path, error.to_string());
+                extraction_failures.insert(
+                    canonical_identity(&path),
+                    portable_diagnostic_reason(&error.to_string(), &path, &root),
+                );
                 None
             }
         })
         .collect::<Vec<_>>();
+    let mut extraction_partials = BTreeMap::new();
+    for (path, extraction) in &mut extractions {
+        prepare_extraction_for_publication(
+            path,
+            extraction,
+            &root,
+            &mut extraction_failures,
+            &mut extraction_partials,
+        );
+    }
+    for (path, extraction, _, _) in &mut fresh {
+        prepare_extraction_for_publication(
+            path,
+            extraction,
+            &root,
+            &mut extraction_failures,
+            &mut extraction_partials,
+        );
+    }
     profile_internal("tree-sitter combined extraction", &mut internal_started);
     let prepared = if options.force && !options.reuse_cache_on_force {
         fresh
@@ -969,7 +996,13 @@ fn build_graph_inner(
             &root,
             configuration_digest,
             source_commit.as_deref(),
-            detection_inventory(&detection, semantic, &extraction_failures, &root),
+            detection_inventory(
+                &detection,
+                semantic,
+                &extraction_failures,
+                &extraction_partials,
+                &root,
+            ),
         )?;
         write_json_atomic(output_dir.join("graph.json"), &published, false)?;
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
@@ -1177,6 +1210,7 @@ fn build_graph_inner(
                 detection: &detection,
                 semantic,
                 extraction_failures: &extraction_failures,
+                extraction_partials: &extraction_partials,
             },
             configuration_digest,
             commit.as_deref(),
@@ -2539,6 +2573,7 @@ struct PublicationEvidence<'a> {
     detection: &'a Detection,
     semantic: Option<&'a SemanticLayer>,
     extraction_failures: &'a BTreeMap<PathBuf, String>,
+    extraction_partials: &'a BTreeMap<PathBuf, String>,
 }
 
 fn published_v1_document(
@@ -2583,6 +2618,7 @@ fn published_v1_document(
             evidence.detection,
             evidence.semantic,
             evidence.extraction_failures,
+            evidence.extraction_partials,
             root,
         ),
     )?)
@@ -2592,6 +2628,7 @@ fn detection_inventory(
     detection: &Detection,
     semantic: Option<&SemanticLayer>,
     extraction_failures: &BTreeMap<PathBuf, String>,
+    extraction_partials: &BTreeMap<PathBuf, String>,
     root: &Path,
 ) -> Vec<InventoryEvidence> {
     let mut inventory = detection
@@ -2604,48 +2641,111 @@ fn detection_inventory(
                 } else {
                     root.join(path)
                 };
-                let status = if extraction_failures.contains_key(&absolute) {
+                let identity = canonical_identity(&absolute);
+                let spec = Registry::resolve(Path::new(path));
+                let status = if extraction_failures.contains_key(&identity) {
                     ExtractionStatus::ParseFailure
-                } else if semantic.is_some_and(|layer| {
-                    layer
-                        .partial_files
-                        .iter()
-                        .any(|partial| canonical_identity(partial) == canonical_identity(&absolute))
-                }) {
+                } else if extraction_partials.contains_key(&identity)
+                    || semantic.is_some_and(|layer| {
+                        layer.partial_files.iter().any(|partial| {
+                            canonical_identity(partial) == canonical_identity(&absolute)
+                        })
+                    })
+                {
                     ExtractionStatus::Partial
                 } else if source_is_generated(&absolute) {
                     ExtractionStatus::Generated
                 } else {
                     match category.as_str() {
                         "image" | "video" => ExtractionStatus::Binary,
-                        "code" | "document" if Registry::resolve(Path::new(path)).is_some() => {
-                            ExtractionStatus::Extracted
-                        }
+                        "code" | "document" if spec.is_some() => ExtractionStatus::Extracted,
                         _ => ExtractionStatus::Unsupported,
                     }
                 };
                 InventoryEvidence {
                     path: PathBuf::from(path),
+                    language: spec.map(|spec| spec.name.to_owned()),
+                    producer: spec.map_or_else(
+                        || "compass.files.detect".to_owned(),
+                        |spec| format!("compass.languages.{}", spec.name),
+                    ),
                     status,
-                    reason: extraction_failures.get(&absolute).cloned().or_else(|| {
-                        (status == ExtractionStatus::Unsupported)
-                            .then(|| format!("no extractor for detected {category} file"))
-                    }),
+                    reason: extraction_failures
+                        .get(&identity)
+                        .or_else(|| extraction_partials.get(&identity))
+                        .cloned()
+                        .or_else(|| {
+                            (status == ExtractionStatus::Unsupported)
+                                .then(|| format!("no extractor for detected {category} file"))
+                        }),
                 }
             })
         })
         .collect::<Vec<_>>();
     inventory.extend(detection.unclassified.iter().map(|path| InventoryEvidence {
         path: PathBuf::from(path),
+        language: None,
+        producer: "compass.files.detect".to_owned(),
         status: ExtractionStatus::Unsupported,
         reason: Some("unclassified by detector".to_owned()),
     }));
     inventory.extend(detection.ignored.iter().map(|path| InventoryEvidence {
         path: PathBuf::from(path),
+        language: None,
+        producer: "compass.files.detect".to_owned(),
         status: ExtractionStatus::Excluded,
         reason: Some("excluded by ignore policy".to_owned()),
     }));
     inventory
+}
+
+fn prepare_extraction_for_publication(
+    path: &Path,
+    extraction: &mut Extraction,
+    root: &Path,
+    failures: &mut BTreeMap<PathBuf, String>,
+    partials: &mut BTreeMap<PathBuf, String>,
+) {
+    let identity = canonical_identity(path);
+    if let Some(error) = extraction.error.take() {
+        failures.insert(identity, portable_diagnostic_reason(&error, path, root));
+        *extraction = Extraction::default();
+        extraction.raw_calls = None;
+        return;
+    }
+    if extraction
+        .extensions
+        .get(EXTRACTION_QUALITY_EXTENSION)
+        .and_then(serde_json::Value::as_str)
+        != Some(EXTRACTION_QUALITY_PARTIAL)
+    {
+        return;
+    }
+    let reason = extraction
+        .extensions
+        .get(EXTRACTION_QUALITY_REASON_EXTENSION)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("extraction completed with parser recovery");
+    partials.insert(identity, portable_diagnostic_reason(reason, path, root));
+    extraction.edges.clear();
+    extraction.hyperedges.clear();
+    extraction.framework_facts.clear();
+    extraction.raw_calls = None;
+}
+
+fn portable_diagnostic_reason(reason: &str, path: &Path, root: &Path) -> String {
+    let root_text = root.to_string_lossy();
+    let path_text = path.to_string_lossy();
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let sanitized = reason
+        .replace(root_text.as_ref(), ".")
+        .replace(path_text.as_ref(), &relative)
+        .replace('\\', "/");
+    sanitized.chars().take(512).collect()
 }
 
 fn source_is_generated(path: &Path) -> bool {

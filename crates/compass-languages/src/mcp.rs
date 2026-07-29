@@ -138,7 +138,7 @@ impl State {
             for name in environment.keys().filter(|name| !name.is_empty()) {
                 let environment_id = make_id(&["env_var", name]);
                 self.add_node(environment_id.clone(), name, "env_var");
-                self.add_edge(&server_id, &environment_id, "requires_env", None);
+                self.add_edge(&server_id, &environment_id, "depends_on", None);
             }
         }
     }
@@ -152,6 +152,24 @@ impl State {
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(sanitize_label(label)));
         attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+        let symbol_kind = match kind {
+            "mcp_config_file" => "file",
+            "mcp_server" => "component",
+            "mcp_command" => "function",
+            "mcp_package" => "package",
+            "env_var" => "variable",
+            _ => return,
+        };
+        attributes.insert(
+            "symbol_kind".to_owned(),
+            Value::String(symbol_kind.to_owned()),
+        );
+        if kind == "mcp_server" {
+            attributes.insert(
+                "component_type".to_owned(),
+                Value::String("mcp_server".to_owned()),
+            );
+        }
         attributes.insert(
             "source_file".to_owned(),
             Value::String(self.source_file.clone()),

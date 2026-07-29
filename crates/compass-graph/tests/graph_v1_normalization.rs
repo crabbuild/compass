@@ -1092,21 +1092,29 @@ fn inventory_includes_detected_files_that_produced_no_facts()
     evidence.include_inventory([
         InventoryEvidence {
             path: root.join("unsupported.xyz"),
+            language: None,
+            producer: "compass.files.detect".to_owned(),
             status: ExtractionStatus::Unsupported,
             reason: Some("no extractor".to_owned()),
         },
         InventoryEvidence {
             path: root.join("partial.rs"),
+            language: Some("rust".to_owned()),
+            producer: "compass.languages.rust".to_owned(),
             status: ExtractionStatus::Partial,
             reason: Some("partial semantic extraction".to_owned()),
         },
         InventoryEvidence {
             path: root.join("generated.rs"),
+            language: Some("rust".to_owned()),
+            producer: "compass.languages.rust".to_owned(),
             status: ExtractionStatus::Generated,
             reason: None,
         },
         InventoryEvidence {
             path: root.join("broken.rs"),
+            language: Some("rust".to_owned()),
+            producer: "compass.languages.rust".to_owned(),
             status: ExtractionStatus::ParseFailure,
             reason: Some("parser failed".to_owned()),
         },
@@ -1130,5 +1138,44 @@ fn inventory_includes_detected_files_that_produced_no_facts()
                 && coverage.status == coverage_status
         }));
     }
+    Ok(())
+}
+
+#[test]
+fn unresolved_external_reference_diagnostics_are_bounded_and_deterministic()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let extraction = Extraction {
+        nodes: (0..105)
+            .map(|index| RawNodeRecord {
+                id: format!("external-{index:03}"),
+                attributes: Map::from_iter([
+                    ("label".to_owned(), json!(format!("External{index:03}"))),
+                    ("symbol_kind".to_owned(), json!("package")),
+                    (
+                        "source_file".to_owned(),
+                        json!(format!("external/Project{index:03}.csproj")),
+                    ),
+                ]),
+            })
+            .collect(),
+        ..Extraction::default()
+    };
+    let first = BuildEvidence::from_extraction(directory.path(), &extraction, "config")?;
+    let second = BuildEvidence::from_extraction(directory.path(), &extraction, "config")?;
+
+    assert_eq!(first.diagnostics, second.diagnostics);
+    assert_eq!(
+        first
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "unresolved_external_reference")
+            .count(),
+        100
+    );
+    assert!(first.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "unresolved_external_reference_truncated"
+            && diagnostic.message == "omitted 5 additional unresolved external references"
+    }));
     Ok(())
 }

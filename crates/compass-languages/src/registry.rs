@@ -185,10 +185,14 @@ impl Registry {
     #[must_use]
     pub fn supported_extensions() -> &'static [&'static str] {
         &[
-            "py", "ts", "tsx", "js", "go", "rs", "java", "c", "cpp", "rb", "cs", "kt", "scala",
-            "php", "swift", "lua", "zig", "ps1", "ex", "m", "jl", "f90", "vue", "svelte", "astro",
-            "dart", "v", "sql", "r", "pl", "pm", "md", "pas", "dfm", "sh", "json", "tf", "dm",
-            "sln", "csproj", "xaml", "razor", "cls",
+            "py", "js", "jsx", "mjs", "cjs", "ejs", "ts", "mts", "cts", "ets", "tsx", "go", "rs",
+            "java", "groovy", "gradle", "c", "h", "cpp", "cc", "cxx", "hpp", "cu", "cuh", "metal",
+            "rb", "rake", "cs", "kt", "kts", "scala", "php", "pl", "pm", "swift", "lua", "luau",
+            "toc", "zig", "ps1", "psm1", "psd1", "ex", "exs", "m", "mm", "jl", "f", "f90", "f95",
+            "f03", "f08", "vue", "svelte", "astro", "dart", "v", "sv", "svh", "sql", "r", "md",
+            "mdx", "qmd", "skill", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm", "lfm", "lpk",
+            "sh", "bash", "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf", "sln",
+            "slnx", "csproj", "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger",
         ]
     }
 }

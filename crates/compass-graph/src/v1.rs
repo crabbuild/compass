@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
+use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord, Registry};
 use compass_model::code_graph::{
     BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, CoverageStatus,
     DatabaseNodeDetails, DiagnosticSeverity, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus,
@@ -30,6 +30,7 @@ const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
+const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 
 #[derive(Clone, Debug)]
 pub struct BuildEvidence {
@@ -43,6 +44,8 @@ pub struct BuildEvidence {
 #[derive(Clone, Debug)]
 pub struct InventoryEvidence {
     pub path: PathBuf,
+    pub language: Option<String>,
+    pub producer: String,
     pub status: ExtractionStatus,
     pub reason: Option<String>,
 }
@@ -67,14 +70,16 @@ impl BuildEvidence {
     ) -> Result<Self, GraphError> {
         let repository_root = repository_root.into();
         let mut paths = BTreeSet::new();
+        let mut diagnostics = Vec::new();
         for attributes in extraction
             .nodes
             .iter()
             .map(|node| &node.attributes)
             .chain(extraction.edges.iter().map(|edge| &edge.attributes))
         {
-            if let Some(path) = optional_source_path(attributes, "source_file")
-                .or_else(|| optional_source_path(attributes, "origin_file"))
+            for path in ["source_file", "origin_file"]
+                .into_iter()
+                .filter_map(|key| optional_source_path(attributes, key))
             {
                 paths.insert(portable_path(&path, &repository_root)?);
             }
@@ -82,8 +87,18 @@ impl BuildEvidence {
 
         let mut source_tree = Sha256::new();
         let mut files = Vec::with_capacity(paths.len());
+        let mut omitted_external_references = 0_usize;
         for path in paths {
             let absolute = repository_root.join(&path);
+            if !absolute.is_file() {
+                if diagnostics.len() < MAX_EXTERNAL_REFERENCE_DIAGNOSTICS {
+                    evidence_external_reference_diagnostic(&mut diagnostics, &path);
+                } else {
+                    omitted_external_references = omitted_external_references.saturating_add(1);
+                }
+                continue;
+            }
+            let language = Registry::resolve(&absolute).map(|spec| spec.name.to_owned());
             let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
                 path: absolute,
                 source,
@@ -96,7 +111,7 @@ impl BuildEvidence {
             files.push(FileRecord {
                 id: file_id(&path),
                 path,
-                language: None,
+                language,
                 content_digest,
                 byte_size: bytes.len() as u64,
                 generated: false,
@@ -107,6 +122,17 @@ impl BuildEvidence {
                 )],
                 coverage: Vec::new(),
                 diagnostics: Vec::new(),
+            });
+        }
+        if omitted_external_references > 0 {
+            diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "unresolved_external_reference_truncated".to_owned(),
+                message: format!(
+                    "omitted {omitted_external_references} additional unresolved external references"
+                ),
+                anchor: None,
+                related_ids: Vec::new(),
             });
         }
 
@@ -169,7 +195,7 @@ impl BuildEvidence {
             },
             files,
             coverage,
-            diagnostics: Vec::new(),
+            diagnostics,
         })
     }
 
@@ -190,7 +216,7 @@ impl BuildEvidence {
             let record = FileRecord {
                 id: file_id(&path),
                 path: path.clone(),
-                language: None,
+                language: item.language.clone(),
                 content_digest: sha256_prefixed(&bytes),
                 byte_size: bytes.len() as u64,
                 generated: item.status == ExtractionStatus::Generated,
@@ -200,30 +226,38 @@ impl BuildEvidence {
                     env!("CARGO_PKG_VERSION")
                 )],
                 coverage: Vec::new(),
-                diagnostics: Vec::new(),
+                diagnostics: inventory_diagnostic(&path, item.status, item.reason.as_deref())
+                    .into_iter()
+                    .collect(),
             };
             if let Some(existing) = self.files.iter_mut().find(|file| file.path == path) {
                 *existing = record;
             } else {
                 self.files.push(record);
             }
+            let status = coverage_status(item.status);
+            let file_record_id = file_id(&path);
+            for coverage in &mut self.coverage {
+                if coverage.file_id.as_deref() == Some(file_record_id.as_str())
+                    && status != CoverageStatus::Complete
+                {
+                    coverage.status = status;
+                    coverage.reason.clone_from(&item.reason);
+                }
+            }
             self.coverage.push(CoverageRecord {
                 capability: "file_inventory".to_owned(),
-                producer: "compass.files.detect".to_owned(),
-                status: match item.status {
-                    ExtractionStatus::Extracted => CoverageStatus::Complete,
-                    ExtractionStatus::Partial => CoverageStatus::Partial,
-                    ExtractionStatus::Unsupported => CoverageStatus::Unsupported,
-                    ExtractionStatus::Excluded => CoverageStatus::Excluded,
-                    ExtractionStatus::ParseFailure => CoverageStatus::Failed,
-                    ExtractionStatus::Generated | ExtractionStatus::Binary => {
-                        CoverageStatus::Indeterminate
-                    }
-                },
-                file_id: Some(file_id(&path)),
-                reason: item.reason,
+                producer: item.producer,
+                status,
+                file_id: Some(file_record_id),
+                reason: item.reason.clone(),
                 anchor: None,
             });
+            if let Some(diagnostic) =
+                inventory_diagnostic(&path, item.status, item.reason.as_deref())
+            {
+                self.diagnostics.push(diagnostic);
+            }
         }
         self.files.sort_by(|left, right| left.path.cmp(&right.path));
         let mut source_tree = Sha256::new();
@@ -250,6 +284,57 @@ impl BuildEvidence {
     }
 }
 
+fn coverage_status(status: ExtractionStatus) -> CoverageStatus {
+    match status {
+        ExtractionStatus::Extracted => CoverageStatus::Complete,
+        ExtractionStatus::Partial => CoverageStatus::Partial,
+        ExtractionStatus::Unsupported => CoverageStatus::Unsupported,
+        ExtractionStatus::Excluded => CoverageStatus::Excluded,
+        ExtractionStatus::ParseFailure => CoverageStatus::Failed,
+        ExtractionStatus::Generated | ExtractionStatus::Binary => CoverageStatus::Indeterminate,
+    }
+}
+
+fn evidence_external_reference_diagnostic(diagnostics: &mut Vec<GraphDiagnostic>, path: &str) {
+    let path = path.chars().take(512).collect::<String>();
+    diagnostics.push(GraphDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "unresolved_external_reference".to_owned(),
+        message: format!("referenced path is not present in the source tree: {path}"),
+        anchor: None,
+        related_ids: Vec::new(),
+    });
+}
+
+fn inventory_diagnostic(
+    path: &str,
+    status: ExtractionStatus,
+    reason: Option<&str>,
+) -> Option<GraphDiagnostic> {
+    let (severity, code) = match status {
+        ExtractionStatus::Partial
+            if reason.is_some_and(|reason| reason.contains("parser recovered")) =>
+        {
+            (DiagnosticSeverity::Warning, "parser_recovery")
+        }
+        ExtractionStatus::Partial => (DiagnosticSeverity::Warning, "partial_extraction"),
+        ExtractionStatus::ParseFailure => (DiagnosticSeverity::Error, "extractor_failure"),
+        ExtractionStatus::Unsupported => (DiagnosticSeverity::Info, "unsupported_input"),
+        ExtractionStatus::Excluded => (DiagnosticSeverity::Info, "excluded_input"),
+        ExtractionStatus::Generated => (DiagnosticSeverity::Info, "generated_input"),
+        ExtractionStatus::Binary => (DiagnosticSeverity::Info, "binary_input"),
+        ExtractionStatus::Extracted => return None,
+    };
+    let reason = reason.unwrap_or("no additional reason");
+    Some(GraphDiagnostic {
+        severity,
+        code: code.to_owned(),
+        message: format!("{path}: {reason}"),
+        anchor: None,
+        related_ids: vec![file_id(path)],
+    })
+}
+
 fn coverage_producer(attributes: &Map<String, Value>) -> String {
     optional_string(attributes, "extractor").unwrap_or_else(|| {
         optional_any_string(attributes, &["language", "lang"]).map_or_else(
@@ -264,8 +349,12 @@ fn coverage_file_id(
     root: &Path,
 ) -> Result<Option<String>, GraphError> {
     optional_source_path(attributes, "source_file")
-        .map(|path| portable_path(&path, root).map(|path| file_id(&path)))
+        .map(|path| {
+            portable_path(&path, root)
+                .map(|path| root.join(&path).is_file().then(|| file_id(&path)))
+        })
         .transpose()
+        .map(Option::flatten)
 }
 
 /// Publish resolved raw facts as a validated, deterministic Compass graph v1 document.

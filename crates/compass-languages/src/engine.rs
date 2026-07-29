@@ -12,8 +12,9 @@ use tree_sitter::{Node, Parser, Tree};
 use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
 use crate::config::{GenericConfig, generic_config};
 use crate::{
-    CombinedExtraction, ExtractError, Extraction, ExtractorKind, LanguageSpec, RawCall, Registry,
-    file_stem, make_id,
+    CombinedExtraction, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
+    EXTRACTION_QUALITY_REASON_EXTENSION, ExtractError, Extraction, ExtractorKind, LanguageSpec,
+    RawCall, Registry, file_stem, make_id,
 };
 
 const JSON_MAX_BYTES: u64 = 1_048_576;
@@ -237,6 +238,16 @@ impl Engine {
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
         crate::frameworks::detect(path, source, root, spec.name, &mut extraction);
+        if root.has_error() {
+            extraction.extensions.insert(
+                EXTRACTION_QUALITY_EXTENSION.to_owned(),
+                Value::String(EXTRACTION_QUALITY_PARTIAL.to_owned()),
+            );
+            extraction.extensions.insert(
+                EXTRACTION_QUALITY_REASON_EXTENSION.to_owned(),
+                Value::String("syntax parser recovered from malformed input".to_owned()),
+            );
+        }
         extraction
     }
 

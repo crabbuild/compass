@@ -73,6 +73,14 @@ pub enum ExtractError {
 }
 pub use engine::Engine;
 
+/// Internal extraction-quality marker consumed by the v1 publication pipeline.
+///
+/// This is serialized with cached extraction facts so parser recovery remains
+/// truthful on warm builds.
+pub const EXTRACTION_QUALITY_EXTENSION: &str = "_compass_extraction_quality";
+pub const EXTRACTION_QUALITY_PARTIAL: &str = "partial";
+pub const EXTRACTION_QUALITY_REASON_EXTENSION: &str = "_compass_extraction_quality_reason";
+
 /// Extract deterministic SQL facts from in-memory content.
 ///
 /// Live schema introspectors use a virtual path so credentials and temporary

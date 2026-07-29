@@ -805,6 +805,19 @@ fn code_node(id: String, label: &str, source_file: &str, location: &str) -> Node
     let mut attributes = Map::new();
     attributes.insert("label".to_owned(), Value::String(label.to_owned()));
     attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+    let symbol_kind = if id == make_id(&[source_file]) {
+        "file"
+    } else if label.ends_with("()") {
+        "method"
+    } else if label.starts_with('/') {
+        "class"
+    } else {
+        "variable"
+    };
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String(symbol_kind.to_owned()),
+    );
     attributes.insert(
         "source_file".to_owned(),
         Value::String(source_file.to_owned()),
