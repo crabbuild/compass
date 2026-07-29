@@ -120,7 +120,7 @@ impl<'a> State<'a> {
         for statement in &declarations {
             self.add_statement_relationships(statement);
         }
-        self.add_queries();
+        self.add_queries(&declarations);
         self.extraction
     }
 
@@ -359,11 +359,13 @@ impl<'a> State<'a> {
                 );
                 let qualified_name = format!("{}::{name}", statement.name);
                 let identity = identifier_key(&format!("{}.{}", statement.name, name));
+                let identity_digest = sha256_prefixed(identity.as_bytes());
                 let id = make_id(&[
                     "sql-constraint",
                     &self.logical_database,
                     &qualified_name,
                     &identity,
+                    &identity_digest,
                 ]);
                 let attributes = self.database_attributes(
                     "database_constraint",
@@ -383,11 +385,13 @@ impl<'a> State<'a> {
             let site = Site::new(member_offset + start, member_offset + end);
             let qualified_name = format!("{}.{}", statement.name, name);
             let identity = identifier_key(&qualified_name);
+            let identity_digest = sha256_prefixed(identity.as_bytes());
             let id = make_id(&[
                 "sql-column",
                 &self.logical_database,
                 &qualified_name,
                 &identity,
+                &identity_digest,
             ]);
             let attributes = self.database_attributes(
                 "database_column",
@@ -421,11 +425,13 @@ impl<'a> State<'a> {
             );
             let qualified_name = format!("{}::{name}", statement.name);
             let identity = identifier_key(&format!("{}.{}", statement.name, name));
+            let identity_digest = sha256_prefixed(identity.as_bytes());
             let id = make_id(&[
                 "sql-constraint",
                 &self.logical_database,
                 &qualified_name,
                 &identity,
+                &identity_digest,
             ]);
             let attributes = self.database_attributes(
                 "database_constraint",
@@ -449,6 +455,9 @@ impl<'a> State<'a> {
             let Some(name_match) = capture.get(1) else {
                 continue;
             };
+            if is_reserved_object_reference(name_match.as_str()) {
+                continue;
+            }
             let site = Site::new(start + name_match.start(), start + name_match.end());
             let target = self.ensure_table(name_match.as_str(), site);
             self.add_edge(
@@ -463,7 +472,7 @@ impl<'a> State<'a> {
 
     fn link_index_to_table(&mut self, statement: &Statement, index_id: &str) {
         let body = self.masked[statement.offset..statement.end].to_owned();
-        let Ok(regex) = Regex::new(&format!(r"(?i)\bON\s+({OBJECT_REFERENCE})")) else {
+        let Ok(regex) = Regex::new(&format!(r"(?i)\bON\s+(?:ONLY\s+)?({OBJECT_REFERENCE})")) else {
             return;
         };
         let Some(capture) = regex.captures(&body) else {
@@ -472,6 +481,9 @@ impl<'a> State<'a> {
         let Some(name_match) = capture.get(1) else {
             return;
         };
+        if is_reserved_object_reference(name_match.as_str()) {
+            return;
+        }
         let site = Site::new(
             statement.offset + name_match.start(),
             statement.offset + name_match.end(),
@@ -487,6 +499,9 @@ impl<'a> State<'a> {
         };
         let capture = regex.captures(&body)?;
         let name_match = capture.get(1)?;
+        if is_reserved_object_reference(name_match.as_str()) {
+            return None;
+        }
         let site = Site::new(
             statement.offset + name_match.start(),
             statement.offset + name_match.end(),
@@ -509,8 +524,8 @@ impl<'a> State<'a> {
         Some(site.end)
     }
 
-    fn add_queries(&mut self) {
-        for (statement_start, _, end, operation) in query_statements(&self.masked) {
+    fn add_queries(&mut self, declarations: &[Statement]) {
+        for (statement_start, _, end, operation) in query_statements(&self.masked, declarations) {
             self.add_query(&operation, statement_start, end);
         }
     }
@@ -591,11 +606,12 @@ impl<'a> State<'a> {
                 };
                 let name = name_match.as_str();
                 let key = identifier_key(name);
-                if is_non_table_keyword(name) || bindings.cte_names.contains(&key) {
+                if is_reserved_object_reference(name) || bindings.cte_names.contains(&key) {
                     continue;
                 }
                 let target_name = bindings.aliases.get(&key).map_or(name, String::as_str);
-                if is_non_table_keyword(target_name) || !emitted.insert(identifier_key(target_name))
+                if is_reserved_object_reference(target_name)
+                    || !emitted.insert((identifier_key(target_name), name_match.start()))
                 {
                     continue;
                 }
@@ -621,12 +637,14 @@ impl<'a> State<'a> {
         let schema = schema_source.as_deref().map(normalized_identifier);
         let qualified_name = normalized_identifier(name);
         let identity = identifier_key(name);
+        let identity_digest = sha256_prefixed(identity.as_bytes());
         let id = make_id(&[
             kind,
             &self.logical_database,
             schema.as_deref().unwrap_or_default(),
             &qualified_name,
             &identity,
+            &identity_digest,
         ]);
         let attributes = self.database_attributes(kind, name, &qualified_name, site, origin, rule);
         self.push_node(id.clone(), attributes);
@@ -657,7 +675,14 @@ impl<'a> State<'a> {
         if let Some(id) = self.schemas.get(&key) {
             return id.clone();
         }
-        let id = make_id(&["database_schema", &self.logical_database, &normalized, &key]);
+        let key_digest = sha256_prefixed(key.as_bytes());
+        let id = make_id(&[
+            "database_schema",
+            &self.logical_database,
+            &normalized,
+            &key,
+            &key_digest,
+        ]);
         let mut attributes =
             self.database_attributes("database_schema", name, &normalized, site, origin, rule);
         attributes.insert("database_schema".into(), Value::String(normalized.clone()));
@@ -682,14 +707,14 @@ impl<'a> State<'a> {
             if qualified_identifier_parts(name).len() > 1 {
                 return None;
             }
-            let short = last_identifier(name).to_ascii_lowercase();
+            let short = short_identifier_key(name);
             self.short_object_names.get(&short).cloned().flatten()
         })
     }
 
     fn register_object(&mut self, name: &str, id: &str) {
         self.objects.insert(identifier_key(name), id.to_owned());
-        let short = last_identifier(name).to_ascii_lowercase();
+        let short = short_identifier_key(name);
         self.short_object_names
             .entry(short)
             .and_modify(|entry| {
@@ -828,7 +853,18 @@ impl<'a> State<'a> {
 
 fn statements(source: &str) -> Vec<Statement> {
     let Ok(pattern) = Regex::new(&format!(
-        r"(?i)\b(?:CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(DATABASE|SCHEMA|TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)|CREATE\s+(?:UNIQUE\s+)?(INDEX)|((?:ALTER)\s+TABLE))\s+({OBJECT_REFERENCE})"
+        r"(?ix)\b(?:
+            CREATE\s+
+                (?:OR\s+(?:REPLACE|ALTER)\s+)?
+                (?:(?:GLOBAL|LOCAL)\s+)?
+                (?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?
+                (?:MATERIALIZED\s+)?
+                (DATABASE|SCHEMA|TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)
+                \s+(?:IF\s+NOT\s+EXISTS\s+)?
+          | CREATE\s+(?:UNIQUE\s+)?(INDEX)(?:\s+CONCURRENTLY)?
+                \s+(?:IF\s+NOT\s+EXISTS\s+)?
+          | ((?:ALTER)\s+TABLE)\s+(?:IF\s+EXISTS\s+)?
+        )({OBJECT_REFERENCE})"
     )) else {
         return Vec::new();
     };
@@ -852,6 +888,9 @@ fn statements(source: &str) -> Vec<Statement> {
                 _ => return None,
             };
             let name = capture.get(4)?;
+            if is_reserved_object_reference(name.as_str()) {
+                return None;
+            }
             Some(Statement {
                 offset: full.start(),
                 end: 0,
@@ -862,40 +901,224 @@ fn statements(source: &str) -> Vec<Statement> {
             })
         })
         .collect::<Vec<_>>();
+    declarations.sort_by_key(|statement| statement.offset);
     for index in 0..declarations.len() {
-        declarations[index].end = declarations.get(index + 1).map_or_else(
-            || statement_end(source, declarations[index].offset).unwrap_or(source.len()),
-            |next| {
-                statement_end(source, declarations[index].offset)
-                    .unwrap_or(next.offset)
-                    .min(next.offset)
-            },
-        );
+        let next = declarations
+            .get(index + 1)
+            .map_or(source.len(), |statement| statement.offset);
+        declarations[index].end = body_statement_end(
+            source,
+            declarations[index].offset,
+            &declarations[index].kind,
+        )
+        .unwrap_or_else(|| {
+            statement_end(source, declarations[index].offset)
+                .unwrap_or(next)
+                .min(next)
+        });
     }
-    declarations
+    let mut top_level = Vec::<Statement>::new();
+    for declaration in declarations {
+        if top_level
+            .last()
+            .is_some_and(|owner| declaration.offset < owner.end)
+        {
+            continue;
+        }
+        top_level.push(declaration);
+    }
+    top_level
 }
 
 fn statement_end(source: &str, start: usize) -> Option<usize> {
     source[start..].find(';').map(|offset| start + offset + 1)
 }
 
-fn query_statements(source: &str) -> Vec<(usize, usize, usize, String)> {
+fn body_statement_end(source: &str, start: usize, kind: &StatementKind) -> Option<usize> {
+    if !matches!(kind, StatementKind::Procedure | StatementKind::Trigger) {
+        return None;
+    }
+    if let Some(open) = next_dollar_quote(source, start) {
+        let delimiter = dollar_quote_delimiter_at(source, open)?;
+        let content_start = open + delimiter.len();
+        let close = source[content_start..]
+            .find(delimiter)
+            .map(|offset| content_start + offset + delimiter.len())
+            .unwrap_or(source.len());
+        return statement_end(source, close).or(Some(close));
+    }
+    compound_statement_end(source, start)
+}
+
+fn compound_statement_end(source: &str, start: usize) -> Option<usize> {
+    let words = sql_word_spans(source, start);
+    let begin_index = words
+        .iter()
+        .position(|(_, _, word)| word.eq_ignore_ascii_case("BEGIN"))?;
+    let mut depth = 0_u32;
+    let mut case_depth = 0_u32;
+    let mut skipped_case_suffix = None;
+    for (position, (_, end, word)) in words.iter().enumerate().skip(begin_index) {
+        if skipped_case_suffix == Some(position) {
+            continue;
+        }
+        if word.eq_ignore_ascii_case("BEGIN") {
+            depth = depth.saturating_add(1);
+            continue;
+        }
+        if word.eq_ignore_ascii_case("CASE") {
+            case_depth = case_depth.saturating_add(1);
+            continue;
+        }
+        if !word.eq_ignore_ascii_case("END") {
+            continue;
+        }
+        let closer = words
+            .get(position + 1)
+            .map(|(_, _, next)| next.to_ascii_uppercase());
+        if closer.as_deref() == Some("CASE") {
+            case_depth = case_depth.saturating_sub(1);
+            skipped_case_suffix = Some(position + 1);
+            continue;
+        }
+        let qualified_closer = closer
+            .as_deref()
+            .is_some_and(|next| matches!(next, "IF" | "LOOP" | "WHILE" | "REPEAT"));
+        if qualified_closer {
+            continue;
+        }
+        if case_depth > 0 {
+            case_depth -= 1;
+            continue;
+        }
+        depth = depth.saturating_sub(1);
+        if depth == 0 {
+            return statement_end(source, *end).or(Some(*end));
+        }
+    }
+    Some(source.len())
+}
+
+fn sql_word_spans(source: &str, start: usize) -> Vec<(usize, usize, &str)> {
+    let bytes = source.as_bytes();
+    let mut words = Vec::new();
+    let mut index = start;
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
+            continue;
+        }
+        if let Some(end) = skip_dollar_quote(source, index) {
+            index = end;
+            continue;
+        }
+        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
+            let word_start = index;
+            index += 1;
+            while bytes
+                .get(index)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                index += 1;
+            }
+            words.push((word_start, index, &source[word_start..index]));
+            continue;
+        }
+        index += 1;
+    }
+    words
+}
+
+fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<(usize, usize)> {
+    let mut output = Vec::new();
+    let mut segment_start = 0;
+    let mut index = 0;
+    while index < source.len() {
+        if let Some(declaration) = declarations
+            .iter()
+            .find(|declaration| declaration.offset == index)
+        {
+            let end = declaration.end.min(source.len());
+            output.push((segment_start, end));
+            segment_start = end;
+            index = end;
+            continue;
+        }
+        if let Some(end) = skip_dollar_quote(source, index) {
+            index = end;
+            continue;
+        }
+        if source.as_bytes()[index] == b';' {
+            output.push((segment_start, index + 1));
+            segment_start = index + 1;
+        }
+        index += 1;
+    }
+    if segment_start < source.len() {
+        output.push((segment_start, source.len()));
+    }
+    output
+}
+
+fn next_dollar_quote(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = start;
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
+            continue;
+        }
+        if dollar_quote_delimiter_at(source, index).is_some() {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn skip_dollar_quote(source: &str, start: usize) -> Option<usize> {
+    let delimiter = dollar_quote_delimiter_at(source, start)?;
+    let content_start = start + delimiter.len();
+    source[content_start..]
+        .find(delimiter)
+        .map(|offset| content_start + offset + delimiter.len())
+        .or(Some(source.len()))
+}
+
+fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
+    let bytes = source.as_bytes();
+    if bytes.get(start).copied() != Some(b'$') {
+        return None;
+    }
+    let mut end = start + 1;
+    while bytes
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        end += 1;
+    }
+    (bytes.get(end).copied() == Some(b'$')).then(|| &source[start..=end])
+}
+
+fn query_statements(
+    source: &str,
+    declarations: &[Statement],
+) -> Vec<(usize, usize, usize, String)> {
     let Ok(operation_pattern) = Regex::new(r"(?i)^(SELECT|INSERT|UPDATE|DELETE|MERGE)\b") else {
         return Vec::new();
     };
     let mut output = Vec::new();
-    let mut segment_start = 0;
-    for segment_end in source
-        .match_indices(';')
-        .map(|(index, delimiter)| index + delimiter.len())
-        .chain(std::iter::once(source.len()))
-    {
+    for (segment_start, segment_end) in top_level_statement_ranges(source, declarations) {
         let Some(segment) = source.get(segment_start..segment_end) else {
-            segment_start = segment_end;
             continue;
         };
         let leading = segment.len() - segment.trim_start().len();
         let statement_start = segment_start + leading;
+        if declarations.iter().any(|declaration| {
+            statement_start >= declaration.offset && statement_start < declaration.end
+        }) {
+            continue;
+        }
         let statement = segment.trim_start();
         let operation = operation_pattern
             .captures(statement)
@@ -917,64 +1140,173 @@ fn query_statements(source: &str) -> Vec<(usize, usize, usize, String)> {
         if let Some((operation_start, operation)) = operation {
             output.push((statement_start, operation_start, segment_end, operation));
         }
-        segment_start = segment_end;
     }
     output
 }
 
 fn top_level_cte_operation(statement: &str) -> Option<(usize, String)> {
-    let bytes = statement.as_bytes();
-    let mut index = 0;
-    let mut depth = 0_u32;
-    let mut completed_cte = false;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'(' => {
-                depth = depth.saturating_add(1);
-                index += 1;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                completed_cte |= depth == 0;
-                index += 1;
-            }
-            byte if byte.is_ascii_alphabetic() || byte == b'_' => {
-                let start = index;
-                index += 1;
-                while bytes
-                    .get(index)
-                    .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-                {
-                    index += 1;
-                }
-                let token = &statement[start..index];
-                if depth == 0
-                    && completed_cte
-                    && matches!(
-                        token.to_ascii_uppercase().as_str(),
-                        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
-                    )
-                {
-                    return Some((start, token.to_ascii_lowercase()));
-                }
-            }
-            _ => index += 1,
-        }
-    }
-    None
+    let parsed = parse_ctes(statement)?;
+    let (start, end) = word_at(statement, parsed.terminal_start)?;
+    let operation = statement[start..end].to_ascii_lowercase();
+    matches!(
+        operation.as_str(),
+        "select" | "insert" | "update" | "delete" | "merge"
+    )
+    .then_some((start, operation))
 }
 
 fn cte_names(statement: &str) -> HashSet<String> {
-    let Ok(pattern) = Regex::new(&format!(
-        r"(?i)(?:\bWITH\b|,)\s*({IDENTIFIER})(?:\s*\([^)]*\))?\s+AS\s*\("
-    )) else {
-        return HashSet::new();
-    };
-    pattern
-        .captures_iter(statement)
-        .filter_map(|capture| capture.get(1))
-        .map(|name| identifier_key(name.as_str()))
-        .collect()
+    parse_ctes(statement)
+        .map(|parsed| parsed.names)
+        .unwrap_or_default()
+}
+
+struct ParsedCtes {
+    names: HashSet<String>,
+    terminal_start: usize,
+}
+
+fn parse_ctes(statement: &str) -> Option<ParsedCtes> {
+    let mut index = skip_sql_whitespace(statement, 0);
+    index = consume_keyword(statement, index, "WITH")?;
+    index = skip_sql_whitespace(statement, index);
+    if let Some(end) = consume_keyword(statement, index, "RECURSIVE") {
+        index = skip_sql_whitespace(statement, end);
+    }
+
+    let mut names = HashSet::new();
+    loop {
+        let name_start = index;
+        let name_end = parse_identifier_end(statement, name_start)?;
+        let name = &statement[name_start..name_end];
+        if is_reserved_object_reference(name) {
+            return None;
+        }
+        names.insert(identifier_key(name));
+        index = skip_sql_whitespace(statement, name_end);
+
+        if statement.as_bytes().get(index).copied() == Some(b'(') {
+            index = balanced_paren_end(statement, index)?;
+            index = skip_sql_whitespace(statement, index);
+        }
+
+        index = consume_keyword(statement, index, "AS")?;
+        index = skip_sql_whitespace(statement, index);
+        if let Some(not_end) = consume_keyword(statement, index, "NOT") {
+            let materialized_start = skip_sql_whitespace(statement, not_end);
+            index = consume_keyword(statement, materialized_start, "MATERIALIZED")?;
+            index = skip_sql_whitespace(statement, index);
+        } else if let Some(materialized_end) = consume_keyword(statement, index, "MATERIALIZED") {
+            index = skip_sql_whitespace(statement, materialized_end);
+        }
+
+        if statement.as_bytes().get(index).copied() != Some(b'(') {
+            return None;
+        }
+        index = balanced_paren_end(statement, index)?;
+        index = skip_sql_whitespace(statement, index);
+        if statement.as_bytes().get(index).copied() == Some(b',') {
+            index = skip_sql_whitespace(statement, index + 1);
+            continue;
+        }
+        return Some(ParsedCtes {
+            names,
+            terminal_start: index,
+        });
+    }
+}
+
+fn skip_sql_whitespace(statement: &str, mut index: usize) -> usize {
+    while statement
+        .as_bytes()
+        .get(index)
+        .is_some_and(u8::is_ascii_whitespace)
+    {
+        index += 1;
+    }
+    index
+}
+
+fn consume_keyword(statement: &str, start: usize, keyword: &str) -> Option<usize> {
+    let end = start.checked_add(keyword.len())?;
+    let value = statement.get(start..end)?;
+    if !value.eq_ignore_ascii_case(keyword) {
+        return None;
+    }
+    let before_is_word = start
+        .checked_sub(1)
+        .and_then(|index| statement.as_bytes().get(index))
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$');
+    let after_is_word = statement
+        .as_bytes()
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$');
+    (!before_is_word && !after_is_word).then_some(end)
+}
+
+fn word_at(statement: &str, start: usize) -> Option<(usize, usize)> {
+    let bytes = statement.as_bytes();
+    if !bytes
+        .get(start)
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+    {
+        return None;
+    }
+    let mut end = start + 1;
+    while bytes
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        end += 1;
+    }
+    Some((start, end))
+}
+
+fn parse_identifier_end(statement: &str, start: usize) -> Option<usize> {
+    let bytes = statement.as_bytes();
+    if let Some(delimiter) = bytes.get(start).copied().and_then(identifier_delimiter) {
+        return quoted_identifier_end(bytes, start, delimiter);
+    }
+    if !bytes.get(start).is_some_and(|byte| {
+        byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$' || !byte.is_ascii()
+    }) {
+        return None;
+    }
+    let mut end = start + 1;
+    while bytes.get(end).is_some_and(|byte| {
+        byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$' || !byte.is_ascii()
+    }) {
+        end += 1;
+    }
+    Some(end)
+}
+
+fn balanced_paren_end(statement: &str, open: usize) -> Option<usize> {
+    let bytes = statement.as_bytes();
+    let mut depth = 0_u32;
+    let mut index = open;
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)?;
+            continue;
+        }
+        if let Some(end) = skip_dollar_quote(statement, index) {
+            index = end;
+            continue;
+        }
+        match bytes[index] {
+            b'(' => depth = depth.saturating_add(1),
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
 }
 
 fn table_aliases(statement: &str) -> HashMap<String, String> {
@@ -988,7 +1320,8 @@ fn table_aliases(statement: &str) -> HashMap<String, String> {
         .filter_map(|capture| {
             let target = capture.get(1)?.as_str();
             let alias = capture.get(2)?.as_str();
-            (!is_non_table_keyword(alias)).then(|| (identifier_key(alias), target.to_owned()))
+            (!is_reserved_object_reference(alias))
+                .then(|| (identifier_key(alias), target.to_owned()))
         })
         .collect()
 }
@@ -1255,10 +1588,36 @@ fn normalized_identifier(name: &str) -> String {
 fn identifier_key(name: &str) -> String {
     qualified_identifier_parts(name)
         .into_iter()
-        .map(|part| normalize_identifier_part(part).to_lowercase())
-        .map(|part| format!("{}:{part}", part.len()))
+        .map(identifier_part_key)
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn short_identifier_key(name: &str) -> String {
+    qualified_identifier_parts(name)
+        .last()
+        .map_or_else(String::new, |part| identifier_part_key(part))
+}
+
+fn identifier_part_key(part: &str) -> String {
+    let trimmed = part.trim();
+    let (quoted, style, value) = if trimmed.starts_with('"') && trimmed.ends_with('"') {
+        (true, "double", normalize_identifier_part(trimmed))
+    } else if trimmed.starts_with('`') && trimmed.ends_with('`') {
+        (true, "backtick", normalize_identifier_part(trimmed))
+    } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        (true, "bracket", normalize_identifier_part(trimmed))
+    } else {
+        (
+            false,
+            "unquoted",
+            normalize_identifier_part(trimmed).to_ascii_lowercase(),
+        )
+    };
+    if !quoted || value == value.to_ascii_lowercase() {
+        return format!("folded:{}:{}", value.len(), value.to_ascii_lowercase());
+    }
+    format!("{style}:{}:{value}", value.len())
 }
 
 fn qualified_identifier_parts(name: &str) -> Vec<&str> {
@@ -1309,34 +1668,108 @@ fn normalize_identifier_part(part: &str) -> String {
     }
 }
 
-fn is_non_table_keyword(name: &str) -> bool {
-    matches!(
-        normalized_identifier(name).to_ascii_lowercase().as_str(),
-        "select"
-            | "where"
-            | "set"
-            | "dual"
-            | "null"
-            | "true"
-            | "false"
-            | "first"
-            | "skip"
-            | "rows"
-            | "next"
-            | "only"
-            | "lateral"
-            | "on"
-            | "of"
-            | "into"
-            | "as"
-            | "when"
-            | "matched"
-            | "then"
-            | "update"
-            | "insert"
-            | "delete"
-            | "merge"
-    )
+fn identifier_delimiter(open: u8) -> Option<u8> {
+    match open {
+        b'"' | b'`' => Some(open),
+        b'[' => Some(b']'),
+        _ => None,
+    }
+}
+
+fn quoted_identifier_end(bytes: &[u8], start: usize, delimiter: u8) -> Option<usize> {
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if bytes[index] != delimiter {
+            index += 1;
+            continue;
+        }
+        if bytes.get(index + 1).copied() == Some(delimiter) {
+            index += 2;
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
+}
+
+fn is_reserved_object_reference(name: &str) -> bool {
+    qualified_identifier_parts(name).into_iter().any(|part| {
+        let trimmed = part.trim();
+        if identifier_delimiter(trimmed.as_bytes().first().copied().unwrap_or_default()).is_some() {
+            return false;
+        }
+        matches!(
+            normalize_identifier_part(trimmed)
+                .to_ascii_lowercase()
+                .as_str(),
+            "all"
+                | "alter"
+                | "and"
+                | "as"
+                | "begin"
+                | "by"
+                | "case"
+                | "create"
+                | "database"
+                | "delete"
+                | "distinct"
+                | "else"
+                | "end"
+                | "exists"
+                | "false"
+                | "first"
+                | "from"
+                | "full"
+                | "function"
+                | "group"
+                | "having"
+                | "if"
+                | "index"
+                | "inner"
+                | "insert"
+                | "into"
+                | "join"
+                | "lateral"
+                | "left"
+                | "materialized"
+                | "matched"
+                | "merge"
+                | "next"
+                | "not"
+                | "null"
+                | "of"
+                | "on"
+                | "only"
+                | "or"
+                | "order"
+                | "outer"
+                | "procedure"
+                | "recursive"
+                | "replace"
+                | "returning"
+                | "right"
+                | "rows"
+                | "schema"
+                | "select"
+                | "set"
+                | "skip"
+                | "table"
+                | "temporary"
+                | "then"
+                | "trigger"
+                | "true"
+                | "union"
+                | "unique"
+                | "unlogged"
+                | "update"
+                | "using"
+                | "values"
+                | "view"
+                | "when"
+                | "where"
+                | "with"
+        )
+    })
 }
 
 fn sha256_prefixed(bytes: &[u8]) -> String {

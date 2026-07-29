@@ -251,3 +251,266 @@ SELECT plain.id FROM tenant.eu.items AS plain;
     assert_eq!(reads.len(), 2, "edges={:?}", extraction.edges);
     assert_ne!(reads[0].target, reads[1].target);
 }
+
+#[test]
+fn sql_declaration_modifiers_bind_only_real_qualified_objects()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE SCHEMA IF NOT EXISTS app;
+CREATE TEMPORARY TABLE IF NOT EXISTS app.users (id BIGINT);
+CREATE MATERIALIZED VIEW IF NOT EXISTS app.active_users AS
+  SELECT id FROM app.users;
+CREATE UNIQUE INDEX IF NOT EXISTS users_idx ON ONLY app.users(id);
+CREATE TRIGGER IF NOT EXISTS audit_users AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  INSERT INTO app.audit(id) VALUES (1);
+END;
+ALTER TABLE IF EXISTS app.users ADD CONSTRAINT users_id_unique UNIQUE (id);
+"#;
+    let extraction = extract_sql_content(Path::new("db/modifiers.sql"), source);
+    let qualified_names = extraction
+        .nodes
+        .iter()
+        .map(|node| node.string("qualified_name"))
+        .collect::<HashSet<_>>();
+
+    for expected in [
+        "app",
+        "app.users",
+        "app.active_users",
+        "users_idx",
+        "audit_users",
+        "app.audit",
+    ] {
+        assert!(
+            qualified_names.contains(expected),
+            "missing {expected:?}: {qualified_names:?}"
+        );
+    }
+    for invalid in [
+        "IF",
+        "if",
+        "NOT",
+        "not",
+        "EXISTS",
+        "exists",
+        "ONLY",
+        "only",
+        "TEMPORARY",
+        "temporary",
+        "MATERIALIZED",
+        "materialized",
+    ] {
+        assert!(
+            !qualified_names.contains(invalid),
+            "modifier became database entity {invalid:?}: {:?}",
+            extraction.nodes
+        );
+    }
+
+    let table = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "database_table"
+                && node.string("qualified_name") == "app.users"
+        })
+        .ok_or("missing app.users")?;
+    let index = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "database_index")
+        .ok_or("missing index")?;
+    let trigger = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "database_trigger")
+        .ok_or("missing trigger")?;
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == table.id && edge.target == index.id && edge.string("relation") == "contains"
+    }));
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == trigger.id
+            && edge.target == table.id
+            && edge.string("relation") == "triggers"
+    }));
+    Ok(())
+}
+
+#[test]
+fn quoted_case_distinct_schema_tables_keep_distinct_read_targets() {
+    let source = br#"
+CREATE SCHEMA "App";
+CREATE SCHEMA "app";
+CREATE TABLE "App"."Users" (id BIGINT);
+CREATE TABLE "app"."users" (id BIGINT);
+SELECT upper_name.id FROM "App"."Users" AS upper_name;
+SELECT lower_name.id FROM "app"."users" AS lower_name;
+"#;
+    let extraction = extract_sql_content(Path::new("db/quoted_case.sql"), source);
+    let tables = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "database_table")
+        .collect::<Vec<_>>();
+    assert_eq!(tables.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_ne!(tables[0].id, tables[1].id);
+
+    let schemas = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "database_schema")
+        .collect::<Vec<_>>();
+    assert_eq!(schemas.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_ne!(schemas[0].id, schemas[1].id);
+
+    for table in tables {
+        let reads = extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "reads" && edge.target == table.id)
+            .count();
+        assert_eq!(
+            reads, 1,
+            "each quoted table must receive its own read: table={table:?}, edges={:?}",
+            extraction.edges
+        );
+    }
+}
+
+#[test]
+fn compound_procedure_and_trigger_bodies_never_become_file_owned_queries()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.audit (id BIGINT);
+CREATE PROCEDURE app.refresh() AS $body$
+BEGIN
+  INSERT INTO app.audit(id) VALUES (1);
+  UPDATE app.users SET id = 2;
+  INSERT INTO app.audit(id) VALUES (3);
+END;
+$body$ LANGUAGE plpgsql;
+CREATE TRIGGER app.capture AFTER UPDATE ON app.users
+FOR EACH ROW BEGIN
+  INSERT INTO app.audit(id) VALUES (2);
+  SELECT id FROM app.users;
+END;
+"#;
+    let extraction = extract_sql_content(Path::new("db/compound.sql"), source);
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("symbol_kind") != "query"),
+        "routine or trigger body became a top-level query: {:?}",
+        extraction.nodes
+    );
+
+    for owner_name in ["app.refresh", "app.capture"] {
+        let owner = extraction
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == owner_name)
+            .ok_or_else(|| format!("missing owner {owner_name}"))?;
+        assert!(
+            extraction.edges.iter().any(|edge| {
+                edge.source == owner.id
+                    && edge.string("relation") == "writes"
+                    && extraction.nodes.iter().any(|node| {
+                        node.id == edge.target && node.string("qualified_name") == "app.audit"
+                    })
+            }),
+            "missing owner-attributed write for {owner_name}: {:?}",
+            extraction.edges
+        );
+    }
+    let procedure = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.refresh")
+        .ok_or("missing procedure")?;
+    let audit = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.audit")
+        .ok_or("missing audit table")?;
+    let repeated_writes = extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == procedure.id
+                && edge.target == audit.id
+                && edge.string("relation") == "writes"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        repeated_writes.len(),
+        2,
+        "repeated body accesses lost occurrence identity: {:?}",
+        extraction.edges
+    );
+    assert_ne!(
+        repeated_writes[0].attributes.get("start_byte"),
+        repeated_writes[1].attributes.get("start_byte")
+    );
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == procedure.id
+            && edge.string("relation") == "writes"
+            && extraction
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.target && node.string("qualified_name") == "app.users")
+    }));
+    Ok(())
+}
+
+#[test]
+fn recursive_multi_ctes_publish_underlying_reads_without_cte_entities()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"
+CREATE TABLE app.users (id BIGINT);
+CREATE TABLE app.accounts (id BIGINT);
+WITH RECURSIVE recent AS NOT MATERIALIZED (
+  SELECT id FROM app.users
+), enriched AS MATERIALIZED (
+  SELECT recent.id FROM recent JOIN app.accounts ON app.accounts.id = recent.id
+)
+SELECT enriched.id FROM enriched;
+"#;
+    let extraction = extract_sql_content(Path::new("db/recursive_cte.sql"), source);
+    let qualified_names = extraction
+        .nodes
+        .iter()
+        .map(|node| node.string("qualified_name"))
+        .collect::<HashSet<_>>();
+    for cte in ["recent", "enriched", "RECURSIVE", "MATERIALIZED"] {
+        assert!(
+            !qualified_names.contains(cte),
+            "CTE syntax became a database entity {cte:?}: {:?}",
+            extraction.nodes
+        );
+    }
+    let query = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "query")
+        .ok_or("missing WITH query")?;
+    let read_names = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.source == query.id && edge.string("relation") == "reads")
+        .filter_map(|edge| {
+            extraction
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.target)
+                .map(|node| node.string("qualified_name"))
+        })
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        read_names,
+        HashSet::from(["app.users".to_owned(), "app.accounts".to_owned()])
+    );
+    Ok(())
+}
