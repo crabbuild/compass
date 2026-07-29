@@ -27,7 +27,8 @@ use compass_model::code_graph::{
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
     EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
-    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
+    Provenance, SEMANTIC_LAYER_EXTRACTOR, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    append_endpoint_rewrite_evidence,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
@@ -103,7 +104,6 @@ const MAX_INCREMENTAL_REMAP_DIAGNOSTICS: usize = 100;
 const INCREMENTAL_REMAP_DROP_DIAGNOSTIC: &str = "dropped_incremental_remap_without_wiring_site";
 const INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC: &str =
     "incremental_remap_without_wiring_site_truncated";
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct OutputStats {
     graph_bytes: u64,
@@ -1643,28 +1643,54 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
     };
     let portable = relative.to_string_lossy().replace('\\', "/");
     let set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
+        let normalize_path = |value: &str| {
+            let path = Path::new(value);
+            if path.is_absolute() {
+                let canonical = canonicalize_allow_missing(path);
+                canonical.strip_prefix(root).map_or_else(
+                    |_| portable_out_of_root_source(&canonical, root),
+                    |relative| relative.to_string_lossy().replace('\\', "/"),
+                )
+            } else {
+                value.replace('\\', "/")
+            }
+        };
         for key in ["source_file", "origin_file"] {
-            if attributes
+            let Some(value) = attributes
                 .get(key)
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|value| !value.is_empty())
-            {
-                attributes.insert(key.to_owned(), serde_json::Value::String(portable.clone()));
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let normalized = normalize_path(value);
+            if normalized != value {
+                attributes.insert(key.to_owned(), serde_json::Value::String(normalized));
             }
+        }
+        if let Some(anchor) = attributes
+            .get_mut("origin_source_anchor")
+            .and_then(serde_json::Value::as_object_mut)
+            && let Some(value) = anchor
+                .get("file")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        {
+            anchor.insert(
+                "file".to_owned(),
+                serde_json::Value::String(normalize_path(&value)),
+            );
         }
         if let Some(target) = attributes
             .get("target_file")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
         {
-            let target = Path::new(&target);
-            let canonical = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
-            if let Ok(relative) = canonical.strip_prefix(root) {
-                attributes.insert(
-                    "target_file".to_owned(),
-                    serde_json::Value::String(relative.to_string_lossy().replace('\\', "/")),
-                );
-            }
+            let normalized = normalize_path(&target);
+            attributes.insert(
+                "target_file".to_owned(),
+                serde_json::Value::String(normalized),
+            );
         }
     };
     for node in &mut extraction.nodes {
@@ -1789,12 +1815,20 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
             "_origin".to_owned(),
             serde_json::Value::String("semantic".to_owned()),
         );
+        node.attributes.insert(
+            "extractor".to_owned(),
+            serde_json::Value::String(SEMANTIC_LAYER_EXTRACTOR.to_owned()),
+        );
     }
     for edge in &mut extraction.edges {
         normalize_source_attribute(&mut edge.attributes, root);
         edge.attributes.insert(
             "_origin".to_owned(),
             serde_json::Value::String("semantic".to_owned()),
+        );
+        edge.attributes.insert(
+            "extractor".to_owned(),
+            serde_json::Value::String(SEMANTIC_LAYER_EXTRACTOR.to_owned()),
         );
     }
     for hyperedge in &mut extraction.hyperedges {
@@ -1805,6 +1839,10 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
         attributes.insert(
             "_origin".to_owned(),
             serde_json::Value::String("semantic".to_owned()),
+        );
+        attributes.insert(
+            "extractor".to_owned(),
+            serde_json::Value::String(SEMANTIC_LAYER_EXTRACTOR.to_owned()),
         );
     }
 }
@@ -2206,10 +2244,7 @@ fn preserve_semantic_layer(
                 .evidence
                 .iter()
                 .any(|evidence| evidence.origin == EvidenceOrigin::Ast)
-            || !typed
-                .evidence
-                .iter()
-                .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
+            || !typed.evidence.iter().any(is_semantic_layer_evidence)
         {
             continue;
         }
@@ -2285,7 +2320,7 @@ fn preserve_semantic_layer(
         let semantic_evidence = prior
             .evidence
             .iter()
-            .filter(|evidence| evidence.origin != EvidenceOrigin::Ast)
+            .filter(|evidence| is_semantic_layer_evidence(evidence))
             .cloned()
             .map(|mut evidence| {
                 rebind_preserved_node_evidence(
@@ -2316,10 +2351,7 @@ fn preserve_semantic_layer(
         .iter()
         .filter(|node| {
             !typed_ast_remap.contains_key(&node.id)
-                && node
-                    .evidence
-                    .iter()
-                    .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
+                && node.evidence.iter().any(is_semantic_layer_evidence)
         })
         .map(|node| node.id.as_str())
         .collect::<HashSet<_>>();
@@ -2350,10 +2382,7 @@ fn preserve_semantic_layer(
             if dropped_edges.contains(&index) {
                 return None;
             }
-            let preserve = typed
-                .evidence
-                .iter()
-                .any(|evidence| evidence.origin != EvidenceOrigin::Ast)
+            let preserve = typed.evidence.iter().any(is_semantic_layer_evidence)
                 && all_ids.contains(&raw.source)
                 && all_ids.contains(&raw.target)
                 && !source_in_set(raw.attributes.get("source_file"), root, refreshed)
@@ -2424,7 +2453,7 @@ fn refresh_preserved_mixed_edge(
     };
     let prior_site = edge.relationship_site.clone();
     edge.evidence.retain(|evidence| {
-        evidence.origin != EvidenceOrigin::Ast
+        is_semantic_layer_evidence(evidence)
             && evidence.rule.as_deref()
                 != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
     });
@@ -2471,7 +2500,7 @@ fn retain_preserved_mixed_edge_as_semantic_only(
         return false;
     };
     edge.evidence.retain(|evidence| {
-        evidence.origin != EvidenceOrigin::Ast
+        is_semantic_layer_evidence(evidence)
             && evidence.rule.as_deref()
                 != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
     });
@@ -2616,8 +2645,7 @@ fn strip_preserved_ast_node_evidence(attributes: &mut serde_json::Map<String, se
     else {
         return;
     };
-    node.evidence
-        .retain(|evidence| evidence.origin != EvidenceOrigin::Ast);
+    node.evidence.retain(is_semantic_layer_evidence);
     *record = serde_json::to_value(node).unwrap_or(serde_json::Value::Null);
 }
 
@@ -2783,10 +2811,16 @@ fn node_has_origin(node: &compass_model::code_graph::NodeRecord, origin: Evidenc
         .any(|evidence| evidence.origin == origin)
 }
 
-fn edge_has_origin(edge: &compass_model::code_graph::EdgeRecord, origin: EvidenceOrigin) -> bool {
-    edge.evidence
-        .iter()
-        .any(|evidence| evidence.origin == origin)
+fn is_semantic_layer_evidence(evidence: &Provenance) -> bool {
+    evidence.extractor == SEMANTIC_LAYER_EXTRACTOR
+}
+
+fn node_has_semantic_layer_evidence(node: &compass_model::code_graph::NodeRecord) -> bool {
+    node.evidence.iter().any(is_semantic_layer_evidence)
+}
+
+fn edge_has_semantic_layer_evidence(edge: &compass_model::code_graph::EdgeRecord) -> bool {
+    edge.evidence.iter().any(is_semantic_layer_evidence)
 }
 
 fn canonical_source_set(paths: &[PathBuf], root: &Path) -> HashSet<PathBuf> {
@@ -2854,7 +2888,7 @@ fn stale_semantic_sources(
     let mut stale = existing
         .nodes
         .iter()
-        .filter(|node| !node_has_origin(node, EvidenceOrigin::Ast))
+        .filter(|node| node_has_semantic_layer_evidence(node))
         .filter_map(|node| semantic_path_under_root(node.source_file(), root))
         .filter(|source| !live.contains(source))
         .collect::<HashSet<_>>();
@@ -2862,7 +2896,7 @@ fn stale_semantic_sources(
         existing
             .links
             .iter()
-            .filter(|edge| !edge_has_origin(edge, EvidenceOrigin::Ast))
+            .filter(|edge| edge_has_semantic_layer_evidence(edge))
             .filter_map(|edge| semantic_path_under_root(edge.source_file(), root))
             .filter(|source| !live.contains(source)),
     );
@@ -2990,9 +3024,7 @@ fn semantic_document_sources(graph_path: &Path, root: &Path) -> HashSet<PathBuf>
     existing
         .nodes
         .into_iter()
-        .filter(|node| {
-            !node_has_origin(node, EvidenceOrigin::Ast) && node.kind == NodeKind::Resource
-        })
+        .filter(|node| node_has_semantic_layer_evidence(node) && node.kind == NodeKind::Resource)
         .filter_map(|node| {
             node.source_file().map(Path::new).map(|path| {
                 if path.is_absolute() {

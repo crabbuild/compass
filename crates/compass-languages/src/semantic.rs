@@ -990,11 +990,19 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         kind: &str,
         extra: Option<Map<String, Value>>,
     ) -> String {
-        let qualified = format!(
-            "{}::{name}@{}",
-            self.node_qualified(owner),
-            item.node.start_byte()
-        );
+        let qualified = if owner == self.file_id.as_str() {
+            format!(
+                "{}@{}",
+                self.qualify(item.scope, name),
+                item.node.start_byte()
+            )
+        } else {
+            format!(
+                "{}::{name}@{}",
+                self.node_qualified(owner),
+                item.node.start_byte()
+            )
+        };
         let id = self.ensure_node(item.node, name, &qualified, kind, None, extra);
         self.contain(owner, &id, item.node);
         id

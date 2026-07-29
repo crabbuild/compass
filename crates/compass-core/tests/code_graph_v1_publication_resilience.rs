@@ -131,6 +131,10 @@ fn missing_dotnet_references_are_external_and_do_not_abort() -> Result<(), Box<d
     assert!(graph.graph.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "unresolved_external_reference"
             && diagnostic.message.contains("src/Missing/Missing.csproj")
+            && diagnostic
+                .anchor
+                .as_ref()
+                .is_some_and(|anchor| anchor.file == "src/App/App.csproj")
             && !diagnostic
                 .message
                 .contains(directory.path().to_string_lossy().as_ref())

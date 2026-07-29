@@ -19,7 +19,8 @@ use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
     ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
     OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
-    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
+    SEMANTIC_LAYER_EXTRACTOR, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    TRUSTED_NODE_RECORD_ATTRIBUTE,
 };
 use compass_model::{GraphError, validate_code_graph};
 use serde::{Deserialize, Serialize};
@@ -74,6 +75,7 @@ impl BuildEvidence {
     ) -> Result<Self, GraphError> {
         let repository_root = repository_root.into();
         let mut paths = BTreeSet::new();
+        let mut external_reference_anchors = BTreeMap::<String, SourceAnchor>::new();
         let mut diagnostics = Vec::new();
         for attributes in extraction
             .nodes
@@ -81,6 +83,16 @@ impl BuildEvidence {
             .map(|node| &node.attributes)
             .chain(extraction.edges.iter().map(|edge| &edge.attributes))
         {
+            if let Some((path, anchor)) = external_reference_anchor(attributes, &repository_root)? {
+                external_reference_anchors
+                    .entry(path)
+                    .and_modify(|existing| {
+                        if anchor_key(&anchor) < anchor_key(existing) {
+                            existing.clone_from(&anchor);
+                        }
+                    })
+                    .or_insert(anchor);
+            }
             for path in ["source_file", "origin_file"]
                 .into_iter()
                 .filter_map(|key| optional_source_path(attributes, key))
@@ -96,7 +108,11 @@ impl BuildEvidence {
             let absolute = repository_root.join(&path);
             if !absolute.is_file() {
                 if diagnostics.len() < MAX_EXTERNAL_REFERENCE_DIAGNOSTICS {
-                    evidence_external_reference_diagnostic(&mut diagnostics, &path);
+                    evidence_external_reference_diagnostic(
+                        &mut diagnostics,
+                        &path,
+                        external_reference_anchors.get(&path).cloned(),
+                    );
                 } else {
                     omitted_external_references = omitted_external_references.saturating_add(1);
                 }
@@ -299,14 +315,48 @@ fn coverage_status(status: ExtractionStatus) -> CoverageStatus {
     }
 }
 
-fn evidence_external_reference_diagnostic(diagnostics: &mut Vec<GraphDiagnostic>, path: &str) {
+fn external_reference_anchor(
+    attributes: &Map<String, Value>,
+    root: &Path,
+) -> Result<Option<(String, SourceAnchor)>, GraphError> {
+    let Some(target) = optional_source_path(attributes, "source_file") else {
+        return Ok(None);
+    };
+    let Some(origin) = optional_source_path(attributes, "origin_file") else {
+        return Ok(None);
+    };
+    let Some(value) = attributes.get("origin_source_anchor") else {
+        return Ok(None);
+    };
+    let target = portable_path(&target, root)?;
+    let origin = portable_path(&origin, root)?;
+    let mut anchor = serde_json::from_value::<SourceAnchor>(value.clone())
+        .map_err(|error| raw_error("origin_source_anchor", &error.to_string()))?;
+    anchor.file = portable_path(&anchor.file, root)?;
+    if anchor.file != origin || !anchor.is_valid() {
+        return Err(raw_error(
+            "origin_source_anchor",
+            "external reference anchor must be a valid range in origin_file",
+        ));
+    }
+    Ok(Some((target, anchor)))
+}
+
+fn evidence_external_reference_diagnostic(
+    diagnostics: &mut Vec<GraphDiagnostic>,
+    path: &str,
+    anchor: Option<SourceAnchor>,
+) {
     let path = path.chars().take(512).collect::<String>();
     diagnostics.push(GraphDiagnostic {
         severity: DiagnosticSeverity::Warning,
         code: "unresolved_external_reference".to_owned(),
         message: format!("referenced path is not present in the source tree: {path}"),
-        anchor: None,
-        related_ids: Vec::new(),
+        related_ids: anchor
+            .as_ref()
+            .map(|anchor| vec![file_id(&anchor.file)])
+            .unwrap_or_default(),
+        anchor,
     });
 }
 
@@ -690,9 +740,11 @@ pub fn normalize_v1(
     evidence
         .files
         .sort_by(|left, right| left.path.cmp(&right.path));
+    sort_dedup_serialized(&mut evidence.coverage);
     evidence
         .coverage
         .sort_by(|left, right| coverage_key(left).cmp(&coverage_key(right)));
+    sort_dedup_serialized(&mut evidence.diagnostics);
     evidence.diagnostics.sort_by(|left, right| {
         (left.code.as_str(), left.message.as_str())
             .cmp(&(right.code.as_str(), right.message.as_str()))
@@ -1723,12 +1775,44 @@ fn normalize_file_inventory(files: &mut [FileRecord], root: &Path) -> Result<(),
     Ok(())
 }
 
+fn normalize_logical_database_scope(
+    attributes: &mut Map<String, Value>,
+    root: &Path,
+) -> Result<(), GraphError> {
+    let Some(logical_database) = optional_string(attributes, "logical_database") else {
+        return Ok(());
+    };
+    if !Path::new(&logical_database).is_absolute() {
+        return Ok(());
+    }
+    let portable = portable_path(&logical_database, root)?;
+    let qualified_prefix = format!("{logical_database}::");
+    for key in ["name", "label", "qualified_name", "qualifiedName"] {
+        let Some(value) = attributes.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        let normalized = if value == logical_database {
+            Some(portable.clone())
+        } else {
+            value
+                .strip_prefix(&qualified_prefix)
+                .map(|suffix| format!("{portable}::{suffix}"))
+        };
+        if let Some(normalized) = normalized {
+            attributes.insert(key.to_owned(), Value::String(normalized));
+        }
+    }
+    attributes.insert("logical_database".to_owned(), Value::String(portable));
+    Ok(())
+}
+
 fn normalize_node(
-    raw: RawNodeRecord,
+    mut raw: RawNodeRecord,
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
     inferred_wiring_site: Option<&SourceAnchor>,
 ) -> Result<NodeRecord, GraphError> {
+    normalize_logical_database_scope(&mut raw.attributes, root)?;
     let raw_kind = raw
         .attributes
         .get("symbol_kind")
@@ -2200,12 +2284,16 @@ fn normalize_provenance(
             ));
         }
     };
-    let extractor = optional_string(attributes, "extractor").unwrap_or_else(|| {
-        optional_any_string(attributes, &["language", "lang"]).map_or_else(
-            || "compass.languages.unknown".to_owned(),
-            |language| format!("compass.languages.{language}"),
-        )
-    });
+    let extractor = if raw_origin.as_deref() == Some("semantic") {
+        SEMANTIC_LAYER_EXTRACTOR.to_owned()
+    } else {
+        optional_string(attributes, "extractor").unwrap_or_else(|| {
+            optional_any_string(attributes, &["language", "lang"]).map_or_else(
+                || "compass.languages.unknown".to_owned(),
+                |language| format!("compass.languages.{language}"),
+            )
+        })
+    };
     let candidates = normalize_candidates(attributes, root, record)?;
     let mut provenance = Provenance {
         origin,

@@ -99,14 +99,17 @@ fn enum_can_contain_enum_member() {
 }
 
 #[test]
-fn unrelated_owner_cannot_contain_enum_member() {
-    let errors = validate_code_graph(&containment_document(NodeKind::Route))
-        .expect_err("route must not own an enum member")
-        .errors;
+fn unrelated_owner_cannot_contain_enum_member() -> Result<(), &'static str> {
+    let error = match validate_code_graph(&containment_document(NodeKind::Route)) {
+        Err(error) => error,
+        Ok(()) => return Err("route must not own an enum member"),
+    };
+    let errors = error.errors;
 
     assert!(
         errors
             .iter()
             .any(|error| error.contains("invalid contains endpoints route -> enum_member"))
     );
+    Ok(())
 }

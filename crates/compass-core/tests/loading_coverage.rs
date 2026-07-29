@@ -9,6 +9,7 @@ use compass_core::{
 use compass_files::BuildGuard;
 use compass_languages::{Engine, Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::identity::edge_id;
+use compass_model::provenance::SEMANTIC_LAYER_EXTRACTOR;
 use serde_json::{Map, json};
 use sha2::{Digest, Sha256};
 
@@ -339,6 +340,7 @@ fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<d
         .cloned()
         .ok_or("missing initial AST evidence")?;
     semantic_evidence.origin = compass_model::provenance::EvidenceOrigin::Heuristic;
+    semantic_evidence.extractor = SEMANTIC_LAYER_EXTRACTOR.to_owned();
     semantic_evidence.confidence = compass_model::provenance::EvidenceConfidence::Inferred;
     semantic_evidence.rule = Some("semantic-extraction".to_owned());
     semantic_evidence.wiring_site = initial_target.source.clone();
@@ -431,6 +433,7 @@ fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(
         .cloned()
         .ok_or("missing initial AST call evidence")?;
     semantic_evidence.origin = compass_model::provenance::EvidenceOrigin::Heuristic;
+    semantic_evidence.extractor = SEMANTIC_LAYER_EXTRACTOR.to_owned();
     semantic_evidence.confidence = compass_model::provenance::EvidenceConfidence::Inferred;
     semantic_evidence.rule = Some("semantic-call".to_owned());
     semantic_evidence.wiring_site = initial_call.relationship_site.clone();

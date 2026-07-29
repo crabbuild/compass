@@ -13,7 +13,7 @@ use compass_model::code_graph::{
 use compass_model::identity::edge_id;
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
-    TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
+    SEMANTIC_LAYER_EXTRACTOR, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
 };
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -107,6 +107,56 @@ fn raw_file_node(root: &Path, id: &str, relative: &str) -> RawNodeRecord {
             ("source_anchor".to_owned(), anchor_in(root, relative, 0)),
         ]),
     }
+}
+
+#[test]
+fn raw_semantic_facts_receive_durable_layer_ownership() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut semantic = raw_node(root, "semantic", "semantic", 10);
+    semantic
+        .attributes
+        .insert("_origin".to_owned(), json!("semantic"));
+    semantic
+        .attributes
+        .insert("extractor".to_owned(), json!("third.party.semantic"));
+    let ast = raw_node(root, "ast", "ast", 30);
+    let graph = normalize_v1(
+        Extraction {
+            nodes: vec![semantic, ast],
+            edges: vec![RawEdgeRecord {
+                source: "semantic".to_owned(),
+                target: "ast".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("references")),
+                    ("rule".to_owned(), json!("semantic-reference")),
+                    ("_origin".to_owned(), json!("semantic")),
+                    ("confidence".to_owned(), json!("INFERRED")),
+                    ("extractor".to_owned(), json!("third.party.semantic")),
+                    ("source_anchor".to_owned(), anchor(root, 50)),
+                ]),
+            }],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    let semantic = graph
+        .nodes
+        .iter()
+        .find(|node| node.name == "semantic")
+        .ok_or("missing semantic node")?;
+    assert!(semantic.evidence.iter().any(|evidence| {
+        evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.extractor == SEMANTIC_LAYER_EXTRACTOR
+            && evidence.rule.as_deref() == Some("semantic-extraction")
+    }));
+    assert!(graph.links[0].evidence.iter().any(|evidence| {
+        evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.extractor == SEMANTIC_LAYER_EXTRACTOR
+            && evidence.rule.as_deref() == Some("semantic-reference")
+    }));
+    Ok(())
 }
 
 fn raw_class_node(
@@ -1203,8 +1253,14 @@ fn normalization_drops_non_recursive_self_loops_and_invalid_inheritance_targets(
         },
     ];
 
-    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let clean = normalize_v1(graph.clone(), build_evidence(root)?)?;
+    let mut repeated_evidence = build_evidence(root)?;
+    repeated_evidence
+        .diagnostics
+        .clone_from(&clean.graph.diagnostics);
+    let document = normalize_v1(graph, repeated_evidence)?;
     assert!(document.links.is_empty());
+    assert_eq!(document.graph.diagnostics, clean.graph.diagnostics);
     assert!(
         document
             .graph

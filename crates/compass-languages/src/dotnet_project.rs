@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Read;
+use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -176,7 +177,7 @@ fn extract_slnx(path: &Path) -> Result<Extraction, ExtractError> {
         let project_source = resolve_path(path, project_path);
         let project_id = make_id(&[&project_source]);
         if !project_id.is_empty() && seen.insert(project_id.clone()) {
-            extraction.nodes.push(external_node(
+            let mut project_record = external_node(
                 project_id.clone(),
                 Path::new(project_path)
                     .file_stem()
@@ -186,7 +187,9 @@ fn extract_slnx(path: &Path) -> Result<Extraction, ExtractError> {
                 "package",
                 &project_source,
                 &source_file,
-            ));
+            );
+            stamp_origin_anchor(&mut project_record, &source_file, &source, project.range());
+            extraction.nodes.push(project_record);
             extraction
                 .edges
                 .push(edge(&file_id, &project_id, "contains", &source_file));
@@ -333,7 +336,7 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
         let project_source = resolve_path(path, reference);
         let project_id = make_id(&[&project_source]);
         if !project_id.is_empty() && seen.insert(project_id.clone()) {
-            extraction.nodes.push(external_node(
+            let mut project_record = external_node(
                 project_id.clone(),
                 Path::new(&reference.replace('\\', "/"))
                     .file_name()
@@ -343,7 +346,9 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
                 "package",
                 &project_source,
                 &source_file,
-            ));
+            );
+            stamp_origin_anchor(&mut project_record, &source_file, &source, project.range());
+            extraction.nodes.push(project_record);
         }
         extraction
             .edges
@@ -461,6 +466,27 @@ fn external_node(
         Value::String(origin_file.to_owned()),
     );
     record
+}
+
+fn stamp_origin_anchor(
+    record: &mut NodeRecord,
+    origin_file: &str,
+    source: &[u8],
+    range: Range<usize>,
+) {
+    let attributes = crate::facts::source_range(source, range.start, range.end);
+    record.attributes.insert(
+        "origin_source_anchor".to_owned(),
+        json!({
+            "file": origin_file,
+            "startByte": attributes.get("start_byte").cloned().unwrap_or(Value::from(0)),
+            "endByte": attributes.get("end_byte").cloned().unwrap_or(Value::from(0)),
+            "startLine": attributes.get("line_start").cloned().unwrap_or(Value::from(1)),
+            "startColumn": attributes.get("column_start").cloned().unwrap_or(Value::from(0)),
+            "endLine": attributes.get("line_end").cloned().unwrap_or(Value::from(1)),
+            "endColumn": attributes.get("column_end").cloned().unwrap_or(Value::from(0)),
+        }),
+    );
 }
 
 fn edge(source: &str, target: &str, relation: &str, source_file: &str) -> EdgeRecord {

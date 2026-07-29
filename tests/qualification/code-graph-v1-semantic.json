@@ -1037,7 +1037,7 @@
       "id": "node-macro",
       "kind": "macro",
       "source": "fixtures/code-graph/qualification/rich.rs",
-      "qualifiedName": "private_tmp_compass_task6_final_gate_gfhsqy_corpus_fixtures_code_graph_qualification_rich_rs::widget@252",
+      "qualifiedName": "widget@252",
       "producer": "compass.languages.rust",
       "origins": [
         "ast"
@@ -1158,7 +1158,7 @@
       "id": "node-query",
       "kind": "query",
       "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
-      "qualifiedName": "/private/tmp/compass-task6-final-gate.GFHsqY/corpus/fixtures/code-graph/qualification/migrations/001_init::select@95",
+      "qualifiedName": "fixtures/code-graph/qualification/migrations/001_init::select@95",
       "producer": "compass.languages.sql",
       "origins": [
         "artifact"
@@ -1169,7 +1169,7 @@
       "id": "node-migration",
       "kind": "migration",
       "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
-      "qualifiedName": "/private/tmp/compass-task6-final-gate.GFHsqY/corpus/fixtures/code-graph/qualification/migrations/001_init::001_init.sql",
+      "qualifiedName": "fixtures/code-graph/qualification/migrations/001_init::001_init.sql",
       "producer": "compass.languages.sql",
       "origins": [
         "convention"
@@ -1191,7 +1191,7 @@
       "id": "node-database",
       "kind": "database",
       "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
-      "qualifiedName": "/private/tmp/compass-task6-final-gate.GFHsqY/corpus/fixtures/code-graph/qualification/migrations/001_init",
+      "qualifiedName": "fixtures/code-graph/qualification/migrations/001_init",
       "producer": "compass.languages.sql",
       "origins": [
         "convention"
@@ -1628,7 +1628,7 @@
     {
       "id": "missing-reference-diagnostic",
       "source": "fixtures/code-graph/qualification/MissingReference.csproj",
-      "diagnosticCode": "unresolved_external_symbol"
+      "diagnosticCode": "unresolved_external_reference"
     }
   ],
   "limits": {

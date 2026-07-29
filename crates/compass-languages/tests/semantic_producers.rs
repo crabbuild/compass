@@ -258,6 +258,21 @@ fn target_is_rendered() { target(Product { value: 1 }); }
             extraction.nodes
         );
     }
+    let macro_node = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "macro")
+        .ok_or("missing macro")?;
+    assert!(
+        macro_node.string("qualified_name").starts_with("product@"),
+        "top-level macro identity must be lexical, not checkout-dependent: {macro_node:?}"
+    );
+    assert!(
+        !macro_node
+            .string("qualified_name")
+            .contains(&directory.path().to_string_lossy().replace(['/', '\\'], "_")),
+        "top-level macro identity embedded the checkout path: {macro_node:?}"
+    );
     for expected in ["type_of", "returns", "overrides", "aliases", "tests"] {
         assert!(
             edge_kinds.contains(expected),

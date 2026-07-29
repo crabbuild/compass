@@ -295,13 +295,17 @@ impl<'a> State<'a> {
             .unwrap_or("migration");
         let qualified_name = format!("{}::{name}", self.logical_database);
         let id = make_id(&["sql-migration", &self.source_file]);
-        let attributes = self.base_attributes(
+        let mut attributes = self.base_attributes(
             "migration",
             name,
             &qualified_name,
             Site::new(0, self.source.len()),
             "convention",
             "sql-migration-path-convention",
+        );
+        attributes.insert(
+            "logical_database".into(),
+            Value::String(self.logical_database.clone()),
         );
         self.push_node(id.clone(), attributes);
         self.add_edge_with_origin(
@@ -685,6 +689,10 @@ impl<'a> State<'a> {
         );
         attributes.insert("dialect".into(), Value::String("sql".into()));
         attributes.insert("operation".into(), Value::String(operation.to_owned()));
+        attributes.insert(
+            "logical_database".into(),
+            Value::String(self.logical_database.clone()),
+        );
         attributes.insert(
             "text_digest".into(),
             Value::String(sha256_prefixed(

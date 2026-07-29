@@ -68,6 +68,60 @@ fn clean_warm_restored_and_checkout_root_builds_are_byte_identical() -> Result<(
 }
 
 #[test]
+fn edit_restore_does_not_preserve_recomputable_heuristic_facts() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+    fs::write(
+        root.join("MissingReference.csproj"),
+        r#"<Project>
+  <ItemGroup>
+    <ProjectReference Include="absent/Dependency.csproj" />
+  </ItemGroup>
+</Project>
+"#,
+    )?;
+
+    let (clean, _) = build(root)?;
+    fs::write(
+        root.join("src/lib.rs"),
+        format!("{SOURCE}\npub fn temporary_edit() {{}}\n"),
+    )?;
+    let (edited, _) = build(root)?;
+    assert_ne!(edited, clean);
+
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+    let (restored, _) = build(root)?;
+    let clean_graph: GraphDocument = serde_json::from_slice(&clean)?;
+    let restored_graph: GraphDocument = serde_json::from_slice(&restored)?;
+    assert_eq!(restored_graph.nodes.len(), clean_graph.nodes.len());
+    assert_eq!(restored_graph.links.len(), clean_graph.links.len());
+    assert_eq!(
+        restored_graph.graph.coverage.len(),
+        clean_graph.graph.coverage.len()
+    );
+    assert_eq!(
+        restored_graph.graph.diagnostics.len(),
+        clean_graph.graph.diagnostics.len()
+    );
+    assert_eq!(restored_graph.graph.build, clean_graph.graph.build);
+    assert_eq!(restored_graph.graph.files, clean_graph.graph.files);
+    assert_eq!(restored_graph.graph.coverage, clean_graph.graph.coverage);
+    assert_eq!(
+        restored_graph.graph.diagnostics,
+        clean_graph.graph.diagnostics
+    );
+    assert_eq!(restored_graph.nodes, clean_graph.nodes);
+    assert_eq!(restored_graph.links, clean_graph.links);
+    assert!(
+        restored == clean,
+        "recomputable resolver and graph heuristics must not feed back from the prior graph"
+    );
+    Ok(())
+}
+
+#[test]
 fn production_pipeline_preserves_framework_domain_kinds_and_route_targets()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

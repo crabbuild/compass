@@ -9,6 +9,7 @@ pub const CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE: &str =
 pub const COALESCED_NODE_EVIDENCE_ATTRIBUTE: &str = "_coalesced_node_evidence";
 pub const TRUSTED_EDGE_RECORD_ATTRIBUTE: &str = "_compass_v1_edge_record";
 pub const TRUSTED_NODE_RECORD_ATTRIBUTE: &str = "_compass_v1_node_record";
+pub const SEMANTIC_LAYER_EXTRACTOR: &str = "compass.semantic";
 
 /// Immutable producer rule used to distinguish relationship occurrences.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

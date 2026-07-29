@@ -31,6 +31,12 @@ UPDATE app.accounts SET owner_id = 1 WHERE id = 1;
     let extraction = extract_sql_content(relative, source);
     let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-config")?;
     let graph = normalize_v1(extraction, evidence)?;
+    let absolute_extraction = extract_sql_content(&root.join(relative), source);
+    let absolute_evidence =
+        BuildEvidence::from_extraction(root, &absolute_extraction, "sha256:test-config")?;
+    let absolute_graph = normalize_v1(absolute_extraction, absolute_evidence)?;
+    assert_eq!(absolute_graph.nodes, graph.nodes);
+    assert_eq!(absolute_graph.links, graph.links);
     let kinds = graph
         .nodes
         .iter()
