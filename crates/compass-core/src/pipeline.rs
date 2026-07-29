@@ -17,7 +17,7 @@ use compass_graph::{
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
-    Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
+    Engine, Extraction, ExtractorKind, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
 use compass_model::code_graph::{
     DiagnosticSeverity, ExtractionStatus, GraphDiagnostic, GraphDocument as V1GraphDocument,
@@ -619,46 +619,60 @@ fn build_graph_inner(
     // cannot silently serialize cold extraction.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
-    let extract_source =
-        |engine: &mut Engine, path: &PathBuf| -> Result<_, compass_languages::ExtractError> {
-            let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let source_file = path
-                .strip_prefix(&root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            let language = Registry::resolve(path).map_or("", |spec| spec.name);
-            let mut combined = engine.extract_source_combined(path, &source_file, &bytes)?;
-            if bytes.is_empty() {
-                combined.graph = Extraction::default();
-                combined.program = None;
-            }
-            let prepared = combined.program.map(|batch| PreparedSyntaxInput {
-                source_file,
-                language: language.to_owned(),
-                bytes: bytes.clone(),
-                batch,
+    let extract_source = |engine: &mut Engine,
+                          path: &PathBuf|
+     -> Result<_, compass_languages::ExtractError> {
+        let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let source_file = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let language = Registry::resolve(path).map_or("", |spec| spec.name);
+        let mut combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+        let empty_structured_document = bytes.is_empty()
+            && Registry::resolve(path).is_some_and(|spec| {
+                matches!(
+                    spec.kind,
+                    ExtractorKind::JsonConfig | ExtractorKind::ProjectXml | ExtractorKind::Xaml
+                )
             });
-            if let Some(progress) = progress {
-                let mut completed = completed_files
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                *completed += 1;
-                progress(BuildFileProgress {
-                    current: *completed,
-                    total: total_files,
-                    path: path.clone(),
-                });
-            }
-            let source = (
-                path.to_string_lossy().into_owned(),
-                String::from_utf8_lossy(&bytes).into_owned(),
-            );
-            Ok((path.clone(), combined.graph, source, prepared))
-        };
+        if empty_structured_document && combined.graph.error.is_none() {
+            combined.graph.error = Some(format!("{language} extraction failed: empty document"));
+        } else if bytes.is_empty() && combined.graph.error.is_none() {
+            combined.graph.nodes.clear();
+            combined.graph.edges.clear();
+            combined.graph.hyperedges.clear();
+            combined.graph.framework_facts.clear();
+            combined.graph.raw_calls = None;
+            combined.program = None;
+        }
+        let prepared = combined.program.map(|batch| PreparedSyntaxInput {
+            source_file,
+            language: language.to_owned(),
+            bytes: bytes.clone(),
+            batch,
+        });
+        if let Some(progress) = progress {
+            let mut completed = completed_files
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *completed += 1;
+            progress(BuildFileProgress {
+                current: *completed,
+                total: total_files,
+                path: path.clone(),
+            });
+        }
+        let source = (
+            path.to_string_lossy().into_owned(),
+            String::from_utf8_lossy(&bytes).into_owned(),
+        );
+        Ok((path.clone(), combined.graph, source, prepared))
+    };
     let fresh_outcomes = if missing.len() < 256 {
         let mut engine = Engine::default();
         missing

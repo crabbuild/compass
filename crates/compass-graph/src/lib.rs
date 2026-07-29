@@ -21,8 +21,8 @@ pub use dedup::{
     deduplicate_entities_with_tiebreaker,
 };
 pub use v1::{
-    BuildEvidence, InventoryEvidence, extraction_from_v1, normalize_document_v1,
-    normalize_document_v1_with_inventory, normalize_v1,
+    BuildEvidence, InventoryEvidence, V1_PUBLICATION_SEMANTICS_VERSION, extraction_from_v1,
+    normalize_document_v1, normalize_document_v1_with_inventory, normalize_v1,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

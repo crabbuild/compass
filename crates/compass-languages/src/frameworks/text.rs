@@ -42,6 +42,28 @@ pub(super) fn line_anchor(
     )
 }
 
+pub(super) fn line_anchor_at(
+    path: &Path,
+    source: &[u8],
+    line_start: usize,
+    line: &str,
+    line_number: usize,
+) -> RawFrameworkAnchor {
+    let start = line_start.min(source.len());
+    let content_end = line.trim_end_matches(['\r', '\n']).len().max(1);
+    let end = start.saturating_add(content_end).min(source.len());
+    let line_number = u32::try_from(line_number).unwrap_or(u32::MAX);
+    RawFrameworkAnchor {
+        source_file: path.to_string_lossy().replace('\\', "/"),
+        start_byte: start as u64,
+        end_byte: end as u64,
+        start_line: line_number,
+        start_column: 0,
+        end_line: line_number,
+        end_column: u32::try_from(end.saturating_sub(start)).unwrap_or(u32::MAX),
+    }
+}
+
 pub(super) fn calls<'a>(source: &'a str, prefix: &str) -> Vec<CallMatch<'a>> {
     let mut matches = Vec::new();
     let mut search_from = 0;

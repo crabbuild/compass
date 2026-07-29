@@ -16,11 +16,12 @@ const FILE_COUNT_UPPER: usize = 500;
 const CODE_EXTENSIONS: &[&str] = &[
     "py", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "ejs", "ets", "go", "rs", "java",
     "groovy", "gradle", "cpp", "cc", "cxx", "c", "h", "hpp", "cu", "cuh", "metal", "rb", "rake",
-    "swift", "kt", "kts", "cs", "scala", "php", "lua", "luau", "toc", "zig", "ps1", "psm1", "psd1",
-    "ex", "exs", "m", "mm", "jl", "vue", "svelte", "astro", "dart", "v", "sv", "svh", "sql", "r",
-    "pl", "pm", "f", "f90", "f95", "f03", "f08", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm",
-    "lfm", "lpk", "sh", "bash", "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf",
-    "sln", "slnx", "csproj", "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger",
+    "swift", "kt", "kts", "cs", "scala", "php", "module", "theme", "install", "lua", "luau", "toc",
+    "zig", "ps1", "psm1", "psd1", "ex", "exs", "m", "mm", "jl", "vue", "svelte", "astro", "dart",
+    "v", "sv", "svh", "sql", "r", "pl", "pm", "f", "f90", "f95", "f03", "f08", "pas", "pp", "dpr",
+    "dpk", "lpr", "inc", "dfm", "lfm", "lpk", "sh", "bash", "json", "tf", "tfvars", "hcl", "dm",
+    "dme", "dmi", "dmm", "dmf", "sln", "slnx", "csproj", "fsproj", "vbproj", "xaml", "razor",
+    "cshtml", "cls", "trigger",
 ];
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "md", "mdx", "qmd", "skill", "txt", "rst", "html", "yaml", "yml", "docx", "xlsx", "gdoc",

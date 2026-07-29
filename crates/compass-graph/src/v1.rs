@@ -23,6 +23,9 @@ use compass_model::provenance::{
 use compass_model::{GraphError, validate_code_graph};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+/// Version of the normalization and publication contract behind graph schema v1.
+pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/2";
 use sha2::{Digest, Sha256};
 
 const TRUSTED_NODE_RECORD: &str = "_compass_v1_node_record";

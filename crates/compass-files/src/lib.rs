@@ -15,7 +15,10 @@ pub use atomic::{
     write_bytes_atomic, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
 };
 pub use build_guard::BuildGuard;
-pub use cache::{Cache, CacheHashPolicy, CacheKind, CacheLayout, CacheOptions};
+pub use cache::{
+    AST_CACHE_VERSION, CACHE_ENCODING_VERSION, Cache, CacheHashPolicy, CacheKind, CacheLayout,
+    CacheOptions,
+};
 pub use detect::{
     DetectOptions, Detection, FileType, IgnorePolicy, WatchPathFilter, classify_file, detect,
 };

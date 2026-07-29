@@ -3,8 +3,8 @@ use std::path::Path;
 use regex::Regex;
 use serde_json::Map;
 
-use super::text::{line_anchor, normalize_route_path, text};
-use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
+use super::text::{line_anchor_at, normalize_route_path, text};
+use super::{FrameworkLimits, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
     let body = text(source);
@@ -15,7 +15,8 @@ pub(super) fn detect(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
     };
     let mut facts = Vec::new();
     let mut offset = 0_usize;
-    for line in body.split_inclusive('\n') {
+    let maximum = FrameworkLimits::default().max_facts_per_file;
+    for (line_index, line) in body.split_inclusive('\n').enumerate() {
         let Some(capture) = route.captures(line) else {
             offset = offset.saturating_add(line.len());
             continue;
@@ -47,7 +48,7 @@ pub(super) fn detect(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
             raw_path: raw_path.clone(),
             normalized_path: normalize_route_path(&raw_path),
             declaring_scope: path.to_string_lossy().replace('\\', "/"),
-            anchor: line_anchor(path, source, offset, line),
+            anchor: line_anchor_at(path, source, offset, line, line_index.saturating_add(1)),
             handler_reference: handler,
             middleware_references: Vec::new(),
             origin: RawFrameworkOrigin::Config,
@@ -55,6 +56,9 @@ pub(super) fn detect(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
             detail: Map::new(),
         }));
         offset = offset.saturating_add(line.len());
+        if facts.len() > maximum {
+            break;
+        }
     }
     facts
 }
