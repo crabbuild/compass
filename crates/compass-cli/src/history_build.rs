@@ -895,7 +895,7 @@ impl CompleteGraphBuilder for NativeCompleteGraphBuilder {
             return Ok(None);
         }
         let Ok(completed) = CompletedGraphArtifacts::load(
-            output_dir,
+            &output_dir,
             CompletionEvidence {
                 extraction_succeeded: true,
                 allow_partial: false,
