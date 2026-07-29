@@ -2992,9 +2992,9 @@ mod tests {
             fs::write(root.join(".hidden/Layout.astro"), "<slot />\n")?;
             let mut options = BuildOptions::new(root);
             options.no_viz = true;
-            build_local_graph(&options)?;
+            let result = build_local_graph(&options)?;
             Ok(V1GraphDocument::load(
-                &root.join("compass-out").join("graph.json"),
+                &result.output_dir.join("graph.json"),
             )?)
         };
         let first_graph = build(first.path())?;
@@ -3212,12 +3212,11 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        let first = build_graph_with_semantic(&options, &semantic)?;
-        let graph_path = first.output_dir.join("graph.json");
+        build_graph_with_semantic(&options, &semantic)?;
 
         fs::write(root.join("main.py"), "def after():\n    return 2\n")?;
-        build_local_graph(&options)?;
-        let graph = V1GraphDocument::load(&graph_path)?;
+        let updated = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&updated.output_dir.join("graph.json"))?;
         assert!(graph.nodes.iter().any(|node| node.label() == "Domain rule"));
         assert!(graph.nodes.iter().any(|node| node.label() == "after()"));
         assert!(!graph.nodes.iter().any(|node| node.label() == "before()"));
@@ -3247,11 +3246,10 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        let first = build_graph_with_semantic(&options, &semantic)?;
-        let graph_path = first.output_dir.join("graph.json");
+        build_graph_with_semantic(&options, &semantic)?;
 
-        build_local_graph(&options)?;
-        let graph = V1GraphDocument::load(&graph_path)?;
+        let updated = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&updated.output_dir.join("graph.json"))?;
         assert_eq!(
             graph
                 .nodes
@@ -3380,12 +3378,12 @@ mod tests {
         let graph_path = cold.output_dir.join("graph.json");
         let graph_bytes = fs::read(&graph_path)?;
         let manifest_bytes = fs::read(cold.output_dir.join("manifest.json"))?;
-        fs::remove_dir_all(cold.output_dir.join("cache"))?;
+        fs::remove_dir_all(directory.path().join("compass-out").join("cache"))?;
 
         let warm = build_local_graph(&options)?;
         assert_eq!(warm.files_extracted, 0);
         assert_eq!(warm.files_cached, 1);
-        assert_eq!(fs::read(graph_path)?, graph_bytes);
+        assert_eq!(fs::read(warm.output_dir.join("graph.json"))?, graph_bytes);
         assert_eq!(
             fs::read(warm.output_dir.join("manifest.json"))?,
             manifest_bytes
@@ -3490,8 +3488,8 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        build_graph_with_semantic(&options, &second_layer)?;
-        let graph = V1GraphDocument::load(&graph_path)?;
+        let second = build_graph_with_semantic(&options, &second_layer)?;
+        let graph = V1GraphDocument::load(&second.output_dir.join("graph.json"))?;
         assert!(!graph.nodes.iter().any(|node| node.label() == "Old concept"));
         assert!(graph.nodes.iter().any(|node| node.label() == "New concept"));
         let Some(semantic) = graph
@@ -3557,12 +3555,12 @@ mod tests {
         assert_eq!(fs::read(&graph_path)?, original);
 
         incomplete.allow_partial = true;
-        build_graph_with_semantic(&options, &incomplete)?;
-        let graph = V1GraphDocument::load(&graph_path)?;
+        let partial = build_graph_with_semantic(&options, &incomplete)?;
+        let graph = V1GraphDocument::load(&partial.output_dir.join("graph.json"))?;
         assert!(graph.nodes.iter().any(|node| node.label() == "Concept A"));
         assert!(!graph.nodes.iter().any(|node| node.label() == "Concept B"));
         let manifest: Value =
-            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+            serde_json::from_slice(&fs::read(partial.output_dir.join("manifest.json"))?)?;
         assert_eq!(manifest["diagram.png"]["semantic_hash"], "");
         Ok(())
     }
@@ -3591,7 +3589,7 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        let first = build_graph_with_semantic(&options, &complete)?;
+        build_graph_with_semantic(&options, &complete)?;
 
         let smaller = SemanticLayer {
             fragment: json!({
@@ -3604,9 +3602,8 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        build_graph_with_semantic(&options, &smaller)?;
-        let graph_path = first.output_dir.join("graph.json");
-        let graph = V1GraphDocument::load(&graph_path)?;
+        let smaller = build_graph_with_semantic(&options, &smaller)?;
+        let graph = V1GraphDocument::load(&smaller.output_dir.join("graph.json"))?;
         assert!(graph.nodes.iter().any(|node| node.label() == "Concept A"));
         assert!(!graph.nodes.iter().any(|node| node.label() == "Concept B"));
 
@@ -3622,11 +3619,11 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        build_graph_with_semantic(&options, &empty)?;
-        let graph = V1GraphDocument::load(&graph_path)?;
+        let empty = build_graph_with_semantic(&options, &empty)?;
+        let graph = V1GraphDocument::load(&empty.output_dir.join("graph.json"))?;
         assert!(!graph.nodes.iter().any(|node| node.label() == "Concept A"));
         let manifest: Value =
-            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+            serde_json::from_slice(&fs::read(empty.output_dir.join("manifest.json"))?)?;
         assert!(manifest.get("diagram.png").is_none());
         Ok(())
     }
