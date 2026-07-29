@@ -10,7 +10,7 @@ use compass_files::{
     Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
-    ClusterOptions, EntityTiebreaker, InventoryEvidence,
+    ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION, InventoryEvidence,
     build_owned_with_tiebreaker as build_document, cluster, dedupe_edges, dedupe_nodes,
     extraction_from_v1, graph_insights, label_communities_by_hub,
     normalize_document_v1_with_inventory, remap_communities_to_previous, score_communities,
@@ -18,9 +18,13 @@ use compass_graph::{
 use compass_languages::{
     Engine, Extraction, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
-use compass_model::code_graph::{ExtractionStatus, GraphDocument as V1GraphDocument, NodeKind};
+use compass_model::code_graph::{
+    DiagnosticSeverity, ExtractionStatus, GraphDiagnostic, GraphDocument as V1GraphDocument,
+    NodeKind,
+};
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, append_endpoint_rewrite_evidence,
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, SourceAnchor,
+    append_endpoint_rewrite_evidence,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
@@ -92,6 +96,7 @@ const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
 const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/1";
 const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
+const MAX_INCREMENTAL_REMAP_DIAGNOSTICS: usize = 100;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct OutputStats {
@@ -2049,30 +2054,67 @@ fn preserve_semantic_layer(
                 .map(|current| (node.id.clone(), current.clone()))
         })
         .collect::<HashMap<_, _>>();
-    for edge in &mut existing_raw.edges {
-        let mut rewritten = false;
-        if let Some(current) = typed_ast_remap.get(&edge.source)
-            && current != &edge.source
-        {
-            edge.source.clone_from(current);
-            rewritten = true;
+    let mut dropped_edges = HashSet::new();
+    let mut remap_diagnostics = Vec::new();
+    let mut dropped_without_site = 0_usize;
+    for (index, edge) in existing_raw.edges.iter_mut().enumerate() {
+        let source = typed_ast_remap
+            .get(&edge.source)
+            .cloned()
+            .unwrap_or_else(|| edge.source.clone());
+        let target = typed_ast_remap
+            .get(&edge.target)
+            .cloned()
+            .unwrap_or_else(|| edge.target.clone());
+        if source == edge.source && target == edge.target {
+            continue;
         }
-        if let Some(current) = typed_ast_remap.get(&edge.target)
-            && current != &edge.target
-        {
-            edge.target.clone_from(current);
-            rewritten = true;
+        if !has_exact_remap_site(&edge.attributes) {
+            dropped_edges.insert(index);
+            dropped_without_site = dropped_without_site.saturating_add(1);
+            if remap_diagnostics.len() < MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
+                let mut related_ids = edge
+                    .attributes
+                    .get(compass_model::provenance::TRUSTED_EDGE_RECORD_ATTRIBUTE)
+                    .and_then(|record| record.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                related_ids.extend([edge.source.clone(), edge.target.clone()]);
+                remap_diagnostics.push(GraphDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "dropped_incremental_remap_without_wiring_site".to_owned(),
+                    message: "dropped preserved edge whose AST endpoint changed without an authoritative producer wiring site".to_owned(),
+                    anchor: None,
+                    related_ids,
+                });
+            }
+            continue;
         }
-        if rewritten {
-            append_endpoint_rewrite_evidence(
-                &mut edge.attributes,
-                EndpointRewriteEvidence {
-                    rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
-                    score: 1.0,
-                },
-            );
-        }
+        edge.source = source;
+        edge.target = target;
+        append_endpoint_rewrite_evidence(
+            &mut edge.attributes,
+            EndpointRewriteEvidence {
+                rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
+                score: 1.0,
+            },
+        );
     }
+    if dropped_without_site > MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
+        remap_diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: "incremental_remap_without_wiring_site_truncated".to_owned(),
+            message: format!(
+                "omitted {} additional incremental remap diagnostics",
+                dropped_without_site - MAX_INCREMENTAL_REMAP_DIAGNOSTICS
+            ),
+            anchor: None,
+            related_ids: Vec::new(),
+        });
+    }
+    append_graph_diagnostics(extraction, remap_diagnostics);
     let preserved_node_ids = existing
         .nodes
         .iter()
@@ -2102,7 +2144,11 @@ fn preserve_semantic_layer(
         .edges
         .into_iter()
         .zip(existing.links)
-        .filter_map(|(raw, typed)| {
+        .enumerate()
+        .filter_map(|(index, (raw, typed))| {
+            if dropped_edges.contains(&index) {
+                return None;
+            }
             (typed
                 .evidence
                 .iter()
@@ -2127,6 +2173,35 @@ fn preserve_semantic_layer(
             target: edge.target,
             attributes: edge.attributes,
         }));
+}
+
+fn has_exact_remap_site(attributes: &serde_json::Map<String, serde_json::Value>) -> bool {
+    attributes
+        .get("source_anchor")
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+        .is_some_and(|site| site.is_valid() && site.start_byte < site.end_byte)
+}
+
+fn append_graph_diagnostics(extraction: &mut Extraction, diagnostics: Vec<GraphDiagnostic>) {
+    if diagnostics.is_empty() {
+        return;
+    }
+    let mut values = extraction
+        .extensions
+        .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    values.extend(
+        diagnostics
+            .into_iter()
+            .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok()),
+    );
+    values.sort_by_cached_key(serde_json::Value::to_string);
+    values.dedup();
+    extraction.extensions.insert(
+        GRAPH_DIAGNOSTICS_EXTENSION.to_owned(),
+        serde_json::Value::Array(values),
+    );
 }
 
 fn raw_node_match_key(node: &RawNodeRecord) -> Option<(String, String, String)> {

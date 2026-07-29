@@ -6,6 +6,7 @@ use compass_core::{
 };
 use compass_files::BuildGuard;
 use compass_languages::{Engine, Extraction, RawEdgeRecord, RawNodeRecord};
+use compass_model::identity::edge_id;
 use serde_json::{Map, json};
 use sha2::{Digest, Sha256};
 
@@ -328,8 +329,8 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
     options.no_viz = true;
 
     let initial = build_graph_with_layers(&options, None, &[serde_json::to_value(supplemental)?])?;
-    let initial_graph =
-        compass_model::code_graph::GraphDocument::load(&initial.output_dir.join("graph.json"))?;
+    let initial_path = initial.output_dir.join("graph.json");
+    let mut initial_graph = compass_model::code_graph::GraphDocument::load(&initial_path)?;
     assert!(
         initial_graph
             .links
@@ -338,10 +339,87 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
         "initial links={:?}",
         initial_graph.links
     );
+    let site_less_template = {
+        let reference = initial_graph
+            .links
+            .iter_mut()
+            .find(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
+            .ok_or("missing initial reference")?;
+        reference.relationship_site = None;
+        reference.id = edge_id(
+            &reference.source,
+            reference.kind,
+            &reference.target,
+            None,
+            reference.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        reference.key.clone_from(&reference.id);
+        let rewrite_evidence = reference
+            .evidence
+            .iter()
+            .find(|evidence| evidence.rule.as_deref() == Some("graph-ghost-endpoint-remap"))
+            .cloned()
+            .ok_or("missing initial graph rewrite evidence")?;
+        let mut template = reference.clone();
+        template.evidence = vec![rewrite_evidence];
+        template
+    };
+    for index in 0..105 {
+        let mut site_less = site_less_template.clone();
+        let occurrence =
+            compass_model::provenance::OccurrenceRule::new(format!("site-less-reference-{index}"))
+                .ok_or("invalid site-less occurrence")?;
+        site_less.occurrence_rule = Some(occurrence);
+        site_less.id = edge_id(
+            &site_less.source,
+            site_less.kind,
+            &site_less.target,
+            None,
+            site_less.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        site_less.key.clone_from(&site_less.id);
+        initial_graph.links.push(site_less);
+    }
+    initial_graph.multigraph = true;
+    fs::write(&initial_path, serde_json::to_vec_pretty(&initial_graph)?)?;
+    compass_model::code_graph::GraphDocument::load(&initial_path)?;
+
     fs::write(&source, "pub fn target() { let _changed = true; }\n")?;
     build_graph_with_layers(&options, None, &[])?;
     let graph_path = BuildGuard::resolve_artifact(&root.join("compass-out"), "graph.json")?;
     let first = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    assert_eq!(
+        first
+            .links
+            .iter()
+            .filter(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
+            .count(),
+        1,
+        "unsafe site-less remaps were published: {:?}",
+        first.links
+    );
+    assert_eq!(
+        first
+            .graph
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == "dropped_incremental_remap_without_wiring_site"
+            })
+            .count(),
+        100
+    );
+    assert_eq!(
+        first
+            .graph
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == "incremental_remap_without_wiring_site_truncated"
+            })
+            .count(),
+        1
+    );
     let edge = first
         .links
         .iter()

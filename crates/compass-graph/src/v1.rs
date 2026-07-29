@@ -16,12 +16,12 @@ use compass_model::identity::{
     route_id, symbol_id,
 };
 use compass_model::provenance::{
-    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EvidenceConfidence, EvidenceOrigin,
+    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
     OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance, ResolutionCandidate, ResolutionState,
     SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
 };
 use compass_model::{GraphError, validate_code_graph};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -932,10 +932,10 @@ fn raw_edge_from_v1(edge: &EdgeRecord) -> RawEdgeRecord {
         .properties()
         .map(|(key, value)| (key.to_owned(), value))
         .collect::<Map<_, _>>();
-    if let Some(site) = &edge.relationship_site {
+    if let Some(site) = authoritative_edge_rewrite_site(edge) {
         attributes.insert(
             "source_anchor".to_owned(),
-            serde_json::to_value(site).unwrap_or(Value::Null),
+            serde_json::to_value(&site).unwrap_or(Value::Null),
         );
     }
     if let Some(rule) = &edge.occurrence_rule {
@@ -959,6 +959,41 @@ fn raw_edge_from_v1(edge: &EdgeRecord) -> RawEdgeRecord {
         target: edge.target.clone(),
         attributes,
     }
+}
+
+fn authoritative_edge_rewrite_site(edge: &EdgeRecord) -> Option<SourceAnchor> {
+    if let Some(site) = edge
+        .relationship_site
+        .as_ref()
+        .filter(|site| site.is_valid() && site.start_byte < site.end_byte)
+    {
+        return Some(site.clone());
+    }
+    let non_rewrite = edge.evidence.iter().filter(|evidence| {
+        !evidence.rule.as_deref().is_some_and(|rule| {
+            serde_json::from_value::<EndpointRewriteRule>(Value::String(rule.to_owned())).is_ok()
+        })
+    });
+    let producer_rule = edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str);
+    let mut preferred = non_rewrite
+        .clone()
+        .filter(|evidence| producer_rule.is_some_and(|rule| evidence.rule.as_deref() == Some(rule)))
+        .flat_map(provenance_exact_sites)
+        .collect::<Vec<_>>();
+    if preferred.is_empty() {
+        preferred.extend(non_rewrite.flat_map(provenance_exact_sites));
+    }
+    preferred.sort_by(|left, right| anchor_key(left).cmp(&anchor_key(right)));
+    preferred.into_iter().next()
+}
+
+fn provenance_exact_sites(evidence: &Provenance) -> impl Iterator<Item = SourceAnchor> + '_ {
+    evidence
+        .anchors
+        .iter()
+        .chain(evidence.wiring_site.iter())
+        .filter(|site| site.is_valid() && site.start_byte < site.end_byte)
+        .cloned()
 }
 
 fn insert_raw_evidence(attributes: &mut Map<String, Value>, evidence: &Provenance) {
@@ -1403,6 +1438,76 @@ struct RawEdgeEvidenceContext<'a> {
     heuristic_default: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEndpointRewrite {
+    rule: EndpointRewriteRule,
+    score: f64,
+    #[serde(default, rename = "_origin")]
+    origin: Option<String>,
+    #[serde(default)]
+    confidence: Option<String>,
+    #[serde(default)]
+    extractor: Option<String>,
+    #[serde(default)]
+    source_file: Option<String>,
+    #[serde(default)]
+    source_location: Option<String>,
+    #[serde(default)]
+    source_anchor: Option<SourceAnchor>,
+    #[serde(default)]
+    line_start: Option<u32>,
+    #[serde(default)]
+    line_end: Option<u32>,
+    #[serde(default)]
+    column_start: Option<u32>,
+    #[serde(default)]
+    column_end: Option<u32>,
+    #[serde(default)]
+    start_byte: Option<u64>,
+    #[serde(default)]
+    end_byte: Option<u64>,
+    #[serde(default)]
+    candidates: Vec<ResolutionCandidate>,
+}
+
+impl RawEndpointRewrite {
+    fn anchor_attributes(&self) -> Map<String, Value> {
+        let mut attributes = Map::new();
+        if let Some(value) = &self.source_file {
+            attributes.insert("source_file".to_owned(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.source_location {
+            attributes.insert("source_location".to_owned(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.source_anchor {
+            attributes.insert(
+                "source_anchor".to_owned(),
+                serde_json::to_value(value).unwrap_or(Value::Null),
+            );
+        }
+        for (key, value) in [
+            ("line_start", self.line_start.map(u64::from)),
+            ("line_end", self.line_end.map(u64::from)),
+            ("column_start", self.column_start.map(u64::from)),
+            ("column_end", self.column_end.map(u64::from)),
+            ("start_byte", self.start_byte),
+            ("end_byte", self.end_byte),
+        ] {
+            if let Some(value) = value {
+                attributes.insert(key.to_owned(), Value::from(value));
+            }
+        }
+        if !self.candidates.is_empty() {
+            attributes.insert(
+                "candidates".to_owned(),
+                serde_json::to_value(&self.candidates).unwrap_or(Value::Null),
+            );
+        }
+        attributes
+    }
+}
+
 fn append_raw_edge_evidence(
     evidence: &mut Vec<Provenance>,
     attributes: &Map<String, Value>,
@@ -1426,54 +1531,64 @@ fn append_raw_endpoint_rewrite_evidence(
     relationship_site: Option<SourceAnchor>,
     context: &RawEdgeEvidenceContext<'_>,
 ) -> Result<(), GraphError> {
-    let Some(rewrites) = attributes
-        .get("_endpoint_rewrite_rules")
-        .and_then(Value::as_array)
-    else {
+    let Some(raw_rewrites) = attributes.get(ENDPOINT_REWRITE_RULES_ATTRIBUTE) else {
         return Ok(());
     };
-    for rewrite in rewrites {
-        let Some(rewrite) = rewrite.as_object() else {
-            continue;
-        };
-        let Some(rule) = rewrite.get("rule").and_then(Value::as_str) else {
-            continue;
-        };
-        let mut rewrite_attributes = Map::new();
-        for key in [
-            "_origin",
-            "origin",
-            "confidence",
-            "extractor",
-            "source_file",
-            "source_location",
-            "source_anchor",
-            "line_start",
-            "line_end",
-            "column_start",
-            "column_end",
-            "start_byte",
-            "end_byte",
-            "candidates",
-        ] {
-            if let Some(value) = rewrite.get(key).or_else(|| attributes.get(key)) {
-                rewrite_attributes.insert(key.to_owned(), value.clone());
-            }
+    let rewrites = raw_rewrites
+        .as_array()
+        .ok_or_else(|| raw_error(context.owner, "endpoint rewrite rules must be a JSON array"))?;
+    for (index, raw_rewrite) in rewrites.iter().enumerate() {
+        let record = format!("{} endpoint rewrite[{index}]", context.owner);
+        let rewrite = serde_json::from_value::<RawEndpointRewrite>(raw_rewrite.clone())
+            .map_err(|error| raw_error(&record, &format!("invalid endpoint rewrite: {error}")))?;
+        if rewrite
+            .origin
+            .as_deref()
+            .is_some_and(|origin| origin != "heuristic")
+            || rewrite
+                .confidence
+                .as_deref()
+                .is_some_and(|confidence| !matches!(confidence, "INFERRED" | "inferred"))
+        {
+            return Err(raw_error(
+                &record,
+                "endpoint rewrite cannot claim direct origin or exact confidence",
+            ));
         }
-        rewrite_attributes.insert("rule".to_owned(), Value::String(rule.to_owned()));
-        if let Some(score) = rewrite.get("score") {
-            rewrite_attributes.insert("score".to_owned(), score.clone());
+        if !rewrite.score.is_finite() || !(0.0..=1.0).contains(&rewrite.score) {
+            return Err(raw_error(
+                &record,
+                "endpoint rewrite score must be finite and between 0.0 and 1.0",
+            ));
         }
+        let rewrite_attributes = rewrite.anchor_attributes();
         let rewrite_site = raw_anchor(&rewrite_attributes, context.root, context.file_facts)?
             .or(relationship_site.clone());
-        evidence.push(normalize_provenance(
-            &rewrite_attributes,
-            rewrite_site,
-            context.owner,
-            context.root,
-            Some(rule),
-            false,
-        )?);
+        let Some(rewrite_site) =
+            rewrite_site.filter(|site| site.is_valid() && site.start_byte < site.end_byte)
+        else {
+            return Err(raw_error(
+                &record,
+                "endpoint rewrite requires a valid non-empty exact wiring site",
+            ));
+        };
+        let provenance = Provenance {
+            origin: EvidenceOrigin::Heuristic,
+            extractor: rewrite
+                .extractor
+                .or_else(|| optional_string(attributes, "extractor"))
+                .unwrap_or_else(|| "compass.graph.endpoint-rewrite".to_owned()),
+            confidence: EvidenceConfidence::Inferred,
+            rule: Some(rewrite.rule.as_str().to_owned()),
+            anchors: Vec::new(),
+            wiring_site: Some(rewrite_site),
+            score: Some(rewrite.score),
+            candidates: normalize_candidates(&rewrite_attributes, context.root, &record)?,
+        };
+        provenance
+            .validate()
+            .map_err(|error| raw_error(&record, &error.to_string()))?;
+        evidence.push(provenance);
     }
     Ok(())
 }

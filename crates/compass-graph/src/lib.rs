@@ -46,7 +46,7 @@ type NodeRecord = RawNodeRecord;
 type EndpointAliases = HashMap<String, BTreeSet<String>>;
 
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
-const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
+pub const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
 
 enum EndpointResolution {
     Exact(String),

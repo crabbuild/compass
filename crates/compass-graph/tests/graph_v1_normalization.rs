@@ -10,6 +10,7 @@ use compass_model::code_graph::{
     BuildMetadata, CoverageRecord, CoverageStatus, DiagnosticSeverity, EdgeKind, ExtractionStatus,
     FileRecord, GraphDiagnostic, NodeKind,
 };
+use compass_model::identity::edge_id;
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
 };
@@ -170,6 +171,35 @@ fn trusted_producer_extraction(root: &Path) -> Extraction {
         .attributes
         .insert("confidence".to_owned(), json!("EXTRACTED"));
     extraction
+}
+
+fn extraction_with_rewrite(
+    root: &Path,
+    rewrite: Value,
+    trusted: bool,
+) -> Result<Extraction, Box<dyn std::error::Error>> {
+    let mut extraction = if trusted {
+        extraction_from_v1(&normalize_v1(
+            trusted_producer_extraction(root),
+            build_evidence(root)?,
+        )?)
+    } else {
+        trusted_producer_extraction(root)
+    };
+    extraction.edges[0]
+        .attributes
+        .insert("_endpoint_rewrite_rules".to_owned(), json!([rewrite]));
+    Ok(extraction)
+}
+
+fn normalization_error(
+    extraction: Extraction,
+    evidence: BuildEvidence,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match normalize_v1(extraction, evidence) {
+        Ok(_) => Err("invalid endpoint rewrite entry was accepted".into()),
+        Err(error) => Ok(error.to_string()),
+    }
 }
 
 #[test]
@@ -690,6 +720,145 @@ fn trusted_incremental_rejects_conflicting_raw_occurrence_rule()
             .contains("conflicting raw occurrence rule"),
         "unexpected error: {error}"
     );
+    Ok(())
+}
+
+#[test]
+fn ordinary_and_trusted_edges_reject_untyped_or_spoofed_endpoint_rewrites()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let valid = || {
+        json!({
+            "rule":"incremental-ast-endpoint-remap",
+            "score":1.0,
+            "extractor":"test.rewrite",
+            "source_anchor":anchor(root, 50)
+        })
+    };
+    let mut unknown_rule = valid();
+    unknown_rule["rule"] = json!("not-a-closed-rewrite-rule");
+    let mut missing_rule = valid();
+    missing_rule
+        .as_object_mut()
+        .ok_or("rewrite is not an object")?
+        .remove("rule");
+    let mut missing_score = valid();
+    missing_score
+        .as_object_mut()
+        .ok_or("rewrite is not an object")?
+        .remove("score");
+    let mut malformed_score = valid();
+    malformed_score["score"] = json!("certain");
+    let mut out_of_range_score = valid();
+    out_of_range_score["score"] = json!(1.01);
+    let mut unknown_field = valid();
+    unknown_field["untrusted"] = json!(true);
+    let mut exact_spoof = valid();
+    exact_spoof["_origin"] = json!("ast");
+    exact_spoof["confidence"] = json!("EXTRACTED");
+
+    for trusted in [false, true] {
+        for (case, rewrite) in [
+            ("non-object", json!("rewrite")),
+            ("missing rule", missing_rule.clone()),
+            ("unknown rule", unknown_rule.clone()),
+            ("missing score", missing_score.clone()),
+            ("malformed score", malformed_score.clone()),
+            ("out-of-range score", out_of_range_score.clone()),
+            ("unknown field", unknown_field.clone()),
+            ("AST/exact spoof", exact_spoof.clone()),
+        ] {
+            let error = normalization_error(
+                extraction_with_rewrite(root, rewrite, trusted)?,
+                build_evidence(root)?,
+            )?;
+            assert!(
+                error.contains("endpoint rewrite"),
+                "{case} trusted={trusted} produced unexpected error: {error}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn ordinary_and_trusted_typed_rewrites_are_forced_to_heuristic_inferred_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    for trusted in [false, true] {
+        let normalized = normalize_v1(
+            extraction_with_rewrite(
+                root,
+                json!({
+                    "rule":"incremental-ast-endpoint-remap",
+                    "score":0.75,
+                    "extractor":"test.rewrite",
+                    "source_anchor":anchor(root, 50)
+                }),
+                trusted,
+            )?,
+            build_evidence(root)?,
+        )?;
+        assert!(normalized.links[0].evidence.iter().any(|evidence| {
+            evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap")
+                && evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic
+                && evidence.confidence == compass_model::provenance::EvidenceConfidence::Inferred
+                && evidence.score == Some(0.75)
+                && evidence.wiring_site.as_ref().is_some_and(|site| {
+                    site.file == "src/lib.rs" && site.start_byte == 50 && site.end_byte == 54
+                })
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn trusted_null_relationship_site_derives_stable_exact_rewrite_wiring()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut baseline = normalize_v1(trusted_producer_extraction(root), build_evidence(root)?)?;
+    let edge = baseline.links.first_mut().ok_or("missing baseline edge")?;
+    let producer_anchor = edge.evidence[0]
+        .anchors
+        .first()
+        .cloned()
+        .ok_or("missing producer anchor")?;
+    edge.relationship_site = None;
+    edge.id = edge_id(
+        &edge.source,
+        edge.kind,
+        &edge.target,
+        None,
+        edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+    );
+    edge.key.clone_from(&edge.id);
+    let stable_id = edge.id.clone();
+
+    let mut projected = extraction_from_v1(&baseline);
+    append_endpoint_rewrite_evidence(
+        &mut projected.edges[0].attributes,
+        EndpointRewriteEvidence {
+            rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
+            score: 1.0,
+        },
+    );
+    let rebuilt = normalize_v1(projected, build_evidence(root)?)?;
+    let rebuilt_edge = rebuilt.links.first().ok_or("missing rebuilt edge")?;
+    assert_eq!(rebuilt_edge.id, stable_id);
+    assert!(rebuilt_edge.relationship_site.is_none());
+    assert!(rebuilt_edge.evidence.iter().any(|evidence| {
+        evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap")
+            && evidence.wiring_site.as_ref() == Some(&producer_anchor)
+    }));
+
+    let graph_path = root.join("null-relationship-site.json");
+    fs::write(&graph_path, serde_json::to_vec_pretty(&rebuilt)?)?;
+    let loaded = compass_model::code_graph::GraphDocument::load(&graph_path)?;
+    let second = normalize_v1(extraction_from_v1(&loaded), build_evidence(root)?)?;
+    assert_eq!(second.links, rebuilt.links);
     Ok(())
 }
 
