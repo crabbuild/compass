@@ -5,6 +5,7 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use crate::facts::{source_range, stamp_source_range};
 use crate::{Extraction, RawCall, file_stem, make_id};
 
 pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
@@ -153,7 +154,7 @@ impl<'a> State<'a> {
         &mut self,
         body: &FunctionBody,
         labels: &HashMap<String, String>,
-        seen: &mut HashSet<(String, String)>,
+        seen: &mut HashSet<(String, String, usize, usize)>,
     ) {
         let Ok(calls) =
             Regex::new(r"(?m)([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\(")
@@ -170,6 +171,7 @@ impl<'a> State<'a> {
                 continue;
             }
             let raw = raw_match.as_str();
+            let end = body.start + raw_match.end();
             let callee = raw.rsplit('.').next().unwrap_or_default();
             if matches!(callee, "if" | "while" | "for" | "switch" | "catch") {
                 continue;
@@ -179,8 +181,11 @@ impl<'a> State<'a> {
                 .get(callee)
                 .filter(|target| target.as_str() != body.id)
             {
-                if seen.insert((body.id.clone(), target.clone())) {
+                if seen.insert((body.id.clone(), target.clone(), absolute, end)) {
                     self.add_edge(&body.id, target, "calls", at);
+                    if let Some(edge) = self.extraction.edges.last_mut() {
+                        stamp_source_range(&mut edge.attributes, self.source, absolute, end);
+                    }
                 }
             } else if !callee.is_empty() {
                 self.extraction.raw_calls_mut().push(RawCall {
@@ -192,7 +197,7 @@ impl<'a> State<'a> {
                     receiver: None,
                     receiver_type: None,
                     lang: None,
-                    extensions: Map::new(),
+                    extensions: source_range(self.source, absolute, end),
                 });
             }
         }

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tree_sitter::Node;
 
 use crate::frameworks::RawFrameworkFact;
 
@@ -112,4 +113,79 @@ impl Extraction {
     pub(crate) fn raw_calls_mut(&mut self) -> &mut Vec<RawCall> {
         self.raw_calls.get_or_insert_with(Vec::new)
     }
+}
+
+pub(crate) fn stamp_node_range(attributes: &mut Map<String, Value>, node: Node<'_>) {
+    let start = node.start_position();
+    let end = node.end_position();
+    attributes.insert(
+        "start_byte".to_owned(),
+        Value::from(u64::try_from(node.start_byte()).unwrap_or(u64::MAX)),
+    );
+    attributes.insert(
+        "end_byte".to_owned(),
+        Value::from(u64::try_from(node.end_byte()).unwrap_or(u64::MAX)),
+    );
+    attributes.insert(
+        "line_start".to_owned(),
+        Value::from(u64::try_from(start.row.saturating_add(1)).unwrap_or(u64::MAX)),
+    );
+    attributes.insert(
+        "line_end".to_owned(),
+        Value::from(u64::try_from(end.row.saturating_add(1)).unwrap_or(u64::MAX)),
+    );
+    attributes.insert(
+        "column_start".to_owned(),
+        Value::from(u64::try_from(start.column).unwrap_or(u64::MAX)),
+    );
+    attributes.insert(
+        "column_end".to_owned(),
+        Value::from(u64::try_from(end.column).unwrap_or(u64::MAX)),
+    );
+}
+
+pub(crate) fn node_range(node: Node<'_>) -> Map<String, Value> {
+    let mut attributes = Map::new();
+    stamp_node_range(&mut attributes, node);
+    attributes
+}
+
+pub(crate) fn stamp_last_edge_range(extraction: &mut Extraction, node: Node<'_>) {
+    if let Some(edge) = extraction.edges.last_mut() {
+        stamp_node_range(&mut edge.attributes, node);
+    }
+}
+
+pub(crate) fn source_range(source: &[u8], start: usize, end: usize) -> Map<String, Value> {
+    let mut attributes = Map::new();
+    stamp_source_range(&mut attributes, source, start, end);
+    attributes
+}
+
+pub(crate) fn stamp_source_range(
+    attributes: &mut Map<String, Value>,
+    source: &[u8],
+    start: usize,
+    end: usize,
+) {
+    let start = start.min(source.len());
+    let end = end.clamp(start, source.len());
+    let (start_line, start_column) = source_point(source, start);
+    let (end_line, end_column) = source_point(source, end);
+    attributes.insert("start_byte".to_owned(), Value::from(start as u64));
+    attributes.insert("end_byte".to_owned(), Value::from(end as u64));
+    attributes.insert("line_start".to_owned(), Value::from(start_line as u64));
+    attributes.insert("line_end".to_owned(), Value::from(end_line as u64));
+    attributes.insert("column_start".to_owned(), Value::from(start_column as u64));
+    attributes.insert("column_end".to_owned(), Value::from(end_column as u64));
+}
+
+fn source_point(source: &[u8], offset: usize) -> (usize, usize) {
+    let prefix = &source[..offset.min(source.len())];
+    let line = prefix.iter().filter(|byte| **byte == b'\n').count() + 1;
+    let column = prefix
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(prefix.len(), |newline| prefix.len() - newline - 1);
+    (line, column)
 }

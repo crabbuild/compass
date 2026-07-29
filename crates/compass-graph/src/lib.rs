@@ -31,6 +31,7 @@ use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
+use compass_model::provenance::SourceAnchor;
 use compass_model::{
     EdgeRecord as LegacyEdgeRecord, GraphDocument, NodeRecord as LegacyNodeRecord,
 };
@@ -262,13 +263,8 @@ fn build_from_owned_extraction(
                 .insert("_drop".to_owned(), Value::Bool(true));
         }
     }
-    source_edges.par_sort_by(|left, right| {
-        (left.source.as_str(), left.target.as_str(), relation(left)).cmp(&(
-            right.source.as_str(),
-            right.target.as_str(),
-            relation(right),
-        ))
-    });
+    source_edges
+        .par_sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
     profile_internal("graph edge cloning and sort", &mut profile_started);
     let normalized_results = source_edges
         .into_par_iter()
@@ -324,9 +320,9 @@ fn build_from_owned_extraction(
         }
     }
     let mut links = Vec::<EdgeRecord>::new();
-    let mut edge_positions = HashMap::<(String, String, String), usize>::new();
+    let mut edge_positions = HashMap::<(String, String, String, String, String), usize>::new();
     for edge in normalized_edges {
-        let key = edge_key(&edge.source, &edge.target, relation(&edge));
+        let key = edge_occurrence_key(&edge);
         if let Some(&position) = edge_positions.get(&key) {
             merge_edge_attributes(&mut links[position].attributes, edge.attributes);
         } else {
@@ -1230,8 +1226,69 @@ fn edge_language_family(extension: &str) -> Option<&'static str> {
     }
 }
 
-fn edge_key(source: &str, target: &str, relation: &str) -> (String, String, String) {
-    (source.to_owned(), target.to_owned(), relation.to_owned())
+fn edge_occurrence_key(edge: &EdgeRecord) -> (String, String, String, String, String) {
+    (
+        edge.source.clone(),
+        edge.target.clone(),
+        relation(edge).to_owned(),
+        edge_anchor_key(&edge.attributes),
+        edge_rule_key(&edge.attributes),
+    )
+}
+
+fn edge_anchor_key(attributes: &Map<String, Value>) -> String {
+    if let Some(anchor) = attributes
+        .get("source_anchor")
+        .or_else(|| attributes.get("sourceAnchor"))
+        .or_else(|| attributes.get("anchor"))
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+    {
+        return serde_json::to_string(&[
+            Value::String(anchor.file.replace('\\', "/")),
+            Value::from(anchor.start_byte),
+            Value::from(anchor.end_byte),
+            Value::from(anchor.start_line),
+            Value::from(anchor.start_column),
+            Value::from(anchor.end_line),
+            Value::from(anchor.end_column),
+        ])
+        .unwrap_or_default();
+    }
+    serde_json::to_string(&[
+        attributes
+            .get("source_file")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("start_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("end_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("line_start").cloned().unwrap_or(Value::Null),
+        attributes
+            .get("column_start")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("line_end").cloned().unwrap_or(Value::Null),
+        attributes.get("column_end").cloned().unwrap_or(Value::Null),
+        attributes
+            .get("source_location")
+            .cloned()
+            .unwrap_or(Value::Null),
+    ])
+    .unwrap_or_default()
+}
+
+fn edge_rule_key(attributes: &Map<String, Value>) -> String {
+    if attributes
+        .get("_endpoint_rewrite_rules")
+        .and_then(Value::as_array)
+        .is_some_and(|rules| !rules.is_empty())
+    {
+        return String::new();
+    }
+    attributes
+        .get("rule")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn has_parallel_edges(links: &[EdgeRecord], directed: bool) -> bool {

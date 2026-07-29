@@ -27,7 +27,7 @@ impl Engine {
     pub fn extract(&mut self, path: &Path) -> Result<Extraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        match spec.kind {
+        let mut extraction = match spec.kind {
             ExtractorKind::Generic => self.extract_generic(path, spec),
             ExtractorKind::Markdown => crate::markdown::extract(path),
             ExtractorKind::JsonConfig => self.extract_json(path, spec),
@@ -54,7 +54,9 @@ impl Engine {
                 })?;
                 Ok(crate::frameworks::detect_config_file(path, &source))
             }
-        }
+        }?;
+        stamp_producer_metadata(&mut extraction, spec.name);
+        Ok(extraction)
     }
 
     /// Extract from bytes already read by the caller. Source-driven extractors
@@ -67,7 +69,7 @@ impl Engine {
     ) -> Result<Extraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        match spec.kind {
+        let mut extraction = match spec.kind {
             ExtractorKind::Generic => self.extract_generic_source(path, spec, source),
             ExtractorKind::JsonConfig => self.extract_json_source(path, spec, source),
             ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
@@ -75,7 +77,9 @@ impl Engine {
                 Ok(crate::frameworks::detect_config_file(path, source))
             }
             _ => self.extract(path),
-        }
+        }?;
+        stamp_producer_metadata(&mut extraction, spec.name);
+        Ok(extraction)
     }
 
     pub fn extract_source_combined(
@@ -101,7 +105,8 @@ impl Engine {
         }
         let tree = self.parse(path, spec, source)?;
         let root = tree.root_node();
-        let graph = Self::extract_generic_from_tree(path, spec, source, root);
+        let mut graph = Self::extract_generic_from_tree(path, spec, source, root);
+        stamp_producer_metadata(&mut graph, spec.name);
         let program = crate::program::extract_from_tree(source_file, spec.name, source, root)
             .map_err(|error| ExtractError::InvalidProgramEvidence {
                 path: path.to_path_buf(),
@@ -143,6 +148,7 @@ impl Engine {
             &generic_config(spec),
             language,
         );
+        stamp_producer_metadata(&mut extraction, language);
         Ok(extraction)
     }
 
@@ -373,7 +379,7 @@ struct ExtractState<'source, 'tree> {
     functions: Vec<FunctionBody<'tree>>,
     callables: HashMap<String, Vec<String>>,
     types: HashMap<String, String>,
-    seen_resolved_calls: HashSet<(String, String)>,
+    seen_resolved_calls: HashSet<(String, String, usize, usize)>,
     seen_dynamic_imports: HashSet<(String, String)>,
     python_import_aliases: HashMap<String, String>,
 }
@@ -559,6 +565,34 @@ fn attach_basic_symbol_metadata(extraction: &mut Extraction, source: &[u8], lang
         node.attributes
             .entry("line_end".to_owned())
             .or_insert_with(|| Value::from(if is_file { source_lines } else { line_start }));
+    }
+}
+
+pub(crate) fn stamp_producer_metadata(extraction: &mut Extraction, language: &str) {
+    let extractor = format!("compass.languages.{language}");
+    for attributes in extraction
+        .nodes
+        .iter_mut()
+        .map(|node| &mut node.attributes)
+        .chain(extraction.edges.iter_mut().map(|edge| &mut edge.attributes))
+    {
+        attributes
+            .entry("language".to_owned())
+            .or_insert_with(|| Value::String(language.to_owned()));
+        attributes
+            .entry("extractor".to_owned())
+            .or_insert_with(|| Value::String(extractor.clone()));
+    }
+    if let Some(calls) = extraction.raw_calls.as_mut() {
+        for call in calls {
+            call.lang.get_or_insert_with(|| language.to_owned());
+            call.extensions
+                .entry("language".to_owned())
+                .or_insert_with(|| Value::String(language.to_owned()));
+            call.extensions
+                .entry("extractor".to_owned())
+                .or_insert_with(|| Value::String(extractor.clone()));
+        }
     }
 }
 
@@ -1098,6 +1132,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             let mut extensions = Map::new();
             extensions.insert("symbol_import_use".to_owned(), Value::Bool(true));
+            crate::facts::stamp_node_range(&mut extensions, node);
             self.extraction.raw_calls_mut().push(RawCall {
                 caller_nid: caller.to_owned(),
                 callee: name,
@@ -1193,6 +1228,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         let mut extensions = Map::new();
         extensions.insert("indirect".to_owned(), Value::Bool(true));
         extensions.insert("context".to_owned(), Value::String(context.to_owned()));
+        crate::facts::stamp_node_range(&mut extensions, node);
         self.extraction.raw_calls_mut().push(RawCall {
             caller_nid: caller.to_owned(),
             callee: name,
@@ -1265,9 +1301,12 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             return;
         };
         if target == self.file_id
-            || !self
-                .seen_resolved_calls
-                .insert((self.file_id.clone(), target.clone()))
+            || !self.seen_resolved_calls.insert((
+                self.file_id.clone(),
+                target.clone(),
+                node.start_byte(),
+                node.end_byte(),
+            ))
         {
             return;
         }
@@ -1295,6 +1334,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             target,
             attributes,
         });
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            crate::facts::stamp_node_range(&mut edge.attributes, node);
+        }
     }
 
     fn walk_calls(&mut self, node: Node<'tree>, caller: &str, is_root: bool) {
@@ -1333,11 +1375,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 });
             if let Some(target) = target.as_ref().filter(|target| {
                 target.as_str() != caller
-                    && self
-                        .seen_resolved_calls
-                        .insert((caller.to_owned(), (*target).clone()))
+                    && self.seen_resolved_calls.insert((
+                        caller.to_owned(),
+                        (*target).clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    ))
             }) {
-                self.add_edge(caller, target, "calls", line(node), Some("call"));
+                self.add_edge_at(caller, target, "calls", node, Some("call"));
             } else if target.is_none()
                 && !(self.language == "lua" && (call.member || call.name.contains('.')))
             {
@@ -1350,7 +1395,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: (self.language == "ruby" && call.member).then_some(None),
                     lang: (self.language == "java").then(|| "java".to_owned()),
-                    extensions: Map::new(),
+                    extensions: crate::facts::node_range(node),
                 });
             }
         }
@@ -1441,6 +1486,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     target,
                     attributes,
                 });
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    crate::facts::stamp_node_range(&mut edge.attributes, node);
+                }
             }
             break;
         }
@@ -2605,6 +2653,20 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             target: target.to_owned(),
             attributes,
         });
+    }
+
+    fn add_edge_at(
+        &mut self,
+        source: &str,
+        target: &str,
+        relation: &str,
+        node: Node<'tree>,
+        context: Option<&str>,
+    ) {
+        self.add_edge(source, target, relation, line(node), context);
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            crate::facts::stamp_node_range(&mut edge.attributes, node);
+        }
     }
 }
 

@@ -482,7 +482,7 @@ impl<'tree> State<'_, 'tree> {
         node: Node<'tree>,
         caller: &str,
         callables: &HashMap<String, Vec<String>>,
-        seen: &mut HashSet<(String, String)>,
+        seen: &mut HashSet<(String, String, usize, usize)>,
         root: bool,
     ) {
         if !root && node.kind() == "method_declaration" {
@@ -524,7 +524,12 @@ impl<'tree> State<'_, 'tree> {
                     .filter(|target| target.as_str() != caller)
                     .cloned();
                 if let Some(target) = target {
-                    let pair = (caller.to_owned(), target.clone());
+                    let pair = (
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    );
                     if seen.insert(pair) {
                         self.add_edge(
                             caller,
@@ -534,6 +539,7 @@ impl<'tree> State<'_, 'tree> {
                             Some("call"),
                             None,
                         );
+                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
                 } else {
                     self.extraction.raw_calls_mut().push(RawCall {
@@ -545,7 +551,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(receiver),
                         receiver_type: None,
                         lang: Some("csharp".to_owned()),
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }

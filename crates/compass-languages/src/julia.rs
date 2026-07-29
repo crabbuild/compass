@@ -238,6 +238,7 @@ impl<'source, 'tree> State<'source, 'tree> {
                     line(node),
                     Some("call"),
                 );
+                crate::facts::stamp_last_edge_range(&mut self.extraction, node);
             }
         }
         let mut cursor = node.walk();

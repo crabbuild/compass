@@ -144,6 +144,14 @@ fn extract_razor(path: &Path) -> Result<Extraction, ExtractError> {
             "calls",
             line,
         );
+        if let Some(edge) = extraction.edges.last_mut() {
+            crate::facts::stamp_source_range(
+                &mut edge.attributes,
+                source.as_bytes(),
+                matched.start(),
+                matched.end(),
+            );
+        }
     }
 
     let (Ok(code), Ok(method)) = (

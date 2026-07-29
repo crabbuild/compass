@@ -374,7 +374,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
-        seen_pairs: &mut HashSet<(String, String)>,
+        seen_pairs: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if matches!(node.kind(), "function_declaration" | "method_declaration") {
             return;
@@ -398,9 +398,15 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             };
             if let Some(callee) = callee.filter(|name| !builtin_global(name)) {
                 if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
-                    let pair = (caller.to_owned(), target.clone());
+                    let pair = (
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    );
                     if seen_pairs.insert(pair) {
                         self.add_edge(caller, target, "calls", line(node), Some("call"));
+                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
                 } else {
                     self.extraction.raw_calls_mut().push(RawCall {
@@ -412,7 +418,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }

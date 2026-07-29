@@ -1,7 +1,9 @@
 mod support;
 
 use std::collections::HashSet;
+use std::fs;
 
+use compass_languages::Engine;
 use compass_model::code_graph::EdgeKind;
 use compass_model::query_contract::{CallRequest, CodeQueryLimits, NodeTrailRequest};
 use compass_query::open;
@@ -39,6 +41,65 @@ fn callers_include_calls_and_route_bindings_while_callees_follow_calls()
             .edges
             .iter()
             .all(|edge| edge.kind == EdgeKind::Calls)
+    );
+    Ok(())
+}
+
+#[test]
+fn callees_return_each_exact_source_site_for_parallel_calls()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_path = directory.path().join("src/lib.rs");
+    fs::create_dir_all(source_path.parent().ok_or("missing source parent")?)?;
+    fs::write(
+        &source_path,
+        b"fn callee(){} fn caller(){callee();callee();}",
+    )?;
+    let extraction = Engine::default().extract(&source_path)?;
+    let flexible = compass_graph::build_from_extraction(&extraction, true, Some(directory.path()));
+    let graph =
+        compass_graph::normalize_document_v1(&flexible, directory.path(), "sha256:test", None)?;
+    let serialized = serde_json::to_vec_pretty(&graph)?;
+    let graph_path = directory.path().join("graph.json");
+    fs::write(&graph_path, &serialized)?;
+
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let response = engine.callees(CallRequest {
+        symbol: "caller".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    let mut sites = response
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Calls)
+        .map(|edge| {
+            let site = edge
+                .relationship_site
+                .as_ref()
+                .ok_or("missing relationship site")?;
+            assert_eq!(site.file, "src/lib.rs");
+            assert_eq!(site.start_line, 1);
+            assert_eq!(site.end_line, 1);
+            assert!(
+                edge.evidence
+                    .iter()
+                    .all(|item| item.extractor == "compass.languages.rust")
+            );
+            Ok::<_, Box<dyn std::error::Error>>((
+                site.start_byte,
+                site.end_byte,
+                site.start_column,
+                site.end_column,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    sites.sort_unstable();
+
+    assert_eq!(sites, [(26, 34, 26, 34), (35, 43, 35, 43)]);
+    assert!(
+        serialized
+            .windows(b"compass.languages.unknown".len())
+            .all(|window| window != b"compass.languages.unknown")
     );
     Ok(())
 }

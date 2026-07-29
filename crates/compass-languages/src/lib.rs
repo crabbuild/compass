@@ -79,5 +79,7 @@ pub use engine::Engine;
 /// files never enter the graph.
 #[must_use]
 pub fn extract_sql_content(path: &std::path::Path, content: &[u8]) -> Extraction {
-    sql::extract(path, content)
+    let mut extraction = sql::extract(path, content);
+    engine::stamp_producer_metadata(&mut extraction, "sql");
+    extraction
 }

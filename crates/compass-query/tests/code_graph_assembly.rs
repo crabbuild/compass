@@ -52,7 +52,7 @@ fn duplicate_edge_extraction(remapped_first: bool) -> Result<Extraction, serde_j
         "relation": "calls",
         "confidence": "EXTRACTED",
         "source_file": "src/service.rs",
-        "source_location": "L1",
+        "source_location": "L2",
         "_origin": "ast",
         "extractor": "test.remapped"
     });
@@ -224,7 +224,7 @@ fn exact_and_remapped_duplicate_edges_are_order_independent_and_heuristic_gated(
             && evidence
                 .wiring_site
                 .as_ref()
-                .is_some_and(|anchor| anchor.start_line == 1)
+                .is_some_and(|anchor| anchor.start_line == 2)
     }));
 
     let graph_path = directory.path().join("graph.json");

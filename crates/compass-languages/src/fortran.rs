@@ -241,6 +241,7 @@ impl<'source, 'tree> State<'source, 'tree> {
                     line(node),
                     Some("call"),
                 );
+                crate::facts::stamp_last_edge_range(&mut self.extraction, node);
             }
         } else if node.kind() == "call_expression"
             && let Some(name_node) = direct_child(node, "identifier")
@@ -249,6 +250,7 @@ impl<'source, 'tree> State<'source, 'tree> {
             let target = make_id(&[&self.stem, &name]);
             if self.seen.contains(&target) && target != scope {
                 self.add_edge(scope, &target, "calls", line(node), Some("call"));
+                crate::facts::stamp_last_edge_range(&mut self.extraction, node);
             }
         }
         let mut cursor = node.walk();

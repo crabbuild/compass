@@ -6,6 +6,7 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use crate::facts::stamp_source_range;
 use crate::{Extraction, file_stem, make_id};
 
 const SCALAR_TYPES: &[&str] = &[
@@ -181,16 +182,16 @@ impl<'a> State<'a> {
                         .map_or(self.text.len(), |value| value + 1);
                     self.set_callable_range(&id, start, close, "class");
                     let body = self.text[open..close].to_owned();
-                    self.add_class_framework(&id, &body);
+                    self.add_class_framework(&id, &body, open);
                 }
             }
         }
     }
 
-    fn add_class_framework(&mut self, owner: &str, body: &str) {
+    fn add_class_framework(&mut self, owner: &str, body: &str, body_start: usize) {
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bon<(\w+)>\s*\(",
             "calls",
             "bloc_event",
@@ -198,7 +199,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:emit|yield)\s*\(?\s*(?:const\s+)?([A-Z]\w*)\b",
             "calls",
             "emit_state",
@@ -206,7 +207,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:\w*[Bb]loc\w*|context\.read<\w+>\(\))\.add\(\s*(?:const\s+)?([A-Z]\w*)\b",
             "calls",
             "bloc_add_event",
@@ -214,7 +215,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bref\.(?:watch|read|listen)\s*\(\s*(\w+)\b",
             "references",
             "riverpod_reference",
@@ -222,7 +223,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bBloc(?:Builder|Listener|Consumer|Provider|Selector)\s*<\s*([A-Za-z0-9_]+)\b",
             "references",
             "bloc_widget_binding",
@@ -230,7 +231,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:read|watch|select|of)\s*<([A-Za-z0-9_]+)>",
             "references",
             "bloc_lookup",
@@ -499,17 +500,17 @@ impl<'a> State<'a> {
                     .map_or(self.text.len(), |value| value + 1);
                 self.set_callable_range(&id, start, close, "function");
                 let body = self.text[open..close].to_owned();
-                self.add_function_framework(&id, &body);
+                self.add_function_framework(&id, &body, open);
             } else if let Some(end) = semicolon {
                 self.set_callable_range(&id, start, end.saturating_add(1), "function");
             }
         }
     }
 
-    fn add_function_framework(&mut self, owner: &str, body: &str) {
+    fn add_function_framework(&mut self, owner: &str, body: &str, body_start: usize) {
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bref\.(?:watch|read|listen)\s*\(\s*(\w+)\b",
             "references",
             "riverpod_reference",
@@ -517,7 +518,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:\w*[Bb]loc\w*|context\.read<\w+>\(\))\.add\(\s*(?:const\s+)?([A-Z]\w*)\b",
             "calls",
             "bloc_add_event",
@@ -525,7 +526,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:read|watch|select|of)\s*<([A-Za-z0-9_]+)>",
             "references",
             "bloc_lookup",
@@ -615,26 +616,36 @@ impl<'a> State<'a> {
     fn add_pattern_relations(
         &mut self,
         owner: &str,
-        body: &str,
+        body: (&str, usize),
         pattern: &str,
         relation: &str,
         context: &str,
         filter_builtins: bool,
     ) {
+        let (body, body_start) = body;
         let Ok(pattern) = Regex::new(pattern) else {
             return;
         };
         let values: Vec<_> = pattern
             .captures_iter(body)
-            .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+            .filter_map(|capture| {
+                Some((
+                    capture.get(1)?.as_str().to_owned(),
+                    body_start + capture.get(0)?.start(),
+                    body_start + capture.get(0)?.end(),
+                ))
+            })
             .collect();
-        for value in values {
+        for (value, start, end) in values {
             if filter_builtins && is_builtin(&value, true) {
                 continue;
             }
             let target = make_id(&[&value]);
             self.add_node(&target, &value, "code", None);
             self.add_edge_with_context(owner, &target, relation, context);
+            if let Some(edge) = self.extraction.edges.last_mut() {
+                stamp_source_range(&mut edge.attributes, self.text.as_bytes(), start, end);
+            }
         }
     }
 

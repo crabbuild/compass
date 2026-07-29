@@ -208,6 +208,7 @@ impl<'source, 'tree> BashState<'source, 'tree> {
             line(node),
             Some("script_invocation"),
         );
+        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
     }
 
     fn add_declaration(&mut self, node: Node<'tree>) {
@@ -245,7 +246,7 @@ impl<'source, 'tree> BashState<'source, 'tree> {
         &mut self,
         node: Node<'tree>,
         caller: &str,
-        seen: &mut HashSet<(String, String)>,
+        seen: &mut HashSet<(String, String, usize, usize)>,
     ) {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -259,8 +260,14 @@ impl<'source, 'tree> BashState<'source, 'tree> {
                 && self.defined_functions.contains(&name)
             {
                 let target = make_id(&[&self.stem, &name]);
-                if seen.insert((caller.to_owned(), target.clone())) {
+                if seen.insert((
+                    caller.to_owned(),
+                    target.clone(),
+                    child.start_byte(),
+                    child.end_byte(),
+                )) {
                     self.add_edge(caller, &target, "calls", line(child), Some("call"));
+                    crate::facts::stamp_last_edge_range(&mut self.extraction, child);
                 }
             }
             self.walk_calls(child, caller, seen);

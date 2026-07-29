@@ -17,6 +17,241 @@ fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), 
 }
 
 #[test]
+fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.rs");
+    let source = b"fn callee(){} fn caller(){callee();callee();}";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let calls = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "edges={:?}", extraction.edges);
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("language") == "rust"
+                && node.string("extractor") == "compass.languages.rust"),
+        "nodes={:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("language") == "rust"
+                && edge.string("extractor") == "compass.languages.rust"),
+        "edges={:?}",
+        extraction.edges
+    );
+
+    let sites = calls
+        .iter()
+        .map(|edge| {
+            let start = edge
+                .attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or("missing start_byte")?;
+            let end = edge
+                .attributes
+                .get("end_byte")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or("missing end_byte")?;
+            let start = usize::try_from(start)?;
+            let end = usize::try_from(end)?;
+            Ok::<_, Box<dyn Error>>((start, end))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(sites, [(26, 34), (35, 43)]);
+    assert_eq!(&source[sites[0].0..sites[0].1], b"callee()");
+    assert_eq!(&source[sites[1].0..sites[1].1], b"callee()");
+    assert_eq!(calls[0].attributes["line_start"], 1);
+    assert_eq!(calls[0].attributes["column_start"], 26);
+    assert_eq!(calls[0].attributes["column_end"], 34);
+    assert_eq!(calls[1].attributes["line_start"], 1);
+    assert_eq!(calls[1].attributes["column_start"], 35);
+    assert_eq!(calls[1].attributes["column_end"], 43);
+    Ok(())
+}
+
+#[test]
+fn repeated_generic_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.py");
+    let source = b"def callee(): pass\ndef caller(): callee(); callee()\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let calls = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+    let sites = calls
+        .iter()
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("column_start")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("column_end")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        sites,
+        [
+            (Some(33), Some(41), Some(14), Some(22)),
+            (Some(43), Some(51), Some(24), Some(32))
+        ],
+        "edges={:?}",
+        extraction.edges
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_go_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.go");
+    let source = b"package p\nfunc callee(){};func caller(){callee();callee()}\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
+    assert!(
+        sites
+            .iter()
+            .all(|(start, end)| start.is_some() && end.is_some())
+    );
+    assert_ne!(sites[0], sites[1]);
+    Ok(())
+}
+
+#[test]
+fn repeated_zig_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.zig");
+    let source = b"fn callee() void {}\nfn caller() void { callee(); callee(); }\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        sites,
+        [(Some(39), Some(45)), (Some(49), Some(55))],
+        "edges={:?}",
+        extraction.edges
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.dart");
+    let source =
+        b"class State {}\nclass Controller { void run() { emit(State()); emit(State()); } }\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("context") == "emit_state")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
+    assert!(sites.iter().all(|(start, end)| start < end));
+    assert_ne!(sites[0], sites[1]);
+    Ok(())
+}
+
+#[test]
+fn repeated_razor_component_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("Repeated.razor");
+    fs::write(&path, "<Widget /><Widget />")?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sites, [(Some(0), Some(8)), (Some(10), Some(18))]);
+    Ok(())
+}
+
+#[test]
 fn extensionless_perl_shebang_extracts_subroutines_and_calls() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("buildah-vendor-treadmill");

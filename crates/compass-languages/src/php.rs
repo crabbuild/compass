@@ -436,7 +436,7 @@ impl<'tree> State<'_, 'tree> {
         caller: &str,
         labels: &HashMap<String, String>,
         labels_ci: &HashMap<String, String>,
-        seen_calls: &mut HashSet<(String, String)>,
+        seen_calls: &mut HashSet<(String, String, usize, usize)>,
         seen_special: &mut HashSet<(String, String, String)>,
     ) {
         if matches!(node.kind(), "function_definition" | "method_declaration") {
@@ -449,8 +449,14 @@ impl<'tree> State<'_, 'tree> {
                     .get(&call.name)
                     .filter(|target| target.as_str() != caller)
                 {
-                    if seen_calls.insert((caller.to_owned(), (*target).clone())) {
+                    if seen_calls.insert((
+                        caller.to_owned(),
+                        (*target).clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    )) {
                         self.add_edge(caller, target, "calls", line(node), Some("call"), false);
+                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
                 } else if !call.name.is_empty() {
                     self.extraction.raw_calls_mut().push(RawCall {
@@ -462,7 +468,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(None),
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
                 if call.name == "config" {

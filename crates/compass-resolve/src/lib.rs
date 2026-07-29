@@ -1098,9 +1098,17 @@ fn resolve_cross_file_calls_with_root_calls(
     let mut existing = AHashSet::new();
     let mut call_like = AHashSet::new();
     for edge in &extraction.edges {
-        existing.insert((edge.source.clone(), edge.target.clone()));
+        existing.insert((
+            edge.source.clone(),
+            edge.target.clone(),
+            edge_occurrence_site(edge),
+        ));
         if matches!(relation(edge), "calls" | "indirect_call") {
-            call_like.insert((edge.source.clone(), edge.target.clone()));
+            call_like.insert((
+                edge.source.clone(),
+                edge.target.clone(),
+                edge_occurrence_site(edge),
+            ));
         }
         match relation(edge) {
             "imports" => {
@@ -1171,7 +1179,11 @@ fn resolve_cross_file_calls_with_root_calls(
         if indirect {
             if target != raw.caller_nid
                 && callable.contains(&target)
-                && call_like.insert((raw.caller_nid.clone(), target.clone()))
+                && call_like.insert((
+                    raw.caller_nid.clone(),
+                    target.clone(),
+                    raw_call_occurrence_site(raw),
+                ))
             {
                 let mut edge = resolved_edge(raw, &target, "INFERRED", 0.8);
                 edge.attributes.insert(
@@ -1192,7 +1204,11 @@ fn resolve_cross_file_calls_with_root_calls(
         if target == raw.caller_nid || (!import_evidence && is_javascript(&raw.source_file)) {
             continue;
         }
-        if existing.insert((raw.caller_nid.clone(), target.clone())) {
+        if existing.insert((
+            raw.caller_nid.clone(),
+            target.clone(),
+            raw_call_occurrence_site(raw),
+        )) {
             let mut edge = resolved_edge(
                 raw,
                 &target,
@@ -2103,12 +2119,60 @@ fn resolved_edge(raw: &RawCall, target: &str, confidence: &str, score: f64) -> E
         "source_location".to_owned(),
         Value::String(raw.source_location.clone()),
     );
+    for key in [
+        "language",
+        "extractor",
+        "source_anchor",
+        "start_byte",
+        "end_byte",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+    ] {
+        if let Some(value) = raw.extensions.get(key) {
+            attributes.insert(key.to_owned(), value.clone());
+        }
+    }
     attributes.insert("weight".to_owned(), Value::from(1.0));
     EdgeRecord {
         source: raw.caller_nid.clone(),
         target: target.to_owned(),
         attributes,
     }
+}
+
+fn raw_call_occurrence_site(raw: &RawCall) -> String {
+    occurrence_site(&raw.extensions, &raw.source_file, &raw.source_location)
+}
+
+fn edge_occurrence_site(edge: &EdgeRecord) -> String {
+    occurrence_site(
+        &edge.attributes,
+        &edge.string("source_file"),
+        &edge.string("source_location"),
+    )
+}
+
+fn occurrence_site(attributes: &Map<String, Value>, source_file: &str, location: &str) -> String {
+    serde_json::to_string(&[
+        Value::String(source_file.to_owned()),
+        attributes
+            .get("source_anchor")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("start_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("end_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("line_start").cloned().unwrap_or(Value::Null),
+        attributes
+            .get("column_start")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("line_end").cloned().unwrap_or(Value::Null),
+        attributes.get("column_end").cloned().unwrap_or(Value::Null),
+        Value::String(location.to_owned()),
+    ])
+    .unwrap_or_default()
 }
 
 fn stamp_endpoint_rewrite(edge: &mut EdgeRecord, rule: &str, score: f64) {

@@ -430,6 +430,99 @@ fn distinct_relations_between_the_same_nodes_are_preserved() -> Result<(), Box<d
 }
 
 #[test]
+fn graph_assembly_preserves_distinct_relationship_occurrences_and_merges_identical_evidence()
+-> Result<(), Box<dyn Error>> {
+    let first = json!({
+        "source":"caller",
+        "target":"callee",
+        "relation":"calls",
+        "rule":"direct-call",
+        "extractor":"test.first",
+        "source_anchor":{
+            "file":"src/lib.rs",
+            "startByte":30,
+            "endByte":38,
+            "startLine":1,
+            "startColumn":30,
+            "endLine":1,
+            "endColumn":38
+        }
+    });
+    let duplicate = json!({
+        "source":"caller",
+        "target":"callee",
+        "relation":"calls",
+        "rule":"direct-call",
+        "extractor":"test.second",
+        "source_anchor":{
+            "file":"src/lib.rs",
+            "startByte":30,
+            "endByte":38,
+            "startLine":1,
+            "startColumn":30,
+            "endLine":1,
+            "endColumn":38
+        }
+    });
+    let second = json!({
+        "source":"caller",
+        "target":"callee",
+        "relation":"calls",
+        "rule":"direct-call",
+        "extractor":"test.first",
+        "source_anchor":{
+            "file":"src/lib.rs",
+            "startByte":39,
+            "endByte":47,
+            "startLine":1,
+            "startColumn":39,
+            "endLine":1,
+            "endColumn":47
+        }
+    });
+    let extraction = |edges| {
+        serde_json::from_value::<Extraction>(json!({
+            "nodes":[
+                {"id":"caller","label":"caller()"},
+                {"id":"callee","label":"callee()"}
+            ],
+            "edges":edges
+        }))
+    };
+
+    let forward = build_from_extraction(
+        &extraction(vec![first.clone(), duplicate.clone(), second.clone()])?,
+        true,
+        None,
+    );
+    let reverse = build_from_extraction(&extraction(vec![second, duplicate, first])?, true, None);
+
+    assert_eq!(serde_json::to_vec(&forward)?, serde_json::to_vec(&reverse)?);
+    assert_eq!(forward.links.len(), 2, "links={:?}", forward.links);
+    assert!(forward.multigraph);
+    let first_site = forward
+        .links
+        .iter()
+        .find(|edge| edge.attributes["source_anchor"]["startByte"] == 30)
+        .ok_or("missing first call site")?;
+    let retained = first_site.attributes["_coalesced_edge_evidence"]
+        .as_array()
+        .ok_or("missing coalesced evidence")?;
+    assert_eq!(retained.len(), 2);
+    assert!(
+        retained
+            .iter()
+            .any(|item| item["extractor"] == "test.first")
+    );
+    assert!(
+        retained
+            .iter()
+            .any(|item| item["extractor"] == "test.second")
+    );
+    Ok(())
+}
+
+#[test]
 fn opposite_direction_relations_are_preserved_in_undirected_documents() -> Result<(), Box<dyn Error>>
 {
     let extraction: Extraction = serde_json::from_value(json!({

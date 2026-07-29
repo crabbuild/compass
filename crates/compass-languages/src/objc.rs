@@ -383,9 +383,8 @@ impl<'tree> State<'_, 'tree> {
                 for candidate in index.all_ids.iter().filter(|candidate| {
                     candidate.ends_with(&needle) && candidate.as_str() != caller
                 }) {
-                    if seen.insert((caller.to_owned(), candidate.clone())) {
-                        self.add_edge(caller, candidate, "calls", line(node), Some("call"));
-                    }
+                    self.add_edge(caller, candidate, "calls", line(node), Some("call"));
+                    crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                 }
                 if let Some(receiver) = receiver.filter(|receiver| receiver.kind() == "identifier")
                 {
@@ -399,7 +398,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(Some(receiver)),
                         receiver_type: None,
                         lang: Some("objc".to_owned()),
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }
@@ -426,9 +425,8 @@ impl<'tree> State<'_, 'tree> {
                 .collect();
             if matches.len() == 1 {
                 let target = matches.into_iter().next().unwrap_or_default();
-                if seen.insert((caller.to_owned(), target.clone())) {
-                    self.add_edge(caller, &target, "calls", line(node), Some("call"));
-                }
+                self.add_edge(caller, &target, "calls", line(node), Some("call"));
+                crate::facts::stamp_last_edge_range(&mut self.extraction, node);
             }
         }
         let mut cursor = node.walk();

@@ -413,7 +413,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
-        pairs: &mut HashSet<(String, String)>,
+        pairs: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if node.kind() == "function_item" {
             return;
@@ -441,9 +441,14 @@ impl<'source, 'tree> RustState<'source, 'tree> {
             };
             if let Some(callee) = callee.filter(|name| !builtin_global(name)) {
                 if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
-                    let pair = (caller.to_owned(), target.clone());
+                    let pair = (
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    );
                     if pairs.insert(pair) {
-                        self.add_call_edge(caller, target, line(node));
+                        self.add_call_edge(caller, target, node);
                     }
                 } else if !scoped
                     && !TRAIT_METHOD_BLOCKLIST.contains(&callee.to_lowercase().as_str())
@@ -457,7 +462,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }
@@ -537,7 +542,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         });
     }
 
-    fn add_call_edge(&mut self, source: &str, target: &str, at: usize) {
+    fn add_call_edge(&mut self, source: &str, target: &str, node: Node<'tree>) {
         let mut attributes = Map::new();
         attributes.insert("relation".into(), Value::String("calls".into()));
         attributes.insert("context".into(), Value::String("call".into()));
@@ -546,8 +551,12 @@ impl<'source, 'tree> RustState<'source, 'tree> {
             "source_file".into(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".into(), Value::String(format!("L{at}")));
+        attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{}", line(node))),
+        );
         attributes.insert("weight".into(), Value::from(1.0));
+        crate::facts::stamp_node_range(&mut attributes, node);
         self.extraction.edges.push(EdgeRecord {
             source: source.to_owned(),
             target: target.to_owned(),

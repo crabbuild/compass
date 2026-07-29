@@ -56,6 +56,12 @@ fn sql_fixture_emits_every_declared_database_kind_and_relation_without_dangling_
             .all(|edge| ids.contains(edge.source.as_str()) && ids.contains(edge.target.as_str())),
         "domain extraction emitted a dangling endpoint"
     );
+    assert!(extraction.nodes.iter().all(|node| {
+        node.string("language") == "sql" && node.string("extractor") == "compass.languages.sql"
+    }));
+    assert!(extraction.edges.iter().all(|edge| {
+        edge.string("language") == "sql" && edge.string("extractor") == "compass.languages.sql"
+    }));
     Ok(())
 }
 
