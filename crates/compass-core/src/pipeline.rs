@@ -11,9 +11,10 @@ use compass_files::{
 };
 use compass_graph::{
     ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION, InventoryEvidence,
-    build_owned_with_tiebreaker as build_document, cluster, dedupe_edges, dedupe_nodes,
-    extraction_from_v1, graph_insights, label_communities_by_hub,
-    normalize_document_v1_with_inventory, remap_communities_to_previous, score_communities,
+    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
+    cluster, dedupe_edges, dedupe_nodes, extraction_from_v1, graph_insights,
+    label_communities_by_hub, normalize_document_v1_with_inventory, remap_communities_to_previous,
+    score_communities,
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
@@ -24,9 +25,8 @@ use compass_model::code_graph::{
     NodeKind,
 };
 use compass_model::provenance::{
-    ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin,
-    OCCURRENCE_RULE_ATTRIBUTE, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
-    append_endpoint_rewrite_evidence,
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
+    SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
@@ -2170,11 +2170,12 @@ fn preserve_semantic_layer(
         });
     }
     let mut fresh_edge_sites = HashMap::<IncrementalEdgeKey, Vec<SourceAnchor>>::new();
-    for edge in &extraction.edges {
+    let raw_edge_sites = canonical_raw_edge_sites(&extraction.edges, root);
+    for (edge, site) in extraction.edges.iter().zip(raw_edge_sites) {
         let Some(key) = incremental_edge_key(edge) else {
             continue;
         };
-        let Some(site) = normalized_raw_edge_site(edge, root) else {
+        let Some(site) = site else {
             continue;
         };
         fresh_edge_sites.entry(key).or_default().push(site);
@@ -2278,7 +2279,7 @@ fn preserve_semantic_layer(
                 return None;
             }
             if let Some(site) = refreshed_mixed_sites.get(&index) {
-                refresh_preserved_mixed_edge(&mut raw.attributes, site);
+                refresh_preserved_mixed_edge(&mut raw.attributes, &raw.source, &raw.target, site);
             }
             Some(raw)
         })
@@ -2305,10 +2306,11 @@ fn incremental_anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
 }
 
 fn incremental_edge_key(edge: &RawEdgeRecord) -> Option<IncrementalEdgeKey> {
+    let relation = edge.attributes.get("relation")?.as_str()?;
     Some((
         edge.source.clone(),
         edge.target.clone(),
-        edge.attributes.get("relation")?.as_str()?.to_owned(),
+        canonical_edge_kind(relation)?.as_str().to_owned(),
         edge.attributes
             .get(OCCURRENCE_RULE_ATTRIBUTE)
             .and_then(serde_json::Value::as_str)
@@ -2316,34 +2318,10 @@ fn incremental_edge_key(edge: &RawEdgeRecord) -> Option<IncrementalEdgeKey> {
     ))
 }
 
-fn normalized_raw_edge_site(edge: &RawEdgeRecord, root: &Path) -> Option<SourceAnchor> {
-    let mut site = edge
-        .attributes
-        .get("source_anchor")
-        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
-        .or_else(|| {
-            let attributes = &edge.attributes;
-            Some(SourceAnchor {
-                file: attributes.get("source_file")?.as_str()?.to_owned(),
-                start_byte: attributes.get("start_byte")?.as_u64()?,
-                end_byte: attributes.get("end_byte")?.as_u64()?,
-                start_line: u32::try_from(attributes.get("line_start")?.as_u64()?).ok()?,
-                start_column: u32::try_from(attributes.get("column_start")?.as_u64()?).ok()?,
-                end_line: u32::try_from(attributes.get("line_end")?.as_u64()?).ok()?,
-                end_column: u32::try_from(attributes.get("column_end")?.as_u64()?).ok()?,
-            })
-        })?;
-    let path = Path::new(&site.file);
-    if path.is_absolute()
-        && let Ok(relative) = path.strip_prefix(root)
-    {
-        site.file = relative.to_string_lossy().replace('\\', "/");
-    }
-    site.is_valid().then_some(site)
-}
-
 fn refresh_preserved_mixed_edge(
     attributes: &mut serde_json::Map<String, serde_json::Value>,
+    source: &str,
+    target: &str,
     fresh_site: &SourceAnchor,
 ) {
     let Some(record) = attributes.get_mut(TRUSTED_EDGE_RECORD_ATTRIBUTE) else {
@@ -2355,40 +2333,26 @@ fn refresh_preserved_mixed_edge(
         return;
     };
     let prior_site = edge.relationship_site.clone();
-    edge.evidence
-        .retain(|evidence| evidence.origin != EvidenceOrigin::Ast);
+    edge.evidence.retain(|evidence| {
+        evidence.origin != EvidenceOrigin::Ast
+            && evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+    });
     for evidence in &mut edge.evidence {
-        let is_endpoint_remap = evidence.rule.as_deref()
-            == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str());
-        if is_endpoint_remap || evidence.wiring_site.as_ref() == prior_site.as_ref() {
+        if evidence.wiring_site.as_ref() == prior_site.as_ref() {
             evidence.wiring_site = Some(fresh_site.clone());
         }
         for anchor in &mut evidence.anchors {
-            if is_endpoint_remap || Some(&*anchor) == prior_site.as_ref() {
+            if Some(&*anchor) == prior_site.as_ref() {
                 anchor.clone_from(fresh_site);
             }
         }
     }
+    edge.source = source.to_owned();
+    edge.target = target.to_owned();
     edge.relationship_site = Some(fresh_site.clone());
     *record = serde_json::to_value(edge).unwrap_or(serde_json::Value::Null);
     rebind_raw_anchor(attributes, fresh_site);
-    if let Some(entries) = attributes
-        .get_mut(ENDPOINT_REWRITE_RULES_ATTRIBUTE)
-        .and_then(serde_json::Value::as_array_mut)
-    {
-        for entry in entries
-            .iter_mut()
-            .filter_map(serde_json::Value::as_object_mut)
-        {
-            if entry.get("rule").and_then(serde_json::Value::as_str)
-                == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
-            {
-                rebind_raw_anchor(entry, fresh_site);
-            }
-        }
-        entries.sort_by_cached_key(serde_json::Value::to_string);
-        entries.dedup();
-    }
 }
 
 fn rebind_raw_anchor(
