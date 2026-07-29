@@ -3,7 +3,7 @@
   "displayName": "Compass Codegraph",
   "description": "Explore, query, and understand how your codebase evolves with Compass.",
   "publisher": "crabbuild",
-  "version": "0.1.6",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
