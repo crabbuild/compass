@@ -192,12 +192,18 @@ fn sequential_rewrite_extraction(
             "target": "target",
             "relation": "calls",
             "confidence": "INFERRED",
-            "confidence_score": previous_score,
-            "rule": previous_rule,
+            "rule": "producer-rule",
             "source_file": "src/service.rs",
             "source_location": format!("L{line}"),
             "_origin": "heuristic",
-            "extractor": format!("test.{previous_rule}")
+            "extractor": "test.producer",
+            "_endpoint_rewrite_rules": [{
+                "rule": previous_rule,
+                "score": previous_score,
+                "source_file": "src/service.rs",
+                "source_location": format!("L{line}"),
+                "extractor": format!("test.{previous_rule}")
+            }]
         }]
     }))
 }
@@ -327,7 +333,12 @@ fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
     assert!(rebuilt.links[0].evidence.iter().any(|evidence| {
         evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap")
             && evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Inferred
             && evidence.wiring_site.is_some()
+            && evidence
+                .score
+                .is_some_and(|score| (0.0..=1.0).contains(&score))
+            && evidence.anchors.is_empty()
     }));
 
     let graph_path = directory.path().join("incremental.json");

@@ -385,8 +385,8 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
     compass_model::code_graph::GraphDocument::load(&initial_path)?;
 
     fs::write(&source, "pub fn target() { let _changed = true; }\n")?;
-    build_graph_with_layers(&options, None, &[])?;
-    let graph_path = BuildGuard::resolve_artifact(&root.join("compass-out"), "graph.json")?;
+    let first_result = build_graph_with_layers(&options, None, &[])?;
+    let graph_path = first_result.output_dir.join("graph.json");
     let first = compass_model::code_graph::GraphDocument::load(&graph_path)?;
     assert_eq!(
         first
@@ -447,11 +447,157 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
         edge.evidence
     );
 
-    let first_bytes = fs::read(&graph_path)?;
-    build_graph_with_layers(&options, None, &[])?;
-    let second_bytes = fs::read(&graph_path)?;
-    let second = compass_model::code_graph::GraphDocument::load(&graph_path)?;
-    assert_eq!(second.links, first.links);
-    assert_eq!(second_bytes, first_bytes);
+    let mut accumulated = first.clone();
+    accumulated
+        .graph
+        .diagnostics
+        .push(compass_model::code_graph::GraphDiagnostic {
+            severity: compass_model::code_graph::DiagnosticSeverity::Info,
+            code: "unrelated_fixture_diagnostic".to_owned(),
+            message: "must survive remap-family compaction".to_owned(),
+            anchor: None,
+            related_ids: vec!["fixture".to_owned()],
+        });
+    let prior_target = accumulated
+        .links
+        .iter()
+        .find(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
+        .map(|edge| edge.target.clone())
+        .ok_or("missing first-build reference target")?;
+    let stale_target = format!("second-build-stale:{prior_target}");
+    accumulated
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == prior_target)
+        .ok_or("missing first-build target node")?
+        .id
+        .clone_from(&stale_target);
+    for edge in &mut accumulated.links {
+        if edge.source == prior_target {
+            edge.source.clone_from(&stale_target);
+        }
+        if edge.target == prior_target {
+            edge.target.clone_from(&stale_target);
+        }
+        edge.id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        edge.key.clone_from(&edge.id);
+    }
+    let mut second_template = accumulated
+        .links
+        .iter()
+        .find(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
+        .cloned()
+        .ok_or("missing first-build reference")?;
+    let rewrite_evidence = second_template
+        .evidence
+        .iter()
+        .find(|evidence| evidence.rule.as_deref() == Some("incremental-ast-endpoint-remap"))
+        .cloned()
+        .ok_or("missing first-build incremental rewrite evidence")?;
+    second_template.evidence = vec![rewrite_evidence];
+    second_template.relationship_site = None;
+    second_template.id = edge_id(
+        &second_template.source,
+        second_template.kind,
+        &second_template.target,
+        None,
+        second_template
+            .occurrence_rule
+            .as_ref()
+            .map(|rule| rule.as_str()),
+    );
+    second_template.key.clone_from(&second_template.id);
+    for index in 0..105 {
+        let mut site_less = second_template.clone();
+        let occurrence = compass_model::provenance::OccurrenceRule::new(format!(
+            "second-site-less-reference-{index}"
+        ))
+        .ok_or("invalid second site-less occurrence")?;
+        site_less.occurrence_rule = Some(occurrence);
+        site_less.id = edge_id(
+            &site_less.source,
+            site_less.kind,
+            &site_less.target,
+            None,
+            site_less.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        site_less.key.clone_from(&site_less.id);
+        accumulated.links.push(site_less);
+    }
+    fs::write(&graph_path, serde_json::to_vec_pretty(&accumulated)?)?;
+    compass_model::code_graph::GraphDocument::load(&graph_path)?;
+
+    fs::write(
+        &source,
+        "// shifted before target\npub fn target() { let _changed_again = \"second\"; }\n",
+    )?;
+    options.force = true;
+    let second_result = build_graph_with_layers(&options, None, &[])?;
+    options.force = false;
+    let second_graph_path = second_result.output_dir.join("graph.json");
+    let second = compass_model::code_graph::GraphDocument::load(&second_graph_path)?;
+    assert_eq!(
+        second
+            .links
+            .iter()
+            .filter(|edge| edge.kind == compass_model::code_graph::EdgeKind::References)
+            .count(),
+        1,
+        "second incremental build did not process the injected site-less edges"
+    );
+    assert_eq!(
+        second
+            .graph
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == "dropped_incremental_remap_without_wiring_site"
+            })
+            .count(),
+        100,
+        "remap diagnostics grew across incremental builds"
+    );
+    let summaries = second
+        .graph
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "incremental_remap_without_wiring_site_truncated")
+        .collect::<Vec<_>>();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(
+        summaries[0].message,
+        "omitted 110 additional incremental remap diagnostics"
+    );
+    assert!(
+        second
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "unrelated_fixture_diagnostic")
+    );
+    let diagnostic_order = second
+        .graph
+        .diagnostics
+        .iter()
+        .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.message.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        diagnostic_order.windows(2).all(|pair| pair[0] <= pair[1]),
+        "diagnostics are not in deterministic order"
+    );
+
+    let second_bytes = fs::read(&second_graph_path)?;
+    let third_result = build_graph_with_layers(&options, None, &[])?;
+    let third_graph_path = third_result.output_dir.join("graph.json");
+    let third_bytes = fs::read(&third_graph_path)?;
+    let third = compass_model::code_graph::GraphDocument::load(&third_graph_path)?;
+    assert_eq!(third.links, second.links);
+    assert_eq!(third_bytes, second_bytes);
     Ok(())
 }

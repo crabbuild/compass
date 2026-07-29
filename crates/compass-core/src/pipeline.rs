@@ -97,6 +97,9 @@ const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
 const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/1";
 const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
 const MAX_INCREMENTAL_REMAP_DIAGNOSTICS: usize = 100;
+const INCREMENTAL_REMAP_DROP_DIAGNOSTIC: &str = "dropped_incremental_remap_without_wiring_site";
+const INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC: &str =
+    "incremental_remap_without_wiring_site_truncated";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct OutputStats {
@@ -2084,7 +2087,7 @@ fn preserve_semantic_layer(
                 related_ids.extend([edge.source.clone(), edge.target.clone()]);
                 remap_diagnostics.push(GraphDiagnostic {
                     severity: DiagnosticSeverity::Warning,
-                    code: "dropped_incremental_remap_without_wiring_site".to_owned(),
+                    code: INCREMENTAL_REMAP_DROP_DIAGNOSTIC.to_owned(),
                     message: "dropped preserved edge whose AST endpoint changed without an authoritative producer wiring site".to_owned(),
                     anchor: None,
                     related_ids,
@@ -2105,7 +2108,7 @@ fn preserve_semantic_layer(
     if dropped_without_site > MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
         remap_diagnostics.push(GraphDiagnostic {
             severity: DiagnosticSeverity::Warning,
-            code: "incremental_remap_without_wiring_site_truncated".to_owned(),
+            code: INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC.to_owned(),
             message: format!(
                 "omitted {} additional incremental remap diagnostics",
                 dropped_without_site - MAX_INCREMENTAL_REMAP_DIAGNOSTICS
@@ -2114,7 +2117,8 @@ fn preserve_semantic_layer(
             related_ids: Vec::new(),
         });
     }
-    append_graph_diagnostics(extraction, remap_diagnostics);
+    let prior_diagnostics = existing_raw.extensions.remove(GRAPH_DIAGNOSTICS_EXTENSION);
+    append_graph_diagnostics(extraction, prior_diagnostics, remap_diagnostics);
     let preserved_node_ids = existing
         .nodes
         .iter()
@@ -2182,26 +2186,85 @@ fn has_exact_remap_site(attributes: &serde_json::Map<String, serde_json::Value>)
         .is_some_and(|site| site.is_valid() && site.start_byte < site.end_byte)
 }
 
-fn append_graph_diagnostics(extraction: &mut Extraction, diagnostics: Vec<GraphDiagnostic>) {
-    if diagnostics.is_empty() {
-        return;
-    }
+fn append_graph_diagnostics(
+    extraction: &mut Extraction,
+    prior: Option<serde_json::Value>,
+    diagnostics: Vec<GraphDiagnostic>,
+) {
     let mut values = extraction
         .extensions
         .remove(GRAPH_DIAGNOSTICS_EXTENSION)
         .and_then(|value| value.as_array().cloned())
         .unwrap_or_default();
     values.extend(
+        prior
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default(),
+    );
+    values.extend(
         diagnostics
             .into_iter()
             .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok()),
     );
-    values.sort_by_cached_key(serde_json::Value::to_string);
-    values.dedup();
+    let mut remap_drops = Vec::new();
+    let mut unrelated = Vec::new();
+    let mut omitted = 0_usize;
+    for value in values {
+        match value
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+        {
+            INCREMENTAL_REMAP_DROP_DIAGNOSTIC => remap_drops.push(value),
+            INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC => {
+                omitted = omitted.saturating_add(remap_truncation_count(&value));
+            }
+            _ => unrelated.push(value),
+        }
+    }
+    remap_drops.sort_by_cached_key(serde_json::Value::to_string);
+    remap_drops.dedup();
+    if remap_drops.len() > MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
+        omitted = omitted.saturating_add(
+            remap_drops
+                .len()
+                .saturating_sub(MAX_INCREMENTAL_REMAP_DIAGNOSTICS),
+        );
+        remap_drops.truncate(MAX_INCREMENTAL_REMAP_DIAGNOSTICS);
+    }
+    unrelated.append(&mut remap_drops);
+    if omitted > 0
+        && let Ok(summary) = serde_json::to_value(GraphDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC.to_owned(),
+            message: format!("omitted {omitted} additional incremental remap diagnostics"),
+            anchor: None,
+            related_ids: Vec::new(),
+        })
+    {
+        unrelated.push(summary);
+    }
+    unrelated.sort_by_cached_key(serde_json::Value::to_string);
+    unrelated.dedup();
     extraction.extensions.insert(
         GRAPH_DIAGNOSTICS_EXTENSION.to_owned(),
-        serde_json::Value::Array(values),
+        serde_json::Value::Array(unrelated),
     );
+}
+
+fn remap_truncation_count(value: &serde_json::Value) -> usize {
+    value
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|message| {
+            message
+                .strip_prefix("omitted ")
+                .and_then(|message| {
+                    message.strip_suffix(" additional incremental remap diagnostics")
+                })
+                .and_then(|count| count.parse().ok())
+        })
+        .unwrap_or_default()
 }
 
 fn raw_node_match_key(node: &RawNodeRecord) -> Option<(String, String, String)> {

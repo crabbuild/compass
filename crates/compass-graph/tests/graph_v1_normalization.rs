@@ -12,7 +12,8 @@ use compass_model::code_graph::{
 };
 use compass_model::identity::edge_id;
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
+    EndpointRewriteEvidence, EndpointRewriteRule, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    append_endpoint_rewrite_evidence,
 };
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -720,6 +721,122 @@ fn trusted_incremental_rejects_conflicting_raw_occurrence_rule()
             .contains("conflicting raw occurrence rule"),
         "unexpected error: {error}"
     );
+    Ok(())
+}
+
+#[test]
+fn trusted_embedded_endpoint_rewrites_reject_spoofed_or_incomplete_semantics()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let baseline = normalize_v1(trusted_producer_extraction(root), build_evidence(root)?)?;
+    let mut valid = json!({
+        "origin":"heuristic",
+        "extractor":"test.incremental",
+        "confidence":"inferred",
+        "rule":"incremental-ast-endpoint-remap",
+        "wiringSite":{
+            "file":"src/lib.rs",
+            "startByte":50,
+            "endByte":54,
+            "startLine":6,
+            "startColumn":0,
+            "endLine":6,
+            "endColumn":4
+        },
+        "score":0.75
+    });
+    let mut ast_exact = serde_json::to_value(&baseline.links[0].evidence[0])?;
+    ast_exact["rule"] = json!("incremental-ast-endpoint-remap");
+    let mut missing_site = valid.clone();
+    missing_site
+        .as_object_mut()
+        .ok_or("evidence is not an object")?
+        .remove("wiringSite");
+    let mut missing_score = valid.clone();
+    missing_score
+        .as_object_mut()
+        .ok_or("evidence is not an object")?
+        .remove("score");
+    let mut out_of_range_score = valid.clone();
+    out_of_range_score["score"] = json!(1.01);
+    valid["anchors"] = json!([{
+        "file":"src/lib.rs",
+        "startByte":50,
+        "endByte":54,
+        "startLine":6,
+        "startColumn":0,
+        "endLine":6,
+        "endColumn":4
+    }]);
+
+    for (case, evidence) in [
+        ("AST/exact spoof", ast_exact),
+        ("missing wiring site", missing_site),
+        ("missing score", missing_score),
+        ("out-of-range score", out_of_range_score),
+        ("direct anchor", valid),
+    ] {
+        let mut projected = extraction_from_v1(&baseline);
+        projected.edges[0].attributes[TRUSTED_EDGE_RECORD_ATTRIBUTE]["evidence"] =
+            json!([evidence]);
+        let error = normalization_error(projected, build_evidence(root)?)?;
+        assert!(
+            error.contains("endpoint rewrite"),
+            "{case} produced unexpected error: {error}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn closed_rewrite_names_are_reserved_but_unknown_rewrite_like_producers_remain_open()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut ordinary = trusted_producer_extraction(root);
+    ordinary.edges[0]
+        .attributes
+        .insert("rule".to_owned(), json!("incremental-ast-endpoint-remap"));
+    let error = normalization_error(ordinary, build_evidence(root)?)?;
+    assert!(
+        error.contains("endpoint rewrite"),
+        "unexpected error: {error}"
+    );
+
+    let baseline = normalize_v1(trusted_producer_extraction(root), build_evidence(root)?)?;
+    let mut coalesced = extraction_from_v1(&baseline);
+    coalesced.edges[0].attributes.insert(
+        "_coalesced_edge_evidence".to_owned(),
+        json!([{
+            "rule":"incremental-ast-endpoint-remap",
+            "_origin":"heuristic",
+            "confidence":"INFERRED",
+            "extractor":"test.spoof",
+            "source_anchor":anchor(root, 50),
+            "score":0.5
+        }]),
+    );
+    let error = normalization_error(coalesced, build_evidence(root)?)?;
+    assert!(
+        error.contains("endpoint rewrite"),
+        "unexpected error: {error}"
+    );
+
+    let mut future = trusted_producer_extraction(root);
+    future.edges[0]
+        .attributes
+        .insert("rule".to_owned(), json!("future-endpoint-remap"));
+    let normalized = normalize_v1(future, build_evidence(root)?)?;
+    assert_eq!(
+        normalized.links[0]
+            .occurrence_rule
+            .as_ref()
+            .map(|rule| rule.as_str()),
+        Some("future-endpoint-remap")
+    );
+    let rebuilt = normalize_v1(extraction_from_v1(&normalized), build_evidence(root)?)?;
+    assert_eq!(rebuilt.links, normalized.links);
     Ok(())
 }
 

@@ -302,3 +302,29 @@ fn heuristic_and_ambiguous_provenance_require_auditable_evidence() {
     };
     assert!(too_many.validate().is_err());
 }
+
+#[test]
+fn typed_endpoint_rewrites_require_heuristic_inferred_bounded_indirect_evidence() {
+    let valid = Provenance {
+        origin: EvidenceOrigin::Heuristic,
+        extractor: "test.incremental".to_owned(),
+        confidence: EvidenceConfidence::Inferred,
+        rule: Some("incremental-ast-endpoint-remap".to_owned()),
+        anchors: Vec::new(),
+        wiring_site: Some(anchor()),
+        score: Some(0.75),
+        candidates: Vec::new(),
+    };
+    assert!(valid.validate().is_ok());
+
+    let mut non_finite = valid;
+    non_finite.score = Some(f64::NAN);
+    assert!(non_finite.validate().is_err());
+}
+
+#[test]
+fn unknown_rewrite_like_names_remain_valid_open_ended_producer_rules() {
+    let mut graph = document();
+    graph.links[0].evidence[0].rule = Some("future-endpoint-remap".to_owned());
+    assert!(validate_code_graph(&graph).is_ok());
+}

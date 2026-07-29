@@ -507,6 +507,11 @@ fn normalize_trusted_edge(
     let position = format!("edge[{index}]");
     let mut edge = serde_json::from_value::<EdgeRecord>(trusted)
         .map_err(|error| raw_error(&position, &error.to_string()))?;
+    for evidence in &edge.evidence {
+        evidence
+            .validate_endpoint_rewrite()
+            .map_err(|error| raw_error(&position, &error.to_string()))?;
+    }
     if let Some(raw_rule) = raw.attributes.get(OCCURRENCE_RULE_ATTRIBUTE) {
         let raw_rule = raw_rule
             .as_str()
@@ -1620,6 +1625,16 @@ fn normalize_provenance(
             (raw_origin.as_deref() == Some("semantic")).then(|| "semantic-extraction".to_owned())
         })
         .filter(|value| !value.trim().is_empty());
+    if rule
+        .as_deref()
+        .and_then(EndpointRewriteRule::from_wire_name)
+        .is_some()
+    {
+        return Err(raw_error(
+            record,
+            "closed endpoint rewrite rule names are reserved for _endpoint_rewrite_rules",
+        ));
+    }
     let origin = match raw_origin.as_deref() {
         None if heuristic_default => EvidenceOrigin::Heuristic,
         Some("ast") if heuristic_default => EvidenceOrigin::Heuristic,

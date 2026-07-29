@@ -60,6 +60,11 @@ impl EndpointRewriteRule {
             Self::IncrementalAstEndpointRemap => "incremental-ast-endpoint-remap",
         }
     }
+
+    #[must_use]
+    pub fn from_wire_name(value: &str) -> Option<Self> {
+        serde_json::from_value(Value::String(value.to_owned())).ok()
+    }
 }
 
 /// Typed evidence that an endpoint was rewritten after a producer emitted it.
@@ -323,6 +328,7 @@ impl Provenance {
         if self.extractor.trim().is_empty() {
             return Err(ProvenanceError::new("extractor must not be empty"));
         }
+        self.validate_endpoint_rewrite()?;
         if self.score.is_some_and(|score| !score.is_finite()) {
             return Err(ProvenanceError::new("score must be finite"));
         }
@@ -418,6 +424,50 @@ impl Provenance {
             return Err(ProvenanceError::new(
                 "ambiguous evidence requires at least two candidates",
             ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_endpoint_rewrite(&self) -> Result<(), ProvenanceError> {
+        let Some(rule) = self
+            .rule
+            .as_deref()
+            .and_then(EndpointRewriteRule::from_wire_name)
+        else {
+            return Ok(());
+        };
+        if self.origin != EvidenceOrigin::Heuristic
+            || self.confidence != EvidenceConfidence::Inferred
+        {
+            return Err(ProvenanceError::new(format!(
+                "endpoint rewrite {} must be heuristic evidence with inferred confidence",
+                rule.as_str()
+            )));
+        }
+        if !self.anchors.is_empty() {
+            return Err(ProvenanceError::new(format!(
+                "endpoint rewrite {} must not contain direct anchors",
+                rule.as_str()
+            )));
+        }
+        if self
+            .wiring_site
+            .as_ref()
+            .is_none_or(|site| !site.is_valid() || site.start_byte == site.end_byte)
+        {
+            return Err(ProvenanceError::new(format!(
+                "endpoint rewrite {} requires a valid non-empty wiring site",
+                rule.as_str()
+            )));
+        }
+        if self
+            .score
+            .is_none_or(|score| !score.is_finite() || !(0.0..=1.0).contains(&score))
+        {
+            return Err(ProvenanceError::new(format!(
+                "endpoint rewrite {} requires a finite score between 0.0 and 1.0",
+                rule.as_str()
+            )));
         }
         Ok(())
     }
