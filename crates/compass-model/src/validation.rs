@@ -586,7 +586,10 @@ fn endpoint_kinds_are_valid(
 }
 
 const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
-    if matches!((source, target), (NodeKind::Schema, NodeKind::ConfigKey)) {
+    if matches!(
+        (source, target),
+        (NodeKind::Enum, NodeKind::EnumMember) | (NodeKind::Schema, NodeKind::ConfigKey)
+    ) {
         return true;
     }
     matches!(
