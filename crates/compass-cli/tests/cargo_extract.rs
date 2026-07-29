@@ -2,6 +2,8 @@ use std::error::Error;
 use std::path::Path;
 use std::process::Command;
 
+use compass_files::BuildGuard;
+
 fn seed(root: &Path) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(root.join("crates/app/src"))?;
     std::fs::create_dir_all(root.join("crates/core/src"))?;
@@ -45,9 +47,9 @@ fn cargo_extract_emits_workspace_dependency_facts() -> Result<(), Box<dyn Error>
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("Cargo: 2 nodes, 1 edges"));
 
-    let graph: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        project.path().join("compass-out/graph.json"),
-    )?)?;
+    let graph_path =
+        BuildGuard::resolve_artifact(&project.path().join("compass-out"), "graph.json")?;
+    let graph: serde_json::Value = serde_json::from_slice(&std::fs::read(graph_path)?)?;
     let crate_nodes = graph["nodes"]
         .as_array()
         .into_iter()
