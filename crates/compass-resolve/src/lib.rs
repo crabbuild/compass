@@ -1824,7 +1824,7 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.trim_start();
-        if !trimmed.starts_with("from ") {
+        if !starts_python_from_import(trimmed) {
             index += 1;
             continue;
         }
@@ -1873,7 +1873,8 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
             if malformed || (depth == 0 && !continued) {
                 break;
             }
-            if index + 1 >= lines.len() || lines[index + 1].trim_start().starts_with("from ") {
+            if index + 1 >= lines.len() || starts_python_from_import(lines[index + 1].trim_start())
+            {
                 malformed = true;
                 break;
             }
@@ -1906,11 +1907,31 @@ fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     output
 }
 
+fn starts_python_from_import(statement: &str) -> bool {
+    statement
+        .strip_prefix("from")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(is_python_inline_whitespace)
+}
+
 fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImportItem>)> {
-    let rest = statement.strip_prefix("from ")?;
-    let (module, imports) = rest.split_once(" import ")?;
-    let module = module.trim();
+    let rest = statement.strip_prefix("from")?;
+    let rest = rest
+        .strip_prefix(is_python_inline_whitespace)?
+        .trim_start_matches(is_python_inline_whitespace);
+    let module_end = rest.find(is_python_inline_whitespace)?;
+    let module = &rest[..module_end];
     if !valid_python_module(module) {
+        return None;
+    }
+    let imports = rest[module_end..]
+        .trim_start_matches(is_python_inline_whitespace)
+        .strip_prefix("import")?;
+    if imports
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphanumeric())
+    {
         return None;
     }
     let imports = imports.trim();
@@ -1926,6 +1947,10 @@ fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImport
     if !parenthesized && pieces.last().is_some_and(|item| item.trim().is_empty()) {
         return None;
     }
+    let wildcard_count = pieces.iter().filter(|item| item.trim() == "*").count();
+    if wildcard_count > 0 {
+        return (!parenthesized && pieces.len() == 1).then(|| (module.to_owned(), Vec::new()));
+    }
     let piece_count = pieces.len();
     let mut output = Vec::new();
     for (occurrence, item) in pieces.into_iter().enumerate() {
@@ -1935,9 +1960,6 @@ fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImport
                 continue;
             }
             return None;
-        }
-        if item == "*" {
-            continue;
         }
         let parts = item.split_whitespace().collect::<Vec<_>>();
         let (imported, local) = match parts.as_slice() {
@@ -1955,6 +1977,10 @@ fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImport
         });
     }
     Some((module.to_owned(), output))
+}
+
+const fn is_python_inline_whitespace(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\u{000C}')
 }
 
 fn valid_python_module(module: &str) -> bool {
@@ -2638,6 +2664,10 @@ mod tests {
     fn python_import_parser_handles_aliases_multiline_comments_and_wildcards() {
         let imports = python_symbol_imports(
             "from pkg.api import (\n  Widget as LocalWidget,\n  helper, # kept\n  *,\n)\nfrom invalid\nimport os\n",
+        );
+        assert!(imports.is_empty());
+        let imports = python_symbol_imports(
+            "from pkg.api import (\n  Widget as LocalWidget,\n  helper, # kept\n)\nfrom pkg.api import *\n",
         );
         assert_eq!(imports.len(), 2);
         assert_eq!(imports[0].module, "pkg.api");

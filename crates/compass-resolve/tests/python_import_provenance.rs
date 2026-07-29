@@ -516,3 +516,151 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_recover()
     }));
     Ok(())
 }
+
+#[test]
+fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn Error>> {
+    let statements = [
+        "from pkg import(Widget)",
+        "from pkg\timport Widget as TabWidget",
+        "from pkg import *",
+        "from pkg import *, Widget",
+        "from pkg import Widget, *",
+        "from pkg import (*)",
+        "from pkg import (*, Widget)",
+        "from pkg import (Widget, *)",
+        "fromx pkg import Widget",
+        "from pkg importWidget",
+        "from pkg import helper as recovered",
+    ];
+    let valid_statements = [statements[0], statements[1], statements[10]];
+    let mut newline_snapshots = Vec::new();
+
+    for newline in ["\n", "\r\n"] {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let caller_source = statements.join(newline) + newline;
+        let files = [
+            ("caller.py", caller_source.as_str()),
+            (
+                "pkg/__init__.py",
+                "class Widget:\n    pass\n\ndef helper():\n    return 1\n",
+            ),
+        ];
+        let mut engine = Engine::default();
+        let mut extractions = Vec::new();
+        let mut sources = HashMap::new();
+        for (relative, source) in files {
+            let path = write(root, relative, source)?;
+            extractions.push(engine.extract(Path::new(&path))?);
+            sources.insert(path, source.to_owned());
+        }
+
+        let mut extraction = resolve_with_root(&extractions, &sources, root);
+        let caller_path = root.join("caller.py").to_string_lossy().into_owned();
+        let resolver_edges = extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("extractor") == PYTHON_IMPORT_PRODUCER
+                    && edge.string("rule") == "python-symbol-import-resolution"
+                    && edge.string("source_file") == caller_path
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            resolver_edges.len(),
+            valid_statements.len(),
+            "wildcards, keyword-prefix near matches, and malformed statements must not emit exact partial facts"
+        );
+
+        let mut expected_spans = valid_statements
+            .iter()
+            .map(|statement| {
+                caller_source
+                    .find(statement)
+                    .map(|start| (start, start + statement.len()))
+                    .ok_or("missing valid import statement")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        expected_spans.sort_unstable();
+        let mut raw_spans = resolver_edges
+            .iter()
+            .map(|edge| {
+                let start = edge
+                    .attributes
+                    .get("start_byte")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or("missing raw import start")? as usize;
+                let end = edge
+                    .attributes
+                    .get("end_byte")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or("missing raw import end")? as usize;
+                Ok((start, end))
+            })
+            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+        raw_spans.sort_unstable();
+        assert_eq!(raw_spans, expected_spans);
+        for (start, end) in &raw_spans {
+            assert!(
+                valid_statements.contains(
+                    &caller_source
+                        .get(*start..*end)
+                        .ok_or("raw import span is not a UTF-8 boundary")?
+                ),
+                "raw import span must cover its complete valid statement"
+            );
+        }
+
+        let node_ids = extraction
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<HashSet<_>>();
+        extraction.edges.retain(|edge| {
+            node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
+        });
+        let evidence =
+            BuildEvidence::from_extraction(root, &extraction, "sha256:python-import-grammar")?;
+        let graph = normalize_v1(extraction, evidence)?;
+        let published_anchors = graph
+            .links
+            .iter()
+            .flat_map(|edge| &edge.evidence)
+            .filter(|evidence| {
+                evidence.extractor == PYTHON_IMPORT_PRODUCER
+                    && evidence.rule.as_deref() == Some("python-symbol-import-resolution")
+                    && evidence
+                        .anchors
+                        .first()
+                        .is_some_and(|anchor| anchor.file == "caller.py")
+            })
+            .filter_map(|evidence| evidence.anchors.first())
+            .collect::<Vec<_>>();
+        assert_eq!(published_anchors.len(), valid_statements.len());
+
+        let mut published_spans = published_anchors
+            .iter()
+            .map(|anchor| (anchor.start_byte as usize, anchor.end_byte as usize))
+            .collect::<Vec<_>>();
+        published_spans.sort_unstable();
+        assert_eq!(published_spans, expected_spans);
+        let mut snapshot = Vec::new();
+        for anchor in published_anchors {
+            snapshot.push((
+                caller_source
+                    .get(anchor.start_byte as usize..anchor.end_byte as usize)
+                    .ok_or("published import span is not a UTF-8 boundary")?
+                    .to_owned(),
+                anchor.start_line,
+                anchor.start_column,
+                anchor.end_line,
+                anchor.end_column,
+            ));
+        }
+        snapshot.sort();
+        newline_snapshots.push(snapshot);
+    }
+
+    assert_eq!(newline_snapshots[0], newline_snapshots[1]);
+    Ok(())
+}
