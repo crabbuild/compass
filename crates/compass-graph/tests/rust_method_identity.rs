@@ -4,7 +4,7 @@ use std::fs;
 
 use compass_graph::{build_from_extraction, normalize_document_v1};
 use compass_languages::Engine;
-use compass_model::code_graph::NodeKind;
+use compass_model::code_graph::{EdgeKind, NodeKind};
 
 #[test]
 fn rust_methods_in_distinct_impls_publish_distinct_stable_nodes() -> Result<(), Box<dyn Error>> {
@@ -45,13 +45,39 @@ impl ChangeSink for ChangeCounts {
             .map(|node| node.qualified_name.as_str())
             .collect::<BTreeSet<_>>(),
         [
-            "ChangeCounts as ChangeSink::change",
-            "ExactDiffWriter as ChangeSink::change",
+            "ChangeCounts as ChangeSink::change(_)@200",
+            "ExactDiffWriter as ChangeSink::change(_)@135",
         ]
         .into_iter()
         .collect()
     );
     assert_ne!(methods[0].id, methods[1].id);
+    for method in &methods {
+        let source = method.source.as_ref().ok_or("method source is missing")?;
+        let ownership = graph
+            .links
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Contains && edge.target == method.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ownership.len(), 1, "method={method:#?}");
+        assert_eq!(ownership[0].relationship_site.as_ref(), Some(source));
+    }
+    let stable_ids = methods
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let repeated = Engine::default().extract(&path)?;
+    let repeated = build_from_extraction(&repeated, true, Some(root));
+    let repeated = normalize_document_v1(&repeated, root, "sha256:test", None)?;
+    assert_eq!(
+        repeated
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Method && node.name == ".change()")
+            .map(|node| node.id.as_str())
+            .collect::<BTreeSet<_>>(),
+        stable_ids
+    );
     Ok(())
 }
 

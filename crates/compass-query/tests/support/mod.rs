@@ -190,6 +190,69 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[allow(dead_code)]
+pub fn write_deferred_external_inheritance_graph(
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    write_graph(path)?;
+    let mut graph = GraphDocument::load(path)?;
+    let child = node("n:child", NodeKind::Class, "Child", "App\\Child");
+    let mut external = node(
+        "n:external",
+        NodeKind::Class,
+        "Model",
+        "Illuminate\\Database\\Eloquent\\Model",
+    );
+    external.source = None;
+    external.evidence = vec![Provenance {
+        origin: EvidenceOrigin::Heuristic,
+        extractor: "compass.graph.external-placeholder".to_owned(),
+        confidence: EvidenceConfidence::Inferred,
+        rule: Some("external-symbol-placeholder".to_owned()),
+        anchors: Vec::new(),
+        wiring_site: Some(anchor()),
+        score: None,
+        candidates: Vec::new(),
+    }];
+    graph.nodes.extend([child, external]);
+    let id = edge_id(
+        "n:child",
+        EdgeKind::Extends,
+        "n:external",
+        Some(&anchor()),
+        None,
+    );
+    graph.links.push(EdgeRecord {
+        id: id.clone(),
+        key: id,
+        source: "n:child".to_owned(),
+        target: "n:external".to_owned(),
+        kind: EdgeKind::Extends,
+        occurrence_rule: None,
+        relationship_site: Some(anchor()),
+        details: None,
+        evidence: vec![
+            evidence(),
+            Provenance {
+                origin: EvidenceOrigin::Heuristic,
+                extractor: "compass.graph.external-placeholder".to_owned(),
+                confidence: EvidenceConfidence::Inferred,
+                rule: Some("external-symbol-placeholder".to_owned()),
+                anchors: Vec::new(),
+                wiring_site: Some(anchor()),
+                score: None,
+                candidates: Vec::new(),
+            },
+        ],
+        weight: None,
+        context: None,
+        deferred: true,
+        diagnostics: Vec::new(),
+    });
+    fs::write(path, serde_json::to_vec_pretty(&graph)?)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
 pub fn write_endpoint_remap_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let root = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(root.join("src"))?;

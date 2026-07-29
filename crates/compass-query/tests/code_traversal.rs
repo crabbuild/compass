@@ -199,3 +199,29 @@ fn node_trail_excludes_graph_assembly_endpoint_remaps_by_default()
     }));
     Ok(())
 }
+
+#[test]
+fn node_trail_excludes_deferred_external_inheritance_by_default()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_deferred_external_inheritance_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let request = |include_heuristic| NodeTrailRequest {
+        source: "App\\Child".to_owned(),
+        target: "Illuminate\\Database\\Eloquent\\Model".to_owned(),
+        include_heuristic,
+        limits: CodeQueryLimits::default(),
+    };
+
+    assert!(engine.node_trail(request(false))?.paths.is_empty());
+    let enriched = engine.node_trail(request(true))?;
+    assert_eq!(enriched.paths.len(), 1);
+    assert!(enriched.edges.iter().all(|edge| {
+        edge.evidence.iter().any(|evidence| {
+            evidence.extractor == "compass.graph.external-placeholder"
+                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+        })
+    }));
+    Ok(())
+}

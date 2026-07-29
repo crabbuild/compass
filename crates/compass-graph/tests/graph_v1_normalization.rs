@@ -12,8 +12,8 @@ use compass_model::code_graph::{
 };
 use compass_model::identity::edge_id;
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, TRUSTED_EDGE_RECORD_ATTRIBUTE,
-    append_endpoint_rewrite_evidence,
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
+    TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
 };
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -64,8 +64,12 @@ fn build_evidence(root: &Path) -> Result<BuildEvidence, Box<dyn std::error::Erro
 }
 
 fn anchor(root: &Path, start: u64) -> Value {
+    anchor_in(root, "src/lib.rs", start)
+}
+
+fn anchor_in(root: &Path, relative: &str, start: u64) -> Value {
     json!({
-        "file": root.join("src/lib.rs"),
+        "file": root.join(relative),
         "startByte": start,
         "endByte": start + 4,
         "startLine": start / 10 + 1,
@@ -86,6 +90,75 @@ fn raw_node(root: &Path, id: &str, name: &str, start: u64) -> RawNodeRecord {
             ("language".to_owned(), json!("rust")),
             ("extractor".to_owned(), json!("test.rust")),
             ("source_anchor".to_owned(), anchor(root, start)),
+        ]),
+    }
+}
+
+fn raw_file_node(root: &Path, id: &str, relative: &str) -> RawNodeRecord {
+    RawNodeRecord {
+        id: id.to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!(relative)),
+            ("qualified_name".to_owned(), json!(relative)),
+            ("symbol_kind".to_owned(), json!("file")),
+            ("file_type".to_owned(), json!("code")),
+            ("language".to_owned(), json!("php")),
+            ("extractor".to_owned(), json!("test.php")),
+            ("source_anchor".to_owned(), anchor_in(root, relative, 0)),
+        ]),
+    }
+}
+
+fn raw_class_node(
+    root: &Path,
+    id: &str,
+    relative: &str,
+    qualified_name: &str,
+    start: u64,
+) -> RawNodeRecord {
+    RawNodeRecord {
+        id: id.to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!(qualified_name)),
+            ("qualified_name".to_owned(), json!(qualified_name)),
+            ("symbol_kind".to_owned(), json!("class")),
+            ("file_type".to_owned(), json!("code")),
+            ("language".to_owned(), json!("php")),
+            ("extractor".to_owned(), json!("test.php")),
+            ("source_anchor".to_owned(), anchor_in(root, relative, start)),
+        ]),
+    }
+}
+
+fn raw_external_node(id: &str, qualified_name: &str) -> RawNodeRecord {
+    RawNodeRecord {
+        id: id.to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!(qualified_name)),
+            ("qualified_name".to_owned(), json!(qualified_name)),
+            ("file_type".to_owned(), json!("code")),
+            ("source_file".to_owned(), json!("")),
+        ]),
+    }
+}
+
+fn raw_php_edge(
+    root: &Path,
+    relative: &str,
+    source: &str,
+    target: &str,
+    relation: &str,
+    start: u64,
+) -> RawEdgeRecord {
+    RawEdgeRecord {
+        source: source.to_owned(),
+        target: target.to_owned(),
+        attributes: Map::from_iter([
+            ("relation".to_owned(), json!(relation)),
+            ("_origin".to_owned(), json!("ast")),
+            ("confidence".to_owned(), json!("EXTRACTED")),
+            ("extractor".to_owned(), json!("test.php")),
+            ("source_anchor".to_owned(), anchor_in(root, relative, start)),
         ]),
     }
 }
@@ -662,46 +735,150 @@ fn normalization_treats_blank_external_source_paths_as_unanchored()
 }
 
 #[test]
-fn sourceless_placeholder_identity_is_scoped_to_each_wiring_site()
+fn sourceless_placeholder_identity_unifies_same_file_occurrences_with_typed_deferred_inheritance()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
-    let mut graph = extraction(root);
-    graph.nodes[1].attributes.remove("source_anchor");
-    graph.nodes[1]
-        .attributes
-        .insert("source_file".to_owned(), json!(""));
-    graph.nodes[1].attributes.remove("symbol_kind");
-    graph.nodes[1]
-        .attributes
-        .insert("label".to_owned(), json!("Shared"));
-    graph.nodes[1]
-        .attributes
-        .insert("qualified_name".to_owned(), json!("Shared"));
-    graph.edges = vec![
-        RawEdgeRecord {
-            source: "raw:a".to_owned(),
-            target: "raw:b".to_owned(),
-            attributes: Map::from_iter([
-                ("relation".to_owned(), json!("references")),
-                ("source_anchor".to_owned(), anchor(root, 50)),
-            ]),
+    let external_name = "Illuminate\\Database\\Eloquent\\Model";
+    let mut inheritance = raw_php_edge(root, "src/lib.rs", "raw:user", "raw:model", "inherits", 70);
+    append_endpoint_rewrite_evidence(
+        &mut inheritance.attributes,
+        EndpointRewriteEvidence {
+            rule: EndpointRewriteRule::SourceScopedNodeDisambiguation,
+            score: 1.0,
         },
-        RawEdgeRecord {
-            source: "raw:a".to_owned(),
-            target: "raw:b".to_owned(),
-            attributes: Map::from_iter([
-                ("relation".to_owned(), json!("references")),
-                ("source_anchor".to_owned(), anchor(root, 70)),
-            ]),
-        },
-    ];
+    );
+    let graph = Extraction {
+        nodes: vec![
+            raw_file_node(root, "raw:file", "src/lib.rs"),
+            raw_class_node(root, "raw:user", "src/lib.rs", "App\\User", 10),
+            raw_external_node("raw:model", external_name),
+        ],
+        edges: vec![
+            raw_php_edge(root, "src/lib.rs", "raw:file", "raw:model", "imports", 50),
+            inheritance,
+        ],
+        ..Extraction::default()
+    };
 
     let document = normalize_v1(graph, build_evidence(root)?)?;
+    let external = document
+        .nodes
+        .iter()
+        .filter(|node| node.qualified_name == external_name)
+        .collect::<Vec<_>>();
+    assert_eq!(external.len(), 1, "nodes={:#?}", document.nodes);
+    let external = external[0];
+    assert_eq!(external.kind, NodeKind::Class);
+    assert_eq!(external.language.as_deref(), Some("php"));
+    assert_eq!(external.source, None);
+    assert!(external.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "unresolved_external_symbol"
+            && diagnostic
+                .anchor
+                .as_ref()
+                .is_some_and(|anchor| anchor.file == "src/lib.rs" && anchor.start_byte == 50)
+    }));
+    assert!(external.evidence.iter().any(|evidence| {
+        evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Inferred
+            && evidence.extractor == "compass.graph.external-placeholder"
+            && evidence
+                .wiring_site
+                .as_ref()
+                .is_some_and(|site| site.file == "src/lib.rs" && site.start_byte == 50)
+    }));
+
+    let import = document
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Imports)
+        .ok_or("missing import edge")?;
+    let inheritance = document
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Extends)
+        .ok_or("missing typed inheritance edge")?;
+    assert_eq!(import.target, external.id);
+    assert_eq!(inheritance.target, external.id);
+    assert!(import.deferred);
+    assert!(inheritance.deferred);
+    assert!(
+        document
+            .links
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Extends)
+            .all(|edge| edge.deferred)
+    );
+    assert!(inheritance.evidence.iter().any(|evidence| {
+        evidence.origin == EvidenceOrigin::Ast
+            && evidence.confidence == EvidenceConfidence::Exact
+            && evidence.extractor == "test.php"
+            && !evidence.anchors.is_empty()
+    }));
+    assert!(inheritance.evidence.iter().any(|evidence| {
+        evidence.rule.as_deref() == Some("source-scoped-node-disambiguation")
+            && evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Inferred
+            && evidence.wiring_site.is_some()
+    }));
+    Ok(())
+}
+
+#[test]
+fn sourceless_placeholder_identity_never_merges_same_name_across_source_files()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let external_name = "Illuminate\\Database\\Eloquent\\Model";
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/other.php"), vec![b'y'; 500])?;
+    let graph = Extraction {
+        nodes: vec![
+            raw_class_node(root, "raw:user", "src/lib.rs", "App\\User", 10),
+            raw_external_node("raw:model-one", external_name),
+            raw_class_node(root, "raw:admin", "src/other.php", "Admin\\User", 10),
+            raw_external_node("raw:model-two", external_name),
+        ],
+        edges: vec![
+            raw_php_edge(
+                root,
+                "src/lib.rs",
+                "raw:user",
+                "raw:model-one",
+                "inherits",
+                70,
+            ),
+            raw_php_edge(
+                root,
+                "src/other.php",
+                "raw:admin",
+                "raw:model-two",
+                "inherits",
+                70,
+            ),
+        ],
+        ..Extraction::default()
+    };
+    let mut evidence = build_evidence(root)?;
+    evidence.files.push(FileRecord {
+        id: "raw:other".to_owned(),
+        path: root.join("src/other.php").to_string_lossy().into_owned(),
+        language: Some("php".to_owned()),
+        content_digest: format!("sha256:{:x}", Sha256::digest(vec![b'y'; 500])),
+        byte_size: 500,
+        generated: false,
+        extraction_status: ExtractionStatus::Extracted,
+        extractor_versions: vec!["test.php".to_owned()],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+
+    let document = normalize_v1(graph, evidence)?;
     let external_ids = document
         .nodes
         .iter()
-        .filter(|node| node.name == "Shared")
+        .filter(|node| node.qualified_name == external_name)
         .map(|node| node.id.as_str())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(external_ids.len(), 2);
@@ -711,6 +888,73 @@ fn sourceless_placeholder_identity_is_scoped_to_each_wiring_site()
         .map(|edge| edge.target.as_str())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(targets.len(), 2);
+    assert!(
+        document
+            .links
+            .iter()
+            .all(|edge| edge.kind == EdgeKind::Extends && edge.deferred)
+    );
+    Ok(())
+}
+
+#[test]
+fn sourceless_implemented_placeholder_infers_a_deferred_interface()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let graph = Extraction {
+        nodes: vec![
+            raw_class_node(root, "raw:user", "src/lib.rs", "App\\User", 10),
+            raw_external_node("raw:contract", "Vendor\\Contracts\\UserContract"),
+        ],
+        edges: vec![raw_php_edge(
+            root,
+            "src/lib.rs",
+            "raw:user",
+            "raw:contract",
+            "implements",
+            70,
+        )],
+        ..Extraction::default()
+    };
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let external = document
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "Vendor\\Contracts\\UserContract")
+        .ok_or("missing external interface")?;
+    assert_eq!(external.kind, NodeKind::Interface);
+    let implementation = document
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Implements)
+        .ok_or("missing implementation edge")?;
+    assert_eq!(implementation.target, external.id);
+    assert!(implementation.deferred);
+    Ok(())
+}
+
+#[test]
+fn sourceless_placeholder_without_exact_wiring_fails_closed()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let graph = Extraction {
+        nodes: vec![raw_external_node(
+            "raw:model",
+            "Illuminate\\Database\\Eloquent\\Model",
+        )],
+        ..Extraction::default()
+    };
+    let error = match normalize_v1(graph, build_evidence(root)?) {
+        Ok(_) => return Err("unwired placeholder published direct AST evidence".into()),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        error.contains("requires an exact wiring site"),
+        "unexpected error: {error}"
+    );
     Ok(())
 }
 

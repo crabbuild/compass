@@ -497,6 +497,34 @@ pub fn normalize_v1(
             .get(&edge.target)
             .map(|node| node.kind)
             .unwrap_or(NodeKind::Variable);
+        let unresolved_wiring_site = [&edge.source, &edge.target]
+            .into_iter()
+            .filter_map(|id| nodes.get(id))
+            .filter(|node| is_unresolved_external_node(node))
+            .find_map(|node| {
+                node.evidence
+                    .iter()
+                    .find_map(|evidence| evidence.wiring_site.clone())
+            });
+        if let Some(wiring_site) = unresolved_wiring_site {
+            edge.deferred = true;
+            if !edge.evidence.iter().any(|evidence| {
+                evidence.extractor == "compass.graph.external-placeholder"
+                    && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+            }) {
+                edge.evidence.push(Provenance {
+                    origin: EvidenceOrigin::Heuristic,
+                    extractor: "compass.graph.external-placeholder".to_owned(),
+                    confidence: EvidenceConfidence::Inferred,
+                    rule: Some("external-symbol-placeholder".to_owned()),
+                    anchors: Vec::new(),
+                    wiring_site: Some(edge.relationship_site.clone().unwrap_or(wiring_site)),
+                    score: None,
+                    candidates: Vec::new(),
+                });
+                sort_dedup_serialized(&mut edge.evidence);
+            }
+        }
         if !trusted_edge && edge.kind == EdgeKind::TypeOf && source_kind.is_callable() {
             edge.kind = EdgeKind::Returns;
             edge.details = None;
@@ -796,6 +824,14 @@ fn normalize_trusted_edge(
     Ok(edge)
 }
 
+fn is_unresolved_external_node(node: &NodeRecord) -> bool {
+    node.source.is_none()
+        && node
+            .evidence
+            .iter()
+            .any(|evidence| evidence.extractor == "compass.graph.external-placeholder")
+}
+
 fn collect_stub_wiring_sites(
     edges: &[RawEdgeRecord],
     root: &Path,
@@ -844,6 +880,7 @@ fn split_sourceless_placeholders(
         .map(|node| (node.id.clone(), node.attributes.clone()))
         .collect::<HashMap<_, _>>();
     let mut scopes = HashMap::<String, BTreeSet<String>>::new();
+    let mut inferred_kinds = HashMap::<(String, String), &'static str>::new();
     for edge in &extraction.edges {
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
@@ -863,39 +900,68 @@ fn split_sourceless_placeholders(
                     &anchor,
                 ));
         }
-    }
-    let split_ids = scopes
-        .iter()
-        .filter(|(_, values)| values.len() > 1)
-        .map(|(id, values)| {
-            let clones = values
-                .iter()
-                .map(|scope| {
-                    let digest = Sha256::digest(scope.as_bytes());
-                    (scope.clone(), format!("{id}#wiring-{digest:x}"))
+        if sourceless.contains(&edge.target)
+            && let Some(kind) = inferred_external_target_kind(&edge.attributes)
+            && let Some(attributes) = node_attributes.get(&edge.target)
+        {
+            let scope =
+                placeholder_scope_key(&edge.attributes, node_attributes.get(&edge.source), &anchor);
+            let qualified = optional_any_string(
+                attributes,
+                &["qualified_name", "qualifiedName", "name", "label"],
+            )
+            .unwrap_or_else(|| edge.target.clone());
+            inferred_kinds
+                .entry((scope, qualified))
+                .and_modify(|existing| {
+                    if kind == "interface" {
+                        *existing = kind;
+                    }
                 })
-                .collect::<BTreeMap<_, _>>();
-            (id.clone(), clones)
-        })
-        .collect::<HashMap<_, _>>();
-    if split_ids.is_empty() {
-        return Ok(());
+                .or_insert(kind);
+        }
     }
 
-    let mut expanded = Vec::with_capacity(extraction.nodes.len() + split_ids.len());
+    let mut split_ids = HashMap::<String, BTreeMap<String, String>>::new();
+    let mut expanded = Vec::with_capacity(extraction.nodes.len() + scopes.len());
     for node in std::mem::take(&mut extraction.nodes) {
-        let Some(clones) = split_ids.get(&node.id) else {
+        if !sourceless.contains(&node.id) {
+            expanded.push(node);
+            continue;
+        }
+        let Some(node_scopes) = scopes.get(&node.id).filter(|scopes| !scopes.is_empty()) else {
+            let mut node = node;
+            mark_external_placeholder(&mut node.attributes, None, None);
             expanded.push(node);
             continue;
         };
-        for (scope, clone_id) in clones {
+        let qualified = optional_any_string(
+            &node.attributes,
+            &["qualified_name", "qualifiedName", "name", "label"],
+        )
+        .unwrap_or_else(|| node.id.clone());
+        let clones = node_scopes
+            .iter()
+            .map(|scope| {
+                let clone_id = if node_scopes.len() == 1 {
+                    node.id.clone()
+                } else {
+                    let digest = Sha256::digest(scope.as_bytes());
+                    format!("{}#scope-{digest:x}", node.id)
+                };
+                (scope.clone(), clone_id)
+            })
+            .collect::<BTreeMap<_, _>>();
+        for (scope, clone_id) in &clones {
             let mut clone = node.clone();
             clone.id.clone_from(clone_id);
-            clone
-                .attributes
-                .insert("declaring_scope".to_owned(), Value::String(scope.clone()));
+            let inferred_kind = inferred_kinds
+                .get(&(scope.clone(), qualified.clone()))
+                .copied();
+            mark_external_placeholder(&mut clone.attributes, Some(scope), inferred_kind);
             expanded.push(clone);
         }
+        split_ids.insert(node.id, clones);
     }
     extraction.nodes = expanded;
 
@@ -937,10 +1003,50 @@ fn placeholder_scope_key(
         scoped(&["package", "package_name"]).unwrap_or_default(),
         scoped(&["module", "namespace"]).unwrap_or_default(),
         anchor.file.clone(),
-        anchor.start_byte.to_string(),
-        anchor.end_byte.to_string(),
     ]
     .join("\u{1f}")
+}
+
+fn inferred_external_target_kind(attributes: &Map<String, Value>) -> Option<&'static str> {
+    match optional_string(attributes, "relation").as_deref() {
+        Some("implements" | "scip_impl" | "mixes_in") => Some("interface"),
+        Some("extends" | "inherits") => Some("class"),
+        _ => None,
+    }
+}
+
+fn mark_external_placeholder(
+    attributes: &mut Map<String, Value>,
+    stable_scope: Option<&str>,
+    inferred_kind: Option<&str>,
+) {
+    attributes.insert(
+        "extractor".to_owned(),
+        Value::String("compass.graph.external-placeholder".to_owned()),
+    );
+    if let Some(scope) = stable_scope {
+        attributes.insert(
+            "external_identity_scope".to_owned(),
+            Value::String(scope.to_owned()),
+        );
+        if optional_any_string(attributes, &["language", "lang"]).is_none()
+            && let Some(language) = scope
+                .split('\u{1f}')
+                .next()
+                .filter(|value| !value.is_empty())
+        {
+            attributes.insert("language".to_owned(), Value::String(language.to_owned()));
+        }
+    }
+    if attributes
+        .get("symbol_kind")
+        .or_else(|| attributes.get("type"))
+        .and_then(Value::as_str)
+        .is_none_or(|kind| kind == "symbol" || kind == "variable")
+        && let Some(kind) = inferred_kind
+    {
+        attributes.insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
+    }
 }
 
 fn anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
@@ -1557,6 +1663,16 @@ fn normalize_node(
     } else {
         None
     };
+    if source.is_none()
+        && external_wiring_site.is_none()
+        && optional_string(&raw.attributes, "extractor").as_deref()
+            == Some("compass.graph.external-placeholder")
+    {
+        return Err(raw_error(
+            &raw.id,
+            "unresolved external placeholder requires an exact wiring site",
+        ));
+    }
     let source_path = match &source {
         Some(anchor) => anchor.file.clone(),
         None => optional_source_path(&raw.attributes, "source_file")
@@ -1610,6 +1726,20 @@ fn normalize_node(
         details.as_ref(),
         source.as_ref().or(external_wiring_site.as_ref()),
     )?;
+    let diagnostics = external_wiring_site
+        .as_ref()
+        .map(|site| {
+            vec![GraphDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: "unresolved_external_symbol".to_owned(),
+                message: format!(
+                    "external symbol {qualified_name:?} remains unresolved at its wiring site"
+                ),
+                anchor: Some(site.clone()),
+                related_ids: vec![id.clone()],
+            }]
+        })
+        .unwrap_or_default();
     let community = optional_u64(&raw.attributes, "community").map(|id| CommunityMetadata {
         id,
         label: optional_string(&raw.attributes, "community_name"),
@@ -1628,7 +1758,7 @@ fn normalize_node(
         details,
         evidence,
         coverage: Vec::new(),
-        diagnostics: Vec::new(),
+        diagnostics,
         community,
     })
 }
@@ -2365,10 +2495,14 @@ fn node_identity(
         _ => {
             let unresolved_scope;
             let identity_source = if source_path.is_empty() {
-                unresolved_scope = identity_site.map_or_else(
-                    || format!("unresolved:{record}"),
-                    |site| format!("{}#{}:{}", site.file, site.start_byte, site.end_byte),
-                );
+                unresolved_scope = optional_string(attributes, "external_identity_scope")
+                    .filter(|scope| !scope.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        identity_site.map_or_else(
+                            || format!("unresolved:{record}"),
+                            |site| format!("{}#{}:{}", site.file, site.start_byte, site.end_byte),
+                        )
+                    });
                 unresolved_scope.as_str()
             } else {
                 source_path

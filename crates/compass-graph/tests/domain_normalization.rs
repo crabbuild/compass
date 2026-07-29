@@ -198,7 +198,7 @@ fn package_manifest_self_dependency_is_diagnostic_not_topology()
 }
 
 #[test]
-fn unresolved_java_inheritance_is_diagnostic_not_exact_topology()
+fn unresolved_java_inheritance_is_typed_deferred_and_not_exact_topology()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -210,25 +210,38 @@ fn unresolved_java_inheritance_is_diagnostic_not_exact_topology()
     let extraction = Engine::default().extract_source(relative, source)?;
     let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-java")?;
     let graph = normalize_v1(extraction, evidence)?;
+    let inheritance = graph
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Extends)
+        .ok_or("missing deferred inheritance edge")?;
+    assert!(inheritance.deferred);
+    assert!(inheritance.evidence.iter().any(|evidence| {
+        evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.extractor == "compass.graph.external-placeholder"
+            && evidence.wiring_site.is_some()
+    }));
     assert!(
         graph
             .links
             .iter()
-            .all(|edge| !matches!(edge.kind, EdgeKind::Extends | EdgeKind::Implements))
-    );
-    assert!(
-        graph
-            .graph
-            .diagnostics
-            .iter()
-            .any(|diagnostic| { diagnostic.code == "dropped_invalid_inheritance_target" })
+            .filter(|edge| matches!(edge.kind, EdgeKind::Extends | EdgeKind::Implements))
+            .all(|edge| edge.deferred)
     );
     let unresolved = graph
         .nodes
         .iter()
         .find(|node| node.name == "Missing")
         .ok_or("missing unresolved superclass")?;
-    assert_eq!(unresolved.evidence[0].origin, EvidenceOrigin::Heuristic);
+    assert_eq!(unresolved.kind, NodeKind::Class);
+    assert!(unresolved.evidence.iter().any(|evidence| {
+        evidence.origin == EvidenceOrigin::Heuristic
+            && evidence.extractor == "compass.graph.external-placeholder"
+            && evidence.wiring_site.is_some()
+    }));
+    assert!(unresolved.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "unresolved_external_symbol" && diagnostic.anchor.is_some()
+    }));
     Ok(())
 }
 
