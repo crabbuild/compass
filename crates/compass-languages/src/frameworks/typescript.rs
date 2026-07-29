@@ -527,19 +527,18 @@ fn collect_route_config(
     if !matches!(node.kind(), "object" | "object_pattern") {
         return;
     }
-    let text = node_text(node, source);
-    let Some(raw_path) = object_string_property(text, "path") else {
+    let Some(raw_path) = direct_object_string_property(node, source, "path") else {
         return;
     };
-    let handler = object_identifier_property(text, "component")
-        .or_else(|| object_identifier_property(text, "element"))
-        .or_else(|| object_identifier_property(text, "Component"));
+    let handler = direct_object_identifier_property(node, source, "component")
+        .or_else(|| direct_object_identifier_property(node, source, "element"))
+        .or_else(|| direct_object_identifier_property(node, source, "Component"));
     let Some(handler) = handler else {
         return;
     };
     let middleware = ["loader", "action"]
         .into_iter()
-        .filter_map(|property| object_identifier_property(text, property))
+        .filter_map(|property| direct_object_identifier_property(node, source, property))
         .collect();
     let mut fact = match route_fact(
         framework,
@@ -707,28 +706,29 @@ fn jsx_component_attribute(source: &str, name: &str) -> Option<String> {
         .map(|value| value.as_str().to_owned())
 }
 
-fn object_string_property(source: &str, name: &str) -> Option<String> {
-    let pattern = Regex::new(&format!(
-        r#"(?m)(?:^|[,{{]\s*){}\s*:\s*["']([^"']+)["']"#,
-        regex::escape(name)
-    ))
-    .ok()?;
-    pattern
-        .captures(source)
-        .and_then(|capture| capture.get(1))
-        .map(|value| value.as_str().to_owned())
+fn direct_object_string_property(node: Node<'_>, source: &[u8], name: &str) -> Option<String> {
+    direct_object_property(node, source, name).and_then(string_literal)
 }
 
-fn object_identifier_property(source: &str, name: &str) -> Option<String> {
-    let pattern = Regex::new(&format!(
-        r"(?m)(?:^|[,\{{]\s*){}\s*:\s*([A-Za-z_$][A-Za-z0-9_$.]*)",
-        regex::escape(name)
-    ))
-    .ok()?;
-    pattern
-        .captures(source)
-        .and_then(|capture| capture.get(1))
-        .map(|value| value.as_str().to_owned())
+fn direct_object_identifier_property(node: Node<'_>, source: &[u8], name: &str) -> Option<String> {
+    let value = direct_object_property(node, source, name)?.trim();
+    is_reference(value).then(|| value.to_owned())
+}
+
+fn direct_object_property<'a>(node: Node<'_>, source: &'a [u8], name: &str) -> Option<&'a str> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| child.kind() == "pair")
+        .find_map(|pair| {
+            let key = pair.child_by_field_name("key")?;
+            let key = node_text(key, source)
+                .trim()
+                .trim_matches(|character| matches!(character, '\'' | '"' | '`'));
+            (key == name)
+                .then(|| pair.child_by_field_name("value"))
+                .flatten()
+                .map(|value| node_text(value, source))
+        })
 }
 
 fn normalize_path(path: &str) -> String {

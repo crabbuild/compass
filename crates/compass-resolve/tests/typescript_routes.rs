@@ -98,11 +98,17 @@ fn react_and_vue_router_configs_require_literal_paths_and_known_shapes()
     }));
 
     let vue = source_extract(Path::new("src/router.ts"), "vue-router.ts")?;
-    assert!(routes(&vue).any(|route| {
-        route.framework == "vue-router"
-            && route.normalized_path == "/users/{userId}"
-            && route.handler_reference == "UserPage"
-    }));
+    assert_eq!(
+        routes(&vue)
+            .filter(|route| {
+                route.framework == "vue-router"
+                    && route.normalized_path == "/users/{userId}"
+                    && route.handler_reference == "UserPage"
+            })
+            .count(),
+        1,
+        "nested route configuration objects must not duplicate their child route"
+    );
     Ok(())
 }
 
