@@ -537,7 +537,10 @@ fn attach_overload_discriminators(extraction: &mut Extraction) {
     for (index, node) in extraction.nodes.iter().enumerate() {
         let source_file = node.string("source_file");
         let symbol_kind = node.string("symbol_kind");
-        let qualified_name = node.string("qualified_name");
+        let mut qualified_name = node.string("qualified_name");
+        if qualified_name.is_empty() {
+            qualified_name = node.label().to_owned();
+        }
         if source_file.is_empty() || symbol_kind.is_empty() || qualified_name.is_empty() {
             continue;
         }

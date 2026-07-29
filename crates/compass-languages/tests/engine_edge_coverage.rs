@@ -856,6 +856,32 @@ fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
 }
 
 #[test]
+fn repeated_anonymous_class_methods_receive_cross_definition_discriminators()
+-> Result<(), Box<dyn Error>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../compass-cli/assets/vendor/pierre-diffs-v1.2.12.js");
+    let source = fs::read(&path)?;
+
+    let extraction = Engine::default().extract_source(&path, &source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == "cleanUp()")
+        .collect::<Vec<_>>();
+    assert!(methods.len() >= 2, "methods={methods:?}");
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("overload_discriminator"))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        methods.len(),
+        "methods={methods:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn objective_c_go_and_swift_fixtures_cover_type_members_calls_and_imports()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
