@@ -96,6 +96,35 @@ fn assert_public_containment(
     Ok(())
 }
 
+fn assert_every_public_containment_site_matches_its_target(
+    graph: &GraphDocument,
+    files: &[&str],
+) -> Result<(), Box<dyn Error>> {
+    for edge in graph.links.iter().filter(|edge| {
+        edge.kind == EdgeKind::Contains
+            && edge
+                .relationship_site
+                .as_ref()
+                .is_some_and(|site| files.contains(&site.file.as_str()))
+    }) {
+        let site = edge
+            .relationship_site
+            .as_ref()
+            .ok_or("missing managed containment site")?;
+        let target = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == edge.target)
+            .ok_or("missing managed containment target")?;
+        assert_eq!(
+            target.source.as_ref(),
+            Some(site),
+            "stale public containment endpoint: target={target:#?} edge={edge:#?}"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn public_normalization_accepts_every_remediated_semantic_producer() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -185,17 +214,49 @@ class RuntimeService : BaseService {
     write(
         root,
         "rust_ownership.rs",
-        b"struct Shared {} mod one { trait Contract {} struct Item {} enum Mode { A } } mod two { trait Contract {} struct Item {} enum Mode { B } struct Shared {} }\n",
+        br#"struct Shared {}
+fn over(value: i32) {}
+fn over(value: &str) {}
+mod one {
+    trait Contract { fn run(&self); }
+    struct Item {}
+    enum Mode { A, B }
+    struct Shared {}
+    impl Contract for Item { fn run(&self) {} }
+}
+mod two {
+    trait Contract { fn run(&self); }
+    struct Item {}
+    enum Mode { A, B }
+    struct Shared {}
+    impl Contract for Item { fn run(&self) {} }
+}
+"#,
     )?;
     write(
         root,
         "ts_ownership.ts",
-        b"class Shared {} namespace One { class Item {} namespace Nested { class Leaf {} } } namespace Two { class Item {} class Shared {} }\n",
+        br#"class Shared {}
+namespace One {
+    class Item {
+        run(value: string): void;
+        run(value: number): void {}
+    }
+    namespace Nested { class Leaf {} }
+}
+namespace Two {
+    class Item {
+        run(value: string): void;
+        run(value: number): void {}
+    }
+    class Shared {}
+}
+"#,
     )?;
     write(
         root,
         "CsharpOwnership.cs",
-        b"class Shared {} namespace One { class Item {} class Outer { class Leaf {} } } namespace Two { class Item {} class Shared {} }\n",
+        b"class Shared {} namespace One { class Item { void Run(int value) {} } class Outer { class Leaf {} } } namespace Two { class Item { void Run(int value) {} } class Shared {} }\n",
     )?;
 
     let mut extraction = Extraction::default();
@@ -232,31 +293,7 @@ class RuntimeService : BaseService {
             && member_ids.contains(&edge.target)
     }));
     let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:semantic-producers")?;
-    let graph = match normalize_v1(extraction.clone(), evidence) {
-        Ok(graph) => graph,
-        Err(error) => {
-            let message = format!("{error:?}");
-            let blocker = "invalid contains endpoints enum -> enum_member";
-            assert!(message.contains(blocker), "{message}");
-            assert_eq!(
-                message.matches(" has invalid ").count(),
-                message.matches(blocker).count(),
-                "{message}"
-            );
-            let mut locally_compatible = extraction;
-            locally_compatible.edges.retain(|edge| {
-                !(edge.string("relation") == "contains"
-                    && enum_ids.contains(&edge.source)
-                    && member_ids.contains(&edge.target))
-            });
-            let evidence = BuildEvidence::from_extraction(
-                root,
-                &locally_compatible,
-                "sha256:semantic-producers-local-validator",
-            )?;
-            normalize_v1(locally_compatible, evidence)?
-        }
-    };
+    let graph = normalize_v1(extraction, evidence)?;
     let node_kinds = graph
         .nodes
         .iter()
@@ -343,6 +380,10 @@ class RuntimeService : BaseService {
     ] {
         assert_public_containment(&graph, file, target, owner)?;
     }
+    assert_every_public_containment_site_matches_its_target(
+        &graph,
+        &["rust_ownership.rs", "ts_ownership.ts", "CsharpOwnership.cs"],
+    )?;
 
     let mut document_sites = graph
         .links

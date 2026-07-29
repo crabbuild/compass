@@ -68,6 +68,13 @@ struct CallableRecord {
     is_test: bool,
 }
 
+#[derive(Clone)]
+struct PendingContainment<'tree> {
+    source: String,
+    target: String,
+    site: Node<'tree>,
+}
+
 #[derive(Default)]
 struct Work {
     ast_visits: usize,
@@ -91,7 +98,6 @@ struct State<'source, 'tree, 'extraction> {
     scope_frames: Vec<ScopeFrame>,
     calls_by_callable: HashMap<usize, Vec<Node<'tree>>>,
     inventory_index: HashMap<usize, usize>,
-    declaration_by_anchor: HashMap<(usize, usize), usize>,
     declaration_node_index: HashMap<usize, Vec<usize>>,
     node_index: HashMap<String, usize>,
     anchor_index: HashMap<(usize, usize), Vec<usize>>,
@@ -108,8 +114,10 @@ struct State<'source, 'tree, 'extraction> {
     callable_ast_index: HashMap<usize, CallableRecord>,
     callables_by_owner: HashMap<usize, Vec<CallableRecord>>,
     methods_by_owner: HashMap<(usize, String, String), Vec<String>>,
-    managed_containment: HashMap<(usize, usize), (String, String)>,
-    managed_containment_by_ast: HashMap<usize, (String, String)>,
+    managed_containment_targets: HashSet<String>,
+    managed_containment_aliases: HashSet<String>,
+    pending_containment: Vec<PendingContainment<'tree>>,
+    pending_containment_keys: HashSet<(String, String, usize, usize)>,
     work: Work,
 }
 
@@ -152,10 +160,6 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             .iter()
             .map(|item| ((item.node.start_byte(), item.node.end_byte()), item))
             .collect::<HashMap<_, _>>();
-        let declaration_by_anchor = inventory_anchor_index
-            .iter()
-            .filter_map(|(anchor, item)| item.declaration_ast.map(|ast| (*anchor, ast)))
-            .collect();
         let mut declaration_node_index = HashMap::<usize, Vec<usize>>::new();
         let mut anchor_index = HashMap::<(usize, usize), Vec<usize>>::new();
         let mut label_line_index = HashMap::<(String, usize), Vec<usize>>::new();
@@ -215,7 +219,6 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             scope_frames,
             calls_by_callable,
             inventory_index,
-            declaration_by_anchor,
             declaration_node_index,
             node_index,
             anchor_index,
@@ -232,8 +235,10 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             callable_ast_index: HashMap::new(),
             callables_by_owner: HashMap::new(),
             methods_by_owner: HashMap::new(),
-            managed_containment: HashMap::new(),
-            managed_containment_by_ast: HashMap::new(),
+            managed_containment_targets: HashSet::new(),
+            managed_containment_aliases: HashSet::new(),
+            pending_containment: Vec::new(),
+            pending_containment_keys: HashSet::new(),
             work,
         }
     }
@@ -323,8 +328,8 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         self.callable_semantics("rust");
         self.rust_overrides();
         self.rust_tests();
-        self.repair_managed_containment();
         self.prune_coalesced_base_shadows();
+        self.repair_managed_containment();
     }
 
     fn typescript(&mut self) {
@@ -368,8 +373,8 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         self.ts_exports();
         self.ts_decorators();
         self.ts_overrides();
-        self.repair_managed_containment();
         self.prune_coalesced_base_shadows();
+        self.repair_managed_containment();
     }
 
     fn csharp(&mut self) {
@@ -423,8 +428,8 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         }
         self.callable_semantics("csharp");
         self.csharp_overrides();
-        self.repair_managed_containment();
         self.prune_coalesced_base_shadows();
+        self.repair_managed_containment();
     }
 
     fn ensure_scopes(&mut self, kinds: &[&str], semantic_kind: &str) {
@@ -1013,6 +1018,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             signature.unwrap_or_default(),
             &node.start_byte().to_string(),
         ]);
+        self.register_containment_aliases(node, label);
         self.work.index_lookups += 1;
         let compatible_index = |index: &usize| {
             self.extraction.nodes.get(*index).is_some_and(|record| {
@@ -1082,6 +1088,7 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
                 self.claimed_unanchored_nodes.insert(index);
             }
             let old_id = self.extraction.nodes[index].id.clone();
+            self.managed_containment_aliases.insert(old_id.clone());
             let collision = self
                 .id_anchors
                 .get(&old_id)
@@ -1143,6 +1150,32 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
         }
         crate::facts::stamp_node_range(&mut record.attributes, node);
         record.id.clone()
+    }
+
+    fn register_containment_aliases(&mut self, node: Node<'tree>, label: &str) {
+        let anchor = (node.start_byte(), node.end_byte());
+        let label_key = (
+            normalized_label(label),
+            node.start_position().row.saturating_add(1),
+        );
+        let mut indexes = self
+            .declaration_node_index
+            .get(&node.id())
+            .into_iter()
+            .flatten()
+            .chain(self.anchor_index.get(&anchor).into_iter().flatten())
+            .chain(self.label_line_index.get(&label_key).into_iter().flatten())
+            .copied()
+            .collect::<Vec<_>>();
+        indexes.sort_unstable();
+        indexes.dedup();
+        for index in indexes {
+            if let Some(record) = self.extraction.nodes.get(index)
+                && compatible_label(&record.string("label"), label)
+            {
+                self.managed_containment_aliases.insert(record.id.clone());
+            }
+        }
     }
 
     fn unique_id(&mut self, desired: &str, anchor: (usize, usize)) -> String {
@@ -1208,11 +1241,20 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
     }
 
     fn contain(&mut self, source: &str, target: &str, node: Node<'tree>) {
-        let expected = (source.to_owned(), target.to_owned());
-        self.managed_containment
-            .insert((node.start_byte(), node.end_byte()), expected.clone());
-        self.managed_containment_by_ast.insert(node.id(), expected);
-        self.edge(source, target, "contains", node, None);
+        self.managed_containment_targets.insert(target.to_owned());
+        let key = (
+            source.to_owned(),
+            target.to_owned(),
+            node.start_byte(),
+            node.end_byte(),
+        );
+        if self.pending_containment_keys.insert(key) {
+            self.pending_containment.push(PendingContainment {
+                source: source.to_owned(),
+                target: target.to_owned(),
+                site: node,
+            });
+        }
     }
 
     fn typed_edge(
@@ -1434,19 +1476,54 @@ impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
             if retired.contains(&edge.source) || retired.contains(&edge.target) {
                 return false;
             }
-            if edge.string("relation") != "contains" {
-                return true;
-            }
-            let site = (edge_usize(edge, "start_byte"), edge_usize(edge, "end_byte"));
-            self.managed_containment
-                .get(&site)
-                .or_else(|| {
-                    self.declaration_by_anchor
-                        .get(&site)
-                        .and_then(|ast| self.managed_containment_by_ast.get(ast))
-                })
-                .is_none_or(|expected| edge.source == expected.0 && edge.target == expected.1)
+            !is_managed_containment_relation(&edge.string("relation"))
+                || (!self.managed_containment_targets.contains(&edge.target)
+                    && !self.managed_containment_aliases.contains(&edge.target))
         });
+        self.seen_edges = self
+            .extraction
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge.source.clone(),
+                    edge.target.clone(),
+                    edge.string("relation"),
+                    edge_usize(edge, "start_byte"),
+                    edge_usize(edge, "end_byte"),
+                )
+            })
+            .collect();
+        let csharp_callable_targets = if self.language == "csharp" {
+            self.extraction
+                .nodes
+                .iter()
+                .filter(|node| {
+                    matches!(
+                        node.string("symbol_kind").as_str(),
+                        "method" | "constructor"
+                    )
+                })
+                .map(|node| node.id.clone())
+                .collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
+        let pending = std::mem::take(&mut self.pending_containment);
+        for containment in pending {
+            let relation = if csharp_callable_targets.contains(&containment.target) {
+                "method"
+            } else {
+                "contains"
+            };
+            self.edge(
+                &containment.source,
+                &containment.target,
+                relation,
+                containment.site,
+                None,
+            );
+        }
     }
 }
 
@@ -1815,6 +1892,10 @@ fn clean_identifier(raw: &str) -> String {
 
 fn compatible_label(existing: &str, requested: &str) -> bool {
     normalized_label(existing) == normalized_label(requested)
+}
+
+fn is_managed_containment_relation(relation: &str) -> bool {
+    matches!(relation, "contains" | "defines" | "method")
 }
 
 fn compatible_kind(existing: &str, requested: &str) -> bool {

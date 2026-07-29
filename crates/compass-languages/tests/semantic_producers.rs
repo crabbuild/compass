@@ -125,17 +125,77 @@ fn assert_unique_node_ids(extraction: &Extraction) {
 }
 
 fn assert_containment_sites_belong_to_targets(extraction: &Extraction) {
-    for edge in extraction
-        .edges
-        .iter()
-        .filter(|edge| edge.string("relation") == "contains")
-    {
+    for edge in extraction.edges.iter().filter(|edge| {
+        matches!(
+            edge.string("relation").as_str(),
+            "contains" | "defines" | "method"
+        )
+    }) {
         let Some(target) = extraction.nodes.iter().find(|node| node.id == edge.target) else {
             continue;
         };
         if target.string("qualified_name").is_empty() {
             continue;
         }
+        assert!(
+            target.attributes.contains_key("start_byte")
+                && target.attributes.contains_key("end_byte"),
+            "legacy semantic alias retained containment: target={target:#?} edge={edge:#?}"
+        );
+        assert_eq!(
+            (
+                edge.attributes["start_byte"].as_u64(),
+                edge.attributes["end_byte"].as_u64()
+            ),
+            (
+                target.attributes["start_byte"].as_u64(),
+                target.attributes["end_byte"].as_u64()
+            ),
+            "public containment alias must use its target declaration site: target={target:#?} edge={edge:#?}"
+        );
+    }
+    for target in extraction.nodes.iter().filter(|node| {
+        !node.string("qualified_name").is_empty()
+            && node.attributes.contains_key("start_byte")
+            && node.attributes.contains_key("end_byte")
+            && matches!(
+                node.string("symbol_kind").as_str(),
+                "module"
+                    | "namespace"
+                    | "trait"
+                    | "struct"
+                    | "enum"
+                    | "type_alias"
+                    | "class"
+                    | "interface"
+                    | "record"
+                    | "field"
+                    | "property"
+                    | "constant"
+                    | "enum_member"
+                    | "function"
+                    | "method"
+                    | "constructor"
+                    | "parameter"
+                    | "macro"
+                    | "export"
+                    | "annotation"
+            )
+    }) {
+        let occurrences = extraction
+            .edges
+            .iter()
+            .filter(|edge| {
+                matches!(edge.string("relation").as_str(), "contains" | "method")
+                    && edge.target == target.id
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            occurrences.len(),
+            1,
+            "managed target must have exactly one containment: target={target:#?} edges={occurrences:#?}"
+        );
+        let edge = occurrences[0];
         let Some(site_start) = edge
             .attributes
             .get("start_byte")
@@ -152,9 +212,10 @@ fn assert_containment_sites_belong_to_targets(extraction: &Extraction) {
         };
         let target_start = target.attributes["start_byte"].as_u64().unwrap_or_default();
         let target_end = target.attributes["end_byte"].as_u64().unwrap_or_default();
-        assert!(
-            target_start <= site_start && site_end <= target_end,
-            "site={site_start}..{site_end} target={target:#?} edge={edge:#?}"
+        assert_eq!(
+            (site_start, site_end),
+            (target_start, target_end),
+            "managed containment site must equal target declaration: target={target:#?} edge={edge:#?}"
         );
     }
 }
@@ -547,7 +608,24 @@ fn scoped_declaration_sites_rebind_every_legacy_containment_occurrence()
     let directory = tempfile::tempdir()?;
 
     let rust_path = directory.path().join("ownership.rs");
-    let rust_source = b"struct Shared {}\nmod one { trait Contract {} struct Item {} enum Mode { A } }\nmod two { trait Contract {} struct Item {} enum Mode { B } struct Shared {} }\n";
+    let rust_source = br#"struct Shared {}
+fn over(value: i32) {}
+fn over(value: &str) {}
+mod one {
+    trait Contract { fn run(&self); }
+    struct Item {}
+    enum Mode { A, B }
+    struct Shared {}
+    impl Contract for Item { fn run(&self) {} }
+}
+mod two {
+    trait Contract { fn run(&self); }
+    struct Item {}
+    enum Mode { A, B }
+    struct Shared {}
+    impl Contract for Item { fn run(&self) {} }
+}
+"#;
     let rust = Engine::default().extract_source(&rust_path, rust_source)?;
     for (target, owner) in [
         ("Shared@", None),
@@ -565,7 +643,22 @@ fn scoped_declaration_sites_rebind_every_legacy_containment_occurrence()
     assert_containment_sites_belong_to_targets(&rust);
 
     let ts_path = directory.path().join("ownership.ts");
-    let ts_source = b"class Shared {}\nnamespace One { class Item {} namespace Nested { class Leaf {} } }\nnamespace Two { class Item {} class Shared {} }\n";
+    let ts_source = br#"class Shared {}
+namespace One {
+    class Item {
+        run(value: string): void;
+        run(value: number): void {}
+    }
+    namespace Nested { class Leaf {} }
+}
+namespace Two {
+    class Item {
+        run(value: string): void;
+        run(value: number): void {}
+    }
+    class Shared {}
+}
+"#;
     let ts = Engine::default().extract_source(&ts_path, ts_source)?;
     for (target, owner) in [
         ("Shared@", None),
@@ -581,7 +674,7 @@ fn scoped_declaration_sites_rebind_every_legacy_containment_occurrence()
     assert_containment_sites_belong_to_targets(&ts);
 
     let csharp_path = directory.path().join("Ownership.cs");
-    let csharp_source = b"class Shared {}\nnamespace One { class Item {} class Outer { class Leaf {} } }\nnamespace Two { class Item {} class Shared {} }\n";
+    let csharp_source = b"class Shared {} namespace One { class Item { void Run(int value) {} } class Outer { class Leaf {} } } namespace Two { class Item { void Run(int value) {} } class Shared {} }\n";
     let csharp = Engine::default().extract_source(&csharp_path, csharp_source)?;
     for (target, owner) in [
         ("Shared@", None),
@@ -595,6 +688,21 @@ fn scoped_declaration_sites_rebind_every_legacy_containment_occurrence()
     }
     assert_unique_node_ids(&csharp);
     assert_containment_sites_belong_to_targets(&csharp);
+    assert_eq!(
+        csharp
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("relation") == "method"
+                    && csharp.nodes.iter().any(|node| {
+                        node.id == edge.target && node.string("symbol_kind") == "method"
+                    })
+            })
+            .count(),
+        2,
+        "C# semantic methods must retain exact raw method ownership for XAML consumers: edges={:#?}",
+        csharp.edges
+    );
     Ok(())
 }
 
