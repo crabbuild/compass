@@ -360,6 +360,9 @@ fn build_graph_inner(
     let prior_build_complete = BuildGuard::ensure_complete(&output_container).is_ok();
     let guard = BuildGuard::begin(&output_container)?;
     let output_dir = guard.staging_directory().to_path_buf();
+    if !options.program_analysis {
+        remove_if_exists(&output_dir.join("program.json"))?;
+    }
     if options.force || !prior_build_complete {
         remove_if_exists(&output_dir.join(BUILD_STATE_FILE))?;
     }

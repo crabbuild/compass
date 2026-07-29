@@ -459,7 +459,7 @@ fn endpoint_kinds_are_valid(
                     ))
         }
         EdgeKind::Imports => {
-            (matches!(
+            ((matches!(
                 source.kind,
                 NodeKind::File
                     | NodeKind::Module
@@ -467,9 +467,13 @@ fn endpoint_kinds_are_valid(
                     | NodeKind::Namespace
                     | NodeKind::Import
             ) || source.kind.is_callable())
+                && is_import_target(target.kind))
                 || (source.kind == NodeKind::ConfigKey && target.kind == NodeKind::Resource)
         }
-        EdgeKind::Exports => source.kind.is_container() || source.kind == NodeKind::Export,
+        EdgeKind::Exports => {
+            (source.kind.is_container() || source.kind == NodeKind::Export)
+                && is_export_target(target.kind)
+        }
         EdgeKind::Extends => source.kind.is_type() && target.kind.is_type(),
         EdgeKind::Implements => {
             source.kind.is_type()
@@ -479,7 +483,7 @@ fn endpoint_kinds_are_valid(
                 )
         }
         EdgeKind::TypeOf => target.kind.is_type(),
-        EdgeKind::Returns => source.kind.is_callable(),
+        EdgeKind::Returns => source.kind.is_callable() && is_return_target(target.kind),
         EdgeKind::Instantiates => {
             (source.kind.is_callable()
                 || source.kind.is_type()
@@ -524,9 +528,12 @@ fn endpoint_kinds_are_valid(
             matches!(
                 source.kind,
                 NodeKind::Import | NodeKind::Export | NodeKind::TypeAlias
-            )
+            ) && is_alias_target(target.kind)
         }
-        EdgeKind::Registers => is_executable(source.kind) || source.kind.is_container(),
+        EdgeKind::Registers => {
+            (is_executable(source.kind) || source.kind.is_container())
+                && is_registration_target(target.kind)
+        }
         EdgeKind::Handles => {
             is_executable(source.kind)
                 && matches!(
@@ -575,7 +582,12 @@ fn endpoint_kinds_are_valid(
             )
         }
         EdgeKind::Documents => source.kind == NodeKind::Resource,
-        EdgeKind::References | EdgeKind::DependsOn => true,
+        EdgeKind::References => {
+            is_reference_source(source.kind) && is_reference_target(target.kind)
+        }
+        EdgeKind::DependsOn => {
+            is_dependency_endpoint(source.kind) && is_dependency_endpoint(target.kind)
+        }
     }
 }
 
@@ -587,6 +599,154 @@ const fn is_call_source(kind: NodeKind) -> bool {
     kind.is_callable()
         || kind.is_type()
         || matches!(kind, NodeKind::File | NodeKind::Module | NodeKind::Variable)
+}
+
+const fn is_import_target(kind: NodeKind) -> bool {
+    kind.is_container()
+        || kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::TypeAlias
+                | NodeKind::Resource
+                | NodeKind::ConfigKey
+        )
+}
+
+const fn is_export_target(kind: NodeKind) -> bool {
+    kind.is_container()
+        || kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::TypeAlias
+                | NodeKind::Variable
+                | NodeKind::Constant
+        )
+}
+
+const fn is_return_target(kind: NodeKind) -> bool {
+    kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::TypeAlias
+                | NodeKind::Variable
+                | NodeKind::Import
+                | NodeKind::Schema
+                | NodeKind::DatabaseTable
+                | NodeKind::DatabaseView
+        )
+}
+
+const fn is_alias_target(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::TypeAlias
+                | NodeKind::Variable
+                | NodeKind::Constant
+        )
+}
+
+const fn is_registration_target(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || kind.is_container()
+        || matches!(
+            kind,
+            NodeKind::Component
+                | NodeKind::Route
+                | NodeKind::Event
+                | NodeKind::Message
+                | NodeKind::Topic
+                | NodeKind::Queue
+                | NodeKind::Job
+        )
+}
+
+const fn is_reference_source(kind: NodeKind) -> bool {
+    kind.is_container()
+        || kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::File
+                | NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::TypeAlias
+                | NodeKind::Resource
+                | NodeKind::Schema
+                | NodeKind::Query
+                | NodeKind::ConfigKey
+                | NodeKind::DatabaseTable
+                | NodeKind::DatabaseView
+                | NodeKind::DatabaseColumn
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
+        )
+}
+
+const fn is_reference_target(kind: NodeKind) -> bool {
+    kind.is_container()
+        || kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::File
+                | NodeKind::Property
+                | NodeKind::Field
+                | NodeKind::Variable
+                | NodeKind::Constant
+                | NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::TypeAlias
+                | NodeKind::Resource
+                | NodeKind::Schema
+                | NodeKind::Query
+                | NodeKind::ConfigKey
+                | NodeKind::Database
+                | NodeKind::DatabaseSchema
+                | NodeKind::DatabaseTable
+                | NodeKind::DatabaseView
+                | NodeKind::DatabaseColumn
+                | NodeKind::DatabaseIndex
+                | NodeKind::DatabaseConstraint
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
+        )
+}
+
+const fn is_dependency_endpoint(kind: NodeKind) -> bool {
+    kind.is_container()
+        || kind.is_callable()
+        || kind.is_type()
+        || matches!(
+            kind,
+            NodeKind::File
+                | NodeKind::Import
+                | NodeKind::Export
+                | NodeKind::TypeAlias
+                | NodeKind::Resource
+                | NodeKind::Schema
+                | NodeKind::Query
+                | NodeKind::ConfigKey
+                | NodeKind::Database
+                | NodeKind::DatabaseSchema
+                | NodeKind::DatabaseTable
+                | NodeKind::DatabaseView
+                | NodeKind::DatabaseProcedure
+                | NodeKind::DatabaseTrigger
+        )
 }
 
 const fn is_executable(kind: NodeKind) -> bool {

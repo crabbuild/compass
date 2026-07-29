@@ -69,9 +69,8 @@ pub fn route_id(
     operation: &str,
     route_path: &str,
     declaring_scope: &str,
-    declaration_site: Option<&SourceAnchor>,
+    target_namespace: &str,
 ) -> String {
-    let declaration_site = declaration_site.map_or_else(String::new, canonical_anchor);
     stable_id(
         ROUTE_DOMAIN,
         &[
@@ -80,7 +79,7 @@ pub fn route_id(
             &operation.to_ascii_uppercase(),
             route_path,
             declaring_scope,
-            &declaration_site,
+            target_namespace,
         ],
     )
 }

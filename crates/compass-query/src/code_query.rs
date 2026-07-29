@@ -522,11 +522,7 @@ impl CodeQueryEngine {
         response: &mut CodeQueryResponse,
     ) -> Result<(), QueryError> {
         let root = if requested_root.is_empty() {
-            self.graph_path
-                .parent()
-                .and_then(Path::parent)
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf()
+            default_repository_root(&self.graph_path)
         } else {
             PathBuf::from(requested_root)
         };
@@ -587,6 +583,12 @@ impl CodeQueryEngine {
         &self,
         response: &mut CodeQueryResponse,
     ) -> Result<CodeQueryResponse, QueryError> {
+        if self.program.is_some() {
+            join_program_evidence(response, self.program.as_ref());
+        } else {
+            response.sort_stable();
+        }
+        self.enforce_graph_bounds(response);
         if response.truncated {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::BoundedTruncation,
@@ -595,14 +597,71 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        if self.program.is_some() {
-            join_program_evidence(response, self.program.as_ref());
-        } else {
-            response.sort_stable();
-        }
+        response.sort_stable();
         enforce_response_size(response)?;
         Ok(response.clone())
     }
+
+    fn enforce_graph_bounds(&self, response: &mut CodeQueryResponse) {
+        response.sort_stable();
+        let max_nodes = usize::try_from(response.limits.max_nodes).unwrap_or(usize::MAX);
+        if response.nodes.len() > max_nodes {
+            response.nodes.truncate(max_nodes);
+            response.truncated = true;
+        }
+        let max_edges = usize::try_from(response.limits.max_edges).unwrap_or(usize::MAX);
+        if response.edges.len() > max_edges {
+            response.edges.truncate(max_edges);
+            response.truncated = true;
+        }
+        let node_ids = response
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<HashSet<_>>();
+        let edge_count = response.edges.len();
+        response.edges.retain(|edge| {
+            node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
+        });
+        response.truncated |= response.edges.len() != edge_count;
+        let edge_ids = response
+            .edges
+            .iter()
+            .map(|edge| edge.id.as_str())
+            .collect::<HashSet<_>>();
+        let path_count = response.paths.len();
+        response.paths.retain(|path| {
+            path.node_ids
+                .iter()
+                .all(|node| node_ids.contains(node.as_str()))
+                && path
+                    .edge_ids
+                    .iter()
+                    .all(|edge| edge_ids.contains(edge.as_str()))
+        });
+        response.truncated |= response.paths.len() != path_count;
+    }
+}
+
+fn default_repository_root(graph_path: &Path) -> PathBuf {
+    let Some(graph_directory) = graph_path.parent() else {
+        return PathBuf::from(".");
+    };
+    if graph_directory
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == ".compass-generations")
+    {
+        return graph_directory
+            .ancestors()
+            .nth(3)
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+    }
+    graph_directory
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
 }
 
 fn path_record(nodes: &[String], edges: &[String], graph: &GraphDocument) -> QueryPath {

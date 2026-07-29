@@ -37,6 +37,35 @@ use time::format_description::well_known::Rfc3339;
 
 const SERVER_NAME: &str = "compass";
 
+#[derive(Debug)]
+enum InvocationError {
+    InvalidParams(String),
+    Internal(String),
+}
+
+impl InvocationError {
+    fn protocol_error(self) -> ErrorData {
+        match self {
+            Self::InvalidParams(message) => ErrorData::invalid_params(message, None),
+            Self::Internal(message) => ErrorData::internal_error(message, None),
+        }
+    }
+}
+
+impl std::fmt::Display for InvocationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidParams(message) | Self::Internal(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl From<String> for InvocationError {
+    fn from(message: String) -> Self {
+        Self::InvalidParams(message)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FileKey {
     modified: Option<SystemTime>,
@@ -121,22 +150,22 @@ impl GraphStore {
         }
     }
 
-    fn resolve(&self, project_path: Option<&str>) -> PathBuf {
+    fn resolve(&self, project_path: Option<&str>) -> Result<PathBuf, String> {
         project_path.map_or_else(
-            || self.inner.default_graph.clone(),
+            || Ok(self.inner.default_graph.clone()),
             |project| {
                 let output = std::env::var_os("COMPASS_OUT")
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("compass-out"));
                 let output = Path::new(project).join(output);
-                compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
-                    .unwrap_or_else(|_| output.join("graph.json"))
+                compass_files::BuildGuard::resolve_requested_artifact(&output.join("graph.json"))
+                    .map_err(|error| error.to_string())
             },
         )
     }
 
     fn load(&self, project_path: Option<&str>) -> Result<Arc<GraphContext>, String> {
-        let path = self.resolve(project_path);
+        let path = self.resolve(project_path)?;
         let metadata =
             fs::metadata(&path).map_err(|_| format!("graph.json not found: {}", path.display()))?;
         let key = FileKey {
@@ -247,7 +276,7 @@ impl ServerHandler for CompassMcp {
         let mut arguments = request.arguments.unwrap_or_default();
         let result = self
             .invoke_result(&request.name, &mut arguments)
-            .map_err(|error| ErrorData::invalid_params(error, None))?;
+            .map_err(InvocationError::protocol_error)?;
         let mut response = result.structured_content.map_or_else(
             || CallToolResult::success(Vec::new()),
             CallToolResult::structured,
@@ -293,14 +322,19 @@ impl CompassMcp {
         &self,
         name: &str,
         arguments: &mut Map<String, Value>,
-    ) -> Result<ToolInvocation, String> {
+    ) -> Result<ToolInvocation, InvocationError> {
         if !tool_specs().iter().any(|tool| tool.name == name) {
-            return Err(format!("unknown tool: {name}"));
+            return Err(InvocationError::InvalidParams(format!(
+                "unknown tool: {name}"
+            )));
         }
         let project_path = arguments
             .remove("project_path")
             .and_then(|value| value.as_str().map(str::to_owned));
-        let context = self.store.load(project_path.as_deref())?;
+        let context = self
+            .store
+            .load(project_path.as_deref())
+            .map_err(InvocationError::Internal)?;
         if matches!(
             name,
             "search_symbols"
@@ -326,12 +360,13 @@ impl CompassMcp {
             return Ok(ToolInvocation {
                 text,
                 structured_content: Some(
-                    serde_json::to_value(response).map_err(|error| error.to_string())?,
+                    serde_json::to_value(response)
+                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
                 ),
             });
         }
         Ok(ToolInvocation {
-            text: invoke_tool(name, arguments, &context)?,
+            text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
             structured_content: None,
         })
     }
@@ -1228,6 +1263,22 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
 mod tests {
     use super::*;
 
+    #[test]
+    fn invocation_errors_preserve_json_rpc_taxonomy() {
+        assert_eq!(
+            InvocationError::InvalidParams("bad input".to_owned())
+                .protocol_error()
+                .code,
+            rmcp::model::ErrorCode::INVALID_PARAMS
+        );
+        assert_eq!(
+            InvocationError::Internal("corrupt graph".to_owned())
+                .protocol_error()
+                .code,
+            rmcp::model::ErrorCode::INTERNAL_ERROR
+        );
+    }
+
     fn sample(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         fs::write(
             path,
@@ -1275,6 +1326,31 @@ mod tests {
                 .invoke("graph_stats", Map::new())
                 .contains("Nodes: 2")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn project_path_fails_closed_on_a_malformed_generation_pointer()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let default = temp.path().join("default.json");
+        sample(&default)?;
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("compass-out"))?;
+        sample(&project.join("compass-out/graph.json"))?;
+        fs::write(
+            project.join("compass-out/.compass-active-generation"),
+            "../escape",
+        )?;
+        let server = CompassMcp::new(default);
+        let mut args = Map::new();
+        args.insert(
+            "project_path".to_owned(),
+            Value::String(project.to_string_lossy().into_owned()),
+        );
+        let result = server.invoke("graph_stats", args);
+        assert!(result.contains("generation"), "{result}");
+        assert!(!result.contains("Nodes: 2"), "{result}");
         Ok(())
     }
 

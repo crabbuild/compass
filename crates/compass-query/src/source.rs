@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Component, Path};
 
@@ -32,8 +32,8 @@ pub(crate) fn verified_source(
             format!("{}: {error}", root.display()),
         )
     })?;
-    let path = root.join(relative_path);
-    let parent = path.parent().unwrap_or(root);
+    let path = canonical_root.join(relative_path);
+    let parent = path.parent().unwrap_or(&canonical_root);
     let canonical_parent = fs::canonicalize(parent).map_err(|error| {
         QueryError::new(
             QueryErrorKind::Internal,
@@ -52,10 +52,24 @@ pub(crate) fn verified_source(
             format!("source path escapes the repository: {relative}"),
         ));
     }
-    let mut file = open_no_follow(&path).map_err(|error| {
+    let mut file = open_beneath(&canonical_root, relative_path).map_err(|error| {
+        let unsupported = error.kind() == std::io::ErrorKind::Unsupported;
+        let unsafe_path = unsupported || is_unsafe_open_error(&error);
         QueryError::new(
-            QueryErrorKind::Internal,
-            "source_read_failed",
+            if unsafe_path {
+                QueryErrorKind::UnsafePath
+            } else {
+                QueryErrorKind::Internal
+            },
+            if unsafe_path {
+                if unsupported {
+                    "source_confinement_unsupported"
+                } else {
+                    "unsafe_source_path"
+                }
+            } else {
+                "source_read_failed"
+            },
             format!("{relative}: {error}"),
         )
     })?;
@@ -92,18 +106,54 @@ pub(crate) fn verified_source(
 }
 
 #[cfg(unix)]
-fn open_no_follow(path: &Path) -> std::io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
+fn is_unsafe_open_error(error: &std::io::Error) -> bool {
+    error
+        .raw_os_error()
+        .is_some_and(|code| code == libc::ELOOP || code == libc::ENOTDIR)
 }
 
 #[cfg(not(unix))]
-fn open_no_follow(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new().read(true).open(path)
+fn is_unsafe_open_error(_error: &std::io::Error) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn open_beneath(root: &Path, relative: &Path) -> std::io::Result<File> {
+    use rustix::fs::{Mode, OFlags, open, openat};
+
+    let mut directory = open(
+        root,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        Mode::empty(),
+    )?;
+    let components = relative.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(name) = component else {
+            return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+        };
+        let last = index + 1 == components.len();
+        let flags = OFlags::RDONLY
+            | OFlags::CLOEXEC
+            | OFlags::NOFOLLOW
+            | if last {
+                OFlags::empty()
+            } else {
+                OFlags::DIRECTORY
+            };
+        directory = openat(&directory, *name, flags, Mode::empty())?;
+    }
+    Ok(File::from(directory))
+}
+
+#[cfg(not(unix))]
+fn open_beneath(_root: &Path, _relative: &Path) -> std::io::Result<File> {
+    // Safe component-by-component, no-follow traversal is not available through
+    // the standard library on these platforms. Fail closed instead of reopening
+    // the canonicalize-then-open race.
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "race-resistant source confinement is unavailable on this platform",
+    ))
 }
 
 pub(crate) enum VerifiedSource {

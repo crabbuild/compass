@@ -1045,6 +1045,7 @@ dependencies = [
 name = "compass-files"
 version = "0.1.10"
 dependencies = [
+ "atomicwrites",
  "glob",
  "md-5 0.10.6",
  "rayon",
@@ -1308,6 +1309,7 @@ dependencies = [
  "libc",
  "regex",
  "rusqlite",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -263,6 +263,32 @@ fn program_pipeline_is_opt_in_at_the_core_api() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn disabling_program_analysis_removes_the_previous_generation_program() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("lib.rs"), "pub fn visible() {}\n")?;
+    let enabled = program_options(directory.path());
+    let first = build_local_graph(&enabled)?;
+    assert!(first.output_dir.join("program.json").is_file());
+
+    let mut disabled = enabled;
+    disabled.program_analysis = false;
+    disabled.force = true;
+    let second = build_local_graph(&disabled)?;
+    assert!(!second.output_dir.join("program.json").exists());
+    assert_eq!(second.program_modules, 0);
+    let resolved = compass_files::BuildGuard::resolve_artifact(
+        &directory.path().join("compass-out"),
+        "program.json",
+    )?;
+    assert!(
+        !resolved.exists(),
+        "stale Program must not remain addressable"
+    );
+    Ok(())
+}
+
+#[test]
 fn invalid_explicit_artifact_does_not_replace_existing_program() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     fs::write(directory.path().join("lib.rs"), "pub fn stable() {}\n")?;

@@ -552,18 +552,50 @@ pub fn normalize_v1(
         let Some(NodeDetails::Route(route_details)) = node.details.as_mut() else {
             continue;
         };
-        let Some(stage) = route_details
+        let mut became_ambiguous = false;
+        if let Some(stage) = route_details
             .stages
             .iter_mut()
             .find(|stage| stage.position == position && stage.stage == edge_details.stage)
-        else {
-            continue;
-        };
-        stage.target = Some(edge.target.clone());
-        if stage.resolution == ResolutionState::Exact
-            && let [candidate] = stage.candidates.as_mut_slice()
         {
-            candidate.node_id.clone_from(&edge.target);
+            let conflicting_target = stage
+                .target
+                .as_ref()
+                .is_some_and(|target| target != &edge.target);
+            if conflicting_target || stage.resolution == ResolutionState::Ambiguous {
+                let mut targets = stage
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.node_id.clone())
+                    .collect::<BTreeSet<_>>();
+                if let Some(target) = stage.target.take() {
+                    targets.insert(target);
+                }
+                targets.insert(edge.target.clone());
+                stage.candidates = targets
+                    .into_iter()
+                    .map(|node_id| ResolutionCandidate {
+                        node_id,
+                        reason: "multiple route targets remain after semantic ID remapping"
+                            .to_owned(),
+                        confidence: EvidenceConfidence::Ambiguous,
+                        score: None,
+                        anchor: None,
+                    })
+                    .collect();
+                stage.resolution = ResolutionState::Ambiguous;
+                became_ambiguous = true;
+            } else {
+                stage.target = Some(edge.target.clone());
+                if stage.resolution == ResolutionState::Exact
+                    && let [candidate] = stage.candidates.as_mut_slice()
+                {
+                    candidate.node_id.clone_from(&edge.target);
+                }
+            }
+        }
+        if became_ambiguous {
+            route_details.resolution = ResolutionState::Ambiguous;
         }
     }
 
@@ -877,12 +909,26 @@ fn merge_normalized_node(
     existing: &mut NodeRecord,
     mut duplicate: NodeRecord,
 ) -> Result<(), GraphError> {
-    if existing.kind != duplicate.kind
-        || existing.name != duplicate.name
-        || existing.qualified_name != duplicate.qualified_name
-        || existing.language != duplicate.language
-        || existing.framework != duplicate.framework
-        || existing.source != duplicate.source
+    let existing_has_ast = existing
+        .evidence
+        .iter()
+        .any(|evidence| evidence.origin == EvidenceOrigin::Ast);
+    let duplicate_has_ast = duplicate
+        .evidence
+        .iter()
+        .any(|evidence| evidence.origin == EvidenceOrigin::Ast);
+    if duplicate_has_ast && !existing_has_ast {
+        std::mem::swap(existing, &mut duplicate);
+    }
+    let current_ast_is_authoritative =
+        existing_has_ast != duplicate_has_ast && (existing_has_ast || duplicate_has_ast);
+    if !current_ast_is_authoritative
+        && (existing.kind != duplicate.kind
+            || existing.name != duplicate.name
+            || existing.qualified_name != duplicate.qualified_name
+            || existing.language != duplicate.language
+            || existing.framework != duplicate.framework
+            || existing.source != duplicate.source)
     {
         return Err(raw_error(
             &existing.id,
@@ -915,7 +961,9 @@ fn merge_normalized_node(
     sort_dedup_serialized(&mut existing.coverage);
     existing.diagnostics.append(&mut duplicate.diagnostics);
     sort_dedup_serialized(&mut existing.diagnostics);
-    existing.details = deterministic_option(existing.details.take(), duplicate.details);
+    if !current_ast_is_authoritative {
+        existing.details = deterministic_option(existing.details.take(), duplicate.details);
+    }
     existing.community = deterministic_option(existing.community.take(), duplicate.community);
     Ok(())
 }
@@ -924,6 +972,17 @@ fn merge_normalized_edge(
     existing: &mut EdgeRecord,
     mut duplicate: EdgeRecord,
 ) -> Result<(), GraphError> {
+    let existing_has_ast = existing
+        .evidence
+        .iter()
+        .any(|evidence| evidence.origin == EvidenceOrigin::Ast);
+    let duplicate_has_ast = duplicate
+        .evidence
+        .iter()
+        .any(|evidence| evidence.origin == EvidenceOrigin::Ast);
+    if duplicate_has_ast && !existing_has_ast {
+        std::mem::swap(existing, &mut duplicate);
+    }
     if existing.source != duplicate.source
         || existing.target != duplicate.target
         || existing.kind != duplicate.kind
@@ -935,13 +994,17 @@ fn merge_normalized_edge(
             "stable edge identity collision has incompatible semantic records",
         ));
     }
+    let current_ast_is_authoritative =
+        existing_has_ast != duplicate_has_ast && (existing_has_ast || duplicate_has_ast);
     existing.evidence.append(&mut duplicate.evidence);
     sort_dedup_serialized(&mut existing.evidence);
     existing.diagnostics.append(&mut duplicate.diagnostics);
     sort_dedup_serialized(&mut existing.diagnostics);
-    existing.details = deterministic_option(existing.details.take(), duplicate.details);
-    existing.weight = deterministic_option(existing.weight.take(), duplicate.weight);
-    existing.context = deterministic_option(existing.context.take(), duplicate.context);
+    if !current_ast_is_authoritative {
+        existing.details = deterministic_option(existing.details.take(), duplicate.details);
+        existing.weight = deterministic_option(existing.weight.take(), duplicate.weight);
+        existing.context = deterministic_option(existing.context.take(), duplicate.context);
+    }
     existing.deferred |= duplicate.deferred;
     Ok(())
 }
@@ -2109,10 +2172,7 @@ fn node_details(
                         .collect()
                 })
                 .unwrap_or_default(),
-            overload_discriminator: optional_any_string(
-                attributes,
-                &["overload_discriminator", "signature_hash"],
-            ),
+            overload_discriminator: optional_string(attributes, "overload_discriminator"),
             declaring_type: optional_string(attributes, "declaring_type"),
             signature_digest: optional_string(attributes, "signature_hash"),
             implementation_digest: optional_string(attributes, "implementation_hash"),
@@ -2140,13 +2200,25 @@ fn node_identity(
             let Some(NodeDetails::Route(route)) = details else {
                 return Err(raw_error(record, "route details are missing"));
             };
+            let target_namespace = route
+                .stages
+                .iter()
+                .find(|stage| stage.stage == RouteStage::Handler)
+                .map(|stage| {
+                    if stage.reference.is_empty() {
+                        stage.target.as_deref().unwrap_or_default()
+                    } else {
+                        stage.reference.as_str()
+                    }
+                })
+                .unwrap_or_default();
             route_id(
                 framework.ok_or_else(|| raw_error(record, "route framework is missing"))?,
                 source_path,
                 &route.operation,
                 &route.path,
                 &route.declaring_scope,
-                identity_site,
+                target_namespace,
             )
         }
         NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue => {
@@ -2199,8 +2271,7 @@ fn node_identity(
             } else {
                 source_path
             };
-            let overload =
-                optional_any_string(attributes, &["overload_discriminator", "signature_hash"]);
+            let overload = optional_string(attributes, "overload_discriminator");
             let lexical_owner =
                 optional_any_string(attributes, &["lexical_owner", "declaring_scope"]);
             let disambiguator = match (lexical_owner, overload) {

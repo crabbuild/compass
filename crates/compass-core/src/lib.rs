@@ -181,8 +181,9 @@ impl LoadedGraph {
 pub fn default_graph_path() -> PathBuf {
     let output =
         PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
-    compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
-        .unwrap_or_else(|_| output.join("graph.json"))
+    let requested = output.join("graph.json");
+    compass_files::BuildGuard::resolve_requested_artifact(&requested)
+        .unwrap_or_else(|_| output.join(".compass-invalid-active-generation"))
 }
 
 fn load_learning_overlay(graph_path: &Path) -> HashMap<String, Map<String, Value>> {

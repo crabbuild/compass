@@ -84,3 +84,48 @@ fn typed_query_resolves_the_active_generation_from_the_public_path() -> Result<(
     assert!(outcome.stdout.contains("Fixture.Target"));
     Ok(())
 }
+
+#[test]
+fn typed_query_prefers_active_generation_over_stale_legacy_graph() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("compass-out");
+    support::write_typed_graph(&output)?;
+    let guard = BuildGuard::begin(&output)?;
+    support::write_typed_graph(guard.staging_directory())?;
+    guard.commit_with_artifacts(&["graph.json"])?;
+    std::fs::write(output.join("graph.json"), b"{\"stale\":true}")?;
+
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            output.join("graph.json").into_os_string(),
+        ],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(outcome.stdout.contains("Fixture.Target"));
+    Ok(())
+}
+
+#[test]
+fn typed_query_fails_closed_on_a_malformed_generation_pointer() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("compass-out");
+    support::write_typed_graph(&output)?;
+    std::fs::write(output.join(".compass-active-generation"), "../escape")?;
+
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            output.join("graph.json").into_os_string(),
+        ],
+    );
+    assert_ne!(outcome.code, 0);
+    assert!(outcome.stderr.contains("generation"));
+    Ok(())
+}

@@ -1792,6 +1792,24 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
     let envelope: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
     assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
     assert!(envelope["findings"].is_array());
+    let typed_node_deltas = ["added_nodes", "removed_nodes", "changed_nodes"]
+        .into_iter()
+        .flat_map(|key| {
+            envelope["graph_delta"][key]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        typed_node_deltas.iter().any(|node| {
+            node["label"]
+                .as_str()
+                .is_some_and(|label| !label.is_empty())
+                && node["source_file"] == "service.rs"
+        }),
+        "history-backed typed node deltas lost their name/source projection: {typed_node_deltas:?}"
+    );
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
     let versions = history.list(None)?;

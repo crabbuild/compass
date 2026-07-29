@@ -280,6 +280,169 @@ fn symbol_identity_survives_leading_source_insertions() -> Result<(), Box<dyn st
 }
 
 #[test]
+fn symbol_identity_survives_signature_digest_changes() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut before = extraction(root);
+    let mut after = extraction(root);
+    before.nodes[0]
+        .attributes
+        .insert("signature_hash".to_owned(), json!("sha256:old-signature"));
+    after.nodes[0]
+        .attributes
+        .insert("signature_hash".to_owned(), json!("sha256:new-signature"));
+    for graph in [&mut before, &mut after] {
+        graph.nodes[0]
+            .attributes
+            .insert("lexical_owner".to_owned(), json!("crate"));
+    }
+
+    let before = normalize_v1(before, build_evidence(root)?)?;
+    let after = normalize_v1(after, build_evidence(root)?)?;
+    let before_id = before
+        .nodes
+        .iter()
+        .find(|node| node.name == "caller")
+        .ok_or("missing caller")?
+        .id
+        .clone();
+    let after_id = after
+        .nodes
+        .iter()
+        .find(|node| node.name == "caller")
+        .ok_or("missing caller")?
+        .id
+        .clone();
+    assert_eq!(before_id, after_id);
+    Ok(())
+}
+
+#[test]
+fn route_identity_uses_handler_reference_instead_of_extractor_local_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let route_extraction = |target: &str| {
+        let mut route = raw_node(root, "raw:route", "GET /items", 10);
+        route
+            .attributes
+            .insert("symbol_kind".to_owned(), json!("route"));
+        route
+            .attributes
+            .insert("framework".to_owned(), json!("express"));
+        route
+            .attributes
+            .insert("operation".to_owned(), json!("GET"));
+        route.attributes.insert("path".to_owned(), json!("/items"));
+        route
+            .attributes
+            .insert("declaring_scope".to_owned(), json!("router"));
+        route.attributes.insert(
+            "stages".to_owned(),
+            json!([{
+                "stage": "handler",
+                "position": 0,
+                "reference": "handlers.listItems",
+                "resolution": "exact",
+                "target": target,
+                "candidates": []
+            }]),
+        );
+        Extraction {
+            nodes: vec![
+                route,
+                raw_node(root, "raw:a", "handler_a", 30),
+                raw_node(root, "raw:b", "handler_b", 50),
+            ],
+            ..Extraction::default()
+        }
+    };
+
+    let before = normalize_v1(route_extraction("raw:a"), build_evidence(root)?)?;
+    let after = normalize_v1(route_extraction("raw:b"), build_evidence(root)?)?;
+    let route_id = |document: &compass_model::code_graph::GraphDocument| {
+        document
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Route)
+            .map(|node| node.id.clone())
+    };
+    assert_eq!(route_id(&before), route_id(&after));
+    Ok(())
+}
+
+#[test]
+fn route_stage_becomes_ambiguous_when_multiple_edges_bind_after_remap()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut route = raw_node(root, "raw:route", "GET /items", 10);
+    route
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("route"));
+    route
+        .attributes
+        .insert("framework".to_owned(), json!("express"));
+    route
+        .attributes
+        .insert("operation".to_owned(), json!("GET"));
+    route.attributes.insert("path".to_owned(), json!("/items"));
+    route
+        .attributes
+        .insert("declaring_scope".to_owned(), json!("router"));
+    route.attributes.insert(
+        "stages".to_owned(),
+        json!([{
+            "stage": "handler",
+            "position": 0,
+            "reference": "handler",
+            "resolution": "exact",
+            "target": "raw:a",
+            "candidates": []
+        }]),
+    );
+    let route_edge = |target: &str, start| RawEdgeRecord {
+        source: "raw:route".to_owned(),
+        target: target.to_owned(),
+        attributes: Map::from_iter([
+            ("relation".to_owned(), json!("routes_to")),
+            ("stage".to_owned(), json!("handler")),
+            ("position".to_owned(), json!(0)),
+            ("operation".to_owned(), json!("GET")),
+            ("extractor".to_owned(), json!("test.routes")),
+            ("source_anchor".to_owned(), anchor(root, start)),
+        ]),
+    };
+    let extraction = Extraction {
+        nodes: vec![
+            route,
+            raw_node(root, "raw:a", "handler_a", 30),
+            raw_node(root, "raw:b", "handler_b", 50),
+        ],
+        edges: vec![route_edge("raw:a", 70), route_edge("raw:b", 90)],
+        ..Extraction::default()
+    };
+    let document = normalize_v1(extraction, build_evidence(root)?)?;
+    let route = document
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Route)
+        .ok_or("missing route")?;
+    let compass_model::code_graph::NodeDetails::Route(details) =
+        route.details.as_ref().ok_or("missing route details")?
+    else {
+        return Err("wrong route details".into());
+    };
+    assert_eq!(
+        details.stages[0].resolution,
+        compass_model::provenance::ResolutionState::Ambiguous
+    );
+    assert!(details.stages[0].target.is_none());
+    assert_eq!(details.stages[0].candidates.len(), 2);
+    Ok(())
+}
+
+#[test]
 fn normalization_rejects_unknown_aliases_and_missing_wiring_sites() {
     let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
     let root = directory.path();

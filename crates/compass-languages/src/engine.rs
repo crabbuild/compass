@@ -529,6 +529,38 @@ fn attach_definition_metadata(
             attributes.insert("source_hash".to_owned(), Value::String(source_hash));
         }
     }
+    attach_overload_discriminators(extraction);
+}
+
+fn attach_overload_discriminators(extraction: &mut Extraction) {
+    let mut groups = HashMap::<(String, String, String), Vec<usize>>::new();
+    for (index, node) in extraction.nodes.iter().enumerate() {
+        let source_file = node.string("source_file");
+        let symbol_kind = node.string("symbol_kind");
+        let qualified_name = node.string("qualified_name");
+        if source_file.is_empty() || symbol_kind.is_empty() || qualified_name.is_empty() {
+            continue;
+        }
+        groups
+            .entry((source_file, symbol_kind, qualified_name))
+            .or_default()
+            .push(index);
+    }
+    for indices in groups.values_mut().filter(|indices| indices.len() > 1) {
+        indices.sort_by_key(|index| {
+            extraction.nodes[*index]
+                .attributes
+                .get("line_start")
+                .and_then(Value::as_u64)
+                .unwrap_or(u64::MAX)
+        });
+        for (position, index) in indices.iter().enumerate() {
+            extraction.nodes[*index].attributes.insert(
+                "overload_discriminator".to_owned(),
+                Value::String(format!("overload:{position}")),
+            );
+        }
+    }
 }
 
 fn attach_basic_symbol_metadata(extraction: &mut Extraction, source: &[u8], language: &str) {
@@ -1020,10 +1052,15 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             && let Some(name) = self.function_name(node)
         {
             let parent_id = parent_class.map(|(class_id, _)| class_id);
-            let id = parent_class.map_or_else(
+            let base_id = parent_class.map_or_else(
                 || make_id(&[&self.stem, &name]),
                 |(class_id, _)| make_id(&[class_id, &name]),
             );
+            let id = if self.seen_nodes.contains(&base_id) {
+                make_id(&[&base_id, "overload", &line(node).to_string()])
+            } else {
+                base_id
+            };
             let label = if parent_class.is_some() {
                 format!(".{name}()")
             } else {

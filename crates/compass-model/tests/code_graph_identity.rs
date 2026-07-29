@@ -2,18 +2,6 @@ use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::identity::{edge_id, file_id, normalize_repository_path, route_id, symbol_id};
 use compass_model::provenance::SourceAnchor;
 
-fn anchor(file: &str, start_byte: u64, end_byte: u64) -> SourceAnchor {
-    SourceAnchor {
-        file: file.to_owned(),
-        start_byte,
-        end_byte,
-        start_line: 1,
-        start_column: 0,
-        end_line: 1,
-        end_column: 1,
-    }
-}
-
 #[test]
 fn identities_are_schema_versioned_length_prefixed_and_portable() {
     assert_eq!(
@@ -42,22 +30,27 @@ fn identities_are_schema_versioned_length_prefixed_and_portable() {
         )
     );
     assert_ne!(
-        route_id("express", "src/routes.ts", "get", "/orders", "router", None,),
+        route_id(
+            "express",
+            "src/routes.ts",
+            "get",
+            "/orders",
+            "router",
+            "orders.list",
+        ),
         route_id(
             "express",
             "src/routes.ts",
             "post",
             "/orders",
             "router",
-            None,
+            "orders.list",
         )
     );
 }
 
 #[test]
-fn route_identity_includes_the_declaration_site() {
-    let first = anchor("src/routes.ts", 10, 20);
-    let second = anchor("src/routes.ts", 30, 40);
+fn route_identity_uses_semantic_target_namespace() {
     assert_ne!(
         route_id(
             "express",
@@ -65,7 +58,7 @@ fn route_identity_includes_the_declaration_site() {
             "get",
             "/orders",
             "router",
-            Some(&first),
+            "orders.list",
         ),
         route_id(
             "express",
@@ -73,7 +66,7 @@ fn route_identity_includes_the_declaration_site() {
             "get",
             "/orders",
             "router",
-            Some(&second),
+            "orders.show",
         )
     );
 }

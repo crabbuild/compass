@@ -29,17 +29,18 @@ export class RepositorySession {
 
 export function resolvePublishedArtifact(outputDirectory: string, artifact: string): string {
   const legacy = path.join(outputDirectory, artifact);
-  try {
-    const generation = readFileSync(
-      path.join(outputDirectory, ".compass-active-generation"),
-      "utf8"
-    ).trim();
-    if (!/^generation-[^/\\]+$/.test(generation)) return legacy;
-    const active = path.join(outputDirectory, ".compass-generations", generation);
-    if (!statSync(active).isDirectory()) return legacy;
-    if (existsSync(path.join(active, ".compass-build-incomplete"))) return legacy;
-    return path.join(active, artifact);
-  } catch {
-    return legacy;
+  const pointer = path.join(outputDirectory, ".compass-active-generation");
+  if (!existsSync(pointer)) return legacy;
+  const generation = readFileSync(pointer, "utf8").trim();
+  if (!/^generation-[^/\\]+$/.test(generation)) {
+    throw new Error(`Invalid Compass active generation pointer: ${pointer}`);
   }
+  const active = path.join(outputDirectory, ".compass-generations", generation);
+  if (!statSync(active).isDirectory()) {
+    throw new Error(`Invalid Compass active generation directory: ${active}`);
+  }
+  if (existsSync(path.join(active, ".compass-build-incomplete"))) {
+    throw new Error(`Incomplete Compass active generation: ${active}`);
+  }
+  return path.join(active, artifact);
 }

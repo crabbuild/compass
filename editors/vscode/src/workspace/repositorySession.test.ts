@@ -36,10 +36,10 @@ describe("resolvePublishedArtifact", () => {
     await mkdir(active, { recursive: true });
     await writeFile(path.join(active, ".compass-build-incomplete"), "1");
     await writeFile(path.join(output, ".compass-active-generation"), generation);
-    expect(resolvePublishedArtifact(output, "graph.json")).toBe(path.join(output, "graph.json"));
+    expect(() => resolvePublishedArtifact(output, "graph.json")).toThrow(/incomplete/i);
 
     await writeFile(path.join(output, ".compass-active-generation"), "../escape");
-    expect(resolvePublishedArtifact(output, "graph.json")).toBe(path.join(output, "graph.json"));
+    expect(() => resolvePublishedArtifact(output, "graph.json")).toThrow(/invalid/i);
   });
 });
 

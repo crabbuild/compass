@@ -4,6 +4,7 @@ use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
     NodeTrailRequest, SearchRequest,
 };
+use compass_query::QueryErrorKind;
 use compass_query::open;
 use serde_json::{Map, Value, json};
 
@@ -50,12 +51,13 @@ pub(super) fn invoke(
     name: &str,
     arguments: &Map<String, Value>,
     graph_path: &Path,
-) -> Result<CodeQueryResponse, String> {
+) -> Result<CodeQueryResponse, super::InvocationError> {
     let cache = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache");
-    let engine = open(graph_path, None, &cache).map_err(|error| error.to_string())?;
+    let engine = open(graph_path, None, &cache)
+        .map_err(|error| super::InvocationError::Internal(error.to_string()))?;
     let limits = limits(arguments)?;
     match name {
         "search_symbols" => engine.search(SearchRequest {
@@ -101,9 +103,18 @@ pub(super) fn invoke(
             include_heuristic: boolean(arguments, "include_heuristic"),
             limits,
         }),
-        _ => return Err(format!("unknown code query tool {name}")),
+        _ => {
+            return Err(super::InvocationError::InvalidParams(format!(
+                "unknown code query tool {name}"
+            )));
+        }
     }
-    .map_err(|error| error.to_string())
+    .map_err(|error| match error.kind() {
+        QueryErrorKind::InvalidParameter | QueryErrorKind::Type | QueryErrorKind::UnsafePath => {
+            super::InvocationError::InvalidParams(error.to_string())
+        }
+        _ => super::InvocationError::Internal(error.to_string()),
+    })
 }
 
 fn limits(arguments: &Map<String, Value>) -> Result<CodeQueryLimits, String> {

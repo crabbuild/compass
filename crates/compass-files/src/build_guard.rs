@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::atomic::sync_directory;
 use crate::{FileError, io_error, write_text_atomic};
 
 const GENERATIONS_DIRECTORY: &str = ".compass-generations";
@@ -92,6 +93,23 @@ impl BuildGuard {
         Ok(Self::resolve_active_directory(output_directory)?.join(relative))
     }
 
+    /// Resolve a public artifact path while honoring a published generation before
+    /// any stale legacy-root file. Legacy files remain readable only when no active
+    /// generation pointer exists.
+    pub fn resolve_requested_artifact(path: &Path) -> Result<PathBuf, FileError> {
+        let Some(name) = path.file_name() else {
+            return Err(FileError::InvalidGenerationArtifact(path.to_path_buf()));
+        };
+        let output_directory = path.parent().unwrap_or_else(|| Path::new("."));
+        let pointer = output_directory.join(ACTIVE_GENERATION);
+        match pointer.try_exists() {
+            Ok(true) => Self::resolve_artifact(output_directory, Path::new(name)),
+            Ok(false) if path.is_file() => Ok(path.to_path_buf()),
+            Ok(false) => Self::resolve_artifact(output_directory, Path::new(name)),
+            Err(source) => Err(io_error(pointer, source)),
+        }
+    }
+
     pub fn ensure_complete(output_directory: &Path) -> Result<(), FileError> {
         let active = Self::resolve_active_directory(output_directory)?;
         let marker = active.join(INCOMPLETE_MARKER);
@@ -112,8 +130,13 @@ impl BuildGuard {
             if !path.is_file() {
                 return Err(FileError::InvalidGenerationArtifact(path));
             }
+            fs::File::open(&path)
+                .and_then(|file| file.sync_all())
+                .map_err(|source| io_error(&path, source))?;
         }
+        sync_directory(&self.generation_directory)?;
         fs::remove_file(&self.marker).map_err(|source| io_error(&self.marker, source))?;
+        sync_directory(&self.generation_directory)?;
         let pointer = self.output_directory.join(ACTIVE_GENERATION);
         let generation = self
             .generation_directory

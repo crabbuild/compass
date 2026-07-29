@@ -72,6 +72,38 @@ impl ChangeSink for ChangeCounts {
 }
 
 #[test]
+fn overloaded_methods_receive_explicit_stable_discriminators() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("Example.java");
+    let source = br#"
+class Example {
+    void run() {}
+    void run(int value) {}
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "Example::run")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("overload_discriminator"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["overload:0", "overload:1"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    Ok(())
+}
+
+#[test]
 fn generic_methods_include_their_declaring_class_in_semantic_identity() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;

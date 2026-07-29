@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
@@ -81,15 +81,7 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
 }
 
 fn resolve_generation_artifact(path: PathBuf) -> Result<PathBuf, String> {
-    if path.is_file() {
-        return Ok(path);
-    }
-    let Some(name) = path.file_name() else {
-        return Ok(path);
-    };
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    compass_files::BuildGuard::resolve_artifact(parent, Path::new(name))
-        .map_err(|error| error.to_string())
+    compass_files::BuildGuard::resolve_requested_artifact(&path).map_err(|error| error.to_string())
 }
 
 fn limits(args: &[String]) -> Result<CodeQueryLimits, String> {

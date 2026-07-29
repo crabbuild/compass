@@ -252,6 +252,77 @@ fn incremental_update_preserves_then_replaces_owned_semantic_facts() -> Result<(
 }
 
 #[test]
+fn incremental_mixed_origin_nodes_use_fresh_ast_typed_data() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("main.rs");
+    fs::write(&source, "pub fn target() {}\n")?;
+
+    let initial_ast = Engine::default().extract(&source)?;
+    let mut semantic_target = initial_ast
+        .nodes
+        .iter()
+        .find(|node| node.label() == "target()")
+        .cloned()
+        .ok_or("missing target extraction")?;
+    semantic_target.id = "semantic-target".to_owned();
+    semantic_target
+        .attributes
+        .insert("_origin".to_owned(), json!("semantic"));
+    semantic_target
+        .attributes
+        .insert("extractor".to_owned(), json!("test.semantic"));
+    semantic_target
+        .attributes
+        .insert("source_file".to_owned(), json!("main.rs"));
+    let supplemental = serde_json::to_value(Extraction {
+        nodes: vec![semantic_target],
+        ..Extraction::default()
+    })?;
+
+    let mut options = BuildOptions::new(root.to_path_buf());
+    options.no_cluster = true;
+    options.no_viz = true;
+    build_graph_with_layers(&options, None, std::slice::from_ref(&supplemental))?;
+
+    fs::write(&source, "pub fn target(value: u32) { let _ = value; }\n")?;
+    let incremental = build_graph_with_layers(&options, None, &[])?;
+    let incremental_graph =
+        compass_model::code_graph::GraphDocument::load(&incremental.output_dir.join("graph.json"))?;
+    let incremental_target = incremental_graph
+        .nodes
+        .iter()
+        .find(|node| node.name == "target" || node.label() == "target()")
+        .ok_or_else(|| format!("missing incremental target: {:?}", incremental_graph.nodes))?;
+    let incremental_signature =
+        incremental_target
+            .details
+            .as_ref()
+            .and_then(|details| match details {
+                compass_model::code_graph::NodeDetails::Symbol(symbol) => {
+                    symbol.signature.as_deref()
+                }
+                _ => None,
+            });
+    assert!(
+        incremental_signature.is_some_and(|signature| signature.contains("value")),
+        "target={incremental_target:?}"
+    );
+
+    options.force = true;
+    let clean = build_graph_with_layers(&options, None, &[supplemental])?;
+    let clean_graph =
+        compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
+    let clean_target = clean_graph
+        .nodes
+        .iter()
+        .find(|node| node.name == "target" || node.label() == "target()")
+        .ok_or("missing clean target")?;
+    assert_eq!(incremental_target.details, clean_target.details);
+    Ok(())
+}
+
+#[test]
 fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

@@ -46,6 +46,32 @@ fn callers_include_calls_and_route_bindings_while_callees_follow_calls()
 }
 
 #[test]
+fn call_queries_never_publish_edges_with_truncated_endpoints()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let response = engine.callers(CallRequest {
+        symbol: "UserService.list".to_owned(),
+        limits: CodeQueryLimits {
+            max_nodes: 1,
+            ..CodeQueryLimits::default()
+        },
+    })?;
+    let node_ids = response
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert!(response.truncated);
+    assert!(response.edges.iter().all(|edge| {
+        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
+    }));
+    Ok(())
+}
+
+#[test]
 fn callees_return_each_exact_source_site_for_parallel_calls()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
