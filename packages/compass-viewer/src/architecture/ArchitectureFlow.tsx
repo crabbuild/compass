@@ -1,380 +1,463 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  ArrowRightIcon,
+  AlertTriangleIcon,
+  ArrowDownLeftIcon,
+  ArrowUpRightIcon,
   BoxIcon,
   FileCodeIcon,
-  NetworkIcon,
-  SearchIcon
+  SearchIcon,
+  SlidersHorizontalIcon
 } from "lucide-react";
-import { Badge } from "../components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { CollectionToolbar } from "../components/workbench/CollectionToolbar";
+import type {
+  ArchitectureEvidence,
+  ArchitectureOverview,
+  ArchitectureRoutePage,
+  ArchitectureScope,
+  ArchitectureSearchPage,
+  ArchitectureSectionPage
+} from "../contracts/architecture";
 import { Pagination } from "../components/workbench/Pagination";
-import { WorkspaceState } from "../components/workbench/WorkspaceState";
-import type { CallflowViewModel } from "../contracts/callflow";
-import { paginate } from "../lib/collectionView";
-import {
-  filterSectionCalls,
-  filterSectionSymbols,
-  nodeNameMap,
-  searchArchitecture,
-  sortCalls,
-  type ArchitectureResult,
-  type CallSort
-} from "./state";
-
-const SYMBOL_PAGE_SIZE = 24;
-const CALL_PAGE_SIZE = 25;
+import { ArchitectureMap, type ArchitectureSelection } from "./ArchitectureMap";
 
 export type ArchitectureHost = {
+  setFilters(scope: ArchitectureScope, evidence: ArchitectureEvidence): void;
+  requestSection(
+    sectionId: string,
+    kind: "symbols" | "calls",
+    page: number,
+    query: string
+  ): void;
+  requestRoute(routeId: string, page: number, query: string): void;
+  search(query: string, page: number): void;
   openSource(file: string): void;
 };
 
 export function ArchitectureFlow({
-  model,
+  overview,
+  sectionPage,
+  routePage,
+  searchPage,
+  loadingMessage,
   host
 }: {
-  model: CallflowViewModel;
+  overview: ArchitectureOverview;
+  sectionPage: ArchitectureSectionPage | undefined;
+  routePage: ArchitectureRoutePage | undefined;
+  searchPage: ArchitectureSearchPage | undefined;
+  loadingMessage: string | undefined;
   host: ArchitectureHost;
 }) {
-  const sections = useMemo(
-    () => model.sections.filter((section) => section.id !== "overview"),
-    [model.sections]
+  const firstSection = overview.sections.find((section) => section.nodeCount > 0);
+  const [selection, setSelection] = useState<ArchitectureSelection>(
+    firstSection ? { kind: "section", id: firstSection.id } : undefined
   );
-  const first = sections[0]?.id ?? "overview";
-  const [sectionId, setSectionId] = useState(first);
-  const [activeTab, setActiveTab] = useState<"symbols" | "calls">("symbols");
-  const [globalQuery, setGlobalQuery] = useState("");
-  const [symbolQuery, setSymbolQuery] = useState("");
-  const [callQuery, setCallQuery] = useState("");
-  const [symbolPage, setSymbolPage] = useState(1);
-  const [callPage, setCallPage] = useState(1);
-  const [callSort, setCallSort] = useState<CallSort>({
-    column: "caller",
-    direction: "ascending"
-  });
-  const [showAllFlows, setShowAllFlows] = useState(false);
-  const section = sections.find((candidate) => candidate.id === sectionId);
-  const names = useMemo(() => nodeNameMap(model), [model]);
-  const globalResults = useMemo(
-    () => searchArchitecture(model, globalQuery),
-    [globalQuery, model]
-  );
-  const globalResultCount = globalResults.reduce(
-    (total, group) => total + group.results.length,
-    0
-  );
-  const visibleOverviewLinks = showAllFlows
-    ? model.overviewLinks
-    : model.overviewLinks.slice(0, 24);
-  const symbols = useMemo(
-    () => section ? filterSectionSymbols(section, symbolQuery) : [],
-    [section, symbolQuery]
-  );
-  const calls = useMemo(
-    () => section
-      ? sortCalls(filterSectionCalls(section, names, callQuery), names, callSort)
-      : [],
-    [callQuery, callSort, names, section]
-  );
-  const symbolResults = paginate(symbols, symbolPage, SYMBOL_PAGE_SIZE);
-  const callResults = paginate(calls, callPage, CALL_PAGE_SIZE);
+  const [sectionTab, setSectionTab] = useState<"symbols" | "calls">("symbols");
+  const [detailQuery, setDetailQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const selectSection = (id: string) => {
-    setSectionId(id);
-    setSymbolPage(1);
-    setCallPage(1);
-  };
-  const selectGlobalResult = (result: ArchitectureResult) => {
-    selectSection(result.sectionId);
-    setActiveTab(result.tab);
-    if (result.tab === "symbols") {
-      setSymbolQuery(result.query);
-    } else {
-      setCallQuery(result.query);
+  useEffect(() => {
+    if (!selection && firstSection) {
+      setSelection({ kind: "section", id: firstSection.id });
+      return;
     }
-    setGlobalQuery("");
+    if (selection?.kind === "section") {
+      host.requestSection(selection.id, sectionTab, 1, detailQuery);
+    } else if (selection?.kind === "route") {
+      host.requestRoute(selection.id, 1, detailQuery);
+    }
+  }, [detailQuery, firstSection, host, sectionTab, selection]);
+
+  const selectedSection = selection?.kind === "section"
+    ? overview.sections.find((section) => section.id === selection.id)
+    : undefined;
+  const selectedRoute = selection?.kind === "route"
+    ? overview.routes.find((route) => route.id === selection.id)
+    : undefined;
+  const displayedSectionPage = sectionPage && sectionPage.sectionId === selectedSection?.id
+    && sectionPage.kind === sectionTab ? sectionPage : undefined;
+  const displayedRoutePage = routePage?.routeId === selectedRoute?.id ? routePage : undefined;
+
+  const select = (next: Exclude<ArchitectureSelection, undefined>) => {
+    setSelection(next);
+    setDetailQuery("");
+    if (next.kind === "section") {
+      setSectionTab("symbols");
+    }
   };
-  const toggleSort = (column: CallSort["column"]) => {
-    setCallSort((current) => ({
-      column,
-      direction: current.column === column && current.direction === "ascending"
-        ? "descending"
-        : "ascending"
-    }));
-    setCallPage(1);
+
+  const updateSearch = (value: string) => {
+    setSearchQuery(value);
+    host.search(value, 1);
   };
 
   return (
-    <div className="architecture-shell">
-      <aside className="architecture-nav">
-        <header className="architecture-nav-header">
+    <div className="architecture-workspace">
+      <aside className="architecture-rail">
+        <header className="architecture-rail-header">
           <span>Architecture flow</span>
-          <h1>{model.title}</h1>
+          <h1>{overview.provenance.projectName}</h1>
+          <p>
+            {overview.statistics.visibleNodes.toLocaleString()} of{" "}
+            {overview.statistics.totalNodes.toLocaleString()} symbols visible
+          </p>
         </header>
-        <nav className="architecture-section-list" aria-label="Architecture sections">
-          {sections.map((item) => (
+        <nav aria-label="Architecture subsystems">
+          {overview.sections.map((section) => (
             <button
-              key={item.id}
+              key={section.id}
               type="button"
-              aria-current={item.id === sectionId ? "page" : undefined}
-              onClick={() => selectSection(item.id)}
+              aria-current={
+                selection?.kind === "section" && selection.id === section.id
+                  ? "page"
+                  : undefined
+              }
+              data-empty={section.nodeCount === 0 || undefined}
+              onClick={() => select({ kind: "section", id: section.id })}
             >
               <BoxIcon aria-hidden="true" />
               <span>
-                <strong>{item.name}</strong>
+                <strong>{section.name}</strong>
                 <small>
-                  {item.nodes.length.toLocaleString()} symbols ·{" "}
-                  {item.edges.length.toLocaleString()} calls
+                  {section.nodeCount.toLocaleString()} visible ·{" "}
+                  {section.totalNodeCount.toLocaleString()} total
                 </small>
               </span>
+              <i>{section.incomingCalls + section.outgoingCalls}</i>
             </button>
           ))}
         </nav>
-        <footer className="architecture-stats">
-          <span><strong>{model.statistics.nodes.toLocaleString()}</strong>nodes</span>
-          <span><strong>{model.statistics.edges.toLocaleString()}</strong>edges</span>
-          <span><strong>{model.statistics.communities.toLocaleString()}</strong>groups</span>
+        <footer className="architecture-scope-totals">
+          <span><strong>{overview.statistics.totalNodes.toLocaleString()}</strong>symbols</span>
+          <span><strong>{overview.statistics.totalCalls.toLocaleString()}</strong>calls</span>
+          <span><strong>{overview.statistics.communities.toLocaleString()}</strong>groups</span>
         </footer>
       </aside>
 
-      <main className="architecture-main">
-        <div className="architecture-global-search">
-          <label>
+      <main className="architecture-stage">
+        <header className="architecture-command-bar">
+          <div className="architecture-search">
             <SearchIcon aria-hidden="true" />
             <input
               type="search"
-              value={globalQuery}
-              placeholder="Search symbols, calls, paths, and subsystems"
-              aria-label="Search architecture"
-              onChange={(event) => setGlobalQuery(event.target.value)}
+              value={searchQuery}
+              placeholder="Search the complete architecture"
+              aria-label="Search the complete architecture"
+              onChange={(event) => updateSearch(event.target.value)}
             />
-            {globalQuery && (
-              <span role="status">{globalResultCount.toLocaleString()} matches</span>
+            {searchQuery && (
+              <span role="status">{searchPage?.total.toLocaleString() ?? "…"} matches</span>
             )}
+            {searchQuery && searchPage && (
+              <div className="architecture-search-popover" role="listbox">
+                {searchPage.items.length > 0 ? searchPage.items.map((result) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    onClick={() => {
+                      if (result.routeId) select({ kind: "route", id: result.routeId });
+                      else if (result.sectionId) {
+                        select({ kind: "section", id: result.sectionId });
+                      }
+                      if (result.sourceFile) host.openSource(result.sourceFile);
+                      setSearchQuery("");
+                    }}
+                  >
+                    <strong>{result.label}</strong>
+                    <small>{result.kind} · {result.detail}</small>
+                  </button>
+                )) : <p>No matches for “{searchQuery}”</p>}
+              </div>
+            )}
+          </div>
+          <div className="architecture-scope-switch" aria-label="Architecture source scope">
+            <button
+              type="button"
+              aria-pressed={overview.scope === "production"}
+              onClick={() => host.setFilters("production", overview.evidence)}
+            >
+              Production
+            </button>
+            <button
+              type="button"
+              aria-pressed={overview.scope === "all"}
+              onClick={() => host.setFilters("all", overview.evidence)}
+            >
+              All code
+            </button>
+          </div>
+          <label className="architecture-evidence-filter">
+            <SlidersHorizontalIcon aria-hidden="true" />
+            <span className="sr-only">Evidence</span>
+            <select
+              value={overview.evidence}
+              aria-label="Filter architecture evidence"
+              onChange={(event) =>
+                host.setFilters(overview.scope, event.target.value as ArchitectureEvidence)
+              }
+            >
+              <option value="all">All evidence</option>
+              <option value="extracted">Extracted</option>
+              <option value="inferred">Inferred</option>
+              <option value="ambiguous">Ambiguous</option>
+            </select>
           </label>
-          {globalQuery && (
-            <div className="architecture-search-results" role="listbox" aria-label="Architecture search results">
-              {globalResults.length > 0 ? globalResults.slice(0, 8).map((group) => (
-                <section
-                  key={group.sectionId}
-                  role="group"
-                  aria-label={`${group.sectionName} search results`}
-                >
-                  <h2>{group.sectionName}</h2>
-                  {group.results.slice(0, 8).map((result) => (
-                    <button
-                      key={result.id}
-                      type="button"
-                      role="option"
-                      aria-selected="false"
-                      aria-label={`${result.label} ${result.kind} in ${result.sectionName}`}
-                      onClick={() => selectGlobalResult(result)}
-                    >
-                      <span>{result.label}</span>
-                      <small>{result.kind} · {result.detail}</small>
-                    </button>
-                  ))}
-                </section>
-              )) : (
-                <p>No architecture matches for “{globalQuery}”</p>
-              )}
-            </div>
+        </header>
+
+        <div className="architecture-context-strip">
+          <strong>
+            {overview.scope === "production" ? "Production" : "All code"} ·{" "}
+            {overview.statistics.visibleNodes.toLocaleString()} of{" "}
+            {overview.statistics.totalNodes.toLocaleString()} symbols
+          </strong>
+          <span>
+            {overview.statistics.visibleCalls.toLocaleString()} visible calls ·{" "}
+            {overview.routes.length.toLocaleString()} subsystem routes
+          </span>
+          {loadingMessage && <span role="status">{loadingMessage}</span>}
+          {overview.coverage.unassigned > 0 && (
+            <span className="architecture-coverage-warning" role="status">
+              <AlertTriangleIcon aria-hidden="true" />
+              {overview.coverage.unassigned.toLocaleString()} unassigned calls disclosed
+            </span>
           )}
         </div>
 
-        <section className="architecture-overview" aria-labelledby="system-flow-heading">
-          <div className="architecture-section-heading">
-            <div>
-              <h2 id="system-flow-heading">System call flow</h2>
-              <p>Cross-subsystem relationships derived from the current Compass graph.</p>
-            </div>
-            <Badge variant="outline">
-              <NetworkIcon aria-hidden="true" /> {model.overviewLinks.length} flows
-            </Badge>
-          </div>
-          <div className="architecture-flow-grid">
-            {visibleOverviewLinks.map((link) => (
-              <button
-                type="button"
-                key={`${link.sourceSection}:${link.targetSection}`}
-                className="architecture-flow"
-                onClick={() => selectSection(link.targetSection)}
-                title={`${sectionName(model, link.sourceSection)} to ${sectionName(model, link.targetSection)}: ${link.calls} calls`}
-              >
-                <span>{sectionName(model, link.sourceSection)}</span>
-                <ArrowRightIcon aria-hidden="true" />
-                <span>{sectionName(model, link.targetSection)}</span>
-                <Badge variant="secondary">{link.calls}</Badge>
-              </button>
-            ))}
-          </div>
-          {!showAllFlows && model.overviewLinks.length > visibleOverviewLinks.length && (
-            <div className="architecture-flow-footer">
-              <p role="status">
-                Showing {visibleOverviewLinks.length} of {model.overviewLinks.length} flows
-              </p>
-              <button type="button" onClick={() => setShowAllFlows(true)}>
-                Show all {model.overviewLinks.length} flows
-              </button>
-            </div>
-          )}
-        </section>
-
-        {section && (
-          <section className="architecture-detail" aria-labelledby="section-heading">
-            <div className="architecture-section-heading">
-              <div>
-                <span className="architecture-eyebrow">Subsystem</span>
-                <h2 id="section-heading">{section.name}</h2>
-              </div>
-              <span className="architecture-detail-count">
-                {section.nodes.length.toLocaleString()} symbols ·{" "}
-                {section.edges.length.toLocaleString()} calls
-              </span>
-            </div>
-            <Tabs
-              value={activeTab}
-              onValueChange={(value) => setActiveTab(value as "symbols" | "calls")}
-            >
-              <TabsList variant="line">
-                <TabsTrigger value="symbols">
-                  Symbols <span>{section.nodes.length.toLocaleString()}</span>
-                </TabsTrigger>
-                <TabsTrigger value="calls">
-                  Calls <span>{section.edges.length.toLocaleString()}</span>
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="symbols" className="architecture-tab-content">
-                <CollectionToolbar
-                  value={symbolQuery}
-                  label={`Filter ${section.name} symbols`}
-                  placeholder="Filter names, kinds, and source paths"
-                  resultCount={symbols.length}
-                  onChange={(value) => {
-                    setSymbolQuery(value);
-                    setSymbolPage(1);
-                  }}
-                />
-                {symbolResults.items.length > 0 ? (
-                  <div className="architecture-symbol-grid">
-                    {symbolResults.items.map((node) => (
-                      <article key={node.id} className="architecture-symbol-card">
-                        <FileCodeIcon aria-hidden="true" />
-                        <div>
-                          <h3 title={node.label}>{node.label}</h3>
-                          <p>{node.kind || "symbol"} · {section.name}</p>
-                        </div>
-                        {node.sourceFile ? (
-                          <button
-                            type="button"
-                            title={node.sourceFile}
-                            onClick={() => host.openSource(node.sourceFile!)}
-                          >
-                            {node.sourceFile}
-                          </button>
-                        ) : (
-                          <span>Source not recorded</span>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <WorkspaceState
-                    kind="empty"
-                    title="No matching symbols"
-                    description={`No symbols in ${section.name} match “${symbolQuery}”.`}
-                    action={{ label: "Clear filter", onClick: () => setSymbolQuery("") }}
-                  />
-                )}
-                <Pagination
-                  {...symbolResults}
-                  label="symbols"
-                  onPageChange={setSymbolPage}
-                />
-              </TabsContent>
-              <TabsContent value="calls" className="architecture-tab-content">
-                <CollectionToolbar
-                  value={callQuery}
-                  label={`Filter ${section.name} calls`}
-                  placeholder="Filter callers, callees, relations, and evidence"
-                  resultCount={calls.length}
-                  onChange={(value) => {
-                    setCallQuery(value);
-                    setCallPage(1);
-                  }}
-                />
-                {callResults.items.length > 0 ? (
-                  <div className="architecture-call-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <SortableHeader column="caller" sort={callSort} onSort={toggleSort}>Caller</SortableHeader>
-                          <SortableHeader column="relation" sort={callSort} onSort={toggleSort}>Relation</SortableHeader>
-                          <SortableHeader column="callee" sort={callSort} onSort={toggleSort}>Callee</SortableHeader>
-                          <SortableHeader column="confidence" sort={callSort} onSort={toggleSort}>Evidence</SortableHeader>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {callResults.items.map((edge, index) => (
-                          <tr key={`${edge.source}:${edge.target}:${index}`}>
-                            <td title={names.get(edge.source) ?? edge.source}>
-                              {names.get(edge.source) ?? edge.source}
-                            </td>
-                            <td>{edge.relation}</td>
-                            <td title={names.get(edge.target) ?? edge.target}>
-                              {names.get(edge.target) ?? edge.target}
-                            </td>
-                            <td><Badge variant="outline">{edge.confidence}</Badge></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <WorkspaceState
-                    kind="empty"
-                    title="No matching calls"
-                    description={`No calls in ${section.name} match “${callQuery}”.`}
-                    action={{ label: "Clear filter", onClick: () => setCallQuery("") }}
-                  />
-                )}
-                <Pagination
-                  {...callResults}
-                  label="calls"
-                  onPageChange={setCallPage}
-                />
-              </TabsContent>
-            </Tabs>
-          </section>
-        )}
+        <ArchitectureMap
+          overview={overview}
+          selection={selection}
+          onSelect={select}
+        />
       </main>
+
+      <aside className="architecture-inspector" aria-label="Architecture selection details">
+        {selectedSection ? (
+          <SectionInspector
+            section={selectedSection}
+            page={displayedSectionPage}
+            tab={sectionTab}
+            query={detailQuery}
+            onTab={(tab) => {
+              setSectionTab(tab);
+            }}
+            onQuery={setDetailQuery}
+            onPage={(page) =>
+              host.requestSection(selectedSection.id, sectionTab, page, detailQuery)
+            }
+            onOpenSource={host.openSource}
+          />
+        ) : selectedRoute ? (
+          <RouteInspector
+            route={selectedRoute}
+            page={displayedRoutePage}
+            query={detailQuery}
+            sectionName={(id) =>
+              overview.sections.find((section) => section.id === id)?.name ?? id
+            }
+            onQuery={setDetailQuery}
+            onPage={(page) => host.requestRoute(selectedRoute.id, page, detailQuery)}
+            onOpenSource={host.openSource}
+          />
+        ) : (
+          <div className="architecture-inspector-empty">
+            Select a subsystem or directed route to inspect its complete evidence.
+          </div>
+        )}
+      </aside>
     </div>
   );
 }
 
-function SortableHeader({
-  column,
-  sort,
-  onSort,
-  children
+function SectionInspector({
+  section,
+  page,
+  tab,
+  query,
+  onTab,
+  onQuery,
+  onPage,
+  onOpenSource
 }: {
-  column: CallSort["column"];
-  sort: CallSort;
-  onSort(column: CallSort["column"]): void;
-  children: string;
+  section: ArchitectureOverview["sections"][number];
+  page: ArchitectureSectionPage | undefined;
+  tab: "symbols" | "calls";
+  query: string;
+  onTab(tab: "symbols" | "calls"): void;
+  onQuery(query: string): void;
+  onPage(page: number): void;
+  onOpenSource(file: string): void;
 }) {
-  const active = sort.column === column;
   return (
-    <th aria-sort={active ? sort.direction : "none"}>
-      <button type="button" onClick={() => onSort(column)}>
-        {children}
-        {active && <span aria-hidden="true">{sort.direction === "ascending" ? "↑" : "↓"}</span>}
-      </button>
-    </th>
+    <>
+      <header className="architecture-inspector-header">
+        <span>Subsystem</span>
+        <h2>{section.name}</h2>
+        <div className="architecture-route-metrics">
+          <span><ArrowDownLeftIcon aria-hidden="true" /> {section.incomingCalls} incoming</span>
+          <span><ArrowUpRightIcon aria-hidden="true" /> {section.outgoingCalls} outgoing</span>
+        </div>
+      </header>
+      <div className="architecture-inspector-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "symbols"}
+          onClick={() => onTab("symbols")}
+        >
+          Symbols
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "calls"}
+          onClick={() => onTab("calls")}
+        >
+          Internal calls
+        </button>
+      </div>
+      <DetailFilter value={query} onChange={onQuery} />
+      <div className="architecture-inspector-scroll">
+        {!page ? <LoadingRows /> : page.kind === "symbols" ? (
+          <div className="architecture-symbol-list">
+            {page.items.map((symbol) => (
+              <article key={symbol.id}>
+                <FileCodeIcon aria-hidden="true" />
+                <div>
+                  <strong title={symbol.label}>{symbol.label}</strong>
+                  <small>{symbol.kind || "symbol"} · {symbol.scope}</small>
+                  {symbol.sourceFile ? (
+                    <button type="button" onClick={() => onOpenSource(symbol.sourceFile!)}>
+                      {symbol.sourceFile}
+                    </button>
+                  ) : <span>Source not recorded</span>}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <CallList calls={page.items} onOpenSource={onOpenSource} />
+        )}
+      </div>
+      {page && (
+        <Pagination
+          {...page}
+          label={page.kind === "symbols" ? "symbols" : "calls"}
+          onPageChange={onPage}
+        />
+      )}
+    </>
   );
 }
 
-function sectionName(model: CallflowViewModel, id: string): string {
-  return model.sections.find((section) => section.id === id)?.name ?? id;
+function RouteInspector({
+  route,
+  page,
+  query,
+  sectionName,
+  onQuery,
+  onPage,
+  onOpenSource
+}: {
+  route: ArchitectureOverview["routes"][number];
+  page: ArchitectureRoutePage | undefined;
+  query: string;
+  sectionName(id: string): string;
+  onQuery(query: string): void;
+  onPage(page: number): void;
+  onOpenSource(file: string): void;
+}) {
+  return (
+    <>
+      <header className="architecture-inspector-header">
+        <span>Directed route</span>
+        <h2>{sectionName(route.sourceSection)} → {sectionName(route.targetSection)}</h2>
+        <p>{route.calls.toLocaleString()} complete cross-subsystem calls</p>
+        <div className="architecture-evidence-counts">
+          <span>{route.extracted} extracted</span>
+          <span>{route.inferred} inferred</span>
+          <span>{route.ambiguous} ambiguous</span>
+        </div>
+      </header>
+      <DetailFilter value={query} onChange={onQuery} />
+      <div className="architecture-inspector-scroll">
+        {page ? <CallList calls={page.items} onOpenSource={onOpenSource} /> : <LoadingRows />}
+      </div>
+      {page && <Pagination {...page} label="calls" onPageChange={onPage} />}
+    </>
+  );
+}
+
+function CallList({
+  calls,
+  onOpenSource
+}: {
+  calls: readonly {
+    id: string;
+    sourceLabel: string;
+    targetLabel: string;
+    sourceFile: string | null;
+    targetFile: string | null;
+    relation: string;
+    confidence: string;
+  }[];
+  onOpenSource(file: string): void;
+}) {
+  return calls.length > 0 ? (
+    <div className="architecture-call-list">
+      {calls.map((call) => (
+        <article key={call.id}>
+          <div>
+            <strong title={call.sourceLabel}>{call.sourceLabel}</strong>
+            <span>→</span>
+            <strong title={call.targetLabel}>{call.targetLabel}</strong>
+          </div>
+          <small>{call.relation} · {call.confidence}</small>
+          <div>
+            {call.sourceFile && (
+              <button type="button" onClick={() => onOpenSource(call.sourceFile!)}>
+                caller source
+              </button>
+            )}
+            {call.targetFile && (
+              <button type="button" onClick={() => onOpenSource(call.targetFile!)}>
+                callee source
+              </button>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  ) : (
+    <div className="architecture-inspector-empty">No calls match this filter.</div>
+  );
+}
+
+function DetailFilter({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange(value: string): void;
+}) {
+  return (
+    <label className="architecture-detail-filter">
+      <SearchIcon aria-hidden="true" />
+      <input
+        type="search"
+        value={value}
+        placeholder="Filter this selection"
+        aria-label="Filter architecture selection"
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function LoadingRows() {
+  return (
+    <div className="architecture-loading-rows" aria-label="Loading architecture details">
+      <i /><i /><i /><i />
+    </div>
+  );
 }

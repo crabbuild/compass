@@ -4600,6 +4600,894 @@ body.vscode-high-contrast-light .architecture-call-table {
   }
 }
 
+/* Architecture system map */
+.architecture-workspace {
+  --architecture-border: var(--vscode-panel-border, var(--border));
+  --architecture-surface: var(--vscode-editor-background, var(--background));
+  --architecture-raised: var(
+    --vscode-editorWidget-background,
+    var(--vscode-sideBar-background, var(--card))
+  );
+  display: grid;
+  grid-template-columns: minmax(210px, 250px) minmax(430px, 1fr) minmax(310px, 370px);
+  height: 100vh;
+  min-height: 520px;
+  overflow: hidden;
+  background: var(--architecture-surface);
+  color: var(--vscode-editor-foreground, var(--foreground));
+}
+
+.architecture-rail,
+.architecture-inspector {
+  min-width: 0;
+  min-height: 0;
+  background: var(--vscode-sideBar-background, var(--sidebar));
+}
+
+.architecture-rail {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border-right: 1px solid var(--architecture-border);
+}
+
+.architecture-rail-header,
+.architecture-inspector-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--architecture-border);
+}
+
+.architecture-rail-header > span,
+.architecture-inspector-header > span {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 700 9px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.architecture-rail-header h1,
+.architecture-inspector-header h2 {
+  margin: 7px 0 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.architecture-rail-header p,
+.architecture-inspector-header p {
+  margin: 5px 0 0;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.architecture-rail nav {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.architecture-rail nav > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.architecture-rail nav > button:hover,
+.architecture-rail nav > button:focus-visible {
+  background: var(--vscode-list-hoverBackground, var(--workbench-hover));
+}
+
+.architecture-rail nav > button[aria-current="page"] {
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, var(--ring)) 48%,
+    transparent
+  );
+  background: var(
+    --vscode-list-activeSelectionBackground,
+    var(--vscode-sideBarSectionHeader-background, var(--sidebar-accent))
+  );
+  color: var(--vscode-list-activeSelectionForeground, inherit);
+}
+
+.architecture-rail nav > button[data-empty="true"] {
+  opacity: 0.57;
+}
+
+.architecture-rail nav svg {
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-symbolIcon-moduleForeground, var(--compass-focus));
+}
+
+.architecture-rail nav strong,
+.architecture-rail nav small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-rail nav strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.architecture-rail nav small {
+  margin-top: 2px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.35 var(--compass-font-mono);
+}
+
+.architecture-rail nav i {
+  min-width: 24px;
+  padding: 2px 5px;
+  border-radius: 10px;
+  background: var(--vscode-badge-background, var(--muted));
+  color: var(--vscode-badge-foreground, var(--muted-foreground));
+  font: normal 9px/1.3 var(--compass-font-mono);
+  text-align: center;
+}
+
+.architecture-scope-totals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 10px 6px;
+  border-top: 1px solid var(--architecture-border);
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 8px;
+  text-align: center;
+}
+
+.architecture-scope-totals strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--vscode-sideBar-foreground, var(--foreground));
+  font: 600 10px/1.2 var(--compass-font-mono);
+}
+
+.architecture-stage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto 1fr;
+  overflow: hidden;
+}
+
+.architecture-command-bar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--architecture-border);
+  background: var(--architecture-surface);
+}
+
+.architecture-search {
+  position: relative;
+  min-width: 0;
+}
+
+.architecture-search > svg,
+.architecture-detail-filter > svg {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 9px;
+  width: 13px;
+  height: 13px;
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.architecture-search > input,
+.architecture-detail-filter > input,
+.architecture-evidence-filter select {
+  width: 100%;
+  height: 30px;
+  border: 1px solid var(--vscode-input-border, var(--architecture-border));
+  border-radius: 4px;
+  outline: none;
+  background: var(--vscode-input-background, var(--input));
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: 11px/1.3 var(--vscode-font-family, system-ui);
+}
+
+.architecture-search > input,
+.architecture-detail-filter > input {
+  padding: 4px 72px 4px 29px;
+}
+
+.architecture-search > input:focus,
+.architecture-detail-filter > input:focus,
+.architecture-evidence-filter select:focus {
+  border-color: var(--vscode-focusBorder, var(--ring));
+  outline: 1px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -1px;
+}
+
+.architecture-search > span {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.4 var(--compass-font-mono);
+}
+
+.architecture-search-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: min(440px, 70vh);
+  overflow: auto;
+  border: 1px solid var(--vscode-menu-border, var(--architecture-border));
+  border-radius: 5px;
+  background: var(--vscode-menu-background, var(--popover));
+  box-shadow: 0 8px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28));
+}
+
+.architecture-search-popover > button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-menu-foreground, var(--foreground));
+  text-align: left;
+}
+
+.architecture-search-popover > button:hover,
+.architecture-search-popover > button:focus-visible {
+  background: var(--vscode-menu-selectionBackground, var(--accent));
+  color: var(--vscode-menu-selectionForeground, var(--accent-foreground));
+}
+
+.architecture-search-popover strong,
+.architecture-search-popover small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-search-popover strong {
+  font-size: 11px;
+}
+
+.architecture-search-popover small {
+  margin-top: 2px;
+  font-size: 9px;
+  opacity: 0.75;
+}
+
+.architecture-search-popover p {
+  margin: 0;
+  padding: 16px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.architecture-scope-switch {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+}
+
+.architecture-scope-switch button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 10px/1.2 var(--compass-font-mono);
+}
+
+.architecture-scope-switch button + button {
+  border-left: 1px solid var(--architecture-border);
+}
+
+.architecture-scope-switch button[aria-pressed="true"] {
+  background: var(--vscode-button-secondaryBackground, var(--accent));
+  color: var(--vscode-button-secondaryForeground, var(--accent-foreground));
+}
+
+.architecture-evidence-filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.architecture-evidence-filter > svg {
+  width: 13px;
+  height: 13px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+}
+
+.architecture-evidence-filter select {
+  width: auto;
+  min-width: 110px;
+  padding: 3px 22px 3px 7px;
+}
+
+.architecture-context-strip {
+  display: flex;
+  min-height: 34px;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--architecture-border);
+  background: var(--vscode-breadcrumb-background, var(--architecture-raised));
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.3 var(--compass-font-mono);
+}
+
+.architecture-context-strip strong {
+  color: var(--vscode-foreground, var(--foreground));
+  font-weight: 600;
+}
+
+.architecture-coverage-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--vscode-editorWarning-foreground, var(--warning));
+}
+
+.architecture-coverage-warning svg {
+  width: 12px;
+  height: 12px;
+}
+
+.architecture-map-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 22%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 22%, transparent) 1px,
+      transparent 1px
+    ),
+    var(--architecture-surface);
+  background-size: 28px 28px;
+}
+
+.architecture-map-toolbar {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--architecture-border);
+  border-radius: 5px;
+  background: var(--architecture-raised);
+}
+
+.architecture-map-toolbar button {
+  display: grid;
+  width: 28px;
+  height: 27px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+}
+
+.architecture-map-toolbar button:hover {
+  background: var(--workbench-hover);
+}
+
+.architecture-map-toolbar button + button,
+.architecture-map-toolbar span + button {
+  border-left: 1px solid var(--architecture-border);
+}
+
+.architecture-map-toolbar svg {
+  width: 13px;
+  height: 13px;
+}
+
+.architecture-map-toolbar span {
+  min-width: 40px;
+  padding: 0 5px;
+  color: var(--muted-foreground);
+  font: 9px/27px var(--compass-font-mono);
+  text-align: center;
+}
+
+.architecture-map {
+  display: block;
+  width: 100%;
+  height: calc(100% - 28px);
+  min-height: 440px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.architecture-map:active {
+  cursor: grabbing;
+}
+
+.architecture-map marker path {
+  fill: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.architecture-route-line {
+  fill: none;
+  stroke: var(--vscode-textLink-foreground, var(--compass-focus));
+  opacity: 0.63;
+  transition: opacity 120ms ease, stroke-width 120ms ease;
+}
+
+.architecture-routes g[data-evidence="inferred"] .architecture-route-line {
+  stroke: var(--vscode-editorWarning-foreground, var(--warning));
+  stroke-dasharray: 7 5;
+}
+
+.architecture-route-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16px;
+  cursor: pointer;
+}
+
+.architecture-routes g[data-selected="true"] .architecture-route-line {
+  opacity: 1;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--compass-focus) 55%, transparent));
+}
+
+.architecture-routes g[data-dimmed="true"],
+.architecture-map-nodes g[data-dimmed="true"] {
+  opacity: 0.18;
+}
+
+.architecture-routes g:focus-visible .architecture-route-line {
+  stroke: var(--vscode-focusBorder, var(--ring));
+  opacity: 1;
+}
+
+.architecture-map-nodes g {
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.architecture-map-nodes rect {
+  fill: var(--vscode-editorWidget-background, var(--card));
+  stroke: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-moduleForeground, var(--compass-focus)) 58%,
+    var(--architecture-border)
+  );
+  stroke-width: 1.2px;
+}
+
+.architecture-map-nodes g:hover rect,
+.architecture-map-nodes g:focus-visible rect,
+.architecture-map-nodes g[data-selected="true"] rect {
+  fill: color-mix(
+    in srgb,
+    var(--vscode-list-activeSelectionBackground, var(--accent)) 48%,
+    var(--vscode-editorWidget-background, var(--card))
+  );
+  stroke: var(--vscode-focusBorder, var(--ring));
+  stroke-width: 2px;
+}
+
+.architecture-map-node-name {
+  fill: var(--vscode-editor-foreground, var(--foreground));
+  font: 600 12px/1.2 var(--vscode-font-family, system-ui);
+}
+
+.architecture-map-node-meta {
+  fill: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 8.5px/1.2 var(--compass-font-mono);
+}
+
+.architecture-map-legend {
+  position: absolute;
+  bottom: 7px;
+  left: 10px;
+  display: flex;
+  gap: 12px;
+  padding: 5px 7px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--architecture-raised) 92%, transparent);
+  color: var(--muted-foreground);
+  font: 8px/1.2 var(--compass-font-mono);
+}
+
+.architecture-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.architecture-map-legend i {
+  width: 18px;
+  height: 2px;
+  background: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.architecture-map-legend i[data-evidence="inferred"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--vscode-editorWarning-foreground, var(--warning)) 0 4px,
+    transparent 4px 7px
+  );
+}
+
+.architecture-map-table {
+  position: absolute;
+  z-index: 4;
+  right: 10px;
+  bottom: 7px;
+  max-width: min(620px, calc(100% - 20px));
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+  background: var(--architecture-raised);
+  font-size: 9px;
+}
+
+.architecture-map-table summary {
+  padding: 5px 8px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+
+.architecture-map-table[open] {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.architecture-map-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.architecture-map-table th,
+.architecture-map-table td {
+  padding: 5px 7px;
+  border-top: 1px solid var(--architecture-border);
+  text-align: left;
+}
+
+.architecture-map-empty {
+  display: grid;
+  min-height: 440px;
+  place-items: center;
+  padding: 30px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-align: center;
+}
+
+.architecture-inspector {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  border-left: 1px solid var(--architecture-border);
+}
+
+.architecture-route-metrics,
+.architecture-evidence-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin-top: 9px;
+  color: var(--muted-foreground);
+  font: 9px/1.3 var(--compass-font-mono);
+}
+
+.architecture-route-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.architecture-route-metrics svg {
+  width: 11px;
+  height: 11px;
+}
+
+.architecture-inspector-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--architecture-border);
+}
+
+.architecture-inspector-tabs button {
+  position: relative;
+  min-height: 32px;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.architecture-inspector-tabs button[aria-selected="true"] {
+  color: var(--foreground);
+}
+
+.architecture-inspector-tabs button[aria-selected="true"]::after {
+  position: absolute;
+  right: 10px;
+  bottom: -1px;
+  left: 10px;
+  height: 2px;
+  background: var(--vscode-focusBorder, var(--ring));
+  content: "";
+}
+
+.architecture-detail-filter {
+  position: relative;
+  display: block;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--architecture-border);
+}
+
+.architecture-detail-filter > svg {
+  left: 19px;
+}
+
+.architecture-inspector-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.architecture-symbol-list,
+.architecture-call-list {
+  display: grid;
+  gap: 6px;
+}
+
+.architecture-symbol-list article,
+.architecture-call-list article {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 5px;
+  background: var(--vscode-editorWidget-background, var(--card));
+}
+
+.architecture-symbol-list article {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.architecture-symbol-list svg {
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-symbolIcon-functionForeground, var(--compass-focus));
+}
+
+.architecture-symbol-list strong,
+.architecture-symbol-list small,
+.architecture-symbol-list article button,
+.architecture-symbol-list article span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-symbol-list strong,
+.architecture-call-list strong {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.architecture-symbol-list small,
+.architecture-call-list small {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font: 8.5px/1.35 var(--compass-font-mono);
+}
+
+.architecture-symbol-list article button,
+.architecture-symbol-list article span {
+  width: 100%;
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font: 8.5px/1.3 var(--compass-font-mono);
+  text-align: left;
+}
+
+.architecture-symbol-list article span {
+  color: var(--vscode-disabledForeground, var(--muted-foreground));
+}
+
+.architecture-call-list article > div:first-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 5px;
+  align-items: center;
+}
+
+.architecture-call-list article > div:first-child strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-call-list article > div:first-child span {
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.architecture-call-list article > div:last-child {
+  display: flex;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.architecture-call-list button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font-size: 8.5px;
+}
+
+.architecture-call-list button:hover,
+.architecture-symbol-list button:hover {
+  text-decoration: underline;
+}
+
+.architecture-inspector > .workbench-pagination {
+  padding: 7px 9px;
+  border-top: 1px solid var(--architecture-border);
+}
+
+.architecture-inspector-empty {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.architecture-loading-rows {
+  display: grid;
+  gap: 7px;
+}
+
+.architecture-loading-rows i {
+  height: 58px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 5px;
+  background: linear-gradient(
+    90deg,
+    var(--architecture-raised),
+    color-mix(in srgb, var(--architecture-raised) 72%, var(--foreground)),
+    var(--architecture-raised)
+  );
+  background-size: 240% 100%;
+  animation: architecture-row-load 1.3s ease infinite;
+}
+
+@keyframes architecture-row-load {
+  to { background-position: -140% 0; }
+}
+
+.architecture-workspace button:focus-visible,
+.architecture-workspace [role="button"]:focus-visible,
+.architecture-workspace select:focus-visible,
+.architecture-workspace input:focus-visible,
+.architecture-workspace summary:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -1px;
+}
+
+body.vscode-high-contrast .architecture-map-nodes rect,
+body.vscode-high-contrast-light .architecture-map-nodes rect,
+body.vscode-high-contrast .architecture-symbol-list article,
+body.vscode-high-contrast-light .architecture-symbol-list article,
+body.vscode-high-contrast .architecture-call-list article,
+body.vscode-high-contrast-light .architecture-call-list article {
+  stroke: var(--vscode-contrastBorder, var(--ring));
+  border-color: var(--vscode-contrastBorder, var(--ring));
+  stroke-width: 2px;
+}
+
+@media (max-width: 1100px) {
+  .architecture-workspace {
+    grid-template-columns: 210px minmax(390px, 1fr) 310px;
+  }
+
+  .architecture-command-bar {
+    grid-template-columns: minmax(220px, 1fr) auto;
+  }
+
+  .architecture-evidence-filter {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 860px) {
+  .architecture-workspace {
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+    grid-template-rows: minmax(620px, 72vh) auto;
+    overflow: auto;
+  }
+
+  .architecture-rail {
+    grid-row: 1 / span 2;
+  }
+
+  .architecture-stage {
+    min-height: 620px;
+  }
+
+  .architecture-inspector {
+    min-height: 440px;
+    border-top: 1px solid var(--architecture-border);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .architecture-workspace {
+    display: block;
+  }
+
+  .architecture-rail {
+    max-height: 310px;
+    border-right: 0;
+    border-bottom: 1px solid var(--architecture-border);
+  }
+
+  .architecture-rail nav {
+    max-height: 190px;
+  }
+
+  .architecture-stage {
+    min-height: 650px;
+  }
+
+  .architecture-command-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .architecture-evidence-filter {
+    grid-column: auto;
+  }
+
+  .architecture-map-legend {
+    display: none;
+  }
+}
+
 /* Call graph editor guide */
 .call-guide-shell {
   position: relative;

@@ -17,7 +17,7 @@ type SourceScope = ArchitectureSourceScope;
 export type PageRequest = {
   page: number;
   pageSize: number;
-  query?: string;
+  query?: string | undefined;
   scope: ArchitectureScope;
   evidence: ArchitectureEvidence;
 };
