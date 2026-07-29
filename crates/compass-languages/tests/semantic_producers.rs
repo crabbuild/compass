@@ -177,13 +177,39 @@ class Service : Base {
     }
 
     let objc = directory.path().join("Protocol.mm");
-    let objc_source = b"@protocol Renderable\n- (void)render;\n@end\n";
+    let objc_source =
+        b"@protocol BaseProtocol\n@end\n@protocol Renderable <BaseProtocol>\n- (void)render;\n@end\n";
     let objc_extraction = Engine::default().extract_source(&objc, objc_source)?;
     assert!(
         kinds(&objc_extraction).contains("protocol"),
         "nodes={:?}",
         objc_extraction.nodes
     );
+    let protocol_ids = objc_extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "protocol")
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
+    let protocol_edges = objc_extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            (edge.string("relation") == "contains" && protocol_ids.contains(&edge.target))
+                || (edge.string("relation") == "implements" && protocol_ids.contains(&edge.source))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        protocol_edges.len() >= 3,
+        "edges={:?}",
+        objc_extraction.edges
+    );
+    for edge in protocol_edges {
+        assert!(
+            edge.attributes["start_byte"].as_u64() < edge.attributes["end_byte"].as_u64(),
+            "edge={edge:?}"
+        );
+    }
     Ok(())
 }
 
@@ -264,6 +290,288 @@ fn unresolved_annotations_do_not_create_cross_file_type_relationships() -> Resul
         }),
         "edges={:?}",
         extraction.edges
+    );
+    Ok(())
+}
+
+#[test]
+fn scoped_duplicates_and_overloads_preserve_every_occurrence() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let rust_path = directory.path().join("scoped.rs");
+    let rust_source = br#"
+mod alpha { pub struct Item { pub value: u8 } }
+mod beta { pub struct Item { pub value: u16 } }
+"#;
+    let rust = Engine::default().extract_source(&rust_path, rust_source)?;
+    let rust_items = rust
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "struct" && node.label() == "Item")
+        .collect::<Vec<_>>();
+    assert_eq!(rust_items.len(), 2, "nodes={:?}", rust.nodes);
+    assert!(
+        rust_items
+            .iter()
+            .any(|node| node.string("qualified_name").contains("alpha::Item"))
+    );
+    assert!(
+        rust_items
+            .iter()
+            .any(|node| node.string("qualified_name").contains("beta::Item"))
+    );
+
+    let ts_path = directory.path().join("scoped.ts");
+    let ts_source = br#"
+namespace Alpha { export class Item { value: string; } }
+namespace Beta { export class Item { value: number; } }
+class Service {
+  constructor(value: string);
+  constructor(value: number);
+  constructor(value: string | number) {}
+  run(value: string): void;
+  run(value: number): void;
+  run(value: string | number): void {}
+}
+"#;
+    let ts = Engine::default().extract_source(&ts_path, ts_source)?;
+    let ts_items = ts
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "class" && node.label() == "Item")
+        .collect::<Vec<_>>();
+    assert_eq!(ts_items.len(), 2, "nodes={:?}", ts.nodes);
+    assert_eq!(
+        ts.nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "constructor")
+            .count(),
+        3,
+        "nodes={:?}",
+        ts.nodes
+    );
+    assert!(
+        ts.nodes
+            .iter()
+            .filter(|node| {
+                node.string("symbol_kind") == "constructor"
+                    || (node.string("symbol_kind") == "method" && node.label().contains("run"))
+            })
+            .all(|node| !node.string("overload_discriminator").is_empty())
+    );
+
+    let csharp_path = directory.path().join("Scoped.cs");
+    let csharp_source = br#"
+namespace Alpha { class Item { int value; } }
+namespace Beta { class Item { string value; } }
+class Service {
+  public Service(string value) {}
+  public Service(int value) {}
+  public void Run(string value) {}
+  public void Run(int value) {}
+}
+"#;
+    let csharp = Engine::default().extract_source(&csharp_path, csharp_source)?;
+    let csharp_items = csharp
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "class" && node.label() == "Item")
+        .collect::<Vec<_>>();
+    assert_eq!(csharp_items.len(), 2, "nodes={:?}", csharp.nodes);
+    assert_eq!(
+        csharp
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "constructor")
+            .count(),
+        2,
+        "nodes={:?}",
+        csharp.nodes
+    );
+    assert_eq!(
+        csharp
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.string("symbol_kind") == "method" && node.label().contains("Run")
+            })
+            .count(),
+        2,
+        "nodes={:?}",
+        csharp.nodes
+    );
+    Ok(())
+}
+
+#[test]
+fn semantic_modifiers_exports_decorators_and_test_attributes_are_ast_only()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let csharp = directory.path().join("Modifiers.cs");
+    let csharp_source = br#"
+class Base { public virtual void Run() {} }
+class Service : Base {
+  public string Marker = " const ";
+  public void Run() { string marker = " override "; }
+}
+"#;
+    let extraction = Engine::default().extract_source(&csharp, csharp_source)?;
+    assert!(
+        !extraction
+            .nodes
+            .iter()
+            .any(|node| node.string("symbol_kind") == "constant"),
+        "nodes={:?}",
+        extraction.nodes
+    );
+    assert!(
+        !relations(&extraction).contains("overrides"),
+        "edges={:?}",
+        extraction.edges
+    );
+
+    let ts = directory.path().join("Modifiers.ts");
+    let ts_source = br#"
+namespace ns { export function decorate(value: object) { return value; } }
+class A {}
+class B {}
+@ns.decorate()
+class Service { run() { const marker = " override "; } }
+export { A as First, B as Second, Service };
+"#;
+    let extraction = Engine::default().extract_source(&ts, ts_source)?;
+    assert!(
+        !relations(&extraction).contains("overrides"),
+        "edges={:?}",
+        extraction.edges
+    );
+    let exports = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "export")
+        .map(|node| node.label())
+        .collect::<HashSet<_>>();
+    assert!(exports.contains("First"), "nodes={:?}", extraction.nodes);
+    assert!(exports.contains("Second"), "nodes={:?}", extraction.nodes);
+    assert!(exports.contains("Service"), "nodes={:?}", extraction.nodes);
+    assert!(
+        extraction.nodes.iter().any(|node| {
+            node.string("symbol_kind") == "annotation" && node.label() == "ns.decorate"
+        }),
+        "nodes={:?}",
+        extraction.nodes
+    );
+
+    let rust = directory.path().join("attributes.rs");
+    let rust_source = br#"
+fn target() {}
+#[test]
+#[should_panic]
+fn checks_target() { target(); panic!("expected"); }
+"#;
+    let extraction = Engine::default().extract_source(&rust, rust_source)?;
+    let test = extraction
+        .nodes
+        .iter()
+        .find(|node| node.label().contains("checks_target"))
+        .ok_or("missing multi-attribute test")?;
+    assert_eq!(test.attributes["roles"], serde_json::json!(["test"]));
+    assert!(relations(&extraction).contains("tests"));
+    Ok(())
+}
+
+#[test]
+fn markdown_occurrences_fences_and_config_relationships_have_exact_ranges()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let runtime = directory.path().join("runtime.rs");
+    fs::write(&runtime, b"pub fn runtime() {}\n")?;
+    let guide = directory.path().join("guide.md");
+    fs::write(
+        &guide,
+        b"# Guide\n\n[One](runtime.rs)\n\n[Two](runtime.rs)\n\n~~~rust\n[Example](runtime.rs)\n~~~\n\n````\n[Backtick](runtime.rs)\n````\n",
+    )?;
+    let extraction = Engine::default().extract(&guide)?;
+    let documents = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "documents")
+        .collect::<Vec<_>>();
+    assert_eq!(documents.len(), 2, "edges={:?}", extraction.edges);
+    assert_ne!(
+        documents[0].attributes["start_byte"],
+        documents[1].attributes["start_byte"]
+    );
+    assert!(
+        documents.iter().all(|edge| {
+            edge.string("_origin") == "artifact"
+                && edge.attributes["start_byte"].as_u64() < edge.attributes["end_byte"].as_u64()
+        }),
+        "edges={:?}",
+        extraction.edges
+    );
+
+    let mcp = directory.path().join("mcp.json");
+    fs::write(
+        &mcp,
+        br#"{
+  "mcpServers": {
+    "runtime": {
+      "command": "node",
+      "env": {
+        "TOKEN": "do-not-publish"
+      }
+    }
+  }
+}"#,
+    )?;
+    let extraction = Engine::default().extract(&mcp)?;
+    let config = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("symbol_kind") == "config_key")
+        .ok_or("missing config key")?;
+    assert_eq!(config.attributes["start_line"], serde_json::json!(6));
+    assert!(config.attributes["start_byte"].as_u64() < config.attributes["end_byte"].as_u64());
+    assert!(!format!("{extraction:?}").contains("do-not-publish"));
+    let dependency = extraction
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "depends_on")
+        .ok_or("missing config dependency")?;
+    assert_eq!(dependency.attributes["start_line"], serde_json::json!(6));
+    Ok(())
+}
+
+#[test]
+fn semantic_inventory_reports_bounded_deterministic_work() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("large.rs");
+    let mut source = String::new();
+    for index in 0..500 {
+        source.push_str(&format!(
+            "mod m{index} {{ pub struct Item{index} {{ pub value: u64 }} }}\n"
+        ));
+    }
+    let extraction = Engine::default().extract_source(&path, source.as_bytes())?;
+    let work = extraction
+        .extensions
+        .get("_semantic_work")
+        .and_then(serde_json::Value::as_object)
+        .ok_or("missing semantic work counter")?;
+    let visits = work["ast_visits"].as_u64().ok_or("missing visits")?;
+    let lookups = work["index_lookups"].as_u64().ok_or("missing lookups")?;
+    assert!(visits < 20_000, "work={work:?}");
+    assert!(lookups < 10_000, "work={work:?}");
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.string("symbol_kind") == "struct"
+                    && node.string("qualified_name").contains("Item")
+            })
+            .count(),
+        500
     );
     Ok(())
 }

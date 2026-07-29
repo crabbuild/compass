@@ -273,12 +273,14 @@ impl<'tree> State<'_, 'tree> {
         self.add_node(id.clone(), &format!("<{name}>"), line(node));
         self.set_node_kind(&id, "protocol", node);
         self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
+        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
         for references in direct_children(node, "protocol_reference_list") {
             for base in direct_children(references, "identifier") {
                 let name = self.text(base).to_owned();
                 let target = self.ensure_named(&name);
                 if target != id {
-                    self.add_edge(&id, &target, "implements", line(node), None);
+                    self.add_edge(&id, &target, "implements", line(base), None);
+                    crate::facts::stamp_last_edge_range(&mut self.extraction, base);
                 }
             }
         }

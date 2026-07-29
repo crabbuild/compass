@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -53,18 +53,20 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
     let Some(root) = document.as_object() else {
         return Ok(failure("mcp_ingest: root is not an object"));
     };
-    let servers = root
-        .get("mcpServers")
-        .and_then(Value::as_object)
-        .or_else(|| {
-            root.get("mcp")
-                .and_then(Value::as_object)
-                .and_then(|mcp| mcp.get("servers"))
-                .and_then(Value::as_object)
-        });
-    let Some(servers) = servers else {
-        return Ok(failure("mcp_ingest: no mcpServers map"));
-    };
+    let (servers, server_prefix) =
+        if let Some(servers) = root.get("mcpServers").and_then(Value::as_object) {
+            (servers, vec!["mcpServers".to_owned()])
+        } else if let Some(servers) = root
+            .get("mcp")
+            .and_then(Value::as_object)
+            .and_then(|mcp| mcp.get("servers"))
+            .and_then(Value::as_object)
+        {
+            (servers, vec!["mcp".to_owned(), "servers".to_owned()])
+        } else {
+            return Ok(failure("mcp_ingest: no mcpServers map"));
+        };
+    let key_spans = JsonKeyScanner::new(text).scan();
 
     let source_file = path.to_string_lossy().into_owned();
     let file_id = make_id(&[&source_file]);
@@ -75,6 +77,8 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         extraction: empty(),
         seen_nodes: HashSet::new(),
         seen_edges: HashSet::new(),
+        node_index: HashMap::new(),
+        key_spans,
     };
     state.add_node(
         file_id,
@@ -82,6 +86,7 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
         "mcp_config_file",
+        Some(SourceSpan::whole(text)),
     );
     let mut server_count = 0;
     for (server_name, specification) in servers {
@@ -95,7 +100,9 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             break;
         }
         server_count += 1;
-        state.add_server(server_name, specification);
+        let mut server_path = server_prefix.clone();
+        server_path.push(server_name.clone());
+        state.add_server(server_name, specification, &server_path);
     }
     Ok(state.extraction)
 }
@@ -107,13 +114,27 @@ struct State {
     extraction: Extraction,
     seen_nodes: HashSet<String>,
     seen_edges: HashSet<(String, String, String)>,
+    node_index: HashMap<String, usize>,
+    key_spans: HashMap<Vec<String>, SourceSpan>,
 }
 
 impl State {
-    fn add_server(&mut self, server_name: &str, specification: &Map<String, Value>) {
+    fn add_server(
+        &mut self,
+        server_name: &str,
+        specification: &Map<String, Value>,
+        server_path: &[String],
+    ) {
         let server_id = make_id(&[&self.file_stem, "mcp_server", server_name]);
-        self.add_node(server_id.clone(), server_name, "mcp_server");
-        self.add_edge(&self.file_id.clone(), &server_id, "contains", None);
+        let server_span = self.key_spans.get(server_path).copied();
+        self.add_node(server_id.clone(), server_name, "mcp_server", server_span);
+        self.add_edge(
+            &self.file_id.clone(),
+            &server_id,
+            "contains",
+            None,
+            server_span,
+        );
 
         if let Some(command) = specification
             .get("command")
@@ -122,20 +143,42 @@ impl State {
             .filter(|command| !command.is_empty())
         {
             let command_id = make_id(&["mcp_command", command]);
-            self.add_node(command_id.clone(), command, "mcp_command");
-            self.add_edge(&server_id, &command_id, "references", Some("command"));
+            let mut command_path = server_path.to_vec();
+            command_path.push("command".to_owned());
+            let command_span = self.key_spans.get(&command_path).copied();
+            self.add_node(command_id.clone(), command, "mcp_command", command_span);
+            self.add_edge(
+                &server_id,
+                &command_id,
+                "references",
+                Some("command"),
+                command_span,
+            );
         }
 
         if let Some(arguments) = specification.get("args").and_then(Value::as_array)
             && let Some(package) = detect_package(arguments)
         {
             let package_id = make_id(&["mcp_package", &package]);
-            self.add_node(package_id.clone(), &package, "mcp_package");
-            self.add_edge(&server_id, &package_id, "references", Some("package"));
+            let mut args_path = server_path.to_vec();
+            args_path.push("args".to_owned());
+            let args_span = self.key_spans.get(&args_path).copied();
+            self.add_node(package_id.clone(), &package, "mcp_package", args_span);
+            self.add_edge(
+                &server_id,
+                &package_id,
+                "references",
+                Some("package"),
+                args_span,
+            );
         }
 
         if let Some(environment) = specification.get("env").and_then(Value::as_object) {
             for environment_name in environment.keys().filter(|name| !name.is_empty()) {
+                let mut environment_path = server_path.to_vec();
+                environment_path.push("env".to_owned());
+                environment_path.push(environment_name.to_string());
+                let environment_span = self.key_spans.get(&environment_path).copied();
                 let environment_id = make_id(&[
                     &self.file_stem,
                     "mcp_server",
@@ -146,16 +189,31 @@ impl State {
                 self.add_environment_node(
                     environment_id.clone(),
                     environment_name,
-                    &format!("mcpServers.{server_name}.env.{environment_name}"),
+                    &format!("{}.env.{environment_name}", server_path.join(".")),
+                    environment_span,
                 );
-                self.add_edge(&server_id, &environment_id, "depends_on", None);
+                self.add_edge(
+                    &server_id,
+                    &environment_id,
+                    "depends_on",
+                    None,
+                    environment_span,
+                );
             }
         }
     }
 
-    fn add_environment_node(&mut self, id: String, label: &str, key_path: &str) {
-        self.add_node(id.clone(), label, "mcp_environment");
-        if let Some(node) = self.extraction.nodes.iter_mut().find(|node| node.id == id) {
+    fn add_environment_node(
+        &mut self,
+        id: String,
+        label: &str,
+        key_path: &str,
+        span: Option<SourceSpan>,
+    ) {
+        self.add_node(id.clone(), label, "mcp_environment", span);
+        if let Some(index) = self.node_index.get(&id).copied()
+            && let Some(node) = self.extraction.nodes.get_mut(index)
+        {
             node.attributes
                 .insert("format".to_owned(), Value::String("mcp".to_owned()));
             node.attributes
@@ -167,7 +225,7 @@ impl State {
         }
     }
 
-    fn add_node(&mut self, id: String, label: &str, kind: &str) {
+    fn add_node(&mut self, id: String, label: &str, kind: &str, span: Option<SourceSpan>) {
         if id.is_empty() || !self.seen_nodes.insert(id.clone()) {
             return;
         }
@@ -198,13 +256,25 @@ impl State {
             "source_file".to_owned(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
+        stamp_span(&mut attributes, span.unwrap_or_default());
         attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
         attributes.insert("metadata".to_owned(), Value::Object(metadata));
-        self.extraction.nodes.push(NodeRecord { id, attributes });
+        let index = self.extraction.nodes.len();
+        self.extraction.nodes.push(NodeRecord {
+            id: id.clone(),
+            attributes,
+        });
+        self.node_index.insert(id, index);
     }
 
-    fn add_edge(&mut self, source: &str, target: &str, relation: &str, context: Option<&str>) {
+    fn add_edge(
+        &mut self,
+        source: &str,
+        target: &str,
+        relation: &str,
+        context: Option<&str>,
+        span: Option<SourceSpan>,
+    ) {
         if source.is_empty() || target.is_empty() || source == target {
             return;
         }
@@ -223,7 +293,7 @@ impl State {
             "source_file".to_owned(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".to_owned(), Value::String("L1".to_owned()));
+        stamp_span(&mut attributes, span.unwrap_or_default());
         attributes.insert("weight".to_owned(), json!(1.0));
         attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
         if let Some(context) = context {
@@ -234,6 +304,229 @@ impl State {
             target: target.to_owned(),
             attributes,
         });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SourceSpan {
+    start_byte: usize,
+    end_byte: usize,
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+impl SourceSpan {
+    fn whole(source: &str) -> Self {
+        let mut line = 1;
+        let mut column = 0;
+        for byte in source.bytes() {
+            if byte == b'\n' {
+                line += 1;
+                column = 0;
+            } else {
+                column += 1;
+            }
+        }
+        Self {
+            start_byte: 0,
+            end_byte: source.len(),
+            start_line: 1,
+            start_column: 0,
+            end_line: line,
+            end_column: column,
+        }
+    }
+}
+
+impl Default for SourceSpan {
+    fn default() -> Self {
+        Self {
+            start_byte: 0,
+            end_byte: 0,
+            start_line: 1,
+            start_column: 0,
+            end_line: 1,
+            end_column: 0,
+        }
+    }
+}
+
+fn stamp_span(attributes: &mut Map<String, Value>, span: SourceSpan) {
+    attributes.insert(
+        "source_location".to_owned(),
+        Value::String(format!("L{}", span.start_line)),
+    );
+    attributes.insert("start_byte".to_owned(), json!(span.start_byte));
+    attributes.insert("end_byte".to_owned(), json!(span.end_byte));
+    attributes.insert("start_line".to_owned(), json!(span.start_line));
+    attributes.insert("end_line".to_owned(), json!(span.end_line));
+    attributes.insert("start_column".to_owned(), json!(span.start_column));
+    attributes.insert("end_column".to_owned(), json!(span.end_column));
+}
+
+struct JsonKeyScanner<'source> {
+    source: &'source str,
+    bytes: &'source [u8],
+    position: usize,
+    line: usize,
+    column: usize,
+    spans: HashMap<Vec<String>, SourceSpan>,
+}
+
+impl<'source> JsonKeyScanner<'source> {
+    fn new(source: &'source str) -> Self {
+        Self {
+            source,
+            bytes: source.as_bytes(),
+            position: 0,
+            line: 1,
+            column: 0,
+            spans: HashMap::new(),
+        }
+    }
+
+    fn scan(mut self) -> HashMap<Vec<String>, SourceSpan> {
+        self.value(&mut Vec::new());
+        self.spans
+    }
+
+    fn value(&mut self, path: &mut Vec<String>) {
+        self.whitespace();
+        match self.peek() {
+            Some(b'{') => self.object(path),
+            Some(b'[') => self.array(path),
+            Some(b'"') => self.skip_string(),
+            Some(_) => {
+                while self
+                    .peek()
+                    .is_some_and(|byte| !matches!(byte, b',' | b']' | b'}'))
+                {
+                    self.advance();
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn object(&mut self, path: &mut Vec<String>) {
+        self.advance();
+        loop {
+            self.whitespace();
+            if self.peek() == Some(b'}') {
+                self.advance();
+                return;
+            }
+            let Some((key, span)) = self.key() else {
+                return;
+            };
+            self.whitespace();
+            if self.peek() != Some(b':') {
+                return;
+            }
+            self.advance();
+            path.push(key);
+            self.spans.insert(path.clone(), span);
+            self.value(path);
+            path.pop();
+            self.whitespace();
+            match self.peek() {
+                Some(b',') => {
+                    self.advance();
+                }
+                Some(b'}') => {
+                    self.advance();
+                    return;
+                }
+                _ => return,
+            }
+        }
+    }
+
+    fn array(&mut self, path: &mut Vec<String>) {
+        self.advance();
+        loop {
+            self.whitespace();
+            if self.peek() == Some(b']') {
+                self.advance();
+                return;
+            }
+            self.value(path);
+            self.whitespace();
+            match self.peek() {
+                Some(b',') => {
+                    self.advance();
+                }
+                Some(b']') => {
+                    self.advance();
+                    return;
+                }
+                _ => return,
+            }
+        }
+    }
+
+    fn key(&mut self) -> Option<(String, SourceSpan)> {
+        let start_byte = self.position;
+        let start_line = self.line;
+        let start_column = self.column;
+        self.skip_string();
+        let end_byte = self.position;
+        let raw = self.source.get(start_byte..end_byte)?;
+        let key = serde_json::from_str::<String>(raw).ok()?;
+        Some((
+            key,
+            SourceSpan {
+                start_byte,
+                end_byte,
+                start_line,
+                start_column,
+                end_line: self.line,
+                end_column: self.column,
+            },
+        ))
+    }
+
+    fn skip_string(&mut self) {
+        if self.peek() != Some(b'"') {
+            return;
+        }
+        self.advance();
+        let mut escaped = false;
+        while let Some(byte) = self.peek() {
+            self.advance();
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                return;
+            }
+        }
+    }
+
+    fn whitespace(&mut self) {
+        while self.peek().is_some_and(|byte| byte.is_ascii_whitespace()) {
+            self.advance();
+        }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.position).copied()
+    }
+
+    fn advance(&mut self) {
+        let Some(byte) = self.peek() else {
+            return;
+        };
+        self.position += 1;
+        if byte == b'\n' {
+            self.line += 1;
+            self.column = 0;
+        } else {
+            self.column += 1;
+        }
     }
 }
 

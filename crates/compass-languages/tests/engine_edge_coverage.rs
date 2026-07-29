@@ -55,19 +55,19 @@ impl ChangeSink for ChangeCounts {
         .map(str::to_owned)
         .collect()
     );
-    assert_eq!(
-        methods
-            .iter()
-            .map(|node| node.string("qualified_name"))
-            .collect::<std::collections::BTreeSet<_>>(),
-        [
-            "ChangeCounts as ChangeSink::change",
-            "ExactDiffWriter as ChangeSink::change",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
-    );
+    let qualified = methods
+        .iter()
+        .map(|node| node.string("qualified_name"))
+        .collect::<Vec<_>>();
+    for expected in [
+        "ChangeCounts as ChangeSink::change(",
+        "ExactDiffWriter as ChangeSink::change(",
+    ] {
+        assert!(
+            qualified.iter().any(|name| name.starts_with(expected)),
+            "qualified={qualified:?}"
+        );
+    }
     Ok(())
 }
 

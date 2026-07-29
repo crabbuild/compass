@@ -45,7 +45,6 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             ..Extraction::default()
         },
         seen_nodes: HashSet::new(),
-        linked_targets: HashSet::new(),
         heading_stack: Vec::new(),
         heading_occurrences: HashMap::new(),
     };
@@ -59,14 +58,25 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
         None,
     );
 
-    let mut in_code_block = false;
-    for (index, text) in source.lines().enumerate() {
+    let mut fence = None;
+    let mut byte_offset = 0;
+    for (index, line_text) in source.split_inclusive('\n').enumerate() {
+        let text = line_text
+            .strip_suffix('\n')
+            .unwrap_or(line_text)
+            .strip_suffix('\r')
+            .unwrap_or_else(|| line_text.strip_suffix('\n').unwrap_or(line_text));
         let line = index + 1;
-        if text.trim().starts_with("```") {
-            in_code_block = !in_code_block;
+        if let Some(open) = fence {
+            if closes_fence(text, open) {
+                fence = None;
+            }
+            byte_offset += line_text.len();
             continue;
         }
-        if in_code_block {
+        if let Some(open) = opens_fence(text) {
+            fence = Some(open);
+            byte_offset += line_text.len();
             continue;
         }
 
@@ -78,7 +88,15 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
                 continue;
             }
             if let Some(target) = captures.get(1) {
-                state.add_link(target.as_str(), line);
+                state.add_link(
+                    target.as_str(),
+                    LinkSite {
+                        line,
+                        start_byte: byte_offset + whole.start(),
+                        end_byte: byte_offset + whole.end(),
+                        line_start: byte_offset,
+                    },
+                );
             }
         }
         for captures in WIKILINK.captures_iter(text) {
@@ -89,16 +107,33 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
                 continue;
             }
             if let Some(target) = captures.get(1) {
-                state.add_link(target.as_str(), line);
+                state.add_link(
+                    target.as_str(),
+                    LinkSite {
+                        line,
+                        start_byte: byte_offset + whole.start(),
+                        end_byte: byte_offset + whole.end(),
+                        line_start: byte_offset,
+                    },
+                );
             }
         }
         if let Some(captures) = REFERENCE_DEFINITION.captures(text)
-            && let Some(target) = captures.get(1)
+            && let (Some(whole), Some(target)) = (captures.get(0), captures.get(1))
         {
-            state.add_link(target.as_str(), line);
+            state.add_link(
+                target.as_str(),
+                LinkSite {
+                    line,
+                    start_byte: byte_offset + whole.start(),
+                    end_byte: byte_offset + whole.end(),
+                    line_start: byte_offset,
+                },
+            );
         }
 
         let Some(captures) = HEADING.captures(text) else {
+            byte_offset += line_text.len();
             continue;
         };
         let (Some(markers), Some(title)) = (captures.get(1), captures.get(2)) else {
@@ -135,6 +170,7 @@ pub(crate) fn extract(path: &Path) -> Result<Extraction, ExtractError> {
             .map_or_else(|| state.file_id.clone(), |(_, id, _)| id.clone());
         state.add_edge(parent, id.clone(), "contains", line);
         state.heading_stack.push((level, id, qualified_name));
+        byte_offset += line_text.len();
     }
 
     state
@@ -155,9 +191,16 @@ struct State<'path> {
     file_id: String,
     extraction: Extraction,
     seen_nodes: HashSet<String>,
-    linked_targets: HashSet<String>,
     heading_stack: Vec<(usize, String, String)>,
     heading_occurrences: HashMap<String, usize>,
+}
+
+#[derive(Clone, Copy)]
+struct LinkSite {
+    line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    line_start: usize,
 }
 
 impl State<'_> {
@@ -210,22 +253,97 @@ impl State<'_> {
         });
     }
 
-    fn add_link(&mut self, raw: &str, line: usize) {
+    fn add_link(&mut self, raw: &str, site: LinkSite) {
         let Some(target) = resolve_link(raw, self.path.parent().unwrap_or_else(|| Path::new("")))
         else {
             return;
         };
         let target_id = make_id(&[&target.to_string_lossy()]);
-        if target_id == self.file_id || !self.linked_targets.insert(target_id.clone()) {
+        if target_id == self.file_id {
             return;
         }
         let relation = if is_documentable_source(&target) {
+            if !target.is_file() {
+                return;
+            }
             "documents"
         } else {
             "references"
         };
-        self.add_edge(self.file_id.clone(), target_id, relation, line);
+        self.add_edge_range(self.file_id.clone(), target_id, relation, site);
     }
+
+    fn add_edge_range(&mut self, source: String, target: String, relation: &str, site: LinkSite) {
+        let mut attributes = Map::new();
+        attributes.insert("relation".to_owned(), Value::String(relation.to_owned()));
+        attributes.insert(
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        );
+        attributes.insert(
+            "source_file".to_owned(),
+            Value::String(self.source_file.clone()),
+        );
+        attributes.insert(
+            "source_location".to_owned(),
+            Value::String(format!("L{}", site.line)),
+        );
+        attributes.insert("_origin".to_owned(), Value::String("artifact".to_owned()));
+        attributes.insert("start_byte".to_owned(), json!(site.start_byte));
+        attributes.insert("end_byte".to_owned(), json!(site.end_byte));
+        attributes.insert("start_line".to_owned(), json!(site.line));
+        attributes.insert("end_line".to_owned(), json!(site.line));
+        attributes.insert(
+            "start_column".to_owned(),
+            json!(site.start_byte.saturating_sub(site.line_start)),
+        );
+        attributes.insert(
+            "end_column".to_owned(),
+            json!(site.end_byte.saturating_sub(site.line_start)),
+        );
+        attributes.insert("weight".to_owned(), json!(1.0));
+        self.extraction.edges.push(EdgeRecord {
+            source,
+            target,
+            attributes,
+        });
+    }
+}
+
+fn opens_fence(line: &str) -> Option<(u8, usize)> {
+    let bytes = line.as_bytes();
+    let indent = bytes.iter().take_while(|byte| **byte == b' ').count();
+    if indent > 3 {
+        return None;
+    }
+    let marker = *bytes.get(indent)?;
+    if !matches!(marker, b'`' | b'~') {
+        return None;
+    }
+    let length = bytes[indent..]
+        .iter()
+        .take_while(|byte| **byte == marker)
+        .count();
+    if length < 3 || (marker == b'`' && bytes[indent + length..].contains(&b'`')) {
+        return None;
+    }
+    Some((marker, length))
+}
+
+fn closes_fence(line: &str, fence: (u8, usize)) -> bool {
+    let bytes = line.as_bytes();
+    let indent = bytes.iter().take_while(|byte| **byte == b' ').count();
+    if indent > 3 || bytes.get(indent) != Some(&fence.0) {
+        return false;
+    }
+    let length = bytes[indent..]
+        .iter()
+        .take_while(|byte| **byte == fence.0)
+        .count();
+    length >= fence.1
+        && bytes[indent + length..]
+            .iter()
+            .all(|byte| byte.is_ascii_whitespace())
 }
 
 fn resolve_link(raw: &str, source_directory: &Path) -> Option<PathBuf> {

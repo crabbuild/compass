@@ -82,7 +82,7 @@ fn markdown_extracts_heading_hierarchy_and_only_local_document_links() -> Result
                 == Some("references")
         })
         .collect::<Vec<_>>();
-    assert_eq!(references.len(), 8, "references={references:#?}");
+    assert_eq!(references.len(), 9, "references={references:#?}");
     assert!(references.iter().all(|edge| {
         edge.attributes
             .get("confidence")

@@ -4,46 +4,128 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
-use crate::{Extraction, RawEdgeRecord, RawNodeRecord, file_stem, make_id};
+use crate::{Extraction, RawEdgeRecord, RawNodeRecord, make_id};
 
-pub(crate) fn enrich(
+pub(crate) fn enrich<'tree>(
     path: &Path,
     source: &[u8],
-    root: Node<'_>,
+    root: Node<'tree>,
     language: &'static str,
     extraction: &mut Extraction,
 ) {
-    let mut state = State::new(path, source, language, extraction);
+    let mut inventory = Vec::new();
+    let mut work = Work::default();
+    collect_inventory(
+        root,
+        source,
+        language,
+        &mut Vec::new(),
+        None,
+        &mut inventory,
+        &mut work,
+    );
+    let mut state = State::new(path, source, language, extraction, inventory, work);
     match language {
-        "rust" => state.rust(root),
-        "javascript" | "typescript" | "tsx" => state.typescript(root),
-        "csharp" => state.csharp(root),
+        "rust" => state.rust(),
+        "typescript" | "tsx" => state.typescript(),
+        "csharp" => state.csharp(),
         _ => {}
     }
+    state.publish_work();
 }
 
-struct State<'source, 'extraction> {
+#[derive(Clone)]
+struct Item<'tree> {
+    node: Node<'tree>,
+    scope: Vec<String>,
+    owner_ast: Option<usize>,
+    callable_ast: Option<usize>,
+}
+
+#[derive(Clone)]
+struct TypeRecord {
+    id: String,
+}
+
+#[derive(Clone)]
+struct CallableRecord {
+    id: String,
+    name: String,
+    scope: Vec<String>,
+    signature: String,
+    ast_id: usize,
+    is_test: bool,
+}
+
+#[derive(Default)]
+struct Work {
+    ast_visits: usize,
+    index_lookups: usize,
+    declarations: usize,
+}
+
+struct State<'source, 'tree, 'extraction> {
     source: &'source [u8],
     source_file: String,
-    stem: String,
     file_id: String,
     language: &'static str,
     extraction: &'extraction mut Extraction,
-    types: HashMap<String, String>,
-    callables: HashMap<String, String>,
+    inventory: Vec<Item<'tree>>,
+    inventory_index: HashMap<usize, usize>,
+    node_index: HashMap<String, usize>,
+    anchor_index: HashMap<(usize, usize), Vec<usize>>,
+    label_line_index: HashMap<(String, usize), Vec<usize>>,
+    id_anchors: HashMap<String, HashSet<(usize, usize)>>,
     seen_edges: HashSet<(String, String, String, usize, usize)>,
+    owner_ids: HashMap<usize, String>,
+    owner_ast_by_id: HashMap<String, usize>,
+    types: HashMap<String, Vec<TypeRecord>>,
+    callables: HashMap<String, Vec<CallableRecord>>,
+    callable_ast_index: HashMap<usize, CallableRecord>,
+    callables_by_owner: HashMap<usize, Vec<CallableRecord>>,
+    methods_by_owner: HashMap<(usize, String, String), Vec<String>>,
+    work: Work,
 }
 
-impl<'source, 'extraction> State<'source, 'extraction> {
+impl<'source, 'tree, 'extraction> State<'source, 'tree, 'extraction> {
     fn new(
         path: &Path,
         source: &'source [u8],
         language: &'static str,
         extraction: &'extraction mut Extraction,
+        inventory: Vec<Item<'tree>>,
+        work: Work,
     ) -> Self {
-        let source_file = path.to_string_lossy().into_owned();
-        let stem = file_stem(path);
-        let file_id = make_id(&[&source_file]);
+        let mut node_index = HashMap::new();
+        let inventory_index = inventory
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.node.id(), index))
+            .collect();
+        let mut anchor_index = HashMap::<(usize, usize), Vec<usize>>::new();
+        let mut label_line_index = HashMap::<(String, usize), Vec<usize>>::new();
+        let mut id_anchors = HashMap::<String, HashSet<(usize, usize)>>::new();
+        for (index, node) in extraction.nodes.iter().enumerate() {
+            node_index.entry(node.id.clone()).or_insert(index);
+            let line = node
+                .attributes
+                .get("source_location")
+                .and_then(Value::as_str)
+                .and_then(|value| value.strip_prefix('L'))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_default();
+            label_line_index
+                .entry((normalized_label(&node.string("label")), line))
+                .or_default()
+                .push(index);
+            if let Some(anchor) = record_anchor(node) {
+                anchor_index.entry(anchor).or_default().push(index);
+                id_anchors
+                    .entry(node.id.clone())
+                    .or_default()
+                    .insert(anchor);
+            }
+        }
         let seen_edges = extraction
             .edges
             .iter()
@@ -52,217 +134,520 @@ impl<'source, 'extraction> State<'source, 'extraction> {
                     edge.source.clone(),
                     edge.target.clone(),
                     edge.string("relation"),
-                    edge.attributes
-                        .get("start_byte")
-                        .and_then(Value::as_u64)
-                        .and_then(|value| usize::try_from(value).ok())
-                        .unwrap_or_default(),
-                    edge.attributes
-                        .get("end_byte")
-                        .and_then(Value::as_u64)
-                        .and_then(|value| usize::try_from(value).ok())
-                        .unwrap_or_default(),
+                    edge_usize(edge, "start_byte"),
+                    edge_usize(edge, "end_byte"),
                 )
             })
             .collect();
         Self {
             source,
-            source_file,
-            stem,
-            file_id,
+            source_file: path.to_string_lossy().into_owned(),
+            file_id: make_id(&[&path.to_string_lossy()]),
             language,
             extraction,
+            inventory,
+            inventory_index,
+            node_index,
+            anchor_index,
+            label_line_index,
+            id_anchors,
+            seen_edges,
+            owner_ids: HashMap::new(),
+            owner_ast_by_id: HashMap::new(),
             types: HashMap::new(),
             callables: HashMap::new(),
-            seen_edges,
+            callable_ast_index: HashMap::new(),
+            callables_by_owner: HashMap::new(),
+            methods_by_owner: HashMap::new(),
+            work,
         }
     }
 
-    fn rust(&mut self, root: Node<'_>) {
-        let declarations = descendants(
-            root,
-            &["trait_item", "struct_item", "enum_item", "type_item"],
+    fn publish_work(&mut self) {
+        self.extraction.extensions.insert(
+            "_semantic_work".to_owned(),
+            json!({
+                "ast_visits": self.work.ast_visits,
+                "index_lookups": self.work.index_lookups,
+                "declarations": self.work.declarations,
+            }),
         );
-        for declaration in &declarations {
-            let Some(name) = node_name(*declaration, self.source) else {
-                continue;
-            };
-            let kind = match declaration.kind() {
-                "trait_item" => "trait",
-                "struct_item" => "struct",
-                "enum_item" => "enum",
-                "type_item" => "type_alias",
-                _ => continue,
-            };
-            let id = make_id(&[&self.stem, &name]);
-            self.upsert_node(&id, &name, &name, kind, *declaration, None);
-            self.types.insert(name, id.clone());
-            self.edge(&self.file_id.clone(), &id, "contains", *declaration, None);
-        }
-
-        for declaration in declarations {
-            let Some(name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let Some(owner) = self.types.get(&name).cloned() else {
-                continue;
-            };
-            match declaration.kind() {
-                "struct_item" => self.rust_fields(declaration, &owner, &name),
-                "enum_item" => self.rust_variants(declaration, &owner, &name),
-                "type_item" => {
-                    if let Some(target) = declaration
-                        .child_by_field_name("type")
-                        .and_then(|node| type_name(node, self.source))
-                        .and_then(|target| self.types.get(&target).cloned())
-                    {
-                        self.edge(&owner, &target, "aliases", declaration, Some("type-alias"));
-                    }
-                }
-                "trait_item" => self.rust_trait_methods(declaration, &owner, &name),
-                _ => {}
-            }
-        }
-
-        for item in descendants(root, &["const_item"]) {
-            let Some(name) = node_name(item, self.source) else {
-                continue;
-            };
-            let id = make_id(&[&self.stem, "constant", &name]);
-            self.upsert_node(&id, &name, &name, "constant", item, None);
-            self.edge(&self.file_id.clone(), &id, "contains", item, None);
-            self.typed_edge(&id, item.child_by_field_name("type"), item);
-        }
-        for item in descendants(root, &["macro_definition"]) {
-            let Some(name) = node_name(item, self.source) else {
-                continue;
-            };
-            let id = make_id(&[&self.stem, "macro", &name]);
-            self.upsert_node(&id, &name, &name, "macro", item, None);
-            self.edge(&self.file_id.clone(), &id, "contains", item, None);
-        }
-
-        for function in descendants(root, &["function_item", "function_signature_item"]) {
-            if ancestor(function, &["trait_item", "impl_item"]).is_some() {
-                continue;
-            }
-            let Some(name) = node_name(function, self.source) else {
-                continue;
-            };
-            let id = make_id(&[&self.stem, &name]);
-            self.upsert_node(&id, &format!("{name}()"), &name, "function", function, None);
-            self.callables.insert(name.clone(), id.clone());
-            self.rust_callable_semantics(function, &id, &name);
-            if has_rust_test_attribute(function, self.source) {
-                self.mark_test(&id);
-            }
-        }
-
-        for implementation in descendants(root, &["impl_item"]) {
-            self.rust_impl(implementation);
-        }
-        self.rust_test_edges(root);
     }
 
-    fn rust_fields(&mut self, declaration: Node<'_>, owner: &str, owner_name: &str) {
-        for field in descendants(declaration, &["field_declaration"]) {
-            let Some(name) = node_name(field, self.source) else {
-                continue;
-            };
-            let id = make_id(&[owner, "field", &name]);
-            let qualified = format!("{owner_name}::{name}");
-            self.upsert_node(&id, &name, &qualified, "field", field, None);
-            self.edge(owner, &id, "contains", field, None);
-            self.typed_edge(&id, field.child_by_field_name("type"), field);
-        }
-    }
+    fn rust(&mut self) {
+        self.ensure_scopes(&["mod_item"], "module");
+        self.ensure_types(&[
+            ("trait_item", "trait"),
+            ("struct_item", "struct"),
+            ("enum_item", "enum"),
+            ("type_item", "type_alias"),
+        ]);
+        self.bind_rust_impl_owners();
 
-    fn rust_variants(&mut self, declaration: Node<'_>, owner: &str, owner_name: &str) {
-        for variant in descendants(declaration, &["enum_variant"]) {
-            let Some(name) = node_name(variant, self.source) else {
+        for item in self.items_of(&["field_declaration"]) {
+            let Some(owner) = self.closest_owner(&item) else {
                 continue;
             };
-            let id = make_id(&[owner, "variant", &name]);
-            let qualified = format!("{owner_name}::{name}");
-            let extra = Map::from_iter([(
-                "declaring_type".to_owned(),
-                Value::String(owner_name.to_owned()),
-            )]);
-            self.upsert_node(&id, &name, &qualified, "enum_member", variant, Some(extra));
-        }
-    }
-
-    fn rust_trait_methods(&mut self, declaration: Node<'_>, owner: &str, owner_name: &str) {
-        for function in descendants(declaration, &["function_item", "function_signature_item"]) {
-            if ancestor_between(function, declaration, "impl_item") {
-                continue;
-            }
-            let Some(name) = node_name(function, self.source) else {
+            let Some(name) = node_name(item.node, self.source) else {
                 continue;
             };
-            let id = make_id(&[owner, owner_name, &name]);
-            let qualified = format!("{owner_name}::{name}");
-            self.upsert_node(
+            let id = self.ensure_member(&item, &owner, &name, "field", None);
+            self.typed_edge(
                 &id,
-                &format!(".{name}()"),
-                &qualified,
-                "method",
-                function,
-                None,
+                item.node.child_by_field_name("type"),
+                item.node,
+                &item.scope,
             );
-            self.edge(owner, &id, "contains", function, None);
-            self.callables.insert(qualified.clone(), id.clone());
-            self.rust_callable_semantics(function, &id, &qualified);
         }
+        for item in self.items_of(&["enum_variant"]) {
+            let Some(owner) = self.closest_owner(&item) else {
+                continue;
+            };
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let declaring_type = self.node_qualified(&owner);
+            let extra =
+                Map::from_iter([("declaring_type".to_owned(), Value::String(declaring_type))]);
+            let id = self.ensure_member(&item, &owner, &name, "enum_member", Some(extra));
+            self.edge(&owner, &id, "contains", item.node, None);
+        }
+        for item in self.items_of(&["const_item"]) {
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let owner = self
+                .closest_owner(&item)
+                .unwrap_or_else(|| self.file_id.clone());
+            let id = self.ensure_member(&item, &owner, &name, "constant", None);
+            self.typed_edge(
+                &id,
+                item.node.child_by_field_name("type"),
+                item.node,
+                &item.scope,
+            );
+        }
+        for item in self.items_of(&["macro_definition"]) {
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let owner = self
+                .closest_owner(&item)
+                .unwrap_or_else(|| self.file_id.clone());
+            self.ensure_member(&item, &owner, &name, "macro", None);
+        }
+
+        self.ensure_rust_callables();
+        self.rust_aliases();
+        self.callable_semantics("rust");
+        self.rust_overrides();
+        self.rust_tests();
+        self.prune_coalesced_base_shadows();
     }
 
-    fn rust_impl(&mut self, implementation: Node<'_>) {
-        let Some(implemented_type) = implementation
-            .child_by_field_name("type")
-            .and_then(|node| type_name(node, self.source))
-        else {
-            return;
-        };
-        let Some(owner) = self.types.get(&implemented_type).cloned() else {
-            return;
-        };
-        let trait_name = implementation
-            .child_by_field_name("trait")
-            .and_then(|node| type_name(node, self.source));
-        let semantic_owner = trait_name.as_ref().map_or_else(
-            || implemented_type.clone(),
-            |trait_name| format!("{implemented_type} as {trait_name}"),
+    fn typescript(&mut self) {
+        self.ensure_scopes(
+            &[
+                "internal_module",
+                "module_declaration",
+                "namespace_declaration",
+            ],
+            "namespace",
         );
-        for function in descendants(implementation, &["function_item"]) {
-            if ancestor_between(function, implementation, "impl_item") {
-                continue;
-            }
-            let Some(name) = node_name(function, self.source) else {
+        self.ensure_types(&[
+            ("class_declaration", "class"),
+            ("abstract_class_declaration", "class"),
+            ("interface_declaration", "interface"),
+            ("enum_declaration", "enum"),
+            ("type_alias_declaration", "type_alias"),
+        ]);
+        self.ensure_ts_callables();
+
+        for item in self.items_of(&[
+            "public_field_definition",
+            "property_signature",
+            "abstract_property_signature",
+        ]) {
+            let Some(owner) = self.closest_owner(&item) else {
                 continue;
             };
-            let id = make_id(&[&owner, &semantic_owner, &name]);
-            let qualified = format!("{semantic_owner}::{name}");
-            self.upsert_node(
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let id = self.ensure_member(&item, &owner, &name, "property", None);
+            self.typed_edge(
                 &id,
-                &format!(".{name}()"),
-                &qualified,
-                "method",
-                function,
-                None,
+                item.node.child_by_field_name("type"),
+                item.node,
+                &item.scope,
             );
-            self.edge(&owner, &id, "contains", function, None);
-            self.callables.insert(qualified.clone(), id.clone());
-            self.rust_callable_semantics(function, &id, &qualified);
-            if let Some(trait_name) = &trait_name
-                && let Some(trait_id) = self.types.get(trait_name)
-            {
-                let target = make_id(&[trait_id, trait_name, &name]);
-                if self.has_node(&target) {
-                    self.edge(
+        }
+        self.callable_semantics("typescript");
+        self.ts_exports();
+        self.ts_decorators();
+        self.ts_overrides();
+        self.prune_coalesced_base_shadows();
+    }
+
+    fn csharp(&mut self) {
+        self.ensure_scopes(
+            &["file_scoped_namespace_declaration", "namespace_declaration"],
+            "namespace",
+        );
+        self.ensure_types(&[
+            ("class_declaration", "class"),
+            ("interface_declaration", "interface"),
+            ("enum_declaration", "enum"),
+            ("struct_declaration", "struct"),
+            ("record_declaration", "struct"),
+        ]);
+        self.ensure_csharp_callables();
+
+        for item in self.items_of(&["property_declaration"]) {
+            let Some(owner) = self.closest_owner(&item) else {
+                continue;
+            };
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let id = self.ensure_member(&item, &owner, &name, "property", None);
+            self.typed_edge(
+                &id,
+                item.node.child_by_field_name("type"),
+                item.node,
+                &item.scope,
+            );
+        }
+        for item in self.items_of(&["variable_declarator"]) {
+            let Some(field) = ancestor_of_kind(item.node, &["field_declaration"]) else {
+                continue;
+            };
+            let Some(owner) = self.closest_owner(&item) else {
+                continue;
+            };
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let kind = if has_modifier(field, "const", self.source) {
+                "constant"
+            } else {
+                "field"
+            };
+            let id = self.ensure_member(&item, &owner, &name, kind, None);
+            let declared_type = ancestor_of_kind(item.node, &["variable_declaration"])
+                .and_then(|node| node.child_by_field_name("type"));
+            self.typed_edge(&id, declared_type, item.node, &item.scope);
+        }
+        self.callable_semantics("csharp");
+        self.csharp_overrides();
+        self.prune_coalesced_base_shadows();
+    }
+
+    fn ensure_scopes(&mut self, kinds: &[&str], semantic_kind: &str) {
+        for item in self.items_of(kinds) {
+            let Some(name) = scope_node_name(item.node, self.source, self.language) else {
+                continue;
+            };
+            let qualified = qualify(&item.scope, &name);
+            let id = self.ensure_node(item.node, &name, &qualified, semantic_kind, None, None);
+            self.register_owner(item.node.id(), id.clone());
+            let owner = item
+                .owner_ast
+                .and_then(|ast| self.owner_ids.get(&ast).cloned())
+                .unwrap_or_else(|| self.file_id.clone());
+            self.edge(&owner, &id, "contains", item.node, None);
+        }
+    }
+
+    fn ensure_types(&mut self, kinds: &[(&str, &str)]) {
+        for item in self
+            .inventory
+            .clone()
+            .into_iter()
+            .filter(|item| kinds.iter().any(|(kind, _)| item.node.kind() == *kind))
+        {
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let kind = kinds
+                .iter()
+                .find_map(|(node_kind, semantic)| {
+                    (item.node.kind() == *node_kind).then_some(*semantic)
+                })
+                .unwrap_or("class");
+            let logical_name = qualify(&item.scope, &name);
+            let qualified = format!("{logical_name}@{}", item.node.start_byte());
+            let id = self.ensure_node(item.node, &name, &qualified, kind, None, None);
+            self.register_owner(item.node.id(), id.clone());
+            self.types
+                .entry(logical_name.clone())
+                .or_default()
+                .push(TypeRecord { id: id.clone() });
+            let owner = item
+                .owner_ast
+                .and_then(|ast| self.owner_ids.get(&ast).cloned())
+                .unwrap_or_else(|| self.file_id.clone());
+            self.edge(&owner, &id, "contains", item.node, None);
+        }
+    }
+
+    fn bind_rust_impl_owners(&mut self) {
+        for item in self.items_of(&["impl_item"]) {
+            let Some(type_node) = item.node.child_by_field_name("type") else {
+                continue;
+            };
+            let Some(owner) = self.resolve_type(type_node, &item.scope) else {
+                continue;
+            };
+            self.register_owner(item.node.id(), owner);
+        }
+    }
+
+    fn ensure_rust_callables(&mut self) {
+        for item in self.items_of(&["function_item", "function_signature_item"]) {
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let owner = self
+                .closest_owner(&item)
+                .unwrap_or_else(|| self.file_id.clone());
+            let is_method = item.owner_ast.is_some_and(|ast| {
+                self.item_by_ast(ast)
+                    .is_some_and(|owner| matches!(owner.node.kind(), "trait_item" | "impl_item"))
+            });
+            let kind = if is_method { "method" } else { "function" };
+            let record = self.ensure_callable(&item, &owner, &name, kind);
+            self.register_callable(record);
+        }
+    }
+
+    fn ensure_ts_callables(&mut self) {
+        for item in self.items_of(&[
+            "function_declaration",
+            "method_definition",
+            "method_signature",
+        ]) {
+            let Some(name) = node_name(item.node, self.source) else {
+                continue;
+            };
+            let owner = self
+                .closest_owner(&item)
+                .unwrap_or_else(|| self.file_id.clone());
+            let kind = if item.node.kind() == "function_declaration" {
+                "function"
+            } else if name == "constructor" {
+                "constructor"
+            } else {
+                "method"
+            };
+            let record = self.ensure_callable(&item, &owner, &name, kind);
+            self.register_callable(record);
+        }
+    }
+
+    fn ensure_csharp_callables(&mut self) {
+        for item in self.items_of(&["constructor_declaration", "method_declaration"]) {
+            let owner = self
+                .closest_owner(&item)
+                .unwrap_or_else(|| self.file_id.clone());
+            let is_constructor = item.node.kind() == "constructor_declaration";
+            let name = if is_constructor {
+                self.node_qualified(&owner)
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or("constructor")
+                    .split('@')
+                    .next()
+                    .unwrap_or("constructor")
+                    .to_owned()
+            } else if let Some(name) = node_name(item.node, self.source) {
+                name
+            } else {
+                continue;
+            };
+            let record = self.ensure_callable(
+                &item,
+                &owner,
+                &name,
+                if is_constructor {
+                    "constructor"
+                } else {
+                    "method"
+                },
+            );
+            self.register_callable(record);
+        }
+    }
+
+    fn ensure_callable(
+        &mut self,
+        item: &Item<'tree>,
+        owner: &str,
+        name: &str,
+        kind: &str,
+    ) -> CallableRecord {
+        let signature = callable_signature(item.node, self.source);
+        let logical = qualify(&item.scope, name);
+        let qualified = format!("{logical}{signature}@{}", item.node.start_byte());
+        let extra = Map::from_iter([
+            ("signature".to_owned(), Value::String(signature.clone())),
+            (
+                "overload_discriminator".to_owned(),
+                Value::String(format!("{signature}@{}", item.node.start_byte())),
+            ),
+        ]);
+        let id = self.ensure_node(
+            item.node,
+            &format!(".{name}{signature}"),
+            &qualified,
+            kind,
+            Some(&signature),
+            Some(extra),
+        );
+        self.edge(owner, &id, "contains", item.node, None);
+        let is_test = self.language == "rust" && has_rust_test_attribute(item.node, self.source);
+        if is_test {
+            self.mark_test(&id, name, item.node);
+        }
+        CallableRecord {
+            id,
+            name: name.to_owned(),
+            scope: item.scope.clone(),
+            signature,
+            ast_id: item.node.id(),
+            is_test,
+        }
+    }
+
+    fn register_callable(&mut self, record: CallableRecord) {
+        let key = qualify(&record.scope, &record.name);
+        if let Some(owner_ast) = self
+            .item_by_ast(record.ast_id)
+            .and_then(|item| item.owner_ast)
+        {
+            self.callables_by_owner
+                .entry(owner_ast)
+                .or_default()
+                .push(record.clone());
+            self.methods_by_owner
+                .entry((owner_ast, record.name.clone(), record.signature.clone()))
+                .or_default()
+                .push(record.id.clone());
+        }
+        self.callable_ast_index
+            .insert(record.ast_id, record.clone());
+        self.callables.entry(key).or_default().push(record);
+    }
+
+    fn callable_semantics(&mut self, family: &str) {
+        let callables = self
+            .callables
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        for callable in callables {
+            let Some(item) = self.item_by_ast(callable.ast_id).cloned() else {
+                continue;
+            };
+            if let Some(parameters) = item.node.child_by_field_name("parameters") {
+                let parameters = direct_named_children(parameters)
+                    .into_iter()
+                    .filter(|node| {
+                        matches!(
+                            node.kind(),
+                            "parameter"
+                                | "required_parameter"
+                                | "optional_parameter"
+                                | "rest_pattern"
+                                | "self_parameter"
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                for (position, parameter) in parameters.into_iter().enumerate() {
+                    let name = parameter_name(parameter, self.source)
+                        .unwrap_or_else(|| format!("parameter_{position}"));
+                    let extra = Map::from_iter([("position".to_owned(), json!(position))]);
+                    let id = self.ensure_node(
+                        parameter,
+                        &name,
+                        &format!(
+                            "{}::{name}@{}",
+                            self.node_qualified(&callable.id),
+                            parameter.start_byte()
+                        ),
+                        "parameter",
+                        None,
+                        Some(extra),
+                    );
+                    self.edge(&callable.id, &id, "contains", parameter, None);
+                    self.typed_edge(
                         &id,
+                        parameter.child_by_field_name("type"),
+                        parameter,
+                        &item.scope,
+                    );
+                }
+            }
+            let return_type = match family {
+                "rust" | "typescript" => item.node.child_by_field_name("return_type"),
+                "csharp" => item
+                    .node
+                    .child_by_field_name("returns")
+                    .or_else(|| item.node.child_by_field_name("type")),
+                _ => None,
+            };
+            if let Some(return_type) = return_type
+                && let Some(target) = self.resolve_type(return_type, &item.scope)
+            {
+                self.edge(
+                    &callable.id,
+                    &target,
+                    "returns",
+                    return_type,
+                    Some("return-type"),
+                );
+            }
+        }
+    }
+
+    fn rust_aliases(&mut self) {
+        for item in self.items_of(&["type_item"]) {
+            let Some(source) = self.owner_ids.get(&item.node.id()).cloned() else {
+                continue;
+            };
+            let Some(type_node) = item.node.child_by_field_name("type") else {
+                continue;
+            };
+            if let Some(target) = self.resolve_type(type_node, &item.scope) {
+                self.edge(&source, &target, "aliases", type_node, Some("type-alias"));
+            }
+        }
+    }
+
+    fn rust_overrides(&mut self) {
+        for item in self.items_of(&["impl_item"]) {
+            let Some(trait_node) = item.node.child_by_field_name("trait") else {
+                continue;
+            };
+            let Some(trait_id) = self.resolve_type(trait_node, &item.scope) else {
+                continue;
+            };
+            let methods = self
+                .callables_by_owner
+                .get(&item.node.id())
+                .cloned()
+                .unwrap_or_default();
+            for method in methods {
+                if let Some(target) =
+                    self.method_in_owner(&trait_id, &method.name, &method.signature)
+                    && let Some(site) = self.item_by_ast(method.ast_id).map(|item| item.node)
+                {
+                    self.edge(
+                        &method.id,
                         &target,
                         "overrides",
-                        function,
+                        site,
                         Some("trait-implementation"),
                     );
                 }
@@ -270,250 +655,79 @@ impl<'source, 'extraction> State<'source, 'extraction> {
         }
     }
 
-    fn rust_callable_semantics(&mut self, function: Node<'_>, id: &str, qualified: &str) {
-        if let Some(parameters) = function.child_by_field_name("parameters") {
-            for (position, parameter) in parameters
-                .named_children(&mut parameters.walk())
-                .enumerate()
-            {
-                if !matches!(parameter.kind(), "parameter" | "self_parameter") {
-                    continue;
-                }
-                let name = parameter
-                    .child_by_field_name("pattern")
-                    .and_then(|node| type_name(node, self.source))
-                    .or_else(|| node_name(parameter, self.source))
-                    .unwrap_or_else(|| format!("parameter_{position}"));
-                let parameter_id = make_id(&[id, "parameter", &position.to_string(), &name]);
-                self.upsert_node(
-                    &parameter_id,
-                    &name,
-                    &format!("{qualified}::{name}"),
-                    "parameter",
-                    parameter,
-                    None,
-                );
-                self.edge(id, &parameter_id, "contains", parameter, None);
-                self.typed_edge(
-                    &parameter_id,
-                    parameter.child_by_field_name("type"),
-                    parameter,
-                );
-            }
-        }
-        if let Some(return_type) = function.child_by_field_name("return_type")
-            && let Some(target) =
-                type_name(return_type, self.source).and_then(|name| self.types.get(&name).cloned())
-        {
-            self.edge(id, &target, "returns", return_type, Some("return-type"));
-        }
-    }
-
-    fn rust_test_edges(&mut self, root: Node<'_>) {
-        for function in descendants(root, &["function_item"]) {
-            let Some(name) = node_name(function, self.source) else {
-                continue;
-            };
-            let id = make_id(&[&self.stem, &name]);
-            if !self.is_test(&id) {
-                continue;
-            }
-            let Some(body) = function.child_by_field_name("body") else {
-                continue;
-            };
-            for call in descendants(body, &["call_expression"]) {
-                let Some(callee) = call
-                    .child_by_field_name("function")
-                    .and_then(|node| type_name(node, self.source))
-                else {
+    fn rust_tests(&mut self) {
+        let tests = self
+            .callables
+            .values()
+            .flatten()
+            .filter(|callable| callable.is_test)
+            .cloned()
+            .collect::<Vec<_>>();
+        for test in tests {
+            for item in self.inventory.clone().into_iter().filter(|item| {
+                item.node.kind() == "call_expression" && item.callable_ast == Some(test.ast_id)
+            }) {
+                let Some(function) = item.node.child_by_field_name("function") else {
                     continue;
                 };
-                let target = make_id(&[&self.stem, &callee]);
-                if target != id && self.has_node(&target) {
-                    self.edge(&id, &target, "tests", call, Some("direct-test-call"));
+                let Some(name) = expression_name(function, self.source) else {
+                    continue;
+                };
+                if let Some(target) = self.resolve_callable(&name, &test.scope, None)
+                    && target != test.id
+                {
+                    self.edge(
+                        &test.id,
+                        &target,
+                        "tests",
+                        item.node,
+                        Some("direct-test-call"),
+                    );
                 }
             }
         }
     }
 
-    fn typescript(&mut self, root: Node<'_>) {
-        for declaration in descendants(
-            root,
-            &[
-                "class_declaration",
-                "abstract_class_declaration",
-                "interface_declaration",
-                "enum_declaration",
-                "type_alias_declaration",
-            ],
-        ) {
-            let Some(name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let kind = match declaration.kind() {
-                "interface_declaration" => "interface",
-                "enum_declaration" => "enum",
-                "type_alias_declaration" => "type_alias",
-                _ => "class",
-            };
-            let id = make_id(&[&self.stem, &name]);
-            self.upsert_node(&id, &name, &name, kind, declaration, None);
-            self.types.insert(name, id);
-        }
-        for function in descendants(root, &["function_declaration"]) {
-            if ancestor(function, &["class_declaration", "interface_declaration"]).is_some() {
-                continue;
-            }
-            let Some(name) = node_name(function, self.source) else {
-                continue;
-            };
-            let id = make_id(&[&self.stem, &name]);
-            self.callables.insert(name.clone(), id.clone());
-            self.ts_callable(function, &id, &name);
-        }
-        for declaration in descendants(
-            root,
-            &[
-                "class_declaration",
-                "abstract_class_declaration",
-                "interface_declaration",
-            ],
-        ) {
-            self.ts_type_members(declaration);
-        }
-        self.ts_exports(root);
-        self.ts_decorators(root);
-        self.ts_overrides(root);
-    }
-
-    fn ts_type_members(&mut self, declaration: Node<'_>) {
-        let Some(owner_name) = node_name(declaration, self.source) else {
-            return;
-        };
-        let Some(owner) = self.types.get(&owner_name).cloned() else {
-            return;
-        };
-        let Some(body) = declaration.child_by_field_name("body") else {
-            return;
-        };
-        for member in body.named_children(&mut body.walk()) {
-            if matches!(member.kind(), "method_definition" | "method_signature") {
-                let Some(name) = node_name(member, self.source) else {
-                    continue;
-                };
-                let kind = if name == "constructor" {
-                    "constructor"
-                } else {
-                    "method"
-                };
-                let id = make_id(&[&owner, &name]);
-                let qualified = format!("{owner_name}::{name}");
-                self.upsert_node(&id, &format!(".{name}()"), &qualified, kind, member, None);
-                self.edge(&owner, &id, "contains", member, None);
-                self.callables.insert(qualified.clone(), id.clone());
-                self.ts_callable(member, &id, &qualified);
-            } else if matches!(
-                member.kind(),
-                "public_field_definition" | "property_signature" | "abstract_property_signature"
-            ) {
-                let Some(name) = node_name(member, self.source) else {
-                    continue;
-                };
-                let id = make_id(&[&owner, "property", &name]);
-                self.upsert_node(
-                    &id,
-                    &name,
-                    &format!("{owner_name}::{name}"),
-                    "property",
-                    member,
-                    None,
-                );
-                self.edge(&owner, &id, "contains", member, None);
-                self.typed_edge(&id, member.child_by_field_name("type"), member);
-            }
-        }
-    }
-
-    fn ts_callable(&mut self, function: Node<'_>, id: &str, qualified: &str) {
-        if let Some(parameters) = function.child_by_field_name("parameters") {
-            for (position, parameter) in parameters
-                .named_children(&mut parameters.walk())
-                .enumerate()
-            {
-                let Some(name) = node_name(parameter, self.source) else {
-                    continue;
-                };
-                let parameter_id = make_id(&[id, "parameter", &position.to_string(), &name]);
-                self.upsert_node(
-                    &parameter_id,
-                    &name,
-                    &format!("{qualified}::{name}"),
-                    "parameter",
-                    parameter,
-                    None,
-                );
-                self.edge(id, &parameter_id, "contains", parameter, None);
-                self.typed_edge(
-                    &parameter_id,
-                    parameter.child_by_field_name("type"),
-                    parameter,
-                );
-            }
-        }
-        if let Some(return_type) = function.child_by_field_name("return_type")
-            && let Some(target) =
-                type_name(return_type, self.source).and_then(|name| self.types.get(&name).cloned())
-        {
-            self.edge(id, &target, "returns", return_type, Some("return-type"));
-        }
-    }
-
-    fn ts_exports(&mut self, root: Node<'_>) {
-        for statement in descendants(root, &["export_statement"]) {
-            let text = self.text(statement);
-            if let Some((source_name, exported_name)) = parse_export_alias(text) {
-                let Some(target) = self
-                    .types
-                    .get(source_name)
-                    .or_else(|| self.callables.get(source_name))
-                    .cloned()
-                else {
-                    continue;
-                };
-                let id = make_id(&[
-                    &self.stem,
-                    "export",
-                    exported_name,
-                    &statement.start_byte().to_string(),
-                ]);
-                let mut extra = Map::new();
-                extra.insert(
-                    "specifier".to_owned(),
-                    Value::String(exported_name.to_owned()),
-                );
-                extra.insert(
-                    "imported_name".to_owned(),
-                    Value::String(source_name.to_owned()),
-                );
-                extra.insert(
-                    "local_name".to_owned(),
-                    Value::String(exported_name.to_owned()),
-                );
-                self.upsert_node(
-                    &id,
-                    exported_name,
-                    exported_name,
-                    "export",
-                    statement,
-                    Some(extra),
-                );
-                self.edge(&self.file_id.clone(), &id, "contains", statement, None);
-                self.edge(&id, &target, "exports", statement, Some("named-export"));
-                self.edge(&id, &target, "aliases", statement, Some("export-alias"));
+    fn ts_exports(&mut self) {
+        for statement in self.items_of(&["export_statement"]) {
+            let specifiers = descendants_bounded(statement.node, &["export_specifier"]);
+            if !specifiers.is_empty() {
+                for specifier in specifiers {
+                    let local_node = specifier
+                        .child_by_field_name("name")
+                        .or_else(|| direct_named_children(specifier).first().copied());
+                    let alias_node = specifier
+                        .child_by_field_name("alias")
+                        .or_else(|| specifier.child_by_field_name("value"));
+                    let Some(local_node) = local_node else {
+                        continue;
+                    };
+                    let local = clean_identifier(self.text(local_node));
+                    let exported = alias_node
+                        .map(|node| clean_identifier(self.text(node)))
+                        .unwrap_or_else(|| local.clone());
+                    if local.is_empty() || exported.is_empty() {
+                        continue;
+                    }
+                    let target = self
+                        .resolve_type_name(&local, &statement.scope)
+                        .or_else(|| self.resolve_callable(&local, &statement.scope, None));
+                    let Some(target) = target else {
+                        continue;
+                    };
+                    self.emit_export(
+                        &statement,
+                        specifier,
+                        &local,
+                        &exported,
+                        &target,
+                        local != exported,
+                    );
+                }
                 continue;
             }
-            let Some(declaration) = first_descendant_of(
-                statement,
+            let declarations = descendants_bounded(
+                statement.node,
                 &[
                     "class_declaration",
                     "abstract_class_declaration",
@@ -522,450 +736,308 @@ impl<'source, 'extraction> State<'source, 'extraction> {
                     "type_alias_declaration",
                     "function_declaration",
                 ],
-            ) else {
-                continue;
-            };
-            let Some(name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let Some(target) = self
-                .types
-                .get(&name)
-                .or_else(|| self.callables.get(&name))
-                .cloned()
-            else {
-                continue;
-            };
-            let id = make_id(&[
-                &self.stem,
-                "export",
-                &name,
-                &statement.start_byte().to_string(),
-            ]);
-            let extra = Map::from_iter([("specifier".to_owned(), Value::String(name.clone()))]);
-            self.upsert_node(&id, &name, &name, "export", statement, Some(extra));
-            self.edge(&self.file_id.clone(), &id, "contains", statement, None);
-            self.edge(
-                &id,
-                &target,
-                "exports",
-                statement,
-                Some("declaration-export"),
             );
-        }
-    }
-
-    fn ts_decorators(&mut self, root: Node<'_>) {
-        for decorator in descendants(root, &["decorator"]) {
-            let declaration = ancestor(
-                decorator,
-                &[
-                    "class_declaration",
-                    "abstract_class_declaration",
-                    "method_definition",
-                ],
-            )
-            .or_else(|| {
-                ancestor(decorator, &["export_statement"]).and_then(|statement| {
-                    first_descendant_of(
-                        statement,
-                        &["class_declaration", "abstract_class_declaration"],
-                    )
-                })
-            });
-            let Some(declaration) = declaration else {
-                continue;
-            };
-            let Some(declared_name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let target = if matches!(
-                declaration.kind(),
-                "class_declaration" | "abstract_class_declaration"
-            ) {
-                self.types.get(&declared_name).cloned()
-            } else {
-                let owner = ancestor(
-                    declaration,
-                    &["class_declaration", "abstract_class_declaration"],
-                )
-                .and_then(|node| node_name(node, self.source));
-                owner.map(|owner| make_id(&[&make_id(&[&self.stem, &owner]), &declared_name]))
-            };
-            let Some(target) = target.filter(|target| self.has_node(target)) else {
-                continue;
-            };
-            let annotation_name = self
-                .text(decorator)
-                .trim()
-                .trim_start_matches('@')
-                .split(['(', '.'])
-                .next()
-                .unwrap_or_default()
-                .trim();
-            if annotation_name.is_empty() {
-                continue;
-            }
-            let id = make_id(&[
-                &self.stem,
-                "annotation",
-                annotation_name,
-                &decorator.start_byte().to_string(),
-            ]);
-            self.upsert_node(
-                &id,
-                annotation_name,
-                annotation_name,
-                "annotation",
-                decorator,
-                None,
-            );
-            self.edge(&self.file_id.clone(), &id, "contains", decorator, None);
-            self.edge(&id, &target, "decorates", decorator, Some("decorator"));
-        }
-    }
-
-    fn ts_overrides(&mut self, root: Node<'_>) {
-        for declaration in descendants(root, &["class_declaration", "abstract_class_declaration"]) {
-            let Some(class_name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let superclass = declaration
-                .child_by_field_name("superclass")
-                .and_then(|node| type_name(node, self.source))
-                .or_else(|| parse_extends_name(self.text(declaration)));
-            let Some(superclass) = superclass else {
-                continue;
-            };
-            let Some(base) = self.types.get(&superclass).cloned() else {
-                continue;
-            };
-            let owner = make_id(&[&self.stem, &class_name]);
-            let Some(body) = declaration.child_by_field_name("body") else {
-                continue;
-            };
-            for method in body
-                .named_children(&mut body.walk())
-                .filter(|node| node.kind() == "method_definition")
-            {
-                if !self
-                    .text(method)
-                    .split_whitespace()
-                    .any(|word| word == "override")
-                {
-                    continue;
-                }
-                let Some(name) = node_name(method, self.source) else {
+            for declaration in declarations {
+                let Some(name) = node_name(declaration, self.source) else {
                     continue;
                 };
-                let source = make_id(&[&owner, &name]);
-                let target = make_id(&[&base, &name]);
-                if self.has_node(&source) && self.has_node(&target) {
-                    self.edge(
-                        &source,
-                        &target,
-                        "overrides",
-                        method,
-                        Some("override-modifier"),
-                    );
+                let target = self
+                    .owner_ids
+                    .get(&declaration.id())
+                    .cloned()
+                    .or_else(|| self.resolve_callable(&name, &statement.scope, None));
+                if let Some(target) = target {
+                    self.emit_export(&statement, declaration, &name, &name, &target, false);
                 }
             }
         }
     }
 
-    fn csharp(&mut self, root: Node<'_>) {
-        let namespace = descendants(
-            root,
-            &["file_scoped_namespace_declaration", "namespace_declaration"],
-        )
-        .first()
-        .and_then(|node| node_name(*node, self.source))
-        .unwrap_or_default();
-        for declaration in descendants(
-            root,
-            &[
-                "class_declaration",
-                "interface_declaration",
-                "enum_declaration",
-                "struct_declaration",
-                "record_declaration",
-            ],
-        ) {
-            let Some(name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let id = make_id(&[&self.stem, &namespace, &name]);
-            let kind = match declaration.kind() {
-                "interface_declaration" => "interface",
-                "enum_declaration" => "enum",
-                "struct_declaration" | "record_declaration" => "struct",
-                _ => "class",
-            };
-            self.upsert_node(&id, &name, &name, kind, declaration, None);
-            self.types.insert(name, id);
-        }
-        for declaration in descendants(
-            root,
-            &[
-                "class_declaration",
-                "interface_declaration",
-                "struct_declaration",
-                "record_declaration",
-            ],
-        ) {
-            self.csharp_members(declaration);
-        }
-        self.csharp_overrides(root);
-    }
-
-    fn csharp_members(&mut self, declaration: Node<'_>) {
-        let Some(owner_name) = node_name(declaration, self.source) else {
-            return;
-        };
-        let Some(owner) = self.types.get(&owner_name).cloned() else {
-            return;
-        };
-        let Some(body) = declaration
-            .child_by_field_name("body")
-            .or_else(|| first_descendant_of(declaration, &["declaration_list"]))
-        else {
-            return;
-        };
-        for member in body.named_children(&mut body.walk()) {
-            match member.kind() {
-                "constructor_declaration" | "method_declaration" => {
-                    let name = if member.kind() == "constructor_declaration" {
-                        owner_name.clone()
-                    } else if let Some(name) = node_name(member, self.source) {
-                        name
-                    } else {
-                        continue;
-                    };
-                    let kind = if member.kind() == "constructor_declaration" {
-                        "constructor"
-                    } else {
-                        "method"
-                    };
-                    let id = make_id(&[&owner, &name]);
-                    let qualified = format!("{owner_name}::{name}");
-                    self.upsert_node(&id, &format!(".{name}()"), &qualified, kind, member, None);
-                    self.edge(&owner, &id, "contains", member, None);
-                    self.callables.insert(qualified.clone(), id.clone());
-                    self.csharp_callable(member, &id, &qualified);
-                }
-                "property_declaration" => {
-                    let Some(name) = node_name(member, self.source) else {
-                        continue;
-                    };
-                    let id = make_id(&[&owner, "property", &name]);
-                    self.upsert_node(
-                        &id,
-                        &name,
-                        &format!("{owner_name}::{name}"),
-                        "property",
-                        member,
-                        None,
-                    );
-                    self.edge(&owner, &id, "contains", member, None);
-                    self.typed_edge(&id, member.child_by_field_name("type"), member);
-                }
-                "field_declaration" => {
-                    let kind = if self
-                        .text(member)
-                        .split_whitespace()
-                        .any(|word| word == "const")
-                    {
-                        "constant"
-                    } else {
-                        "field"
-                    };
-                    let Some(declaration) = first_descendant_of(member, &["variable_declaration"])
-                    else {
-                        continue;
-                    };
-                    let declared_type = declaration.child_by_field_name("type");
-                    for variable in descendants(declaration, &["variable_declarator"]) {
-                        let Some(name) = node_name(variable, self.source) else {
-                            continue;
-                        };
-                        let id = make_id(&[&owner, kind, &name]);
-                        self.upsert_node(
-                            &id,
-                            &name,
-                            &format!("{owner_name}::{name}"),
-                            kind,
-                            variable,
-                            None,
-                        );
-                        self.edge(&owner, &id, "contains", variable, None);
-                        self.typed_edge(&id, declared_type, variable);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn csharp_callable(&mut self, function: Node<'_>, id: &str, qualified: &str) {
-        if let Some(parameters) = function.child_by_field_name("parameters") {
-            for (position, parameter) in parameters
-                .named_children(&mut parameters.walk())
-                .filter(|node| node.kind() == "parameter")
-                .enumerate()
-            {
-                let Some(name) = node_name(parameter, self.source) else {
-                    continue;
-                };
-                let parameter_id = make_id(&[id, "parameter", &position.to_string(), &name]);
-                self.upsert_node(
-                    &parameter_id,
-                    &name,
-                    &format!("{qualified}::{name}"),
-                    "parameter",
-                    parameter,
-                    None,
-                );
-                self.edge(id, &parameter_id, "contains", parameter, None);
-                self.typed_edge(
-                    &parameter_id,
-                    parameter.child_by_field_name("type"),
-                    parameter,
-                );
-            }
-        }
-        if let Some(return_type) = function
-            .child_by_field_name("returns")
-            .or_else(|| function.child_by_field_name("type"))
-            && let Some(target) =
-                type_name(return_type, self.source).and_then(|name| self.types.get(&name).cloned())
-        {
-            self.edge(id, &target, "returns", return_type, Some("return-type"));
-        }
-    }
-
-    fn csharp_overrides(&mut self, root: Node<'_>) {
-        for declaration in descendants(root, &["class_declaration"]) {
-            let Some(class_name) = node_name(declaration, self.source) else {
-                continue;
-            };
-            let Some(base_list) = first_descendant_of(declaration, &["base_list"]) else {
-                continue;
-            };
-            let Some(base_name) = base_list
-                .named_children(&mut base_list.walk())
-                .find_map(|node| type_name(node, self.source))
-            else {
-                continue;
-            };
-            let (Some(owner), Some(base)) = (
-                self.types.get(&class_name).cloned(),
-                self.types.get(&base_name).cloned(),
-            ) else {
-                continue;
-            };
-            let Some(body) = declaration
-                .child_by_field_name("body")
-                .or_else(|| first_descendant_of(declaration, &["declaration_list"]))
-            else {
-                continue;
-            };
-            for method in body
-                .named_children(&mut body.walk())
-                .filter(|node| node.kind() == "method_declaration")
-            {
-                if !self
-                    .text(method)
-                    .split_whitespace()
-                    .any(|word| word == "override")
-                {
-                    continue;
-                }
-                let Some(name) = node_name(method, self.source) else {
-                    continue;
-                };
-                let source = make_id(&[&owner, &name]);
-                let target = make_id(&[&base, &name]);
-                if self.has_node(&source) && self.has_node(&target) {
-                    self.edge(
-                        &source,
-                        &target,
-                        "overrides",
-                        method,
-                        Some("override-modifier"),
-                    );
-                }
-            }
-        }
-    }
-
-    fn typed_edge(&mut self, source: &str, annotation: Option<Node<'_>>, site: Node<'_>) {
-        let Some(target) = annotation
-            .and_then(|node| type_name(node, self.source))
-            .and_then(|name| self.types.get(&name).cloned())
-        else {
-            return;
-        };
-        self.edge(source, &target, "type_of", site, Some("declared-type"));
-    }
-
-    fn upsert_node(
+    fn emit_export(
         &mut self,
-        id: &str,
+        statement: &Item<'tree>,
+        site: Node<'tree>,
+        local: &str,
+        exported: &str,
+        target: &str,
+        aliased: bool,
+    ) {
+        let qualified = format!(
+            "{}@{}",
+            qualify(&statement.scope, exported),
+            site.start_byte()
+        );
+        let extra = Map::from_iter([
+            ("specifier".to_owned(), Value::String(exported.to_owned())),
+            ("imported_name".to_owned(), Value::String(local.to_owned())),
+            ("local_name".to_owned(), Value::String(exported.to_owned())),
+        ]);
+        let id = self.ensure_node(site, exported, &qualified, "export", None, Some(extra));
+        let owner = self
+            .closest_owner(statement)
+            .unwrap_or_else(|| self.file_id.clone());
+        self.edge(&owner, &id, "contains", site, None);
+        self.edge(&id, target, "exports", site, Some("named-export-target"));
+        if aliased {
+            self.edge(&id, target, "aliases", site, Some("export-alias"));
+        }
+    }
+
+    fn ts_decorators(&mut self) {
+        for item in self.items_of(&["decorator"]) {
+            let expression = direct_named_children(item.node).first().copied();
+            let Some(expression) = expression else {
+                continue;
+            };
+            let callee = if expression.kind() == "call_expression" {
+                expression
+                    .child_by_field_name("function")
+                    .unwrap_or(expression)
+            } else {
+                expression
+            };
+            let name = self.text(callee).trim().trim_start_matches('@').to_owned();
+            if name.is_empty() {
+                continue;
+            }
+            let target_ast = item
+                .owner_ast
+                .or_else(|| item.node.next_named_sibling().map(|node| node.id()));
+            let Some(target) = target_ast.and_then(|ast| {
+                self.owner_ids.get(&ast).cloned().or_else(|| {
+                    self.callable_ast_index
+                        .get(&ast)
+                        .map(|callable| callable.id.clone())
+                })
+            }) else {
+                continue;
+            };
+            let qualified = format!("{}@{}", qualify(&item.scope, &name), item.node.start_byte());
+            let id = self.ensure_node(item.node, &name, &qualified, "annotation", None, None);
+            let owner = self
+                .closest_owner(&item)
+                .unwrap_or_else(|| self.file_id.clone());
+            self.edge(&owner, &id, "contains", item.node, None);
+            self.edge(&id, &target, "decorates", item.node, Some("decorator"));
+        }
+    }
+
+    fn ts_overrides(&mut self) {
+        for item in self.items_of(&["method_definition"]) {
+            if !has_modifier(item.node, "override", self.source) {
+                continue;
+            }
+            let Some(owner_ast) = item.owner_ast else {
+                continue;
+            };
+            let Some(class_item) = self.item_by_ast(owner_ast).cloned() else {
+                continue;
+            };
+            let base = class_item
+                .node
+                .child_by_field_name("superclass")
+                .and_then(|node| self.resolve_type(node, &class_item.scope))
+                .or_else(|| {
+                    descendants_bounded(class_item.node, &["class_heritage", "extends_clause"])
+                        .into_iter()
+                        .find_map(|heritage| {
+                            type_reference(heritage, self.source)
+                                .and_then(|name| self.resolve_type_name(&name, &class_item.scope))
+                        })
+                });
+            let Some(base) = base else {
+                continue;
+            };
+            let Some(method) = self.callable_by_ast(item.node.id()) else {
+                continue;
+            };
+            if let Some(target) = self.method_in_owner(&base, &method.name, &method.signature) {
+                self.edge(
+                    &method.id,
+                    &target,
+                    "overrides",
+                    item.node,
+                    Some("override-modifier"),
+                );
+            }
+        }
+    }
+
+    fn csharp_overrides(&mut self) {
+        for item in self.items_of(&["method_declaration"]) {
+            if !has_modifier(item.node, "override", self.source) {
+                continue;
+            }
+            let Some(owner_ast) = item.owner_ast else {
+                continue;
+            };
+            let Some(class_item) = self.item_by_ast(owner_ast).cloned() else {
+                continue;
+            };
+            let Some(base_list) = direct_named_children(class_item.node)
+                .into_iter()
+                .find(|node| node.kind() == "base_list")
+            else {
+                continue;
+            };
+            let Some(base_node) = direct_named_children(base_list).first().copied() else {
+                continue;
+            };
+            let Some(base) = self.resolve_type(base_node, &class_item.scope) else {
+                continue;
+            };
+            let Some(method) = self.callable_by_ast(item.node.id()) else {
+                continue;
+            };
+            if let Some(target) = self.method_in_owner(&base, &method.name, &method.signature) {
+                self.edge(
+                    &method.id,
+                    &target,
+                    "overrides",
+                    item.node,
+                    Some("override-modifier"),
+                );
+            }
+        }
+    }
+
+    fn ensure_member(
+        &mut self,
+        item: &Item<'tree>,
+        owner: &str,
+        name: &str,
+        kind: &str,
+        extra: Option<Map<String, Value>>,
+    ) -> String {
+        let qualified = format!(
+            "{}::{name}@{}",
+            self.node_qualified(owner),
+            item.node.start_byte()
+        );
+        let id = self.ensure_node(item.node, name, &qualified, kind, None, extra);
+        self.edge(owner, &id, "contains", item.node, None);
+        id
+    }
+
+    fn ensure_node(
+        &mut self,
+        node: Node<'tree>,
         label: &str,
         qualified_name: &str,
         kind: &str,
-        node: Node<'_>,
+        signature: Option<&str>,
         extra: Option<Map<String, Value>>,
-    ) {
-        if let Some(existing) = self
-            .extraction
-            .nodes
-            .iter_mut()
-            .find(|record| record.id == id)
-        {
-            existing
-                .attributes
-                .insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
-            existing.attributes.insert(
-                "qualified_name".to_owned(),
-                Value::String(qualified_name.to_owned()),
-            );
-            crate::facts::stamp_node_range(&mut existing.attributes, node);
-            if let Some(extra) = extra {
-                existing.attributes.extend(extra);
-            }
-            return;
-        }
-        let mut attributes = Map::from_iter([
-            ("label".to_owned(), Value::String(label.to_owned())),
-            ("name".to_owned(), Value::String(label.to_owned())),
-            (
-                "qualified_name".to_owned(),
-                Value::String(qualified_name.to_owned()),
-            ),
-            ("symbol_kind".to_owned(), Value::String(kind.to_owned())),
-            ("file_type".to_owned(), Value::String("code".to_owned())),
-            (
-                "source_file".to_owned(),
-                Value::String(self.source_file.clone()),
-            ),
-            (
-                "source_location".to_owned(),
-                Value::String(format!("L{}", node.start_position().row + 1)),
-            ),
-            (
-                "language".to_owned(),
-                Value::String(self.language.to_owned()),
-            ),
+    ) -> String {
+        self.work.declarations += 1;
+        let anchor = (node.start_byte(), node.end_byte());
+        let desired = make_id(&[
+            &self.source_file,
+            qualified_name,
+            kind,
+            signature.unwrap_or_default(),
+            &node.start_byte().to_string(),
         ]);
-        crate::facts::stamp_node_range(&mut attributes, node);
-        if let Some(extra) = extra {
-            attributes.extend(extra);
+        self.work.index_lookups += 1;
+        let compatible_index = |index: &usize| {
+            self.extraction.nodes.get(*index).is_some_and(|record| {
+                let existing_label = record.string("label");
+                compatible_label(&existing_label, label)
+                    && compatible_kind(&record.string("symbol_kind"), kind)
+            })
+        };
+        let existing = self
+            .anchor_index
+            .get(&anchor)
+            .and_then(|indexes| {
+                indexes
+                    .iter()
+                    .find(|index| compatible_index(index))
+                    .copied()
+            })
+            .or_else(|| {
+                self.label_line_index
+                    .get(&(
+                        normalized_label(label),
+                        node.start_position().row.saturating_add(1),
+                    ))
+                    .and_then(|indexes| {
+                        indexes
+                            .iter()
+                            .find(|index| compatible_index(index))
+                            .copied()
+                    })
+            });
+        let index = if let Some(index) = existing {
+            let old_id = self.extraction.nodes[index].id.clone();
+            let collision = self
+                .id_anchors
+                .get(&old_id)
+                .is_some_and(|anchors| anchors.len() > 1);
+            if collision {
+                self.extraction.nodes[index].id.clone_from(&desired);
+                self.node_index.insert(desired.clone(), index);
+            }
+            index
+        } else {
+            let id = self.unique_id(&desired, anchor);
+            let attributes = Map::from_iter([
+                ("label".to_owned(), Value::String(label.to_owned())),
+                ("name".to_owned(), Value::String(label.to_owned())),
+                (
+                    "source_file".to_owned(),
+                    Value::String(self.source_file.clone()),
+                ),
+                ("file_type".to_owned(), Value::String("code".to_owned())),
+                (
+                    "language".to_owned(),
+                    Value::String(self.language.to_owned()),
+                ),
+                ("_origin".to_owned(), Value::String("ast".to_owned())),
+            ]);
+            let index = self.extraction.nodes.len();
+            self.extraction.nodes.push(RawNodeRecord {
+                id: id.clone(),
+                attributes,
+            });
+            self.node_index.insert(id, index);
+            self.anchor_index.entry(anchor).or_default().push(index);
+            index
+        };
+        let record = &mut self.extraction.nodes[index];
+        record
+            .attributes
+            .insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
+        record.attributes.insert(
+            "qualified_name".to_owned(),
+            Value::String(qualified_name.to_owned()),
+        );
+        record
+            .attributes
+            .entry("_origin".to_owned())
+            .or_insert_with(|| Value::String("ast".to_owned()));
+        if let Some(signature) = signature {
+            record
+                .attributes
+                .insert("signature".to_owned(), Value::String(signature.to_owned()));
         }
-        self.extraction.nodes.push(RawNodeRecord {
-            id: id.to_owned(),
-            attributes,
-        });
+        if let Some(extra) = extra {
+            record.attributes.extend(extra);
+        }
+        crate::facts::stamp_node_range(&mut record.attributes, node);
+        record.id.clone()
+    }
+
+    fn unique_id(&mut self, desired: &str, anchor: (usize, usize)) -> String {
+        self.work.index_lookups += 1;
+        if !self.node_index.contains_key(desired) {
+            return desired.to_owned();
+        }
+        make_id(&[
+            desired,
+            "occurrence",
+            &anchor.0.to_string(),
+            &anchor.1.to_string(),
+        ])
     }
 
     fn edge(
@@ -973,7 +1045,7 @@ impl<'source, 'extraction> State<'source, 'extraction> {
         source: &str,
         target: &str,
         relation: &str,
-        node: Node<'_>,
+        node: Node<'tree>,
         context: Option<&str>,
     ) {
         if source.is_empty() || target.is_empty() || source == target {
@@ -1017,61 +1089,467 @@ impl<'source, 'extraction> State<'source, 'extraction> {
         });
     }
 
-    fn mark_test(&mut self, id: &str) {
-        if let Some(node) = self.extraction.nodes.iter_mut().find(|node| node.id == id) {
-            node.attributes.insert("roles".to_owned(), json!(["test"]));
+    fn typed_edge(
+        &mut self,
+        source: &str,
+        annotation: Option<Node<'tree>>,
+        site: Node<'tree>,
+        scope: &[String],
+    ) {
+        if let Some(annotation) = annotation
+            && let Some(target) = self.resolve_type(annotation, scope)
+        {
+            self.edge(source, &target, "type_of", site, Some("declared-type"));
         }
     }
 
-    fn is_test(&self, id: &str) -> bool {
-        self.extraction
-            .nodes
+    fn resolve_type(&mut self, node: Node<'tree>, scope: &[String]) -> Option<String> {
+        let reference = type_reference(node, self.source)?;
+        self.resolve_type_name(&reference, scope)
+    }
+
+    fn resolve_type_name(&mut self, reference: &str, scope: &[String]) -> Option<String> {
+        self.work.index_lookups += 1;
+        let reference = normalize_path(reference);
+        if reference.contains("::") {
+            for depth in (0..=scope.len()).rev() {
+                let prefix = &scope[..depth];
+                let candidate = qualify(prefix, &reference);
+                if let Some(records) = self.types.get(&candidate)
+                    && let [record] = records.as_slice()
+                {
+                    return Some(record.id.clone());
+                }
+            }
+            return None;
+        }
+        for depth in (0..=scope.len()).rev() {
+            let candidate = qualify(&scope[..depth], &reference);
+            if let Some(records) = self.types.get(&candidate) {
+                return match records.as_slice() {
+                    [record] => Some(record.id.clone()),
+                    _ => None,
+                };
+            }
+        }
+        None
+    }
+
+    fn resolve_callable(
+        &mut self,
+        name: &str,
+        scope: &[String],
+        signature: Option<&str>,
+    ) -> Option<String> {
+        self.work.index_lookups += 1;
+        let name = normalize_path(name);
+        for depth in (0..=scope.len()).rev() {
+            let key = qualify(&scope[..depth], &name);
+            if let Some(records) = self.callables.get(&key) {
+                let matches = records
+                    .iter()
+                    .filter(|record| signature.is_none_or(|value| record.signature == value))
+                    .collect::<Vec<_>>();
+                return match matches.as_slice() {
+                    [record] => Some(record.id.clone()),
+                    _ => None,
+                };
+            }
+        }
+        None
+    }
+
+    fn method_in_owner(&self, owner: &str, name: &str, signature: &str) -> Option<String> {
+        let owner_ast = self.owner_ast_by_id.get(owner)?;
+        match self
+            .methods_by_owner
+            .get(&(*owner_ast, name.to_owned(), signature.to_owned()))
+            .map(Vec::as_slice)
+        {
+            Some([id]) => Some(id.clone()),
+            _ => None,
+        }
+    }
+
+    fn closest_owner(&self, item: &Item<'tree>) -> Option<String> {
+        let mut ast = item.owner_ast;
+        while let Some(owner) = ast {
+            if let Some(id) = self.owner_ids.get(&owner) {
+                return Some(id.clone());
+            }
+            ast = self.item_by_ast(owner).and_then(|item| item.owner_ast);
+        }
+        None
+    }
+
+    fn mark_test(&mut self, id: &str, name: &str, site: Node<'tree>) {
+        self.work.index_lookups += 1;
+        let mut indexes = self
+            .label_line_index
+            .get(&(
+                normalized_label(name),
+                site.start_position().row.saturating_add(1),
+            ))
+            .cloned()
+            .unwrap_or_default();
+        if let Some(index) = self.node_index.get(id).copied() {
+            indexes.push(index);
+        }
+        indexes.sort_unstable();
+        indexes.dedup();
+        for index in indexes {
+            if let Some(node) = self.extraction.nodes.get_mut(index) {
+                node.attributes.insert("roles".to_owned(), json!(["test"]));
+            }
+        }
+    }
+
+    fn node_qualified(&self, id: &str) -> String {
+        self.node_index
+            .get(id)
+            .and_then(|index| self.extraction.nodes.get(*index))
+            .map(|node| node.string("qualified_name"))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| id.to_owned())
+    }
+
+    fn callable_by_ast(&self, ast: usize) -> Option<CallableRecord> {
+        self.callable_ast_index.get(&ast).cloned()
+    }
+
+    fn item_by_ast(&self, ast: usize) -> Option<&Item<'tree>> {
+        self.inventory_index
+            .get(&ast)
+            .and_then(|index| self.inventory.get(*index))
+    }
+
+    fn register_owner(&mut self, ast: usize, id: String) {
+        self.owner_ast_by_id.insert(id.clone(), ast);
+        self.owner_ids.insert(ast, id);
+    }
+
+    fn items_of(&self, kinds: &[&str]) -> Vec<Item<'tree>> {
+        self.inventory
             .iter()
-            .find(|node| node.id == id)
-            .and_then(|node| node.attributes.get("roles"))
-            .and_then(Value::as_array)
-            .is_some_and(|roles| roles.iter().any(|role| role.as_str() == Some("test")))
+            .filter(|item| kinds.contains(&item.node.kind()))
+            .cloned()
+            .collect()
     }
 
-    fn has_node(&self, id: &str) -> bool {
-        self.extraction.nodes.iter().any(|node| node.id == id)
-    }
-
-    fn text(&self, node: Node<'_>) -> &'source str {
+    fn text(&self, node: Node<'tree>) -> &'source str {
         node.utf8_text(self.source).unwrap_or_default()
     }
-}
 
-fn descendants<'tree>(node: Node<'tree>, kinds: &[&str]) -> Vec<Node<'tree>> {
-    let mut output = Vec::new();
-    collect_descendants(node, kinds, &mut output);
-    output
-}
-
-fn collect_descendants<'tree>(node: Node<'tree>, kinds: &[&str], output: &mut Vec<Node<'tree>>) {
-    if kinds.contains(&node.kind()) {
-        output.push(node);
+    fn prune_coalesced_base_shadows(&mut self) {
+        let mut anchored = HashMap::<(String, String), usize>::new();
+        for node in &self.extraction.nodes {
+            if record_anchor(node).is_some() {
+                *anchored
+                    .entry((
+                        node.string("symbol_kind"),
+                        normalized_label(&node.string("label")),
+                    ))
+                    .or_default() += 1;
+            }
+        }
+        let removed = self
+            .extraction
+            .nodes
+            .iter()
+            .filter(|node| {
+                record_anchor(node).is_none()
+                    && node.string("qualified_name").is_empty()
+                    && anchored
+                        .get(&(
+                            node.string("symbol_kind"),
+                            normalized_label(&node.string("label")),
+                        ))
+                        .is_some_and(|count| *count > 1)
+            })
+            .map(|node| node.id.clone())
+            .collect::<HashSet<_>>();
+        if removed.is_empty() {
+            return;
+        }
+        self.extraction
+            .nodes
+            .retain(|node| !removed.contains(&node.id));
+        self.extraction
+            .edges
+            .retain(|edge| !removed.contains(&edge.source) && !removed.contains(&edge.target));
     }
+}
+
+fn collect_inventory<'tree>(
+    node: Node<'tree>,
+    source: &[u8],
+    language: &str,
+    scope: &mut Vec<String>,
+    callable_ast: Option<usize>,
+    output: &mut Vec<Item<'tree>>,
+    work: &mut Work,
+) {
+    work.ast_visits += 1;
+    let owner_ast = closest_scope_ancestor(node);
+    output.push(Item {
+        node,
+        scope: scope.clone(),
+        owner_ast,
+        callable_ast,
+    });
+    let mut next_callable = callable_ast;
+    if is_callable_kind(node.kind(), language) {
+        next_callable = Some(node.id());
+    }
+    let pushed = if is_scope_kind(node.kind(), language) {
+        scope_node_name(node, source, language).map(|name| {
+            scope.push(name);
+        })
+    } else {
+        None
+    };
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_descendants(child, kinds, output);
+        collect_inventory(child, source, language, scope, next_callable, output, work);
+    }
+    if pushed.is_some() {
+        scope.pop();
     }
 }
 
-fn first_descendant_of<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if kinds.contains(&child.kind()) {
-            return Some(child);
+fn closest_scope_ancestor(node: Node<'_>) -> Option<usize> {
+    let mut parent = node.parent();
+    while let Some(candidate) = parent {
+        if matches!(
+            candidate.kind(),
+            "mod_item"
+                | "trait_item"
+                | "struct_item"
+                | "enum_item"
+                | "impl_item"
+                | "internal_module"
+                | "module_declaration"
+                | "namespace_declaration"
+                | "file_scoped_namespace_declaration"
+                | "class_declaration"
+                | "abstract_class_declaration"
+                | "interface_declaration"
+                | "struct_declaration"
+                | "record_declaration"
+        ) {
+            return Some(candidate.id());
         }
-        if let Some(found) = first_descendant_of(child, kinds) {
-            return Some(found);
-        }
+        parent = candidate.parent();
     }
     None
 }
 
-fn ancestor<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
+fn is_scope_kind(kind: &str, language: &str) -> bool {
+    match language {
+        "rust" => matches!(
+            kind,
+            "mod_item" | "trait_item" | "struct_item" | "enum_item" | "impl_item"
+        ),
+        "javascript" | "typescript" | "tsx" => matches!(
+            kind,
+            "internal_module"
+                | "module_declaration"
+                | "namespace_declaration"
+                | "class_declaration"
+                | "abstract_class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+        ),
+        "csharp" => matches!(
+            kind,
+            "file_scoped_namespace_declaration"
+                | "namespace_declaration"
+                | "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "struct_declaration"
+                | "record_declaration"
+        ),
+        _ => false,
+    }
+}
+
+fn is_callable_kind(kind: &str, language: &str) -> bool {
+    match language {
+        "rust" => matches!(kind, "function_item" | "function_signature_item"),
+        "javascript" | "typescript" | "tsx" => matches!(
+            kind,
+            "function_declaration" | "method_definition" | "method_signature"
+        ),
+        "csharp" => matches!(kind, "constructor_declaration" | "method_declaration"),
+        _ => false,
+    }
+}
+
+fn scope_node_name(node: Node<'_>, source: &[u8], language: &str) -> Option<String> {
+    if node.kind() == "impl_item" && language == "rust" {
+        let implemented = node
+            .child_by_field_name("type")
+            .and_then(|node| type_reference(node, source))?;
+        return Some(
+            node.child_by_field_name("trait")
+                .and_then(|node| type_reference(node, source))
+                .map_or_else(
+                    || format!("impl {implemented}"),
+                    |trait_name| format!("{implemented} as {trait_name}"),
+                ),
+        );
+    }
+    node_name(node, source)
+}
+
+fn node_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    node.child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("declarator"))
+        .or_else(|| node.child_by_field_name("pattern"))
+        .and_then(|name| type_reference(name, source))
+        .map(|name| clean_identifier(&name))
+        .filter(|name| !name.is_empty())
+}
+
+fn parameter_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    node.child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("pattern"))
+        .and_then(|name| name.utf8_text(source).ok())
+        .map(clean_identifier)
+        .filter(|name| !name.is_empty())
+}
+
+fn type_reference(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if matches!(
+        node.kind(),
+        "identifier"
+            | "type_identifier"
+            | "field_identifier"
+            | "property_identifier"
+            | "predefined_type"
+            | "primitive_type"
+            | "qualified_name"
+            | "scoped_type_identifier"
+            | "nested_type_identifier"
+    ) {
+        return node
+            .utf8_text(source)
+            .ok()
+            .map(normalize_path)
+            .filter(|name| !name.is_empty());
+    }
+    if let Some(name) = node.child_by_field_name("name") {
+        return type_reference(name, source);
+    }
+    if let Some(inner) = node.child_by_field_name("type") {
+        return type_reference(inner, source);
+    }
+    direct_named_children(node)
+        .into_iter()
+        .find_map(|child| type_reference(child, source))
+}
+
+fn expression_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if matches!(
+        node.kind(),
+        "identifier" | "type_identifier" | "member_expression" | "scoped_identifier"
+    ) {
+        return node
+            .utf8_text(source)
+            .ok()
+            .map(normalize_path)
+            .filter(|name| !name.is_empty());
+    }
+    node.child_by_field_name("function")
+        .and_then(|function| expression_name(function, source))
+}
+
+fn callable_signature(node: Node<'_>, source: &[u8]) -> String {
+    let parameters = node
+        .child_by_field_name("parameters")
+        .map(direct_named_children)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|parameter| {
+            matches!(
+                parameter.kind(),
+                "parameter"
+                    | "required_parameter"
+                    | "optional_parameter"
+                    | "rest_pattern"
+                    | "self_parameter"
+            )
+        })
+        .map(|parameter| {
+            parameter
+                .child_by_field_name("type")
+                .and_then(|node| node.utf8_text(source).ok())
+                .map(normalize_signature_part)
+                .unwrap_or_else(|| "_".to_owned())
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("({parameters})")
+}
+
+fn has_modifier(node: Node<'_>, modifier: &str, source: &[u8]) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor).any(|child| {
+        child.kind() == modifier
+            || (child.kind().contains("modifier")
+                && child
+                    .utf8_text(source)
+                    .is_ok_and(|text| text.trim() == modifier))
+    })
+}
+
+fn has_rust_test_attribute(node: Node<'_>, source: &[u8]) -> bool {
+    let mut sibling = node.prev_named_sibling();
+    while let Some(attribute) = sibling {
+        if attribute.kind() != "attribute_item" {
+            break;
+        }
+        if attribute_identifiers(attribute, source)
+            .into_iter()
+            .any(|identifier| identifier == "test")
+        {
+            return true;
+        }
+        sibling = attribute.prev_named_sibling();
+    }
+    direct_named_children(node)
+        .into_iter()
+        .filter(|child| child.kind() == "attribute_item")
+        .flat_map(|attribute| attribute_identifiers(attribute, source))
+        .any(|identifier| identifier == "test")
+}
+
+fn attribute_identifiers(node: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut identifiers = descendants_bounded(node, &["identifier"])
+        .into_iter()
+        .filter_map(|identifier| identifier.utf8_text(source).ok().map(ToOwned::to_owned))
+        .collect::<Vec<_>>();
+    identifiers.extend(
+        direct_named_children(node)
+            .into_iter()
+            .filter_map(|attribute| attribute.utf8_text(source).ok())
+            .map(|text| {
+                text.trim()
+                    .trim_start_matches("#[")
+                    .trim_end_matches(']')
+                    .split(['(', ':'])
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned()
+            })
+            .filter(|name| !name.is_empty()),
+    );
+    identifiers
+}
+
+fn ancestor_of_kind<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
     let mut parent = node.parent();
     while let Some(candidate) = parent {
         if kinds.contains(&candidate.kind()) {
@@ -1082,90 +1560,103 @@ fn ancestor<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
     None
 }
 
-fn ancestor_between(node: Node<'_>, boundary: Node<'_>, kind: &str) -> bool {
-    let mut parent = node.parent();
-    while let Some(candidate) = parent {
-        if candidate.id() == boundary.id() {
-            return false;
+fn direct_named_children(node: Node<'_>) -> Vec<Node<'_>> {
+    node.named_children(&mut node.walk()).collect()
+}
+
+fn descendants_bounded<'tree>(node: Node<'tree>, kinds: &[&str]) -> Vec<Node<'tree>> {
+    let mut output = Vec::new();
+    let mut stack = direct_named_children(node);
+    while let Some(candidate) = stack.pop() {
+        if kinds.contains(&candidate.kind()) {
+            output.push(candidate);
+        } else {
+            stack.extend(direct_named_children(candidate));
         }
-        if candidate.kind() == kind {
-            return true;
-        }
-        parent = candidate.parent();
     }
-    false
+    output.sort_by_key(Node::start_byte);
+    output
 }
 
-fn node_name(node: Node<'_>, source: &[u8]) -> Option<String> {
-    node.child_by_field_name("name")
-        .or_else(|| node.child_by_field_name("declarator"))
-        .or_else(|| node.child_by_field_name("pattern"))
-        .and_then(|name| type_name(name, source))
+fn qualify(scope: &[String], name: &str) -> String {
+    if scope.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{}::{name}", scope.join("::"))
+    }
 }
 
-fn type_name(node: Node<'_>, source: &[u8]) -> Option<String> {
-    if matches!(
-        node.kind(),
-        "identifier"
-            | "type_identifier"
-            | "field_identifier"
-            | "property_identifier"
-            | "shorthand_property_identifier_pattern"
-            | "predefined_type"
-            | "primitive_type"
-            | "self"
-    ) {
-        let name = node.utf8_text(source).ok()?.trim();
-        return (!name.is_empty()).then(|| name.to_owned());
-    }
-    if matches!(
-        node.kind(),
-        "qualified_name" | "scoped_type_identifier" | "nested_type_identifier"
-    ) {
-        let raw = node.utf8_text(source).ok()?.trim();
-        let name = raw.rsplit(['.', ':']).find(|part| !part.is_empty())?;
-        return Some(name.to_owned());
-    }
-    if let Some(name) = node.child_by_field_name("name") {
-        return type_name(name, source);
-    }
-    if let Some(type_node) = node.child_by_field_name("type") {
-        return type_name(type_node, source);
-    }
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .find_map(|child| type_name(child, source))
-}
-
-fn parse_export_alias(text: &str) -> Option<(&str, &str)> {
-    let body = text
+fn normalize_path(raw: &str) -> String {
+    let raw = raw
         .trim()
-        .strip_prefix("export")?
+        .trim_start_matches('&')
+        .trim_start_matches("mut ")
+        .trim_end_matches('?')
+        .trim_end_matches("[]");
+    let raw = raw.split('<').next().unwrap_or(raw);
+    raw.replace('.', "::")
+        .split("::")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn normalize_signature_part(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn clean_identifier(raw: &str) -> String {
+    raw.trim()
+        .trim_matches(['"', '\'', '`'])
+        .trim_start_matches('#')
+        .to_owned()
+}
+
+fn compatible_label(existing: &str, requested: &str) -> bool {
+    normalized_label(existing) == normalized_label(requested)
+}
+
+fn compatible_kind(existing: &str, requested: &str) -> bool {
+    existing.is_empty()
+        || existing == requested
+        || matches!(
+            (existing, requested),
+            ("method", "constructor")
+                | ("variable", "property" | "field" | "constant")
+                | ("class", "trait")
+                | ("module", "namespace")
+        )
+}
+
+fn normalized_label(value: &str) -> String {
+    value
         .trim()
-        .strip_prefix('{')?
-        .split_once('}')?
-        .0
-        .trim();
-    let (source, alias) = body.split_once(" as ")?;
-    let source = source.trim();
-    let alias = alias.trim().split(',').next()?.trim();
-    (!source.is_empty() && !alias.is_empty()).then_some((source, alias))
+        .trim_start_matches('.')
+        .trim_end_matches("()")
+        .split('(')
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
-fn parse_extends_name(text: &str) -> Option<String> {
-    let (_, suffix) = text.split_once(" extends ")?;
-    let name = suffix
-        .split(|character: char| character.is_whitespace() || matches!(character, '{' | '<' | ','))
-        .next()?
-        .trim();
-    (!name.is_empty()).then(|| name.to_owned())
+fn record_anchor(node: &RawNodeRecord) -> Option<(usize, usize)> {
+    Some((
+        node.attributes
+            .get("start_byte")?
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())?,
+        node.attributes
+            .get("end_byte")?
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())?,
+    ))
 }
 
-fn has_rust_test_attribute(node: Node<'_>, source: &[u8]) -> bool {
-    node.prev_named_sibling().is_some_and(|attribute| {
-        attribute.kind() == "attribute_item"
-            && attribute
-                .utf8_text(source)
-                .is_ok_and(|text| text.trim() == "#[test]")
-    })
+fn edge_usize(edge: &RawEdgeRecord, key: &str) -> usize {
+    edge.attributes
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_default()
 }
