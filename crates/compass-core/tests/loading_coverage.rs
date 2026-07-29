@@ -464,10 +464,12 @@ fn incremental_mixed_origin_edges_use_fresh_ast_relationship_sites() -> Result<(
     }));
 
     options.force = true;
-    let clean = build_graph_with_layers(&options, None, &[])?;
-    let clean_graph =
-        compass_model::code_graph::GraphDocument::load(&clean.output_dir.join("graph.json"))?;
-    assert_eq!(incremental_graph.links, clean_graph.links);
+    options.reuse_cache_on_force = true;
+    let forced_reuse = build_graph_with_layers(&options, None, &[])?;
+    let forced_reuse_graph = compass_model::code_graph::GraphDocument::load(
+        &forced_reuse.output_dir.join("graph.json"),
+    )?;
+    assert_eq!(incremental_graph.links, forced_reuse_graph.links);
     Ok(())
 }
 
@@ -1369,8 +1371,10 @@ fn incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence()
         "// shifted before target\npub fn target() { let _changed_again = \"second\"; }\n",
     )?;
     options.force = true;
+    options.reuse_cache_on_force = true;
     let second_result = build_graph_with_layers(&options, None, &[])?;
     options.force = false;
+    options.reuse_cache_on_force = false;
     let second_graph_path = second_result.output_dir.join("graph.json");
     let second = compass_model::code_graph::GraphDocument::load(&second_graph_path)?;
     assert_eq!(

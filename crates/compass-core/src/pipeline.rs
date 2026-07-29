@@ -145,6 +145,10 @@ impl BuildOptions {
     }
 }
 
+const fn prior_graph_reuse_enabled(force: bool, reuse_cache_on_force: bool) -> bool {
+    !force || reuse_cache_on_force
+}
+
 #[derive(Clone, Debug)]
 pub struct BuildResult {
     pub root: PathBuf,
@@ -354,6 +358,7 @@ fn build_graph_inner(
         .output_root
         .as_deref()
         .map_or_else(|| root.clone(), absolutize);
+    let reuse_prior_graph = prior_graph_reuse_enabled(options.force, options.reuse_cache_on_force);
     let output_container = output_root.join(&output_name);
     fs::create_dir_all(&output_container).map_err(|source| compass_files::FileError::Io {
         path: output_container.clone(),
@@ -425,9 +430,7 @@ fn build_graph_inner(
     timings.detect = stage_started.elapsed();
     stage_started = Instant::now();
     let mut internal_started = Instant::now();
-    let mut semantic_documents = if options.purpose == BuildPurpose::Update
-        || (options.purpose == BuildPurpose::Extract && !options.force)
-    {
+    let mut semantic_documents = if reuse_prior_graph {
         semantic_document_sources(&output_dir.join("graph.json"), &root)
     } else {
         HashSet::new()
@@ -457,7 +460,7 @@ fn build_graph_inner(
     );
 
     let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && (!options.force || options.reuse_cache_on_force)
+        && reuse_prior_graph
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
     let has_program_artifacts =
@@ -587,7 +590,7 @@ fn build_graph_inner(
     let mut cache = Cache::open(&root, cache_options)?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
-    if !options.force || options.reuse_cache_on_force {
+    if reuse_prior_graph {
         for path in &sources {
             let cached = cache.load(path, &CacheKind::Ast, None, false)?;
             if let Some(value) = cached {
@@ -733,7 +736,7 @@ fn build_graph_inner(
         );
     }
     profile_internal("tree-sitter combined extraction", &mut internal_started);
-    let prepared = if options.force && !options.reuse_cache_on_force {
+    let prepared = if !reuse_prior_graph {
         fresh
             .iter()
             .filter_map(|(_, _, _, prepared)| prepared.clone())
@@ -745,7 +748,7 @@ fn build_graph_inner(
         let program_root = root.clone();
         let program_sources = sources.clone();
         let mut program_options = options.clone();
-        program_options.force = options.force && !options.reuse_cache_on_force;
+        program_options.force = !reuse_prior_graph;
         let program_cache_root = options.cache_root.clone();
         let program_output_cache_root = output_cache_root.map(Path::to_path_buf);
         let program_output_dir = output_dir.clone();
@@ -891,9 +894,7 @@ fn build_graph_inner(
     };
     profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
-    if options.purpose == BuildPurpose::Update
-        || (options.purpose == BuildPurpose::Extract && !options.force)
-    {
+    if reuse_prior_graph {
         let refreshed = semantic
             .map(|layer| {
                 let mut refreshed = canonical_source_set(&layer.refreshed_files, &root);
@@ -3566,6 +3567,14 @@ mod tests {
     use serde_json::{Map, Value};
 
     use super::*;
+
+    #[test]
+    fn force_prior_graph_reuse_requires_explicit_opt_in() {
+        assert!(prior_graph_reuse_enabled(false, false));
+        assert!(prior_graph_reuse_enabled(false, true));
+        assert!(!prior_graph_reuse_enabled(true, false));
+        assert!(prior_graph_reuse_enabled(true, true));
+    }
 
     #[test]
     fn precomputed_detection_cannot_cross_repository_roots() -> Result<(), Box<dyn Error>> {

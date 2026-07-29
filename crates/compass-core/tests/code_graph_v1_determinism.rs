@@ -7,7 +7,7 @@ use compass_core::{BuildOptions, build_local_graph};
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
-use compass_model::provenance::{EvidenceConfidence, ResolutionState};
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
 
 const SOURCE: &str = r#"
 pub struct Store;
@@ -330,5 +330,78 @@ function secondHandler() {}
         conflict_references,
         BTreeSet::from(["firstHandler", "secondHandler"])
     );
+    Ok(())
+}
+
+#[test]
+fn force_update_is_a_clean_byte_identical_rebuild() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    for (relative, source) in [
+        (
+            "project/urls.py",
+            r#"from django.urls import path
+from . import views
+urlpatterns = [path("health/", views.health, name="health")]
+"#,
+        ),
+        (
+            "project/views.py",
+            "def health(request):\n    return \"ok\"\n",
+        ),
+        ("guide.md", "# Service guide\n\n[Routes](project/urls.py)\n"),
+    ] {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, source)?;
+    }
+
+    let mut options = BuildOptions::new(root);
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+
+    let clean = build_local_graph(&options)?;
+    let clean_path = clean.output_dir.join("graph.json");
+    let clean_bytes = fs::read(&clean_path)?;
+    let clean_graph = GraphDocument::load(&clean_path)?;
+    assert!(clean_graph.nodes.iter().any(|node| {
+        node.kind == NodeKind::Resource
+            && node.source_file() == Some("guide.md")
+            && node
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin == EvidenceOrigin::Artifact)
+    }));
+    assert!(
+        clean_graph
+            .nodes
+            .iter()
+            .any(|node| node.kind == NodeKind::Route)
+    );
+    assert!(clean_graph.links.iter().any(|edge| {
+        edge.evidence
+            .iter()
+            .any(|evidence| evidence.origin == EvidenceOrigin::Convention)
+    }));
+
+    options.force = true;
+    let forced = build_local_graph(&options)?;
+    let forced_path = forced.output_dir.join("graph.json");
+    let forced_bytes = fs::read(&forced_path)?;
+    let forced_graph = GraphDocument::load(&forced_path)?;
+
+    assert_eq!(forced_bytes, clean_bytes);
+    assert_eq!(forced_graph.graph.files, clean_graph.graph.files);
+    assert_eq!(forced_graph.nodes, clean_graph.nodes);
+    assert_eq!(forced_graph.links, clean_graph.links);
+    assert!(forced_graph.links.iter().all(|edge| {
+        edge.evidence
+            .iter()
+            .all(|evidence| evidence.rule.as_deref() != Some("incremental-ast-endpoint-remap"))
+    }));
     Ok(())
 }
