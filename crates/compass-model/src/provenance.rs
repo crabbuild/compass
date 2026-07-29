@@ -4,6 +4,8 @@ use serde_json::{Map, Value};
 pub const MAX_RESOLUTION_CANDIDATES: usize = 20;
 pub const OCCURRENCE_RULE_ATTRIBUTE: &str = "_occurrence_rule";
 pub const ENDPOINT_REWRITE_RULES_ATTRIBUTE: &str = "_endpoint_rewrite_rules";
+pub const CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE: &str =
+    "_consume_incremental_endpoint_remap";
 pub const TRUSTED_EDGE_RECORD_ATTRIBUTE: &str = "_compass_v1_edge_record";
 pub const TRUSTED_NODE_RECORD_ATTRIBUTE: &str = "_compass_v1_node_record";
 
