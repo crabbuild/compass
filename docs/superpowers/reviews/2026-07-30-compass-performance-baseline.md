@@ -5,8 +5,9 @@ Date: 2026-07-30
 ## Scope
 
 The qualification harness lives in `benchmarks/performance/` and defaults to
-Compass-only execution. Graphify comparison is explicit and was not run for the
-final verification, per request.
+Compass-only execution. Graphify comparison is explicit. A separate three-run
+Graphify cold-build confirmation was performed after the final Compass
+verification.
 
 The checked-in suite pins Django, Spring Framework, Rails, Laravel, Bevy,
 ASP.NET Core, Angular, and Entire to exact remote commits at run time. This
@@ -22,6 +23,8 @@ because all eight repositories were not measured on this runner.
 - Final Compass commit: `b86dc228037b6410e006078ec85e76bf44ef7c9d`
 - Final Compass release SHA-256:
   `9c27ea72451d1bde002753b744a18698f5ff5e9ed742977df23d96ce6e9bcb9c`
+- Graphify version: 0.9.30
+- Graphify commit: `ecfcd160d56b420eb8241430fa7b5b1951c7829f`
 - Django commit: `50d706d0aebcc2d073c8d034b6e22fc98fad49f2`
 - Entire commit: `279b988597f1037c14cdd4c46765a5552e067d17`
 
@@ -81,16 +84,32 @@ rerun after that change in this session.
 
 ## Graphify reference
 
-No Graphify process was run. Against the supplied historical Django reference
-of 17.22 seconds and 4.98 GiB:
+The supplied 17.22-second historical value was not reproducible as a cold
+Graphify build. Graphify 0.9.30 was run from an isolated worktree at the exact
+remote-default-branch commit above. Each sample used a fresh process and empty
+output root; Graphify reported all 3,096 code files as uncached.
 
-- Compass cold is 1.39x faster and uses about 9.6% less peak memory.
-- Compass warm is 8.83x faster.
-- Compass cold does **not** meet the requested 5x speedup. Meeting 5x would
-  require a cold median at or below 3.444 seconds on the same runner and corpus.
+| Sample | Wall time | Peak RSS | Nodes | Edges |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 65.669 s | 1.26 GiB | 50,842 | 158,704 |
+| 2 | 62.346 s | 1.25 GiB | 50,842 | 158,704 |
+| 3 | 59.644 s | 1.25 GiB | 50,842 | 158,704 |
+| p50 / p95 / max | 62.346 s / 65.669 s | 1.26 GiB | 50,842 | 158,704 |
 
-There is no supplied Graphify query baseline, so no query speedup ratio is
-claimed.
+Against the qualified Compass cold result, Compass is 5.03x faster at p50 and
+5.29x faster at p95. This meets the 5x median target narrowly, not comfortably.
+The tradeoff remains material: Compass peak RSS is 3.58x Graphify's.
+
+The schema-aware comparison found zero validation errors and no mismatches
+among aligned shared nodes, but Compass is not yet a strict semantic superset:
+it retained 49,667 of 50,842 Graphify node facts (97.69%) and 148,104 of
+158,704 Graphify edge facts (93.32%). Compass emits a larger graph overall
+(52,904 nodes and 206,205 links), but size alone is not a quality claim.
+
+Graphify's node and edge counts were stable across the three samples, while
+the raw graph SHA-256 and community count differed in every sample. There is no
+qualified Graphify query baseline in this report, so no query speedup ratio is
+claimed here.
 
 ## Changes validated
 
