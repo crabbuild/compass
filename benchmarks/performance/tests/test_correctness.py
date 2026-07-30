@@ -61,6 +61,52 @@ class CorrectnessTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
 
+    def test_v1_compass_nodes_match_graphify_by_source_fact_not_internal_id(self) -> None:
+        database = sqlite3.connect(":memory:")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compass = root / "compass.json"
+            graphify = root / "graphify.json"
+            compass.write_text(
+                """
+                {
+                  "graph":{"schema":"compass.code-graph/1","diagnostics":[]},
+                  "nodes":[
+                    {"id":"sha256:file","kind":"file","name":"base.py",
+                     "source":{"file":"src/base.py","startLine":1}},
+                    {"id":"sha256:function","kind":"function","name":"run",
+                     "source":{"file":"src/base.py","startLine":12}}
+                  ],
+                  "edges":[
+                    {"source":"sha256:file","target":"sha256:function","kind":"contains"}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+            graphify.write_text(
+                """
+                {
+                  "nodes":[
+                    {"id":"src_base","label":"src/base.py","source_file":"src/base.py",
+                     "source_location":"L1"},
+                    {"id":"src_base_run","label":"run()","source_file":"src/base.py",
+                     "source_location":"L12"}
+                  ],
+                  "links":[
+                    {"source":"src_base","target":"src_base_run","relation":"contains"}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+            index_graph("compass", compass, database)
+            index_graph("graphify", graphify, database)
+        result = compare_graphs(database)
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 0)
+
     def test_dangling_edge_is_rejected(self) -> None:
         database = sqlite3.connect(":memory:")
         with tempfile.TemporaryDirectory() as directory:
@@ -88,4 +134,3 @@ class CorrectnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

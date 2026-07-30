@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Iterator
 
@@ -39,6 +40,24 @@ def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
+def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, str, str]:
+    source = record.get("source")
+    nested = source if isinstance(source, dict) else {}
+    label = _text(record.get("name", record.get("label", identifier))).strip()
+    normalized_label = label.casefold().lstrip(".")
+    normalized_label = re.sub(r"\(\)$", "", normalized_label)
+    if "/" in normalized_label or "\\" in normalized_label:
+        normalized_label = Path(normalized_label.replace("\\", "/")).name
+    source_file = _text(record.get("source_file", nested.get("file"))).replace("\\", "/")
+    source_location = _text(record.get("source_location"))
+    if not source_location:
+        start_line = nested.get("startLine", nested.get("start_line"))
+        if isinstance(start_line, int) and start_line > 0:
+            source_location = f"L{start_line}"
+    fact_key = _hash((normalized_label, source_file, source_location))
+    return label, source_file, source_location, fact_key
+
+
 def _create_schema(database: sqlite3.Connection) -> None:
     database.executescript(
         """
@@ -52,6 +71,7 @@ def _create_schema(database: sqlite3.Connection) -> None:
             kind TEXT NOT NULL,
             source_file TEXT NOT NULL,
             source_location TEXT NOT NULL,
+            fact_key TEXT NOT NULL,
             payload_sha256 TEXT NOT NULL,
             PRIMARY KEY (tool, id)
         );
@@ -65,6 +85,7 @@ def _create_schema(database: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS edges_source ON edges(tool, source);
         CREATE INDEX IF NOT EXISTS edges_target ON edges(tool, target);
+        CREATE INDEX IF NOT EXISTS nodes_fact_key ON nodes(tool, fact_key);
         CREATE TABLE IF NOT EXISTS summaries (
             tool TEXT PRIMARY KEY,
             nodes INTEGER NOT NULL,
@@ -123,11 +144,9 @@ def index_graph(
         identifier = record.get("id")
         if not isinstance(identifier, str) or not identifier:
             raise ValueError(f"{tool} node has an invalid id")
-        label = _text(record.get("label", identifier))
+        label, source_file, source_location, fact_key = _source_fact(record, identifier)
         kind = _text(record.get("kind", record.get("type", record.get("node_type"))))
-        source_file = _text(record.get("source_file")).replace("\\", "/")
-        source_location = _text(record.get("source_location"))
-        payload = _hash((identifier, label, kind, source_file, source_location))
+        payload = _hash((identifier, label, kind, source_file, source_location, fact_key))
         existing = database.execute(
             "SELECT payload_sha256 FROM nodes WHERE tool = ? AND id = ?",
             (tool, identifier),
@@ -136,8 +155,8 @@ def index_graph(
             raise ValueError(f"{tool} node id has conflicting payloads: {identifier}")
         if existing is None:
             database.execute(
-                "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (tool, identifier, label, kind, source_file, source_location, payload),
+                "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (tool, identifier, label, kind, source_file, source_location, fact_key, payload),
             )
             node_count += 1
 
@@ -206,7 +225,7 @@ def canonical_graph_digest(database: sqlite3.Connection, tool: str) -> str:
     for table, query in (
         (
             "node",
-            "SELECT id,label,kind,source_file,source_location,payload_sha256 "
+            "SELECT id,label,kind,source_file,source_location,fact_key,payload_sha256 "
             "FROM nodes WHERE tool = ? ORDER BY id",
         ),
         (
@@ -246,32 +265,57 @@ def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
         missing_nodes_query = """
             SELECT graphify.id
             FROM nodes AS graphify
-            LEFT JOIN nodes AS compass
-              ON compass.tool = 'compass' AND compass.id = graphify.id
-            WHERE graphify.tool = 'graphify' AND compass.id IS NULL
+            WHERE graphify.tool = 'graphify'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM nodes AS compass
+                WHERE compass.tool = 'compass'
+                  AND compass.fact_key = graphify.fact_key
+              )
         """
         mismatch_query = """
             SELECT graphify.id
             FROM nodes AS graphify
-            JOIN nodes AS compass
-              ON compass.tool = 'compass' AND compass.id = graphify.id
             WHERE graphify.tool = 'graphify'
-              AND (
-                graphify.label != compass.label
-                OR graphify.kind != compass.kind
-                OR graphify.source_file != compass.source_file
-                OR graphify.source_location != compass.source_location
+              AND graphify.kind != ''
+              AND EXISTS (
+                SELECT 1
+                FROM nodes AS compass
+                WHERE compass.tool = 'compass'
+                  AND compass.fact_key = graphify.fact_key
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM nodes AS compass
+                WHERE compass.tool = 'compass'
+                  AND compass.fact_key = graphify.fact_key
+                  AND (compass.kind = '' OR compass.kind = graphify.kind)
               )
         """
         missing_edges_query = """
             SELECT graphify.source || '|' || graphify.relation || '|' || graphify.target
             FROM edges AS graphify
-            LEFT JOIN edges AS compass
-              ON compass.tool = 'compass'
-              AND compass.source = graphify.source
-              AND compass.target = graphify.target
-              AND compass.relation = graphify.relation
-            WHERE graphify.tool = 'graphify' AND compass.source IS NULL
+            JOIN nodes AS graphify_source
+              ON graphify_source.tool = 'graphify'
+              AND graphify_source.id = graphify.source
+            JOIN nodes AS graphify_target
+              ON graphify_target.tool = 'graphify'
+              AND graphify_target.id = graphify.target
+            WHERE graphify.tool = 'graphify'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM edges AS compass
+                JOIN nodes AS compass_source
+                  ON compass_source.tool = 'compass'
+                  AND compass_source.id = compass.source
+                JOIN nodes AS compass_target
+                  ON compass_target.tool = 'compass'
+                  AND compass_target.id = compass.target
+                WHERE compass.tool = 'compass'
+                  AND compass.relation = graphify.relation
+                  AND compass_source.fact_key = graphify_source.fact_key
+                  AND compass_target.fact_key = graphify_target.fact_key
+              )
         """
         for name, query in (
             ("missing_graphify_nodes", missing_nodes_query),
@@ -294,4 +338,3 @@ def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
         failures=tuple(failures),
         metrics=metrics,
     )
-
