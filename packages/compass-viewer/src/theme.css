@@ -3273,8 +3273,16 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 .history-change-counts {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
   margin-top: 12px;
+}
+
+.history-commit-actions {
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.history-change-counts {
+  gap: 6px;
 }
 
 .history-change-counts-help {
@@ -4128,6 +4136,15 @@ body.vscode-high-contrast-light .compass-change-badge {
   .history-comparison-control {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .history-commit-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .history-commit-actions > button {
+    align-self: flex-start;
   }
 
   .history-comparison-control label {

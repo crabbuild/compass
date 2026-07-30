@@ -215,6 +215,31 @@ test("comparison replaces the full graph with a readable focused delta", async (
   });
 });
 
+test("revision actions share a common control baseline", async ({ page }) => {
+  await page.goto("/history.html");
+
+  const alignment = await page.evaluate(() => {
+    const query = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Query this revision"));
+    const picker = document.querySelector<HTMLSelectElement>(
+      '[aria-label="Comparison revision"]'
+    );
+    const compare = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Compare revisions"));
+    if (!query || !picker || !compare) throw new Error("revision actions did not render");
+    return {
+      query: query.getBoundingClientRect(),
+      picker: picker.getBoundingClientRect(),
+      compare: compare.getBoundingClientRect()
+    };
+  });
+
+  expect(Math.abs(alignment.query.top - alignment.picker.top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(alignment.query.bottom - alignment.picker.bottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(alignment.compare.top - alignment.picker.top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(alignment.compare.bottom - alignment.picker.bottom)).toBeLessThanOrEqual(1);
+});
+
 test("unavailable comparison offers to build the selected graph", async ({ page }) => {
   await page.goto("/history.html");
   await page.getByRole("listbox", { name: "Git commit timeline" })
