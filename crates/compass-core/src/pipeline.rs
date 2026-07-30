@@ -1522,28 +1522,35 @@ fn build_graph_inner(
     timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
 
-    write_semantic_marker(&output_dir, semantic)?;
-
     let mut manifest = prior_manifest;
-    save_build_manifest(
-        &mut manifest,
-        &detection.files,
-        &manifest_path,
-        &root,
-        semantic,
-    )?;
+    let (manifest_result, seals_result) = rayon::join(
+        || {
+            save_build_manifest(
+                &mut manifest,
+                &detection.files,
+                &manifest_path,
+                &root,
+                semantic,
+            )
+        },
+        || {
+            write_semantic_marker(&output_dir, semantic)?;
+            save_output_stats(
+                &output_dir,
+                published_nodes,
+                published_edges,
+                communities.len(),
+                true,
+                omissions,
+            )
+        },
+    );
+    manifest_result?;
+    seals_result?;
     timings.publish = stage_started.elapsed();
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
-    save_output_stats(
-        &output_dir,
-        published_nodes,
-        published_edges,
-        communities.len(),
-        true,
-        omissions,
-    )?;
     publish_build_state(
         options,
         &output_dir,

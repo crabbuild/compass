@@ -27,6 +27,7 @@ use compass_model::provenance::{
 use compass_model::{
     CodeGraphValidationError, GraphError, validate_code_graph, validate_code_graph_records,
 };
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -48,6 +49,13 @@ const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 enum PublicationMode {
     Strict,
     BestEffort,
+}
+
+struct PreparedEdge {
+    index: usize,
+    raw: RawEdgeRecord,
+    trusted: bool,
+    normalized: Result<EdgeRecord, (GraphError, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,9 +125,42 @@ impl BuildEvidence {
         let mut source_tree = Sha256::new();
         let mut files = Vec::with_capacity(paths.len());
         let mut omitted_external_references = 0_usize;
-        for path in paths {
-            let absolute = repository_root.join(&path);
-            if !absolute.is_file() {
+        let inspected = paths
+            .into_iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|path| {
+                let absolute = repository_root.join(&path);
+                if !absolute.is_file() {
+                    return Ok((path, None));
+                }
+                let language = Registry::resolve(&absolute).map(|spec| spec.name.to_owned());
+                let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                    path: absolute,
+                    source,
+                })?;
+                let content_digest = sha256_prefixed(&bytes);
+                let record = FileRecord {
+                    id: file_id(&path),
+                    path: path.clone(),
+                    language,
+                    content_digest,
+                    byte_size: bytes.len() as u64,
+                    generated: false,
+                    extraction_status: ExtractionStatus::Extracted,
+                    extractor_versions: vec![format!(
+                        "compass-languages/{}",
+                        env!("CARGO_PKG_VERSION")
+                    )],
+                    coverage: Vec::new(),
+                    diagnostics: Vec::new(),
+                };
+                Ok((path, Some(record)))
+            })
+            .collect::<Vec<Result<_, GraphError>>>();
+        for inspected in inspected {
+            let (path, record) = inspected?;
+            let Some(record) = record else {
                 if diagnostics.len() < MAX_EXTERNAL_REFERENCE_DIAGNOSTICS {
                     evidence_external_reference_diagnostic(
                         &mut diagnostics,
@@ -130,32 +171,12 @@ impl BuildEvidence {
                     omitted_external_references = omitted_external_references.saturating_add(1);
                 }
                 continue;
-            }
-            let language = Registry::resolve(&absolute).map(|spec| spec.name.to_owned());
-            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
-                path: absolute,
-                source,
-            })?;
-            let content_digest = sha256_prefixed(&bytes);
+            };
             source_tree.update((path.len() as u64).to_le_bytes());
             source_tree.update(path.as_bytes());
-            source_tree.update((content_digest.len() as u64).to_le_bytes());
-            source_tree.update(content_digest.as_bytes());
-            files.push(FileRecord {
-                id: file_id(&path),
-                path,
-                language,
-                content_digest,
-                byte_size: bytes.len() as u64,
-                generated: false,
-                extraction_status: ExtractionStatus::Extracted,
-                extractor_versions: vec![format!(
-                    "compass-languages/{}",
-                    env!("CARGO_PKG_VERSION")
-                )],
-                coverage: Vec::new(),
-                diagnostics: Vec::new(),
-            });
+            source_tree.update((record.content_digest.len() as u64).to_le_bytes());
+            source_tree.update(record.content_digest.as_bytes());
+            files.push(record);
         }
         if omitted_external_references > 0 {
             diagnostics.push(GraphDiagnostic {
@@ -493,6 +514,58 @@ pub fn normalize_v1_best_effort(
     normalize_v1_with_mode(extraction, evidence, PublicationMode::BestEffort)
 }
 
+fn prepare_edge(
+    raw: RawEdgeRecord,
+    index: usize,
+    id_remap: &HashMap<String, String>,
+    repository_root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> PreparedEdge {
+    let trusted = raw.attributes.contains_key(TRUSTED_EDGE_RECORD);
+    let Some(source) = id_remap.get(&raw.source) else {
+        let reason = format!("source {} does not match a retained raw node", raw.source);
+        let strict_reason = format!("source {} does not match a raw node", raw.source);
+        return PreparedEdge {
+            index,
+            raw,
+            trusted,
+            normalized: Err((raw_error(&format!("edge[{index}]"), &strict_reason), reason)),
+        };
+    };
+    let Some(target) = id_remap.get(&raw.target) else {
+        let reason = format!("target {} does not match a retained raw node", raw.target);
+        let strict_reason = format!("target {} does not match a raw node", raw.target);
+        return PreparedEdge {
+            index,
+            raw,
+            trusted,
+            normalized: Err((raw_error(&format!("edge[{index}]"), &strict_reason), reason)),
+        };
+    };
+    let normalized = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
+        Some(value) => normalize_trusted_edge(
+            &raw,
+            value,
+            source,
+            target,
+            index,
+            repository_root,
+            file_facts,
+        ),
+        None => normalize_edge(&raw, source, target, index, repository_root, file_facts),
+    }
+    .map_err(|error| {
+        let reason = error.to_string();
+        (error, reason)
+    });
+    PreparedEdge {
+        index,
+        raw,
+        trusted,
+        normalized,
+    }
+}
+
 fn normalize_v1_with_mode(
     mut extraction: Extraction,
     mut evidence: BuildEvidence,
@@ -626,83 +699,49 @@ fn normalize_v1_with_mode(
     }
     profile_v1("v1 node normalization", &mut profile_started);
 
-    let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
-    for (index, raw) in extraction.edges.into_iter().enumerate() {
-        let source = match id_remap.get(&raw.source) {
-            Some(source) => source.clone(),
-            None if mode == PublicationMode::BestEffort => {
-                quarantine.omit_edge(
-                    &raw_edge_identity(&raw, index),
-                    &format!("source {} does not match a retained raw node", raw.source),
-                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
-                );
-                continue;
-            }
-            None => {
-                return Err(raw_error(
-                    &format!("edge[{index}]"),
-                    &format!("source {} does not match a raw node", raw.source),
-                ));
-            }
-        };
-        let target = match id_remap.get(&raw.target) {
-            Some(target) => target.clone(),
-            None if mode == PublicationMode::BestEffort => {
-                quarantine.omit_edge(
-                    &raw_edge_identity(&raw, index),
-                    &format!("target {} does not match a retained raw node", raw.target),
-                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
-                );
-                continue;
-            }
-            None => {
-                return Err(raw_error(
-                    &format!("edge[{index}]"),
-                    &format!("target {} does not match a raw node", raw.target),
-                ));
-            }
-        };
-        let trusted_edge = raw.attributes.contains_key(TRUSTED_EDGE_RECORD);
-        let normalized = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
-            Some(value) => normalize_trusted_edge(
-                &raw,
-                value,
-                &source,
-                &target,
+    let prepared_edges = extraction
+        .edges
+        .into_par_iter()
+        .enumerate()
+        .map(|(index, raw)| {
+            prepare_edge(
+                raw,
                 index,
+                &id_remap,
                 &evidence.repository_root,
                 &file_facts,
-            ),
-            None => normalize_edge(
-                &raw,
-                &source,
-                &target,
-                index,
-                &evidence.repository_root,
-                &file_facts,
-            ),
-        };
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut links = HashMap::<String, EdgeRecord>::with_capacity(prepared_edges.len());
+    for prepared in prepared_edges {
+        let PreparedEdge {
+            index,
+            raw,
+            trusted,
+            normalized,
+        } = prepared;
         let mut edge = match normalized {
             Ok(edge) => edge,
-            Err(error) if mode == PublicationMode::BestEffort => {
+            Err((_error, reason)) if mode == PublicationMode::BestEffort => {
                 quarantine.omit_edge(
                     &raw_edge_identity(&raw, index),
-                    &error.to_string(),
+                    &reason,
                     best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
                 );
                 continue;
             }
-            Err(error) => return Err(error),
+            Err((error, _)) => return Err(error),
         };
         remap_provenance_candidates(&mut edge.evidence, &id_remap);
-        if !trusted_edge
+        if !trusted
             && edge.kind == EdgeKind::Tests
             && let Some(source) = nodes.get_mut(&edge.source)
         {
             source.roles.push(NodeRole::Test);
             sort_dedup_serialized(&mut source.roles);
         }
-        if !trusted_edge
+        if !trusted
             && edge.kind == EdgeKind::Decorates
             && nodes
                 .get(&edge.target)
@@ -762,7 +801,7 @@ fn normalize_v1_with_mode(
                 sort_dedup_serialized(&mut edge.evidence);
             }
         }
-        if !trusted_edge && edge.kind == EdgeKind::TypeOf && source_kind.is_callable() {
+        if !trusted && edge.kind == EdgeKind::TypeOf && source_kind.is_callable() {
             edge.kind = EdgeKind::Returns;
             edge.details = None;
             let id = edge_id(
@@ -775,7 +814,7 @@ fn normalize_v1_with_mode(
             edge.id.clone_from(&id);
             edge.key = id;
         }
-        if !trusted_edge && edge.kind == EdgeKind::Calls && target_is_constructible {
+        if !trusted && edge.kind == EdgeKind::Calls && target_is_constructible {
             edge.kind = EdgeKind::Instantiates;
             edge.details = None;
             let id = edge_id(
@@ -4028,7 +4067,7 @@ fn published_file_facts(
 ) -> Result<HashMap<String, PublishedFileFacts>, GraphError> {
     evidence
         .files
-        .iter()
+        .par_iter()
         .map(|file| {
             let absolute = evidence.repository_root.join(&file.path);
             let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
@@ -4048,6 +4087,8 @@ fn published_file_facts(
                 PublishedFileFacts::from_bytes(&bytes, file.generated),
             ))
         })
+        .collect::<Vec<_>>()
+        .into_iter()
         .collect()
 }
 
