@@ -1,0 +1,90 @@
+schema = "compass.performance-suite/1"
+
+[[repository]]
+name = "django"
+url = "https://github.com/django/django.git"
+mutation_suffix = ".py"
+[[repository.query]]
+question = "where is URL resolution implemented"
+required = ["URLResolver"]
+[[repository.query]]
+question = "how does a model save data"
+required = ["Model", "save"]
+
+[[repository]]
+name = "spring"
+url = "https://github.com/spring-projects/spring-framework.git"
+mutation_suffix = ".java"
+[[repository.query]]
+question = "how is the application context refreshed"
+required = ["ApplicationContext"]
+[[repository.query]]
+question = "how are HTTP requests dispatched"
+required = ["DispatcherServlet"]
+
+[[repository]]
+name = "rails"
+url = "https://github.com/rails/rails.git"
+mutation_suffix = ".rb"
+[[repository.query]]
+question = "how does Active Record save a model"
+required = ["ActiveRecord"]
+[[repository.query]]
+question = "how are routes recognized"
+required = ["RouteSet"]
+
+[[repository]]
+name = "laravel"
+url = "https://github.com/laravel/framework.git"
+mutation_suffix = ".php"
+[[repository.query]]
+question = "how does the service container resolve bindings"
+required = ["Container"]
+[[repository.query]]
+question = "how are HTTP routes dispatched"
+required = ["Router"]
+
+[[repository]]
+name = "bevy"
+url = "https://github.com/bevyengine/bevy.git"
+mutation_suffix = ".rs"
+[[repository.query]]
+question = "how are systems scheduled"
+required = ["Schedule"]
+[[repository.query]]
+question = "how are plugins added to an application"
+required = ["Plugin"]
+
+[[repository]]
+name = "aspnetcore"
+url = "https://github.com/dotnet/aspnetcore.git"
+mutation_suffix = ".cs"
+[[repository.query]]
+question = "how are HTTP requests processed"
+required = ["HttpContext"]
+[[repository.query]]
+question = "how is middleware invoked"
+required = ["RequestDelegate"]
+
+[[repository]]
+name = "angular"
+url = "https://github.com/angular/angular.git"
+mutation_suffix = ".ts"
+[[repository.query]]
+question = "how does dependency injection resolve providers"
+required = ["Injector"]
+[[repository.query]]
+question = "how are components created"
+required = ["ComponentFactory"]
+
+[[repository]]
+name = "entire"
+url = "https://github.com/entireio/cli.git"
+mutation_suffix = ".go"
+[[repository.query]]
+question = "how is a checkpoint created"
+required = ["checkpoint"]
+[[repository.query]]
+question = "how is repository state recorded"
+required = ["repository"]
+
