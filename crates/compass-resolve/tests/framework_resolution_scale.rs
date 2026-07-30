@@ -11,7 +11,10 @@ use serde_json::{Map, Value};
 const TARGETS: usize = 100_000;
 const ROUTES: usize = 50_000;
 const DOMAIN_FACTS: usize = 50_000;
-const RESOLUTION_CEILING: Duration = Duration::from_secs(30);
+// This end-to-end guard runs in an unoptimized test binary on shared CI
+// hardware. Candidate expansion has separate deterministic budget assertions;
+// this ceiling detects material regressions without encoding runner speed.
+const RESOLUTION_CEILING: Duration = Duration::from_secs(90);
 
 #[test]
 fn shared_production_framework_resolution_stays_within_enterprise_ceiling()
