@@ -251,6 +251,10 @@ fn production_pipeline_preserves_framework_domain_kinds_and_route_targets()
     let root = directory.path();
     for (relative, source) in [
         (
+            "package.json",
+            r#"{"dependencies":{"nuxt":"4.0.0","@nestjs/common":"11.0.0","react-router-dom":"7.0.0"}}"#,
+        ),
+        (
             "src/orders.ts",
             r#"import { Controller } from '@nestjs/common';
 import { EventPattern, MessagePattern } from '@nestjs/microservices';

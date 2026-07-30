@@ -143,8 +143,85 @@ describe("HistoryWorkspace", () => {
     expect(container.textContent).toContain("No graph delta to draw");
     expect(container.textContent).toContain(`Comparing ${commit.slice(0, 9)} to ${parent.slice(0, 9)}`);
     expect(container.textContent).toContain(
-      "No structural changes from the first parent. Source or configuration changes may still exist"
+      "No structural changes from the comparison baseline. Source or configuration changes may still exist"
     );
+    root.unmount();
+  });
+
+  it("compares the selected revision with any other loaded revision", () => {
+    const historyHost = host();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const parent = "b".repeat(40);
+    const nonAdjacent = "c".repeat(40);
+    flushSync(() => root.render(
+      <HistoryWorkspace
+        timeline={{
+          schema: "compass.history.timeline/1",
+          repositoryId: "repo",
+          selectedHead: commit,
+          historyEnabled: true,
+          totalEntries: 3,
+          hasMore: false,
+          nextCursor: null,
+          entries: [{
+            commit,
+            parents: [parent],
+            authorName: "Compass",
+            authorEmail: "test@example.invalid",
+            authoredAtSeconds: 3,
+            subject: "Selected revision",
+            graphState: "graph_available",
+            presentationAvailable: true,
+            realization: "selected-realization",
+            fingerprint: "selected-fingerprint",
+            job: null
+          }, {
+            commit: parent,
+            parents: [nonAdjacent],
+            authorName: "Compass",
+            authorEmail: "test@example.invalid",
+            authoredAtSeconds: 2,
+            subject: "Parent revision",
+            graphState: "graph_available",
+            presentationAvailable: true,
+            realization: "parent-realization",
+            fingerprint: "parent-fingerprint",
+            job: null
+          }, {
+            commit: nonAdjacent,
+            parents: [],
+            authorName: "Compass",
+            authorEmail: "test@example.invalid",
+            authoredAtSeconds: 1,
+            subject: "Older revision",
+            graphState: "graph_available",
+            presentationAvailable: true,
+            realization: "older-realization",
+            fingerprint: "older-fingerprint",
+            job: null
+          }]
+        }}
+        selectedCommit={commit}
+        revisionLoadState="ready"
+        onSelectCommit={vi.fn()}
+        host={historyHost}
+      />
+    ));
+
+    const comparisonSelect = container.querySelector<HTMLSelectElement>(
+      '[aria-label="Comparison revision"]'
+    );
+    expect(comparisonSelect?.value).toBe(parent);
+    if (!comparisonSelect) throw new Error("comparison revision picker did not render");
+
+    comparisonSelect.value = nonAdjacent;
+    flushSync(() => comparisonSelect.dispatchEvent(new Event("change", { bubbles: true })));
+    const compareButton = Array.from(container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.includes("Compare revisions"));
+    flushSync(() => compareButton?.click());
+
+    expect(historyHost.compare).toHaveBeenCalledWith(commit, nonAdjacent);
     root.unmount();
   });
 

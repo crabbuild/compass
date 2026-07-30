@@ -105,6 +105,16 @@
   --workbench-progress: var(--vscode-progressBar-background, var(--ring));
 }
 
+body.vscode-light,
+body.vscode-high-contrast-light {
+  color-scheme: light;
+}
+
+body.vscode-dark,
+body.vscode-high-contrast {
+  color-scheme: dark;
+}
+
 * {
   border-color: var(--border);
 }
@@ -3263,8 +3273,16 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 .history-change-counts {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
   margin-top: 12px;
+}
+
+.history-commit-actions {
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.history-change-counts {
+  gap: 6px;
 }
 
 .history-change-counts-help {
@@ -3280,6 +3298,50 @@ body.vscode-high-contrast-light .query-mode button[aria-selected="true"] {
 
 .history-commit-actions button {
   border-radius: 2px;
+}
+
+.history-comparison-control {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 5px 7px;
+  min-width: min(100%, 440px);
+}
+
+.history-comparison-control label {
+  grid-column: 1 / -1;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.history-comparison-control select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 26px 0 8px;
+  border: 1px solid var(--vscode-dropdown-border, var(--border));
+  border-radius: 2px;
+  outline: none;
+  background: var(--vscode-dropdown-background, var(--background));
+  color: var(--vscode-dropdown-foreground, var(--foreground));
+  font-size: 11px;
+}
+
+.history-comparison-control select option {
+  background: var(--vscode-dropdown-background, var(--background));
+  color: var(--vscode-dropdown-foreground, var(--foreground));
+}
+
+.history-comparison-control select:focus-visible {
+  border-color: var(--vscode-focusBorder, var(--ring));
+  outline: 1px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -1px;
+}
+
+.history-comparison-control select:disabled {
+  color: var(--vscode-disabledForeground, var(--muted-foreground));
+  cursor: not-allowed;
 }
 
 .history-comparison-help,
@@ -4037,7 +4099,9 @@ body.vscode-high-contrast-light .history-finding-list details,
 body.vscode-high-contrast .history-source-changes details,
 body.vscode-high-contrast-light .history-source-changes details,
 body.vscode-high-contrast .history-change-counts span,
-body.vscode-high-contrast-light .history-change-counts span {
+body.vscode-high-contrast-light .history-change-counts span,
+body.vscode-high-contrast .history-comparison-control select,
+body.vscode-high-contrast-light .history-comparison-control select {
   border-color: var(--vscode-contrastBorder, var(--ring));
   border-width: 2px;
 }
@@ -4067,6 +4131,24 @@ body.vscode-high-contrast-light .compass-change-badge {
 
   .history-diff-toolbar {
     flex-wrap: wrap;
+  }
+
+  .history-comparison-control {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .history-commit-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .history-commit-actions > button {
+    align-self: flex-start;
+  }
+
+  .history-comparison-control label {
+    grid-column: auto;
   }
 
   .history-diff-expand {

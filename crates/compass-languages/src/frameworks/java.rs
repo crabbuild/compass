@@ -4,6 +4,7 @@ use regex::Regex;
 use serde_json::Map;
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{join_route_path, line_anchor, normalize_route_path, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
@@ -17,9 +18,20 @@ struct Mapping {
 
 pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    if !body.contains("org.springframework.web.bind.annotation")
-        && !body.contains("@RestController")
-    {
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            body.contains("org.springframework.web.bind.annotation"),
+            "spring",
+            EvidenceKind::Import,
+            "org.springframework.web.bind.annotation",
+        )
+        .supporting_if(
+            body.contains("@RestController"),
+            "spring",
+            EvidenceKind::DecoratorOrAttribute,
+            "@RestController",
+        );
+    if !evidence.activates("spring") {
         return Vec::new();
     }
     let Ok(annotation) = Regex::new(

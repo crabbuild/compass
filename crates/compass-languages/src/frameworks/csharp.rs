@@ -4,12 +4,26 @@ use regex::Regex;
 use serde_json::Map;
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{join_route_path, line_anchor, normalize_route_path, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    if !body.contains("Microsoft.AspNetCore.Mvc") && !body.contains("[ApiController]") {
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            body.contains("Microsoft.AspNetCore.Mvc"),
+            "aspnet",
+            EvidenceKind::Import,
+            "Microsoft.AspNetCore.Mvc",
+        )
+        .supporting_if(
+            body.contains("[ApiController]"),
+            "aspnet",
+            EvidenceKind::DecoratorOrAttribute,
+            "ApiController",
+        );
+    if !evidence.activates("aspnet") {
         return Vec::new();
     }
     let Ok(route_attribute) = Regex::new(r#"\[Route\(\s*"([^"]*)"\s*\)\]"#) else {

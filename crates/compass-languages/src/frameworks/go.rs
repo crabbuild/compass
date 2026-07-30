@@ -5,16 +5,36 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{join_route_path, line_anchor, normalize_route_path, split_top_level, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    let framework = if body.contains("github.com/gin-gonic/gin") {
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            body.contains("github.com/gin-gonic/gin"),
+            "gin",
+            EvidenceKind::Import,
+            "github.com/gin-gonic/gin",
+        )
+        .direct_if(
+            body.contains("github.com/go-chi/chi"),
+            "chi",
+            EvidenceKind::Import,
+            "github.com/go-chi/chi",
+        )
+        .direct_if(
+            body.contains("github.com/gorilla/mux"),
+            "gorilla",
+            EvidenceKind::Import,
+            "github.com/gorilla/mux",
+        );
+    let framework = if evidence.activates("gin") {
         "gin"
-    } else if body.contains("github.com/go-chi/chi") {
+    } else if evidence.activates("chi") {
         "chi"
-    } else if body.contains("github.com/gorilla/mux") {
+    } else if evidence.activates("gorilla") {
         "gorilla"
     } else {
         return Vec::new();

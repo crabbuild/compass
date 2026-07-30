@@ -3,14 +3,16 @@ use std::path::Path;
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::{
     RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
-use crate::{Extraction, RawEdgeRecord, RawNodeRecord, make_id};
+use crate::{Extraction, ProjectEvidence, RawEdgeRecord, RawNodeRecord, make_id};
 
 pub(super) fn detect(
     path: &Path,
     source: &[u8],
+    project: Option<&ProjectEvidence>,
     extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
     if source.is_empty() {
@@ -18,7 +20,44 @@ pub(super) fn detect(
     }
     let portable = path.to_string_lossy().replace('\\', "/");
     let lower = portable.to_ascii_lowercase();
-    if let Some(relative) = segment_after(&portable, "src/routes/") {
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            project.is_none_or(|project| project.has_dependency("@sveltejs/kit"))
+                && segment_after(&portable, "src/routes/").is_some()
+                && matches!(
+                    path.file_name().and_then(|name| name.to_str()),
+                    Some("+page.svelte" | "+page.ts" | "+server.ts" | "+server.js")
+                ),
+            "sveltekit",
+            EvidenceKind::ConfigurationContract,
+            "SvelteKit src/routes artifact",
+        )
+        .direct_if(
+            project.is_none_or(|project| project.has_dependency("nuxt"))
+                && ((segment_after(&portable, "pages/").is_some() && lower.ends_with(".vue"))
+                    || segment_after(&portable, "server/api/").is_some()
+                    || (segment_after(&portable, "middleware/").is_some()
+                        && lower.ends_with(".ts")
+                        && lower.contains("nuxt"))),
+            "nuxt",
+            EvidenceKind::ConfigurationContract,
+            "Nuxt route artifact",
+        )
+        .direct_if(
+            project.is_none_or(|project| project.has_dependency("astro"))
+                && segment_after(&portable, "src/pages/").is_some()
+                && (lower.ends_with(".astro")
+                    || matches!(
+                        path.extension().and_then(|extension| extension.to_str()),
+                        Some("ts" | "js")
+                    )),
+            "astro",
+            EvidenceKind::ConfigurationContract,
+            "Astro src/pages artifact",
+        );
+    if evidence.activates("sveltekit")
+        && let Some(relative) = segment_after(&portable, "src/routes/")
+    {
         if lower.ends_with("/+page.svelte") || lower.ends_with("/+page.ts") {
             return page_routes(
                 "sveltekit",
@@ -37,7 +76,8 @@ pub(super) fn detect(
             return endpoint_routes("sveltekit", route, path, source, extraction);
         }
     }
-    if let Some(relative) = segment_after(&portable, "pages/")
+    if evidence.activates("nuxt")
+        && let Some(relative) = segment_after(&portable, "pages/")
         && lower.ends_with(".vue")
     {
         return page_routes(
@@ -48,7 +88,8 @@ pub(super) fn detect(
             extraction,
         );
     }
-    if let Some(relative) = segment_after(&portable, "server/api/")
+    if evidence.activates("nuxt")
+        && let Some(relative) = segment_after(&portable, "server/api/")
         && matches!(
             path.extension().and_then(|extension| extension.to_str()),
             Some("ts" | "js" | "mts" | "mjs")
@@ -65,7 +106,8 @@ pub(super) fn detect(
             "nuxt-server-api-convention",
         );
     }
-    if let Some(relative) = segment_after(&portable, "middleware/")
+    if evidence.activates("nuxt")
+        && let Some(relative) = segment_after(&portable, "middleware/")
         && lower.ends_with(".ts")
         && lower.contains("nuxt")
     {
@@ -79,7 +121,9 @@ pub(super) fn detect(
             detail: Map::new(),
         })];
     }
-    if let Some(relative) = segment_after(&portable, "src/pages/") {
+    if evidence.activates("astro")
+        && let Some(relative) = segment_after(&portable, "src/pages/")
+    {
         if lower.ends_with(".astro") {
             return page_routes(
                 "astro",
