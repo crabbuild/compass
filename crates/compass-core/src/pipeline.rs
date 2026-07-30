@@ -498,13 +498,18 @@ fn build_graph_inner(
             }),
     );
 
-    let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && read_prior_published_graph
+    let reusable_semantic_layer = semantic.is_none()
+        || (options.purpose == BuildPurpose::Extract
+            && semantic.is_some_and(semantic_layer_is_empty));
+    let manifest_unchanged = read_prior_published_graph
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let verified_state = if semantic.is_none() && supplemental.is_empty() && manifest_unchanged {
+    let verified_state = if reusable_semantic_layer
+        && supplemental.is_empty()
+        && manifest_unchanged
+    {
         load_verified(
             &output_dir,
             &build_profile,
@@ -559,7 +564,7 @@ fn build_graph_inner(
         }
     }
     let unchanged_program = if options.program_analysis
-        && semantic.is_none()
+        && reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
         && verified_output
@@ -568,7 +573,7 @@ fn build_graph_inner(
     } else {
         None
     };
-    if semantic.is_none()
+    if reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
         && verified_output
@@ -3135,7 +3140,7 @@ fn save_build_manifest(
     root: &Path,
     semantic: Option<&SemanticLayer>,
 ) -> Result<(), CoreError> {
-    let Some(layer) = semantic else {
+    let Some(layer) = semantic.filter(|layer| !semantic_layer_is_empty(layer)) else {
         let scan_corpus = files.values().flatten().cloned().collect::<BTreeSet<_>>();
         manifest.save(
             files,

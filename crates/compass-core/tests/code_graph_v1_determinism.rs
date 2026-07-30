@@ -123,6 +123,22 @@ fn cached_file_symlink_keeps_its_logical_graph_identity() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn unchanged_clustered_extract_reuses_verified_generation() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+
+    let (cold, cold_changed) = build_clustered(root)?;
+    let (warm, warm_changed) = build_clustered(root)?;
+
+    assert!(cold_changed);
+    assert!(!warm_changed);
+    assert_eq!(warm, cold);
+    Ok(())
+}
+
+#[test]
 fn edit_restore_does_not_preserve_recomputable_heuristic_facts() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
