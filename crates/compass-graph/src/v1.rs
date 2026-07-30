@@ -1002,9 +1002,8 @@ fn normalize_v1_with_mode(
         nodes,
         links,
     };
-    if mode == PublicationMode::BestEffort {
-        sanitize_document(&mut document, &mut quarantine)?;
-    }
+    let already_validated =
+        mode == PublicationMode::BestEffort && sanitize_document(&mut document, &mut quarantine)?;
     profile_v1("v1 best-effort sanitization", &mut profile_started);
     let omissions = quarantine.finish(&mut document.graph.diagnostics);
     sort_dedup_serialized(&mut document.graph.diagnostics);
@@ -1012,7 +1011,9 @@ fn normalize_v1_with_mode(
         (left.code.as_str(), left.message.as_str())
             .cmp(&(right.code.as_str(), right.message.as_str()))
     });
-    validate_code_graph(&document)?;
+    if !already_validated {
+        validate_code_graph(&document)?;
+    }
     profile_v1("v1 strict validation", &mut profile_started);
     Ok(PublicationOutcome {
         document,
@@ -1023,13 +1024,16 @@ fn normalize_v1_with_mode(
 fn sanitize_document(
     document: &mut GraphDocument,
     quarantine: &mut QuarantineCollector,
-) -> Result<(), GraphError> {
+) -> Result<bool, GraphError> {
     let report = validate_code_graph_records(document);
     if !report.document_errors.is_empty() {
         return Err(CodeGraphValidationError {
             errors: report.document_errors,
         }
         .into());
+    }
+    if report.node_errors.is_empty() && report.edge_errors.is_empty() {
+        return Ok(true);
     }
 
     let invalid_nodes = report
@@ -1088,7 +1092,7 @@ fn sanitize_document(
         .links
         .retain(|edge| !incident_edges.contains(&edge.id) && !invalid_edges.contains(&edge.id));
     repair_route_topology(document);
-    Ok(())
+    Ok(false)
 }
 
 fn repair_route_topology(document: &mut GraphDocument) {
