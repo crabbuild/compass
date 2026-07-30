@@ -36,6 +36,16 @@ missing and 18 ambiguous edges. Current Graphify also improved enough that the
 fresh cold-build ratios are below 5x. The review document records complete
 measurements, query oracles, and the next evidence-backed gaps.
 
+Before delivery, `origin/main` advanced with project-scoped framework evidence
+gating and was merged into this branch. That integration requires SvelteKit,
+Nuxt, and Astro file-route fixtures to carry their real package dependencies;
+the qualification corpus now has a separate manifest in each subproject so
+positive evidence cannot leak into negative fixtures. The exact merged tree
+passes all 24 semantic flows and produces byte-identical clean, warm, forced,
+restored, and alternate-checkout graphs. A CI-observed transient Windows
+`MoveFileExW` denial during generation publication is also handled by bounded,
+Windows-only atomic-replacement retries.
+
 ## Background and current evidence
 
 The performance branch is `codex/compass-performance-hardening`; draft PR #86
