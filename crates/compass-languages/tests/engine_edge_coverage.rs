@@ -255,6 +255,51 @@ fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<
 }
 
 #[test]
+fn rust_scoped_calls_do_not_bind_terminal_names_to_unrelated_symbols() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("scoped.rs");
+    fs::write(
+        &path,
+        b"
+trait Error {}
+enum RejectionReason { Error(String) }
+fn reject(message: String) {
+    let _ = RejectionReason::Error(message);
+}
+",
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let error_trait = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "trait" && node.string("qualified_name").contains("Error")
+        })
+        .ok_or("missing Error trait")?;
+    let reject = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            matches!(node.string("symbol_kind").as_str(), "function" | "method")
+                && node.string("qualified_name").contains("reject")
+        })
+        .ok_or("missing reject function")?;
+
+    assert!(
+        !extraction.edges.iter().any(|edge| {
+            edge.string("relation") == "calls"
+                && edge.source == reject.id
+                && edge.target == error_trait.id
+        }),
+        "scoped enum construction bound to unrelated trait: {:?}",
+        extraction.edges
+    );
+    Ok(())
+}
+
+#[test]
 fn repeated_generic_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("repeated.py");
@@ -851,6 +896,63 @@ fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
             .edges
             .iter()
             .any(|edge| edge.string("relation") == "imports")
+    );
+    Ok(())
+}
+
+#[test]
+fn javascript_module_object_bindings_have_explicit_variable_kind() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("app.ts");
+    fs::write(
+        &path,
+        r#"
+import express from "express";
+const app = express();
+const settings = { enabled: true };
+app.get("/health", health);
+function health() { return "ok"; }
+"#,
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    for name in ["app", "settings"] {
+        let binding = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == name)
+            .ok_or_else(|| format!("missing {name} binding"))?;
+        assert_eq!(
+            binding.string("symbol_kind"),
+            "variable",
+            "binding={binding:#?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn dart_exports_have_explicit_resource_targets() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("exports.dart");
+    fs::write(&path, "export 'rich.dart';\n")?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let export = extraction
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "exports")
+        .ok_or("missing Dart export")?;
+    let target = extraction
+        .nodes
+        .iter()
+        .find(|node| node.id == export.target)
+        .ok_or("missing Dart export target")?;
+
+    assert_eq!(target.string("symbol_kind"), "resource");
+    assert_eq!(
+        export.string("target_file"),
+        directory.path().join("rich.dart").to_string_lossy()
     );
     Ok(())
 }

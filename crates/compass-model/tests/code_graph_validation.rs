@@ -210,6 +210,28 @@ fn whole_document_validation_rejects_an_invalid_endpoint_kind_pair() {
 }
 
 #[test]
+fn invalid_endpoint_diagnostics_name_both_symbols_and_the_relationship_site() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Method;
+    graph.nodes[1].kind = NodeKind::Interface;
+    graph.links[0].kind = EdgeKind::Calls;
+    let id = edge_id("route", EdgeKind::Calls, "handler", Some(&anchor()), None);
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+
+    let errors = validate_code_graph(&graph)
+        .err()
+        .map(|error| error.errors)
+        .unwrap_or_default();
+    assert!(errors.iter().any(|error| {
+        error.contains("invalid calls endpoints method -> interface")
+            && error.contains("source=route")
+            && error.contains("target=handler")
+            && error.contains("site=src/lib.rs:1:0")
+    }));
+}
+
+#[test]
 fn top_level_calls_accept_file_and_module_sources_but_require_callable_targets() {
     for source_kind in [NodeKind::File, NodeKind::Module] {
         let mut graph = document();
@@ -235,6 +257,55 @@ fn top_level_calls_accept_file_and_module_sources_but_require_callable_targets()
         validate_code_graph(&graph).is_err(),
         "top-level calls must still target a callable node"
     );
+}
+
+#[test]
+fn top_level_instantiations_accept_file_and_module_sources() {
+    for source_kind in [NodeKind::File, NodeKind::Module] {
+        let mut graph = document();
+        graph.nodes[0].kind = source_kind;
+        graph.nodes[1].kind = NodeKind::Class;
+        graph.links[0].kind = EdgeKind::Instantiates;
+        let id = edge_id(
+            "route",
+            EdgeKind::Instantiates,
+            "handler",
+            Some(&anchor()),
+            None,
+        );
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "rejected intentional {source_kind:?} -> class top-level instantiation"
+        );
+    }
+}
+
+#[test]
+fn rust_enum_members_are_importable_referenceable_and_constructible() {
+    for (kind, source_kind, target_kind) in [
+        (EdgeKind::Imports, NodeKind::File, NodeKind::EnumMember),
+        (EdgeKind::References, NodeKind::Method, NodeKind::EnumMember),
+        (EdgeKind::References, NodeKind::Struct, NodeKind::Parameter),
+        (
+            EdgeKind::Instantiates,
+            NodeKind::Method,
+            NodeKind::EnumMember,
+        ),
+    ] {
+        let mut graph = document();
+        graph.nodes[0].kind = source_kind;
+        graph.nodes[1].kind = target_kind;
+        graph.links[0].kind = kind;
+        let id = edge_id("route", kind, "handler", Some(&anchor()), None);
+        graph.links[0].id.clone_from(&id);
+        graph.links[0].key = id;
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "rejected Rust {kind:?} {source_kind:?} -> {target_kind:?}"
+        );
+    }
 }
 
 #[test]
@@ -293,7 +364,6 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
         (EdgeKind::Extends, NodeKind::Class, NodeKind::Function),
         (EdgeKind::Implements, NodeKind::Class, NodeKind::Class),
         (EdgeKind::TypeOf, NodeKind::Variable, NodeKind::Function),
-        (EdgeKind::Instantiates, NodeKind::File, NodeKind::Class),
         (EdgeKind::Reads, NodeKind::Route, NodeKind::Class),
         (EdgeKind::Handles, NodeKind::Variable, NodeKind::Event),
         (EdgeKind::Publishes, NodeKind::Variable, NodeKind::Message),

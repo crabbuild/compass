@@ -30,9 +30,12 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
     let Ok(class) = Regex::new(r"\b(?:class|interface)\s+([A-Za-z_][A-Za-z0-9_]*)") else {
         return Vec::new();
     };
-    let Ok(method) = Regex::new(
+    let Ok(java_method) = Regex::new(
         r"\b(?:public|protected|private|static|final|synchronized|abstract|native|\s)+[A-Za-z0-9_<>,.?\[\]\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
     ) else {
+        return Vec::new();
+    };
+    let Ok(kotlin_method) = Regex::new(r"\bfun\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(") else {
         return Vec::new();
     };
 
@@ -72,8 +75,9 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
             offset = offset.saturating_add(line.len());
             continue;
         };
-        let Some(method_name) = method
+        let Some(method_name) = java_method
             .captures(line)
+            .or_else(|| kotlin_method.captures(line))
             .and_then(|capture| capture.get(1))
             .map(|value| value.as_str())
         else {

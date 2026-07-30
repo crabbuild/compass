@@ -669,8 +669,10 @@ fn canonicalize_import_targets(extraction: &mut Extraction) {
         })
         .collect::<HashMap<_, _>>();
     for edge in &mut extraction.edges {
-        if matches!(relation(edge), "imports" | "imports_from" | "re_exports")
-            && let Some(target) = aliases.get(&edge.target)
+        if matches!(
+            relation(edge),
+            "imports" | "imports_from" | "exports" | "re_exports"
+        ) && let Some(target) = aliases.get(&edge.target)
         {
             edge.target.clone_from(target);
             stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
@@ -1034,7 +1036,10 @@ fn disambiguate_colliding_node_ids_with_calls(
             .remove("target_file")
             .and_then(|value| value.as_str().map(str::to_owned));
         let relation = relation(edge);
-        let target_key = if matches!(relation, "imports" | "imports_from" | "re_exports") {
+        let target_key = if matches!(
+            relation,
+            "imports" | "imports_from" | "exports" | "re_exports"
+        ) {
             target_file
                 .as_deref()
                 .map_or(edge_key, |path| source_key(path, root))
@@ -1648,6 +1653,15 @@ fn python_import_edge(
         (
             OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
             Value::String(python_import_occurrence_rule(resolution, imported)),
+        ),
+        ("module".to_owned(), Value::String(imported.module.clone())),
+        (
+            "imported_name".to_owned(),
+            Value::String(imported.imported.clone()),
+        ),
+        (
+            "local_name".to_owned(),
+            Value::String(imported.local.clone()),
         ),
         ("weight".to_owned(), Value::from(1.0)),
     ]);

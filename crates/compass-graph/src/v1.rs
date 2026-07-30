@@ -557,6 +557,10 @@ pub fn normalize_v1(
             .get(&edge.target)
             .map(|node| node.kind)
             .unwrap_or(NodeKind::Variable);
+        let target_is_constructible = nodes.get(&edge.target).is_some_and(|node| {
+            node.kind.is_constructible()
+                || (node.kind == NodeKind::EnumMember && node.language.as_deref() == Some("rust"))
+        });
         let unresolved_wiring_site = [&edge.source, &edge.target]
             .into_iter()
             .filter_map(|id| nodes.get(id))
@@ -598,7 +602,7 @@ pub fn normalize_v1(
             edge.id.clone_from(&id);
             edge.key = id;
         }
-        if !trusted_edge && edge.kind == EdgeKind::Calls && target_kind.is_constructible() {
+        if !trusted_edge && edge.kind == EdgeKind::Calls && target_is_constructible {
             edge.kind = EdgeKind::Instantiates;
             edge.details = None;
             let id = edge_id(
@@ -1420,7 +1424,14 @@ fn merge_normalized_node(
     }
     let current_ast_is_authoritative =
         existing_has_ast != duplicate_has_ast && (existing_has_ast || duplicate_has_ast);
+    let compatible_route_registration = existing.kind == NodeKind::Route
+        && duplicate.kind == NodeKind::Route
+        && existing.name == duplicate.name
+        && existing.qualified_name == duplicate.qualified_name
+        && existing.language == duplicate.language
+        && existing.framework == duplicate.framework;
     if !current_ast_is_authoritative
+        && !compatible_route_registration
         && (existing.kind != duplicate.kind
             || existing.name != duplicate.name
             || existing.qualified_name != duplicate.qualified_name
@@ -1460,6 +1471,9 @@ fn merge_normalized_node(
     existing.diagnostics.append(&mut duplicate.diagnostics);
     sort_dedup_serialized(&mut existing.diagnostics);
     if !current_ast_is_authoritative {
+        if compatible_route_registration {
+            existing.source = deterministic_option(existing.source.take(), duplicate.source.take());
+        }
         existing.details = deterministic_option(existing.details.take(), duplicate.details);
     }
     existing.community = deterministic_option(existing.community.take(), duplicate.community);
@@ -2964,6 +2978,39 @@ fn node_identity(
                 &database.logical_database,
                 database.database_schema.as_deref().unwrap_or_default(),
                 qualified_name,
+            )
+        }
+        NodeKind::Resource
+            if matches!(
+                details,
+                Some(NodeDetails::Resource(ResourceNodeDetails {
+                    resource_kind: ResourceKind::Rationale,
+                    ..
+                }))
+            ) =>
+        {
+            let positional_name = identity_site.map_or_else(
+                || qualified_name.to_owned(),
+                |site| format!("{qualified_name}@{}:{}", site.start_byte, site.end_byte),
+            );
+            domain_id(kind, source_path, &positional_name)
+        }
+        NodeKind::Import | NodeKind::Export => {
+            let binding = match details {
+                Some(NodeDetails::ImportExport(details)) => format!(
+                    "{}:{}:{}",
+                    details.imported_name.as_deref().unwrap_or_default(),
+                    details.local_name.as_deref().unwrap_or_default(),
+                    details.type_only
+                ),
+                _ => String::new(),
+            };
+            symbol_id(
+                language.unwrap_or("unknown"),
+                source_path,
+                kind,
+                qualified_name,
+                &binding,
             )
         }
         NodeKind::Job

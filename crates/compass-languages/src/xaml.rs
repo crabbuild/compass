@@ -878,7 +878,10 @@ fn community_toolkit_members(
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(label.clone()));
         attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
-        attributes.insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
+        attributes.insert(
+            "symbol_kind".to_owned(),
+            Value::String("property".to_owned()),
+        );
         attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
         attributes.insert(
             "source_location".to_owned(),

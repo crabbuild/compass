@@ -310,12 +310,24 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
             validate_anchor(&edge.id, anchor, &files, &mut errors);
         }
         if !endpoint_kinds_are_valid(source, edge.kind, target) {
+            let site = edge.relationship_site.as_ref().map_or_else(
+                || "<none>".to_owned(),
+                |anchor| {
+                    format!(
+                        "{}:{}:{}",
+                        anchor.file, anchor.start_line, anchor.start_column
+                    )
+                },
+            );
             errors.push(format!(
-                "edge {} has invalid {} endpoints {} -> {}",
+                "edge {} has invalid {} endpoints {} -> {}; source={} target={} site={}",
                 edge.id,
                 edge.kind.as_str(),
                 source.kind.as_str(),
-                target.kind.as_str()
+                target.kind.as_str(),
+                source.qualified_name,
+                target.qualified_name,
+                site
             ));
         }
     }
@@ -476,10 +488,10 @@ fn endpoint_kinds_are_valid(
         EdgeKind::TypeOf => is_typed_value(source.kind) && target.kind.is_type(),
         EdgeKind::Returns => source.kind.is_callable() && is_return_target(target.kind),
         EdgeKind::Instantiates => {
-            (source.kind.is_callable()
-                || source.kind.is_type()
-                || source.kind == NodeKind::Variable)
-                && target.kind.is_constructible()
+            is_call_source(source.kind)
+                && (target.kind.is_constructible()
+                    || (target.kind == NodeKind::EnumMember
+                        && target.language.as_deref() == Some("rust")))
         }
         EdgeKind::Overrides => source.kind.is_callable() && target.kind.is_callable(),
         EdgeKind::Decorates => {
@@ -833,6 +845,7 @@ const fn is_import_target(kind: NodeKind) -> bool {
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
                 | NodeKind::Constant
+                | NodeKind::EnumMember
                 | NodeKind::Resource
                 | NodeKind::ConfigKey
         )
@@ -930,6 +943,8 @@ const fn is_reference_target(kind: NodeKind) -> bool {
                 | NodeKind::Field
                 | NodeKind::Variable
                 | NodeKind::Constant
+                | NodeKind::EnumMember
+                | NodeKind::Parameter
                 | NodeKind::Import
                 | NodeKind::Export
                 | NodeKind::TypeAlias

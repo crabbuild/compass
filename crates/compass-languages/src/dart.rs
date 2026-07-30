@@ -616,7 +616,31 @@ impl<'a> State<'a> {
             for package in packages {
                 let target = make_id(&[&package]);
                 self.add_node(&target, &package, "code", None);
+                if let Some(resource) = self
+                    .extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|resource| resource.id == target)
+                {
+                    resource.attributes.insert(
+                        "symbol_kind".to_owned(),
+                        Value::String("resource".to_owned()),
+                    );
+                }
                 self.add_edge(&self.file_id.clone(), &target, relation, None);
+                if !package.contains(':')
+                    && !Path::new(&package).is_absolute()
+                    && let Some(edge) = self.extraction.edges.last_mut()
+                {
+                    let target_file = Path::new(&self.source_file)
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(&package);
+                    edge.attributes.insert(
+                        "target_file".to_owned(),
+                        Value::String(target_file.to_string_lossy().replace('\\', "/")),
+                    );
+                }
             }
         }
     }
