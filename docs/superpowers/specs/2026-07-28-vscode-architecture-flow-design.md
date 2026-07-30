@@ -126,8 +126,8 @@ The 128 MiB value is a safety ceiling, not a webview payload target.
 
 ### Call-flow contract
 
-The CLI keeps `compass.viewer.callflow/1` and adds optional fields alongside the
-existing provenance and statistics:
+The CLI and extension use only `compass.viewer.callflow/1`. Its complete
+contract requires:
 
 - section summary counts independent of loaded row arrays;
 - a source scope for each node: `production`, `test`, `generated`, `vendor`, or
@@ -142,11 +142,9 @@ The model exposes all three totals. Section derivation places otherwise
 unassigned nodes in `Other`; if an edge still cannot be represented, the UI
 discloses its count instead of presenting the view as complete.
 
-The capability report and VS Code compatibility requirement continue to
-advertise `/1`. Original v1 payloads remain valid: the host preserves their
-subsystem and aggregate route totals, treats their nodes as visible, and clearly
-marks individual cross-route evidence as unavailable. Additive v1 payloads
-provide production scoping and complete caller/callee evidence.
+The capability report, export, parser, and VS Code compatibility requirement
+all use `/1`. Payloads missing any current v1 field are rejected rather than
+normalized, and no alternate schema version is accepted.
 
 ### Host projection and messaging
 

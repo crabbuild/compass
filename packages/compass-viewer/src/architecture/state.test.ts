@@ -8,7 +8,6 @@ import {
 
 const model: CallflowViewModel = {
   schema: "compass.viewer.callflow/1",
-  legacyAggregateOnly: false,
   title: "Fixture",
   sections: [
     {

@@ -225,11 +225,11 @@ export function ArchitectureMap({
         </button>
       </div>
       {layout.nodes.length > 0 ? (
-        <svg
-          className="architecture-map"
-          viewBox={viewBox}
-          role="img"
-          aria-label={`${layout.nodes.length} subsystems and ${layout.routes.length} directed routes`}
+          <svg
+            className="architecture-map"
+            viewBox={viewBox}
+            role="group"
+            aria-label={`${layout.nodes.length} subsystems and ${layout.routes.length} directed routes`}
           onPointerDown={(event) => {
             if (event.target !== event.currentTarget) return;
             panDrag.current = {
@@ -325,9 +325,7 @@ export function ArchitectureMap({
               const related = selected
                 || selection === undefined
                 || (selection.kind === "section" && connected.has(route.id));
-              const evidence = route.detailsAvailable === false
-                ? "aggregate"
-                : route.inferred > route.extracted ? "inferred" : "extracted";
+              const evidence = route.inferred > route.extracted ? "inferred" : "extracted";
               const focusDirection = selection?.kind === "section"
                 ? route.targetSection === selection.id
                   ? "incoming"

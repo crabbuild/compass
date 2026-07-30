@@ -37,11 +37,6 @@ export type SearchRequest = PageRequest & {
 
 type IndexedNode = ArchitectureSymbol & { normalized: string };
 type IndexedCall = ArchitectureCall & { normalized: string };
-type AggregateRoute = {
-  sourceSection: string;
-  targetSection: string;
-  calls: number;
-};
 
 const EMPTY_SCOPES: Record<SourceScope, number> = {
   production: 0,
@@ -57,7 +52,6 @@ export class ArchitectureIndex {
   private readonly internalCalls = new Map<string, IndexedCall[]>();
   private readonly crossCalls: IndexedCall[];
   private readonly routes = new Map<string, IndexedCall[]>();
-  private readonly aggregateRoutes = new Map<string, AggregateRoute>();
 
   constructor(private readonly model: CallflowViewModel) {
     this.sections = model.sections.filter((section) => section.id !== "overview");
@@ -92,14 +86,6 @@ export class ArchitectureIndex {
       calls.push(call);
       this.routes.set(id, calls);
     }
-    if (model.legacyAggregateOnly) {
-      for (const link of model.overviewLinks) {
-        this.aggregateRoutes.set(
-          routeId(link.sourceSection, link.targetSection),
-          link
-        );
-      }
-    }
   }
 
   overview(
@@ -129,24 +115,10 @@ export class ArchitectureIndex {
           calls: visible.length,
           extracted: visible.filter((call) => call.confidence === "extracted").length,
           inferred: visible.filter((call) => call.confidence === "inferred").length,
-          ambiguous: visible.filter((call) => call.confidence === "ambiguous").length,
-          detailsAvailable: true
+          ambiguous: visible.filter((call) => call.confidence === "ambiguous").length
         };
       })
       .filter((route) => route !== undefined);
-    if (evidence === "all") {
-      for (const [id, aggregate] of this.aggregateRoutes) {
-        countRoute(aggregate.sourceSection, aggregate.targetSection, aggregate.calls);
-        routes.push({
-          id,
-          ...aggregate,
-          extracted: 0,
-          inferred: 0,
-          ambiguous: 0,
-          detailsAvailable: false
-        });
-      }
-    }
     routes.sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
 
     const sections = this.sections.map((section) => {
@@ -216,16 +188,7 @@ export class ArchitectureIndex {
 
   routePage(request: RoutePageRequest): ArchitectureRoutePage {
     const calls = this.routes.get(request.routeId);
-    if (!calls) {
-      const aggregate = this.aggregateRoutes.get(request.routeId);
-      if (!aggregate) throw new Error(`Unknown architecture route '${request.routeId}'`);
-      return {
-        routeId: request.routeId,
-        sourceSection: aggregate.sourceSection,
-        targetSection: aggregate.targetSection,
-        ...page([], request)
-      };
-    }
+    if (!calls) throw new Error(`Unknown architecture route '${request.routeId}'`);
     const query = normalized(request.query);
     const items = calls
       .filter((call) => this.includeCall(call, request.scope, request.evidence))

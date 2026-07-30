@@ -38,7 +38,7 @@ describe("ArchitectureMap", () => {
 
   it("renders keyboard-accessible directed routes and a table alternative", () => {
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
-    expect(screen.getByRole("img", { name: /2 subsystems and 1 directed routes/i }))
+    expect(screen.getByRole("group", { name: /2 subsystems and 1 directed routes/i }))
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: /api to storage, 30 calls/i }))
       .toBeInTheDocument();
@@ -54,7 +54,7 @@ describe("ArchitectureMap", () => {
 
   it("repositions a dragged subsystem, reconnects its route, and remembers the drop", () => {
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={vi.fn()} />);
-    const map = screen.getByRole("img", { name: /2 subsystems and 1 directed routes/i });
+    const map = screen.getByRole("group", { name: /2 subsystems and 1 directed routes/i });
     const api = screen.getByRole("button", { name: /^API, 20 visible symbols/i });
     const initialTransform = api.getAttribute("transform");
     Object.defineProperties(map, {

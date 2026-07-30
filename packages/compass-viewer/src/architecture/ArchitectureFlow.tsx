@@ -389,35 +389,18 @@ function RouteInspector({
       <header className="architecture-inspector-header">
         <span>Directed route</span>
         <h2>{sectionName(route.sourceSection)} → {sectionName(route.targetSection)}</h2>
-        <p>
-          {route.calls.toLocaleString()}{" "}
-          {route.detailsAvailable === false ? "aggregate" : "complete"} cross-subsystem calls
-        </p>
-        {route.detailsAvailable !== false && (
-          <div className="architecture-evidence-counts">
-            <span>{route.extracted} extracted</span>
-            <span>{route.inferred} inferred</span>
-            <span>{route.ambiguous} ambiguous</span>
-          </div>
-        )}
-      </header>
-      {route.detailsAvailable === false ? (
-        <div className="architecture-legacy-route-note" role="note">
-          <strong>Aggregate route</strong>
-          <p>
-            This schema-v1 export contains the route total but not its individual
-            caller and callee evidence.
-          </p>
+        <p>{route.calls.toLocaleString()} complete cross-subsystem calls</p>
+        <div className="architecture-evidence-counts">
+          <span>{route.extracted} extracted</span>
+          <span>{route.inferred} inferred</span>
+          <span>{route.ambiguous} ambiguous</span>
         </div>
-      ) : (
-        <>
-          <DetailFilter value={query} onChange={onQuery} />
-          <div className="architecture-inspector-scroll">
-            {page ? <CallList calls={page.items} onOpenSource={onOpenSource} /> : <LoadingRows />}
-          </div>
-          {page && <Pagination {...page} label="calls" onPageChange={onPage} />}
-        </>
-      )}
+      </header>
+      <DetailFilter value={query} onChange={onQuery} />
+      <div className="architecture-inspector-scroll">
+        {page ? <CallList calls={page.items} onOpenSource={onOpenSource} /> : <LoadingRows />}
+      </div>
+      {page && <Pagination {...page} label="calls" onPageChange={onPage} />}
     </>
   );
 }

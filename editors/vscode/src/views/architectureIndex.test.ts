@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
-import {
-  CallflowViewModelSchema,
-  type CallflowViewModel
-} from "@compass/viewer/contracts/callflow";
+import type { CallflowViewModel } from "@compass/viewer/contracts/callflow";
 import { ArchitectureIndex, routeId } from "./architectureIndex";
 
 const model: CallflowViewModel = {
   schema: "compass.viewer.callflow/1",
-  legacyAggregateOnly: false,
   title: "Fixture — Architecture Flow",
   sections: [
     {
@@ -179,68 +175,4 @@ describe("ArchitectureIndex", () => {
     expect(page.items).toHaveLength(2);
   });
 
-  it("keeps original schema-v1 route totals accessible without inventing evidence", () => {
-    const legacy = CallflowViewModelSchema.parse({
-      schema: "compass.viewer.callflow/1",
-      title: "Legacy fixture",
-      sections: [
-        {
-          id: "api",
-          name: "API",
-          communities: ["0"],
-          nodes: [{
-            id: "handler",
-            label: "handler",
-            kind: "function",
-            sourceFile: "tests/legacy_handler.py"
-          }],
-          edges: []
-        },
-        {
-          id: "storage",
-          name: "Storage",
-          communities: ["1"],
-          nodes: [{
-            id: "store",
-            label: "store",
-            kind: "function",
-            sourceFile: "generated/legacy_store.py"
-          }],
-          edges: []
-        }
-      ],
-      overviewLinks: [{ sourceSection: "api", targetSection: "storage", calls: 7 }],
-      reportHighlights: [],
-      statistics: {
-        nodes: 2,
-        edges: 7,
-        communities: 2,
-        hyperedges: 0,
-        extracted: 7,
-        inferred: 0,
-        ambiguous: 0
-      },
-      provenance: { projectName: "Legacy", builtAtCommit: null, generatedAt: null }
-    });
-    const index = new ArchitectureIndex(legacy);
-    const overview = index.overview("production", "all");
-
-    expect(legacy.legacyAggregateOnly).toBe(true);
-    expect(overview.statistics.visibleNodes).toBe(2);
-    expect(overview.routes).toEqual([
-      expect.objectContaining({
-        sourceSection: "api",
-        targetSection: "storage",
-        calls: 7,
-        detailsAvailable: false
-      })
-    ]);
-    expect(index.routePage({
-      routeId: routeId("api", "storage"),
-      scope: "production",
-      evidence: "all",
-      page: 1,
-      pageSize: 100
-    })).toMatchObject({ total: 0, items: [] });
-  });
 });

@@ -7,7 +7,7 @@ commit it before starting the next slice. Do not use a red-green TDD sequence.
 **Goal:** Load Django-sized architecture exports safely and present a complete,
 directional, production-first architecture and call-flow workspace in VS Code.
 
-**Architecture:** Compass emits a complete additive
+**Architecture:** Compass emits the complete, strict
 `compass.viewer.callflow/1` model.
 The extension host captures up to 128 MiB for this command, retains and indexes
 the full model, and sends bounded projections to the webview. The shared viewer

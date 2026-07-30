@@ -2,13 +2,10 @@ import { expect, test } from "@playwright/test";
 
 test("architecture and call graph have separate purpose-built views", async ({ page }) => {
   await page.goto("/architecture.html");
-  await expect(page.getByRole("heading", { name: "System call flow" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Architecture sections" })).toBeVisible();
-  await expect(page.getByText("Showing 24 of 25 flows")).toBeVisible();
-  await expect(page.locator(".architecture-flow-grid > button")).toHaveCount(24);
-  await page.getByRole("button", { name: "Show all 25 flows" }).click();
-  await expect(page.locator(".architecture-flow-grid > button")).toHaveCount(25);
-  await expect(page.getByText("Showing 24 of 25 flows")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Fixture" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Architecture subsystems" })).toBeVisible();
+  await expect(page.getByText("25 subsystem routes")).toBeVisible();
+  await expect(page.locator(".architecture-routes > g")).toHaveCount(25);
 
   await page.goto("/calls.html");
   await expect(page.getByText("depth 1")).toBeVisible();
@@ -29,11 +26,10 @@ test("architecture and call graph have separate purpose-built views", async ({ p
 test("architecture loading is informative and recoverable", async ({ page }) => {
   await page.goto("/architecture.html?delay=1");
   await expect(
-    page.getByRole("heading", { name: "Deriving architecture flow" })
+    page.getByRole("heading", { name: "Preparing symbol index" })
   ).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Preparing symbol index");
   await expect(page.locator(".architecture-load-skeleton")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "System call flow" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fixture" })).toBeVisible();
 
   await page.goto("/architecture.html?error=1");
   await expect(page.getByRole("alert")).toContainText("Architecture export failed");
@@ -49,32 +45,28 @@ test("architecture searches globally and bounds large symbol and call collection
   page
 }) => {
   await page.goto("/architecture.html");
-  const globalSearch = page.getByRole("searchbox", { name: "Search architecture" });
+  const globalSearch = page.getByRole("searchbox", {
+    name: "Search the complete architecture"
+  });
   await globalSearch.fill("database");
-  await expect(page.getByRole("group", { name: "Storage search results" })).toBeVisible();
-  await page.getByRole("option", { name: /database symbol in API/i }).click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.getByRole("option", { name: /^database symbol\b/i }).click();
   await expect(page.getByRole("heading", { name: "API" })).toBeVisible();
-  await expect(page.locator("[data-slot='tabs']")).toHaveCSS("flex-direction", "column");
-  expect((await page.getByRole("tablist").boundingBox())?.width).toBeGreaterThan(600);
+  await expect(page.getByRole("tablist")).toBeVisible();
 
-  const symbolFilter = page.getByRole("searchbox", { name: "Filter API symbols" });
+  const symbolFilter = page.getByRole("searchbox", { name: "Filter architecture selection" });
   await symbolFilter.fill("");
-  await expect(page.locator(".architecture-symbol-card")).toHaveCount(24);
-  await page.getByRole("button", { name: "Next symbols page" }).click();
-  await expect(page.getByText("25–31 of 31 symbols")).toBeVisible();
+  await expect(page.locator(".architecture-symbol-list article")).toHaveCount(31);
+  await expect(page.getByText("1–31 of 31 symbols")).toBeVisible();
 
   await page.getByRole("tab", { name: "Calls" }).click();
-  await expect(page.getByText("1–25 of 53 calls")).toBeVisible();
-  const callFilter = page.getByRole("searchbox", { name: "Filter API calls" });
+  await expect(page.getByText("1–53 of 53 calls")).toBeVisible();
+  const callFilter = page.getByRole("searchbox", { name: "Filter architecture selection" });
   await callFilter.fill("database");
-  await expect(page.getByRole("row", { name: /authenticate.*database/i }).first())
+  await expect(page.locator(".architecture-call-list article", {
+    hasText: /authenticate.*database/i
+  }).first())
     .toBeVisible();
-  const calleeHeader = page.getByRole("columnheader", { name: /Callee/ });
-  await calleeHeader.getByRole("button").click();
-  await expect(calleeHeader).toHaveAttribute("aria-sort", "ascending");
-  await calleeHeader.getByRole("button").click();
-  await expect(page.getByRole("columnheader", { name: /Callee/ }))
-    .toHaveAttribute("aria-sort", "descending");
 });
 
 test("call graph uses a balanced cursor-resolution state and recoverable error", async ({
