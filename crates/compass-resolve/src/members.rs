@@ -447,15 +447,16 @@ fn retain_qualified_python_external_calls(
 ) -> Vec<NodeRecord> {
     let mut nodes = Vec::new();
     let mut created = HashSet::new();
+    let mut resolved_sites = existing
+        .iter()
+        .map(|(caller, _, occurrence)| (caller.clone(), occurrence.clone()))
+        .collect::<HashSet<_>>();
     for call in calls {
         if call.is_member_call != Some(true) || extension(&call.source_file) != "py" {
             continue;
         }
         let site = occurrence_site(&call.extensions, &call.source_file, &call.source_location);
-        if existing
-            .iter()
-            .any(|(caller, _, occurrence)| caller == &call.caller_nid && occurrence == &site)
-        {
+        if resolved_sites.contains(&(call.caller_nid.clone(), site.clone())) {
             continue;
         }
         let Some(qualified) = call
@@ -472,6 +473,7 @@ fn retain_qualified_python_external_calls(
         if label != call.callee {
             continue;
         }
+        resolved_sites.insert((call.caller_nid.clone(), site));
         let id = make_id(&[
             "external",
             "python",
