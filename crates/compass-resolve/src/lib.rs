@@ -221,13 +221,13 @@ fn finish_resolution(
     root: &Path,
 ) -> Extraction {
     let mut profile_started = Instant::now();
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     resolve_javascript_reexports(&mut merged);
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     canonicalize_import_targets(&mut merged);
     profile_internal("resolver import canonicalization", &mut profile_started);
     canonicalize_go_receiver_owners(&mut merged);
     profile_internal("resolver Go receiver ownership", &mut profile_started);
-    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
@@ -238,6 +238,8 @@ fn finish_resolution(
     profile_internal("resolver C# namespace normalization", &mut profile_started);
     resolve_php_type_references(&mut merged, sources);
     profile_internal("resolver PHP types", &mut profile_started);
+    resolve_python_imported_types(&mut merged, &canonical_root);
+    profile_internal("resolver Python imported types", &mut profile_started);
     rewire_unique_family_stubs(&mut merged);
     profile_internal("resolver family stubs", &mut profile_started);
     rewire_unique_stub_nodes(&mut merged);
@@ -678,6 +680,131 @@ fn canonicalize_import_targets(extraction: &mut Extraction) {
             stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
         }
     }
+}
+
+fn resolve_python_imported_types(extraction: &mut Extraction, root: &Path) {
+    let mut definitions = HashMap::<String, Vec<String>>::new();
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        let Some(module) = python_module_name(&source, root) else {
+            continue;
+        };
+        let label = node.label().trim();
+        if is_type_like_definition(node) && !label.is_empty() {
+            definitions
+                .entry(format!("{module}.{label}"))
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+
+    let mut aliases = HashMap::<String, HashSet<String>>::new();
+    for edge in &extraction.edges {
+        let Some(module) = python_module_name(&edge.string("source_file"), root) else {
+            continue;
+        };
+        let Some(bindings) = edge
+            .attributes
+            .get("python_imports")
+            .and_then(Value::as_object)
+        else {
+            continue;
+        };
+        for (local, target) in bindings {
+            let Some(target) = target.as_str() else {
+                continue;
+            };
+            let target = resolve_relative_python_import(&module, target);
+            if !local.is_empty() && !target.is_empty() {
+                aliases
+                    .entry(format!("{module}.{local}"))
+                    .or_default()
+                    .insert(target);
+            }
+        }
+    }
+
+    let resolve = |requested: &str| {
+        let mut current = requested.to_owned();
+        let mut seen = HashSet::new();
+        for _ in 0..64 {
+            if !seen.insert(current.clone()) {
+                return None;
+            }
+            if let Some(candidates) = definitions.get(&current)
+                && let [candidate] = candidates.as_slice()
+            {
+                return Some(candidate.clone());
+            }
+            let targets = aliases.get(&current)?;
+            if targets.len() != 1 {
+                return None;
+            }
+            current = targets.iter().next()?.clone();
+        }
+        None
+    };
+
+    let mut repointed = HashSet::new();
+    for edge in &mut extraction.edges {
+        if !matches!(relation(edge), "inherits" | "implements" | "extends") {
+            continue;
+        }
+        let Some(requested) = edge
+            .attributes
+            .get("target_qualified_name")
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let Some(target) = resolve(requested) else {
+            continue;
+        };
+        if target == edge.target {
+            continue;
+        }
+        repointed.insert(edge.target.clone());
+        edge.target = target;
+        stamp_endpoint_rewrite(edge, EndpointRewriteRule::PythonImportedTypeResolution, 1.0);
+    }
+    drop_unreferenced_nodes(extraction, &repointed);
+}
+
+fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
+    let source_path = Path::new(source_file);
+    let source = source_path
+        .strip_prefix(root)
+        .unwrap_or(source_path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let source = source.strip_suffix(".py")?;
+    let source = source.strip_suffix("/__init__").unwrap_or(source);
+    let module = source
+        .split('/')
+        .filter(|component| !component.is_empty() && *component != ".")
+        .collect::<Vec<_>>()
+        .join(".");
+    (!module.is_empty()).then_some(module)
+}
+
+fn resolve_relative_python_import(source_module: &str, target: &str) -> String {
+    let dots = target
+        .chars()
+        .take_while(|character| *character == '.')
+        .count();
+    if dots == 0 {
+        return target.to_owned();
+    }
+    let suffix = target.trim_start_matches('.');
+    let mut components = source_module.split('.').collect::<Vec<_>>();
+    components.pop();
+    for _ in 1..dots {
+        components.pop();
+    }
+    if !suffix.is_empty() {
+        components.extend(suffix.split('.'));
+    }
+    components.join(".")
 }
 
 fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
@@ -3363,6 +3490,61 @@ mod tests {
     }
 
     #[test]
+    fn python_import_reexports_anchor_inheritance_to_the_definition() {
+        let mut reexport = edge(
+            "django-test-file",
+            "django.test.testcases",
+            "imports_from",
+            "django/test/__init__.py",
+        );
+        reexport.attributes.insert(
+            "python_imports".to_owned(),
+            json!({"TestCase": "django.test.testcases.TestCase"}),
+        );
+        let mut inheritance = edge(
+            "admin-test",
+            "test-case-stub",
+            "inherits",
+            "tests/admin_views/tests.py",
+        );
+        inheritance.attributes.insert(
+            "target_qualified_name".to_owned(),
+            Value::String("django.test.TestCase".to_owned()),
+        );
+        let mut extraction = Extraction {
+            nodes: vec![
+                node("test-case", "TestCase", "django/test/testcases.py", "class"),
+                node("test-case-stub", "TestCase", "", "stub"),
+                node(
+                    "admin-test",
+                    "AdminViewUnicodeTest",
+                    "tests/admin_views/tests.py",
+                    "class",
+                ),
+            ],
+            edges: vec![reexport, inheritance],
+            ..Extraction::default()
+        };
+
+        resolve_python_imported_types(&mut extraction, Path::new("."));
+
+        assert_eq!(extraction.edges[1].target, "test-case");
+        assert!(
+            extraction
+                .nodes
+                .iter()
+                .all(|node| node.id != "test-case-stub")
+        );
+        assert!(
+            extraction.edges[1].attributes["_endpoint_rewrite_rules"]
+                .as_array()
+                .is_some_and(|entries| entries.iter().any(|entry| {
+                    entry["rule"] == "python-imported-type-resolution" && entry["score"] == 1.0
+                }))
+        );
+    }
+
+    #[test]
     fn every_resolver_rewrite_family_preserves_occurrences_through_v1()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
@@ -3373,6 +3555,7 @@ mod tests {
             EndpointRewriteRule::CsharpNamespaceCanonicalization,
             EndpointRewriteRule::LanguageFamilyStubResolution,
             EndpointRewriteRule::PhpQualifiedTypeResolution,
+            EndpointRewriteRule::PythonImportedTypeResolution,
             EndpointRewriteRule::CanonicalImportTarget,
             EndpointRewriteRule::UniqueStubEndpointResolution,
             EndpointRewriteRule::SourceScopedNodeDisambiguation,

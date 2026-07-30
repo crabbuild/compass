@@ -394,6 +394,7 @@ struct ExtractState<'source, 'tree> {
     seen_resolved_calls: HashSet<(String, String, usize, usize)>,
     seen_dynamic_imports: HashSet<(String, String)>,
     python_import_aliases: HashMap<String, String>,
+    python_import_targets: HashMap<String, String>,
 }
 
 fn extract_tree(
@@ -406,6 +407,11 @@ fn extract_tree(
     let source_file = path.to_string_lossy().into_owned();
     let stem = file_stem(path);
     let file_id = make_id(&[&source_file]);
+    let (python_import_aliases, python_import_targets) = if language == "python" {
+        python_import_maps(root, source)
+    } else {
+        (HashMap::new(), HashMap::new())
+    };
     let mut state = ExtractState {
         source,
         source_file,
@@ -420,11 +426,8 @@ fn extract_tree(
         types: HashMap::new(),
         seen_resolved_calls: HashSet::new(),
         seen_dynamic_imports: HashSet::new(),
-        python_import_aliases: if language == "python" {
-            python_import_aliases(root, source)
-        } else {
-            HashMap::new()
-        },
+        python_import_aliases,
+        python_import_targets,
     };
     let file_label = path
         .file_name()
@@ -1122,6 +1125,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                             .parent()
                             .is_some_and(|parent| parent.kind() == "module")),
             });
+            return;
+        }
+
+        if matches!(self.language, "javascript" | "typescript" | "tsx")
+            && parent_class.is_none()
+            && kind == "assignment_expression"
+            && self.add_js_prototype_method(node)
+        {
             return;
         }
 
@@ -1847,6 +1858,18 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             line(node),
             Some("import"),
         );
+        let mut bindings = Map::new();
+        for (_, local) in python_import_entries(node, self.source) {
+            if let Some(qualified) = self.python_import_targets.get(&local) {
+                bindings.insert(local, Value::String(qualified.clone()));
+            }
+        }
+        if !bindings.is_empty()
+            && let Some(edge) = self.extraction.edges.last_mut()
+        {
+            edge.attributes
+                .insert("python_imports".to_owned(), Value::Object(bindings));
+        }
     }
 
     fn add_js_import(&mut self, node: Node<'tree>) {
@@ -2205,6 +2228,14 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             }
             let target = self.ensure_type_node(&name, true);
             self.add_edge(class_id, &target, "inherits", line(node), None);
+            if let Some(qualified) = self.python_import_targets.get(&name)
+                && let Some(edge) = self.extraction.edges.last_mut()
+            {
+                edge.attributes.insert(
+                    "target_qualified_name".to_owned(),
+                    Value::String(qualified.clone()),
+                );
+            }
         }
     }
 
@@ -2674,6 +2705,85 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         id
     }
 
+    fn add_js_prototype_method(&mut self, node: Node<'tree>) -> bool {
+        let Some(left) = node.child_by_field_name("left") else {
+            return false;
+        };
+        let Some(right) = node.child_by_field_name("right") else {
+            return false;
+        };
+        if !matches!(
+            right.kind(),
+            "function_expression" | "arrow_function" | "generator_function"
+        ) {
+            return false;
+        }
+        let Some(owner) = left
+            .child_by_field_name("object")
+            .and_then(|owner| self.node_text(owner))
+            .map(|owner| owner.trim().to_owned())
+            .filter(|owner| owner.contains(".prototype") || owner.ends_with(".fn"))
+        else {
+            return false;
+        };
+        let Some(name) = left
+            .child_by_field_name("property")
+            .or_else(|| last_identifier(left))
+            .and_then(|name| self.node_text(name))
+            .map(clean_name)
+            .filter(|name| !name.is_empty())
+        else {
+            return false;
+        };
+        let id = make_id(&[&self.stem, &owner, &name]);
+        let label = format!(".{name}()");
+        self.add_node(&id, &label, line(node), true, None);
+        if let Some(method) = self
+            .extraction
+            .nodes
+            .iter_mut()
+            .find(|method| method.id == id)
+        {
+            method
+                .attributes
+                .insert("lexical_owner".to_owned(), Value::String(owner.clone()));
+            method.attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!("{owner}::{name}")),
+            );
+        }
+        let owner_name = owner
+            .strip_suffix(".prototype")
+            .or_else(|| owner.strip_suffix(".fn"))
+            .and_then(|owner| owner.rsplit('.').next())
+            .unwrap_or_default();
+        let containment_source = self
+            .types
+            .get(owner_name)
+            .cloned()
+            .or_else(|| {
+                self.callables
+                    .get(owner_name)
+                    .and_then(|owners| owners.last())
+                    .cloned()
+            })
+            .unwrap_or_else(|| self.file_id.clone());
+        self.add_edge(
+            &containment_source,
+            &id,
+            "contains",
+            line(node),
+            Some("prototype_method"),
+        );
+        self.callables.entry(name).or_default().push(id.clone());
+        self.functions.push(FunctionBody {
+            id,
+            node: right,
+            top_level: false,
+        });
+        true
+    }
+
     fn node_text(&self, node: Node<'tree>) -> Option<String> {
         node.utf8_text(self.source).ok().map(str::to_owned)
     }
@@ -2888,53 +2998,87 @@ fn collect_python_type_references(
     }
 }
 
-fn python_import_aliases(root: Node<'_>, source: &[u8]) -> HashMap<String, String> {
-    fn collect(node: Node<'_>, source: &[u8], output: &mut HashMap<String, String>) {
-        if node.kind() == "import_from_statement" {
-            let mut past_import = false;
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "import" {
-                    past_import = true;
-                    continue;
-                }
-                if !past_import {
-                    continue;
-                }
-                let (imported, local) = if child.kind() == "aliased_import" {
-                    let imported = child
-                        .child_by_field_name("name")
-                        .and_then(|name| name.utf8_text(source).ok());
-                    let local = child
-                        .child_by_field_name("alias")
-                        .and_then(|name| name.utf8_text(source).ok());
-                    (imported, local)
-                } else if matches!(child.kind(), "dotted_name" | "identifier") {
-                    let name = child.utf8_text(source).ok();
-                    (name, name)
-                } else {
-                    (None, None)
-                };
-                if let (Some(imported), Some(local)) = (imported, local) {
-                    let imported = imported.rsplit('.').next().unwrap_or_default().trim();
-                    let local = local.rsplit('.').next().unwrap_or_default().trim();
-                    if !imported.is_empty() && !local.is_empty() && imported != "*" {
-                        output.insert(local.to_owned(), imported.to_owned());
+fn python_import_maps(
+    root: Node<'_>,
+    source: &[u8],
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    fn collect(
+        node: Node<'_>,
+        source: &[u8],
+        aliases: &mut HashMap<String, String>,
+        targets: &mut HashMap<String, String>,
+    ) {
+        if node.kind() == "import_from_statement"
+            && let Some(module) = node
+                .child_by_field_name("module_name")
+                .and_then(|module| module.utf8_text(source).ok())
+                .map(str::trim)
+                .filter(|module| !module.is_empty())
+        {
+            for (imported, local) in python_import_entries(node, source) {
+                let imported = imported.trim();
+                let local = local.trim();
+                if !imported.is_empty() && !local.is_empty() && imported != "*" {
+                    let callable_name = imported.rsplit('.').next().unwrap_or_default().trim();
+                    let local_name = local.rsplit('.').next().unwrap_or_default().trim();
+                    if !callable_name.is_empty() && !local_name.is_empty() {
+                        aliases.insert(local_name.to_owned(), callable_name.to_owned());
                     }
+                    targets.insert(local.to_owned(), format!("{module}.{imported}"));
                 }
             }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            collect(child, source, output);
+            collect(child, source, aliases, targets);
         }
     }
-    let mut output = HashMap::new();
+    let mut aliases = HashMap::new();
+    let mut targets = HashMap::new();
     // Compass's collection-level symbol pass indexes every `from ... import`
     // alias in the file, including function-local imports. It then scans only
     // undecorated top-level function bodies for uses. Preserve that observable
     // ordering here; `FunctionBody::top_level` supplies the matching use gate.
-    collect(root, source, &mut output);
+    collect(root, source, &mut aliases, &mut targets);
+    (aliases, targets)
+}
+
+fn python_import_entries(node: Node<'_>, source: &[u8]) -> Vec<(String, String)> {
+    fn collect(node: Node<'_>, source: &[u8], output: &mut Vec<(String, String)>) {
+        if node.kind() == "aliased_import" {
+            let imported = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok());
+            let local = node
+                .child_by_field_name("alias")
+                .and_then(|name| name.utf8_text(source).ok());
+            if let (Some(imported), Some(local)) = (imported, local) {
+                output.push((imported.to_owned(), local.to_owned()));
+            }
+            return;
+        }
+        if matches!(node.kind(), "dotted_name" | "identifier") {
+            if let Ok(name) = node.utf8_text(source) {
+                output.push((name.to_owned(), name.to_owned()));
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect(child, source, output);
+        }
+    }
+
+    let mut output = Vec::new();
+    let mut past_import = false;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "import" {
+            past_import = true;
+        } else if past_import && child.is_named() {
+            collect(child, source, &mut output);
+        }
+    }
     output
 }
 
@@ -3572,6 +3716,82 @@ mod rationale_tests {
             node.string("signature"),
             "def reveal(t, hold_val=\"1\", start_val=\"0\")"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn javascript_prototype_assignments_are_methods_with_callable_bodies()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("widget.js");
+        fs::write(
+            &source,
+            "function Widget() {}\n\
+             Widget.prototype.render = function () { helper(); };\n\
+             function helper() { return true; }\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let method = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == ".render()")
+            .ok_or("missing prototype method")?;
+        assert_eq!(method.string("symbol_kind"), "method");
+        assert_eq!(method.string("qualified_name"), "Widget.prototype::render");
+        let owner = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "Widget()")
+            .ok_or("missing Widget constructor")?;
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == owner.id
+                && edge.target == method.id
+                && edge.string("relation") == "contains"
+        }));
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == method.id
+                && edge.string("relation") == "calls"
+                && extraction
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == edge.target && node.label() == "helper()")
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn python_parenthesized_imports_qualify_inherited_types()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("tests.py");
+        fs::write(
+            &source,
+            "from django.test import (\n    RequestFactory,\n    TestCase,\n)\n\
+             class Example(TestCase):\n    pass\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let example = extraction
+            .nodes
+            .iter()
+            .find(|node| node.label() == "Example")
+            .ok_or("missing Example class")?;
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.source == example.id
+                && edge.string("relation") == "inherits"
+                && edge.string("target_qualified_name") == "django.test.TestCase"
+        }));
+        assert!(extraction.edges.iter().any(|edge| {
+            edge.string("relation") == "imports_from"
+                && edge
+                    .attributes
+                    .get("python_imports")
+                    .and_then(Value::as_object)
+                    .and_then(|imports| imports.get("TestCase"))
+                    .and_then(Value::as_str)
+                    == Some("django.test.TestCase")
+        }));
         Ok(())
     }
 
