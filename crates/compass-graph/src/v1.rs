@@ -433,6 +433,13 @@ pub fn normalize_v1(
     split_sourceless_placeholders(&mut extraction, &evidence.repository_root, &file_facts)?;
     let stub_wiring_sites =
         collect_stub_wiring_sites(&extraction.edges, &evidence.repository_root, &file_facts)?;
+    resolve_or_drop_generic_symbols(
+        &mut extraction,
+        &mut evidence.diagnostics,
+        &evidence.repository_root,
+        &file_facts,
+        &stub_wiring_sites,
+    )?;
 
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
     let mut nodes = BTreeMap::new();
@@ -1147,8 +1154,136 @@ fn inferred_external_target_kind(attributes: &Map<String, Value>) -> Option<&'st
     match optional_string(attributes, "relation").as_deref() {
         Some("implements" | "scip_impl" | "mixes_in") => Some("interface"),
         Some("extends" | "inherits") => Some("class"),
+        Some("calls" | "indirect_call") => Some("function"),
+        Some("type_of" | "returns" | "scip_typed") => Some("type_alias"),
+        Some("references")
+            if matches!(
+                optional_string(attributes, "context").as_deref(),
+                Some(
+                    "field"
+                        | "generic_arg"
+                        | "parameter_type"
+                        | "return_type"
+                        | "type"
+                        | "type_annotation"
+                )
+            ) =>
+        {
+            Some("type_alias")
+        }
         _ => None,
     }
+}
+
+fn resolve_or_drop_generic_symbols(
+    extraction: &mut Extraction,
+    diagnostics: &mut Vec<GraphDiagnostic>,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+    wiring_sites: &HashMap<String, SourceAnchor>,
+) -> Result<(), GraphError> {
+    let generic_ids = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.attributes.get(TRUSTED_NODE_RECORD).is_none()
+                && node
+                    .attributes
+                    .get("file_type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("code")
+                    == "code"
+                && node
+                    .attributes
+                    .get("symbol_kind")
+                    .or_else(|| node.attributes.get("type"))
+                    .and_then(Value::as_str)
+                    .is_none_or(|kind| kind == "symbol")
+        })
+        .map(|node| node.id.clone())
+        .collect::<BTreeSet<_>>();
+    if generic_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut inferred = HashMap::<String, BTreeSet<&'static str>>::new();
+    for edge in &extraction.edges {
+        if generic_ids.contains(&edge.target)
+            && let Some(kind) = inferred_external_target_kind(&edge.attributes)
+        {
+            inferred
+                .entry(edge.target.clone())
+                .or_default()
+                .insert(kind);
+        }
+    }
+
+    for node in &mut extraction.nodes {
+        let Some(kinds) = inferred.get(&node.id).filter(|kinds| kinds.len() == 1) else {
+            continue;
+        };
+        if let Some(kind) = kinds.first() {
+            node.attributes
+                .insert("symbol_kind".to_owned(), Value::String((*kind).to_owned()));
+        }
+    }
+
+    let dropped = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            generic_ids.contains(&node.id)
+                && node
+                    .attributes
+                    .get("symbol_kind")
+                    .or_else(|| node.attributes.get("type"))
+                    .and_then(Value::as_str)
+                    .is_none_or(|kind| kind == "symbol")
+        })
+        .map(|node| node.id.clone())
+        .collect::<BTreeSet<_>>();
+    if dropped.is_empty() {
+        return Ok(());
+    }
+
+    for node in extraction
+        .nodes
+        .iter()
+        .filter(|node| dropped.contains(&node.id))
+    {
+        let incident_count = extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.source == node.id || edge.target == node.id)
+            .count();
+        let anchor = raw_anchor(&node.attributes, root, file_facts)?
+            .or(raw_origin_anchor(&node.attributes, root, file_facts)?)
+            .or_else(|| wiring_sites.get(&node.id).cloned());
+        if anchor.is_none()
+            && optional_string(&node.attributes, "extractor").as_deref()
+                == Some("compass.graph.external-placeholder")
+        {
+            return Err(raw_error(
+                &node.id,
+                "unresolved external placeholder requires an exact wiring site",
+            ));
+        }
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: "unresolved_node_kind".to_owned(),
+            message: format!(
+                "omitted generic symbol {} and {incident_count} incident relationships because no exact node kind could be inferred",
+                node.id
+            ),
+            anchor,
+            related_ids: Vec::new(),
+        });
+    }
+    extraction.nodes.retain(|node| !dropped.contains(&node.id));
+    extraction
+        .edges
+        .retain(|edge| !dropped.contains(&edge.source) && !dropped.contains(&edge.target));
+    Ok(())
 }
 
 fn mark_external_placeholder(
@@ -2502,7 +2637,7 @@ fn map_node_kind(
         "constructor" => NodeKind::Constructor,
         "property" => NodeKind::Property,
         "field" => NodeKind::Field,
-        "variable" | "symbol" => NodeKind::Variable,
+        "variable" => NodeKind::Variable,
         "constant" => NodeKind::Constant,
         "parameter" => NodeKind::Parameter,
         "import" => NodeKind::Import,

@@ -380,3 +380,13 @@ framework = "astro"
 name = "Astro dynamic page"
 query = "slug"
 source = "fixtures/code-graph/routes/typescript/astro/src/pages/blog/[slug].astro"
+
+[[repository]]
+name = "entire-cli"
+url = "https://github.com/entireio/cli.git"
+commit = "683a10d3773ee4830ee791f39d76d8092ef1b0cf"
+size_class = "large"
+language_family = "go"
+frameworks = []
+release_gate = true
+required_validation_errors = 0

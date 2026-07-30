@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use compass_core::{BuildOptions, build_local_graph};
+use compass_core::{BuildOptions, build_graph_with_layers, build_local_graph};
 use compass_files::{Cache, CacheOptions};
 use compass_languages::{Extraction, Registry};
 use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument};
@@ -26,6 +26,70 @@ fn write(root: &Path, relative: &str, source: &str) -> Result<(), Box<dyn Error>
         fs::create_dir_all(parent)?;
     }
     fs::write(path, source)?;
+    Ok(())
+}
+
+#[test]
+fn failed_topology_preflight_preserves_the_last_known_good_generation() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    write(directory.path(), "src/main.rs", "pub fn healthy() {}\n")?;
+    let mut options = BuildOptions::new(directory.path());
+    options.no_viz = true;
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+    let first = build_local_graph(&options)?;
+    let graph_before = fs::read(first.output_dir.join("graph.json"))?;
+    let pointer = directory
+        .path()
+        .join("compass-out/.compass-active-generation");
+    let active_before = fs::read_to_string(&pointer)?;
+
+    options.force = true;
+    let invalid_layer = serde_json::json!({
+        "nodes": [
+            {
+                "id": "invalid_owner",
+                "label": "owner",
+                "symbol_kind": "variable",
+                "file_type": "code",
+                "source_file": "src/main.rs",
+                "source_location": "L1",
+                "language": "rust",
+                "extractor": "test.invalid"
+            },
+            {
+                "id": "invalid_method",
+                "label": ".method()",
+                "symbol_kind": "method",
+                "file_type": "code",
+                "source_file": "src/main.rs",
+                "source_location": "L1",
+                "language": "rust",
+                "extractor": "test.invalid"
+            }
+        ],
+        "edges": [{
+            "source": "invalid_owner",
+            "target": "invalid_method",
+            "relation": "method",
+            "source_file": "src/main.rs",
+            "source_location": "L1",
+            "confidence": "EXTRACTED",
+            "extractor": "test.invalid"
+        }]
+    });
+    let error = match build_graph_with_layers(&options, None, &[invalid_layer]) {
+        Ok(_) => return Err("invalid endpoint topology passed publication preflight".into()),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("contains")
+            && error.to_string().contains("variable")
+            && error.to_string().contains("method"),
+        "unexpected preflight error: {error}"
+    );
+    assert_eq!(fs::read_to_string(&pointer)?, active_before);
+    assert_eq!(fs::read(first.output_dir.join("graph.json"))?, graph_before);
     Ok(())
 }
 

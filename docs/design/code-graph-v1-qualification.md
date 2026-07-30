@@ -36,6 +36,27 @@ Run the complete offline fixture gate from the repository root:
 ./scripts/qualify_code_graph_v1.sh --fixtures-only
 ```
 
+Run the pinned release corpus gate:
+
+```bash
+./scripts/qualify_code_graph_v1.sh \
+  --repositories tests/qualification/code-graph-v1-repositories.toml
+```
+
+For a clean local checkout at the pinned commit, avoid a second clone with:
+
+```bash
+./scripts/qualify_code_graph_v1.sh \
+  --repositories tests/qualification/code-graph-v1-repositories.toml \
+  --local-repository /Volumes/Workspace/Github/Entire
+```
+
+The release-corpus mode verifies the manifest pin, requires a clean source
+checkout, builds through the production CLI, strictly reloads the published
+`compass.graph/1` artifact, and fails unless the graph contains exactly zero
+error-severity validation diagnostics. The release workflow must pass this
+gate before platform binaries are packaged.
+
 The script:
 
 1. validates both manifests before building;

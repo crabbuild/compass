@@ -6,12 +6,37 @@ QUALIFY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/compass-code-graph-v1.XXXXXX")"
 trap 'chmod -R u+w "$QUALIFY_TMP" 2>/dev/null || true; rm -rf -- "$QUALIFY_TMP"' EXIT
 
 usage() {
-  echo "usage: $0 --fixtures-only" >&2
+  cat >&2 <<EOF
+usage:
+  $0 --fixtures-only
+  $0 --repositories <manifest> [--local-repository <path>]
+EOF
   exit 2
 }
 
-[[ "${1:-}" == "--fixtures-only" ]] || usage
-shift
+MODE=
+REPOSITORIES_MANIFEST=
+LOCAL_REPOSITORY=
+case "${1:-}" in
+  --fixtures-only)
+    MODE=fixtures
+    shift
+    ;;
+  --repositories)
+    MODE=repositories
+    REPOSITORIES_MANIFEST="${2:-}"
+    [[ -n "$REPOSITORIES_MANIFEST" ]] || usage
+    shift 2
+    if [[ "${1:-}" == "--local-repository" ]]; then
+      LOCAL_REPOSITORY="${2:-}"
+      [[ -n "$LOCAL_REPOSITORY" ]] || usage
+      shift 2
+    fi
+    ;;
+  *)
+    usage
+    ;;
+esac
 [[ "$#" -eq 0 ]] || usage
 
 cd "$QUALIFY_ROOT"
@@ -19,6 +44,159 @@ MANIFEST="$QUALIFY_ROOT/tests/qualification/code-graph-v1-semantic.json"
 CORPUS_MANIFEST="$QUALIFY_ROOT/tests/qualification/code-graph-v1-corpus.json"
 CORPUS="$QUALIFY_TMP/corpus"
 OUTPUT_PARENT="$QUALIFY_TMP/output"
+
+active_graph() {
+  python3 - "$1" <<'PY'
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[1]) / "compass-out"
+pointer = output / ".compass-active-generation"
+generation = pointer.read_text().strip()
+if not generation.startswith("generation-") or "/" in generation or "\\" in generation:
+    raise SystemExit(f"invalid active generation {generation!r}")
+active = output / ".compass-generations" / generation
+if not active.is_dir() or (active / ".compass-build-incomplete").exists():
+    raise SystemExit(f"incomplete active generation {active}")
+print(active / "graph.json")
+PY
+}
+
+echo "[code-graph-v1] build qualifying production binary once"
+cargo build --locked -p compass-cli --bin compass
+COMPASS_BIN="$QUALIFY_ROOT/target/debug/compass"
+
+if [[ "$MODE" == repositories ]]; then
+  [[ -f "$REPOSITORIES_MANIFEST" ]] || {
+    echo "repository manifest not found: $REPOSITORIES_MANIFEST" >&2
+    exit 1
+  }
+  RELEASE_REPOSITORIES="$QUALIFY_TMP/release-repositories.tsv"
+  python3 - "$REPOSITORIES_MANIFEST" >"$RELEASE_REPOSITORIES" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+path = pathlib.Path(sys.argv[1])
+manifest = tomllib.loads(path.read_text())
+if manifest.get("schema") != "compass.code-graph-qualification/1":
+    raise SystemExit(f"unsupported repository manifest schema in {path}")
+repositories = [
+    repository
+    for repository in manifest.get("repository", [])
+    if repository.get("release_gate") is True
+]
+if not repositories:
+    raise SystemExit(f"no release-gate repositories declared in {path}")
+for repository in repositories:
+    required = {
+        "name",
+        "url",
+        "commit",
+        "size_class",
+        "language_family",
+        "release_gate",
+        "required_validation_errors",
+    }
+    missing = required - repository.keys()
+    if missing:
+        raise SystemExit(
+            f"repository {repository.get('name', '<unknown>')} missing {sorted(missing)}"
+        )
+    if repository["required_validation_errors"] != 0:
+        raise SystemExit(
+            f"repository {repository['name']} must require zero validation errors"
+        )
+    print(
+        "\t".join(
+            [
+                repository["name"],
+                repository["url"],
+                repository["commit"],
+                str(repository["required_validation_errors"]),
+            ]
+        )
+    )
+PY
+  repository_count="$(wc -l <"$RELEASE_REPOSITORIES" | tr -d ' ')"
+  if [[ -n "$LOCAL_REPOSITORY" && "$repository_count" -ne 1 ]]; then
+    echo "--local-repository requires exactly one release-gate repository" >&2
+    exit 1
+  fi
+
+  while IFS=$'\t' read -r repository_name repository_url repository_commit required_errors; do
+    repository="$QUALIFY_TMP/repositories/$repository_name"
+    if [[ -n "$LOCAL_REPOSITORY" ]]; then
+      repository="$(cd "$LOCAL_REPOSITORY" && pwd)"
+    else
+      git clone --quiet --no-checkout "$repository_url" "$repository"
+      git -C "$repository" checkout --quiet --detach "$repository_commit"
+    fi
+    [[ "$(git -C "$repository" rev-parse HEAD)" == "$repository_commit" ]] || {
+      echo "$repository_name is not at pinned commit $repository_commit" >&2
+      exit 1
+    }
+    status_before="$(git -C "$repository" status --porcelain=v1 --untracked-files=all)"
+    [[ -z "$status_before" ]] || {
+      echo "$repository_name qualification repository must be clean" >&2
+      exit 1
+    }
+
+    repository_output="$QUALIFY_TMP/repository-output/$repository_name"
+    echo "[code-graph-v1] qualify pinned repository $repository_name@$repository_commit"
+    "$COMPASS_BIN" update "$repository" \
+      --out "$repository_output" --no-cluster --no-viz \
+      >"$QUALIFY_TMP/$repository_name.log"
+    repository_graph="$(active_graph "$repository_output")"
+    "$COMPASS_BIN" benchmark "$repository_graph" \
+      >"$QUALIFY_TMP/$repository_name.benchmark.json"
+    python3 - "$repository_graph" "$repository_name" "$repository_commit" "$required_errors" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+name = sys.argv[2]
+commit = sys.argv[3]
+required_errors = int(sys.argv[4])
+graph_bytes = path.read_bytes()
+graph = json.loads(graph_bytes)
+metadata = graph.get("graph", {})
+if metadata.get("schema") != "compass.graph/1":
+    raise SystemExit(f"{name}: unexpected graph schema {metadata.get('schema')!r}")
+diagnostics = metadata.get("diagnostics", [])
+validation_errors = sum(
+    diagnostic.get("severity") == "error" for diagnostic in diagnostics
+)
+if validation_errors != required_errors:
+    raise SystemExit(
+        f"{name}: expected {required_errors} validation errors, found {validation_errors}"
+    )
+print(
+    json.dumps(
+        {
+            "schema": "compass.code-graph-repository-qualification/1",
+            "repository": name,
+            "commit": commit,
+            "graphSha256": hashlib.sha256(graph_bytes).hexdigest(),
+            "nodes": len(graph.get("nodes", [])),
+            "edges": len(graph.get("links", [])),
+            "validationErrors": validation_errors,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+)
+PY
+    status_after="$(git -C "$repository" status --porcelain=v1 --untracked-files=all)"
+    [[ "$status_after" == "$status_before" ]] || {
+      echo "$repository_name source repository changed during qualification" >&2
+      exit 1
+    }
+  done <"$RELEASE_REPOSITORIES"
+  exit 0
+fi
 
 echo "[code-graph-v1] validate strict manifests"
 python3 scripts/check_code_graph_v1_coverage.py \
@@ -39,10 +217,6 @@ cargo test --locked -p compass-query --test code_query_scale \
 cargo test --locked -p compass-resolve --test framework_resolution_scale \
   shared_production_framework_resolution_stays_within_enterprise_ceiling
 
-echo "[code-graph-v1] build qualifying production binary once"
-cargo build --locked -p compass-cli --bin compass
-COMPASS_BIN="$QUALIFY_ROOT/target/debug/compass"
-
 mkdir -p "$CORPUS/fixtures/code-graph"
 cp -R "$QUALIFY_ROOT/fixtures/code-graph/." "$CORPUS/fixtures/code-graph/"
 python3 - "$CORPUS_MANIFEST" "$CORPUS" <<'PY'
@@ -57,23 +231,6 @@ for fixture in manifest["files"]:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(fixture["contents"].encode("utf-8"))
 PY
-
-active_graph() {
-  python3 - "$1" <<'PY'
-import pathlib
-import sys
-
-output = pathlib.Path(sys.argv[1]) / "compass-out"
-pointer = output / ".compass-active-generation"
-generation = pointer.read_text().strip()
-if not generation.startswith("generation-") or "/" in generation or "\\" in generation:
-    raise SystemExit(f"invalid active generation {generation!r}")
-active = output / ".compass-generations" / generation
-if not active.is_dir() or (active / ".compass-build-incomplete").exists():
-    raise SystemExit(f"incomplete active generation {active}")
-print(active / "graph.json")
-PY
-}
 
 fixture_digest() {
   python3 - "$QUALIFY_ROOT/fixtures/code-graph" <<'PY'

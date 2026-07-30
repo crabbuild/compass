@@ -225,6 +225,8 @@ fn finish_resolution(
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     canonicalize_import_targets(&mut merged);
     profile_internal("resolver import canonicalization", &mut profile_started);
+    canonicalize_go_receiver_owners(&mut merged);
+    profile_internal("resolver Go receiver ownership", &mut profile_started);
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
@@ -856,6 +858,73 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
 }
 
+fn canonicalize_go_receiver_owners(extraction: &mut Extraction) {
+    let mut groups = HashMap::<&str, Vec<usize>>::new();
+    for (index, node) in extraction.nodes.iter().enumerate() {
+        if !node.id.is_empty() && string_attribute(node, "language") == "go" {
+            groups.entry(&node.id).or_default().push(index);
+        }
+    }
+
+    let mut dropped = HashSet::new();
+    for (id, indexes) in groups {
+        if indexes.len() < 2 {
+            continue;
+        }
+        let definitions = indexes
+            .iter()
+            .copied()
+            .filter(|index| {
+                matches!(
+                    string_attribute(&extraction.nodes[*index], "symbol_kind").as_str(),
+                    "class" | "struct" | "interface" | "type_alias"
+                )
+            })
+            .collect::<Vec<_>>();
+        if definitions.len() != 1 {
+            continue;
+        }
+        let definition = &extraction.nodes[definitions[0]];
+        let definition_scope = repository_scope(&string_attribute(definition, "source_file"));
+        let definition_label = definition.label();
+        if definition_scope.is_empty() || definition_label.is_empty() {
+            continue;
+        }
+
+        for index in indexes {
+            if index == definitions[0] {
+                continue;
+            }
+            let candidate = &extraction.nodes[index];
+            let candidate_source = string_attribute(candidate, "source_file");
+            if string_attribute(candidate, "symbol_kind") != "symbol"
+                || candidate.label() != definition_label
+                || repository_scope(&candidate_source) != definition_scope
+            {
+                continue;
+            }
+            let owns_method_in_source = extraction.edges.iter().any(|edge| {
+                edge.source == id
+                    && relation(edge) == "method"
+                    && edge.string("source_file") == candidate_source
+            });
+            if owns_method_in_source {
+                dropped.insert(index);
+            }
+        }
+    }
+
+    if dropped.is_empty() {
+        return;
+    }
+    let mut index = 0_usize;
+    extraction.nodes.retain(|_| {
+        let keep = !dropped.contains(&index);
+        index += 1;
+        keep
+    });
+}
+
 #[cfg(test)]
 fn disambiguate_colliding_node_ids(extraction: &mut Extraction, root: &Path) {
     let mut raw_calls = extraction.raw_calls.take();
@@ -1082,9 +1151,7 @@ fn resolve_cross_file_calls_with_root_calls(
                 .entry(source.clone())
                 .or_insert_with(|| node.id.clone());
         }
-        if string_attribute(node, "file_type") == "rationale"
-            || string_attribute(node, "type") == "namespace"
-        {
+        if !is_generic_call_target(node) {
             continue;
         }
         let label = node
@@ -2586,6 +2653,21 @@ fn is_file_node(node: &NodeRecord, source: &str) -> bool {
             .file_name()
             .and_then(|value| value.to_str())
             == Some(node.label())
+}
+
+fn is_generic_call_target(node: &NodeRecord) -> bool {
+    if node.attributes.get("_callable").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
+    let kind = string_attribute(node, "symbol_kind");
+    let legacy_kind = string_attribute(node, "type");
+    matches!(
+        kind.as_str(),
+        "function" | "method" | "constructor" | "database_procedure"
+    ) || matches!(
+        legacy_kind.as_str(),
+        "function" | "method" | "constructor" | "database_procedure"
+    )
 }
 
 fn relation(edge: &EdgeRecord) -> &str {

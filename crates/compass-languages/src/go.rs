@@ -37,6 +37,13 @@ pub(crate) fn extract(path: &Path, source: &[u8], root: Node<'_>) -> Extraction 
     GoState::new(path, source).run(root)
 }
 
+#[derive(Clone)]
+struct LexicalBinding {
+    name: String,
+    active_from: usize,
+    active_until: usize,
+}
+
 struct GoState<'source, 'tree> {
     source: &'source [u8],
     source_file: String,
@@ -45,7 +52,7 @@ struct GoState<'source, 'tree> {
     file_id: String,
     extraction: Extraction,
     seen: HashSet<String>,
-    function_bodies: Vec<(String, Node<'tree>)>,
+    function_bodies: Vec<(String, Node<'tree>, Vec<LexicalBinding>)>,
     imported_packages: HashSet<String>,
 }
 
@@ -105,7 +112,8 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                     self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
                     self.add_function_references(node, &id, at);
                     if let Some(body) = node.child_by_field_name("body") {
-                        self.function_bodies.push((id, body));
+                        self.function_bodies
+                            .push((id, body, lexical_bindings(node, self.source)));
                     }
                 }
                 return;
@@ -160,7 +168,8 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         };
         self.add_function_references(node, &id, at);
         if let Some(body) = node.child_by_field_name("body") {
-            self.function_bodies.push((id, body));
+            self.function_bodies
+                .push((id, body, lexical_bindings(node, self.source)));
         }
     }
 
@@ -365,8 +374,8 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             );
         }
         let mut seen_pairs = HashSet::new();
-        for (caller, body) in self.function_bodies.clone() {
-            self.walk_calls_in(body, &caller, &labels, &mut seen_pairs);
+        for (caller, body, bindings) in self.function_bodies.clone() {
+            self.walk_calls_in(body, &caller, &labels, &bindings, &mut seen_pairs);
         }
     }
 
@@ -375,6 +384,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
+        lexical_bindings: &[LexicalBinding],
         seen_pairs: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if matches!(node.kind(), "function_declaration" | "method_declaration") {
@@ -398,7 +408,16 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                 (None, false)
             };
             if let Some(callee) = callee {
-                if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
+                let is_lexically_bound = function.kind() == "identifier"
+                    && lexical_bindings.iter().any(|binding| {
+                        binding.name == callee
+                            && binding.active_from <= function.start_byte()
+                            && function.start_byte() < binding.active_until
+                    });
+                if is_lexically_bound {
+                    // A local callback or function value shadows repository-level symbols.
+                } else if let Some(target) = labels.get(&callee).filter(|target| *target != caller)
+                {
                     let pair = (
                         caller.to_owned(),
                         target.clone(),
@@ -426,7 +445,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.walk_calls_in(child, caller, labels, seen_pairs);
+            self.walk_calls_in(child, caller, labels, lexical_bindings, seen_pairs);
         }
     }
 
@@ -502,6 +521,123 @@ impl<'source, 'tree> GoState<'source, 'tree> {
     fn text(&self, node: Node<'_>) -> String {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
+}
+
+fn lexical_bindings(callable: Node<'_>, source: &[u8]) -> Vec<LexicalBinding> {
+    fn collect_binding_identifiers(node: Node<'_>, source: &[u8], names: &mut Vec<String>) {
+        if node.kind() == "identifier"
+            && let Ok(name) = node.utf8_text(source)
+            && !name.is_empty()
+        {
+            names.push(name.to_owned());
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_binding_identifiers(child, source, names);
+        }
+    }
+
+    fn push_bindings(
+        names_node: Node<'_>,
+        source: &[u8],
+        active_from: usize,
+        active_until: usize,
+        bindings: &mut Vec<LexicalBinding>,
+    ) {
+        let mut names = Vec::new();
+        collect_binding_identifiers(names_node, source, &mut names);
+        names.sort();
+        names.dedup();
+        bindings.extend(names.into_iter().map(|name| LexicalBinding {
+            name,
+            active_from,
+            active_until,
+        }));
+    }
+
+    fn walk(node: Node<'_>, source: &[u8], scope_end: usize, bindings: &mut Vec<LexicalBinding>) {
+        if node.kind() == "func_literal"
+            && let Some(body) = node.child_by_field_name("body")
+        {
+            if let Some(parameters) = node.child_by_field_name("parameters") {
+                push_bindings(
+                    parameters,
+                    source,
+                    body.start_byte(),
+                    body.end_byte(),
+                    bindings,
+                );
+            }
+            walk(body, source, body.end_byte(), bindings);
+            return;
+        }
+        let scope_end = if node.kind() == "block" {
+            node.end_byte()
+        } else {
+            scope_end
+        };
+        match node.kind() {
+            "var_spec" => {
+                let type_node = node.child_by_field_name("type");
+                let value_node = node.child_by_field_name("value");
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor).filter(|child| {
+                    child.is_named() && Some(*child) != type_node && Some(*child) != value_node
+                }) {
+                    if child.kind() == "identifier" {
+                        push_bindings(child, source, node.end_byte(), scope_end, bindings);
+                    }
+                }
+            }
+            "short_var_declaration" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    push_bindings(left, source, node.end_byte(), scope_end, bindings);
+                }
+            }
+            "for_statement" => {
+                let body = node.child_by_field_name("body");
+                let mut cursor = node.walk();
+                if let Some(range) = node
+                    .children(&mut cursor)
+                    .find(|child| child.kind() == "range_clause")
+                    && range.utf8_text(source).unwrap_or_default().contains(":=")
+                    && let Some(left) = range.child_by_field_name("left")
+                {
+                    push_bindings(
+                        left,
+                        source,
+                        range.end_byte(),
+                        body.map_or(node.end_byte(), |body| body.end_byte()),
+                        bindings,
+                    );
+                }
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            walk(child, source, scope_end, bindings);
+        }
+    }
+
+    let Some(body) = callable.child_by_field_name("body") else {
+        return Vec::new();
+    };
+    let mut bindings = Vec::new();
+    for field in ["receiver", "parameters"] {
+        if let Some(parameters) = callable.child_by_field_name(field) {
+            push_bindings(
+                parameters,
+                source,
+                body.start_byte(),
+                body.end_byte(),
+                &mut bindings,
+            );
+        }
+    }
+    walk(body, source, body.end_byte(), &mut bindings);
+    bindings
 }
 
 fn collect_type_refs(
