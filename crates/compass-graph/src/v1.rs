@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -22,9 +22,13 @@ use compass_model::provenance::{
     SEMANTIC_LAYER_EXTRACTOR, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
     TRUSTED_NODE_RECORD_ATTRIBUTE,
 };
-use compass_model::{GraphError, validate_code_graph};
+use compass_model::{
+    CodeGraphValidationError, GraphError, validate_code_graph, validate_code_graph_records,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Version of the normalization and publication contract behind graph schema v1.
 pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/2";
@@ -36,6 +40,12 @@ const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PublicationMode {
+    Strict,
+    BestEffort,
+}
 
 #[derive(Clone, Debug)]
 pub struct BuildEvidence {
@@ -413,9 +423,27 @@ fn coverage_file_id(
 
 /// Publish resolved raw facts as a validated, deterministic Compass graph v1 document.
 pub fn normalize_v1(
+    extraction: Extraction,
+    evidence: BuildEvidence,
+) -> Result<GraphDocument, GraphError> {
+    normalize_v1_with_mode(extraction, evidence, PublicationMode::Strict)
+        .map(|outcome| outcome.document)
+}
+
+/// Publish the largest strict-valid graph after quarantining invalid records.
+pub fn normalize_v1_best_effort(
+    extraction: Extraction,
+    evidence: BuildEvidence,
+) -> Result<PublicationOutcome, GraphError> {
+    normalize_v1_with_mode(extraction, evidence, PublicationMode::BestEffort)
+}
+
+fn normalize_v1_with_mode(
     mut extraction: Extraction,
     mut evidence: BuildEvidence,
-) -> Result<GraphDocument, GraphError> {
+    mode: PublicationMode,
+) -> Result<PublicationOutcome, GraphError> {
+    let mut quarantine = QuarantineCollector::default();
     if let Some(value) = extraction.extensions.remove(TRUSTED_GRAPH_COVERAGE) {
         let mut coverage = serde_json::from_value::<Vec<CoverageRecord>>(value)
             .map_err(|error| raw_error("graph.coverage", &error.to_string()))?;
@@ -439,33 +467,69 @@ pub fn normalize_v1(
         &evidence.repository_root,
         &file_facts,
         &stub_wiring_sites,
+        mode,
+        &mut quarantine,
     )?;
 
+    if mode == PublicationMode::BestEffort {
+        extraction.nodes.sort_by_cached_key(raw_node_sort_key);
+        extraction.edges.sort_by_cached_key(raw_edge_sort_key);
+    }
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
-    let mut nodes = BTreeMap::new();
+    let mut nodes = BTreeMap::<String, NodeRecord>::new();
     for raw in extraction.nodes {
-        if id_remap.contains_key(&raw.id) {
-            return Err(raw_error(
-                &raw.id,
+        let raw_id = raw.id.clone();
+        let diagnostic_anchor =
+            best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts);
+        if id_remap.contains_key(&raw_id) {
+            let error = raw_error(
+                &raw_id,
                 "duplicate raw node ID cannot be resolved deterministically",
-            ));
+            );
+            if mode == PublicationMode::Strict {
+                return Err(error);
+            }
+            id_remap.remove(&raw_id);
+            quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
+            continue;
         }
-        let node = match raw.attributes.get(TRUSTED_NODE_RECORD) {
+        let normalized = match raw.attributes.get(TRUSTED_NODE_RECORD) {
             Some(value) => serde_json::from_value::<NodeRecord>(value.clone())
-                .map_err(|error| raw_error(&raw.id, &error.to_string()))?,
+                .map_err(|error| raw_error(&raw_id, &error.to_string())),
             None => normalize_node(
                 raw.clone(),
                 &evidence.repository_root,
                 &file_facts,
-                stub_wiring_sites.get(&raw.id),
-            )?,
+                stub_wiring_sites.get(&raw_id),
+            ),
         };
-        id_remap.insert(raw.id, node.id.clone());
+        let node = match normalized {
+            Ok(node) => node,
+            Err(error) if mode == PublicationMode::BestEffort => {
+                quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let published_id = node.id.clone();
         if let Some(existing) = nodes.get_mut(&node.id) {
-            merge_normalized_node(existing, node)?;
+            let mut merged = existing.clone();
+            if let Err(error) = merge_normalized_node(&mut merged, node) {
+                if mode == PublicationMode::Strict {
+                    return Err(error);
+                }
+                quarantine.identity_collision(
+                    &raw_id,
+                    &error.to_string(),
+                    diagnostic_anchor.or_else(|| best_effort_node_anchor(existing)),
+                );
+                continue;
+            }
+            *existing = merged;
         } else {
             nodes.insert(node.id.clone(), node);
         }
+        id_remap.insert(raw_id, published_id);
     }
     for node in nodes.values_mut() {
         remap_provenance_candidates(&mut node.evidence, &id_remap);
@@ -487,39 +551,72 @@ pub fn normalize_v1(
         recompute_route_resolution(details);
     }
 
-    let mut links = BTreeMap::new();
+    let mut links = BTreeMap::<String, EdgeRecord>::new();
     for (index, raw) in extraction.edges.into_iter().enumerate() {
-        let source = id_remap.get(&raw.source).ok_or_else(|| {
-            raw_error(
-                &format!("edge[{index}]"),
-                &format!("source {} does not match a raw node", raw.source),
-            )
-        })?;
-        let target = id_remap.get(&raw.target).ok_or_else(|| {
-            raw_error(
-                &format!("edge[{index}]"),
-                &format!("target {} does not match a raw node", raw.target),
-            )
-        })?;
+        let raw_identity = raw_edge_identity(&raw, index);
+        let diagnostic_anchor =
+            best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts);
+        let source = match id_remap.get(&raw.source) {
+            Some(source) => source.clone(),
+            None if mode == PublicationMode::BestEffort => {
+                quarantine.omit_edge(
+                    &raw_identity,
+                    &format!("source {} does not match a retained raw node", raw.source),
+                    diagnostic_anchor,
+                );
+                continue;
+            }
+            None => {
+                return Err(raw_error(
+                    &format!("edge[{index}]"),
+                    &format!("source {} does not match a raw node", raw.source),
+                ));
+            }
+        };
+        let target = match id_remap.get(&raw.target) {
+            Some(target) => target.clone(),
+            None if mode == PublicationMode::BestEffort => {
+                quarantine.omit_edge(
+                    &raw_identity,
+                    &format!("target {} does not match a retained raw node", raw.target),
+                    diagnostic_anchor,
+                );
+                continue;
+            }
+            None => {
+                return Err(raw_error(
+                    &format!("edge[{index}]"),
+                    &format!("target {} does not match a raw node", raw.target),
+                ));
+            }
+        };
         let trusted_edge = raw.attributes.contains_key(TRUSTED_EDGE_RECORD);
-        let mut edge = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
+        let normalized = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
             Some(value) => normalize_trusted_edge(
                 raw,
                 value,
-                source,
-                target,
+                &source,
+                &target,
                 index,
                 &evidence.repository_root,
                 &file_facts,
-            )?,
+            ),
             None => normalize_edge(
                 raw,
-                source,
-                target,
+                &source,
+                &target,
                 index,
                 &evidence.repository_root,
                 &file_facts,
-            )?,
+            ),
+        };
+        let mut edge = match normalized {
+            Ok(edge) => edge,
+            Err(error) if mode == PublicationMode::BestEffort => {
+                quarantine.omit_edge(&raw_identity, &error.to_string(), diagnostic_anchor);
+                continue;
+            }
+            Err(error) => return Err(error),
         };
         remap_provenance_candidates(&mut edge.evidence, &id_remap);
         if !trusted_edge
@@ -627,6 +724,13 @@ pub fn normalize_v1(
             });
         }
         if edge.source == edge.target && edge.kind != EdgeKind::Calls {
+            if mode == PublicationMode::BestEffort {
+                quarantine.omit_edge(
+                    &edge.id,
+                    &format!("unsupported {} self-loop", edge.kind.as_str()),
+                    edge.relationship_site.clone(),
+                );
+            }
             evidence.diagnostics.push(GraphDiagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: "dropped_non_recursive_self_loop".to_owned(),
@@ -651,6 +755,18 @@ pub fn normalize_v1(
                     _ => false,
                 };
             if !valid {
+                if mode == PublicationMode::BestEffort {
+                    quarantine.omit_edge(
+                        &edge.id,
+                        &format!(
+                            "invalid {} endpoints {} -> {}",
+                            edge.kind.as_str(),
+                            source_kind.as_str(),
+                            target_kind.as_str()
+                        ),
+                        edge.relationship_site.clone(),
+                    );
+                }
                 evidence.diagnostics.push(GraphDiagnostic {
                     severity: DiagnosticSeverity::Warning,
                     code: "dropped_invalid_inheritance_target".to_owned(),
@@ -667,7 +783,19 @@ pub fn normalize_v1(
             }
         }
         if let Some(existing) = links.get_mut(&edge.id) {
-            merge_normalized_edge(existing, edge)?;
+            let mut merged = existing.clone();
+            if let Err(error) = merge_normalized_edge(&mut merged, edge) {
+                if mode == PublicationMode::Strict {
+                    return Err(error);
+                }
+                quarantine.omit_edge(
+                    &existing.id,
+                    &error.to_string(),
+                    existing.relationship_site.clone(),
+                );
+                continue;
+            }
+            *existing = merged;
         } else {
             links.insert(edge.id.clone(), edge);
         }
@@ -783,7 +911,7 @@ pub fn normalize_v1(
             .cmp(&(right.code.as_str(), right.message.as_str()))
     });
 
-    let document = GraphDocument {
+    let mut document = GraphDocument {
         directed: true,
         multigraph: true,
         graph: GraphMetadata {
@@ -796,8 +924,246 @@ pub fn normalize_v1(
         nodes,
         links,
     };
+    if mode == PublicationMode::BestEffort {
+        sanitize_document(&mut document, &mut quarantine)?;
+    }
+    let omissions = quarantine.finish(&mut document.graph.diagnostics);
+    sort_dedup_serialized(&mut document.graph.diagnostics);
+    document.graph.diagnostics.sort_by(|left, right| {
+        (left.code.as_str(), left.message.as_str())
+            .cmp(&(right.code.as_str(), right.message.as_str()))
+    });
     validate_code_graph(&document)?;
-    Ok(document)
+    Ok(PublicationOutcome {
+        document,
+        omissions,
+    })
+}
+
+fn sanitize_document(
+    document: &mut GraphDocument,
+    quarantine: &mut QuarantineCollector,
+) -> Result<(), GraphError> {
+    let report = validate_code_graph_records(document);
+    if !report.document_errors.is_empty() {
+        return Err(CodeGraphValidationError {
+            errors: report.document_errors,
+        }
+        .into());
+    }
+
+    let invalid_nodes = report
+        .node_errors
+        .iter()
+        .map(|record| record.id.as_str())
+        .collect::<HashSet<_>>();
+    for record in &report.node_errors {
+        quarantine.omit_node(&record.id, &record.errors.join("; "), None);
+    }
+
+    let incident_edges = document
+        .links
+        .iter()
+        .filter(|edge| {
+            invalid_nodes.contains(edge.source.as_str())
+                || invalid_nodes.contains(edge.target.as_str())
+        })
+        .map(|edge| edge.id.clone())
+        .collect::<BTreeSet<_>>();
+    for edge in document
+        .links
+        .iter()
+        .filter(|edge| incident_edges.contains(&edge.id))
+    {
+        quarantine.omit_edge(
+            &edge.id,
+            "an endpoint node was quarantined",
+            edge.relationship_site.clone(),
+        );
+    }
+
+    let invalid_edges = report
+        .edge_errors
+        .iter()
+        .filter(|record| !incident_edges.contains(&record.id))
+        .map(|record| record.id.clone())
+        .collect::<BTreeSet<_>>();
+    for record in report
+        .edge_errors
+        .iter()
+        .filter(|record| invalid_edges.contains(&record.id))
+    {
+        let anchor = document
+            .links
+            .iter()
+            .find(|edge| edge.id == record.id)
+            .and_then(|edge| edge.relationship_site.clone());
+        quarantine.omit_edge(&record.id, &record.errors.join("; "), anchor);
+    }
+
+    document
+        .nodes
+        .retain(|node| !invalid_nodes.contains(node.id.as_str()));
+    document
+        .links
+        .retain(|edge| !incident_edges.contains(&edge.id) && !invalid_edges.contains(&edge.id));
+    repair_route_topology(document);
+    Ok(())
+}
+
+fn repair_route_topology(document: &mut GraphDocument) {
+    let retained_nodes = document
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
+    let retained_stages = document
+        .links
+        .iter()
+        .filter_map(|edge| {
+            let EdgeDetails::Route(details) = edge.details.as_ref()? else {
+                return None;
+            };
+            Some((
+                edge.source.clone(),
+                details.stage,
+                details.position,
+                edge.target.clone(),
+            ))
+        })
+        .collect::<HashSet<_>>();
+
+    for node in &mut document.nodes {
+        for evidence in &mut node.evidence {
+            evidence
+                .candidates
+                .retain(|candidate| retained_nodes.contains(candidate.node_id.as_str()));
+        }
+        let Some(NodeDetails::Route(details)) = node.details.as_mut() else {
+            continue;
+        };
+        for stage in &mut details.stages {
+            stage
+                .candidates
+                .retain(|candidate| retained_nodes.contains(candidate.node_id.as_str()));
+            let retained = stage.target.as_ref().is_some_and(|target| {
+                retained_stages.contains(&(
+                    node.id.clone(),
+                    stage.stage,
+                    Some(stage.position),
+                    target.clone(),
+                ))
+            });
+            if !retained {
+                stage.target = None;
+                stage.resolution = if stage.candidates.len() > 1 {
+                    ResolutionState::Ambiguous
+                } else {
+                    ResolutionState::Unresolved
+                };
+            }
+        }
+        recompute_route_resolution(details);
+    }
+    for edge in &mut document.links {
+        for evidence in &mut edge.evidence {
+            evidence
+                .candidates
+                .retain(|candidate| retained_nodes.contains(candidate.node_id.as_str()));
+        }
+    }
+}
+
+fn raw_node_sort_key(raw: &RawNodeRecord) -> String {
+    let trusted = raw
+        .attributes
+        .get(TRUSTED_NODE_RECORD)
+        .and_then(|value| serde_json::from_value::<NodeRecord>(value.clone()).ok());
+    let rank = trusted.as_ref().map_or_else(
+        || {
+            let has_source = optional_source_path(&raw.attributes, "source_file").is_some();
+            let exact = optional_string(&raw.attributes, "confidence")
+                .is_some_and(|confidence| matches!(confidence.as_str(), "EXACT" | "EXTRACTED"));
+            let ast = optional_string(&raw.attributes, "origin")
+                .is_some_and(|origin| origin.eq_ignore_ascii_case("ast"));
+            match (ast, exact, has_source) {
+                (true, _, true) => 0,
+                (_, true, true) => 1,
+                (_, _, true) => 2,
+                _ => 4,
+            }
+        },
+        |node| {
+            let exact_ast = node.evidence.iter().any(|evidence| {
+                evidence.origin == EvidenceOrigin::Ast
+                    && evidence.confidence == EvidenceConfidence::Exact
+            });
+            let exact_source = node.source.is_some()
+                && node
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.confidence == EvidenceConfidence::Exact);
+            let inferred_source = node.source.is_some();
+            let exact_wiring = node.evidence.iter().any(|evidence| {
+                evidence.wiring_site.is_some() && evidence.confidence == EvidenceConfidence::Exact
+            });
+            if exact_ast {
+                0
+            } else if exact_source {
+                1
+            } else if inferred_source {
+                2
+            } else if exact_wiring {
+                3
+            } else {
+                4
+            }
+        },
+    );
+    format!(
+        "{rank}\u{1f}{}\u{1f}{}",
+        raw.id,
+        serialized(&raw.attributes)
+    )
+}
+
+fn raw_edge_sort_key(raw: &RawEdgeRecord) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        raw.source,
+        optional_string(&raw.attributes, "relation").unwrap_or_default(),
+        raw.target,
+        serialized(&raw.attributes)
+    )
+}
+
+fn raw_edge_identity(raw: &RawEdgeRecord, index: usize) -> String {
+    let relation =
+        optional_string(&raw.attributes, "relation").unwrap_or_else(|| "<missing>".to_owned());
+    format!(
+        "edge[{index}] {} -[{relation}]-> {}",
+        raw.source, raw.target
+    )
+}
+
+fn best_effort_raw_anchor(
+    attributes: &Map<String, Value>,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> Option<SourceAnchor> {
+    raw_anchor(attributes, root, file_facts).ok().flatten()
+}
+
+fn best_effort_node_anchor(node: &NodeRecord) -> Option<SourceAnchor> {
+    node.source.clone().or_else(|| {
+        node.evidence.iter().find_map(|evidence| {
+            evidence
+                .anchors
+                .first()
+                .cloned()
+                .or_else(|| evidence.wiring_site.clone())
+        })
+    })
 }
 
 fn remap_diagnostic_ids(diagnostic: &mut GraphDiagnostic, id_remap: &HashMap<String, String>) {
@@ -1185,6 +1551,8 @@ fn resolve_or_drop_generic_symbols(
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
     wiring_sites: &HashMap<String, SourceAnchor>,
+    mode: PublicationMode,
+    quarantine: &mut QuarantineCollector,
 ) -> Result<(), GraphError> {
     let generic_ids = extraction
         .nodes
@@ -1266,11 +1634,19 @@ fn resolve_or_drop_generic_symbols(
         if anchor.is_none()
             && optional_string(&node.attributes, "extractor").as_deref()
                 == Some("compass.graph.external-placeholder")
+            && mode == PublicationMode::Strict
         {
             return Err(raw_error(
                 &node.id,
                 "unresolved external placeholder requires an exact wiring site",
             ));
+        }
+        if mode == PublicationMode::BestEffort {
+            quarantine.omit_node(
+                &node.id,
+                "no exact node kind or wiring site could be inferred",
+                anchor.clone(),
+            );
         }
         diagnostics.push(GraphDiagnostic {
             severity: DiagnosticSeverity::Warning,
@@ -1282,6 +1658,19 @@ fn resolve_or_drop_generic_symbols(
             anchor,
             related_ids: Vec::new(),
         });
+    }
+    if mode == PublicationMode::BestEffort {
+        for edge in extraction
+            .edges
+            .iter()
+            .filter(|edge| dropped.contains(&edge.source) || dropped.contains(&edge.target))
+        {
+            quarantine.omit_edge(
+                &raw_edge_identity(edge, 0),
+                "an endpoint node was quarantined",
+                best_effort_raw_anchor(&edge.attributes, root, file_facts),
+            );
+        }
     }
     extraction.nodes.retain(|node| !dropped.contains(&node.id));
     extraction
