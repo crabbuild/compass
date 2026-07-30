@@ -125,7 +125,8 @@ source file
   creation/repository state continue to pass.
 - Residual missing facts are grouped into genuine Compass gaps, external facts,
   and demonstrated Graphify false positives.
-- Run `graphify update .` in the parent repository after code changes.
+- Do not rerun Graphify during final Compass verification; retain the pinned
+  Graphify 0.9.31 artifacts as the comparison baseline.
 
 ## Execution tasks
 
@@ -203,8 +204,8 @@ Post-implementation verification:
 - [x] Run the four semantic query oracles.
 - [x] Record before/after quality, latency, peak RSS, and residual categories
   in the performance review.
-- [x] Run `graphify update .`.
-- [x] Commit only phase-two files, push the branch, and create a pull request
+- [x] Preserve the retained Graphify baseline without rerunning Graphify.
+- [ ] Commit only phase-two files, push the branch, and create a pull request
   targeting `main`.
 
 ## Qualification outcome
