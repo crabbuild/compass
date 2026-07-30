@@ -1810,9 +1810,9 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
 
 fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, root: &Path) {
     let canonical = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-    let Ok(relative) = canonical
+    let Ok(relative) = source
         .strip_prefix(root)
-        .or_else(|_| source.strip_prefix(root))
+        .or_else(|_| canonical.strip_prefix(root))
     else {
         return;
     };
@@ -1830,6 +1830,13 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
                 value.replace('\\', "/")
             }
         };
+        let normalize_origin_path = |value: &str| {
+            if Path::new(value) == source {
+                portable.clone()
+            } else {
+                normalize_path(value)
+            }
+        };
         for key in ["source_file", "origin_file"] {
             let Some(value) = attributes
                 .get(key)
@@ -1838,7 +1845,7 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             else {
                 continue;
             };
-            let normalized = normalize_path(value);
+            let normalized = normalize_origin_path(value);
             if normalized != value {
                 attributes.insert(key.to_owned(), serde_json::Value::String(normalized));
             }
@@ -1853,7 +1860,7 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         {
             anchor.insert(
                 "file".to_owned(),
-                serde_json::Value::String(normalize_path(&value)),
+                serde_json::Value::String(normalize_origin_path(&value)),
             );
         }
         if let Some(target) = attributes

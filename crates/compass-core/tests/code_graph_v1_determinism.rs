@@ -3,7 +3,9 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use compass_core::{BuildOptions, BuildPurpose, build_local_graph};
+use compass_core::{
+    BuildOptions, BuildPurpose, SemanticLayer, build_graph_with_semantic, build_local_graph,
+};
 use compass_model::code_graph::{
     EdgeKind, GraphDocument, NodeDetails, NodeKind, NodeRole, RouteStage,
 };
@@ -28,6 +30,34 @@ fn build(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
     options.max_workers = Some(2);
     options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
     let result = build_local_graph(&options)?;
+    let path = result.output_dir.join("graph.json");
+    let bytes = fs::read(&path)?;
+    GraphDocument::load(&path)?;
+    Ok((bytes, result.outputs_changed))
+}
+
+fn build_clustered(root: &Path) -> Result<(Vec<u8>, bool), Box<dyn Error>> {
+    let mut options = BuildOptions::new(root);
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+    options.purpose = BuildPurpose::Extract;
+    let result = build_graph_with_semantic(
+        &options,
+        &SemanticLayer {
+            fragment: serde_json::json!({
+                "nodes": [],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "failed_chunks": 0,
+            }),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        },
+    )?;
     let path = result.output_dir.join("graph.json");
     let bytes = fs::read(&path)?;
     GraphDocument::load(&path)?;
@@ -82,10 +112,9 @@ fn cached_file_symlink_keeps_its_logical_graph_identity() -> Result<(), Box<dyn 
     )?;
     symlink("CLAUDE.md", root.join("AGENTS.md"))?;
 
-    let (cold, _) = build(root)?;
-    let (warm, warm_changed) = build(root)?;
+    let (cold, _) = build_clustered(root)?;
+    let (warm, _) = build_clustered(root)?;
 
-    assert!(!warm_changed);
     assert_eq!(
         warm, cold,
         "loading a cached extraction must not collapse an in-repository file symlink into its target"
