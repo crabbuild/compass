@@ -564,16 +564,13 @@ fn normalize_v1_with_mode(
 
     let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
     for (index, raw) in extraction.edges.into_iter().enumerate() {
-        let raw_identity = raw_edge_identity(&raw, index);
-        let diagnostic_anchor =
-            best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts);
         let source = match id_remap.get(&raw.source) {
             Some(source) => source.clone(),
             None if mode == PublicationMode::BestEffort => {
                 quarantine.omit_edge(
-                    &raw_identity,
+                    &raw_edge_identity(&raw, index),
                     &format!("source {} does not match a retained raw node", raw.source),
-                    diagnostic_anchor,
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
                 );
                 continue;
             }
@@ -588,9 +585,9 @@ fn normalize_v1_with_mode(
             Some(target) => target.clone(),
             None if mode == PublicationMode::BestEffort => {
                 quarantine.omit_edge(
-                    &raw_identity,
+                    &raw_edge_identity(&raw, index),
                     &format!("target {} does not match a retained raw node", raw.target),
-                    diagnostic_anchor,
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
                 );
                 continue;
             }
@@ -604,7 +601,7 @@ fn normalize_v1_with_mode(
         let trusted_edge = raw.attributes.contains_key(TRUSTED_EDGE_RECORD);
         let normalized = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
             Some(value) => normalize_trusted_edge(
-                raw,
+                &raw,
                 value,
                 &source,
                 &target,
@@ -613,7 +610,7 @@ fn normalize_v1_with_mode(
                 &file_facts,
             ),
             None => normalize_edge(
-                raw,
+                &raw,
                 &source,
                 &target,
                 index,
@@ -624,7 +621,11 @@ fn normalize_v1_with_mode(
         let mut edge = match normalized {
             Ok(edge) => edge,
             Err(error) if mode == PublicationMode::BestEffort => {
-                quarantine.omit_edge(&raw_identity, &error.to_string(), diagnostic_anchor);
+                quarantine.omit_edge(
+                    &raw_edge_identity(&raw, index),
+                    &error.to_string(),
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
+                );
                 continue;
             }
             Err(error) => return Err(error),
@@ -1188,7 +1189,7 @@ fn remap_diagnostic_ids(diagnostic: &mut GraphDiagnostic, id_remap: &HashMap<Str
 }
 
 fn normalize_trusted_edge(
-    raw: RawEdgeRecord,
+    raw: &RawEdgeRecord,
     trusted: Value,
     source: &str,
     target: &str,
@@ -2743,7 +2744,7 @@ fn normalize_node(
 }
 
 fn normalize_edge(
-    raw: RawEdgeRecord,
+    raw: &RawEdgeRecord,
     source: &str,
     target: &str,
     index: usize,
