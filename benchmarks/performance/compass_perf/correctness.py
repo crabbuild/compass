@@ -80,11 +80,15 @@ def _create_schema(database: sqlite3.Connection) -> None:
             source TEXT NOT NULL,
             target TEXT NOT NULL,
             relation TEXT NOT NULL,
+            source_fact_key TEXT NOT NULL,
+            target_fact_key TEXT NOT NULL,
             payload_sha256 TEXT NOT NULL,
             UNIQUE (tool, source, target, relation, payload_sha256)
         );
         CREATE INDEX IF NOT EXISTS edges_source ON edges(tool, source);
         CREATE INDEX IF NOT EXISTS edges_target ON edges(tool, target);
+        CREATE INDEX IF NOT EXISTS edges_fact
+          ON edges(tool, relation, source_fact_key, target_fact_key);
         CREATE INDEX IF NOT EXISTS nodes_fact_key ON nodes(tool, fact_key);
         CREATE TABLE IF NOT EXISTS summaries (
             tool TEXT PRIMARY KEY,
@@ -157,6 +161,9 @@ def index_graph(
             )
             node_count += 1
 
+    node_facts = dict(
+        database.execute("SELECT id,fact_key FROM nodes WHERE tool = ?", (tool,))
+    )
     edge_count = 0
     for record in _records(graph_path, "links", "edges"):
         source = record.get("source")
@@ -169,6 +176,8 @@ def index_graph(
         if not isinstance(relation, str) or not relation:
             raise ValueError(f"{tool} edge has an invalid relation")
         relation = relation.lower()
+        source_fact_key = node_facts.get(source, "")
+        target_fact_key = node_facts.get(target, "")
         confidence = record.get("confidence")
         if isinstance(confidence, float) and not math.isfinite(confidence):
             raise ValueError(f"{tool} edge has non-finite confidence")
@@ -184,8 +193,8 @@ def index_graph(
         )
         before = database.total_changes
         database.execute(
-            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?)",
-            (tool, source, target, relation, payload),
+            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tool, source, target, relation, source_fact_key, target_fact_key, payload),
         )
         if database.total_changes > before:
             edge_count += 1
@@ -292,26 +301,14 @@ def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
         missing_edges_query = """
             SELECT graphify.source || '|' || graphify.relation || '|' || graphify.target
             FROM edges AS graphify
-            JOIN nodes AS graphify_source
-              ON graphify_source.tool = 'graphify'
-              AND graphify_source.id = graphify.source
-            JOIN nodes AS graphify_target
-              ON graphify_target.tool = 'graphify'
-              AND graphify_target.id = graphify.target
             WHERE graphify.tool = 'graphify'
               AND NOT EXISTS (
                 SELECT 1
                 FROM edges AS compass
-                JOIN nodes AS compass_source
-                  ON compass_source.tool = 'compass'
-                  AND compass_source.id = compass.source
-                JOIN nodes AS compass_target
-                  ON compass_target.tool = 'compass'
-                  AND compass_target.id = compass.target
                 WHERE compass.tool = 'compass'
                   AND compass.relation = graphify.relation
-                  AND compass_source.fact_key = graphify_source.fact_key
-                  AND compass_target.fact_key = graphify_target.fact_key
+                  AND compass.source_fact_key = graphify.source_fact_key
+                  AND compass.target_fact_key = graphify.target_fact_key
               )
         """
         for name, query in (
