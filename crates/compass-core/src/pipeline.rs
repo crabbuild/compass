@@ -506,9 +506,7 @@ fn build_graph_inner(
     let build_profile = build_profile(options);
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let verified_state = if reusable_semantic_layer
-        && supplemental.is_empty()
-        && manifest_unchanged
+    let verified_state = if reusable_semantic_layer && supplemental.is_empty() && manifest_unchanged
     {
         load_verified(
             &output_dir,
