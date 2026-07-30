@@ -15,6 +15,21 @@ from benchmarks.performance.compass_perf.correctness import (
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def compare_documents(
+    compass_document: str, graphify_document: str
+):
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        compass = root / "compass.json"
+        graphify = root / "graphify.json"
+        compass.write_text(compass_document, encoding="utf-8")
+        graphify.write_text(graphify_document, encoding="utf-8")
+        database = sqlite3.connect(":memory:")
+        index_graph("compass", compass, database)
+        index_graph("graphify", graphify, database)
+        return compare_graphs(database)
+
+
 class CorrectnessTests(unittest.TestCase):
     def test_compass_superset_passes_shared_fact_comparison(self) -> None:
         database = sqlite3.connect(":memory:")
@@ -24,6 +39,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertTrue(result.passed, result.failures)
         self.assertGreater(compass.nodes, graphify.nodes)
         self.assertEqual(compass.digest, canonical_graph_digest(database, "compass"))
+        self.assertEqual(result.digest, compare_graphs(database).digest)
 
     def test_storage_order_does_not_change_digest(self) -> None:
         database = sqlite3.connect(":memory:")
@@ -191,6 +207,146 @@ class CorrectnessTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "conflicting"):
                 index_graph("compass", graph, database)
+
+    def test_unique_generated_receiver_and_occurrence_edge_are_dominated(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"caller","label":"run()","kind":"function",
+               "source_file":"pkg/call.go","source_location":"L5","language":"go"},
+              {"id":"type","label":"Widget","kind":"class",
+               "source_file":"pkg/schema.go","source_location":"L1","language":"go"},
+              {"id":"stub","label":"Widget","kind":"type_alias","language":"go"}
+            ],"links":[
+              {"source":"caller","target":"stub","relation":"references",
+               "source_file":"pkg/call.go","source_location":"L9"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_caller","label":"run()",
+               "source_file":"pkg/call.go","source_location":"L5"},
+              {"id":"generated_receiver","label":"Widget",
+               "source_file":"pkg/generated.go","source_location":"L20"}
+            ],"links":[
+              {"source":"legacy_caller","target":"generated_receiver","relation":"uses",
+               "source_file":"pkg/call.go","source_location":"L9"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+
+    def test_same_label_cross_package_definition_is_ambiguous(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"left","label":"Agent","kind":"class",
+               "source_file":"pkg/left/agent.go","source_location":"L1","language":"go"},
+              {"id":"right","label":"Agent","kind":"class",
+               "source_file":"pkg/right/agent.go","source_location":"L1","language":"go"}
+            ],"links":[]}
+            """,
+            """
+            {"nodes":[{"id":"receiver","label":"Agent"}],"links":[]}
+            """,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["ambiguous_graphify_nodes"], 1)
+        self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
+
+    def test_two_hop_containment_dominates_flat_graphify_ownership(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"a.go","kind":"file",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"owner","label":"Widget","kind":"class",
+               "source_file":"pkg/a.go","source_location":"L2"},
+              {"id":"method","label":"run()","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L3"}
+            ],"links":[
+              {"source":"file","target":"owner","relation":"contains"},
+              {"source":"owner","target":"method","relation":"contains"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_file","label":"pkg/a.go",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"legacy_method","label":"run()",
+               "source_file":"pkg/a.go","source_location":"L3"}
+            ],"links":[
+              {"source":"legacy_file","target":"legacy_method","relation":"contains"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:containment_path",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_three_hop_containment_and_different_call_sites_fail_closed(self) -> None:
+        containment = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"file","label":"a.go","kind":"file",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"outer","label":"Outer","kind":"class",
+               "source_file":"pkg/a.go","source_location":"L2"},
+              {"id":"inner","label":"Inner","kind":"class",
+               "source_file":"pkg/a.go","source_location":"L3"},
+              {"id":"method","label":"run()","kind":"method",
+               "source_file":"pkg/a.go","source_location":"L4"}
+            ],"links":[
+              {"source":"file","target":"outer","relation":"contains"},
+              {"source":"outer","target":"inner","relation":"contains"},
+              {"source":"inner","target":"method","relation":"contains"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_file","label":"pkg/a.go",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"legacy_method","label":"run()",
+               "source_file":"pkg/a.go","source_location":"L4"}
+            ],"links":[
+              {"source":"legacy_file","target":"legacy_method","relation":"contains"}
+            ]}
+            """,
+        )
+        self.assertFalse(containment.passed)
+        self.assertEqual(containment.metrics["missing_graphify_edges"], 1)
+
+        occurrence = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"caller","label":"run()","kind":"function",
+               "source_file":"pkg/a.go","source_location":"L1","language":"go"},
+              {"id":"type","label":"Widget","kind":"class",
+               "source_file":"pkg/a.go","source_location":"L2","language":"go"}
+            ],"links":[
+              {"source":"caller","target":"type","relation":"references",
+               "source_file":"pkg/a.go","source_location":"L10"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"legacy_caller","label":"run()",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"receiver","label":"Widget",
+               "source_file":"pkg/generated.go","source_location":"L5"}
+            ],"links":[
+              {"source":"legacy_caller","target":"receiver","relation":"uses",
+               "source_file":"pkg/a.go","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertFalse(occurrence.passed)
+        self.assertEqual(occurrence.metrics["missing_graphify_edges"], 1)
 
 
 if __name__ == "__main__":

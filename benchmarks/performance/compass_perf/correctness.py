@@ -24,6 +24,42 @@ class GraphSummary:
     digest: str
 
 
+@dataclass(frozen=True)
+class Coverage:
+    status: str
+    reason: str
+    compass_fact: str | None
+
+
+@dataclass(frozen=True)
+class NodeFact:
+    identifier: str
+    label: str
+    normalized_label: str
+    kind: str
+    source_file: str
+    source_location: str
+    fact_key: str
+    qualified_name: str
+    language: str
+    module: str
+    placeholder: bool
+    anchored_definition: bool
+    callable: bool
+
+
+@dataclass(frozen=True)
+class EdgeFact:
+    source: str
+    target: str
+    relation: str
+    source_fact_key: str
+    target_fact_key: str
+    occurrence_file: str
+    occurrence_location: str
+    payload_sha256: str
+
+
 def _text(value: Any) -> str:
     if value is None:
         return ""
@@ -40,7 +76,7 @@ def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
-def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, str, str]:
+def _normalized_label(record: dict[str, object], identifier: str) -> tuple[str, str]:
     source = record.get("source")
     nested = source if isinstance(source, dict) else {}
     label = _text(record.get("name", record.get("label", identifier))).strip()
@@ -50,10 +86,17 @@ def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, 
         detail_data.get("resourceKind") if isinstance(detail_data, dict) else None
     )
     rationale = record.get("file_type") == "rationale" or resource_kind == "rationale"
-    normalized_label = "rationale" if rationale else label.casefold().lstrip(".")
-    normalized_label = re.sub(r"\(\)$", "", normalized_label)
-    if "/" in normalized_label or "\\" in normalized_label:
-        normalized_label = Path(normalized_label.replace("\\", "/")).name
+    normalized = "rationale" if rationale else label.casefold().lstrip(".")
+    normalized = re.sub(r"\(\)$", "", normalized)
+    if "/" in normalized or "\\" in normalized:
+        normalized = Path(normalized.replace("\\", "/")).name
+    return label, normalized
+
+
+def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, str, str]:
+    source = record.get("source")
+    nested = source if isinstance(source, dict) else {}
+    label, normalized_label = _normalized_label(record, identifier)
     source_file = _text(record.get("source_file", nested.get("file"))).replace("\\", "/")
     source_location = _text(record.get("source_location"))
     if not source_location:
@@ -62,6 +105,61 @@ def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, 
             source_location = f"L{start_line}"
     fact_key = _hash((normalized_label, source_file, source_location))
     return label, source_file, source_location, fact_key
+
+
+def _language(record: dict[str, object], source_file: str) -> str:
+    explicit = _text(record.get("language", record.get("lang"))).casefold()
+    if explicit:
+        return explicit
+    extension = Path(source_file).suffix.casefold().lstrip(".")
+    return {
+        "cjs": "javascript",
+        "cts": "typescript",
+        "go": "go",
+        "js": "javascript",
+        "jsx": "javascript",
+        "mjs": "javascript",
+        "mts": "typescript",
+        "py": "python",
+        "rs": "rust",
+        "ts": "typescript",
+        "tsx": "typescript",
+    }.get(extension, extension)
+
+
+def _module(record: dict[str, object], source_file: str) -> str:
+    explicit = _text(
+        record.get(
+            "module",
+            record.get("namespace", record.get("package", record.get("package_name"))),
+        )
+    )
+    if explicit:
+        return explicit.replace("\\", "/").casefold()
+    if not source_file:
+        return ""
+    return str(Path(source_file).parent).replace("\\", "/").casefold().strip(".")
+
+
+def _qualified_name(record: dict[str, object]) -> str:
+    return _text(
+        record.get(
+            "qualified_name",
+            record.get("qualifiedName", record.get("semantic_scope")),
+        )
+    ).casefold()
+
+
+def _edge_occurrence(record: dict[str, object]) -> tuple[str, str]:
+    site = record.get("relationshipSite", record.get("relationship_site"))
+    nested = site if isinstance(site, dict) else {}
+    source_file = _text(record.get("source_file", nested.get("file"))).replace("\\", "/")
+    source_location = _text(record.get("source_location"))
+    if not source_location:
+        start_line = nested.get("startLine", nested.get("start_line"))
+        if isinstance(start_line, int) and start_line > 0:
+            source_location = f"L{start_line}"
+    return source_file, source_location
 
 
 def _shared_relation(tool: str, relation: str) -> str:
@@ -79,6 +177,16 @@ def _shared_relation(tool: str, relation: str) -> str:
 
 
 def _create_schema(database: sqlite3.Connection) -> None:
+    schema_version = 2
+    current = int(database.execute("PRAGMA user_version").fetchone()[0])
+    if current != schema_version:
+        database.executescript(
+            """
+            DROP TABLE IF EXISTS edges;
+            DROP TABLE IF EXISTS nodes;
+            DROP TABLE IF EXISTS summaries;
+            """
+        )
     database.executescript(
         """
         PRAGMA journal_mode=OFF;
@@ -88,10 +196,17 @@ def _create_schema(database: sqlite3.Connection) -> None:
             tool TEXT NOT NULL,
             id TEXT NOT NULL,
             label TEXT NOT NULL,
+            normalized_label TEXT NOT NULL,
             kind TEXT NOT NULL,
             source_file TEXT NOT NULL,
             source_location TEXT NOT NULL,
             fact_key TEXT NOT NULL,
+            qualified_name TEXT NOT NULL,
+            language TEXT NOT NULL,
+            module TEXT NOT NULL,
+            placeholder INTEGER NOT NULL,
+            anchored_definition INTEGER NOT NULL,
+            callable INTEGER NOT NULL,
             payload_sha256 TEXT NOT NULL,
             PRIMARY KEY (tool, id)
         );
@@ -102,6 +217,8 @@ def _create_schema(database: sqlite3.Connection) -> None:
             relation TEXT NOT NULL,
             source_fact_key TEXT NOT NULL,
             target_fact_key TEXT NOT NULL,
+            occurrence_file TEXT NOT NULL,
+            occurrence_location TEXT NOT NULL,
             payload_sha256 TEXT NOT NULL,
             UNIQUE (tool, source, target, relation, payload_sha256)
         );
@@ -110,6 +227,8 @@ def _create_schema(database: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS edges_fact
           ON edges(tool, relation, source_fact_key, target_fact_key);
         CREATE INDEX IF NOT EXISTS nodes_fact_key ON nodes(tool, fact_key);
+        CREATE INDEX IF NOT EXISTS nodes_semantic
+          ON nodes(tool, normalized_label, language, module);
         CREATE TABLE IF NOT EXISTS summaries (
             tool TEXT PRIMARY KEY,
             nodes INTEGER NOT NULL,
@@ -119,6 +238,7 @@ def _create_schema(database: sqlite3.Connection) -> None:
         );
         """
     )
+    database.execute(f"PRAGMA user_version={schema_version}")
 
 
 def _records(path: Path, preferred: str, fallback: str | None = None) -> Iterator[dict[str, object]]:
@@ -166,8 +286,53 @@ def index_graph(
         if not isinstance(identifier, str) or not identifier:
             raise ValueError(f"{tool} node has an invalid id")
         label, source_file, source_location, fact_key = _source_fact(record, identifier)
-        kind = _text(record.get("kind", record.get("type", record.get("node_type"))))
-        payload = _hash((identifier, label, kind, source_file, source_location, fact_key))
+        normalized_label = _normalized_label(record, identifier)[1]
+        kind = _text(
+            record.get(
+                "kind",
+                record.get("symbol_kind", record.get("type", record.get("node_type"))),
+            )
+        ).casefold()
+        qualified_name = _qualified_name(record)
+        language = _language(record, source_file)
+        module = _module(record, source_file)
+        callable_fact = kind in {"function", "method", "constructor"} or label.rstrip().endswith(
+            "()"
+        )
+        explicit_placeholder = any(
+            record.get(key) is True
+            for key in ("placeholder", "unresolved", "external")
+        ) or _text(record.get("resolution")).casefold() in {"deferred", "unresolved"}
+        placeholder = explicit_placeholder or not source_file or (tool == "graphify" and not kind)
+        anchored_definition = bool(
+            source_file
+            and not placeholder
+            and kind
+            not in {
+                "file",
+                "import",
+                "export",
+                "resource",
+                "rationale",
+            }
+        )
+        payload = _hash(
+            (
+                identifier,
+                label,
+                normalized_label,
+                kind,
+                source_file,
+                source_location,
+                fact_key,
+                qualified_name,
+                language,
+                module,
+                placeholder,
+                anchored_definition,
+                callable_fact,
+            )
+        )
         existing = database.execute(
             "SELECT payload_sha256 FROM nodes WHERE tool = ? AND id = ?",
             (tool, identifier),
@@ -176,8 +341,24 @@ def index_graph(
             raise ValueError(f"{tool} node id has conflicting payloads: {identifier}")
         if existing is None:
             database.execute(
-                "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (tool, identifier, label, kind, source_file, source_location, fact_key, payload),
+                "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    tool,
+                    identifier,
+                    label,
+                    normalized_label,
+                    kind,
+                    source_file,
+                    source_location,
+                    fact_key,
+                    qualified_name,
+                    language,
+                    module,
+                    int(placeholder),
+                    int(anchored_definition),
+                    int(callable_fact),
+                    payload,
+                ),
             )
             node_count += 1
 
@@ -198,6 +379,7 @@ def index_graph(
         relation = _shared_relation(tool, relation.lower())
         source_fact_key = node_facts.get(source, "")
         target_fact_key = node_facts.get(target, "")
+        occurrence_file, occurrence_location = _edge_occurrence(record)
         confidence = record.get("confidence")
         if isinstance(confidence, float) and not math.isfinite(confidence):
             raise ValueError(f"{tool} edge has non-finite confidence")
@@ -207,14 +389,24 @@ def index_graph(
                 target,
                 relation,
                 _text(confidence),
-                _text(record.get("source_file")).replace("\\", "/"),
-                _text(record.get("source_location")),
+                occurrence_file,
+                occurrence_location,
             )
         )
         before = database.total_changes
         database.execute(
-            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (tool, source, target, relation, source_fact_key, target_fact_key, payload),
+            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                tool,
+                source,
+                target,
+                relation,
+                source_fact_key,
+                target_fact_key,
+                occurrence_file,
+                occurrence_location,
+                payload,
+            ),
         )
         if database.total_changes > before:
             edge_count += 1
@@ -251,12 +443,15 @@ def canonical_graph_digest(database: sqlite3.Connection, tool: str) -> str:
     for table, query in (
         (
             "node",
-            "SELECT id,label,kind,source_file,source_location,fact_key,payload_sha256 "
+            "SELECT id,label,normalized_label,kind,source_file,source_location,fact_key,"
+            "qualified_name,language,module,placeholder,anchored_definition,callable,"
+            "payload_sha256 "
             "FROM nodes WHERE tool = ? ORDER BY id",
         ),
         (
             "edge",
-            "SELECT source,target,relation,payload_sha256 FROM edges "
+            "SELECT source,target,relation,occurrence_file,occurrence_location,payload_sha256 "
+            "FROM edges "
             "WHERE tool = ? ORDER BY source,target,relation,payload_sha256",
         ),
     ):
@@ -269,6 +464,289 @@ def canonical_graph_digest(database: sqlite3.Connection, tool: str) -> str:
 
 def _examples(database: sqlite3.Connection, query: str, limit: int = 10) -> tuple[str, ...]:
     return tuple(str(row[0]) for row in database.execute(f"{query} LIMIT {limit}"))
+
+
+def _node_facts(database: sqlite3.Connection, tool: str) -> dict[str, NodeFact]:
+    rows = database.execute(
+        """
+        SELECT id,label,normalized_label,kind,source_file,source_location,fact_key,
+               qualified_name,language,module,placeholder,anchored_definition,callable
+        FROM nodes WHERE tool = ? ORDER BY id
+        """,
+        (tool,),
+    )
+    return {
+        str(row[0]): NodeFact(
+            identifier=str(row[0]),
+            label=str(row[1]),
+            normalized_label=str(row[2]),
+            kind=str(row[3]),
+            source_file=str(row[4]),
+            source_location=str(row[5]),
+            fact_key=str(row[6]),
+            qualified_name=str(row[7]),
+            language=str(row[8]),
+            module=str(row[9]),
+            placeholder=bool(row[10]),
+            anchored_definition=bool(row[11]),
+            callable=bool(row[12]),
+        )
+        for row in rows
+    }
+
+
+def _edge_facts(database: sqlite3.Connection, tool: str) -> list[EdgeFact]:
+    return [
+        EdgeFact(
+            source=str(row[0]),
+            target=str(row[1]),
+            relation=str(row[2]),
+            source_fact_key=str(row[3]),
+            target_fact_key=str(row[4]),
+            occurrence_file=str(row[5]),
+            occurrence_location=str(row[6]),
+            payload_sha256=str(row[7]),
+        )
+        for row in database.execute(
+            """
+            SELECT source,target,relation,source_fact_key,target_fact_key,
+                   occurrence_file,occurrence_location,payload_sha256
+            FROM edges WHERE tool = ?
+            ORDER BY source,target,relation,occurrence_file,occurrence_location,payload_sha256
+            """,
+            (tool,),
+        )
+    ]
+
+
+def _compatible_definition(graphify: NodeFact, compass: NodeFact) -> bool:
+    if graphify.normalized_label != compass.normalized_label:
+        return False
+    if graphify.language and compass.language and graphify.language != compass.language:
+        return False
+    if graphify.module and compass.module and graphify.module != compass.module:
+        return False
+    if (
+        graphify.qualified_name
+        and compass.qualified_name
+        and graphify.qualified_name != compass.qualified_name
+    ):
+        return False
+    return True
+
+
+def _classify_nodes(
+    graphify_nodes: dict[str, NodeFact],
+    compass_nodes: dict[str, NodeFact],
+) -> tuple[dict[str, Coverage], dict[str, str]]:
+    compass_by_fact: dict[str, list[NodeFact]] = {}
+    compass_by_label: dict[str, list[NodeFact]] = {}
+    for node in compass_nodes.values():
+        compass_by_fact.setdefault(node.fact_key, []).append(node)
+        if node.anchored_definition and not node.callable:
+            compass_by_label.setdefault(node.normalized_label, []).append(node)
+
+    coverage: dict[str, Coverage] = {}
+    mapping: dict[str, str] = {}
+    excluded_kinds = {"file", "import", "export", "resource", "rationale"}
+    for identifier, graphify in graphify_nodes.items():
+        exact = compass_by_fact.get(graphify.fact_key, [])
+        if exact:
+            coverage[identifier] = Coverage("exact", "source_fact", exact[0].identifier)
+            if len(exact) == 1:
+                mapping[identifier] = exact[0].identifier
+            continue
+        if (
+            not graphify.placeholder
+            or graphify.callable
+            or graphify.kind in excluded_kinds
+            or not graphify.normalized_label
+        ):
+            coverage[identifier] = Coverage("missing", "no_exact_fact", None)
+            continue
+        candidates = [
+            candidate
+            for candidate in compass_by_label.get(graphify.normalized_label, [])
+            if _compatible_definition(graphify, candidate)
+        ]
+        if len(candidates) == 1:
+            reason = "canonical_owner" if graphify.source_file else "resolved_definition"
+            coverage[identifier] = Coverage(
+                "dominated", reason, candidates[0].identifier
+            )
+            mapping[identifier] = candidates[0].identifier
+        elif len(candidates) > 1:
+            coverage[identifier] = Coverage(
+                "ambiguous", "multiple_anchored_definitions", None
+            )
+        else:
+            coverage[identifier] = Coverage(
+                "missing", "no_compatible_anchored_definition", None
+            )
+    return coverage, mapping
+
+
+def _canonical_compass_endpoints(
+    compass_nodes: dict[str, NodeFact],
+) -> dict[str, str]:
+    anchored_by_label: dict[str, list[NodeFact]] = {}
+    for node in compass_nodes.values():
+        if node.anchored_definition and not node.callable:
+            anchored_by_label.setdefault(node.normalized_label, []).append(node)
+    canonical: dict[str, str] = {}
+    for node in compass_nodes.values():
+        if not node.placeholder or node.callable or not node.normalized_label:
+            continue
+        candidates = [
+            candidate
+            for candidate in anchored_by_label.get(node.normalized_label, [])
+            if _compatible_definition(node, candidate)
+        ]
+        if len(candidates) == 1:
+            canonical[node.identifier] = candidates[0].identifier
+    return canonical
+
+
+def _same_occurrence(graphify: EdgeFact, compass: EdgeFact) -> bool:
+    if graphify.occurrence_file and graphify.occurrence_file != compass.occurrence_file:
+        return False
+    if (
+        graphify.occurrence_location
+        and graphify.occurrence_location != compass.occurrence_location
+    ):
+        return False
+    return bool(
+        graphify.occurrence_file
+        or graphify.occurrence_location
+        or not (compass.occurrence_file or compass.occurrence_location)
+    )
+
+
+def _classify_edges(
+    graphify_edges: list[EdgeFact],
+    compass_edges: list[EdgeFact],
+    graphify_nodes: dict[str, NodeFact],
+    compass_nodes: dict[str, NodeFact],
+    node_coverage: dict[str, Coverage],
+    node_mapping: dict[str, str],
+) -> list[Coverage]:
+    exact_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
+    direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
+    containment: dict[str, set[str]] = {}
+    canonical_endpoints = _canonical_compass_endpoints(compass_nodes)
+    for edge in compass_edges:
+        exact_index.setdefault(
+            (edge.relation, edge.source_fact_key, edge.target_fact_key), []
+        ).append(edge)
+        source = canonical_endpoints.get(edge.source, edge.source)
+        target = canonical_endpoints.get(edge.target, edge.target)
+        direct_index.setdefault((edge.relation, source, target), []).append(edge)
+        if edge.relation == "contains":
+            containment.setdefault(source, set()).add(target)
+
+    output: list[Coverage] = []
+    for graphify in graphify_edges:
+        exact = [
+            edge
+            for edge in exact_index.get(
+                (
+                    graphify.relation,
+                    graphify.source_fact_key,
+                    graphify.target_fact_key,
+                ),
+                [],
+            )
+            if _same_occurrence(graphify, edge)
+        ]
+        if exact:
+            output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
+            continue
+
+        source_coverage = node_coverage.get(graphify.source)
+        target_coverage = node_coverage.get(graphify.target)
+        source = node_mapping.get(graphify.source)
+        target = node_mapping.get(graphify.target)
+        if source is None or target is None:
+            status = (
+                "ambiguous"
+                if any(
+                    fact is not None and fact.status == "ambiguous"
+                    for fact in (source_coverage, target_coverage)
+                )
+                else "missing"
+            )
+            output.append(Coverage(status, "uncovered_endpoint", None))
+            continue
+
+        direct = direct_index.get((graphify.relation, source, target), [])
+        if graphify.relation == "contains":
+            direct_paths = int(bool(direct))
+            middle_nodes = {
+                middle
+                for middle in containment.get(source, set())
+                if target in containment.get(middle, set())
+                and compass_nodes.get(middle) is not None
+                and compass_nodes[middle].source_file
+                == compass_nodes.get(target, compass_nodes[middle]).source_file
+            }
+            path_count = direct_paths + len(middle_nodes)
+            if path_count == 1:
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "containment_path",
+                        target if not middle_nodes else sorted(middle_nodes)[0],
+                    )
+                )
+            elif path_count > 1:
+                output.append(Coverage("ambiguous", "multiple_containment_paths", None))
+            else:
+                output.append(Coverage("missing", "no_bounded_containment_path", None))
+            continue
+
+        if not (graphify.occurrence_file or graphify.occurrence_location):
+            output.append(Coverage("missing", "missing_relationship_occurrence", None))
+            continue
+        matching = [edge for edge in direct if _same_occurrence(graphify, edge)]
+        if len(matching) == 1:
+            reason = (
+                "canonical_owner"
+                if target_coverage is not None
+                and target_coverage.reason == "canonical_owner"
+                else "resolved_endpoint"
+            )
+            output.append(Coverage("dominated", reason, matching[0].payload_sha256))
+        elif len(matching) > 1:
+            output.append(Coverage("ambiguous", "multiple_relationship_facts", None))
+        else:
+            output.append(Coverage("missing", "no_matching_relationship_occurrence", None))
+    return output
+
+
+def _coverage_metrics(prefix: str, coverage: list[Coverage]) -> dict[str, int | str]:
+    metrics: dict[str, int | str] = {}
+    for status in ("exact", "dominated", "ambiguous", "missing"):
+        metrics[f"{status}_graphify_{prefix}"] = sum(
+            fact.status == status for fact in coverage
+        )
+    reasons: dict[str, int] = {}
+    for fact in coverage:
+        reasons[f"{fact.status}:{fact.reason}"] = reasons.get(
+            f"{fact.status}:{fact.reason}", 0
+        ) + 1
+    metrics[f"graphify_{prefix}_coverage_reasons"] = _canonical(reasons)
+    return metrics
+
+
+def _coverage_examples(
+    facts: list[tuple[str, Coverage]], status: str, limit: int = 10
+) -> str:
+    examples = [
+        f"{identifier} [{coverage.reason}]"
+        for identifier, coverage in facts
+        if coverage.status == status
+    ]
+    return ", ".join(examples[:limit])
 
 
 def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
@@ -287,60 +765,71 @@ def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
             compass_digest=str(compass[2]),
         )
 
-    if "graphify" in tools:
-        missing_nodes_query = """
-            SELECT graphify.id
-            FROM nodes AS graphify
-            WHERE graphify.tool = 'graphify'
-              AND NOT EXISTS (
-                SELECT 1
-                FROM nodes AS compass
-                WHERE compass.tool = 'compass'
-                  AND compass.fact_key = graphify.fact_key
-              )
-        """
-        mismatch_query = """
-            SELECT graphify.id
-            FROM nodes AS graphify
-            WHERE graphify.tool = 'graphify'
-              AND graphify.kind != ''
-              AND EXISTS (
-                SELECT 1
-                FROM nodes AS compass
-                WHERE compass.tool = 'compass'
-                  AND compass.fact_key = graphify.fact_key
-              )
-              AND NOT EXISTS (
-                SELECT 1
-                FROM nodes AS compass
-                WHERE compass.tool = 'compass'
-                  AND compass.fact_key = graphify.fact_key
-                  AND (compass.kind = '' OR compass.kind = graphify.kind)
-              )
-        """
-        missing_edges_query = """
-            SELECT graphify.source || '|' || graphify.relation || '|' || graphify.target
-            FROM edges AS graphify
-            WHERE graphify.tool = 'graphify'
-              AND NOT EXISTS (
-                SELECT 1
-                FROM edges AS compass
-                WHERE compass.tool = 'compass'
-                  AND compass.relation = graphify.relation
-                  AND compass.source_fact_key = graphify.source_fact_key
-                  AND compass.target_fact_key = graphify.target_fact_key
-              )
-        """
-        for name, query in (
-            ("missing_graphify_nodes", missing_nodes_query),
-            ("mismatched_shared_nodes", mismatch_query),
-            ("missing_graphify_edges", missing_edges_query),
+    if "graphify" in tools and compass is not None:
+        graphify_summary = database.execute(
+            "SELECT nodes,edges,validation_errors,digest FROM summaries "
+            "WHERE tool = 'graphify'"
+        ).fetchone()
+        assert graphify_summary is not None
+        metrics.update(
+            graphify_nodes=int(graphify_summary[0]),
+            graphify_edges=int(graphify_summary[1]),
+            graphify_validation_errors=int(graphify_summary[2]),
+            graphify_digest=str(graphify_summary[3]),
+        )
+        if int(graphify_summary[2]):
+            failures.append(
+                f"Graphify graph reports {int(graphify_summary[2])} validation errors"
+            )
+
+        compass_nodes = _node_facts(database, "compass")
+        graphify_nodes = _node_facts(database, "graphify")
+        node_coverage, node_mapping = _classify_nodes(graphify_nodes, compass_nodes)
+        node_facts = [
+            (identifier, node_coverage[identifier])
+            for identifier in sorted(node_coverage)
+        ]
+        node_metrics = _coverage_metrics(
+            "nodes", [coverage for _, coverage in node_facts]
+        )
+        metrics.update(node_metrics)
+        metrics["missing_graphify_nodes"] = node_metrics["missing_graphify_nodes"]
+        metrics["mismatched_shared_nodes"] = 0
+
+        graphify_edges = _edge_facts(database, "graphify")
+        compass_edges = _edge_facts(database, "compass")
+        edge_coverage = _classify_edges(
+            graphify_edges,
+            compass_edges,
+            graphify_nodes,
+            compass_nodes,
+            node_coverage,
+            node_mapping,
+        )
+        edge_metrics = _coverage_metrics("edges", edge_coverage)
+        metrics.update(edge_metrics)
+        metrics["missing_graphify_edges"] = edge_metrics["missing_graphify_edges"]
+
+        for prefix, facts in (
+            ("nodes", node_facts),
+            (
+                "edges",
+                [
+                    (
+                        f"{edge.source}|{edge.relation}|{edge.target}",
+                        coverage,
+                    )
+                    for edge, coverage in zip(graphify_edges, edge_coverage, strict=True)
+                ],
+            ),
         ):
-            count = int(database.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0])
-            metrics[name] = count
-            if count:
-                examples = ", ".join(_examples(database, query))
-                failures.append(f"{name}: {count}; examples: {examples}")
+            for status in ("ambiguous", "missing"):
+                count = int(metrics[f"{status}_graphify_{prefix}"])
+                if count:
+                    failures.append(
+                        f"{status}_graphify_{prefix}: {count}; examples: "
+                        f"{_coverage_examples(facts, status)}"
+                    )
 
     payload = {
         "failures": failures,
