@@ -107,6 +107,33 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
 
+    def test_shared_relation_projection_accepts_more_precise_compass_edges(self) -> None:
+        database = sqlite3.connect(":memory:")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compass = root / "compass.json"
+            graphify = root / "graphify.json"
+            nodes = (
+                '{"id":"source","label":"Source","source_file":"src/a.py","source_location":"L1"},'
+                '{"id":"target","label":"Target","source_file":"src/b.py","source_location":"L2"}'
+            )
+            compass.write_text(
+                '{"graph":{"diagnostics":[]},"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target","relation":"instantiates"}]}',
+                encoding="utf-8",
+            )
+            graphify.write_text(
+                '{"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target","relation":"calls"}]}',
+                encoding="utf-8",
+            )
+            index_graph("compass", compass, database)
+            index_graph("graphify", graphify, database)
+        result = compare_graphs(database)
+        self.assertTrue(result.passed, result.failures)
+
     def test_dangling_edge_is_rejected(self) -> None:
         database = sqlite3.connect(":memory:")
         with tempfile.TemporaryDirectory() as directory:

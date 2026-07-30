@@ -58,6 +58,20 @@ def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, 
     return label, source_file, source_location, fact_key
 
 
+def _shared_relation(tool: str, relation: str) -> str:
+    if tool == "compass":
+        return {"instantiates": "calls"}.get(relation, relation)
+    return {
+        "defines": "contains",
+        "indirect_call": "calls",
+        "inherits": "extends",
+        "imports_from": "imports",
+        "method": "contains",
+        "re_exports": "exports",
+        "uses": "references",
+    }.get(relation, relation)
+
+
 def _create_schema(database: sqlite3.Connection) -> None:
     database.executescript(
         """
@@ -175,7 +189,7 @@ def index_graph(
             raise ValueError(f"{tool} edge has an invalid target")
         if not isinstance(relation, str) or not relation:
             raise ValueError(f"{tool} edge has an invalid relation")
-        relation = relation.lower()
+        relation = _shared_relation(tool, relation.lower())
         source_fact_key = node_facts.get(source, "")
         target_fact_key = node_facts.get(target, "")
         confidence = record.get("confidence")
