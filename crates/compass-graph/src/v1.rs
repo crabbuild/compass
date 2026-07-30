@@ -1979,6 +1979,9 @@ fn deterministic_option<T: Serialize>(left: Option<T>, right: Option<T>) -> Opti
 }
 
 fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
+    if values.len() < 2 {
+        return;
+    }
     values.sort_by_cached_key(serialized);
     values.dedup_by(|left, right| serialized(left) == serialized(right));
 }
@@ -3143,6 +3146,9 @@ fn remap_provenance_candidates(evidence: &mut Vec<Provenance>, id_remap: &HashMa
 }
 
 fn sort_dedup_candidates(candidates: &mut Vec<ResolutionCandidate>) {
+    if candidates.len() < 2 {
+        return;
+    }
     candidates.sort_by(|left, right| {
         left.node_id
             .cmp(&right.node_id)
