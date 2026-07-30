@@ -919,18 +919,55 @@ fn normalization_treats_blank_external_source_paths_as_unanchored()
     graph.edges.clear();
 
     let document = normalize_v1(graph, build_evidence(root)?)?;
+    assert!(
+        document.nodes.iter().all(|node| node.name != "callee"),
+        "a generic symbol without structural kind evidence must not be guessed as a variable"
+    );
+    assert!(document.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "unresolved_node_kind"
+            && diagnostic.message.contains("raw:b")
+            && diagnostic.anchor.is_some()
+    }));
+    Ok(())
+}
+
+#[test]
+fn normalization_infers_an_external_call_target_as_a_function()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let graph = Extraction {
+        nodes: vec![
+            raw_node(root, "raw:caller", "caller", 10),
+            raw_external_node("raw:external", "external"),
+        ],
+        edges: vec![RawEdgeRecord {
+            source: "raw:caller".to_owned(),
+            target: "raw:external".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("confidence".to_owned(), json!("INFERRED")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("source_anchor".to_owned(), anchor(root, 50)),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+
+    let document = normalize_v1(graph, build_evidence(root)?)?;
     let external = document
         .nodes
         .iter()
-        .find(|node| node.name == "callee")
-        .ok_or("missing external node")?;
-    assert_eq!(external.source, None);
-    assert_eq!(external.kind, NodeKind::Variable);
-    assert_eq!(
-        external.evidence[0].rule.as_deref(),
-        Some("external-symbol-placeholder")
-    );
-    assert!(external.evidence[0].wiring_site.is_some());
+        .find(|node| node.name == "external")
+        .ok_or("missing inferred external function")?;
+    assert_eq!(external.kind, NodeKind::Function);
+    assert!(external.source.is_none());
+    assert!(external.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "unresolved_external_symbol" && diagnostic.anchor.is_some()
+    }));
+    assert!(document.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Calls && edge.target == external.id && edge.deferred
+    }));
     Ok(())
 }
 
@@ -1215,10 +1252,16 @@ fn authoritative_incident_scope_separates_precoalesced_java_and_typescript_place
     global_entity
         .attributes
         .insert("origin_file".to_owned(), json!("src/typeorm.ts"));
+    global_entity
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("type_alias"));
     let mut duplicate_typescript_entity = raw_external_node("raw:entity-ts", "Entity");
     duplicate_typescript_entity
         .attributes
         .insert("language".to_owned(), json!("java"));
+    duplicate_typescript_entity
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("type_alias"));
     duplicate_typescript_entity.attributes.insert(
         "declaring_scope".to_owned(),
         json!("stale-typescript-owner"),

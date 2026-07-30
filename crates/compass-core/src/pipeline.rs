@@ -1152,6 +1152,26 @@ fn build_graph_inner(
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
+    let commit = options.built_at_commit.clone().or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|directory| git_commit(&directory))
+    });
+    let preflight_started = Instant::now();
+    normalize_document_v1_with_inventory(
+        &document,
+        &root,
+        graph_configuration_digest(options, &output_dir)?,
+        commit.as_deref(),
+        detection_inventory(
+            &detection,
+            semantic,
+            &extraction_failures,
+            &extraction_partials,
+            &root,
+        ),
+    )?;
+    profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
 
     let unchanged_artifacts_complete = match options.purpose {
         BuildPurpose::Update => update_artifacts_complete(&output_dir),
@@ -1266,11 +1286,6 @@ fn build_graph_inner(
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
-    let commit = options.built_at_commit.clone().or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .and_then(|directory| git_commit(&directory))
-    });
 
     let graph_output = || -> Result<Duration, CoreError> {
         let started = Instant::now();
@@ -3911,13 +3926,19 @@ mod tests {
             .filter(|node| node.label() == "[]")
             .collect::<Vec<_>>();
         assert!(
-            !punctuation_symbols.is_empty(),
-            "fixture must exercise the punctuation-symbol identity collision"
+            punctuation_symbols.is_empty(),
+            "generic punctuation symbols must not be guessed into the typed graph"
         );
         assert!(
-            punctuation_symbols
-                .iter()
-                .all(|node| node.id.starts_with("sha256:"))
+            first_graph.graph.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "unresolved_node_kind"
+                    && diagnostic
+                        .anchor
+                        .as_ref()
+                        .is_some_and(|anchor| anchor.file == "src/Page.astro")
+            }),
+            "omitted generic symbols must remain visible as anchored diagnostics: {:#?}",
+            first_graph.graph.diagnostics
         );
         Ok(())
     }

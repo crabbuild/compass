@@ -122,6 +122,7 @@ jobs:
           sh -n scripts/install.sh
           sh -n scripts/package_release.sh
           sh -n scripts/test_release_scripts.sh
+          bash -n scripts/qualify_code_graph_v1.sh
           sh scripts/test_release_scripts.sh
           bash -n completions/compass.bash
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/measure_process.py').read_text())"
