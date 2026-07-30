@@ -111,6 +111,85 @@ the raw graph SHA-256 and community count differed in every sample. There is no
 qualified Graphify query baseline in this report, so no query speedup ratio is
 claimed here.
 
+## Semantic-dominance phase
+
+The implementation-first semantic-dominance phase was verified against the
+same pinned Django and Entire revisions. The production binary at
+`0bdee95e266c3ab97ba85a879b64e2c2fc403f18` has SHA-256
+`22fa9ff03e5f0b78f55a0e2de76610b083ee520f84b8cfc32d629bb66c0ac994`.
+The fresh comparison used Graphify 0.9.31 at
+`4fe11092ccbe9f543608f140c790f68d5d83cae4`; both tools published graphs
+with zero validation errors and stable canonical digests.
+
+The comparator now separates exact facts, uniquely dominated legacy facts,
+ambiguous facts, and genuinely missing facts. Dominance requires compatible
+language/module identity, a unique anchored definition, exact relationship
+occurrence evidence, or a unique same-file ownership path of at most two
+hops. It does not accept label equality alone.
+
+| Repository | Graphify fact | Exact | Dominated | Ambiguous | Missing | Exact + dominated |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Django | Nodes | 50,466 | 6 | 25 | 348 | 99.27% |
+| Django | Edges | 149,993 | 336 | 26 | 8,355 | 94.72% |
+| Entire | Nodes | 19,866 | 663 | 6 | 50 | 99.73% |
+| Entire | Edges | 53,593 | 6,104 | 18 | 1,347 | 97.76% |
+
+This is a substantial improvement over the literal baseline (Django: 1,175
+missing nodes and 10,600 missing edges; Entire: 720 missing nodes and 7,470
+missing edges), but it is not a strict Graphify superset. The remaining
+failures are intentionally fail-closed. Django is now dominated by config and
+vendored-resource relationships plus unresolved generated/inherited bases.
+Entire is dominated by shell entry points, Go embedding occurrences, and a
+small number of same-package receiver ambiguities.
+
+The phase also found and fixed two real generated-Go identity defects:
+method-before-type traversal could retain a method-site anchor instead of the
+later declaration, and grouped generic function types lacked an explicit
+`type_alias` kind. On the real Entire corpus this published
+`ErrorModelStatusCode` at line 2348 and `optionFunc` at line 17, reduced
+ambiguous nodes from 20 to 6, reduced missing nodes from 52 to 50, and reduced
+missing or ambiguous edges by 77.
+
+### Fresh build measurements
+
+The complete three-sample comparison run is stored at
+`target/performance/runs/semantic-dominance-20a9e96/`. It exposed and led to a
+fix for a harness bug that incorrectly rejected independently valid Graphify
+samples because a sample-local Compass graph was absent. The raw process
+measurements and canonical digests remain valid; the old eligibility labels in
+that report do not.
+
+| Tool | Repository | Workload | p50 | p95 | Peak RSS |
+| --- | --- | --- | ---: | ---: | ---: |
+| Compass | Django | Cold, final 3 samples | 12.355 s | 16.587 s | 4.45 GiB |
+| Compass | Django | Warm, final 5 samples after warmup | 2.182 s | 2.429 s | 674.58 MiB |
+| Graphify 0.9.31 | Django | Cold, 3 samples | 49.985 s | 50.916 s | 1.26 GiB |
+| Compass | Entire | Cold, 3-sample matrix | 4.055 s | 4.127 s | 1.42 GiB |
+| Compass | Entire | Warm, 3-sample matrix | 0.586 s | 0.599 s | 247.25 MiB |
+| Graphify 0.9.31 | Entire | Cold, 3 samples | 17.650 s | 18.214 s | 226.09 MiB |
+
+The final Django cold median remains faster than the earlier qualified Compass
+baseline and is 5.05x faster than the pinned Graphify 0.9.30 median. Graphify
+0.9.31 itself became materially faster, so the current-head ratios are 4.05x
+for Django and 4.35x for Entire rather than 5x. Django warm is 11.96% above the
+earlier 1.949-second baseline on this final five-sample check, narrowly outside
+the phase's 10% gate. These are recorded as open performance gaps rather than
+being hidden by the quality improvements.
+
+### Fresh query checks
+
+These are single fresh-process semantic checks, not qualified latency medians.
+Compass passed all four repository oracles. Graphify passed three; its Django
+URL-resolution query selected template/i18n/storage results and did not return
+the required `URLResolver`.
+
+| Repository / query | Compass | Graphify 0.9.31 |
+| --- | ---: | ---: |
+| Django URL resolution | 2.783 s, pass | 2.414 s, fail oracle |
+| Django model save | 3.303 s, pass | 4.232 s, pass |
+| Entire checkpoint creation | 0.655 s, pass | 1.199 s, pass |
+| Entire repository state | 1.614 s, pass | 1.923 s, pass |
+
 ## Changes validated
 
 - Exact path-aware AST cache keys prevent byte-identical symlinks from losing
@@ -124,6 +203,15 @@ claimed here.
   resolver/resolution terms.
 - Correctness indexing compares cross-schema semantic facts and streams large
   graph metadata without weakening per-record limits.
+- Python imports retain qualified type provenance across re-export chains.
+- Safely qualified external Python member calls retain exact occurrences and
+  source-scoped deferred endpoints.
+- Empty generic source files publish deterministic inventory nodes.
+- JavaScript `prototype` and `.fn` assignments publish bounded owned methods.
+- Generated Go declarations are indexed before receiver methods and retain
+  explicit canonical type kinds.
+- Graph publication bounds anchor parsing, preserves canonical order, and
+  transfers owned facts without redundant cloning.
 
 ## Remaining bottlenecks
 

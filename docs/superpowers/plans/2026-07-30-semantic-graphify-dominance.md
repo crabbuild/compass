@@ -24,6 +24,18 @@ committed independently.
 standard library, Cargo, the existing `benchmarks/performance` harness,
 Graphify 0.9.30 as an explicit development oracle.
 
+## Execution status
+
+Tasks 1-7 are implemented and locally verified. Task 8 was executed against
+both the pinned Graphify 0.9.30 baseline and a fresh Graphify 0.9.31 checkout.
+The phase substantially improved semantic coverage and retained valid,
+deterministic graphs, but the deliberately strict final gate remains open:
+Django has 348 missing and 25 ambiguous Graphify nodes plus 8,355 missing and
+26 ambiguous edges; Entire has 50 missing and 6 ambiguous nodes plus 1,347
+missing and 18 ambiguous edges. Current Graphify also improved enough that the
+fresh cold-build ratios are below 5x. The review document records complete
+measurements, query oracles, and the next evidence-backed gaps.
+
 ## Background and current evidence
 
 The performance branch is `codex/compass-performance-hardening`; draft PR #86
