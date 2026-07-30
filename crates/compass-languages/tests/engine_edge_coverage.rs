@@ -1009,6 +1009,7 @@ type (
         .ok_or("missing later type")?;
     assert_eq!(later.label(), "Later");
     assert_eq!(later.string("source_location"), "L5");
+    assert_eq!(later.string("symbol_kind"), "class");
 
     let option = extraction
         .nodes
@@ -1017,6 +1018,7 @@ type (
         .ok_or("missing grouped generic type")?;
     assert_eq!(option.label(), "optionFunc");
     assert_eq!(option.string("source_location"), "L10");
+    assert_eq!(option.string("symbol_kind"), "type_alias");
     assert_eq!(
         extraction
             .nodes

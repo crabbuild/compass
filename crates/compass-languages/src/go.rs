@@ -207,6 +207,23 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         let at = line(node);
         let id = make_id(&[&self.package_scope, &name]);
         self.add_node(&id, &name, at);
+        let symbol_kind = if has_descendant_kind(node, "struct_type") {
+            "struct"
+        } else if has_descendant_kind(node, "interface_type") {
+            "interface"
+        } else {
+            "type_alias"
+        };
+        if let Some(record) = self
+            .extraction
+            .nodes
+            .iter_mut()
+            .find(|record| record.id == id)
+        {
+            record
+                .attributes
+                .insert("symbol_kind".into(), Value::String(symbol_kind.to_owned()));
+        }
         self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
         let mut body_cursor = node.walk();
         for body in node.children(&mut body_cursor) {
@@ -720,6 +737,12 @@ fn collect_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tre
             collect_kind(child, kind, output);
         }
     }
+}
+
+fn has_descendant_kind(node: Node<'_>, kind: &str) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|child| child.kind() == kind || has_descendant_kind(child, kind))
 }
 
 fn line(node: Node<'_>) -> usize {
