@@ -1990,6 +1990,27 @@ pub fn normalize_document_v1_with_inventory_best_effort(
     normalize_v1_best_effort(extraction, evidence)
 }
 
+/// Publish an owned analysis document without cloning its node and edge facts.
+///
+/// Callers that already hold a publication-only document can transfer its
+/// buffers across the v1 boundary and avoid retaining a second full raw graph.
+pub fn normalize_document_v1_with_inventory_best_effort_owned(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input_owned(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+    )?;
+    normalize_v1_best_effort(extraction, evidence)
+}
+
 fn document_publication_input(
     document: &compass_model::GraphDocument,
     repository_root: &Path,
@@ -2017,6 +2038,45 @@ fn document_publication_input(
                 source: edge.source.clone(),
                 target: edge.target.clone(),
                 attributes: edge.attributes.clone(),
+            })
+            .collect(),
+        extensions,
+        ..Extraction::default()
+    };
+    let mut evidence =
+        BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    evidence.include_inventory(inventory)?;
+    evidence.build.source_commit = source_commit.map(str::to_owned);
+    Ok((extraction, evidence))
+}
+
+fn document_publication_input_owned(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<(Extraction, BuildEvidence), GraphError> {
+    let mut extensions = Map::new();
+    if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
+        extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
+    }
+    let extraction = Extraction {
+        nodes: document
+            .nodes
+            .into_iter()
+            .map(|node| RawNodeRecord {
+                id: node.id,
+                attributes: node.attributes,
+            })
+            .collect(),
+        edges: document
+            .links
+            .into_iter()
+            .map(|edge| RawEdgeRecord {
+                source: edge.source,
+                target: edge.target,
+                attributes: edge.attributes,
             })
             .collect(),
         extensions,

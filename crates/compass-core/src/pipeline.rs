@@ -14,7 +14,8 @@ use compass_graph::{
     PublicationOmissions, PublicationOutcome, build_owned_with_tiebreaker as build_document,
     canonical_edge_kind, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
     graph_insights, label_communities_by_hub, normalize_document_v1_with_inventory_best_effort,
-    remap_communities_to_previous, score_communities,
+    normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
+    score_communities,
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
@@ -3274,8 +3275,8 @@ fn published_v1_document(
             );
         }
     }
-    Ok(normalize_document_v1_with_inventory_best_effort(
-        &publication_source,
+    Ok(normalize_document_v1_with_inventory_best_effort_owned(
+        publication_source,
         root,
         configuration_digest,
         source_commit,

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use compass_core::{BuildOptions, build_graph_with_layers, build_local_graph};
-use compass_files::{Cache, CacheOptions};
+use compass_files::{AST_CACHE_VERSION, Cache, CacheOptions};
 use compass_languages::{Extraction, Registry};
 use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument};
 use compass_model::provenance::EvidenceOrigin;
@@ -290,7 +290,10 @@ fn legacy_markerless_ast_cache_is_reextracted_conservatively() -> Result<(), Box
     cache.save_portable_ast_batch(&[(source, Extraction::default())])?;
     drop(cache);
     let ast_root = directory.path().join("compass-out/cache/ast");
-    fs::rename(ast_root.join("v2"), ast_root.join("v1"))?;
+    fs::rename(
+        ast_root.join(format!("v{AST_CACHE_VERSION}")),
+        ast_root.join("v1"),
+    )?;
 
     let graph = build(directory.path())?;
     let recovered = graph
