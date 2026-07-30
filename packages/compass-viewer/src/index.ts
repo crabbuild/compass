@@ -2,6 +2,7 @@ export * from "./calls/CallGraph";
 export * from "./calls/state";
 export * from "./contracts/callGraph";
 export * from "./contracts/callflow";
+export * from "./contracts/architecture";
 export * from "./contracts/codeQuery";
 export * from "./contracts/graph";
 export * from "./contracts/history";

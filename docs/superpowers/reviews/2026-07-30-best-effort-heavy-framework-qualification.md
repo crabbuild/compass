@@ -201,4 +201,3 @@ artifact-integrity failure:
 4. Add this pinned corpus, or an equivalently sized internal mirror, to
    scheduled release qualification with wall-time, memory, validity, and
    omission-rate regression thresholds.
-

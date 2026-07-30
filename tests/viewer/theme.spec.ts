@@ -103,7 +103,7 @@ test("Architecture symbol titles use editor foreground in light themes", async (
     document.documentElement.style.setProperty("--vscode-sideBar-foreground", "#f2f2f2");
   });
 
-  await expect(page.locator(".architecture-symbol-card h3").first())
+  await expect(page.locator(".architecture-symbol-list strong").first())
     .toHaveCSS("color", "rgb(32, 32, 32)");
 });
 
@@ -163,7 +163,9 @@ test("narrow Architecture, Ask Codebase, and Evolution views preserve core actio
   await page.setViewportSize({ width: 420, height: 780 });
 
   await page.goto("/architecture.html");
-  await expect(page.getByRole("searchbox", { name: "Search architecture" })).toBeVisible();
+  await expect(page.getByRole("searchbox", {
+    name: "Search the complete architecture"
+  })).toBeVisible();
   await expect(page.getByRole("button", { name: /API/ }).first()).toBeVisible();
   await expectNoHorizontalDocumentOverflow(page);
 

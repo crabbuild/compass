@@ -15,6 +15,8 @@ pub struct CallflowViewModel {
     pub title: String,
     pub sections: Vec<CallflowViewSection>,
     pub overview_links: Vec<CallflowViewLink>,
+    pub cross_section_calls: Vec<CallflowCrossSectionCall>,
+    pub coverage: CallflowCoverage,
     pub report_highlights: Vec<String>,
     pub statistics: CallflowStatistics,
     pub provenance: CallflowProvenance,
@@ -26,6 +28,8 @@ pub struct CallflowViewSection {
     pub id: String,
     pub name: String,
     pub communities: Vec<String>,
+    pub node_count: usize,
+    pub internal_call_count: usize,
     pub nodes: Vec<CallflowViewNode>,
     pub edges: Vec<CallflowViewEdge>,
 }
@@ -37,6 +41,17 @@ pub struct CallflowViewNode {
     pub label: String,
     pub kind: String,
     pub source_file: Option<String>,
+    pub scope: CallflowSourceScope,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallflowSourceScope {
+    Production,
+    Test,
+    Generated,
+    Vendor,
+    Unknown,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -45,6 +60,25 @@ pub struct CallflowViewEdge {
     pub target: String,
     pub relation: String,
     pub confidence: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallflowCrossSectionCall {
+    pub source: String,
+    pub target: String,
+    pub source_section: String,
+    pub target_section: String,
+    pub relation: String,
+    pub confidence: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallflowCoverage {
+    pub internal: usize,
+    pub cross_section: usize,
+    pub unassigned: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -152,27 +186,49 @@ pub fn callflow_view_model(
                 confidence: confidence(edge.string("confidence")),
             })
             .collect::<Vec<_>>();
+        let node_count = nodes.len();
+        let internal_call_count = edges.len();
         view_sections.push(CallflowViewSection {
             id: section.id,
             name: section.name,
             communities: section.communities,
+            node_count,
+            internal_call_count,
             nodes,
             edges,
         });
     }
     let mut link_counts = BTreeMap::<(String, String), usize>::new();
+    let mut cross_section_calls = Vec::new();
+    let mut coverage = CallflowCoverage {
+        internal: 0,
+        cross_section: 0,
+        unassigned: 0,
+    };
     for edge in &document.links {
         let (Some(source), Some(target)) = (
             node_section.get(edge.source.as_str()),
             node_section.get(edge.target.as_str()),
         ) else {
+            coverage.unassigned += 1;
             continue;
         };
-        if source != target {
-            *link_counts
-                .entry((source.clone(), target.clone()))
-                .or_default() += 1;
+        if source == target {
+            coverage.internal += 1;
+            continue;
         }
+        coverage.cross_section += 1;
+        *link_counts
+            .entry((source.clone(), target.clone()))
+            .or_default() += 1;
+        cross_section_calls.push(CallflowCrossSectionCall {
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            source_section: source.clone(),
+            target_section: target.clone(),
+            relation: edge.string("relation"),
+            confidence: confidence(edge.string("confidence")),
+        });
     }
     let overview_links = link_counts
         .into_iter()
@@ -205,6 +261,8 @@ pub fn callflow_view_model(
         title: format!("{} — Architecture Flow", options.project_name),
         sections: view_sections,
         overview_links,
+        cross_section_calls,
+        coverage,
         report_highlights,
         statistics: CallflowStatistics {
             nodes: document.nodes.len(),
@@ -247,8 +305,53 @@ fn view_node(node: &NodeRecord) -> CallflowViewNode {
                 kind
             }
         },
+        scope: source_scope(&source_file),
         source_file: (!source_file.is_empty()).then_some(source_file),
     }
+}
+
+fn source_scope(source_file: &str) -> CallflowSourceScope {
+    if source_file.trim().is_empty() {
+        return CallflowSourceScope::Unknown;
+    }
+    let normalized = source_file.replace('\\', "/").to_ascii_lowercase();
+    let segments = normalized.split('/').collect::<Vec<_>>();
+    let filename = segments.last().copied().unwrap_or_default();
+    if segments
+        .iter()
+        .any(|segment| matches!(*segment, "test" | "tests" | "testing" | "__tests__"))
+        || filename.starts_with("test_")
+        || filename.contains("_test.")
+        || filename.contains(".test.")
+        || filename.contains(".spec.")
+    {
+        return CallflowSourceScope::Test;
+    }
+    if segments.iter().any(|segment| {
+        matches!(
+            *segment,
+            "generated" | "gen" | "dist" | "build" | "target" | ".next"
+        )
+    }) || filename.contains(".generated.")
+        || filename.contains("_generated.")
+    {
+        return CallflowSourceScope::Generated;
+    }
+    if segments.iter().any(|segment| {
+        matches!(
+            *segment,
+            "vendor"
+                | "third_party"
+                | "third-party"
+                | "node_modules"
+                | ".venv"
+                | "venv"
+                | "site-packages"
+        )
+    }) {
+        return CallflowSourceScope::Vendor;
+    }
+    CallflowSourceScope::Production
 }
 
 fn confidence(value: String) -> String {
