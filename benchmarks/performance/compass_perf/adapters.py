@@ -80,6 +80,9 @@ class ToolAdapter:
     def query_command(self, graph: Path, question: str) -> tuple[str, ...]:
         raise NotImplementedError
 
+    def compassql_command(self, graph: Path, query: str) -> tuple[str, ...]:
+        raise RuntimeError(f"{self.name} does not support CompassQL qualification")
+
     def graph_path(self, output: Path) -> Path:
         raise NotImplementedError
 
@@ -114,6 +117,7 @@ class CompassAdapter(ToolAdapter):
         metadata = dict(revision.metadata)
         metadata["rustc"] = _run(["rustc", "--version"], cwd=source_root)
         metadata["cargo"] = _run(["cargo", "--version"], cwd=source_root)
+        metadata["profile"] = "release"
         return cls(binary, ToolRevision(**{**revision.__dict__, "metadata": metadata}))
 
     def build_command(self, checkout: Path, output: Path, *, force: bool = False) -> tuple[str, ...]:
@@ -132,6 +136,18 @@ class CompassAdapter(ToolAdapter):
 
     def query_command(self, graph: Path, question: str) -> tuple[str, ...]:
         return (str(self.executable), "query", question, "--graph", str(graph))
+
+    def compassql_command(self, graph: Path, query: str) -> tuple[str, ...]:
+        return (
+            str(self.executable),
+            "query",
+            "--cql",
+            query,
+            "--graph",
+            str(graph),
+            "--format",
+            "json",
+        )
 
     def graph_path(self, output: Path) -> Path:
         compass_output = output / "compass-out"
@@ -225,4 +241,3 @@ class GraphifyAdapter(ToolAdapter):
         if not graph.is_file() or not graph.resolve().is_relative_to(output.resolve()):
             raise RuntimeError(f"invalid Graphify graph artifact: {graph}")
         return graph
-

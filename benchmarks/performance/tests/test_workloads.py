@@ -11,6 +11,7 @@ from benchmarks.performance.compass_perf.model import QueryOracle, RepositorySpe
 from benchmarks.performance.compass_perf.workloads import (
     graph_neutral_mutation,
     run_build_matrix,
+    run_compassql_matrix,
     run_query_matrix,
     select_mutation_file,
     validate_query_output,
@@ -36,6 +37,13 @@ class FakeAdapter(ToolAdapter):
 
     def query_command(self, graph: Path, question: str):
         return (sys.executable, str(FAKE_TOOL), "query", "--text", "URLResolver safe result")
+
+    def compassql_command(self, graph: Path, query: str):
+        return (
+            sys.executable,
+            "-c",
+            'print(\'{"columns":["id"],"rows":[{"id":"fixture:function"}]}\')',
+        )
 
     def graph_path(self, output: Path) -> Path:
         return output / "graph.json"
@@ -134,7 +142,29 @@ class WorkloadTests(unittest.TestCase):
         )
         self.assertFalse(result.passed)
 
+    def test_compassql_matrix_canonicalizes_results(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graph = root / "graph.json"
+            graph.write_text("{}", encoding="utf-8")
+            spec = RepositorySpec(
+                "fixture",
+                "https://example.invalid/fixture.git",
+                ".py",
+                (QueryOracle("where", ("URLResolver",)), QueryOracle("how", ("safe",))),
+            )
+            results = run_compassql_matrix(
+                self.adapter(),
+                graph,
+                root / "artifacts",
+                spec,
+                batches=10,
+                timeout_seconds=5,
+            )
+            self.assertEqual(7, len(results))
+            self.assertTrue(all(result.correctness.passed for result in results))
+            self.assertTrue(all(len(result.samples) == 10 for result in results))
+
 
 if __name__ == "__main__":
     unittest.main()
-

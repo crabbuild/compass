@@ -20,6 +20,7 @@ from benchmarks.performance.compass_perf.model import (
 from benchmarks.performance.compass_perf.report import (
     compare_baseline,
     compare_tools,
+    load_run,
     promote_baseline,
     write_run,
 )
@@ -169,6 +170,7 @@ class ReportTests(unittest.TestCase):
             write_run(second, output)
             self.assertNotIn("Excluded samples", summary_path.read_text(encoding="utf-8"))
             self.assertTrue(run_path.is_file())
+            self.assertEqual(second, load_run(run_path))
             self.assertEqual([], list(output.glob("*.tmp")))
 
     def test_promotion_rejects_interrupted_and_promotes_complete(self) -> None:

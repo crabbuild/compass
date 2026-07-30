@@ -4,6 +4,10 @@ Compass performance is measured against Compass-owned baselines. Qualification
 must never trade away graph correctness, deterministic output, resource bounds,
 or complete error reporting.
 
+The reproducible real-repository harness, operator commands, correctness gates,
+and optional explicit Graphify comparison are documented in
+[`benchmarks/performance/README.md`](benchmarks/performance/README.md).
+
 ## Baseline policy
 
 A benchmark records:

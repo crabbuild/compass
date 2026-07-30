@@ -28,6 +28,32 @@ _EXCLUDED_PARTS = {
     "test",
 }
 
+_COMPASSQL_QUERIES = (
+    ("scan", "MATCH (n) RETURN n.id AS id ORDER BY id LIMIT 100"),
+    ("anchored", "MATCH (n:Function) RETURN n.id AS id ORDER BY id LIMIT 100"),
+    (
+        "one-hop",
+        "MATCH (a)-[r]->(b) RETURN a.id AS source, b.id AS target "
+        "ORDER BY source, target LIMIT 100",
+    ),
+    (
+        "bounded-path",
+        "MATCH p=(a)-[:CALLS|IMPORTS_FROM*1..2]->(b) "
+        "RETURN a.id AS source, b.id AS target ORDER BY source, target LIMIT 100",
+    ),
+    ("aggregate", "MATCH (n) RETURN count(n) AS nodes"),
+    (
+        "optional",
+        "MATCH (n) OPTIONAL MATCH (n)-[:CALLS]->(target) "
+        "RETURN n.id AS source, target.id AS target ORDER BY source, target LIMIT 100",
+    ),
+    (
+        "policy-shaped",
+        "MATCH (n) WHERE EXISTS { MATCH (n)-[:CALLS]->(target) } "
+        "RETURN n.id AS id ORDER BY id LIMIT 100",
+    ),
+)
+
 
 def _git(checkout: Path, *arguments: str) -> str:
     completed = subprocess.run(
@@ -359,7 +385,7 @@ def run_query_matrix(
         failures: list[str] = []
         logs = artifact_root / "logs" / adapter.name / spec.name / workload
         logs.mkdir(parents=True, exist_ok=True)
-        for iteration in range(1, batches + 1):
+        for iteration in range(0, batches + 1):
             metrics = run_measured(
                 ProcessSpec(
                     command=adapter.query_command(graph, oracle.question),
@@ -376,6 +402,10 @@ def run_query_matrix(
                 error = f"query failed with return code {metrics.return_code}"
             elif not correctness.passed:
                 error = "; ".join(correctness.failures)
+            if iteration == 0:
+                if error:
+                    failures.append(f"{workload}[warmup]: {error}")
+                continue
             if error:
                 failures.append(f"{workload}[{iteration}]: {error}")
             samples.append(
@@ -389,6 +419,93 @@ def run_query_matrix(
                     metrics=metrics,
                     correctness_digest=correctness.digest,
                     error=error,
+                )
+            )
+        results.append(_result(adapter.name, spec.name, workload, samples, failures))
+    return tuple(results)
+
+
+def _canonical_json_output(text: str) -> CorrectnessResult:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        message = f"invalid CompassQL JSON: {error}"
+        return CorrectnessResult(
+            False,
+            hashlib.sha256(message.encode("utf-8")).hexdigest(),
+            (message,),
+        )
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return CorrectnessResult(
+        True,
+        hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        metrics={"json_bytes": len(canonical.encode("utf-8"))},
+    )
+
+
+def run_compassql_matrix(
+    adapter: ToolAdapter,
+    graph: Path,
+    artifact_root: Path,
+    spec: RepositorySpec,
+    *,
+    batches: int = 10,
+    timeout_seconds: float = 120,
+) -> tuple[WorkloadResult, ...]:
+    """Measure representative CompassQL plans; these have no Graphify ratio."""
+    if adapter.name != "compass":
+        raise ValueError("CompassQL workloads are Compass-only")
+    if batches < 10:
+        raise ValueError("CompassQL qualification requires at least ten batches")
+    results: list[WorkloadResult] = []
+    for name, query in _COMPASSQL_QUERIES:
+        workload = f"compassql-{name}"
+        logs = artifact_root / "logs" / adapter.name / spec.name / workload
+        logs.mkdir(parents=True, exist_ok=True)
+        samples: list[Sample] = []
+        failures: list[str] = []
+        expected_digest: str | None = None
+        for iteration in range(0, batches + 1):
+            metrics = run_measured(
+                ProcessSpec(
+                    command=adapter.compassql_command(graph, query),
+                    cwd=graph.parent,
+                    stdout_path=logs / f"{iteration}.out",
+                    stderr_path=logs / f"{iteration}.err",
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+            output = Path(metrics.stdout_path).read_text(
+                encoding="utf-8", errors="replace"
+            )
+            correctness = _canonical_json_output(output)
+            error = None
+            if metrics.return_code != 0 or metrics.timed_out:
+                error = f"CompassQL failed with return code {metrics.return_code}"
+            elif not correctness.passed:
+                error = "; ".join(correctness.failures)
+            elif expected_digest is None:
+                expected_digest = correctness.digest
+            elif correctness.digest != expected_digest:
+                error = "CompassQL result digest changed"
+            if iteration == 0:
+                if error:
+                    failures.append(f"{workload}[warmup]: {error}")
+                continue
+            if error:
+                failures.append(f"{workload}[{iteration}]: {error}")
+            samples.append(
+                Sample(
+                    sample_id=f"{adapter.name}:{spec.name}:{workload}:{iteration}",
+                    tool=adapter.name,
+                    repository=spec.name,
+                    workload=workload,
+                    iteration=iteration,
+                    eligible=error is None,
+                    metrics=metrics,
+                    correctness_digest=correctness.digest,
+                    error=error,
+                    evidence=correctness.metrics,
                 )
             )
         results.append(_result(adapter.name, spec.name, workload, samples, failures))

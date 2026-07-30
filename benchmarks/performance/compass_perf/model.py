@@ -165,3 +165,60 @@ def to_json_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): to_json_value(item) for key, item in value.items()}
     return value
+
+
+def run_from_json_value(value: dict[str, Any]) -> QualificationRun:
+    """Rehydrate a persisted qualification run for reporting and comparison."""
+
+    def process(item: dict[str, Any]) -> ProcessMetrics:
+        return ProcessMetrics(
+            **{
+                **item,
+                "command": tuple(item["command"]),
+            }
+        )
+
+    def sample(item: dict[str, Any]) -> Sample:
+        return Sample(**{**item, "metrics": process(item["metrics"])})
+
+    def correctness(item: dict[str, Any]) -> CorrectnessResult:
+        return CorrectnessResult(
+            **{
+                **item,
+                "failures": tuple(item.get("failures", ())),
+                "warnings": tuple(item.get("warnings", ())),
+            }
+        )
+
+    def result(item: dict[str, Any]) -> WorkloadResult:
+        aggregate = item.get("aggregate")
+        return WorkloadResult(
+            tool=item["tool"],
+            repository=item["repository"],
+            workload=item["workload"],
+            samples=tuple(sample(entry) for entry in item["samples"]),
+            aggregate=Aggregate(**aggregate) if aggregate is not None else None,
+            correctness=correctness(item["correctness"]),
+        )
+
+    gates = value.get("gates")
+    gate_report = None
+    if gates is not None:
+        gate_report = GateReport(
+            passed=gates["passed"],
+            issues=tuple(GateIssue(**issue) for issue in gates.get("issues", ())),
+            ratios=dict(gates.get("ratios", {})),
+        )
+    return QualificationRun(
+        schema=value["schema"],
+        run_id=value["run_id"],
+        started_at=value["started_at"],
+        completed_at=value.get("completed_at"),
+        complete=value["complete"],
+        suite_digest=value["suite_digest"],
+        environment=EnvironmentIdentity(**value["environment"]),
+        tools=tuple(ToolRevision(**tool) for tool in value["tools"]),
+        corpora=tuple(CheckoutIdentity(**corpus) for corpus in value["corpora"]),
+        results=tuple(result(item) for item in value["results"]),
+        gates=gate_report,
+    )

@@ -8,7 +8,14 @@ from pathlib import Path
 import tempfile
 from typing import Sequence
 
-from .model import GateIssue, GateReport, QualificationRun, WorkloadResult, to_json_value
+from .model import (
+    GateIssue,
+    GateReport,
+    QualificationRun,
+    WorkloadResult,
+    run_from_json_value,
+    to_json_value,
+)
 
 _PRIMARY_BUILDS = {"cold", "warm", "incremental"}
 
@@ -332,6 +339,13 @@ def write_run(run: QualificationRun, output: Path) -> tuple[Path, Path]:
     _atomic_text(run_path, payload + "\n")
     _atomic_text(summary_path, render_markdown(run))
     return run_path, summary_path
+
+
+def load_run(path: Path) -> QualificationRun:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"qualification run must be a JSON object: {path}")
+    return run_from_json_value(value)
 
 
 def promote_baseline(run_path: Path, destination: Path) -> Path:
