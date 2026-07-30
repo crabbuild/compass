@@ -1,0 +1,15 @@
+{
+  "directed": true,
+  "multigraph": true,
+  "graph": {"schema": "compass.graph/1", "diagnostics": []},
+  "nodes": [
+    {"id": "a", "label": "Alpha", "kind": "function", "source_file": "src/a.py", "source_location": "L1"},
+    {"id": "b", "label": "Beta", "kind": "function", "source_file": "src/b.py", "source_location": "L2"},
+    {"id": "c", "label": "CompassOnly", "kind": "route", "source_file": "src/c.py", "source_location": "L3"}
+  ],
+  "links": [
+    {"source": "a", "target": "b", "relation": "calls", "confidence": "EXTRACTED"},
+    {"source": "c", "target": "a", "relation": "routes_to", "confidence": "EXTRACTED"}
+  ]
+}
+

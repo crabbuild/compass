@@ -1,0 +1,13 @@
+{
+  "directed": true,
+  "multigraph": true,
+  "graph": {},
+  "nodes": [
+    {"id": "b", "label": "Beta", "type": "function", "source_file": "src/b.py", "source_location": "L2"},
+    {"id": "a", "label": "Alpha", "type": "function", "source_file": "src/a.py", "source_location": "L1"}
+  ],
+  "links": [
+    {"source": "a", "target": "b", "relation": "calls", "confidence": "EXTRACTED"}
+  ]
+}
+
