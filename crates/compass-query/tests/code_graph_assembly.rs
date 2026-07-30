@@ -498,10 +498,6 @@ fn lossy_normalized_alias_collisions_are_diagnostic_and_never_choose_a_node()
             && evidence.score == Some(0.8)
             && evidence.wiring_site.is_some()
     }));
-    assert!(forward.graph.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "ambiguous_normalized_endpoint"
-            && diagnostic.related_ids == ["Candidate::Shared", "candidate-shared"]
-    }));
     let mut candidates = forward
         .nodes
         .iter()
@@ -517,6 +513,15 @@ fn lossy_normalized_alias_collisions_are_diagnostic_and_never_choose_a_node()
     assert_eq!(candidates.len(), 2);
     assert_ne!(candidates[0].1, candidates[1].1);
     assert!(candidates.iter().all(|(_, id)| !id.is_empty()));
+    let mut published_candidate_ids = candidates
+        .iter()
+        .map(|(_, id)| id.clone())
+        .collect::<Vec<_>>();
+    published_candidate_ids.sort();
+    assert!(forward.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "ambiguous_normalized_endpoint"
+            && diagnostic.related_ids == published_candidate_ids
+    }));
 
     let graph_path = directory.path().join("collision.json");
     fs::write(&graph_path, serde_json::to_vec_pretty(&forward)?)?;
