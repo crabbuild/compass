@@ -150,7 +150,7 @@ function render(): void {
       enableState={enableState}
       loadingMore={loadingMore}
       loadMoreError={loadMoreError}
-      buildState={buildStates.get(selectedCommit)}
+      buildStates={buildStates}
       operationError={operationErrors.get(selectedCommit)}
       onSelectCommit={selectCommit}
       graph={graph}
