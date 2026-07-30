@@ -67,6 +67,32 @@ fn clean_warm_restored_and_checkout_root_builds_are_byte_identical() -> Result<(
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn cached_file_symlink_keeps_its_logical_graph_identity() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), SOURCE)?;
+    fs::write(
+        root.join("CLAUDE.md"),
+        "# Repro Guide\n\nSee [the source](src/lib.rs).\n",
+    )?;
+    symlink("CLAUDE.md", root.join("AGENTS.md"))?;
+
+    let (cold, _) = build(root)?;
+    let (warm, warm_changed) = build(root)?;
+
+    assert!(!warm_changed);
+    assert_eq!(
+        warm, cold,
+        "loading a cached extraction must not collapse an in-repository file symlink into its target"
+    );
+    Ok(())
+}
+
 #[test]
 fn edit_restore_does_not_preserve_recomputable_heuristic_facts() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
