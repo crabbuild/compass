@@ -1145,7 +1145,7 @@ fn build_graph_inner(
             timings,
         });
     }
-    let document = build_document(resolved, false, true, Some(&root), tiebreaker)?;
+    let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
     profile_internal("graph document build and dedup", &mut internal_started);
     timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
