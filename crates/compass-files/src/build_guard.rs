@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -130,7 +130,10 @@ impl BuildGuard {
             if !path.is_file() {
                 return Err(FileError::InvalidGenerationArtifact(path));
             }
-            fs::File::open(&path)
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
                 .and_then(|file| file.sync_all())
                 .map_err(|source| io_error(&path, source))?;
         }
