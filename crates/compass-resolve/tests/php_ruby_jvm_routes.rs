@@ -67,6 +67,76 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
 }
 
 #[test]
+fn laravel_routes_require_the_exact_facade_receiver_and_static_handler()
+-> Result<(), Box<dyn Error>> {
+    let mut engine = Engine::default();
+    let wrong_import = engine.extract_source(
+        Path::new("routes/wrong.php"),
+        br#"<?php
+use Acme\Routing\Route;
+Route::get('/wrong', [WrongController::class, 'show']);
+"#,
+    )?;
+    assert!(wrong_import.framework_facts.is_empty());
+
+    let missing_import = engine.extract_source(
+        Path::new("routes/missing.php"),
+        br#"<?php
+Route::get('/missing', [MissingController::class, 'show']);
+"#,
+    )?;
+    assert!(missing_import.framework_facts.is_empty());
+
+    let routes = engine.extract_source(
+        Path::new("app/routes.php"),
+        br#"<?php
+use Illuminate\Support\Facades\Route as Router;
+use Illuminate\Support\Facades\{Route as GroupedRouter};
+use Acme\Routing\Route;
+
+Router::get('/alias', [AliasController::class, 'show']);
+GroupedRouter::put('/grouped-alias', [AliasController::class, 'update']);
+\Illuminate\Support\Facades\Route::post('/qualified', 'QualifiedController@store');
+Router::get('/dynamic', $handler);
+Router::$method('/variable-method', [AliasController::class, 'show']);
+
+Route::prefix('/wrong')->group(function () {
+    Router::get('/unprefixed', [AliasController::class, 'show']);
+});
+"#,
+    )?;
+    let routes = routes
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Route(route) => Some(route),
+            RawFrameworkFact::Domain(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(routes.len(), 4, "routes={routes:#?}");
+    assert!(routes.iter().any(|route| {
+        route.normalized_path == "/alias" && route.handler_reference == "AliasController.show"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.normalized_path == "/grouped-alias"
+            && route.handler_reference == "AliasController.update"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.normalized_path == "/qualified"
+            && route.handler_reference == "QualifiedController.store"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.normalized_path == "/unprefixed" && route.handler_reference == "AliasController.show"
+    }));
+    assert!(
+        routes
+            .iter()
+            .all(|route| !route.normalized_path.contains("/wrong"))
+    );
+    Ok(())
+}
+
+#[test]
 fn drupal_yaml_and_hook_files_publish_auditable_routes() -> Result<(), Box<dyn Error>> {
     let mut extraction = extract("php/drupal.routing.yml")?;
     merge(&mut extraction, extract("php/drupal.module")?);

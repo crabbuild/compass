@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
@@ -13,8 +14,9 @@ use crate::builtins::is_language_builtin_global;
 use crate::config::{GenericConfig, generic_config};
 use crate::{
     CombinedExtraction, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
-    EXTRACTION_QUALITY_REASON_EXTENSION, ExtractError, Extraction, ExtractorKind, LanguageSpec,
-    RawCall, Registry, file_stem, make_id,
+    EXTRACTION_QUALITY_REASON_EXTENSION, ExtractError, Extraction, ExtractorKind,
+    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, LanguageSpec, ProjectEvidenceIndex, RawCall, Registry,
+    file_stem, make_id,
 };
 
 const JSON_MAX_BYTES: u64 = 1_048_576;
@@ -22,9 +24,18 @@ const JSON_MAX_BYTES: u64 = 1_048_576;
 #[derive(Default)]
 pub struct Engine {
     parsers: HashMap<&'static str, Parser>,
+    project_evidence: Option<Arc<ProjectEvidenceIndex>>,
 }
 
 impl Engine {
+    #[must_use]
+    pub fn with_project_evidence(project_evidence: Arc<ProjectEvidenceIndex>) -> Self {
+        Self {
+            parsers: HashMap::new(),
+            project_evidence: Some(project_evidence),
+        }
+    }
+
     pub fn extract(&mut self, path: &Path) -> Result<Extraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
@@ -44,7 +55,12 @@ impl Engine {
             ExtractorKind::Template => {
                 let mut extraction = crate::templates::extract(self, path, spec.name)?;
                 if let Ok(source) = fs::read(path) {
-                    crate::frameworks::detect_template_file_route(path, &source, &mut extraction);
+                    crate::frameworks::detect_template_file_route(
+                        path,
+                        &source,
+                        self.project_evidence(path),
+                        &mut extraction,
+                    );
                 }
                 Ok(extraction)
             }
@@ -53,9 +69,14 @@ impl Engine {
                     path: path.to_path_buf(),
                     source,
                 })?;
-                Ok(crate::frameworks::detect_config_file(path, &source))
+                Ok(crate::frameworks::detect_config_file(
+                    path,
+                    &source,
+                    self.project_evidence(path),
+                ))
             }
         }?;
+        self.stamp_project_evidence(path, &mut extraction);
         stamp_producer_metadata(&mut extraction, spec.name);
         Ok(extraction)
     }
@@ -74,11 +95,14 @@ impl Engine {
             ExtractorKind::Generic => self.extract_generic_source(path, spec, source),
             ExtractorKind::JsonConfig => self.extract_json_source(path, spec, source),
             ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
-            ExtractorKind::FrameworkConfig => {
-                Ok(crate::frameworks::detect_config_file(path, source))
-            }
+            ExtractorKind::FrameworkConfig => Ok(crate::frameworks::detect_config_file(
+                path,
+                source,
+                self.project_evidence(path),
+            )),
             _ => self.extract(path),
         }?;
+        self.stamp_project_evidence(path, &mut extraction);
         stamp_producer_metadata(&mut extraction, spec.name);
         Ok(extraction)
     }
@@ -106,7 +130,8 @@ impl Engine {
         }
         let tree = self.parse(path, spec, source)?;
         let root = tree.root_node();
-        let mut graph = Self::extract_generic_from_tree(path, spec, source, root);
+        let mut graph = self.extract_generic_from_tree(path, spec, source, root);
+        self.stamp_project_evidence(path, &mut graph);
         stamp_producer_metadata(&mut graph, spec.name);
         let program = crate::program::extract_from_tree(source_file, spec.name, source, root)
             .map_err(|error| ExtractError::InvalidProgramEvidence {
@@ -149,6 +174,7 @@ impl Engine {
             &generic_config(spec),
             language,
         );
+        self.stamp_project_evidence(path, &mut extraction);
         stamp_producer_metadata(&mut extraction, language);
         Ok(extraction)
     }
@@ -203,15 +229,11 @@ impl Engine {
             source
         };
         let tree = self.parse(path, spec, source)?;
-        Ok(Self::extract_generic_from_tree(
-            path,
-            spec,
-            source,
-            tree.root_node(),
-        ))
+        Ok(self.extract_generic_from_tree(path, spec, source, tree.root_node()))
     }
 
     fn extract_generic_from_tree(
+        &self,
         path: &Path,
         spec: LanguageSpec,
         source: &[u8],
@@ -238,7 +260,14 @@ impl Engine {
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
         crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
-        crate::frameworks::detect(path, source, root, spec.name, &mut extraction);
+        crate::frameworks::detect(
+            path,
+            source,
+            root,
+            spec.name,
+            self.project_evidence(path),
+            &mut extraction,
+        );
         if root.has_error() {
             extraction.extensions.insert(
                 EXTRACTION_QUALITY_EXTENSION.to_owned(),
@@ -250,6 +279,22 @@ impl Engine {
             );
         }
         extraction
+    }
+
+    fn project_evidence(&self, path: &Path) -> Option<&crate::ProjectEvidence> {
+        self.project_evidence
+            .as_deref()
+            .map(|index| index.evidence_for(path))
+    }
+
+    fn stamp_project_evidence(&self, path: &Path, extraction: &mut Extraction) {
+        let Some(evidence) = self.project_evidence(path) else {
+            return;
+        };
+        extraction.extensions.insert(
+            FRAMEWORK_PROJECT_EVIDENCE_EXTENSION.to_owned(),
+            Value::String(evidence.fingerprint().to_owned()),
+        );
     }
 
     fn extract_json(

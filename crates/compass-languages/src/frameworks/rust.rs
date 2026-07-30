@@ -4,14 +4,40 @@ use regex::Regex;
 use serde_json::Map;
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{line_anchor, normalize_route_path, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    let axum = body.contains("axum::") || body.contains("use axum");
-    let actix = body.contains("actix_web");
-    let rocket = body.contains("rocket::") || body.contains("#[rocket::");
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            body.contains("axum::") || body.contains("use axum"),
+            "axum",
+            EvidenceKind::Import,
+            "axum",
+        )
+        .direct_if(
+            body.contains("actix_web"),
+            "actix",
+            EvidenceKind::Import,
+            "actix_web",
+        )
+        .direct_if(
+            body.contains("rocket::"),
+            "rocket",
+            EvidenceKind::Import,
+            "rocket",
+        )
+        .direct_if(
+            body.contains("#[rocket::"),
+            "rocket",
+            EvidenceKind::Macro,
+            "rocket route attribute",
+        );
+    let axum = evidence.activates("axum");
+    let actix = evidence.activates("actix");
+    let rocket = evidence.activates("rocket");
     if !axum && !actix && !rocket {
         return Vec::new();
     }

@@ -5,6 +5,7 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::{
     RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
@@ -14,37 +15,76 @@ const HTTP_METHODS: &[&str] = &[
     "get", "post", "put", "patch", "delete", "options", "head", "all",
 ];
 
-pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
+pub(super) fn detect(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
     if source.is_empty() {
         return Vec::new();
     }
-    let text = std::str::from_utf8(source).unwrap_or_default();
+    let mut imports = Vec::new();
+    collect_import_aliases(root, source, &mut imports);
+    attach_import_aliases(path, source, root, extraction, &imports);
+    let imports_module = |expected: &str| {
+        imports.iter().any(|(_, _, module, _)| {
+            module == expected
+                || (expected.ends_with('/') && module.starts_with(expected))
+                || (expected == "react-router" && module.starts_with("react-router-"))
+        })
+    };
     let mut facts = Vec::new();
     let receivers = express_receivers(root, source);
-    if !receivers.is_empty() {
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            !receivers.is_empty() && imports_module("express"),
+            "express",
+            EvidenceKind::Receiver,
+            "express application/router",
+        )
+        .direct_if(
+            imports_module("@nestjs/"),
+            "nestjs",
+            EvidenceKind::Import,
+            "@nestjs/",
+        )
+        .direct_if(
+            imports_module("react-router"),
+            "react-router",
+            EvidenceKind::Import,
+            "react-router",
+        )
+        .direct_if(
+            imports_module("vue-router"),
+            "vue-router",
+            EvidenceKind::Import,
+            "vue-router",
+        );
+    if evidence.activates("express") {
         collect_express_routes(root, source, path, &receivers, &mut facts);
     }
-    if text.contains("@nestjs/") {
+    if evidence.activates("nestjs") {
         collect_nest_routes(root, source, path, &mut facts);
     }
-    if text.contains("react-router") {
+    if evidence.activates("react-router") {
         collect_react_router_routes(root, source, path, &mut facts);
     }
-    if text.contains("vue-router") || text.contains("createRouter") {
+    if evidence.activates("vue-router") {
         collect_vue_router_routes(root, source, path, &mut facts);
     }
     facts
 }
 
-pub(super) fn attach_import_aliases(
+fn attach_import_aliases(
     path: &Path,
     source: &[u8],
     root: Node<'_>,
     extraction: &mut Extraction,
+    aliases: &[(String, String, String, u64)],
 ) {
     attach_default_export_identities(path, source, root, extraction);
-    let mut aliases = Vec::new();
-    collect_import_aliases(root, source, &mut aliases);
+    let mut aliases = aliases.to_vec();
     aliases.sort();
     aliases.dedup();
     let source_file = path.to_string_lossy().into_owned();

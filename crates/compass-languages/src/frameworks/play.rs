@@ -3,10 +3,20 @@ use std::path::Path;
 use regex::Regex;
 use serde_json::Map;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{line_anchor_at, normalize_route_path, text};
 use super::{FrameworkLimits, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
+    let evidence = EvidenceSet::new().direct_if(
+        path.file_name().and_then(|name| name.to_str()) == Some("routes"),
+        "play",
+        EvidenceKind::ConfigurationContract,
+        "Play conf/routes",
+    );
+    if !evidence.activates("play") {
+        return Vec::new();
+    }
     let body = text(source);
     let Ok(route) = Regex::new(
         r"^\s*(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\S+)\s+(@?[A-Za-z_$][A-Za-z0-9_$.]*(?:\([^)]*\))?)",

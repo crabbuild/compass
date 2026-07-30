@@ -5,6 +5,7 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::{RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 #[derive(Clone, Debug)]
@@ -15,13 +16,40 @@ struct Receiver {
 
 pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
     let text = std::str::from_utf8(source).unwrap_or_default();
-    let receivers = receiver_declarations(root, source);
     let aliases = import_aliases(root, source);
+    let receivers = receiver_declarations(root, source, &aliases);
+    let django_import = aliases.values().any(|target| {
+        target.starts_with("django.urls.") || target.starts_with("django.conf.urls.")
+    });
+    let evidence = EvidenceSet::new()
+        .direct_if(django_import, "django", EvidenceKind::Import, "django.urls")
+        .supporting_if(
+            is_django_url_module(path, text),
+            "django",
+            EvidenceKind::Convention,
+            "urls.py with urlpatterns",
+        )
+        .direct_if(
+            receivers
+                .values()
+                .any(|receiver| receiver.framework == "flask"),
+            "flask",
+            EvidenceKind::Receiver,
+            "flask application receiver",
+        )
+        .direct_if(
+            receivers
+                .values()
+                .any(|receiver| receiver.framework == "fastapi"),
+            "fastapi",
+            EvidenceKind::Receiver,
+            "fastapi application receiver",
+        );
     let mut facts = Vec::new();
-    if is_django_url_module(path, text) {
+    if evidence.activates("django") {
         collect_django_routes(root, source, path, &aliases, &mut facts);
     }
-    if !receivers.is_empty() {
+    if evidence.activates("flask") || evidence.activates("fastapi") {
         collect_decorated_routes(root, source, path, &receivers, &aliases, &mut facts);
     }
     facts
@@ -159,9 +187,13 @@ fn collect_decorated_routes(
     }
 }
 
-fn receiver_declarations(root: Node<'_>, source: &[u8]) -> HashMap<String, Receiver> {
+fn receiver_declarations(
+    root: Node<'_>,
+    source: &[u8],
+    aliases: &HashMap<String, String>,
+) -> HashMap<String, Receiver> {
     let mut receivers = HashMap::new();
-    collect_receivers(root, source, &mut receivers);
+    collect_receivers(root, source, aliases, &mut receivers);
     receivers
 }
 
@@ -243,7 +275,12 @@ fn expand_alias(reference: &str, aliases: &HashMap<String, String>) -> String {
     )
 }
 
-fn collect_receivers(node: Node<'_>, source: &[u8], receivers: &mut HashMap<String, Receiver>) {
+fn collect_receivers(
+    node: Node<'_>,
+    source: &[u8],
+    aliases: &HashMap<String, String>,
+    receivers: &mut HashMap<String, Receiver>,
+) {
     if node.kind() == "assignment" {
         let left = node.child_by_field_name("left");
         let right = node.child_by_field_name("right");
@@ -253,10 +290,11 @@ fn collect_receivers(node: Node<'_>, source: &[u8], receivers: &mut HashMap<Stri
             if is_identifier(variable)
                 && let Some((constructor, arguments)) = parse_call(expression)
             {
-                let terminal = constructor.rsplit('.').next().unwrap_or(constructor);
-                let framework = match terminal {
-                    "Flask" | "Blueprint" => Some("flask"),
-                    "FastAPI" | "APIRouter" => Some("fastapi"),
+                let resolved = expand_alias(constructor, aliases);
+                let terminal = resolved.rsplit('.').next().unwrap_or(&resolved);
+                let framework = match resolved.as_str() {
+                    "flask.Flask" | "flask.Blueprint" => Some("flask"),
+                    "fastapi.FastAPI" | "fastapi.APIRouter" => Some("fastapi"),
                     _ => None,
                 };
                 if let Some(framework) = framework {
@@ -278,7 +316,7 @@ fn collect_receivers(node: Node<'_>, source: &[u8], receivers: &mut HashMap<Stri
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_receivers(child, source, receivers);
+        collect_receivers(child, source, aliases, receivers);
     }
 }
 

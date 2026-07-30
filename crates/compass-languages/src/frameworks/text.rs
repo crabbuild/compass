@@ -2,11 +2,6 @@ use std::path::Path;
 
 use super::RawFrameworkAnchor;
 
-pub(super) struct CallMatch<'a> {
-    pub end: usize,
-    pub arguments: &'a str,
-}
-
 pub(super) fn text(source: &[u8]) -> &str {
     std::str::from_utf8(source).unwrap_or_default()
 }
@@ -62,62 +57,6 @@ pub(super) fn line_anchor_at(
         end_line: line_number,
         end_column: u32::try_from(end.saturating_sub(start)).unwrap_or(u32::MAX),
     }
-}
-
-pub(super) fn calls<'a>(source: &'a str, prefix: &str) -> Vec<CallMatch<'a>> {
-    let mut matches = Vec::new();
-    let mut search_from = 0;
-    while let Some(relative) = source[search_from..].find(prefix) {
-        let start = search_from + relative;
-        let open = start + prefix.len();
-        if open >= source.len() || source.as_bytes()[open] != b'(' {
-            search_from = open;
-            continue;
-        }
-        let Some(close) = matching_delimiter(source.as_bytes(), open, b'(', b')') else {
-            break;
-        };
-        matches.push(CallMatch {
-            end: close + 1,
-            arguments: &source[open + 1..close],
-        });
-        search_from = close + 1;
-    }
-    matches
-}
-
-pub(super) fn matching_delimiter(
-    source: &[u8],
-    open: usize,
-    opening: u8,
-    closing: u8,
-) -> Option<usize> {
-    let mut depth = 0_u32;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, byte) in source.iter().copied().enumerate().skip(open) {
-        if let Some(active) = quote {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == active {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(byte, b'\'' | b'"' | b'`') {
-            quote = Some(byte);
-        } else if byte == opening {
-            depth = depth.saturating_add(1);
-        } else if byte == closing {
-            depth = depth.saturating_sub(1);
-            if depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-    None
 }
 
 pub(super) fn split_top_level(value: &str) -> Vec<&str> {

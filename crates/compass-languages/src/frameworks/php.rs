@@ -1,29 +1,76 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use regex::Regex;
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{
-    anchor, calls, join_route_path, line_anchor, literal, matching_delimiter, normalize_route_path,
-    split_top_level, text,
+    anchor, join_route_path, line_anchor, literal, normalize_route_path, split_top_level, text,
 };
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
-pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
+const LARAVEL_ROUTE_FACADE: &str = "Illuminate\\Support\\Facades\\Route";
+
+#[derive(Clone, Debug)]
+struct LaravelCall {
+    method: String,
+    arguments: Vec<String>,
+    start: usize,
+    end: usize,
+    group_body: Option<(usize, usize)>,
+}
+
+pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    let mut facts = if is_laravel_route_file(path, body) {
-        detect_laravel(path, source, body)
+    let imports = php_imports(root, source);
+    let mut calls = Vec::new();
+    collect_laravel_calls(root, source, &imports, &mut calls);
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            !calls.is_empty(),
+            "laravel",
+            EvidenceKind::Receiver,
+            LARAVEL_ROUTE_FACADE,
+        )
+        .supporting_if(
+            is_routes_directory(path),
+            "laravel",
+            EvidenceKind::Convention,
+            "routes/",
+        )
+        .direct_if(
+            is_drupal_hook_file(path),
+            "drupal",
+            EvidenceKind::ConfigurationContract,
+            "Drupal hook extension",
+        );
+    let mut facts = if evidence.activates("laravel") {
+        detect_laravel(path, source, &calls)
     } else {
         Vec::new()
     };
-    if is_drupal_hook_file(path) {
+    if evidence.activates("drupal") {
         facts.extend(detect_drupal_hooks(path, source, body));
     }
     facts
 }
 
 pub(super) fn detect_drupal_routing(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
+    let direct_contract = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.ends_with(".routing.yml") || name.ends_with(".routing.yaml"));
+    let evidence = EvidenceSet::new().direct_if(
+        direct_contract,
+        "drupal",
+        EvidenceKind::ConfigurationContract,
+        "Drupal routing YAML",
+    );
+    if !evidence.activates("drupal") {
+        return Vec::new();
+    }
     let body = text(source);
     let mut facts = Vec::new();
     let mut current_name = None::<String>;
@@ -103,40 +150,29 @@ pub(super) fn detect_drupal_routing(path: &Path, source: &[u8]) -> Vec<RawFramew
     facts
 }
 
-fn detect_laravel(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    let Ok(route_call) = Regex::new(r"Route::([A-Za-z_][A-Za-z0-9_]*)\s*\(") else {
-        return Vec::new();
-    };
-    let prefixes = laravel_prefixes(body);
+fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawFrameworkFact> {
+    let prefixes = laravel_prefixes(calls);
     let mut facts = Vec::new();
-    for capture in route_call.captures_iter(body) {
-        let Some(method_match) = capture.get(1) else {
-            continue;
-        };
-        let method = method_match.as_str().to_ascii_lowercase();
+    for call in calls {
+        let method = call.method.as_str();
         if method == "prefix" {
             continue;
         }
-        let Some(call_match) = capture.get(0) else {
-            continue;
-        };
-        let open = call_match.end().saturating_sub(1);
-        let Some(close) = matching_delimiter(body.as_bytes(), open, b'(', b')') else {
-            continue;
-        };
-        let arguments = split_top_level(&body[open + 1..close]);
         let prefix = prefixes
             .iter()
-            .filter(|(_, start, end)| *start < call_match.start() && call_match.start() < *end)
+            .filter(|(_, start, end)| *start < call.start && call.start < *end)
             .max_by_key(|(_, start, _)| *start)
             .map(|(prefix, _, _)| prefix.as_str())
             .unwrap_or_default();
-        let call_anchor = anchor(path, source, call_match.start(), close + 1);
+        let call_anchor = anchor(path, source, call.start, call.end);
         if method == "resource" {
-            let Some(resource) = arguments.first().and_then(|value| literal(value)) else {
+            let Some(resource) = call.arguments.first().and_then(|value| literal(value)) else {
                 continue;
             };
-            let Some(controller) = arguments.get(1).and_then(|value| laravel_controller(value))
+            let Some(controller) = call
+                .arguments
+                .get(1)
+                .and_then(|value| laravel_controller(value))
             else {
                 continue;
             };
@@ -144,7 +180,7 @@ fn detect_laravel(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFac
             continue;
         }
         let (operations, path_index, handler_index) = if method == "match" {
-            let Some(methods) = arguments.first() else {
+            let Some(methods) = call.arguments.first() else {
                 continue;
             };
             (
@@ -157,15 +193,20 @@ fn detect_laravel(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFac
             )
         } else if method == "any" {
             (vec!["ANY".to_owned()], 0, 1)
-        } else if is_http_method(&method) {
+        } else if is_http_method(method) {
             (vec![method.to_ascii_uppercase()], 0, 1)
         } else {
             continue;
         };
-        let Some(raw_path) = arguments.get(path_index).and_then(|value| literal(value)) else {
+        let Some(raw_path) = call
+            .arguments
+            .get(path_index)
+            .and_then(|value| literal(value))
+        else {
             continue;
         };
-        let Some(handler) = arguments
+        let Some(handler) = call
+            .arguments
             .get(handler_index)
             .and_then(|value| laravel_handler(value))
         else {
@@ -189,6 +230,183 @@ fn detect_laravel(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFac
         }
     }
     facts
+}
+
+fn php_imports(root: Node<'_>, source: &[u8]) -> HashMap<String, String> {
+    let mut imports = HashMap::new();
+    collect_php_imports(root, source, &mut imports);
+    imports
+}
+
+fn collect_php_imports(node: Node<'_>, source: &[u8], imports: &mut HashMap<String, String>) {
+    if node.kind() == "namespace_use_declaration" {
+        parse_php_import_declaration(node_text(node, source), imports);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_php_imports(child, source, imports);
+    }
+}
+
+fn parse_php_import_declaration(declaration: &str, imports: &mut HashMap<String, String>) {
+    let declaration = declaration.trim();
+    let Some(body) = declaration
+        .get(3..)
+        .filter(|_| {
+            declaration
+                .get(..3)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("use"))
+        })
+        .map(str::trim)
+        .and_then(|value| value.strip_suffix(';'))
+        .map(str::trim)
+    else {
+        return;
+    };
+    if starts_with_keyword(body, "function") || starts_with_keyword(body, "const") {
+        return;
+    }
+    if let (Some(open), Some(close)) = (body.find('{'), body.rfind('}')) {
+        if open >= close {
+            return;
+        }
+        let prefix = body[..open].trim().trim_end_matches('\\');
+        for entry in split_top_level(&body[open + 1..close]) {
+            add_php_import(prefix, entry, imports);
+        }
+    } else {
+        for entry in split_top_level(body) {
+            add_php_import("", entry, imports);
+        }
+    }
+}
+
+fn add_php_import(prefix: &str, entry: &str, imports: &mut HashMap<String, String>) {
+    let entry = entry.trim();
+    if starts_with_keyword(entry, "function") || starts_with_keyword(entry, "const") {
+        return;
+    }
+    let parts = entry.split_whitespace().collect::<Vec<_>>();
+    let Some(imported) = parts.first().copied() else {
+        return;
+    };
+    let alias = if parts.len() == 3 && parts[1].eq_ignore_ascii_case("as") {
+        parts[2]
+    } else if parts.len() == 1 {
+        imported.rsplit('\\').next().unwrap_or_default()
+    } else {
+        return;
+    };
+    let target = if prefix.is_empty() {
+        normalize_php_name(imported)
+    } else {
+        normalize_php_name(&format!("{prefix}\\{imported}"))
+    };
+    if is_php_qualified_name(alias) && !target.is_empty() {
+        imports.insert(alias.to_owned(), target);
+    }
+}
+
+fn collect_laravel_calls(
+    node: Node<'_>,
+    source: &[u8],
+    imports: &HashMap<String, String>,
+    calls: &mut Vec<LaravelCall>,
+) {
+    if node.kind() == "scoped_call_expression"
+        && let (Some(scope), Some(name), Some(arguments)) = (
+            node.child_by_field_name("scope"),
+            node.child_by_field_name("name"),
+            node.child_by_field_name("arguments"),
+        )
+        && matches!(scope.kind(), "name" | "qualified_name")
+        && name.kind() == "name"
+        && resolves_laravel_route(node_text(scope, source), imports)
+    {
+        let arguments_text = node_text(arguments, source).trim();
+        if let Some(arguments_text) = arguments_text
+            .strip_prefix('(')
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            calls.push(LaravelCall {
+                method: node_text(name, source).to_ascii_lowercase(),
+                arguments: split_top_level(arguments_text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                start: node.start_byte(),
+                end: node.end_byte(),
+                group_body: scoped_group_body(node, source),
+            });
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_laravel_calls(child, source, imports, calls);
+    }
+}
+
+fn resolves_laravel_route(scope: &str, imports: &HashMap<String, String>) -> bool {
+    let scope = normalize_php_name(scope);
+    scope == LARAVEL_ROUTE_FACADE
+        || imports
+            .get(&scope)
+            .is_some_and(|target| target == LARAVEL_ROUTE_FACADE)
+}
+
+fn scoped_group_body(call: Node<'_>, source: &[u8]) -> Option<(usize, usize)> {
+    let parent = call.parent()?;
+    if parent.kind() != "member_call_expression" {
+        return None;
+    }
+    let object = parent.child_by_field_name("object")?;
+    let name = parent.child_by_field_name("name")?;
+    if object.id() != call.id() || node_text(name, source) != "group" {
+        return None;
+    }
+    let arguments = parent.child_by_field_name("arguments")?;
+    let body = find_descendant(arguments, "compound_statement")?;
+    Some((body.start_byte(), body.end_byte()))
+}
+
+fn find_descendant<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find_map(|child| find_descendant(child, kind))
+}
+
+fn starts_with_keyword(value: &str, keyword: &str) -> bool {
+    value
+        .get(..keyword.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(keyword))
+        && value
+            .as_bytes()
+            .get(keyword.len())
+            .is_some_and(u8::is_ascii_whitespace)
+}
+
+fn normalize_php_name(value: &str) -> String {
+    value.trim().trim_start_matches('\\').to_owned()
+}
+
+fn node_text<'source>(node: Node<'_>, source: &'source [u8]) -> &'source str {
+    node.utf8_text(source).unwrap_or_default()
+}
+
+fn is_php_qualified_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('\\').all(|segment| {
+            let mut characters = segment.chars();
+            characters
+                .next()
+                .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+                && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+        })
 }
 
 fn resource_routes(
@@ -261,32 +479,16 @@ fn detect_drupal_hooks(path: &Path, source: &[u8], body: &str) -> Vec<RawFramewo
         .collect()
 }
 
-fn laravel_prefixes(source: &str) -> Vec<(String, usize, usize)> {
-    let mut prefixes = Vec::new();
-    for call in calls(source, "Route::prefix") {
-        let Some(prefix) = split_top_level(call.arguments)
-            .first()
-            .and_then(|value| literal(value))
-        else {
-            continue;
-        };
-        let suffix = &source[call.end..];
-        let Some(group) = suffix.find("->group") else {
-            continue;
-        };
-        let group_start = call.end + group;
-        let Some(open) = source[group_start..]
-            .find('{')
-            .map(|value| group_start + value)
-        else {
-            continue;
-        };
-        let Some(close) = matching_delimiter(source.as_bytes(), open, b'{', b'}') else {
-            continue;
-        };
-        prefixes.push((prefix, open, close));
-    }
-    prefixes
+fn laravel_prefixes(calls: &[LaravelCall]) -> Vec<(String, usize, usize)> {
+    calls
+        .iter()
+        .filter(|call| call.method == "prefix")
+        .filter_map(|call| {
+            let prefix = call.arguments.first().and_then(|value| literal(value))?;
+            let (start, end) = call.group_body?;
+            Some((prefix, start, end))
+        })
+        .collect()
 }
 
 fn laravel_handler(value: &str) -> Option<String> {
@@ -299,16 +501,16 @@ fn laravel_handler(value: &str) -> Option<String> {
         .strip_suffix(']')
         .map(split_top_level)?;
     let controller = parts.first().and_then(|part| laravel_controller(part))?;
-    let action = parts.get(1).and_then(|part| literal(part));
-    Some(action.map_or(controller.clone(), |action| {
-        format!("{controller}.{action}")
-    }))
+    let action = parts.get(1).and_then(|part| literal(part))?;
+    Some(format!("{controller}.{action}"))
 }
 
 fn laravel_controller(value: &str) -> Option<String> {
-    let value = value.trim().trim_start_matches('\\');
-    let value = value.strip_suffix("::class").unwrap_or(value);
-    (!value.is_empty()).then(|| value.replace('\\', "."))
+    let value = value
+        .trim()
+        .strip_suffix("::class")?
+        .trim_start_matches('\\');
+    is_php_qualified_name(value).then(|| value.replace('\\', "."))
 }
 
 fn array_literals(value: &str) -> Vec<String> {
@@ -330,20 +532,18 @@ fn is_http_method(method: &str) -> bool {
     )
 }
 
-fn is_laravel_route_file(path: &Path, source: &str) -> bool {
-    source.contains("Illuminate\\Support\\Facades\\Route")
-        || path
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|value| value.to_str())
-            .is_some_and(|parent| parent.eq_ignore_ascii_case("routes"))
-}
-
 fn is_drupal_hook_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|value| value.to_str()),
         Some("module" | "theme" | "install" | "inc")
     )
+}
+
+fn is_routes_directory(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+        .is_some_and(|parent| parent.eq_ignore_ascii_case("routes"))
 }
 
 fn normalize_drupal_handler(value: &str) -> String {

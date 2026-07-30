@@ -4,12 +4,26 @@ use regex::Regex;
 use serde_json::Map;
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{join_route_path, line_anchor, literal, normalize_route_path, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    if !is_rails_routes(path, body) {
+    let evidence = EvidenceSet::new()
+        .direct_if(
+            body.contains(".routes.draw do"),
+            "rails",
+            EvidenceKind::Receiver,
+            "Rails.application.routes",
+        )
+        .supporting_if(
+            is_rails_routes_path(path),
+            "rails",
+            EvidenceKind::Convention,
+            "config/routes.rb",
+        );
+    if !evidence.activates("rails") {
         return Vec::new();
     }
     let Ok(scope) = Regex::new(
@@ -160,13 +174,11 @@ fn camelize(value: &str) -> String {
         .collect()
 }
 
-fn is_rails_routes(path: &Path, source: &str) -> bool {
-    source.contains(".routes.draw do")
-        || path
-            .components()
-            .rev()
-            .take(2)
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            == ["routes.rb", "config"]
+fn is_rails_routes_path(path: &Path) -> bool {
+    path.components()
+        .rev()
+        .take(2)
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        == ["routes.rb", "config"]
 }
