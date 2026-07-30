@@ -93,6 +93,7 @@ class Sample:
     metrics: ProcessMetrics
     correctness_digest: str = ""
     error: str | None = None
+    evidence: dict[str, float | int | str | bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -164,4 +165,3 @@ def to_json_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): to_json_value(item) for key, item in value.items()}
     return value
-

@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from benchmarks.performance.compass_perf.adapters import ToolAdapter
+from benchmarks.performance.compass_perf.model import QueryOracle, RepositorySpec, ToolRevision
+from benchmarks.performance.compass_perf.workloads import (
+    graph_neutral_mutation,
+    run_build_matrix,
+    run_query_matrix,
+    select_mutation_file,
+    validate_query_output,
+)
+from benchmarks.performance.compass_perf.workspace import QualificationWorkspace
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "compass_graph.json"
+FAKE_TOOL = Path(__file__).parent / "helpers" / "fake_tool.py"
+
+
+class FakeAdapter(ToolAdapter):
+    def build_command(self, checkout: Path, output: Path, *, force: bool = False):
+        return (
+            sys.executable,
+            str(FAKE_TOOL),
+            "build",
+            "--output",
+            str(output),
+            "--graph",
+            str(FIXTURE),
+        )
+
+    def query_command(self, graph: Path, question: str):
+        return (sys.executable, str(FAKE_TOOL), "query", "--text", "URLResolver safe result")
+
+    def graph_path(self, output: Path) -> Path:
+        return output / "graph.json"
+
+
+def git(cwd: Path, *arguments: str) -> str:
+    return subprocess.check_output(["git", *arguments], cwd=cwd, text=True).strip()
+
+
+class WorkloadTests(unittest.TestCase):
+    def make_checkout(self, root: Path) -> Path:
+        checkout = root / "checkout"
+        checkout.mkdir()
+        git(checkout, "init", "-q")
+        git(checkout, "config", "user.name", "Compass")
+        git(checkout, "config", "user.email", "compass@example.invalid")
+        source = checkout / "src" / "main.py"
+        source.parent.mkdir()
+        source.write_text("def run():\n    return 1\n" + "# filler\n" * 200, encoding="utf-8")
+        git(checkout, "add", "src/main.py")
+        git(checkout, "commit", "-q", "-m", "fixture")
+        return checkout
+
+    def adapter(self) -> FakeAdapter:
+        revision = ToolRevision(
+            "compass",
+            "https://example.invalid/compass.git",
+            "a" * 40,
+            "b" * 40,
+            False,
+            "c" * 64,
+        )
+        return FakeAdapter(Path(sys.executable), revision)
+
+    def test_mutation_selection_and_restoration_are_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.make_checkout(Path(directory))
+            source = select_mutation_file(checkout, ".py")
+            original = source.read_bytes()
+            with graph_neutral_mutation(checkout, source):
+                self.assertNotEqual(source.read_bytes(), original)
+            self.assertEqual(source.read_bytes(), original)
+            self.assertEqual(git(checkout, "status", "--porcelain"), "")
+
+    def test_build_matrix_produces_three_correct_workloads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = QualificationWorkspace.create(root / "workspace")
+            checkout = self.make_checkout(root)
+            spec = RepositorySpec(
+                "fixture",
+                "https://example.invalid/fixture.git",
+                ".py",
+                (QueryOracle("where", ("URLResolver",)), QueryOracle("how", ("safe",))),
+            )
+            results = run_build_matrix(
+                self.adapter(),
+                checkout,
+                workspace.root / "artifacts",
+                spec,
+                timeout_seconds=5,
+            )
+            self.assertEqual([result.workload for result in results], ["cold", "warm", "incremental"])
+            self.assertTrue(all(result.correctness.passed for result in results))
+            self.assertTrue(all(result.aggregate is not None for result in results))
+
+    def test_query_matrix_requires_oracle_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graph = root / "graph.json"
+            graph.write_text("{}", encoding="utf-8")
+            spec = RepositorySpec(
+                "fixture",
+                "https://example.invalid/fixture.git",
+                ".py",
+                (
+                    QueryOracle("where", ("URLResolver",), ("forbidden",)),
+                    QueryOracle("how", ("safe",)),
+                ),
+            )
+            results = run_query_matrix(
+                self.adapter(),
+                graph,
+                root / "artifacts",
+                spec,
+                batches=10,
+                timeout_seconds=5,
+            )
+            self.assertEqual(len(results), 2)
+            self.assertTrue(all(result.correctness.passed for result in results))
+
+    def test_query_validation_rejects_forbidden_evidence(self) -> None:
+        result = validate_query_output(
+            "URLResolver also emitted WrongRoute",
+            QueryOracle("where", ("URLResolver",), ("WrongRoute",)),
+        )
+        self.assertFalse(result.passed)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
