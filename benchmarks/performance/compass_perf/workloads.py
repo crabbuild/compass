@@ -213,6 +213,7 @@ def _run_build(
                     Path(metrics.stderr_path).read_text(encoding="utf-8", errors="replace")
                 )
             )
+            adapter.prune_superseded_artifacts(output, graph)
         except (OSError, RuntimeError) as exception:
             error = str(exception)
     sample = Sample(

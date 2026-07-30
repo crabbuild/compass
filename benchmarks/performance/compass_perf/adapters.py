@@ -89,6 +89,9 @@ class ToolAdapter:
     def parse_build_evidence(self, stderr: str) -> dict[str, float]:
         return {}
 
+    def prune_superseded_artifacts(self, output: Path, active_graph: Path) -> None:
+        """Release tool-specific artifacts that are no longer needed by the run."""
+
 
 @dataclass(frozen=True)
 class CompassAdapter(ToolAdapter):
@@ -173,6 +176,15 @@ class CompassAdapter(ToolAdapter):
             if matched:
                 evidence[matched.group(1).replace(" ", "_")] = float(matched.group(2))
         return evidence
+
+    def prune_superseded_artifacts(self, output: Path, active_graph: Path) -> None:
+        generations = output / "compass-out" / ".compass-generations"
+        active = active_graph.parent.resolve()
+        if not generations.is_dir() or active.parent.resolve() != generations.resolve():
+            raise RuntimeError(f"active Compass generation is outside {generations}")
+        for candidate in generations.iterdir():
+            if candidate.is_dir() and candidate.resolve() != active:
+                guarded_remove(candidate)
 
 
 @dataclass(frozen=True)

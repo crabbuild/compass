@@ -6,6 +6,7 @@ import unittest
 
 from benchmarks.performance.compass_perf.adapters import CompassAdapter, GraphifyAdapter
 from benchmarks.performance.compass_perf.model import ToolRevision
+from benchmarks.performance.compass_perf.workspace import QualificationWorkspace
 
 
 def revision(name: str) -> ToolRevision:
@@ -78,7 +79,24 @@ class AdapterTests(unittest.TestCase):
             {"detect": 1.2, "deterministic_extract": 2.5, "total": 4.0},
         )
 
+    def test_compass_prunes_only_inactive_generations(self) -> None:
+        adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = QualificationWorkspace.create(Path(directory) / "workspace")
+            output = workspace.root / "artifacts" / "fixture"
+            generations = output / "compass-out" / ".compass-generations"
+            active = generations / "generation-active"
+            inactive = generations / "generation-inactive"
+            active.mkdir(parents=True)
+            inactive.mkdir()
+            graph = active / "graph.json"
+            graph.write_text("{}")
+
+            adapter.prune_superseded_artifacts(output, graph)
+
+            self.assertTrue(active.is_dir())
+            self.assertFalse(inactive.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
-
