@@ -133,8 +133,11 @@ impl CodeLookupIndex {
 
 pub(crate) struct CodeAdjacencyIndex {
     incident: HashMap<String, Vec<usize>>,
+    trusted_incident: HashMap<String, Vec<usize>>,
     incoming: HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
+    trusted_incoming: HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
     outgoing: HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
+    trusted_outgoing: HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
     by_id: HashMap<String, usize>,
 }
 
@@ -142,49 +145,118 @@ impl CodeAdjacencyIndex {
     pub(crate) fn build(graph: &GraphDocument) -> Self {
         let mut adjacency = Self {
             incident: HashMap::new(),
+            trusted_incident: HashMap::new(),
             incoming: HashMap::new(),
+            trusted_incoming: HashMap::new(),
             outgoing: HashMap::new(),
+            trusted_outgoing: HashMap::new(),
             by_id: HashMap::with_capacity(graph.links.len()),
         };
         for (index, edge) in graph.links.iter().enumerate() {
             index_edge(&mut adjacency.incident, &edge.source, index);
             index_edge(&mut adjacency.incident, &edge.target, index);
-            adjacency
-                .outgoing
-                .entry(edge.source.clone())
-                .or_default()
-                .entry(edge.kind)
-                .or_default()
-                .push(index);
-            adjacency
-                .incoming
-                .entry(edge.target.clone())
-                .or_default()
-                .entry(edge.kind)
-                .or_default()
-                .push(index);
+            index_directional_edge(&mut adjacency.outgoing, &edge.source, edge.kind, index);
+            index_directional_edge(&mut adjacency.incoming, &edge.target, edge.kind, index);
+            if !is_heuristic(edge) {
+                index_edge(&mut adjacency.trusted_incident, &edge.source, index);
+                index_edge(&mut adjacency.trusted_incident, &edge.target, index);
+                index_directional_edge(
+                    &mut adjacency.trusted_outgoing,
+                    &edge.source,
+                    edge.kind,
+                    index,
+                );
+                index_directional_edge(
+                    &mut adjacency.trusted_incoming,
+                    &edge.target,
+                    edge.kind,
+                    index,
+                );
+            }
             adjacency.by_id.insert(edge.id.clone(), index);
         }
-        for edges in adjacency.incident.values_mut() {
-            sort_edge_indices(edges, graph);
-            edges.dedup();
-        }
-        for by_kind in adjacency
-            .incoming
-            .values_mut()
-            .chain(adjacency.outgoing.values_mut())
-        {
-            for edges in by_kind.values_mut() {
+        for incident in [&mut adjacency.incident, &mut adjacency.trusted_incident] {
+            for edges in incident.values_mut() {
                 sort_edge_indices(edges, graph);
+                edges.dedup();
+            }
+        }
+        for directional in [
+            &mut adjacency.incoming,
+            &mut adjacency.trusted_incoming,
+            &mut adjacency.outgoing,
+            &mut adjacency.trusted_outgoing,
+        ] {
+            for by_kind in directional.values_mut() {
+                for edges in by_kind.values_mut() {
+                    sort_edge_indices(edges, graph);
+                }
             }
         }
         adjacency
     }
 
-    fn incident(&self, node: &str) -> &[usize] {
-        self.incident.get(node).map_or(&[], Vec::as_slice)
+    fn incident(&self, node: &str, include_heuristic: bool) -> &[usize] {
+        let index = if include_heuristic {
+            &self.incident
+        } else {
+            &self.trusted_incident
+        };
+        index.get(node).map_or(&[], Vec::as_slice)
     }
 
+    fn matching_bounded(
+        &self,
+        graph: &GraphDocument,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+        include_heuristic: bool,
+        limit: usize,
+    ) -> (Vec<usize>, bool, usize) {
+        let directional = match (inbound, include_heuristic) {
+            (true, true) => &self.incoming,
+            (true, false) => &self.trusted_incoming,
+            (false, true) => &self.outgoing,
+            (false, false) => &self.trusted_outgoing,
+        };
+        let Some(by_kind) = directional.get(node) else {
+            return (Vec::new(), false, 0);
+        };
+        let buckets = kinds
+            .iter()
+            .filter_map(|kind| by_kind.get(kind).map(Vec::as_slice))
+            .collect::<Vec<_>>();
+        let mut positions = vec![0_usize; buckets.len()];
+        let mut edges = Vec::with_capacity(limit.min(1_024).saturating_add(1));
+        let retained = limit.saturating_add(1);
+        let mut examined = 0_usize;
+        while edges.len() < retained {
+            examined = examined.saturating_add(buckets.len());
+            let next = buckets
+                .iter()
+                .enumerate()
+                .filter_map(|(bucket, edges)| {
+                    edges
+                        .get(positions[bucket])
+                        .copied()
+                        .map(|edge| (bucket, edge))
+                })
+                .min_by(|(_, left), (_, right)| graph.links[*left].id.cmp(&graph.links[*right].id));
+            let Some((bucket, edge)) = next else {
+                break;
+            };
+            positions[bucket] += 1;
+            edges.push(edge);
+        }
+        let truncated = edges.len() > limit;
+        if truncated {
+            edges.truncate(limit);
+        }
+        (edges, truncated, examined)
+    }
+
+    #[cfg(test)]
     fn matching(
         &self,
         graph: &GraphDocument,
@@ -192,28 +264,29 @@ impl CodeAdjacencyIndex {
         inbound: bool,
         kinds: &[EdgeKind],
     ) -> Vec<usize> {
-        let by_kind = if inbound {
-            self.incoming.get(node)
-        } else {
-            self.outgoing.get(node)
-        };
-        let mut edges = kinds
-            .iter()
-            .flat_map(|kind| {
-                by_kind
-                    .and_then(|by_kind| by_kind.get(kind))
-                    .into_iter()
-                    .flatten()
-                    .copied()
-            })
-            .collect::<Vec<_>>();
-        sort_edge_indices(&mut edges, graph);
+        let (edges, truncated, _) =
+            self.matching_bounded(graph, node, inbound, kinds, true, usize::MAX);
+        debug_assert!(!truncated);
         edges
     }
 
     fn by_id(&self, id: &str) -> Option<usize> {
         self.by_id.get(id).copied()
     }
+}
+
+fn index_directional_edge(
+    index: &mut HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
+    node: &str,
+    kind: EdgeKind,
+    edge: usize,
+) {
+    index
+        .entry(node.to_owned())
+        .or_default()
+        .entry(kind)
+        .or_default()
+        .push(edge);
 }
 
 fn index_edge(index: &mut HashMap<String, Vec<usize>>, node: &str, edge: usize) {
@@ -364,13 +437,15 @@ impl CodeQueryEngine {
         } else {
             &[EdgeKind::Calls]
         };
-        let mut selected_edges = self
-            .adjacency
-            .matching(&self.graph, &seed, inbound, kinds)
+        let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
+        let (selected_indices, truncated, _) =
+            self.adjacency
+                .matching_bounded(&self.graph, &seed, inbound, kinds, true, max_edges);
+        response.truncated |= truncated;
+        let selected_edges = selected_indices
             .into_iter()
             .map(|index| &self.graph.links[index])
             .collect::<Vec<_>>();
-        self.bound_edges(&mut selected_edges, &mut response);
         let mut ids = HashSet::from([seed.clone()]);
         for edge in &selected_edges {
             ids.insert(edge.source.clone());
@@ -399,13 +474,17 @@ impl CodeQueryEngine {
             if path_edges.len() >= max_depth {
                 continue;
             }
-            let incoming = self
-                .adjacency
-                .matching(&self.graph, &node, true, IMPACT_KINDS)
-                .into_iter()
-                .map(|index| &self.graph.links[index])
-                .filter(|edge| request.include_heuristic || !is_heuristic(edge))
-                .collect::<Vec<_>>();
+            let remaining_edges = max_edges.saturating_sub(selected_edges.len());
+            let (incoming, incoming_truncated, _) = self.adjacency.matching_bounded(
+                &self.graph,
+                &node,
+                true,
+                IMPACT_KINDS,
+                request.include_heuristic,
+                remaining_edges,
+            );
+            response.truncated |= incoming_truncated;
+            let incoming = incoming.into_iter().map(|index| &self.graph.links[index]);
             for edge in incoming {
                 if selected_edges.len() >= max_edges {
                     response.truncated = true;
@@ -612,14 +691,6 @@ impl CodeQueryEngine {
         response.edges.extend(edges.into_iter().map(query_edge));
     }
 
-    fn bound_edges(&self, edges: &mut Vec<&EdgeRecord>, response: &mut CodeQueryResponse) {
-        let max = usize::try_from(response.limits.max_edges).unwrap_or(usize::MAX);
-        if edges.len() > max {
-            edges.truncate(max);
-            response.truncated = true;
-        }
-    }
-
     fn shortest_path(
         &self,
         source: &str,
@@ -657,15 +728,12 @@ impl CodeQueryEngine {
                 continue;
             }
             let mut adjacent = Vec::new();
-            for index in self.adjacency.incident(&node) {
+            for index in self.adjacency.incident(&node, include_heuristic) {
                 if !budget.consume_edge() {
                     truncated = true;
                     break;
                 }
                 let edge = &self.graph.links[*index];
-                if !include_heuristic && is_heuristic(edge) {
-                    continue;
-                }
                 if edge.source == node {
                     adjacent.push((edge.target.clone(), edge));
                 } else if edge.target == node {
@@ -1048,6 +1116,7 @@ fn sql_error(error: rusqlite::Error) -> QueryError {
 #[cfg(test)]
 mod adjacency_tests {
     use compass_model::code_graph::{BuildMetadata, EdgeRecord, GraphDocument};
+    use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
 
     use super::{CodeAdjacencyIndex, EdgeKind};
 
@@ -1098,7 +1167,7 @@ mod adjacency_tests {
                 .collect::<Vec<_>>();
             expected_incident
                 .sort_by(|left, right| graph.links[*left].id.cmp(&graph.links[*right].id));
-            assert_eq!(adjacency.incident(node), expected_incident);
+            assert_eq!(adjacency.incident(node, true), expected_incident);
 
             for inbound in [false, true] {
                 for kind in kinds {
@@ -1125,5 +1194,86 @@ mod adjacency_tests {
         for (index, edge) in graph.links.iter().enumerate() {
             assert_eq!(adjacency.by_id(&edge.id), Some(index));
         }
+    }
+
+    #[test]
+    fn trusted_adjacency_does_not_spend_budget_on_heuristic_edges() {
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let mut heuristic = edge("e:1", "source", EdgeKind::Calls, "heuristic");
+        heuristic.evidence.push(Provenance {
+            origin: EvidenceOrigin::Heuristic,
+            extractor: "test".to_owned(),
+            confidence: EvidenceConfidence::Inferred,
+            rule: Some("test-heuristic".to_owned()),
+            anchors: Vec::new(),
+            wiring_site: None,
+            score: None,
+            candidates: Vec::new(),
+        });
+        graph.links = vec![heuristic, edge("e:2", "source", EdgeKind::Calls, "trusted")];
+
+        let adjacency = CodeAdjacencyIndex::build(&graph);
+        assert_eq!(adjacency.incident("source", false), [1]);
+        let (matching, truncated, examined) =
+            adjacency.matching_bounded(&graph, "source", false, &[EdgeKind::Calls], false, 1);
+        assert_eq!(matching, [1]);
+        assert!(!truncated);
+        assert_eq!(examined, 2);
+    }
+
+    #[test]
+    fn bounded_matching_scales_with_response_budget_on_500k_edges() {
+        const NODES: usize = 100_000;
+        const EDGES: usize = 500_000;
+        const LIMIT: usize = 4;
+
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        graph.links.reserve(EDGES);
+        for index in 0..EDGES {
+            graph.links.push(edge(
+                &format!("e:{index:06}"),
+                "hub",
+                if index % 2 == 0 {
+                    EdgeKind::Calls
+                } else {
+                    EdgeKind::RoutesTo
+                },
+                &format!("n:{:05}", index % NODES),
+            ));
+        }
+
+        let adjacency = CodeAdjacencyIndex::build(&graph);
+        let (matching, truncated, examined) = adjacency.matching_bounded(
+            &graph,
+            "hub",
+            false,
+            &[EdgeKind::Calls, EdgeKind::RoutesTo],
+            true,
+            LIMIT,
+        );
+        assert_eq!(matching.len(), LIMIT);
+        assert!(truncated);
+        assert!(
+            examined <= (LIMIT + 1) * 2,
+            "bounded lookup examined {examined} bucket heads"
+        );
+        println!(
+            "{{\"nodes\":{NODES},\"edges\":{EDGES},\"retained\":{},\"examined\":{examined}}}",
+            matching.len()
+        );
     }
 }

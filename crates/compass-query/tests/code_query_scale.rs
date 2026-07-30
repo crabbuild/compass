@@ -10,7 +10,7 @@ use compass_model::query_contract::{
 };
 use compass_query::open;
 
-const SCALE_NODES: usize = 25_000;
+const SCALE_NODES: usize = 100_000;
 const QUERY_CEILING: Duration = Duration::from_secs(5);
 
 #[test]

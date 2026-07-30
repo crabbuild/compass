@@ -1,5 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawEdgeRecord, RawFrameworkAnchor,
@@ -13,6 +12,8 @@ use compass_model::provenance::{
     SourceAnchor,
 };
 use serde_json::{Map, Value};
+
+use super::target_index::{FrameworkTargetIndex, TargetFamily, normalize_reference, terminal_name};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RouteStageRole {
@@ -53,9 +54,17 @@ pub fn resolve_routes(
     extraction: &Extraction,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
+    let targets = FrameworkTargetIndex::new(extraction);
+    resolve_routes_with_targets(extraction, limits, &targets)
+}
+
+pub(super) fn resolve_routes_with_targets(
+    extraction: &Extraction,
+    limits: FrameworkLimits,
+    targets: &FrameworkTargetIndex<'_>,
+) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     validate_fact_limits(extraction, limits)?;
     let aliases = alias_map(extraction, limits)?;
-    let targets = RouteTargetIndex::new(extraction);
     let expanded = super::python::expand_django_includes(&extraction.framework_facts, limits)?;
     let mut unique = BTreeMap::new();
     for route in expanded {
@@ -83,7 +92,7 @@ pub fn resolve_routes(
 
     unique
         .into_values()
-        .map(|route| resolve_one_route(route, &targets, &aliases, limits))
+        .map(|route| resolve_one_route(route, targets, &aliases, limits))
         .collect()
 }
 
@@ -178,7 +187,7 @@ pub fn publish_resolved_routes(
 
 fn resolve_one_route(
     route: RawRouteFact,
-    targets: &RouteTargetIndex<'_>,
+    targets: &FrameworkTargetIndex<'_>,
     aliases: &super::typescript::ImportAliases,
     limits: FrameworkLimits,
 ) -> Result<ResolvedRoute, FrameworkResolutionError> {
@@ -232,7 +241,7 @@ fn resolve_reference(
     framework: &str,
     declaring_scope: &str,
     source_file: &str,
-    targets: &RouteTargetIndex<'_>,
+    targets: &FrameworkTargetIndex<'_>,
     aliases: &super::typescript::ImportAliases,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolutionCandidate>, FrameworkResolutionError> {
@@ -240,7 +249,7 @@ fn resolve_reference(
     let reference = normalize_reference(&reference);
     let alias = import_alias(&reference, source_file, aliases);
     let expanded = expand_alias(&reference, alias.map(|(_, alias)| alias));
-    let last = terminal_name(&expanded);
+    let last = terminal_name(&expanded).to_owned();
     let owner = expanded
         .rsplit_once('.')
         .map(|(owner, _)| normalize_reference(owner));
@@ -250,87 +259,68 @@ fn resolve_reference(
     ];
     let alias_export = alias.map(|(suffix, alias)| {
         if alias.imported == "*" {
-            terminal_name(suffix.trim_start_matches(['.', ':']))
+            terminal_name(suffix.trim_start_matches(['.', ':'])).to_owned()
         } else if suffix.is_empty() {
             alias.imported.clone()
         } else {
-            terminal_name(suffix)
+            terminal_name(suffix).to_owned()
         }
     });
-    let retained_limit = limits.max_candidates.saturating_add(1);
-    let mut best_score = None;
-    let mut candidates = Vec::with_capacity(retained_limit);
-    let mut candidates_truncated = false;
-    for node in targets.candidates(&expanded, &last, alias_export.as_deref()) {
-        let qualified = node.string("qualified_name");
-        let name = node
-            .attributes
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| node.label());
-        let normalized_name = normalize_reference(name);
-        let normalized_qualified = normalize_reference(&qualified);
-        let same_source = node
-            .attributes
-            .get("source_file")
-            .and_then(Value::as_str)
-            .is_some_and(|candidate| portable_path(candidate) == portable_path(source_file));
-        let (score, reason) = if node.id == expanded {
-            (100_u8, "exact stable ID")
-        } else if alias
-            .is_some_and(|(suffix, alias)| import_alias_matches(node, source_file, suffix, alias))
-        {
-            (98, "source-module import/export alias")
-        } else if owner.as_deref().is_some_and(|owner| {
-            terminal_name(&normalized_name) == last && targets.has_matching_owner(node, owner)
-        }) {
-            (97, "owner-qualified member")
-        } else if normalized_qualified == expanded {
-            (95, "exact qualified name")
-        } else if scoped
-            .iter()
-            .any(|scope| normalize_reference(scope) == normalized_qualified)
-        {
-            (90, "declaring-scope qualified name")
-        } else if expanded != reference && normalized_qualified == expanded {
-            (85, "import/export alias")
-        } else if same_source
-            && (terminal_name(&normalized_qualified) == last
-                || normalize_reference(&normalized_name) == last)
-        {
-            (90, "same-source route target")
-        } else if terminal_name(&normalized_qualified) == last
-            || normalize_reference(&normalized_name) == last
-        {
-            (70, "unique terminal name")
-        } else {
-            continue;
-        };
-        match best_score {
-            None => {
-                best_score = Some(score);
-                candidates.push((score, node, reason));
-            }
-            Some(best) if score > best => {
-                best_score = Some(score);
-                candidates.clear();
-                candidates.push((score, node, reason));
-                candidates_truncated = false;
-            }
-            Some(best) if score == best && candidates.len() < retained_limit => {
-                candidates.push((score, node, reason));
-            }
-            Some(best) if score == best => candidates_truncated = true,
-            Some(_) => {}
-        }
+    let families = [TargetFamily::Route];
+    let max = limits.max_candidates;
+    let (mut positions, mut candidates_truncated) = targets.by_id(&expanded, &families, max);
+    let mut score = 100_u8;
+    let mut reason = "exact stable ID";
+    if positions.is_empty()
+        && let Some((_, alias)) = alias
+        && let Some(export) = alias_export.as_deref()
+        && alias.module.starts_with('.')
+    {
+        (positions, candidates_truncated) =
+            targets.by_module_terminal(source_file, &alias.module, export, &families, max);
+        score = 98;
+        reason = "source-module import/export alias";
     }
-    if best_score.is_none() {
+    if positions.is_empty()
+        && let Some(owner) = owner.as_deref()
+    {
+        (positions, candidates_truncated) = targets.by_owner_terminal(owner, &last, &families, max);
+        score = 97;
+        reason = "owner-qualified member";
+    }
+    if positions.is_empty() {
+        (positions, candidates_truncated) =
+            targets.by_names(std::slice::from_ref(&expanded), &families, max);
+        score = 95;
+        reason = "exact qualified name";
+    }
+    if positions.is_empty() {
+        let scoped = scoped
+            .iter()
+            .map(|value| normalize_reference(value))
+            .collect::<Vec<_>>();
+        (positions, candidates_truncated) = targets.by_names(&scoped, &families, max);
+        score = 90;
+        reason = "declaring-scope qualified name";
+    }
+    if positions.is_empty() {
+        (positions, candidates_truncated) =
+            targets.by_source_terminal(source_file, &last, &families, max);
+        score = 90;
+        reason = "same-source route target";
+    }
+    if positions.is_empty() {
+        (positions, candidates_truncated) = targets.by_terminal(&last, &families, max);
+        score = 70;
+        reason = "unique terminal name";
+    }
+    if positions.is_empty() {
         return Ok(Vec::new());
     }
-    let mut candidates = candidates
+    let mut candidates = positions
         .into_iter()
-        .map(|(score, node, reason)| ResolutionCandidate {
-            node_id: node.id.clone(),
+        .map(|position| ResolutionCandidate {
+            node_id: targets.targets[position].node.id.clone(),
             reason: reason.to_owned(),
             confidence: if score >= 85 {
                 EvidenceConfidence::Exact
@@ -338,153 +328,18 @@ fn resolve_reference(
                 EvidenceConfidence::Ambiguous
             },
             score: Some(f64::from(score) / 100.0),
-            anchor: node_anchor(node),
+            anchor: node_anchor(targets.targets[position].node),
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.node_id.cmp(&right.node_id));
     candidates.dedup_by(|left, right| left.node_id == right.node_id);
-    if candidates.len() > limits.max_candidates || candidates_truncated {
-        candidates.truncate(limits.max_candidates);
+    if candidates_truncated {
         for candidate in &mut candidates {
             candidate.confidence = EvidenceConfidence::Ambiguous;
             candidate.reason.push_str(" (candidate set truncated)");
         }
     }
     Ok(candidates)
-}
-
-struct RouteTargetIndex<'a> {
-    nodes: Vec<&'a RawNodeRecord>,
-    parents: HashMap<&'a str, Vec<&'a RawNodeRecord>>,
-    by_id: HashMap<&'a str, Vec<usize>>,
-    by_name: HashMap<String, Vec<usize>>,
-    by_terminal: HashMap<String, Vec<usize>>,
-}
-
-impl<'a> RouteTargetIndex<'a> {
-    fn new(extraction: &'a Extraction) -> Self {
-        let nodes = extraction
-            .nodes
-            .iter()
-            .filter(|node| is_route_target(node))
-            .collect::<Vec<_>>();
-        let by_id = extraction
-            .nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node))
-            .collect::<HashMap<_, _>>();
-        let mut parents = HashMap::<&str, Vec<&RawNodeRecord>>::new();
-        for edge in &extraction.edges {
-            if !matches!(
-                edge.attributes.get("relation").and_then(Value::as_str),
-                Some("contains" | "method" | "defines")
-            ) {
-                continue;
-            }
-            if let Some(parent) = by_id.get(edge.source.as_str()) {
-                parents
-                    .entry(edge.target.as_str())
-                    .or_default()
-                    .push(parent);
-            }
-        }
-        let mut index = Self {
-            nodes,
-            parents,
-            by_id: HashMap::new(),
-            by_name: HashMap::new(),
-            by_terminal: HashMap::new(),
-        };
-        for (position, node) in index.nodes.iter().enumerate() {
-            index
-                .by_id
-                .entry(node.id.as_str())
-                .or_default()
-                .push(position);
-            let names = [
-                node.string("qualified_name"),
-                node.string("name"),
-                node.label().to_owned(),
-                node.attributes
-                    .get("export_name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            ];
-            for name in names {
-                if name.is_empty() {
-                    continue;
-                }
-                let normalized = normalize_reference(&name);
-                index
-                    .by_name
-                    .entry(normalized.clone())
-                    .or_default()
-                    .push(position);
-                index
-                    .by_terminal
-                    .entry(terminal_name(&normalized))
-                    .or_default()
-                    .push(position);
-            }
-        }
-        for positions in index
-            .by_id
-            .values_mut()
-            .chain(index.by_name.values_mut())
-            .chain(index.by_terminal.values_mut())
-        {
-            positions.sort_unstable();
-            positions.dedup();
-        }
-        index
-    }
-
-    fn has_matching_owner(&self, node: &RawNodeRecord, expected: &str) -> bool {
-        let expected_terminal = terminal_name(expected);
-        self.parents
-            .get(node.id.as_str())
-            .into_iter()
-            .flatten()
-            .any(|parent| {
-                [
-                    parent.string("qualified_name"),
-                    parent.string("name"),
-                    parent.label().to_owned(),
-                ]
-                .into_iter()
-                .map(|name| normalize_reference(&name))
-                .any(|name| name == expected || terminal_name(&name) == expected_terminal)
-            })
-    }
-
-    fn candidates(
-        &self,
-        expanded: &str,
-        terminal: &str,
-        alias_export: Option<&str>,
-    ) -> Vec<&'a RawNodeRecord> {
-        let mut positions = BTreeSet::<usize>::new();
-        if let Some(candidates) = self.by_id.get(expanded) {
-            positions.extend(candidates.iter().copied());
-        }
-        if let Some(candidates) = self.by_name.get(expanded) {
-            positions.extend(candidates.iter().copied());
-        }
-        if let Some(candidates) = self.by_terminal.get(terminal) {
-            positions.extend(candidates.iter().copied());
-        }
-        if let Some(alias_export) = alias_export {
-            let alias_export = normalize_reference(alias_export);
-            if let Some(candidates) = self.by_name.get(&alias_export) {
-                positions.extend(candidates.iter().copied());
-            }
-        }
-        positions
-            .into_iter()
-            .map(|position| self.nodes[position])
-            .collect()
-    }
 }
 
 fn canonical_framework_reference(framework: &str, reference: &str) -> String {
@@ -551,110 +406,8 @@ fn expand_alias(reference: &str, alias: Option<&super::typescript::ImportAlias>)
     )
 }
 
-fn import_alias_matches(
-    node: &RawNodeRecord,
-    declaring_source: &str,
-    suffix: &str,
-    alias: &super::typescript::ImportAlias,
-) -> bool {
-    let expected_export = if alias.imported == "*" {
-        terminal_name(suffix.trim_start_matches(['.', ':']))
-    } else if suffix.is_empty() {
-        alias.imported.clone()
-    } else {
-        terminal_name(suffix)
-    };
-    if expected_export.is_empty() {
-        return false;
-    }
-    let expected_export = normalize_reference(&expected_export);
-    let export_matches = if alias.imported == "default" && suffix.is_empty() {
-        node.attributes.get("export_name").and_then(Value::as_str) == Some("default")
-    } else {
-        [
-            node.string("qualified_name"),
-            node.string("name"),
-            node.label().to_owned(),
-        ]
-        .into_iter()
-        .map(|name| normalize_reference(&name))
-        .any(|name| terminal_name(&name) == expected_export)
-    };
-    export_matches
-        && node
-            .attributes
-            .get("source_file")
-            .and_then(Value::as_str)
-            .is_some_and(|source| module_matches(declaring_source, &alias.module, source))
-}
-
-fn module_matches(declaring_source: &str, module: &str, candidate_source: &str) -> bool {
-    if !module.starts_with('.') {
-        return false;
-    }
-    let parent = Path::new(declaring_source)
-        .parent()
-        .unwrap_or_else(|| Path::new(""));
-    let expected = strip_module_extension(&lexical_path(&parent.join(module)));
-    let candidate = strip_module_extension(&lexical_path(Path::new(candidate_source)));
-    candidate == expected || candidate == format!("{expected}/index")
-}
-
-fn lexical_path(path: &Path) -> String {
-    let mut output = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                output.pop();
-            }
-            Component::Normal(value) => output.push(value),
-            Component::RootDir | Component::Prefix(_) => output.push(component.as_os_str()),
-        }
-    }
-    portable_path(&output.to_string_lossy())
-}
-
-fn strip_module_extension(path: &str) -> String {
-    for extension in [".tsx", ".ts", ".jsx", ".js", ".mts", ".mjs", ".vue"] {
-        if let Some(path) = path.strip_suffix(extension) {
-            return path.to_owned();
-        }
-    }
-    path.to_owned()
-}
-
 fn portable_path(path: &str) -> String {
     path.replace('\\', "/")
-}
-
-fn is_route_target(node: &RawNodeRecord) -> bool {
-    matches!(
-        node.attributes
-            .get("symbol_kind")
-            .or_else(|| node.attributes.get("type"))
-            .and_then(Value::as_str),
-        Some("function" | "method" | "class" | "component")
-    )
-}
-
-fn normalize_reference(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches(['"', '\'', '`'])
-        .trim_end_matches(".as_view()")
-        .trim_end_matches("()")
-        .replace('\\', ".")
-        .replace("::", ".")
-}
-
-fn terminal_name(value: &str) -> String {
-    value
-        .rsplit(['.', ':', '#'])
-        .next()
-        .unwrap_or(value)
-        .trim_end_matches("()")
-        .to_owned()
 }
 
 fn resolved_stage(

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::HashSet;
 
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawEdgeRecord,
@@ -8,6 +8,7 @@ use compass_model::provenance::{ResolutionCandidate, ResolutionState, SourceAnch
 use serde_json::{Map, Value, json};
 
 use super::FrameworkResolutionError;
+use super::target_index::{FrameworkTargetIndex, TargetFamily, normalize_reference, terminal_name};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedDomainFact {
@@ -21,6 +22,15 @@ pub fn resolve_domains(
     extraction: &Extraction,
     limits: FrameworkLimits,
 ) -> Result<Vec<ResolvedDomainFact>, FrameworkResolutionError> {
+    let targets = FrameworkTargetIndex::new(extraction);
+    resolve_domains_with_targets(extraction, limits, &targets)
+}
+
+pub(super) fn resolve_domains_with_targets(
+    extraction: &Extraction,
+    limits: FrameworkLimits,
+    targets: &FrameworkTargetIndex<'_>,
+) -> Result<Vec<ResolvedDomainFact>, FrameworkResolutionError> {
     let facts = extraction
         .framework_facts
         .iter()
@@ -30,10 +40,9 @@ pub fn resolve_domains(
         })
         .collect::<Vec<_>>();
     limits.check_facts(facts.len())?;
-    let targets = DomainTargetIndex::new(extraction);
     facts
         .into_iter()
-        .map(|fact| resolve_one(fact, &targets, limits))
+        .map(|fact| resolve_one(fact, targets, limits))
         .collect()
 }
 
@@ -189,7 +198,7 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
 
 fn resolve_one(
     fact: &RawDomainFact,
-    targets: &DomainTargetIndex<'_>,
+    targets: &FrameworkTargetIndex<'_>,
     limits: FrameworkLimits,
 ) -> Result<ResolvedDomainFact, FrameworkResolutionError> {
     if fact.kind == "route_middleware" {
@@ -270,7 +279,7 @@ enum TargetKind {
 }
 
 fn resolve_reference(
-    targets: &DomainTargetIndex<'_>,
+    targets: &FrameworkTargetIndex<'_>,
     reference: &str,
     target_kind: TargetKind,
     declaring_source: &str,
@@ -279,58 +288,51 @@ fn resolve_reference(
     if reference.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let expected = normalize(reference);
-    let expected_terminal = terminal(&expected);
+    let expected = normalize_reference(reference);
+    let expected_terminal = terminal_name(&expected);
     let owner = expected.rsplit_once('.').map(|(owner, _)| owner);
-    let mut matches = Vec::new();
-    for index in targets.candidates(&expected, expected_terminal) {
-        let target = &targets.nodes[index];
-        let node = target.node;
-        if !accepts(node, target_kind) {
-            continue;
-        }
-        let same_source = target.source == declaring_source.replace('\\', "/");
-        let owner_match = owner.is_some_and(|owner| {
-            target
-                .owners
-                .iter()
-                .any(|name| name == owner || terminal(name) == terminal(owner))
-        });
-        let score = if node.id == expected || target.normalized[0] == expected {
-            100_u8
-        } else if owner_match
-            && target
-                .normalized
-                .iter()
-                .any(|name| terminal(name) == expected_terminal)
-        {
-            97
-        } else if same_source
-            && target
-                .normalized
-                .iter()
-                .any(|name| terminal(name) == expected_terminal)
-        {
-            90
-        } else if target
-            .normalized
-            .iter()
-            .any(|name| terminal(name) == expected_terminal)
-        {
-            70
-        } else {
-            continue;
-        };
-        matches.push((score, node));
+    let families = [match target_kind {
+        TargetKind::Callable => TargetFamily::Callable,
+        TargetKind::Type => TargetFamily::Type,
+        TargetKind::DatabaseTable => TargetFamily::DatabaseTable,
+    }];
+    let max = limits.max_candidates;
+    let (mut positions, mut truncated) = targets.by_id(&expected, &families, max);
+    let mut score = 100_u8;
+    if positions.is_empty() {
+        (positions, truncated) = targets.by_names(std::slice::from_ref(&expected), &families, max);
     }
-    let Some(best) = matches.iter().map(|(score, _)| *score).max() else {
+    if positions.is_empty()
+        && let Some(owner) = owner
+    {
+        (positions, truncated) =
+            targets.by_owner_terminal(owner, expected_terminal, &families, max);
+        score = 97;
+    }
+    if positions.is_empty() {
+        (positions, truncated) =
+            targets.by_source_terminal(declaring_source, expected_terminal, &families, max);
+        score = 90;
+    }
+    if positions.is_empty() {
+        (positions, truncated) = targets.by_terminal(expected_terminal, &families, max);
+        score = 70;
+    }
+    if positions.is_empty() {
         return Ok(Vec::new());
-    };
-    let mut candidates = matches
+    }
+    if truncated {
+        return Err(FrameworkLimitError {
+            limit: "max_candidates",
+            maximum: limits.max_candidates,
+            observed: limits.max_candidates.saturating_add(1),
+        }
+        .into());
+    }
+    let mut candidates = positions
         .into_iter()
-        .filter(|(score, _)| *score == best)
-        .map(|(score, node)| ResolutionCandidate {
-            node_id: node.id.clone(),
+        .map(|position| ResolutionCandidate {
+            node_id: targets.targets[position].node.id.clone(),
             reason: if score >= 90 {
                 "exact domain reference".to_owned()
             } else {
@@ -342,149 +344,12 @@ fn resolve_reference(
                 compass_model::provenance::EvidenceConfidence::Ambiguous
             },
             score: Some(f64::from(score) / 100.0),
-            anchor: node_anchor(node),
+            anchor: node_anchor(targets.targets[position].node),
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.node_id.cmp(&right.node_id));
     candidates.dedup_by(|left, right| left.node_id == right.node_id);
-    if candidates.len() > limits.max_candidates {
-        return Err(FrameworkLimitError {
-            limit: "max_candidates",
-            maximum: limits.max_candidates,
-            observed: candidates.len(),
-        }
-        .into());
-    }
     Ok(candidates)
-}
-
-struct IndexedDomainTarget<'a> {
-    node: &'a RawNodeRecord,
-    normalized: [String; 3],
-    source: String,
-    owners: Vec<String>,
-}
-
-struct DomainTargetIndex<'a> {
-    nodes: Vec<IndexedDomainTarget<'a>>,
-    by_id: HashMap<&'a str, Vec<usize>>,
-    by_name: HashMap<String, Vec<usize>>,
-    by_terminal: HashMap<String, Vec<usize>>,
-}
-
-impl<'a> DomainTargetIndex<'a> {
-    fn new(extraction: &'a Extraction) -> Self {
-        let raw_by_id = extraction
-            .nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node))
-            .collect::<HashMap<_, _>>();
-        let mut owners = HashMap::<&str, Vec<String>>::new();
-        for edge in &extraction.edges {
-            if matches!(
-                edge.attributes.get("relation").and_then(Value::as_str),
-                Some("contains" | "method" | "defines")
-            ) && let Some(parent) = raw_by_id.get(edge.source.as_str())
-            {
-                owners.entry(edge.target.as_str()).or_default().extend(
-                    [
-                        parent.string("qualified_name"),
-                        parent.string("name"),
-                        parent.label().to_owned(),
-                    ]
-                    .into_iter()
-                    .map(|name| normalize(&name)),
-                );
-            }
-        }
-        for values in owners.values_mut() {
-            values.sort();
-            values.dedup();
-        }
-
-        let mut index = Self {
-            nodes: Vec::with_capacity(extraction.nodes.len()),
-            by_id: HashMap::new(),
-            by_name: HashMap::new(),
-            by_terminal: HashMap::new(),
-        };
-        for node in &extraction.nodes {
-            let normalized = [
-                normalize(&node.string("qualified_name")),
-                normalize(&node.string("name")),
-                normalize(node.label()),
-            ];
-            let position = index.nodes.len();
-            index
-                .by_id
-                .entry(node.id.as_str())
-                .or_default()
-                .push(position);
-            for name in &normalized {
-                index
-                    .by_name
-                    .entry(name.clone())
-                    .or_default()
-                    .push(position);
-                index
-                    .by_terminal
-                    .entry(terminal(name).to_owned())
-                    .or_default()
-                    .push(position);
-            }
-            index.nodes.push(IndexedDomainTarget {
-                node,
-                normalized,
-                source: node
-                    .attributes
-                    .get("source_file")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .replace('\\', "/"),
-                owners: owners.remove(node.id.as_str()).unwrap_or_default(),
-            });
-        }
-        for positions in index
-            .by_id
-            .values_mut()
-            .chain(index.by_name.values_mut())
-            .chain(index.by_terminal.values_mut())
-        {
-            positions.sort_unstable();
-            positions.dedup();
-        }
-        index
-    }
-
-    fn candidates(&self, expected: &str, expected_terminal: &str) -> Vec<usize> {
-        let mut candidates = BTreeSet::new();
-        if let Some(positions) = self.by_id.get(expected) {
-            candidates.extend(positions);
-        }
-        if let Some(positions) = self.by_name.get(expected) {
-            candidates.extend(positions);
-        }
-        if let Some(positions) = self.by_terminal.get(expected_terminal) {
-            candidates.extend(positions);
-        }
-        candidates.into_iter().collect()
-    }
-}
-
-fn accepts(node: &RawNodeRecord, target: TargetKind) -> bool {
-    let kind = node
-        .attributes
-        .get("symbol_kind")
-        .or_else(|| node.attributes.get("type"))
-        .and_then(Value::as_str);
-    match target {
-        TargetKind::Callable => matches!(kind, Some("function" | "method")),
-        TargetKind::Type => matches!(
-            kind,
-            Some("class" | "struct" | "interface" | "trait" | "protocol" | "enum")
-        ),
-        TargetKind::DatabaseTable => matches!(kind, Some("database_table" | "table")),
-    }
 }
 
 fn domain_node_kind(kind: &str) -> Option<&'static str> {
@@ -731,19 +596,6 @@ fn node_anchor(node: &RawNodeRecord) -> Option<SourceAnchor> {
         end_line: line,
         end_column: 0,
     })
-}
-
-fn normalize(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches(['&', '*'])
-        .trim_end_matches("()")
-        .replace(['\\', '#'], ".")
-        .replace("::", ".")
-}
-
-fn terminal(value: &str) -> &str {
-    value.rsplit('.').next().unwrap_or(value)
 }
 
 fn single_state(candidates: &[ResolutionCandidate]) -> ResolutionState {

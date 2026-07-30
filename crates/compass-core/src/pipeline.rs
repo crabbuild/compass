@@ -915,14 +915,7 @@ fn build_graph_inner(
         })
         .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     profile_internal("portable AST ID remapping", &mut internal_started);
-    let read_source = |path: &PathBuf| {
-        fs::read(path).ok().map(|bytes| {
-            (
-                path.to_string_lossy().into_owned(),
-                String::from_utf8_lossy(&bytes).into_owned(),
-            )
-        })
-    };
+    let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
         (!fresh_paths.contains(path))
             .then(|| read_source(path))
@@ -3678,6 +3671,19 @@ fn absolutize_from(root: &Path, path: &Path) -> PathBuf {
     }
 }
 
+fn read_source_text_with_limit(path: &Path, max_source_bytes: u64) -> Option<(String, String)> {
+    fs::metadata(path)
+        .ok()
+        .filter(|metadata| metadata.is_file() && metadata.len() <= max_source_bytes)
+        .and_then(|_| fs::read(path).ok())
+        .map(|bytes| {
+            (
+                path.to_string_lossy().into_owned(),
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -3695,6 +3701,22 @@ mod tests {
         assert!(cache_reuse_enabled(true, true));
         assert!(prior_published_graph_input_enabled(false));
         assert!(!prior_published_graph_input_enabled(true));
+    }
+
+    #[test]
+    fn resolver_source_text_enforces_the_pre_read_byte_limit() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("oversized.py");
+        fs::write(&source, b"0123456789")?;
+
+        assert!(read_source_text_with_limit(&source, 9).is_none());
+        assert_eq!(
+            read_source_text_with_limit(&source, 10)
+                .map(|(_, body)| body)
+                .as_deref(),
+            Some("0123456789")
+        );
+        Ok(())
     }
 
     #[test]

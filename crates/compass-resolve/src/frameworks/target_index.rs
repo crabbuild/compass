@@ -1,0 +1,356 @@
+use std::collections::{HashMap, HashSet};
+
+use compass_languages::{Extraction, RawNodeRecord};
+use serde_json::Value;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) enum TargetFamily {
+    Route,
+    Callable,
+    Type,
+    DatabaseTable,
+}
+
+pub(super) struct IndexedTarget<'a> {
+    pub node: &'a RawNodeRecord,
+}
+
+pub(super) struct FrameworkTargetIndex<'a> {
+    pub targets: Vec<IndexedTarget<'a>>,
+    by_id: HashMap<(TargetFamily, &'a str), Vec<usize>>,
+    by_qualified: HashMap<(TargetFamily, String), Vec<usize>>,
+    by_terminal: HashMap<(TargetFamily, String), Vec<usize>>,
+    by_source_terminal: HashMap<(TargetFamily, String, String), Vec<usize>>,
+    by_owner_terminal: HashMap<(TargetFamily, String, String), Vec<usize>>,
+    by_module_terminal: HashMap<(TargetFamily, String, String), Vec<usize>>,
+}
+
+impl<'a> FrameworkTargetIndex<'a> {
+    pub fn new(extraction: &'a Extraction) -> Self {
+        let raw_by_id = extraction
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect::<HashMap<_, _>>();
+        let mut owners = HashMap::<&str, Vec<String>>::new();
+        for edge in &extraction.edges {
+            if !matches!(
+                edge.attributes.get("relation").and_then(Value::as_str),
+                Some("contains" | "method" | "defines")
+            ) {
+                continue;
+            }
+            if let Some(parent) = raw_by_id.get(edge.source.as_str()) {
+                owners.entry(edge.target.as_str()).or_default().extend(
+                    [
+                        parent.string("qualified_name"),
+                        parent.string("name"),
+                        parent.label().to_owned(),
+                    ]
+                    .into_iter()
+                    .map(|name| normalize_reference(&name))
+                    .filter(|name| !name.is_empty()),
+                );
+            }
+        }
+        for values in owners.values_mut() {
+            values.sort();
+            values.dedup();
+        }
+
+        let mut index = Self {
+            targets: Vec::with_capacity(extraction.nodes.len()),
+            by_id: HashMap::new(),
+            by_qualified: HashMap::new(),
+            by_terminal: HashMap::new(),
+            by_source_terminal: HashMap::new(),
+            by_owner_terminal: HashMap::new(),
+            by_module_terminal: HashMap::new(),
+        };
+        for node in &extraction.nodes {
+            let qualified = normalize_reference(&node.string("qualified_name"));
+            let source = node
+                .attributes
+                .get("source_file")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .replace('\\', "/");
+            let mut normalized = [
+                node.string("qualified_name"),
+                node.string("name"),
+                node.label().to_owned(),
+                node.attributes
+                    .get("export_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ]
+            .into_iter()
+            .map(|name| normalize_reference(&name))
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>();
+            normalized.sort();
+            normalized.dedup();
+            let target_owners = owners.remove(node.id.as_str()).unwrap_or_default();
+            let position = index.targets.len();
+            let families = target_families(node);
+            for family in families {
+                index
+                    .by_id
+                    .entry((family, node.id.as_str()))
+                    .or_default()
+                    .push(position);
+                if !qualified.is_empty() {
+                    index
+                        .by_qualified
+                        .entry((family, qualified.clone()))
+                        .or_default()
+                        .push(position);
+                }
+                for name in &normalized {
+                    let terminal = terminal_name(name).to_owned();
+                    index
+                        .by_terminal
+                        .entry((family, terminal.clone()))
+                        .or_default()
+                        .push(position);
+                    if !source.is_empty() {
+                        index
+                            .by_source_terminal
+                            .entry((family, source.clone(), terminal.clone()))
+                            .or_default()
+                            .push(position);
+                        index
+                            .by_module_terminal
+                            .entry((family, module_key(&source), terminal.clone()))
+                            .or_default()
+                            .push(position);
+                    }
+                    for owner in &target_owners {
+                        index
+                            .by_owner_terminal
+                            .entry((family, terminal_name(owner).to_owned(), terminal.clone()))
+                            .or_default()
+                            .push(position);
+                    }
+                }
+            }
+            index.targets.push(IndexedTarget { node });
+        }
+        for positions in index
+            .by_id
+            .values_mut()
+            .chain(index.by_qualified.values_mut())
+            .chain(index.by_terminal.values_mut())
+            .chain(index.by_source_terminal.values_mut())
+            .chain(index.by_owner_terminal.values_mut())
+            .chain(index.by_module_terminal.values_mut())
+        {
+            positions.sort_unstable();
+            positions.dedup();
+        }
+        index
+    }
+
+    pub fn by_id(
+        &self,
+        value: &str,
+        families: &[TargetFamily],
+        limit: usize,
+    ) -> (Vec<usize>, bool) {
+        bounded_union(
+            families
+                .iter()
+                .filter_map(|family| self.by_id.get(&(*family, value)).map(Vec::as_slice)),
+            limit,
+        )
+    }
+
+    pub fn by_names(
+        &self,
+        values: &[String],
+        families: &[TargetFamily],
+        limit: usize,
+    ) -> (Vec<usize>, bool) {
+        bounded_union(
+            values.iter().flat_map(|value| {
+                families.iter().filter_map(|family| {
+                    self.by_qualified
+                        .get(&(*family, value.clone()))
+                        .map(Vec::as_slice)
+                })
+            }),
+            limit,
+        )
+    }
+
+    pub fn by_terminal(
+        &self,
+        value: &str,
+        families: &[TargetFamily],
+        limit: usize,
+    ) -> (Vec<usize>, bool) {
+        bounded_union(
+            families.iter().filter_map(|family| {
+                self.by_terminal
+                    .get(&(*family, value.to_owned()))
+                    .map(Vec::as_slice)
+            }),
+            limit,
+        )
+    }
+
+    pub fn by_source_terminal(
+        &self,
+        source: &str,
+        terminal: &str,
+        families: &[TargetFamily],
+        limit: usize,
+    ) -> (Vec<usize>, bool) {
+        let source = source.replace('\\', "/");
+        bounded_union(
+            families.iter().filter_map(|family| {
+                self.by_source_terminal
+                    .get(&(*family, source.clone(), terminal.to_owned()))
+                    .map(Vec::as_slice)
+            }),
+            limit,
+        )
+    }
+
+    pub fn by_owner_terminal(
+        &self,
+        owner: &str,
+        terminal: &str,
+        families: &[TargetFamily],
+        limit: usize,
+    ) -> (Vec<usize>, bool) {
+        let owner = terminal_name(owner).to_owned();
+        bounded_union(
+            families.iter().filter_map(|family| {
+                self.by_owner_terminal
+                    .get(&(*family, owner.clone(), terminal.to_owned()))
+                    .map(Vec::as_slice)
+            }),
+            limit,
+        )
+    }
+
+    pub fn by_module_terminal(
+        &self,
+        declaring_source: &str,
+        module: &str,
+        terminal: &str,
+        families: &[TargetFamily],
+        limit: usize,
+    ) -> (Vec<usize>, bool) {
+        let parent = std::path::Path::new(declaring_source)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""));
+        let module = module_key(&lexical_path(&parent.join(module)));
+        bounded_union(
+            families.iter().filter_map(|family| {
+                self.by_module_terminal
+                    .get(&(*family, module.clone(), terminal.to_owned()))
+                    .map(Vec::as_slice)
+            }),
+            limit,
+        )
+    }
+}
+
+fn bounded_union<'a>(
+    buckets: impl Iterator<Item = &'a [usize]>,
+    limit: usize,
+) -> (Vec<usize>, bool) {
+    let buckets = buckets.collect::<Vec<_>>();
+    let mut positions = vec![0_usize; buckets.len()];
+    let mut retained = Vec::with_capacity(limit.min(64).saturating_add(1));
+    let mut seen = HashSet::with_capacity(limit.min(64).saturating_add(1));
+    while retained.len() <= limit {
+        let next = buckets
+            .iter()
+            .enumerate()
+            .filter_map(|(bucket, values)| {
+                values
+                    .get(positions[bucket])
+                    .copied()
+                    .map(|value| (bucket, value))
+            })
+            .min_by_key(|(_, value)| *value);
+        let Some((bucket, value)) = next else {
+            break;
+        };
+        positions[bucket] += 1;
+        if seen.insert(value) {
+            retained.push(value);
+        }
+    }
+    let truncated = retained.len() > limit;
+    if truncated {
+        retained.truncate(limit);
+    }
+    (retained, truncated)
+}
+
+fn target_families(node: &RawNodeRecord) -> Vec<TargetFamily> {
+    let kind = node
+        .attributes
+        .get("symbol_kind")
+        .or_else(|| node.attributes.get("type"))
+        .and_then(Value::as_str);
+    match kind {
+        Some("function" | "method") => vec![TargetFamily::Route, TargetFamily::Callable],
+        Some("class") => vec![TargetFamily::Route, TargetFamily::Type],
+        Some("component") => vec![TargetFamily::Route],
+        Some("struct" | "interface" | "trait" | "protocol" | "enum") => {
+            vec![TargetFamily::Type]
+        }
+        Some("database_table" | "table") => vec![TargetFamily::DatabaseTable],
+        _ => Vec::new(),
+    }
+}
+
+pub(super) fn normalize_reference(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(['"', '\'', '`'])
+        .trim_start_matches(['&', '*'])
+        .trim_end_matches(".as_view()")
+        .trim_end_matches("()")
+        .replace(['\\', '#'], ".")
+        .replace("::", ".")
+}
+
+pub(super) fn terminal_name(value: &str) -> &str {
+    value.rsplit(['.', ':', '#']).next().unwrap_or(value)
+}
+
+fn module_key(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let path = [
+        ".tsx", ".ts", ".jsx", ".js", ".mts", ".mjs", ".vue", ".py", ".rb", ".php", ".java", ".cs",
+        ".go", ".rs", ".swift",
+    ]
+    .into_iter()
+    .find_map(|extension| path.strip_suffix(extension))
+    .unwrap_or(&path);
+    path.strip_suffix("/index").unwrap_or(path).to_owned()
+}
+
+fn lexical_path(path: &std::path::Path) -> String {
+    let mut output = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                output.pop();
+            }
+            std::path::Component::Normal(value) => output.push(value),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                output.push(component.as_os_str());
+            }
+        }
+    }
+    output.to_string_lossy().replace('\\', "/")
+}

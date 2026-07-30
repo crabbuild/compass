@@ -8,10 +8,10 @@ use compass_model::provenance::ResolutionState;
 use compass_resolve::frameworks::{resolve_domains, resolve_routes};
 use serde_json::{Map, Value};
 
-const TARGETS: usize = 20_000;
-const ROUTES: usize = 2_000;
-const DOMAIN_FACTS: usize = 2_000;
-const RESOLUTION_CEILING: Duration = Duration::from_secs(5);
+const TARGETS: usize = 100_000;
+const ROUTES: usize = 50_000;
+const DOMAIN_FACTS: usize = 50_000;
+const RESOLUTION_CEILING: Duration = Duration::from_secs(30);
 
 #[test]
 fn indexed_framework_resolution_stays_within_enterprise_ceiling()
@@ -53,6 +53,13 @@ fn indexed_framework_resolution_stays_within_enterprise_ceiling()
     assert!(
         elapsed < RESOLUTION_CEILING,
         "indexed framework resolution took {elapsed:?}, exceeding {RESOLUTION_CEILING:?}"
+    );
+    println!(
+        "{{\"targets\":{TARGETS},\"facts\":{},\"routes\":{},\"domains\":{},\"elapsedMs\":{}}}",
+        ROUTES + DOMAIN_FACTS,
+        routes.len(),
+        domains.len(),
+        elapsed.as_millis()
     );
     Ok(())
 }

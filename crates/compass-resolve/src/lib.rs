@@ -244,10 +244,13 @@ fn finish_resolution(
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
-    if let Err(error) = frameworks::resolve_and_publish_framework_routes(
-        &mut merged,
-        compass_languages::FrameworkLimits::default(),
-    ) {
+    let (routes, domains) =
+        frameworks::resolve_framework_facts(&merged, compass_languages::FrameworkLimits::default());
+    let route_result = routes.and_then(|routes| {
+        frameworks::publish_resolved_routes(&mut merged, &routes)?;
+        Ok(routes)
+    });
+    if let Err(error) = route_result {
         if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
             eprintln!("[compass internal] framework route resolution failed: {error}");
         }
@@ -256,13 +259,13 @@ fn finish_resolution(
             .get_or_insert_with(|| format!("framework resolution failed: {error}"));
     }
     profile_internal("resolver framework routes", &mut profile_started);
-    if let Err(error) = frameworks::resolve_and_publish_framework_domains(
-        &mut merged,
-        compass_languages::FrameworkLimits::default(),
-    ) {
-        merged
-            .error
-            .get_or_insert_with(|| format!("framework domain resolution failed: {error}"));
+    match domains {
+        Ok(domains) => frameworks::publish_resolved_domains(&mut merged, &domains),
+        Err(error) => {
+            merged
+                .error
+                .get_or_insert_with(|| format!("framework domain resolution failed: {error}"));
+        }
     }
     profile_internal("resolver framework domains", &mut profile_started);
     merged
