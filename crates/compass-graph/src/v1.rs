@@ -2593,16 +2593,45 @@ fn normalize_node(
         })
         .transpose()?
         .unwrap_or_default();
-    let mut evidence = vec![normalize_provenance(
-        &raw.attributes,
-        source.clone().or_else(|| external_wiring_site.clone()),
-        &raw.id,
-        root,
-        external_wiring_site
-            .as_ref()
-            .map(|_| "external-symbol-placeholder"),
-        external_wiring_site.is_some(),
-    )?];
+    let primary_evidence = if kind == NodeKind::File
+        && source.as_ref().is_some_and(|anchor| {
+            anchor.start_byte == anchor.end_byte
+                && file_facts
+                    .get(&anchor.file)
+                    .is_some_and(|file| file.byte_size == 0)
+        }) {
+        let provenance = Provenance {
+            origin: EvidenceOrigin::Convention,
+            extractor: optional_string(&raw.attributes, "extractor").unwrap_or_else(|| {
+                optional_any_string(&raw.attributes, &["language", "lang"]).map_or_else(
+                    || "compass.files.detect".to_owned(),
+                    |language| format!("compass.languages.{language}"),
+                )
+            }),
+            confidence: EvidenceConfidence::Exact,
+            rule: Some("empty-file-inventory".to_owned()),
+            anchors: source.clone().into_iter().collect(),
+            wiring_site: None,
+            score: None,
+            candidates: Vec::new(),
+        };
+        provenance
+            .validate()
+            .map_err(|error| raw_error(&raw.id, &error.to_string()))?;
+        provenance
+    } else {
+        normalize_provenance(
+            &raw.attributes,
+            source.clone().or_else(|| external_wiring_site.clone()),
+            &raw.id,
+            root,
+            external_wiring_site
+                .as_ref()
+                .map(|_| "external-symbol-placeholder"),
+            external_wiring_site.is_some(),
+        )?
+    };
+    let mut evidence = vec![primary_evidence];
     if let Some(coalesced) = raw
         .attributes
         .get(COALESCED_NODE_EVIDENCE_ATTRIBUTE)

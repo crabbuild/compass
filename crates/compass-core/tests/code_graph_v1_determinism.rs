@@ -123,6 +123,58 @@ fn cached_file_symlink_keeps_its_logical_graph_identity() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn empty_python_modules_publish_stable_file_and_import_facts() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("pkg"))?;
+    fs::write(root.join("pkg/__init__.py"), b"")?;
+    fs::write(root.join("pkg/__main__.py"), b"")?;
+    fs::write(root.join("consumer.py"), "import pkg.__main__\n")?;
+
+    let mut options = BuildOptions::new(root);
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+
+    let first = build_local_graph(&options)?;
+    let first_path = first.output_dir.join("graph.json");
+    let first_bytes = fs::read(&first_path)?;
+    let first_graph = GraphDocument::load(&first_path)?;
+    for source_file in ["pkg/__init__.py", "pkg/__main__.py"] {
+        let file_nodes = first_graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::File && node.source_file() == Some(source_file))
+            .collect::<Vec<_>>();
+        assert_eq!(file_nodes.len(), 1);
+        assert!(file_nodes[0].evidence.iter().any(|evidence| {
+            evidence.origin == EvidenceOrigin::Convention
+                && evidence.rule.as_deref() == Some("empty-file-inventory")
+        }));
+    }
+    let main_module = first_graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::File && node.source_file() == Some("pkg/__main__.py"))
+        .ok_or("missing pkg/__main__.py file node")?;
+    assert!(first_graph.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Imports
+            && edge.target == main_module.id
+            && first_graph
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.source && node.source_file() == Some("consumer.py"))
+    }));
+
+    options.force = true;
+    let forced = build_local_graph(&options)?;
+    let forced_bytes = fs::read(forced.output_dir.join("graph.json"))?;
+    assert_eq!(forced_bytes, first_bytes);
+    Ok(())
+}
+
+#[test]
 fn unchanged_clustered_extract_reuses_verified_generation() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
