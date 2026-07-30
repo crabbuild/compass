@@ -83,9 +83,44 @@ describe("ArchitectureMap", () => {
 
     expect(api.getAttribute("transform")).not.toBe(initialTransform);
     expect(window.localStorage.getItem(
-      "compass.architecture.layout.v1:Fixture:production:all"
+      "compass.architecture.layout.v2:Fixture:production:all"
     )).toContain("\"api\"");
     expect(screen.getByRole("button", { name: "Reset subsystem positions" }))
       .not.toBeDisabled();
+  });
+
+  it("starts with key routes and reveals the complete map on demand", () => {
+    const denseOverview: ArchitectureOverview = {
+      ...overview,
+      sections: [
+        overview.sections[0]!,
+        ...Array.from({ length: 18 }, (_, index) => ({
+          ...overview.sections[1]!,
+          id: `storage-${index}`,
+          name: `Storage ${index}`
+        }))
+      ],
+      routes: Array.from({ length: 18 }, (_, index) => ({
+        ...overview.routes[0]!,
+        id: `api→storage-${index}`,
+        targetSection: `storage-${index}`,
+        calls: index + 1
+      }))
+    };
+    render(
+      <ArchitectureMap
+        overview={denseOverview}
+        selection={undefined}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("group", {
+      name: /19 subsystems and 16 of 18 directed routes visible/i
+    })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "All routes" }));
+    expect(screen.getByRole("group", {
+      name: /19 subsystems and 18 directed routes/i
+    })).toBeInTheDocument();
   });
 });

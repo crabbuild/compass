@@ -36,6 +36,10 @@ type DragState = {
   moved: boolean;
 };
 
+type RouteMode = "key" | "complete";
+
+const KEY_ROUTE_LIMIT = 16;
+
 export function ArchitectureMap({
   overview,
   selection,
@@ -46,7 +50,7 @@ export function ArchitectureMap({
   onSelect(selection: Exclude<ArchitectureSelection, undefined>): void;
 }) {
   const storageKey = [
-    "compass.architecture.layout.v1",
+    "compass.architecture.layout.v2",
     overview.provenance.projectName,
     overview.scope,
     overview.evidence
@@ -61,6 +65,7 @@ export function ArchitectureMap({
   );
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [routeMode, setRouteMode] = useState<RouteMode>("key");
   const [draggingId, setDraggingId] = useState<string>();
   const panDrag = useRef<
     { x: number; y: number; panX: number; panY: number; pointerId: number } | undefined
@@ -73,19 +78,31 @@ export function ArchitectureMap({
     setPositions(next);
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    setRouteMode("key");
   }, [storageKey]);
 
+  const keyRouteIds = useMemo(
+    () => selectKeyRoutes(overview.routes, selection),
+    [overview.routes, selection]
+  );
+  const displayedRoutes = useMemo(
+    () => routeMode === "complete"
+      ? layout.routes
+      : layout.routes.filter((route) => keyRouteIds.has(route.id)),
+    [keyRouteIds, layout.routes, routeMode]
+  );
   const connected = useMemo(() => {
     if (selection?.kind !== "section") return new Set<string>();
     return new Set(
-      overview.routes
+      displayedRoutes
         .filter((route) =>
           route.sourceSection === selection.id || route.targetSection === selection.id
         )
         .flatMap((route) => [route.id, route.sourceSection, route.targetSection])
     );
-  }, [overview.routes, selection]);
-  const maximumCalls = Math.max(1, ...overview.routes.map((route) => route.calls));
+  }, [displayedRoutes, selection]);
+  const maximumCalls = Math.max(1, ...displayedRoutes.map((route) => route.calls));
+  const hiddenRouteCount = layout.routes.length - displayedRoutes.length;
   const viewWidth = layout.width / zoom;
   const viewHeight = layout.height / zoom;
   const viewBox = `${(layout.width - viewWidth) / 2 + pan.x} ${
@@ -187,7 +204,27 @@ export function ArchitectureMap({
   };
 
   return (
-    <section className="architecture-map-panel" aria-label="Interactive system map">
+    <section
+      className="architecture-map-panel"
+      aria-label="Interactive system map"
+      data-route-mode={routeMode}
+    >
+      <div className="architecture-route-mode" role="group" aria-label="Route visibility">
+        <button
+          type="button"
+          aria-pressed={routeMode === "key"}
+          onClick={() => setRouteMode("key")}
+        >
+          Key routes
+        </button>
+        <button
+          type="button"
+          aria-pressed={routeMode === "complete"}
+          onClick={() => setRouteMode("complete")}
+        >
+          All routes
+        </button>
+      </div>
       <div className="architecture-map-toolbar" aria-label="Map controls">
         <button
           type="button"
@@ -229,7 +266,11 @@ export function ArchitectureMap({
             className="architecture-map"
             viewBox={viewBox}
             role="group"
-            aria-label={`${layout.nodes.length} subsystems and ${layout.routes.length} directed routes`}
+            aria-label={mapLabel(
+              layout.nodes.length,
+              displayedRoutes.length,
+              layout.routes.length
+            )}
           onPointerDown={(event) => {
             if (event.target !== event.currentTarget) return;
             panDrag.current = {
@@ -320,7 +361,7 @@ export function ArchitectureMap({
           </g>
 
           <g className="architecture-routes">
-            {layout.routes.map((route) => {
+            {displayedRoutes.map((route) => {
               const selected = selection?.kind === "route" && selection.id === route.id;
               const related = selected
                 || selection === undefined
@@ -333,7 +374,9 @@ export function ArchitectureMap({
                     ? "outgoing"
                     : undefined
                 : undefined;
-              const opacity = 0.13 + Math.sqrt(route.calls / maximumCalls) * 0.22;
+              const opacity = routeMode === "key"
+                ? 0.3 + Math.sqrt(route.calls / maximumCalls) * 0.28
+                : 0.1 + Math.sqrt(route.calls / maximumCalls) * 0.2;
               return (
                 <g
                   key={route.id}
@@ -456,6 +499,11 @@ export function ArchitectureMap({
         <span><i data-direction="incoming" /> Incoming</span>
         <span><i data-direction="outgoing" /> Outgoing</span>
         <span><MoveIcon aria-hidden="true" /> Drag cards to arrange</span>
+        {hiddenRouteCount > 0 && (
+          <button type="button" onClick={() => setRouteMode("complete")}>
+            {displayedRoutes.length} of {layout.routes.length} routes · Show all
+          </button>
+        )}
       </div>
       <details className="architecture-map-table">
         <summary>View routes as a table</summary>
@@ -523,4 +571,40 @@ function sectionName(overview: ArchitectureOverview, id: string): string {
 
 function truncate(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+function selectKeyRoutes(
+  routes: readonly ArchitectureOverview["routes"][number][],
+  selection: ArchitectureSelection
+): Set<string> {
+  const strongest = (candidates: readonly ArchitectureOverview["routes"][number][]) =>
+    [...candidates].sort((left, right) =>
+      right.calls - left.calls || left.id.localeCompare(right.id)
+    );
+  const selected = new Set<string>();
+  if (selection?.kind === "route") {
+    selected.add(selection.id);
+  } else if (selection?.kind === "section") {
+    const incoming = strongest(
+      routes.filter((route) => route.targetSection === selection.id)
+    ).slice(0, 4);
+    const outgoing = strongest(
+      routes.filter((route) => route.sourceSection === selection.id)
+    ).slice(0, 4);
+    for (const route of strongest([...incoming, ...outgoing])) {
+      selected.add(route.id);
+    }
+  }
+  for (const route of strongest(routes)) {
+    if (selected.size >= KEY_ROUTE_LIMIT) break;
+    selected.add(route.id);
+  }
+  return selected;
+}
+
+function mapLabel(nodes: number, displayedRoutes: number, totalRoutes: number): string {
+  if (displayedRoutes === totalRoutes) {
+    return `${nodes} subsystems and ${totalRoutes} directed routes`;
+  }
+  return `${nodes} subsystems and ${displayedRoutes} of ${totalRoutes} directed routes visible`;
 }

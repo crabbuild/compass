@@ -5,6 +5,9 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   await expect(page.getByRole("heading", { name: "Fixture" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Architecture subsystems" })).toBeVisible();
   await expect(page.getByText("25 subsystem routes")).toBeVisible();
+  await expect(page.getByText("16 of 25 routes · Show all")).toBeVisible();
+  await expect(page.locator(".architecture-routes > g")).toHaveCount(16);
+  await page.getByRole("button", { name: "All routes" }).click();
   await expect(page.locator(".architecture-routes > g")).toHaveCount(25);
 
   await page.goto("/calls.html");

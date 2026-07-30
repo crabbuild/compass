@@ -53,7 +53,7 @@ describe("layoutArchitecture", () => {
   it("creates aligned flow lanes and rounded orthogonal routes", () => {
     const layout = layoutArchitecture(sections, routes);
     expect(layout.lanes).toHaveLength(2);
-    expect(layout.lanes.map((lane) => lane.label)).toEqual(["Upstream", "Downstream"]);
+    expect(layout.lanes.map((lane) => lane.label)).toEqual(["Entry", "Dependencies"]);
     expect(layout.routes[0]).toMatchObject({ direction: "forward" });
     expect(layout.routes[0]!.path).toContain(" H ");
     expect(layout.routes[0]!.path).toContain(" V ");
@@ -73,5 +73,48 @@ describe("layoutArchitecture", () => {
       y: 510
     });
     expect(moved.routes[0]!.path).not.toBe(automatic.routes[0]!.path);
+  });
+
+  it("keeps a long directed chain in reading order across balanced stages", () => {
+    const chainSections = Array.from({ length: 12 }, (_, index) => ({
+      ...sections[0]!,
+      id: `stage-${index}`,
+      name: `Stage ${index}`,
+      incomingCalls: index === 0 ? 0 : 10,
+      outgoingCalls: index === 11 ? 0 : 10
+    }));
+    const chainRoutes = Array.from({ length: 11 }, (_, index) => ({
+      ...routes[0]!,
+      id: `route-${index}`,
+      sourceSection: `stage-${index}`,
+      targetSection: `stage-${index + 1}`
+    }));
+    const layout = layoutArchitecture(chainSections, chainRoutes);
+    const columns = chainSections.map((section) =>
+      layout.nodes.find((node) => node.id === section.id)!.column
+    );
+
+    expect(columns).toEqual([...columns].sort((left, right) => left - right));
+    expect(new Set(columns).size).toBeGreaterThan(2);
+  });
+
+  it("fans routes across separate card ports instead of stacking every line", () => {
+    const destinations = Array.from({ length: 4 }, (_, index) => ({
+      ...sections[1]!,
+      id: `storage-${index}`,
+      name: `Storage ${index}`
+    }));
+    const fanoutRoutes = destinations.map((destination, index) => ({
+      ...routes[0]!,
+      id: `fanout-${index}`,
+      targetSection: destination.id
+    }));
+    const layout = layoutArchitecture(
+      [sections[0]!, ...destinations],
+      fanoutRoutes
+    );
+    const routeStarts = layout.routes.map((route) => route.path.match(/^M [^ ]+ ([^ ]+)/)?.[1]);
+
+    expect(new Set(routeStarts).size).toBe(fanoutRoutes.length);
   });
 });

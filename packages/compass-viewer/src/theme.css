@@ -5207,16 +5207,57 @@ body.vscode-high-contrast-light .architecture-call-table {
   overflow: hidden;
   background:
     linear-gradient(
-      color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 14%, transparent) 1px,
+      color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 9%, transparent) 1px,
       transparent 1px
     ),
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 14%, transparent) 1px,
+      color-mix(in srgb, var(--vscode-editorRuler-foreground, var(--border)) 9%, transparent) 1px,
       transparent 1px
     ),
     var(--architecture-surface);
-  background-size: 28px 28px;
+  background-size: 32px 32px;
+}
+
+.architecture-route-mode {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--architecture-border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--architecture-raised) 94%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, #000 10%, transparent);
+}
+
+.architecture-route-mode button {
+  min-width: 66px;
+  height: 27px;
+  padding: 0 9px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.architecture-route-mode button + button {
+  border-left: 1px solid var(--architecture-border);
+}
+
+.architecture-route-mode button:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--workbench-hover));
+  color: var(--vscode-foreground, var(--foreground));
+}
+
+.architecture-route-mode button[aria-pressed="true"] {
+  background: color-mix(
+    in srgb,
+    var(--vscode-list-activeSelectionBackground, var(--accent)) 72%,
+    var(--architecture-raised)
+  );
+  color: var(--vscode-list-activeSelectionForeground, var(--foreground));
 }
 
 .architecture-map-toolbar {
@@ -5229,7 +5270,8 @@ body.vscode-high-contrast-light .architecture-call-table {
   overflow: hidden;
   border: 1px solid var(--architecture-border);
   border-radius: 5px;
-  background: var(--architecture-raised);
+  background: color-mix(in srgb, var(--architecture-raised) 94%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, #000 10%, transparent);
 }
 
 .architecture-map-toolbar button {
@@ -5299,8 +5341,8 @@ body.vscode-high-contrast-light .architecture-call-table {
 }
 
 .architecture-map-lanes rect {
-  fill: color-mix(in srgb, var(--architecture-raised) 26%, transparent);
-  stroke: color-mix(in srgb, var(--architecture-border) 58%, transparent);
+  fill: color-mix(in srgb, var(--architecture-raised) 18%, transparent);
+  stroke: color-mix(in srgb, var(--architecture-border) 38%, transparent);
   stroke-width: 1px;
 }
 
@@ -5332,7 +5374,7 @@ body.vscode-high-contrast-light .architecture-call-table {
   opacity: var(--architecture-route-opacity, 0.2);
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: opacity 120ms ease, stroke-width 120ms ease;
+  transition: opacity 140ms ease, stroke-width 140ms ease;
 }
 
 .architecture-routes g[data-evidence="inferred"] .architecture-route-line {
@@ -5366,8 +5408,16 @@ body.vscode-high-contrast-light .architecture-call-table {
   opacity: 0.09;
 }
 
+.architecture-map-panel[data-route-mode="key"] .architecture-routes g[data-dimmed="true"] {
+  opacity: 0.38;
+}
+
 .architecture-map-nodes g[data-dimmed="true"] {
-  opacity: 0.34;
+  opacity: 0.27;
+}
+
+.architecture-map-panel[data-route-mode="key"] .architecture-map-nodes g[data-dimmed="true"] {
+  opacity: 0.48;
 }
 
 .architecture-routes g:focus-visible .architecture-route-line {
@@ -5389,21 +5439,21 @@ body.vscode-high-contrast-light .architecture-call-table {
   fill: var(--vscode-editorWidget-background, var(--card));
   stroke: color-mix(
     in srgb,
-    var(--vscode-symbolIcon-moduleForeground, var(--compass-focus)) 38%,
+    var(--vscode-symbolIcon-moduleForeground, var(--compass-focus)) 25%,
     var(--architecture-border)
   );
   stroke-width: 1px;
 }
 
 .architecture-map-node-shadow {
-  fill: color-mix(in srgb, black 28%, transparent);
+  fill: color-mix(in srgb, black 17%, transparent);
   stroke: none;
-  transform: translate(0, 4px);
+  transform: translate(0, 3px);
 }
 
 .architecture-map-node-accent {
   fill: var(--vscode-symbolIcon-moduleForeground, var(--compass-focus));
-  opacity: 0.72;
+  opacity: 0.62;
   pointer-events: none;
 }
 
@@ -5431,13 +5481,13 @@ body.vscode-high-contrast-light .architecture-call-table {
 
 .architecture-map-node-name {
   fill: var(--vscode-editor-foreground, var(--foreground));
-  font: 650 11.5px/1.2 var(--vscode-font-family, system-ui);
+  font: 650 12px/1.2 var(--vscode-font-family, system-ui);
   pointer-events: none;
 }
 
 .architecture-map-node-meta {
   fill: var(--vscode-descriptionForeground, var(--muted-foreground));
-  font: 8px/1.2 var(--compass-font-mono);
+  font: 8.5px/1.2 var(--compass-font-mono);
   pointer-events: none;
 }
 
@@ -5457,8 +5507,10 @@ body.vscode-high-contrast-light .architecture-call-table {
   bottom: 7px;
   left: 10px;
   display: flex;
-  gap: 11px;
-  padding: 5px 7px;
+  max-width: calc(100% - 150px);
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  padding: 6px 8px;
   border: 1px solid var(--architecture-border);
   border-radius: 4px;
   background: color-mix(in srgb, var(--architecture-raised) 92%, transparent);
@@ -5470,6 +5522,18 @@ body.vscode-high-contrast-light .architecture-call-table {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.architecture-map-legend button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--workbench-link));
+  font: inherit;
+}
+
+.architecture-map-legend button:hover {
+  text-decoration: underline;
 }
 
 .architecture-map-legend i,
@@ -5805,17 +5869,17 @@ body.vscode-high-contrast-light .architecture-call-list article {
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1180px) {
   .architecture-workspace {
     height: auto;
     min-height: 100vh;
-    grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
-    grid-template-rows: minmax(620px, 72vh) auto;
+    grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+    grid-template-rows: minmax(650px, 78vh) auto;
     overflow: auto;
   }
 
   .architecture-workspace[data-inspector-open="false"] {
-    grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+    grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
   }
 
   .architecture-rail {
@@ -5823,11 +5887,13 @@ body.vscode-high-contrast-light .architecture-call-list article {
   }
 
   .architecture-stage {
-    min-height: 620px;
+    min-height: 650px;
   }
 
   .architecture-inspector {
+    height: min(560px, 72vh);
     min-height: 440px;
+    overflow: hidden;
     border-top: 1px solid var(--architecture-border);
     border-left: 0;
   }
