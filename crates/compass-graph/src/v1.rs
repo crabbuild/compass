@@ -2954,14 +2954,25 @@ fn normalize_optional_anchor(
 fn portable_path(path: &str, root: &Path) -> Result<String, GraphError> {
     let candidate = Path::new(path);
     let relative = if candidate.is_absolute() {
-        candidate.strip_prefix(root).map_err(|_| {
-            raw_error(
-                path,
-                "absolute source path is outside the declared repository root",
-            )
-        })?
-    } else {
         candidate
+            .strip_prefix(root)
+            .map(Path::to_path_buf)
+            .or_else(|_| {
+                let candidate = fs::canonicalize(candidate).map_err(|_| ())?;
+                let root = fs::canonicalize(root).map_err(|_| ())?;
+                candidate
+                    .strip_prefix(root)
+                    .map(Path::to_path_buf)
+                    .map_err(|_| ())
+            })
+            .map_err(|()| {
+                raw_error(
+                    path,
+                    "absolute source path is outside the declared repository root",
+                )
+            })?
+    } else {
+        candidate.to_path_buf()
     };
     let normalized = normalize_repository_path(&relative.to_string_lossy());
     if normalized.is_empty() || normalized == ".." || normalized.starts_with("../") {

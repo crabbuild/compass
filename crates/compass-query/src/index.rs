@@ -373,7 +373,10 @@ fn build_index(
         ));
     }
     drop(connection);
-    File::open(&temporary)
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&temporary)
         .and_then(|file| file.sync_all())
         .map_err(|error| io_error("sync_index", error))?;
     fs::rename(&temporary, index_path).map_err(|error| io_error("publish_index", error))?;
