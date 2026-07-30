@@ -25,6 +25,12 @@ suite("Compass extension", () => {
       "compass.openCallersAndCallees",
       "compass.openArchitecture",
       "compass.openQuery",
+      "compass.searchSymbols",
+      "compass.showCodeCallers",
+      "compass.showCodeCallees",
+      "compass.showCodeImpact",
+      "compass.exploreCode",
+      "compass.showNodeTrail",
       "compass.openHistory",
       "compass.installCli",
       "compass.selectCli"

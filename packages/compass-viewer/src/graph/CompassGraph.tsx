@@ -7,6 +7,7 @@ import {
   type CSSProperties
 } from "react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
+import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { GraphInspector } from "./GraphInspector";
 import { GraphTransitionScreen } from "./GraphTransitionScreen";
 import { GraphToolbar } from "./GraphToolbar";
@@ -38,6 +39,7 @@ const CHANGE_TYPES: Array<{
 export type GraphHost = {
   openSource(source: SourceLocation, revision?: string): void;
   openCommunity?(communityId: number): void;
+  queryNode?(operation: "callers" | "callees" | "impact", symbol: string): void;
 };
 
 export type CommunityGraphDetail = {
@@ -58,6 +60,7 @@ export type CompassGraphProps = {
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
   sourceRevisions?: GraphSourceRevisions | undefined;
+  queryResult?: CodeQueryResponse | undefined;
   initialInspectorLayout?: Partial<InspectorLayout> | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
 };
@@ -70,6 +73,7 @@ export function CompassGraph({
   communityError,
   onBackToOverview,
   sourceRevisions,
+  queryResult,
   initialInspectorLayout,
   onInspectorLayoutChange
 }: CompassGraphProps) {
@@ -94,6 +98,7 @@ export function CompassGraph({
       onBackToOverview={communityDetail ? onBackToOverview : undefined}
       bounded={communityDetail?.bounded}
       sourceRevisions={sourceRevisions}
+      queryResult={queryResult}
       inspectorLayout={inspectorLayout}
       onInspectorLayoutChange={updateInspectorLayout}
     />
@@ -109,6 +114,7 @@ function CompassGraphView({
   onBackToOverview,
   bounded,
   sourceRevisions,
+  queryResult,
   inspectorLayout,
   onInspectorLayoutChange
 }: {
@@ -120,6 +126,7 @@ function CompassGraphView({
   onBackToOverview?: (() => void) | undefined;
   bounded?: CommunityGraphDetail["bounded"];
   sourceRevisions?: GraphSourceRevisions | undefined;
+  queryResult?: CodeQueryResponse | undefined;
   inspectorLayout: InspectorLayout;
   onInspectorLayoutChange(layout: InspectorLayout): void;
 }) {
@@ -333,10 +340,12 @@ function CompassGraphView({
           hiddenCommunities={state.hiddenCommunities}
           comparisonMode={comparisonMode}
           sourceRevisions={sourceRevisions}
+          queryResult={queryResult}
           onQueryChange={(query) => dispatch({ type: "search", query })}
           onFocus={focus}
           onOpenSource={host.openSource}
           onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
+          onQueryNode={host.queryNode}
           onToggleCommunity={(communityId) => dispatch({
             type: "toggleCommunity",
             communityId

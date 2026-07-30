@@ -507,14 +507,21 @@ mod tests {
                 Some("postgresql:/host/database")
             );
         }
-        let labels = graph
+        let tables = graph
             .extraction
             .nodes
             .iter()
-            .filter_map(|node| node.attributes.get("label").and_then(Value::as_str))
+            .filter(|node| {
+                node.attributes.get("symbol_kind").and_then(Value::as_str) == Some("database_table")
+            })
+            .filter_map(|node| {
+                node.attributes
+                    .get("qualified_name")
+                    .and_then(Value::as_str)
+            })
             .collect::<Vec<_>>();
-        assert!(labels.contains(&"\"public\".\"order\""));
-        assert!(labels.contains(&"\"public\".\"user-data\""));
+        assert!(tables.contains(&"public.order"), "{tables:?}");
+        assert!(tables.contains(&"public.user-data"), "{tables:?}");
         assert!(graph.extraction.edges.iter().any(|edge| {
             edge.attributes.get("relation").and_then(Value::as_str) == Some("references")
         }));

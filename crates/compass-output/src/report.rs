@@ -62,34 +62,41 @@ pub fn generate_report(
     let confidences = graph
         .edges
         .iter()
-        .map(|edge| edge_attribute(edge, "confidence").unwrap_or("EXTRACTED"))
+        .map(|edge| {
+            let confidence = edge.string("confidence");
+            if confidence.is_empty() {
+                "EXTRACTED".to_owned()
+            } else {
+                confidence
+            }
+        })
         .collect::<Vec<_>>();
     let total = confidences.len().max(1);
     let extracted_percent = percentage(
         confidences
             .iter()
-            .filter(|value| **value == "EXTRACTED")
+            .filter(|value| value.as_str() == "EXTRACTED")
             .count(),
         total,
     );
     let inferred_percent = percentage(
         confidences
             .iter()
-            .filter(|value| **value == "INFERRED")
+            .filter(|value| value.as_str() == "INFERRED")
             .count(),
         total,
     );
     let ambiguous_percent = percentage(
         confidences
             .iter()
-            .filter(|value| **value == "AMBIGUOUS")
+            .filter(|value| value.as_str() == "AMBIGUOUS")
             .count(),
         total,
     );
     let inferred = graph
         .edges
         .iter()
-        .filter(|edge| edge_attribute(edge, "confidence") == Some("INFERRED"))
+        .filter(|edge| edge.string("confidence") == "INFERRED")
         .collect::<Vec<_>>();
     let inferred_average = if inferred.is_empty() {
         None
@@ -97,12 +104,7 @@ pub fn generate_report(
         Some(round_two(
             inferred
                 .iter()
-                .map(|edge| {
-                    edge.attributes
-                        .get("confidence_score")
-                        .and_then(Value::as_f64)
-                        .unwrap_or(0.5)
-                })
+                .map(|edge| edge.number("confidence_score").unwrap_or(0.5))
                 .sum::<f64>()
                 / inferred.len() as f64,
         ))
@@ -239,13 +241,11 @@ pub fn generate_report(
     let has_code = graph
         .nodes
         .iter()
-        .any(|node| attribute(node, "file_type") == Some("code"))
-        || graph.edges.iter().any(|edge| {
-            matches!(
-                edge_attribute(edge, "relation"),
-                Some("imports" | "imports_from")
-            )
-        });
+        .any(|node| node.string("file_type") == "code")
+        || graph
+            .edges
+            .iter()
+            .any(|edge| matches!(edge.relation(), "imports" | "imports_from"));
     if has_code {
         lines.extend([String::new(), "## Import Cycles".to_owned()]);
         let cycles = find_import_cycles(document, 5, 20);
@@ -354,7 +354,7 @@ pub fn generate_report(
     let ambiguous = graph
         .edges
         .iter()
-        .filter(|edge| edge_attribute(edge, "confidence") == Some("AMBIGUOUS"))
+        .filter(|edge| edge.string("confidence") == "AMBIGUOUS")
         .collect::<Vec<_>>();
     if !ambiguous.is_empty() {
         lines.extend([
@@ -369,8 +369,12 @@ pub fn generate_report(
             ));
             lines.push(format!(
                 "  {} · relation: {}",
-                edge_attribute(edge, "source_file").unwrap_or_default(),
-                edge_attribute(edge, "relation").unwrap_or("unknown")
+                edge.source_file().unwrap_or_default(),
+                if edge.relation().is_empty() {
+                    "unknown"
+                } else {
+                    edge.relation()
+                }
             ));
         }
     }
@@ -382,7 +386,7 @@ pub fn generate_report(
             graph.degree(&node.id) <= 1
                 && !graph.is_file_node_id(&node.id)
                 && !is_concept_node(node)
-                && attribute(node, "file_type") != Some("rationale")
+                && node.string("file_type") != "rationale"
         })
         .collect::<Vec<_>>();
     let thin_communities = communities
@@ -568,15 +572,11 @@ impl<'a> ReportGraph<'a> {
         let Some(node) = self.positions.get(id) else {
             return false;
         };
-        let label = node
-            .attributes
-            .get("label")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let label = node.label();
         if label.is_empty() {
             return false;
         }
-        let source = attribute(node, "source_file").unwrap_or_default();
+        let source = node.source_file().unwrap_or_default();
         (!source.is_empty()
             && Path::new(source).file_name().and_then(|name| name.to_str()) == Some(label))
             || (label.starts_with('.') && label.ends_with("()"))
@@ -610,14 +610,8 @@ fn grouped(value: u64) -> String {
 fn prefix_chars(value: &str, count: usize) -> String {
     value.chars().take(count).collect()
 }
-fn attribute<'a>(node: &'a NodeRecord, key: &str) -> Option<&'a str> {
-    node.attributes.get(key).and_then(Value::as_str)
-}
-fn edge_attribute<'a>(edge: &'a compass_model::EdgeRecord, key: &str) -> Option<&'a str> {
-    edge.attributes.get(key).and_then(Value::as_str)
-}
 fn is_concept_node(node: &NodeRecord) -> bool {
-    let source = attribute(node, "source_file").unwrap_or_default();
+    let source = node.source_file().unwrap_or_default();
     source.is_empty() || !source.rsplit('/').next().unwrap_or_default().contains('.')
 }
 fn safe_community_name(label: &str) -> String {

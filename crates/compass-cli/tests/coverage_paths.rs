@@ -38,6 +38,97 @@ fn write_graph_fixture(path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn write_diagnostic_graph(path: &Path, node_count: usize) -> Result<(), Box<dyn Error>> {
+    let nodes = (0..node_count)
+        .map(|index| serde_json::json!({"id":format!("node-{index}")}))
+        .collect::<Vec<_>>();
+    fs::write(
+        path,
+        serde_json::to_vec(&serde_json::json!({
+            "directed":true,
+            "multigraph":false,
+            "nodes":nodes,
+            "links":[]
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn diagnostic_node_count(graph: &Path) -> Result<usize, Box<dyn Error>> {
+    let outcome = invoke_owned(
+        Frontend::Compass,
+        &[
+            "diagnose".to_owned(),
+            "multigraph".to_owned(),
+            "--graph".to_owned(),
+            graph.to_string_lossy().into_owned(),
+            "--json".to_owned(),
+        ],
+    );
+    if outcome.code != 0 {
+        return Err(outcome.stderr.into());
+    }
+    let body: serde_json::Value = serde_json::from_str(&outcome.stdout)?;
+    body["summary"]["node_count"]
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| "missing diagnostic node count".into())
+}
+
+#[test]
+fn diagnose_rereads_the_active_generation_for_an_explicit_public_graph()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let output = directory.path();
+    let public = output.join("graph.json");
+    write_diagnostic_graph(&public, 1)?;
+    let generations = output.join(".compass-generations");
+    let first = generations.join("generation-first");
+    let second = generations.join("generation-second");
+    fs::create_dir_all(&first)?;
+    fs::create_dir_all(&second)?;
+    write_diagnostic_graph(&first.join("graph.json"), 2)?;
+    write_diagnostic_graph(&second.join("graph.json"), 3)?;
+
+    fs::write(
+        output.join(".compass-active-generation"),
+        "generation-first",
+    )?;
+    assert_eq!(diagnostic_node_count(&public)?, 2);
+    fs::write(
+        output.join(".compass-active-generation"),
+        "generation-second",
+    )?;
+    assert_eq!(diagnostic_node_count(&public)?, 3);
+    Ok(())
+}
+
+#[test]
+fn diagnose_uses_legacy_only_when_the_generation_pointer_is_absent() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let public = directory.path().join("graph.json");
+    write_diagnostic_graph(&public, 1)?;
+    assert_eq!(diagnostic_node_count(&public)?, 1);
+
+    fs::write(
+        directory.path().join(".compass-active-generation"),
+        "../escape",
+    )?;
+    let outcome = invoke_owned(
+        Frontend::Compass,
+        &[
+            "diagnose".to_owned(),
+            "multigraph".to_owned(),
+            "--graph".to_owned(),
+            public.to_string_lossy().into_owned(),
+            "--json".to_owned(),
+        ],
+    );
+    assert_ne!(outcome.code, 0);
+    assert!(outcome.stderr.contains("generation"), "{}", outcome.stderr);
+    Ok(())
+}
+
 #[test]
 fn frontend_roots_versions_help_and_unknown_commands_are_total() {
     assert_eq!(invoke(Frontend::Compass, &[]).code, 0);

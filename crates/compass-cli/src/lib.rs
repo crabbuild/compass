@@ -2,6 +2,7 @@
 
 mod call_graph_commands;
 mod capability_commands;
+mod code_query_commands;
 mod dedup_commands;
 mod help;
 mod history_batch;
@@ -116,6 +117,11 @@ pub struct Outcome {
     pub stdout_trailing_newline: bool,
     pub stderr_trailing_newline: bool,
     html_output: Option<PathBuf>,
+}
+
+pub(crate) fn resolve_output_artifact(output: &Path, name: &str) -> Result<PathBuf, String> {
+    compass_files::BuildGuard::resolve_requested_artifact(&output.join(name))
+        .map_err(|error| error.to_string())
 }
 
 impl Outcome {
@@ -341,6 +347,12 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "history" => history_commands::command(frontend, &args),
         "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
+        "search" => code_query_commands::command("search", &args),
+        "callers" => code_query_commands::command("callers", &args),
+        "callees" => code_query_commands::command("callees", &args),
+        "impact" => code_query_commands::command("impact", &args),
+        "explore" => code_query_commands::command("explore", &args),
+        "node" => code_query_commands::command("node", &args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
@@ -620,7 +632,10 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
     let graph_path = graph_flag
         .filter(|path| !path.as_os_str().is_empty())
         .or_else(|| positional.filter(|path| !path.as_os_str().is_empty()))
-        .unwrap_or_else(default_graph_path);
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
+                .join("graph.json")
+        });
     Ok(Some(McpOptions {
         graph_path,
         transport,
@@ -1116,6 +1131,10 @@ fn command_diagnose(frontend: Frontend, args: &[String]) -> Outcome {
         index += 1;
     }
     let _ = frontend;
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+        Ok(path) => path,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
     match diagnose_graph_file(&graph_path, directed, max_examples, extract_path.as_deref()) {
         Ok(summary) if json_output => {
             match serde_json::to_string_pretty(&format_diagnostic_json(&summary)) {
@@ -1210,9 +1229,15 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
         index += 1;
     }
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
-    let graph_path = graph_override
+    let requested_graph = graph_override
         .clone()
         .unwrap_or_else(|| root.join(&output_name).join("graph.json"));
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested_graph) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if !graph_path.exists() {
         return Outcome::failure(format!(
             "error: no graph found at {} — run `compass extract {}` first",
@@ -1220,16 +1245,10 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
             root.display()
         ));
     }
-    let output_dir = if graph_override.is_some()
-        && graph_path.parent().and_then(Path::file_name) == Path::new(&output_name).file_name()
-    {
-        graph_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
-    } else {
-        root.join(&output_name)
-    };
+    let output_dir = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     match cluster_existing_graph(&ClusterExistingOptions {
         graph_path,
         output_dir: output_dir.clone(),
@@ -1312,6 +1331,12 @@ fn command_tree(frontend: Frontend, args: &[String]) -> Outcome {
         }
         index += 1;
     }
+    graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if !graph_path.is_file() {
         return Outcome::failure(format!(
             "error: graph.json not found at {}",
@@ -1395,12 +1420,20 @@ fn command_merge_graphs(args: &[String]) -> Outcome {
                 .to_owned(),
         );
     }
-    for path in &paths {
+    let mut resolved_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path = match compass_files::BuildGuard::resolve_requested_artifact(&path) {
+            Ok(path) => path,
+            Err(error) => {
+                return Outcome::failure(format!("error: could not resolve graph: {error}"));
+            }
+        };
         if !path.exists() {
             return Outcome::failure(format!("error: not found: {}", path.display()));
         }
+        resolved_paths.push(path);
     }
-    match merge_graphs(&paths, &output) {
+    match merge_graphs(&resolved_paths, &output) {
         Ok(result) => {
             let mut lines = Vec::new();
             if result.naive_tags_collided {
@@ -1421,7 +1454,13 @@ fn command_merge_graphs(args: &[String]) -> Outcome {
 }
 
 fn command_benchmark(args: &[String]) -> Outcome {
-    let graph_path = args.first().map_or_else(default_graph_path, PathBuf::from);
+    let requested = args.first().map_or_else(default_graph_path, PathBuf::from);
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     let document = match compass_model::GraphDocument::load(&graph_path) {
         Ok(document) => document,
         Err(error) => return Outcome::failure(format!("error: {error}")),
@@ -1533,6 +1572,7 @@ fn command_build_with_validation_inner(
     let mut token_budget = None;
     let mut max_concurrency = None;
     let mut max_workers = None;
+    let mut max_source_bytes = None;
     let mut api_timeout = None;
     let mut allow_partial = false;
     let mut timing = false;
@@ -1716,13 +1756,32 @@ fn command_build_with_validation_inner(
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
+            "--max-source-bytes" if index + 1 < args.len() => {
+                max_source_bytes = match parse_positive_u64(&args[index + 1], "--max-source-bytes")
+                {
+                    Ok(value) => Some(value),
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+                index += 1;
+            }
+            value if value.starts_with("--max-source-bytes=") => {
+                max_source_bytes = match parse_positive_u64(&value[19..], "--max-source-bytes") {
+                    Ok(value) => Some(value),
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+            }
+            "--max-source-bytes" => {
+                return Outcome::failure(
+                    "error: --max-source-bytes requires a positive integer".to_owned(),
+                );
+            }
             "--timing" => timing = true,
             "--dedup-llm" if extract => dedup_llm = true,
             "-h" | "--help" => {
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program-artifact PATH] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program-artifact PATH] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1784,17 +1843,20 @@ fn command_build_with_validation_inner(
     options.program_artifacts = program_artifacts;
     options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
+    if let Some(max_source_bytes) = max_source_bytes {
+        options.max_source_bytes = max_source_bytes;
+    }
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
+    let output_container = options
+        .output_root
+        .as_deref()
+        .map(absolute_cli_path)
+        .unwrap_or_else(|| root.clone())
+        .join(output_name);
     let extract_incremental = extract
         && !force
-        && options
-            .output_root
-            .as_deref()
-            .map(absolute_cli_path)
-            .unwrap_or_else(|| root.clone())
-            .join(output_name)
-            .join("graph.json")
-            .is_file();
+        && compass_files::BuildGuard::resolve_artifact(&output_container, "graph.json")
+            .is_ok_and(|path| path.is_file());
     let mut dedup_environment = std::env::vars().collect::<HashMap<_, _>>();
     if let Some(timeout) = api_timeout {
         dedup_environment.insert("COMPASS_API_TIMEOUT".to_owned(), timeout.to_string());
@@ -2430,6 +2492,18 @@ fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("error: {option} must be > 0 (got {parsed})"))
 }
 
+fn parse_positive_u64(value: &str, option: &str) -> Result<u64, String> {
+    let parsed = value.parse::<u64>().map_err(|_| {
+        format!(
+            "error: {option} must be a positive integer (got {})",
+            python_string_repr(value)
+        )
+    })?;
+    (parsed > 0)
+        .then_some(parsed)
+        .ok_or_else(|| format!("error: {option} must be > 0 (got {parsed})"))
+}
+
 fn parse_positive_f64(value: &str, option: &str) -> Result<f64, String> {
     let parsed = value.parse::<f64>().map_err(|_| {
         format!(
@@ -2551,7 +2625,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program-artifact PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program-artifact PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -2804,6 +2878,12 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             _ => index += 1,
         }
     }
+    graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure(format!("error: could not resolve graph: {error}"));
+        }
+    };
     if graph_explicit {
         let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
         if !labels_explicit {
@@ -3639,16 +3719,20 @@ fn frontend_name(frontend: Frontend) -> &'static str {
 }
 
 fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
+    let path = compass_files::BuildGuard::resolve_requested_artifact(path)
+        .map_err(|error| Outcome::failure(format!("error: could not resolve graph: {error}")))?;
     let result = if force_directed {
-        LoadedGraph::load_directed(path)
+        LoadedGraph::load_directed(&path)
     } else {
-        LoadedGraph::load(path)
+        LoadedGraph::load(&path)
     };
     result.map_err(graph_load_outcome)
 }
 
 fn load_affected(path: &Path) -> Result<LoadedGraph, Outcome> {
-    LoadedGraph::load_for_affected(path).map_err(graph_load_outcome)
+    let path = compass_files::BuildGuard::resolve_requested_artifact(path)
+        .map_err(|error| Outcome::failure(format!("error: could not resolve graph: {error}")))?;
+    LoadedGraph::load_for_affected(&path).map_err(graph_load_outcome)
 }
 
 fn graph_load_outcome(error: GraphError) -> Outcome {
@@ -3834,6 +3918,28 @@ mod mcp_option_tests {
         let options = parse_mcp_options(&args)?
             .ok_or_else(|| "options unexpectedly returned help".to_owned())?;
         assert_eq!(options.graph_path, PathBuf::from("flag.json"));
+        Ok(())
+    }
+
+    #[test]
+    fn shared_cli_artifact_resolution_distinguishes_legacy_from_malformed_pointer()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let output = directory.path().join("compass-out");
+        fs::create_dir_all(&output)?;
+        fs::write(output.join("graph.json"), "{}")?;
+
+        assert_eq!(
+            resolve_output_artifact(&output, "graph.json")?,
+            output.join("graph.json"),
+            "pointer absence must retain documented legacy compatibility"
+        );
+
+        fs::write(output.join(".compass-active-generation"), "../escape")?;
+        let Err(error) = resolve_output_artifact(&output, "graph.json") else {
+            return Err("a malformed pointer must never fall back to the legacy graph".into());
+        };
+        assert!(error.contains("generation"), "{error}");
         Ok(())
     }
 
@@ -4114,5 +4220,17 @@ mod mcp_option_tests {
         assert_eq!(options.max_workers, None);
         apply_max_workers_override(&mut options, Some(4));
         assert_eq!(options.max_workers, Some(4));
+    }
+
+    #[test]
+    fn source_size_limit_parser_rejects_zero_negative_and_invalid_values() {
+        assert_eq!(
+            parse_positive_u64("16777216", "--max-source-bytes"),
+            Ok(16_777_216)
+        );
+        for invalid in ["0", "-1", "large"] {
+            assert!(parse_positive_u64(invalid, "--max-source-bytes").is_err());
+        }
+        assert!(extract_help().contains("[--max-source-bytes N]"));
     }
 }

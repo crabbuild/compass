@@ -32,12 +32,25 @@ compass query "authentication flow" --at HEAD~20
 ## Focused graph operations
 
 ```bash
+compass search PaymentGateway
+compass callers PaymentGateway.charge
+compass callees CheckoutController.create
+compass impact authorizePayment --max-depth 3
+compass explore CheckoutController PaymentGateway --root .
+compass node route:/checkout CheckoutController.create
 compass explain PaymentGateway
 compass path CheckoutHandler PaymentGateway
 compass affected authorizePayment --depth 3
 compass tree
 ```
 
+- `search` resolves typed symbols by exact or fuzzy name.
+- `callers` and `callees` walk one attributable call-graph hop.
+- `impact` traverses a bounded transitive radius and excludes heuristic
+  evidence by default.
+- `explore` returns related source and paths together under source and response
+  byte limits.
+- `node` exposes the evidence trail and provenance between two symbols.
 - `explain` reports a matched node and connected context.
 - `path` reports the shortest known graph route; preserve relation direction.
 - `affected` follows impact relations and returns a review candidate set.

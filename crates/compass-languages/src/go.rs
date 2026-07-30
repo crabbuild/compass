@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
+use crate::builtins::is_language_builtin_global;
 use crate::{Extraction, RawCall, make_id};
 
 const PREDECLARED_TYPES: &[&str] = &[
@@ -374,7 +375,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
-        seen_pairs: &mut HashSet<(String, String)>,
+        seen_pairs: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if matches!(node.kind(), "function_declaration" | "method_declaration") {
             return;
@@ -396,13 +397,19 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             } else {
                 (None, false)
             };
-            if let Some(callee) = callee.filter(|name| !builtin_global(name)) {
+            if let Some(callee) = callee {
                 if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
-                    let pair = (caller.to_owned(), target.clone());
+                    let pair = (
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    );
                     if seen_pairs.insert(pair) {
                         self.add_edge(caller, target, "calls", line(node), Some("call"));
+                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
-                } else {
+                } else if !is_language_builtin_global("go", &callee) {
                     self.extraction.raw_calls_mut().push(RawCall {
                         caller_nid: caller.to_owned(),
                         callee,
@@ -412,7 +419,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }
@@ -557,13 +564,6 @@ fn collect_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tre
             collect_kind(child, kind, output);
         }
     }
-}
-
-fn builtin_global(name: &str) -> bool {
-    matches!(
-        name,
-        "String" | "Number" | "Boolean" | "Object" | "Array" | "len" | "print" | "min" | "max"
-    )
 }
 
 fn line(node: Node<'_>) -> usize {

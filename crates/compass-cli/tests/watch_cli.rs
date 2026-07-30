@@ -2,6 +2,8 @@ use std::error::Error;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 
+use compass_files::BuildGuard;
+
 #[cfg(unix)]
 #[test]
 fn native_watch_synchronizes_before_reporting_ready() -> Result<(), Box<dyn Error>> {
@@ -40,6 +42,9 @@ fn native_watch_synchronizes_before_reporting_ready() -> Result<(), Box<dyn Erro
     assert!(output.contains("Starting"));
     assert!(output.contains("Synchronizing current graph"));
     assert!(output.contains("Watching"));
-    assert!(directory.path().join("compass-out/graph.json").is_file());
+    assert!(
+        BuildGuard::resolve_artifact(&directory.path().join("compass-out"), "graph.json")?
+            .is_file()
+    );
     Ok(())
 }

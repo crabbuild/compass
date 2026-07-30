@@ -63,7 +63,7 @@ pub(crate) fn load_graph_at(
     let cache_key = serde_json::json!({
         "schema": "compass.history.graph_query_key/1",
         "realization": preferred.id.to_string(),
-        "projection_version": 1,
+        "projection_version": 2,
     });
     let document = cache
         .read(DerivedCacheNamespace::Viewer, &cache_key, 256 * 1024 * 1024)
@@ -73,11 +73,10 @@ pub(crate) fn load_graph_at(
     let document = match document {
         Some(document) => document,
         None => {
-            let reader = history
-                .reader(&preferred.id)
+            let artifacts = history
+                .artifacts(&preferred.id)
                 .map_err(|error| error.to_string())?;
-            let document = compass_output::historical_graph_document(&reader)
-                .map_err(|error| error.to_string())?;
+            let document = artifacts.artifacts.document;
             if let Ok(value) = serde_json::to_value(&document)
                 && let Ok(bytes) = compass_history::canonical_json_bytes(&value)
             {
@@ -688,8 +687,7 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                 if output.is_dir() {
                     return Err(runtime("graph-json output must be a file"));
                 }
-                let value = serde_json::to_value(&artifacts.artifacts.document).map_err(runtime)?;
-                let bytes = compass_history::canonical_json_bytes(&value).map_err(runtime)?;
+                let bytes = artifacts.artifacts.graph_json_bytes().map_err(runtime)?;
                 compass_files::write_bytes_atomic(&output, &bytes).map_err(runtime)?;
             } else if format == "compass-out" {
                 if output.exists() {
@@ -726,15 +724,18 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
                     .map(compass_analysis::AnalysisBundle::canonical_bytes)
                     .transpose()
                     .map_err(runtime)?;
+                let graph_json = artifacts.artifacts.graph_json_bytes().map_err(runtime)?;
+                let authoritative_sidecars = artifacts.artifacts.export_sidecars();
                 compass_output::publish_history_bundle(
                     &output,
                     &compass_output::HistoryBundleInput {
                         document: &artifacts.artifacts.document,
+                        graph_json: Some(&graph_json),
                         program: program.as_deref(),
                         analysis: artifacts.artifacts.analysis.as_ref(),
                         labels: artifacts.artifacts.labels.as_ref(),
                         manifest: artifacts.artifacts.manifest.as_ref(),
-                        authoritative_sidecars: &artifacts.artifacts.authoritative_sidecars,
+                        authoritative_sidecars: &authoritative_sidecars,
                         semantic_marker: &marker,
                         derived: &derived,
                     },

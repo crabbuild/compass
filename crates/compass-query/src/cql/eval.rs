@@ -793,11 +793,8 @@ pub(super) fn property_value(
             if property == "label" {
                 return Ok(CompassValue::String(Arc::from(node.label())));
             }
-            node.attributes
-                .get(property)
-                .map(json_value)
-                .transpose()
-                .map(|value| value.unwrap_or(CompassValue::Null))
+            node.property(property)
+                .map_or(Ok(CompassValue::Null), |value| json_value(&value))
         }
         CompassValue::Relationship(reference) => {
             let edge = context.graph.edge(reference.index);
@@ -805,17 +802,14 @@ pub(super) fn property_value(
                 "source" => Some(reference.source.as_ref()),
                 "target" => Some(reference.target.as_ref()),
                 "relation" | "type" => Some(reference.relation.as_ref()),
-                "confidence" if !edge.attributes.contains_key("confidence") => Some("EXTRACTED"),
+                "confidence" if edge.property("confidence").is_none() => Some("EXTRACTED"),
                 _ => None,
             };
             if let Some(value) = synthetic {
                 return Ok(CompassValue::String(Arc::from(value)));
             }
-            edge.attributes
-                .get(property)
-                .map(json_value)
-                .transpose()
-                .map(|value| value.unwrap_or(CompassValue::Null))
+            edge.property(property)
+                .map_or(Ok(CompassValue::Null), |value| json_value(&value))
         }
         CompassValue::Map(values) => {
             Ok(values.get(property).cloned().unwrap_or(CompassValue::Null))
@@ -836,9 +830,8 @@ fn properties_function(
         Some(CompassValue::Node(node)) => {
             let record = context.graph.node(node.index);
             let mut values = record
-                .attributes
-                .iter()
-                .map(|(key, value)| Ok((key.clone(), json_value(value)?)))
+                .properties()
+                .map(|(key, value)| Ok((key.to_owned(), json_value(&value)?)))
                 .collect::<Result<BTreeMap<_, _>, QueryError>>()?;
             values.insert("id".to_owned(), CompassValue::String(Arc::clone(&node.id)));
             values.insert(
@@ -850,9 +843,8 @@ fn properties_function(
         Some(CompassValue::Relationship(relationship)) => {
             let record = context.graph.edge(relationship.index);
             let mut values = record
-                .attributes
-                .iter()
-                .map(|(key, value)| Ok((key.clone(), json_value(value)?)))
+                .properties()
+                .map(|(key, value)| Ok((key.to_owned(), json_value(&value)?)))
                 .collect::<Result<BTreeMap<_, _>, QueryError>>()?;
             values
                 .entry("confidence".to_owned())

@@ -281,7 +281,9 @@ ratio limits.
 
 ### `compass-transcribe`
 
-**Purpose:** bounded transcription orchestration and download/backend traits.
+**Purpose:** bounded transcription orchestration, backend traits, and inference
+integration. It re-exports the ingest downloader API for workspace
+compatibility.
 
 ### `compass-whisper`
 
@@ -312,8 +314,8 @@ mapping.
 
 ### `compass-ingest`
 
-Fetches bounded public URL content with SSRF defenses and writes corpus files
-atomically.
+Owns bounded, verified URL and audio acquisition, including the managed
+downloader. It applies SSRF defenses and writes corpus files atomically.
 
 ### `compass-postgres`
 

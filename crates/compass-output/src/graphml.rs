@@ -94,10 +94,9 @@ pub fn graphml_document(document: &GraphDocument, communities: &Communities) -> 
         .iter()
         .map(|node| {
             let mut attributes = node
-                .attributes
-                .iter()
-                .filter(|(name, _)| !name.starts_with('_'))
-                .map(|(name, value)| (name.clone(), graphml_value(value)))
+                .properties()
+                .filter(|(name, _)| !name.starts_with('_') && *name != "id")
+                .map(|(name, value)| (name.to_owned(), graphml_value(&value)))
                 .collect::<Vec<_>>();
             attributes.push((
                 "community".to_owned(),
@@ -117,10 +116,11 @@ pub fn graphml_document(document: &GraphDocument, communities: &Communities) -> 
         .iter()
         .map(|edge| {
             let attributes = edge
-                .attributes
-                .iter()
-                .filter(|(name, _)| !name.starts_with('_'))
-                .map(|(name, value)| (name.clone(), graphml_value(value)))
+                .properties()
+                .filter(|(name, _)| {
+                    !name.starts_with('_') && !matches!(*name, "id" | "key" | "source" | "target")
+                })
+                .map(|(name, value)| (name.to_owned(), graphml_value(&value)))
                 .collect::<Vec<_>>();
             let data = register_attributes(&attributes, Scope::Edge, &mut keys);
             (edge.source.as_str(), edge.target.as_str(), data)

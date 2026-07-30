@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
-use compass_model::GraphDocument;
+use compass_model::{EdgeRecord, GraphDocument};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -672,17 +672,13 @@ impl WeightedGraph {
             else {
                 continue;
             };
-            let weight = edge
-                .attributes
-                .get("weight")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0);
+            let weight = edge.number("weight").unwrap_or(1.0);
             let candidate = selected
                 .entry((*left, *right))
                 .or_insert((edge_index, weight));
             if candidate.1 != weight
-                && canonical_attributes(&edge.attributes)
-                    >= canonical_attributes(&document.links[candidate.0].attributes)
+                && canonical_edge_properties(edge)
+                    >= canonical_edge_properties(&document.links[candidate.0])
             {
                 *candidate = (edge_index, weight);
             }
@@ -837,6 +833,14 @@ fn canonical_attributes(attributes: &serde_json::Map<String, Value>) -> String {
         }
     }
     serde_json::to_string(&canonical(&Value::Object(attributes.clone()))).unwrap_or_default()
+}
+
+fn canonical_edge_properties(edge: &EdgeRecord) -> String {
+    let properties = edge
+        .properties()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect::<serde_json::Map<_, _>>();
+    canonical_attributes(&properties)
 }
 
 pub(crate) struct PythonRandom {

@@ -317,7 +317,7 @@ pub(super) fn command_hook_guard(_frontend: Frontend, args: &[String]) -> Outcom
     if kind == "gemini" {
         let mut payload = Map::new();
         payload.insert("decision".to_owned(), Value::String("allow".to_owned()));
-        if graph_path().is_file() {
+        if graph_path().is_ok_and(|path| path.is_file()) {
             payload.insert(
                 "additionalContext".to_owned(),
                 Value::String(GEMINI_NUDGE_TEXT.to_owned()),
@@ -358,7 +358,7 @@ fn search_guard(tool: &Map<String, Value>) -> Option<String> {
     let bash_search = ["grep", "ripgrep", "rg ", "find ", "fd ", "ack ", "ag "]
         .iter()
         .any(|token| command.contains(token));
-    ((grep_tool || bash_search) && graph_path().is_file())
+    ((grep_tool || bash_search) && graph_path().is_ok_and(|path| path.is_file()))
         .then(|| pretool_payload("additionalContext", SEARCH_NUDGE_TEXT))
 }
 
@@ -408,7 +408,7 @@ fn read_guard(
     {
         return None;
     }
-    let graph = graph_path();
+    let graph = graph_path().ok()?;
     let graph_modified = graph
         .metadata()
         .and_then(|metadata| metadata.modified())
@@ -574,7 +574,10 @@ fn target_is_indexed(file_path: &str, root: &Path) -> bool {
     if file_path.is_empty() {
         return true;
     }
-    let manifest_path = output_root().join("manifest.json");
+    let output = output_root();
+    let Ok(manifest_path) = crate::resolve_output_artifact(&output, "manifest.json") else {
+        return false;
+    };
     let Ok(metadata) = manifest_path.metadata() else {
         return true;
     };
@@ -941,8 +944,9 @@ fn output_root() -> PathBuf {
     PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
 }
 
-fn graph_path() -> PathBuf {
-    output_root().join("graph.json")
+fn graph_path() -> Result<PathBuf, String> {
+    let output = output_root();
+    crate::resolve_output_artifact(&output, "graph.json")
 }
 
 fn project_root() -> PathBuf {

@@ -1,0 +1,1637 @@
+{
+  "schema": "compass.code-graph-qualification/2",
+  "flows": [
+    {
+      "id": "flow-django",
+      "framework": "django",
+      "routeFramework": "django",
+      "operation": "ANY",
+      "path": "/qualification-health",
+      "routeSource": "fixtures/code-graph/routes/python/django/qualification/urls.py",
+      "handler": {
+        "qualifiedName": "qualification_health()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/python/django/qualification/urls.py",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "python",
+      "resolution": "exact",
+      "origins": [
+        "config"
+      ],
+      "producer": "compass.frameworks.django",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-flask",
+      "framework": "flask",
+      "routeFramework": "flask",
+      "operation": "ANY",
+      "path": "/health",
+      "routeSource": "fixtures/code-graph/routes/python/flask_app.py",
+      "handler": {
+        "qualifiedName": "health()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/python/flask_app.py",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "python",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.flask",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-fastapi",
+      "framework": "fastapi",
+      "routeFramework": "fastapi",
+      "operation": "POST",
+      "path": "/v1/users",
+      "routeSource": "fixtures/code-graph/routes/python/fastapi_app.py",
+      "handler": {
+        "qualifiedName": "create_user()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/python/fastapi_app.py",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 1,
+      "handlerKind": "function",
+      "handlerLanguage": "python",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.fastapi",
+      "rules": [
+        "framework-route-stage:handler:1"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-express",
+      "framework": "express",
+      "routeFramework": "express",
+      "operation": "GET",
+      "path": "/health",
+      "routeSource": "fixtures/code-graph/routes/typescript/express.ts",
+      "handler": {
+        "qualifiedName": "health()@324"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/express.ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.express",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-nestjs",
+      "framework": "nestjs",
+      "routeFramework": "nestjs",
+      "operation": "GET",
+      "path": "/users/{userId}",
+      "routeSource": "fixtures/code-graph/routes/typescript/nest.ts",
+      "handler": {
+        "qualifiedName": "UsersController::showUser()@316"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/nest.ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.nestjs",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-nestjs-graphql",
+      "framework": "nestjs-graphql",
+      "routeFramework": "nestjs-graphql",
+      "operation": "QUERY",
+      "path": "/graphql/user",
+      "routeSource": "fixtures/code-graph/routes/typescript/nest.ts",
+      "handler": {
+        "qualifiedName": "UsersResolver::user()@582"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/nest.ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.nestjs-graphql",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-laravel",
+      "framework": "laravel",
+      "routeFramework": "laravel",
+      "operation": "GET",
+      "path": "/users",
+      "routeSource": "fixtures/code-graph/routes/php/laravel.php",
+      "handler": {
+        "qualifiedName": "UserController::index"
+      },
+      "handlerSource": "fixtures/code-graph/routes/php/laravel.php",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "php",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.laravel",
+      "rules": [
+        "laravel-route-facade|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-drupal",
+      "framework": "drupal",
+      "routeFramework": "drupal",
+      "operation": "GET",
+      "path": "/examples/{example}",
+      "routeSource": "fixtures/code-graph/routes/php/drupal.routing.yml",
+      "handler": {
+        "qualifiedName": "ExampleController::view"
+      },
+      "handlerSource": "fixtures/code-graph/routes/php/drupal.module",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "php",
+      "resolution": "exact",
+      "origins": [
+        "config"
+      ],
+      "producer": "compass.frameworks.drupal",
+      "rules": [
+        "drupal-routing-yaml|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-rails",
+      "framework": "rails",
+      "routeFramework": "rails",
+      "operation": "GET",
+      "path": "/users/:id",
+      "routeSource": "fixtures/code-graph/routes/ruby/rails.rb",
+      "handler": {
+        "qualifiedName": "UsersController::show"
+      },
+      "handlerSource": "fixtures/code-graph/routes/ruby/rails.rb",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "ruby",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.rails",
+      "rules": [
+        "rails-routes-dsl|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-spring",
+      "framework": "spring",
+      "routeFramework": "spring",
+      "operation": "GET",
+      "path": "/api/users/{id}",
+      "routeSource": "fixtures/code-graph/routes/jvm/SpringController.java",
+      "handler": {
+        "qualifiedName": "SpringController::show"
+      },
+      "handlerSource": "fixtures/code-graph/routes/jvm/SpringController.java",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "java",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.spring",
+      "rules": [
+        "spring-request-mapping|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-play",
+      "framework": "play",
+      "routeFramework": "play",
+      "operation": "GET",
+      "path": "/java/:id",
+      "routeSource": "fixtures/code-graph/routes/jvm/play/conf/routes",
+      "handler": {
+        "qualifiedName": "PlayController::show"
+      },
+      "handlerSource": "fixtures/code-graph/routes/jvm/PlayController.java",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "java",
+      "resolution": "exact",
+      "origins": [
+        "config"
+      ],
+      "producer": "compass.frameworks.play",
+      "rules": [
+        "play-conf-routes|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-gin",
+      "framework": "gin",
+      "routeFramework": "gin",
+      "operation": "GET",
+      "path": "/api/users",
+      "routeSource": "fixtures/code-graph/routes/go/gin.go",
+      "handler": {
+        "qualifiedName": "listUsers()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/go/gin.go",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 1,
+      "handlerKind": "function",
+      "handlerLanguage": "go",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.gin",
+      "rules": [
+        "gin-router-call|stage:handler:1"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-chi",
+      "framework": "chi",
+      "routeFramework": "chi",
+      "operation": "GET",
+      "path": "/users/{id}",
+      "routeSource": "fixtures/code-graph/routes/go/chi.go",
+      "handler": {
+        "qualifiedName": "showUser()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/go/chi.go",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "go",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.chi",
+      "rules": [
+        "chi-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-gorilla-mux",
+      "framework": "gorilla-mux",
+      "routeFramework": "gorilla",
+      "operation": "PUT",
+      "path": "/users/{id}",
+      "routeSource": "fixtures/code-graph/routes/go/gorilla.go",
+      "handler": {
+        "qualifiedName": "updateUser()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/go/gorilla.go",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "go",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.gorilla",
+      "rules": [
+        "gorilla-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-axum",
+      "framework": "axum",
+      "routeFramework": "axum",
+      "operation": "GET",
+      "path": "/users/:id",
+      "routeSource": "fixtures/code-graph/routes/rust/axum.rs",
+      "handler": {
+        "qualifiedName": "show_user()@43"
+      },
+      "handlerSource": "fixtures/code-graph/routes/rust/axum.rs",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "rust",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.axum",
+      "rules": [
+        "rust-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-actix",
+      "framework": "actix",
+      "routeFramework": "actix",
+      "operation": "GET",
+      "path": "/users",
+      "routeSource": "fixtures/code-graph/routes/rust/actix.rs",
+      "handler": {
+        "qualifiedName": "list_users()@28"
+      },
+      "handlerSource": "fixtures/code-graph/routes/rust/actix.rs",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "rust",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.actix",
+      "rules": [
+        "rust-router-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-rocket",
+      "framework": "rocket",
+      "routeFramework": "rocket",
+      "operation": "GET",
+      "path": "/users/<id>",
+      "routeSource": "fixtures/code-graph/routes/rust/rocket.rs",
+      "handler": {
+        "qualifiedName": "show_user(u64)@40"
+      },
+      "handlerSource": "fixtures/code-graph/routes/rust/rocket.rs",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "rust",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.rocket",
+      "rules": [
+        "rust-route-attribute|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-aspnet",
+      "framework": "aspnet",
+      "routeFramework": "aspnet",
+      "operation": "GET",
+      "path": "/api/Users/{id}",
+      "routeSource": "fixtures/code-graph/routes/csharp/AspNetController.cs",
+      "handler": {
+        "qualifiedName": "UsersController::Show(string)@129"
+      },
+      "handlerSource": "fixtures/code-graph/routes/csharp/AspNetController.cs",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "csharp",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.aspnet",
+      "rules": [
+        "aspnet-http-attribute|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-vapor",
+      "framework": "vapor",
+      "routeFramework": "vapor",
+      "operation": "GET",
+      "path": "/api/users",
+      "routeSource": "fixtures/code-graph/routes/swift/VaporRoutes.swift",
+      "handler": {
+        "qualifiedName": "listUsers()"
+      },
+      "handlerSource": "fixtures/code-graph/routes/swift/VaporRoutes.swift",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "swift",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.vapor",
+      "rules": [
+        "vapor-route-call|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-react-router",
+      "framework": "react-router",
+      "routeFramework": "react-router",
+      "operation": "PAGE",
+      "path": "/accounts/{accountId}",
+      "routeSource": "fixtures/code-graph/routes/typescript/react-router.tsx",
+      "handler": {
+        "qualifiedName": "AccountPage()@7"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/AccountPage.tsx",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "tsx",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.react-router",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-sveltekit",
+      "framework": "sveltekit",
+      "routeFramework": "sveltekit",
+      "operation": "GET",
+      "path": "/api/users/{id}",
+      "routeSource": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts",
+      "handler": {
+        "qualifiedName": "sveltekit::route-component::GET::/api/users/{id}"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/api/users/[id]/+server.ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "component",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "convention"
+      ],
+      "producer": "compass.frameworks.sveltekit",
+      "rules": [
+        "sveltekit-endpoint-convention|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-vue-router",
+      "framework": "vue-router",
+      "routeFramework": "vue-router",
+      "operation": "PAGE",
+      "path": "/qualified-users/{userId}",
+      "routeSource": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
+      "handler": {
+        "qualifiedName": "QualifiedUserPage()@62"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "function",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.vue-router",
+      "rules": [
+        "framework-route-stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-nuxt",
+      "framework": "nuxt",
+      "routeFramework": "nuxt",
+      "operation": "GET",
+      "path": "/users",
+      "routeSource": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
+      "handler": {
+        "qualifiedName": "nuxt::route-component::GET::/users"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "component",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "convention"
+      ],
+      "producer": "compass.frameworks.nuxt",
+      "rules": [
+        "nuxt-server-api-convention|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-astro",
+      "framework": "astro",
+      "routeFramework": "astro",
+      "operation": "GET",
+      "path": "/api/items/{id}",
+      "routeSource": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+      "handler": {
+        "qualifiedName": "astro::route-component::GET::/api/items/{id}"
+      },
+      "handlerSource": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "component",
+      "handlerLanguage": "typescript",
+      "resolution": "exact",
+      "origins": [
+        "convention"
+      ],
+      "producer": "compass.frameworks.astro",
+      "rules": [
+        "astro-endpoint-convention|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    }
+  ],
+  "negatives": [
+    {
+      "id": "negative-django",
+      "framework": "django",
+      "source": "fixtures/code-graph/routes/python/near_matches.py",
+      "routeFramework": "django"
+    },
+    {
+      "id": "negative-flask",
+      "framework": "flask",
+      "source": "fixtures/code-graph/routes/python/near_matches.py",
+      "routeFramework": "flask"
+    },
+    {
+      "id": "negative-fastapi",
+      "framework": "fastapi",
+      "source": "fixtures/code-graph/routes/python/near_matches.py",
+      "routeFramework": "fastapi"
+    },
+    {
+      "id": "negative-express",
+      "framework": "express",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "express"
+    },
+    {
+      "id": "negative-nestjs",
+      "framework": "nestjs",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "nestjs"
+    },
+    {
+      "id": "negative-laravel",
+      "framework": "laravel",
+      "source": "fixtures/code-graph/routes/php/near_matches.php",
+      "routeFramework": "laravel"
+    },
+    {
+      "id": "negative-drupal",
+      "framework": "drupal",
+      "source": "fixtures/code-graph/routes/php/near_matches.php",
+      "routeFramework": "drupal"
+    },
+    {
+      "id": "negative-rails",
+      "framework": "rails",
+      "source": "fixtures/code-graph/routes/ruby/near_matches.rb",
+      "routeFramework": "rails"
+    },
+    {
+      "id": "negative-spring",
+      "framework": "spring",
+      "source": "fixtures/code-graph/routes/jvm/NearMatches.java",
+      "routeFramework": "spring"
+    },
+    {
+      "id": "negative-play",
+      "framework": "play",
+      "source": "fixtures/code-graph/routes/jvm/NearMatches.java",
+      "routeFramework": "play"
+    },
+    {
+      "id": "negative-gin",
+      "framework": "gin",
+      "source": "fixtures/code-graph/routes/go/near_matches.go",
+      "routeFramework": "gin"
+    },
+    {
+      "id": "negative-chi",
+      "framework": "chi",
+      "source": "fixtures/code-graph/routes/go/near_matches.go",
+      "routeFramework": "chi"
+    },
+    {
+      "id": "negative-gorilla-mux",
+      "framework": "gorilla-mux",
+      "source": "fixtures/code-graph/routes/go/near_matches.go",
+      "routeFramework": "gorilla"
+    },
+    {
+      "id": "negative-axum",
+      "framework": "axum",
+      "source": "fixtures/code-graph/routes/rust/near_matches.rs",
+      "routeFramework": "axum"
+    },
+    {
+      "id": "negative-actix",
+      "framework": "actix",
+      "source": "fixtures/code-graph/routes/rust/near_matches.rs",
+      "routeFramework": "actix"
+    },
+    {
+      "id": "negative-rocket",
+      "framework": "rocket",
+      "source": "fixtures/code-graph/routes/rust/near_matches.rs",
+      "routeFramework": "rocket"
+    },
+    {
+      "id": "negative-aspnet",
+      "framework": "aspnet",
+      "source": "fixtures/code-graph/routes/csharp/NearMatches.cs",
+      "routeFramework": "aspnet"
+    },
+    {
+      "id": "negative-vapor",
+      "framework": "vapor",
+      "source": "fixtures/code-graph/routes/swift/NearMatches.swift",
+      "routeFramework": "vapor"
+    },
+    {
+      "id": "negative-react-router",
+      "framework": "react-router",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "react-router"
+    },
+    {
+      "id": "negative-sveltekit",
+      "framework": "sveltekit",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "sveltekit"
+    },
+    {
+      "id": "negative-vue-router",
+      "framework": "vue-router",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "vue-router"
+    },
+    {
+      "id": "negative-nuxt",
+      "framework": "nuxt",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "nuxt"
+    },
+    {
+      "id": "negative-astro",
+      "framework": "astro",
+      "source": "fixtures/code-graph/routes/typescript/near-matches.ts",
+      "routeFramework": "astro"
+    }
+  ],
+  "nodeProducers": [
+    {
+      "id": "node-file",
+      "kind": "file",
+      "source": "fixtures/code-graph/qualification/MissingReference.csproj",
+      "qualifiedName": "MissingReference.csproj",
+      "producer": "compass.languages.project-xml",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "file"
+    },
+    {
+      "id": "node-module",
+      "kind": "module",
+      "source": "fixtures/code-graph/routes/swift/VaporRoutes.swift",
+      "qualifiedName": "Vapor",
+      "producer": "compass.languages.swift",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-package",
+      "kind": "package",
+      "source": "matrix/pyproject.toml",
+      "qualifiedName": "matrix",
+      "producer": "compass.languages.package-manifest",
+      "origins": [
+        "config"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-namespace",
+      "kind": "namespace",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "Qualification",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-class",
+      "kind": "class",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "BaseService@84",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-struct",
+      "kind": "struct",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "Receipt@101",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-interface",
+      "kind": "interface",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "IService@26",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-trait",
+      "kind": "trait",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "Renderable@0",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-protocol",
+      "kind": "protocol",
+      "source": "matrix/objc.h",
+      "qualifiedName": "<MatrixProtocol>",
+      "producer": "compass.languages.objc",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-enum",
+      "kind": "enum",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "Mode@147",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-enum_member",
+      "kind": "enum_member",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "Mode@147::Fast@167",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-type_alias",
+      "kind": "type_alias",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "WidgetId@186",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-function",
+      "kind": "function",
+      "source": "fixtures/code-graph/qualification/mcp.json",
+      "qualifiedName": "node",
+      "producer": "compass.languages.mcp-config",
+      "origins": [
+        "config"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-method",
+      "kind": "method",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "BaseService::Run(int)@115",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-constructor",
+      "kind": "constructor",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "Service::Service(int)@327",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-property",
+      "kind": "property",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "Service@176::Count@291",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-field",
+      "kind": "field",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "Service@176::count@280",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-variable",
+      "kind": "variable",
+      "source": "fixtures/code-graph/routes/typescript/express.ts",
+      "qualifiedName": "app",
+      "producer": "compass.languages.typescript",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-constant",
+      "kind": "constant",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "Service@176::Limit@244",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-parameter",
+      "kind": "parameter",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "BaseService::Run(int)@115::value@141",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-import",
+      "kind": "import",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "@nestjs/common.Controller",
+      "producer": "compass.frameworks.typescript.imports",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "import_export"
+    },
+    {
+      "id": "node-export",
+      "kind": "export",
+      "source": "fixtures/code-graph/qualification/rich.ts",
+      "qualifiedName": "DefaultStore@271",
+      "producer": "compass.languages.typescript",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "import_export"
+    },
+    {
+      "id": "node-macro",
+      "kind": "macro",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "widget@252",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-annotation",
+      "kind": "annotation",
+      "source": "fixtures/code-graph/qualification/rich.ts",
+      "qualifiedName": "sealed@159",
+      "producer": "compass.languages.typescript",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-route",
+      "kind": "route",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
+      "qualifiedName": "aspnet::GET::/api/Users/{id}",
+      "producer": "compass.frameworks.aspnet",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "route"
+    },
+    {
+      "id": "node-component",
+      "kind": "component",
+      "source": "fixtures/code-graph/qualification/mcp.json",
+      "qualifiedName": "qualification",
+      "producer": "compass.languages.mcp-config",
+      "origins": [
+        "config"
+      ],
+      "detailType": "component"
+    },
+    {
+      "id": "node-event",
+      "kind": "event",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "nestjs::event::orders.cancelled",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "messaging"
+    },
+    {
+      "id": "node-message",
+      "kind": "message",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "nestjs::message::orders.created",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "messaging"
+    },
+    {
+      "id": "node-topic",
+      "kind": "topic",
+      "source": "fixtures/code-graph/domain/messaging/spring.java",
+      "qualifiedName": "spring::topic::orders.created",
+      "producer": "compass.frameworks.spring.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "messaging"
+    },
+    {
+      "id": "node-queue",
+      "kind": "queue",
+      "source": "fixtures/code-graph/domain/messaging/spring.java",
+      "qualifiedName": "spring::queue::orders.queue",
+      "producer": "compass.frameworks.spring.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "messaging"
+    },
+    {
+      "id": "node-job",
+      "kind": "job",
+      "source": "fixtures/code-graph/domain/jobs/aspnet.cs",
+      "qualifiedName": "aspnet::job::RebuildIndex",
+      "producer": "compass.frameworks.aspnet.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "job"
+    },
+    {
+      "id": "node-resource",
+      "kind": "resource",
+      "source": "fixtures/code-graph/qualification/guide.md",
+      "qualifiedName": "Qualification guide",
+      "producer": "compass.languages.markdown",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "resource"
+    },
+    {
+      "id": "node-schema",
+      "kind": "schema",
+      "source": "matrix/semantic-schema.json",
+      "qualifiedName": "semantic-schema.json",
+      "producer": "compass.languages.json-config",
+      "origins": [
+        "config"
+      ],
+      "detailType": "schema"
+    },
+    {
+      "id": "node-query",
+      "kind": "query",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "fixtures/code-graph/qualification/migrations/001_init::select@95",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "query"
+    },
+    {
+      "id": "node-migration",
+      "kind": "migration",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "fixtures/code-graph/qualification/migrations/001_init::001_init.sql",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "convention"
+      ],
+      "detailType": "symbol"
+    },
+    {
+      "id": "node-config_key",
+      "kind": "config_key",
+      "source": "fixtures/code-graph/qualification/mcp.json",
+      "qualifiedName": "mcpServers.qualification.env.QUALIFICATION_MODE",
+      "producer": "compass.languages.mcp-config",
+      "origins": [
+        "config"
+      ],
+      "detailType": "config"
+    },
+    {
+      "id": "node-database",
+      "kind": "database",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "fixtures/code-graph/qualification/migrations/001_init",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "convention"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_schema",
+      "kind": "database_schema",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "CaseSensitive",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_table",
+      "kind": "database_table",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "CaseSensitive.User",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_view",
+      "kind": "database_view",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "accounting.account_owners",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_column",
+      "kind": "database_column",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "\"CaseSensitive\".\"User\".\"Id\"",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_index",
+      "kind": "database_index",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "accounts_owner_idx",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_constraint",
+      "kind": "database_constraint",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "\"accounting\".\"accounts\"::\"accounts_owner_fk\"",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_procedure",
+      "kind": "database_procedure",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "accounting.refresh_accounts",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    },
+    {
+      "id": "node-database_trigger",
+      "kind": "database_trigger",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "accounts_audit",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": "database"
+    }
+  ],
+  "edgeProducers": [
+    {
+      "id": "edge-contains",
+      "kind": "contains",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-calls",
+      "kind": "calls",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-imports",
+      "kind": "imports",
+      "source": "fixtures/code-graph/qualification/MissingReference.csproj",
+      "qualifiedName": "*",
+      "producer": "compass.languages.project-xml",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-exports",
+      "kind": "exports",
+      "source": "fixtures/code-graph/qualification/export.dart",
+      "qualifiedName": "*",
+      "producer": "compass.languages.dart",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-extends",
+      "kind": "extends",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-implements",
+      "kind": "implements",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-references",
+      "kind": "references",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-type_of",
+      "kind": "type_of",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-returns",
+      "kind": "returns",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-instantiates",
+      "kind": "instantiates",
+      "source": "fixtures/code-graph/domain/messaging/dynamic-near-matches.ts",
+      "qualifiedName": "*",
+      "producer": "compass.languages.typescript",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-overrides",
+      "kind": "overrides",
+      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.csharp",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-decorates",
+      "kind": "decorates",
+      "source": "fixtures/code-graph/qualification/rich.ts",
+      "qualifiedName": "*",
+      "producer": "compass.languages.typescript",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-routes_to",
+      "kind": "routes_to",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.aspnet",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "route"
+    },
+    {
+      "id": "edge-reads",
+      "kind": "reads",
+      "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
+      "qualifiedName": "*",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-writes",
+      "kind": "writes",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "*",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-aliases",
+      "kind": "aliases",
+      "source": "fixtures/code-graph/qualification/rich.ts",
+      "qualifiedName": "*",
+      "producer": "compass.languages.typescript",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-registers",
+      "kind": "registers",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-handles",
+      "kind": "handles",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-publishes",
+      "kind": "publishes",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-subscribes",
+      "kind": "subscribes",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-produces",
+      "kind": "produces",
+      "source": "fixtures/code-graph/domain/messaging/nest.ts",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.nestjs.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-consumes",
+      "kind": "consumes",
+      "source": "fixtures/code-graph/domain/messaging/spring.java",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.spring.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-schedules",
+      "kind": "schedules",
+      "source": "fixtures/code-graph/domain/jobs/aspnet.cs",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.aspnet.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-triggers",
+      "kind": "triggers",
+      "source": "fixtures/code-graph/domain/database.sql",
+      "qualifiedName": "*",
+      "producer": "compass.languages.sql",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-tests",
+      "kind": "tests",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "qualifiedName": "*",
+      "producer": "compass.languages.rust",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-depends_on",
+      "kind": "depends_on",
+      "source": "fixtures/code-graph/qualification/mcp.json",
+      "qualifiedName": "*",
+      "producer": "compass.languages.mcp-config",
+      "origins": [
+        "config"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-documents",
+      "kind": "documents",
+      "source": "fixtures/code-graph/qualification/semantic-doc.md",
+      "qualifiedName": "*",
+      "producer": "compass.languages.markdown",
+      "origins": [
+        "artifact"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-maps_to",
+      "kind": "maps_to",
+      "source": "fixtures/code-graph/domain/orm/active-record.rb",
+      "qualifiedName": "*",
+      "producer": "compass.frameworks.active-record.domain",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    }
+  ],
+  "languages": {
+    "source": "corpus",
+    "producerVersion": "compass-languages/0.1.10"
+  },
+  "occurrences": [
+    {
+      "id": "repeated-rust-call",
+      "kind": "calls",
+      "source": "fixtures/code-graph/qualification/rich.rs",
+      "sourceQualifiedName": "Widget as Renderable::render(_)@345",
+      "targetQualifiedName": "target()@441",
+      "minimum": 2
+    }
+  ],
+  "coverage": [
+    {
+      "id": "recovery-not-complete",
+      "source": "fixtures/code-graph/qualification/recovery.py",
+      "forbidCompleteWhen": [
+        "partial",
+        "parse_failure"
+      ]
+    },
+    {
+      "id": "empty-file-supported",
+      "source": "fixtures/code-graph/qualification/empty.py",
+      "extractionStatus": "extracted"
+    },
+    {
+      "id": "missing-reference-diagnostic",
+      "source": "fixtures/code-graph/qualification/MissingReference.csproj",
+      "diagnosticCode": "unresolved_external_reference"
+    }
+  ],
+  "limits": {
+    "maxDiagnostics": 64
+  }
+}

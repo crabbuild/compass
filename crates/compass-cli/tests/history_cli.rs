@@ -1637,7 +1637,10 @@ fn explicit_rebuild_ignores_the_mutable_current_snapshot() -> Result<(), Box<dyn
         "{}",
         String::from_utf8_lossy(&initialized.stderr)
     );
-    let graph_path = directory.path().join("compass-out/graph.json");
+    let graph_path = compass_files::BuildGuard::resolve_artifact(
+        &directory.path().join("compass-out"),
+        "graph.json",
+    )?;
     let mut current: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
     current["nodes"]
         .as_array_mut()
@@ -1789,6 +1792,24 @@ fn build_rebuild_and_unseen_diff_publish_complete_realizations()
     let envelope: serde_json::Value = serde_json::from_slice(&diff.stdout)?;
     assert_eq!(envelope["schema"], "compass.semantic_diff.report/1");
     assert!(envelope["findings"].is_array());
+    let typed_node_deltas = ["added_nodes", "removed_nodes", "changed_nodes"]
+        .into_iter()
+        .flat_map(|key| {
+            envelope["graph_delta"][key]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        typed_node_deltas.iter().any(|node| {
+            node["label"]
+                .as_str()
+                .is_some_and(|label| !label.is_empty())
+                && node["source_file"] == "service.rs"
+        }),
+        "history-backed typed node deltas lost their name/source projection: {typed_node_deltas:?}"
+    );
     let repository = Repository::discover(directory.path())?;
     let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
     let versions = history.list(None)?;
@@ -2331,7 +2352,10 @@ fn normal_graph_export_and_historical_queries_are_semantically_identical()
         "{}",
         String::from_utf8_lossy(&extracted.stderr)
     );
-    let graph_path = directory.path().join("compass-out/graph.json");
+    let graph_path = compass_files::BuildGuard::resolve_artifact(
+        &directory.path().join("compass-out"),
+        "graph.json",
+    )?;
     let original: serde_json::Value = serde_json::from_slice(&std::fs::read(&graph_path)?)?;
 
     let built = run(compass, directory.path(), &["history", "build", "HEAD"])?;
@@ -2407,7 +2431,14 @@ fn normalize_graph(mut graph: serde_json::Value) -> serde_json::Value {
             .get_mut(field)
             .and_then(serde_json::Value::as_array_mut)
         {
-            records.sort_by_key(serde_json::Value::to_string);
+            records.sort_by_key(|record| {
+                record
+                    .get("id")
+                    .or_else(|| record.get("key"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            });
         }
     }
     graph

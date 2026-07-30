@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
+use crate::facts::{source_range, stamp_source_range};
 use crate::{Extraction, RawCall, file_stem, make_id};
 
 static IMPORT: LazyLock<Regex> = LazyLock::new(|| regex(r"^\s*import\s+(?:static\s+)?([\w.]+)"));
@@ -210,17 +211,35 @@ fn extract_regular(path: &Path, source: &str) -> Extraction {
                 }
             }
             if let Some((caller, _)) = &active_method {
+                let line_start = source
+                    .split_inclusive('\n')
+                    .take(index)
+                    .map(str::len)
+                    .sum::<usize>();
                 for captures in MEMBER_CALL.captures_iter(text) {
                     let callee = capture(&captures, 2);
                     if callee.is_empty() {
                         continue;
                     }
+                    let Some(callee_match) = captures.get(2) else {
+                        continue;
+                    };
+                    let start = line_start + callee_match.start();
+                    let end = line_start + callee_match.end();
                     if let Some(target) = call_targets
                         .get(callee)
                         .filter(|target| target.as_str() != caller)
                     {
-                        if seen_calls.insert((caller.clone(), target.clone())) {
+                        if seen_calls.insert((caller.clone(), target.clone(), start, end)) {
                             state.add_edge(caller, target, "calls", index + 1, Some("call"));
+                            if let Some(edge) = state.extraction.edges.last_mut() {
+                                stamp_source_range(
+                                    &mut edge.attributes,
+                                    source.as_bytes(),
+                                    start,
+                                    end,
+                                );
+                            }
                         }
                     } else {
                         state.extraction.raw_calls_mut().push(RawCall {
@@ -232,7 +251,7 @@ fn extract_regular(path: &Path, source: &str) -> Extraction {
                             receiver: Some(None),
                             receiver_type: None,
                             lang: None,
-                            extensions: Map::new(),
+                            extensions: source_range(source.as_bytes(), start, end),
                         });
                     }
                 }
@@ -349,8 +368,13 @@ impl State {
             let mut attributes = Map::new();
             attributes.insert("label".to_owned(), Value::String(name.to_owned()));
             attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+            attributes.insert("type".to_owned(), Value::String("class".to_owned()));
             attributes.insert("source_file".to_owned(), Value::String(String::new()));
             attributes.insert("source_location".to_owned(), Value::String(String::new()));
+            attributes.insert(
+                "origin_file".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
             self.extraction.nodes.push(NodeRecord {
                 id: id.clone(),
                 attributes,

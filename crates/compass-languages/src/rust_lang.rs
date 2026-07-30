@@ -1,11 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
 use crate::{Extraction, RawCall, make_id};
 
 const TRAIT_METHOD_BLOCKLIST: &[&str] = &[
@@ -102,7 +101,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         self.extraction
     }
 
-    fn walk(&mut self, node: Node<'tree>, parent_impl: Option<&str>) {
+    fn walk(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str)>) {
         match node.kind() {
             "function_item" => {
                 self.add_function(node, parent_impl);
@@ -128,15 +127,30 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         }
     }
 
-    fn add_function(&mut self, node: Node<'tree>, parent_impl: Option<&str>) {
+    fn add_function(&mut self, node: Node<'tree>, parent_impl: Option<(&str, &str)>) {
         let Some(name_node) = node.child_by_field_name("name") else {
             return;
         };
         let name = self.text(name_node);
         let at = line(node);
-        let id = if let Some(parent) = parent_impl {
-            let id = make_id(&[parent, &name]);
+        let id = if let Some((parent, semantic_owner)) = parent_impl {
+            let id = make_id(&[parent, semantic_owner, &name]);
             self.add_node(&id, &format!(".{name}()"), at);
+            if let Some(method) = self
+                .extraction
+                .nodes
+                .iter_mut()
+                .find(|method| method.id == id)
+            {
+                method.attributes.insert(
+                    "lexical_owner".to_owned(),
+                    Value::String(semantic_owner.to_owned()),
+                );
+                method.attributes.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!("{semantic_owner}::{name}")),
+                );
+            }
             self.add_edge(parent, &id, "method", at, None);
             id
         } else {
@@ -284,6 +298,14 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         };
         let name = self.text(type_node).trim().to_owned();
         let id = make_id(&[&self.stem, &name]);
+        let semantic_owner = node
+            .child_by_field_name("trait")
+            .map(|trait_node| self.text(trait_node).trim().to_owned())
+            .filter(|trait_name| !trait_name.is_empty())
+            .map_or_else(
+                || name.clone(),
+                |trait_name| format!("{name} as {trait_name}"),
+            );
         let at = line(node);
         self.add_node(&id, &name, at);
         if let Some(trait_node) = node.child_by_field_name("trait") {
@@ -310,7 +332,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor) {
-                self.walk(child, Some(&id));
+                self.walk(child, Some((&id, &semantic_owner)));
             }
         }
     }
@@ -413,7 +435,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
-        pairs: &mut HashSet<(String, String)>,
+        pairs: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if node.kind() == "function_item" {
             return;
@@ -439,11 +461,16 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                 ),
                 _ => (None, false, false),
             };
-            if let Some(callee) = callee.filter(|name| !builtin_global(name)) {
+            if let Some(callee) = callee {
                 if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
-                    let pair = (caller.to_owned(), target.clone());
+                    let pair = (
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    );
                     if pairs.insert(pair) {
-                        self.add_call_edge(caller, target, line(node));
+                        self.add_call_edge(caller, target, node);
                     }
                 } else if !scoped
                     && !TRAIT_METHOD_BLOCKLIST.contains(&callee.to_lowercase().as_str())
@@ -457,7 +484,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }
@@ -537,7 +564,7 @@ impl<'source, 'tree> RustState<'source, 'tree> {
         });
     }
 
-    fn add_call_edge(&mut self, source: &str, target: &str, at: usize) {
+    fn add_call_edge(&mut self, source: &str, target: &str, node: Node<'tree>) {
         let mut attributes = Map::new();
         attributes.insert("relation".into(), Value::String("calls".into()));
         attributes.insert("context".into(), Value::String("call".into()));
@@ -546,8 +573,12 @@ impl<'source, 'tree> RustState<'source, 'tree> {
             "source_file".into(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".into(), Value::String(format!("L{at}")));
+        attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{}", line(node))),
+        );
         attributes.insert("weight".into(), Value::from(1.0));
+        crate::facts::stamp_node_range(&mut attributes, node);
         self.extraction.edges.push(EdgeRecord {
             source: source.to_owned(),
             target: target.to_owned(),
@@ -640,10 +671,6 @@ fn is_type_node(kind: &str) -> bool {
             | "tuple_type"
             | "array_type"
     )
-}
-
-fn builtin_global(name: &str) -> bool {
-    LANGUAGE_BUILTIN_GLOBALS.contains(&name)
 }
 
 fn line(node: Node<'_>) -> usize {

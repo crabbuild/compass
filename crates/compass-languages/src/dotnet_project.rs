@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Read;
+use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
@@ -55,6 +56,7 @@ fn extract_sln(path: &Path) -> Result<Extraction, ExtractError> {
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
         "code",
+        "file",
         &source_file,
     ));
     let mut seen = HashSet::from([file_id.clone()]);
@@ -74,9 +76,14 @@ fn extract_sln(path: &Path) -> Result<Extraction, ExtractError> {
         };
         let project_id = make_id(&[&project_source]);
         if !project_id.is_empty() && seen.insert(project_id.clone()) {
-            extraction
-                .nodes
-                .push(node(project_id.clone(), name, "code", &project_source));
+            extraction.nodes.push(external_node(
+                project_id.clone(),
+                name,
+                "code",
+                "package",
+                &project_source,
+                &source_file,
+            ));
             extraction
                 .edges
                 .push(edge(&file_id, &project_id, "contains", &source_file));
@@ -155,6 +162,7 @@ fn extract_slnx(path: &Path) -> Result<Extraction, ExtractError> {
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
         "code",
+        "file",
         &source_file,
     ));
     let mut seen = HashSet::from([file_id.clone()]);
@@ -169,15 +177,19 @@ fn extract_slnx(path: &Path) -> Result<Extraction, ExtractError> {
         let project_source = resolve_path(path, project_path);
         let project_id = make_id(&[&project_source]);
         if !project_id.is_empty() && seen.insert(project_id.clone()) {
-            extraction.nodes.push(node(
+            let mut project_record = external_node(
                 project_id.clone(),
                 Path::new(project_path)
                     .file_stem()
                     .and_then(|name| name.to_str())
                     .unwrap_or_default(),
                 "code",
+                "package",
                 &project_source,
-            ));
+                &source_file,
+            );
+            stamp_origin_anchor(&mut project_record, &source_file, &source, project.range());
+            extraction.nodes.push(project_record);
             extraction
                 .edges
                 .push(edge(&file_id, &project_id, "contains", &source_file));
@@ -238,6 +250,7 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
         "code",
+        "file",
         &source_file,
     ));
     let mut seen = HashSet::from([file_id.clone()]);
@@ -267,6 +280,7 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
                     framework_id.clone(),
                     framework,
                     "concept",
+                    "resource",
                     &source_file,
                 ));
                 extraction
@@ -300,6 +314,7 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
                     format!("{name} ({version})")
                 },
                 "code",
+                "package",
                 &source_file,
             ));
         }
@@ -321,15 +336,19 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
         let project_source = resolve_path(path, reference);
         let project_id = make_id(&[&project_source]);
         if !project_id.is_empty() && seen.insert(project_id.clone()) {
-            extraction.nodes.push(node(
+            let mut project_record = external_node(
                 project_id.clone(),
                 Path::new(&reference.replace('\\', "/"))
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or_default(),
                 "code",
+                "package",
                 &project_source,
-            ));
+                &source_file,
+            );
+            stamp_origin_anchor(&mut project_record, &source_file, &source, project.range());
+            extraction.nodes.push(project_record);
         }
         extraction
             .edges
@@ -340,9 +359,13 @@ pub(crate) fn extract_project(path: &Path) -> Result<Extraction, ExtractError> {
     {
         let sdk_id = make_id(&["sdk", sdk]);
         if !sdk_id.is_empty() && seen.insert(sdk_id.clone()) {
-            extraction
-                .nodes
-                .push(node(sdk_id.clone(), sdk, "concept", &source_file));
+            extraction.nodes.push(node(
+                sdk_id.clone(),
+                sdk,
+                "concept",
+                "resource",
+                &source_file,
+            ));
             extraction
                 .edges
                 .push(edge(&file_id, &sdk_id, "references", &source_file));
@@ -407,16 +430,63 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     output
 }
 
-fn node(id: String, label: &str, file_type: &str, source_file: &str) -> NodeRecord {
+fn node(
+    id: String,
+    label: &str,
+    file_type: &str,
+    symbol_kind: &str,
+    source_file: &str,
+) -> NodeRecord {
     let mut attributes = Map::new();
     attributes.insert("label".to_owned(), Value::String(label.to_owned()));
     attributes.insert("file_type".to_owned(), Value::String(file_type.to_owned()));
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String(symbol_kind.to_owned()),
+    );
     attributes.insert(
         "source_file".to_owned(),
         Value::String(source_file.to_owned()),
     );
     attributes.insert("source_location".to_owned(), Value::Null);
     NodeRecord { id, attributes }
+}
+
+fn external_node(
+    id: String,
+    label: &str,
+    file_type: &str,
+    symbol_kind: &str,
+    source_file: &str,
+    origin_file: &str,
+) -> NodeRecord {
+    let mut record = node(id, label, file_type, symbol_kind, source_file);
+    record.attributes.insert(
+        "origin_file".to_owned(),
+        Value::String(origin_file.to_owned()),
+    );
+    record
+}
+
+fn stamp_origin_anchor(
+    record: &mut NodeRecord,
+    origin_file: &str,
+    source: &[u8],
+    range: Range<usize>,
+) {
+    let attributes = crate::facts::source_range(source, range.start, range.end);
+    record.attributes.insert(
+        "origin_source_anchor".to_owned(),
+        json!({
+            "file": origin_file,
+            "startByte": attributes.get("start_byte").cloned().unwrap_or(Value::from(0)),
+            "endByte": attributes.get("end_byte").cloned().unwrap_or(Value::from(0)),
+            "startLine": attributes.get("line_start").cloned().unwrap_or(Value::from(1)),
+            "startColumn": attributes.get("column_start").cloned().unwrap_or(Value::from(0)),
+            "endLine": attributes.get("line_end").cloned().unwrap_or(Value::from(1)),
+            "endColumn": attributes.get("column_end").cloned().unwrap_or(Value::from(0)),
+        }),
+    );
 }
 
 fn edge(source: &str, target: &str, relation: &str, source_file: &str) -> EdgeRecord {

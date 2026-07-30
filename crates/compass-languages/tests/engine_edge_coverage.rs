@@ -17,6 +17,500 @@ fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), 
 }
 
 #[test]
+fn rust_methods_include_their_declaring_impl_in_semantic_identity() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("changes.rs");
+    let source = br#"
+trait ChangeSink {
+    fn change(&mut self);
+}
+struct ExactDiffWriter;
+struct ChangeCounts;
+impl ChangeSink for ExactDiffWriter {
+    fn change(&mut self) {}
+}
+impl ChangeSink for ChangeCounts {
+    fn change(&mut self) {}
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == ".change()" && !node.string("lexical_owner").is_empty())
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("lexical_owner"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            "ChangeCounts as ChangeSink",
+            "ExactDiffWriter as ChangeSink"
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    );
+    let qualified = methods
+        .iter()
+        .map(|node| node.string("qualified_name"))
+        .collect::<Vec<_>>();
+    for expected in [
+        "ChangeCounts as ChangeSink::change(",
+        "ExactDiffWriter as ChangeSink::change(",
+    ] {
+        assert!(
+            qualified.iter().any(|name| name.starts_with(expected)),
+            "qualified={qualified:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn overloaded_methods_receive_explicit_stable_discriminators() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("Example.java");
+    let source = br#"
+class Example {
+    void run() {}
+    void run(int value) {}
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "Example::run")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("overload_discriminator"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["overload:0", "overload:1"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    Ok(())
+}
+
+#[test]
+fn generic_methods_include_their_declaring_class_in_semantic_identity() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("bundle.js");
+    let source = br#"
+class First {
+    constructor(e, t) { this.value = e + t; }
+}
+class Second {
+    constructor(e, t) { this.value = e * t; }
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let constructors = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == ".constructor()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(constructors.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        constructors
+            .iter()
+            .map(|node| node.string("lexical_owner"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["First", "Second"].into_iter().map(str::to_owned).collect()
+    );
+    assert_eq!(
+        constructors
+            .iter()
+            .map(|node| node.string("qualified_name"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["First::constructor", "Second::constructor"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    Ok(())
+}
+
+#[test]
+fn php_methods_include_their_declaring_class_in_semantic_identity() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("controllers.php");
+    let source = br#"<?php
+class FirstController {
+    public function index() {}
+}
+class SecondController {
+    public function index() {}
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == ".index()")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("lexical_owner"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["FirstController", "SecondController"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("qualified_name"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["FirstController::index", "SecondController::index"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.rs");
+    let source = b"fn callee(){} fn caller(){callee();callee();}";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let calls = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "edges={:?}", extraction.edges);
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("language") == "rust"
+                && node.string("extractor") == "compass.languages.rust"),
+        "nodes={:?}",
+        extraction.nodes
+    );
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("language") == "rust"
+                && edge.string("extractor") == "compass.languages.rust"),
+        "edges={:?}",
+        extraction.edges
+    );
+
+    let sites = calls
+        .iter()
+        .map(|edge| {
+            let start = edge
+                .attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or("missing start_byte")?;
+            let end = edge
+                .attributes
+                .get("end_byte")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or("missing end_byte")?;
+            let start = usize::try_from(start)?;
+            let end = usize::try_from(end)?;
+            Ok::<_, Box<dyn Error>>((start, end))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(sites, [(26, 34), (35, 43)]);
+    assert_eq!(&source[sites[0].0..sites[0].1], b"callee()");
+    assert_eq!(&source[sites[1].0..sites[1].1], b"callee()");
+    assert_eq!(calls[0].attributes["line_start"], 1);
+    assert_eq!(calls[0].attributes["column_start"], 26);
+    assert_eq!(calls[0].attributes["column_end"], 34);
+    assert_eq!(calls[1].attributes["line_start"], 1);
+    assert_eq!(calls[1].attributes["column_start"], 35);
+    assert_eq!(calls[1].attributes["column_end"], 43);
+    Ok(())
+}
+
+#[test]
+fn repeated_generic_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.py");
+    let source = b"def callee(): pass\ndef caller(): callee(); callee()\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let calls = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .collect::<Vec<_>>();
+    let sites = calls
+        .iter()
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("column_start")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("column_end")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        sites,
+        [
+            (Some(33), Some(41), Some(14), Some(22)),
+            (Some(43), Some(51), Some(24), Some(32))
+        ],
+        "edges={:?}",
+        extraction.edges
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_go_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.go");
+    let source = b"package p\nfunc callee(){};func caller(){callee();callee()}\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
+    assert!(
+        sites
+            .iter()
+            .all(|(start, end)| start.is_some() && end.is_some())
+    );
+    assert_ne!(sites[0], sites[1]);
+    Ok(())
+}
+
+#[test]
+fn repeated_zig_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.zig");
+    let source = b"fn callee() void {}\nfn caller() void { callee(); callee(); }\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        sites,
+        [(Some(39), Some(45)), (Some(49), Some(55))],
+        "edges={:?}",
+        extraction.edges
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("repeated.dart");
+    let source =
+        b"class State {}\nclass Controller { void run() { emit(State()); emit(State()); } }\n";
+    fs::write(&path, source)?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("context") == "emit_state")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
+    assert!(sites.iter().all(|(start, end)| start < end));
+    assert_ne!(sites[0], sites[1]);
+    Ok(())
+}
+
+struct NavigationSite {
+    start: usize,
+    end: usize,
+    line: u64,
+    column: u64,
+}
+
+fn dart_navigation_sites(source: &[u8]) -> Result<Vec<NavigationSite>, Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("navigation.dart");
+    fs::write(&path, source)?;
+    let extraction = Engine::default().extract(&path)?;
+    extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "navigates" && edge.string("context") == "route_path"
+        })
+        .map(|edge| {
+            let start = edge.attributes["start_byte"]
+                .as_u64()
+                .ok_or("missing start_byte")?;
+            let end = edge.attributes["end_byte"]
+                .as_u64()
+                .ok_or("missing end_byte")?;
+            let line = edge.attributes["line_start"]
+                .as_u64()
+                .ok_or("missing line_start")?;
+            let column = edge.attributes["column_start"]
+                .as_u64()
+                .ok_or("missing column_start")?;
+            Ok(NavigationSite {
+                start: usize::try_from(start)?,
+                end: usize::try_from(end)?,
+                line,
+                column,
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn dart_ascii_navigation_range_slices_original_source() -> Result<(), Box<dyn Error>> {
+    let source = b"void run() { go('/home'); }\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (1, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_multiline_comment_preserves_navigation_bytes_and_lines() -> Result<(), Box<dyn Error>> {
+    let source = b"/* lead\ncomment */\nvoid run() { go('/home'); }\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (3, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dyn Error>> {
+    let source = "const label = 'café';\nvoid run() { go('/home'); }\n".as_bytes();
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (2, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_minified_navigation_keeps_same_line_occurrences_distinct() -> Result<(), Box<dyn Error>> {
+    let source = b"void run(){go('/a');go('/b');}\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 2);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/a'");
+    assert_eq!(&source[sites[1].start..sites[1].end], b"go('/b'");
+    assert_ne!(sites[0].start, sites[1].start);
+    Ok(())
+}
+
+#[test]
+fn repeated_razor_component_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("Repeated.razor");
+    fs::write(&path, "<Widget /><Widget />")?;
+
+    let extraction = Engine::default().extract(&path)?;
+    let sites = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .map(|edge| {
+            (
+                edge.attributes
+                    .get("start_byte")
+                    .and_then(|value| value.as_u64()),
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(|value| value.as_u64()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sites, [(Some(0), Some(8)), (Some(10), Some(18))]);
+    Ok(())
+}
+
+#[test]
 fn extensionless_perl_shebang_extracts_subroutines_and_calls() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("buildah-vendor-treadmill");
@@ -357,6 +851,32 @@ fn javascript_modules_reexports_require_and_decorators_keep_compass_contracts()
             .edges
             .iter()
             .any(|edge| edge.string("relation") == "imports")
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_anonymous_class_methods_receive_cross_definition_discriminators()
+-> Result<(), Box<dyn Error>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../compass-cli/assets/vendor/pierre-diffs-v1.2.12.js");
+    let source = fs::read(&path)?;
+
+    let extraction = Engine::default().extract_source(&path, &source)?;
+    let methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.label() == "cleanUp()")
+        .collect::<Vec<_>>();
+    assert!(methods.len() >= 2, "methods={methods:?}");
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("overload_discriminator"))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        methods.len(),
+        "methods={methods:?}"
     );
     Ok(())
 }

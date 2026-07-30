@@ -1,5 +1,6 @@
 //! Deterministic cross-file resolution over immutable extraction facts.
 
+pub mod frameworks;
 mod members;
 
 pub use members::resolve_language_calls;
@@ -9,8 +10,14 @@ use std::path::Path;
 use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
-use compass_languages::{Extraction, RawCall, make_id};
-use compass_model::{EdgeRecord, NodeRecord};
+use compass_languages::{
+    Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
+    is_language_builtin_global, make_id,
+};
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE,
+    append_endpoint_rewrite_evidence, preserve_occurrence_rule,
+};
 use rayon::prelude::*;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -177,6 +184,9 @@ pub fn resolve_with_root(
         merged
             .hyperedges
             .extend(extraction.hyperedges.iter().cloned());
+        merged
+            .framework_facts
+            .extend(extraction.framework_facts.iter().cloned());
     }
     finish_resolution(merged, language_facts, sources, root)
 }
@@ -196,6 +206,9 @@ pub fn resolve_owned_with_root(
         merged.nodes.append(&mut extraction.nodes);
         merged.edges.append(&mut extraction.edges);
         merged.hyperedges.append(&mut extraction.hyperedges);
+        merged
+            .framework_facts
+            .append(&mut extraction.framework_facts);
     }
     extractions.into_par_iter().for_each(drop);
     finish_resolution(merged, language_facts, sources, root)
@@ -231,6 +244,30 @@ fn finish_resolution(
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
+    let (routes, domains) =
+        frameworks::resolve_framework_facts(&merged, compass_languages::FrameworkLimits::default());
+    let route_result = routes.and_then(|routes| {
+        frameworks::publish_resolved_routes(&mut merged, &routes)?;
+        Ok(routes)
+    });
+    if let Err(error) = route_result {
+        if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+            eprintln!("[compass internal] framework route resolution failed: {error}");
+        }
+        merged
+            .error
+            .get_or_insert_with(|| format!("framework resolution failed: {error}"));
+    }
+    profile_internal("resolver framework routes", &mut profile_started);
+    match domains {
+        Ok(domains) => frameworks::publish_resolved_domains(&mut merged, &domains),
+        Err(error) => {
+            merged
+                .error
+                .get_or_insert_with(|| format!("framework domain resolution failed: {error}"));
+        }
+    }
+    profile_internal("resolver framework domains", &mut profile_started);
     merged
 }
 
@@ -330,11 +367,21 @@ fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
         return;
     }
     for edge in &mut extraction.edges {
+        let mut rewritten = false;
         if let Some(target) = remap.get(&edge.source) {
             edge.source.clone_from(target);
+            rewritten = true;
         }
         if let Some(target) = remap.get(&edge.target) {
             edge.target.clone_from(target);
+            rewritten = true;
+        }
+        if rewritten {
+            stamp_endpoint_rewrite(
+                edge,
+                EndpointRewriteRule::CsharpNamespaceCanonicalization,
+                1.0,
+            );
         }
     }
     let mut index = 0_usize;
@@ -350,7 +397,7 @@ fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
 /// a JVM edge can still have exactly one JVM definition. This is the same
 /// conservative boundary used by Compass's Java/Groovy resolver.
 fn rewire_unique_family_stubs(extraction: &mut Extraction) {
-    let mut definitions = HashMap::<(String, &'static str), Vec<String>>::new();
+    let mut definitions = HashMap::<(String, &'static str), Vec<(String, String)>>::new();
     let mut stubs = HashMap::<String, String>::new();
     for node in &extraction.nodes {
         let source = string_attribute(node, "source_file");
@@ -366,9 +413,37 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
             definitions
                 .entry((label, family))
                 .or_default()
-                .push(node.id.clone());
+                .push((node.id.clone(), source));
         }
     }
+    let imports_by_source = extraction
+        .edges
+        .iter()
+        .filter(|edge| matches!(relation(edge), "imports" | "imports_from"))
+        .fold(
+            HashMap::<String, HashSet<String>>::new(),
+            |mut imports, edge| {
+                imports
+                    .entry(edge.source.clone())
+                    .or_default()
+                    .insert(edge.target.clone());
+                imports
+            },
+        );
+    let imports_by_file = extraction
+        .edges
+        .iter()
+        .filter(|edge| matches!(relation(edge), "imports" | "imports_from"))
+        .fold(
+            HashMap::<String, HashSet<String>>::new(),
+            |mut imports, edge| {
+                imports
+                    .entry(edge.string("source_file"))
+                    .or_default()
+                    .insert(edge.target.clone());
+                imports
+            },
+        );
 
     let repoint_relations = ["implements", "inherits", "extends", "imports", "references"];
     let mut repointed = HashSet::new();
@@ -386,11 +461,25 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         let Some(candidates) = definitions.get(&(label.clone(), family)) else {
             continue;
         };
-        if let [target] = candidates.as_slice()
-            && target != &edge.target
+        let source_scope = repository_scope(&source_file);
+        let compatible = candidates
+            .iter()
+            .filter(|(id, source)| {
+                repository_scope(source) == source_scope
+                    || imports_by_source
+                        .get(&edge.source)
+                        .is_some_and(|targets| targets.contains(id))
+                    || imports_by_file
+                        .get(&source_file)
+                        .is_some_and(|targets| targets.contains(id))
+            })
+            .collect::<Vec<_>>();
+        if let [target] = compatible.as_slice()
+            && target.0 != edge.target
         {
             repointed.insert(edge.target.clone());
-            edge.target.clone_from(target);
+            edge.target.clone_from(&target.0);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::LanguageFamilyStubResolution, 0.9);
         }
     }
     drop_unreferenced_nodes(extraction, &repointed);
@@ -512,6 +601,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         }
         repointed.insert(edge.target.clone());
         edge.target = target;
+        stamp_endpoint_rewrite(edge, EndpointRewriteRule::PhpQualifiedTypeResolution, 1.0);
     }
     extraction.nodes.extend(new_nodes);
     drop_unreferenced_nodes(extraction, &repointed);
@@ -581,6 +671,7 @@ fn canonicalize_import_targets(extraction: &mut Extraction) {
             && let Some(target) = aliases.get(&edge.target)
         {
             edge.target.clone_from(target);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::CanonicalImportTarget, 1.0);
         }
     }
 }
@@ -635,7 +726,21 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         .map(|(id, _)| id.as_str())
         .collect::<HashSet<_>>();
     let mut stub_families = HashMap::<String, HashSet<&'static str>>::new();
+    let mut stub_scopes = HashMap::<String, HashSet<String>>::new();
+    let mut stub_consumers = HashMap::<String, HashSet<String>>::new();
+    let mut imports = HashMap::<String, HashSet<String>>::new();
+    let mut imports_by_file = HashMap::<String, HashSet<String>>::new();
     for edge in &extraction.edges {
+        if matches!(relation(edge), "imports" | "imports_from") {
+            imports
+                .entry(edge.source.clone())
+                .or_default()
+                .insert(edge.target.clone());
+            imports_by_file
+                .entry(edge.string("source_file"))
+                .or_default()
+                .insert(edge.target.clone());
+        }
         let Some(family) = language_family(&edge.string("source_file")) else {
             continue;
         };
@@ -645,51 +750,90 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                     .entry(endpoint.clone())
                     .or_default()
                     .insert(family);
+                stub_scopes
+                    .entry(endpoint.clone())
+                    .or_default()
+                    .insert(repository_scope(&edge.string("source_file")));
+                let counterpart = if endpoint == &edge.source {
+                    &edge.target
+                } else {
+                    &edge.source
+                };
+                stub_consumers
+                    .entry(endpoint.clone())
+                    .or_default()
+                    .insert(counterpart.clone());
             }
         }
     }
     let mut remap = HashMap::new();
     for (stub, label) in stubs {
-        let candidates = types
-            .get(&label)
-            .filter(|items| items.len() == 1)
-            .or_else(|| {
-                types_ci
-                    .get(&label.to_ascii_lowercase())
-                    .filter(|items| items.len() == 1)
-            })
+        let families = stub_families.get(&stub);
+        let scopes = stub_scopes.get(&stub);
+        let consumers = stub_consumers.get(&stub);
+        let compatible_unique = |items: Option<&Vec<String>>| {
+            let compatible = items?
+                .iter()
+                .filter(|candidate| {
+                    let Some(candidate_source) = source_by_id.get(*candidate) else {
+                        return false;
+                    };
+                    let Some(candidate_family) = language_family(candidate_source) else {
+                        return false;
+                    };
+                    let family_compatible = families
+                        .is_some_and(|set| set.len() == 1 && set.contains(candidate_family));
+                    let scope_compatible = scopes.is_some_and(|set| {
+                        set.len() == 1 && set.contains(&repository_scope(candidate_source))
+                    });
+                    let explicitly_imported = consumers.is_some_and(|consumers| {
+                        consumers.iter().any(|consumer| {
+                            imports
+                                .get(consumer)
+                                .is_some_and(|targets| targets.contains(*candidate))
+                        })
+                    }) || scopes.is_some_and(|_| {
+                        extraction.edges.iter().any(|edge| {
+                            (edge.source == stub || edge.target == stub)
+                                && imports_by_file
+                                    .get(&edge.string("source_file"))
+                                    .is_some_and(|targets| targets.contains(*candidate))
+                        })
+                    });
+                    family_compatible && (scope_compatible || explicitly_imported)
+                })
+                .collect::<Vec<_>>();
+            (compatible.len() == 1).then(|| compatible[0].clone())
+        };
+        let candidate = compatible_unique(types.get(&label))
+            .or_else(|| compatible_unique(types_ci.get(&label.to_ascii_lowercase())))
             .or_else(|| {
                 if supertype_stubs.contains(stub.as_str()) {
                     return None;
                 }
-                let items = functions.get(&label).filter(|items| items.len() == 1)?;
-                let target = items.first()?;
-                let families = stub_families.get(&stub);
-                let candidate_family = source_by_id
-                    .get(target)
-                    .and_then(|source| language_family(source));
-                (families.is_none_or(HashSet::is_empty)
-                    || candidate_family.is_none()
-                    || candidate_family.is_some_and(|family| {
-                        families.is_some_and(|families| families.contains(family))
-                    }))
-                .then_some(items)
+                compatible_unique(functions.get(&label))
             });
-        if let Some(target) = candidates.and_then(|items| items.first())
-            && target != &stub
+        if let Some(target) = candidate
+            && target != stub
         {
-            remap.insert(stub, target.clone());
+            remap.insert(stub, target);
         }
     }
     if remap.is_empty() {
         return;
     }
     for edge in &mut extraction.edges {
+        let mut rewritten = false;
         if let Some(target) = remap.get(&edge.source) {
             edge.source.clone_from(target);
+            rewritten = true;
         }
         if let Some(target) = remap.get(&edge.target) {
             edge.target.clone_from(target);
+            rewritten = true;
+        }
+        if rewritten {
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::UniqueStubEndpointResolution, 0.8);
         }
     }
     let referenced = extraction
@@ -810,6 +954,11 @@ fn disambiguate_colliding_node_ids_with_calls(
         let edge_key = source_key(&edge.string("source_file"), root);
         if let Some(new_id) = remap.get(&(edge.source.clone(), edge_key.clone())) {
             edge.source.clone_from(new_id);
+            stamp_endpoint_rewrite(
+                edge,
+                EndpointRewriteRule::SourceScopedNodeDisambiguation,
+                1.0,
+            );
         }
         let target_file = edge
             .attributes
@@ -827,8 +976,14 @@ fn disambiguate_colliding_node_ids_with_calls(
             && let Some(new_id) = header_remaps.get(&edge.target)
         {
             edge.target.clone_from(new_id);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::HeaderImportDisambiguation, 1.0);
         } else if let Some(new_id) = remap.get(&(edge.target.clone(), target_key)) {
             edge.target.clone_from(new_id);
+            stamp_endpoint_rewrite(
+                edge,
+                EndpointRewriteRule::SourceScopedNodeDisambiguation,
+                1.0,
+            );
         }
     }
     for raw in raw_calls {
@@ -966,9 +1121,17 @@ fn resolve_cross_file_calls_with_root_calls(
     let mut existing = AHashSet::new();
     let mut call_like = AHashSet::new();
     for edge in &extraction.edges {
-        existing.insert((edge.source.clone(), edge.target.clone()));
+        existing.insert((
+            edge.source.clone(),
+            edge.target.clone(),
+            edge_occurrence_site(edge),
+        ));
         if matches!(relation(edge), "calls" | "indirect_call") {
-            call_like.insert((edge.source.clone(), edge.target.clone()));
+            call_like.insert((
+                edge.source.clone(),
+                edge.target.clone(),
+                edge_occurrence_site(edge),
+            ));
         }
         match relation(edge) {
             "imports" => {
@@ -990,7 +1153,6 @@ fn resolve_cross_file_calls_with_root_calls(
     for raw in raw_calls {
         if raw.callee.is_empty()
             || raw.is_member_call == Some(true)
-            || is_builtin(&raw.callee)
             || raw.extensions.get("is_mixin").and_then(Value::as_bool) == Some(true)
         {
             continue;
@@ -1015,6 +1177,18 @@ fn resolve_cross_file_calls_with_root_calls(
         let Some((target, import_evidence)) = selection else {
             continue;
         };
+        let same_file = source_by_id
+            .get(&target)
+            .is_some_and(|source| normalize_path(source) == normalize_path(&raw.source_file));
+        let language = raw
+            .lang
+            .as_deref()
+            .or_else(|| language_name_from_source(&raw.source_file));
+        if language.is_some_and(|language| {
+            is_language_builtin_global(language, &raw.callee) && !same_file && !import_evidence
+        }) {
+            continue;
+        }
         if raw
             .extensions
             .get("symbol_import_use")
@@ -1039,7 +1213,11 @@ fn resolve_cross_file_calls_with_root_calls(
         if indirect {
             if target != raw.caller_nid
                 && callable.contains(&target)
-                && call_like.insert((raw.caller_nid.clone(), target.clone()))
+                && call_like.insert((
+                    raw.caller_nid.clone(),
+                    target.clone(),
+                    raw_call_occurrence_site(raw),
+                ))
             {
                 let mut edge = resolved_edge(raw, &target, "INFERRED", 0.8);
                 edge.attributes.insert(
@@ -1060,7 +1238,11 @@ fn resolve_cross_file_calls_with_root_calls(
         if target == raw.caller_nid || (!import_evidence && is_javascript(&raw.source_file)) {
             continue;
         }
-        if existing.insert((raw.caller_nid.clone(), target.clone())) {
+        if existing.insert((
+            raw.caller_nid.clone(),
+            target.clone(),
+            raw_call_occurrence_site(raw),
+        )) {
             let mut edge = resolved_edge(
                 raw,
                 &target,
@@ -1152,6 +1334,21 @@ fn resolve_python_import_guided_with_calls(
             )
         })
         .collect::<HashSet<_>>();
+    let mut known_import_occurrences = extraction
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.source.clone(),
+                edge.target.clone(),
+                relation(edge).to_owned(),
+                edge.attributes
+                    .get(OCCURRENCE_RULE_ATTRIBUTE)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            )
+        })
+        .collect::<HashSet<_>>();
     let file_nodes = extraction
         .nodes
         .iter()
@@ -1193,14 +1390,21 @@ fn resolve_python_import_guided_with_calls(
             );
             if candidates.len() == 1 {
                 let target = &candidates[0];
-                if known.insert((file_node.clone(), target.clone(), "imports".to_owned())) {
+                if known_import_occurrences.insert((
+                    file_node.clone(),
+                    target.clone(),
+                    "imports".to_owned(),
+                    Some(python_import_occurrence_rule(
+                        PythonImportResolution::SymbolImport,
+                        imported,
+                    )),
+                )) {
                     resolved_edges.push(python_import_edge(
                         file_node,
                         target,
-                        "imports",
-                        "import",
+                        PythonImportResolution::SymbolImport,
                         source_file,
-                        imported.line,
+                        imported,
                     ));
                 }
             } else if let Some(target) = python_module_file(
@@ -1209,18 +1413,21 @@ fn resolve_python_import_guided_with_calls(
                 &imported.module,
                 Some(&imported.imported),
                 &normalized_file_nodes,
-            ) && known.insert((
+            ) && known_import_occurrences.insert((
                 file_node.clone(),
                 target.clone(),
                 "imports_from".to_owned(),
+                Some(python_import_occurrence_rule(
+                    PythonImportResolution::SubmoduleImport,
+                    imported,
+                )),
             )) {
                 resolved_edges.push(python_import_edge(
                     file_node,
                     &target,
-                    "imports_from",
-                    "submodule_import",
+                    PythonImportResolution::SubmoduleImport,
                     source_file,
-                    imported.line,
+                    imported,
                 ));
             }
             if Path::new(source_file)
@@ -1228,15 +1435,22 @@ fn resolve_python_import_guided_with_calls(
                 .and_then(|name| name.to_str())
                 == Some("__init__.py")
                 && let Some(target) = module_file
-                && known.insert((file_node.clone(), target.clone(), "re_exports".to_owned()))
+                && known_import_occurrences.insert((
+                    file_node.clone(),
+                    target.clone(),
+                    "re_exports".to_owned(),
+                    Some(python_import_occurrence_rule(
+                        PythonImportResolution::ModuleReExport,
+                        imported,
+                    )),
+                ))
             {
                 resolved_edges.push(python_import_edge(
                     file_node,
                     &target,
-                    "re_exports",
-                    "export",
+                    PythonImportResolution::ModuleReExport,
                     source_file,
-                    imported.line,
+                    imported,
                 ));
             }
         }
@@ -1301,35 +1515,120 @@ fn resolve_python_import_guided_with_calls(
     resolved_edges
 }
 
+#[derive(Clone, Copy)]
+enum PythonImportResolution {
+    SymbolImport,
+    SubmoduleImport,
+    ModuleReExport,
+}
+
+impl PythonImportResolution {
+    const fn relation(self) -> &'static str {
+        match self {
+            Self::SymbolImport => "imports",
+            Self::SubmoduleImport => "imports_from",
+            Self::ModuleReExport => "re_exports",
+        }
+    }
+
+    const fn context(self) -> &'static str {
+        match self {
+            Self::SymbolImport => "import",
+            Self::SubmoduleImport => "submodule_import",
+            Self::ModuleReExport => "export",
+        }
+    }
+
+    const fn rule(self) -> &'static str {
+        match self {
+            Self::SymbolImport => "python-symbol-import-resolution",
+            Self::SubmoduleImport => "python-submodule-import-resolution",
+            Self::ModuleReExport => "python-module-re-export-resolution",
+        }
+    }
+}
+
 fn python_import_edge(
     source: &str,
     target: &str,
-    relation: &str,
-    context: &str,
+    resolution: PythonImportResolution,
     source_file: &str,
-    line: usize,
+    imported: &PythonImport,
 ) -> EdgeRecord {
+    let mut attributes = Map::from_iter([
+        (
+            "relation".to_owned(),
+            Value::String(resolution.relation().to_owned()),
+        ),
+        (
+            "context".to_owned(),
+            Value::String(resolution.context().to_owned()),
+        ),
+        (
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        ),
+        ("language".to_owned(), Value::String("python".to_owned())),
+        (
+            "extractor".to_owned(),
+            Value::String("compass.resolve.python-imports".to_owned()),
+        ),
+        ("_origin".to_owned(), Value::String("convention".to_owned())),
+        (
+            "rule".to_owned(),
+            Value::String(resolution.rule().to_owned()),
+        ),
+        (
+            OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+            Value::String(python_import_occurrence_rule(resolution, imported)),
+        ),
+        ("weight".to_owned(), Value::from(1.0)),
+    ]);
+    insert_python_import_anchor(&mut attributes, source_file, imported);
     EdgeRecord {
         source: source.to_owned(),
         target: target.to_owned(),
-        attributes: Map::from_iter([
-            ("relation".to_owned(), Value::String(relation.to_owned())),
-            ("context".to_owned(), Value::String(context.to_owned())),
-            (
-                "confidence".to_owned(),
-                Value::String("EXTRACTED".to_owned()),
-            ),
-            (
-                "source_file".to_owned(),
-                Value::String(source_file.to_owned()),
-            ),
-            (
-                "source_location".to_owned(),
-                Value::String(format!("L{line}")),
-            ),
-            ("weight".to_owned(), Value::from(1.0)),
-        ]),
+        attributes,
     }
+}
+
+fn insert_python_import_anchor(
+    attributes: &mut Map<String, Value>,
+    source_file: &str,
+    imported: &PythonImport,
+) {
+    attributes.insert(
+        "source_file".to_owned(),
+        Value::String(source_file.to_owned()),
+    );
+    attributes.insert(
+        "source_location".to_owned(),
+        Value::String(format!("L{}", imported.start_line)),
+    );
+    attributes.insert("start_byte".to_owned(), Value::from(imported.start_byte));
+    attributes.insert("end_byte".to_owned(), Value::from(imported.end_byte));
+    attributes.insert("line_start".to_owned(), Value::from(imported.start_line));
+    attributes.insert("line_end".to_owned(), Value::from(imported.end_line));
+    attributes.insert(
+        "column_start".to_owned(),
+        Value::from(imported.start_column),
+    );
+    attributes.insert("column_end".to_owned(), Value::from(imported.end_column));
+}
+
+fn python_import_occurrence_rule(
+    resolution: PythonImportResolution,
+    imported: &PythonImport,
+) -> String {
+    format!(
+        "{}@{}:{}:{}:{}:{}",
+        resolution.rule(),
+        imported.start_byte,
+        imported.end_byte,
+        imported.occurrence,
+        imported.imported,
+        imported.local
+    )
 }
 
 fn python_module_file(
@@ -1460,11 +1759,18 @@ fn resolve_python_class_uses(
                     "confidence".to_owned(),
                     Value::String("INFERRED".to_owned()),
                 );
-                attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
+                attributes.insert("language".to_owned(), Value::String("python".to_owned()));
                 attributes.insert(
-                    "source_location".to_owned(),
-                    Value::String(format!("L{}", imported.line)),
+                    "extractor".to_owned(),
+                    Value::String("compass.resolve.python-imports".to_owned()),
                 );
+                attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
+                attributes.insert(
+                    "rule".to_owned(),
+                    Value::String("python-imported-class-use-inference".to_owned()),
+                );
+                attributes.insert("confidence_score".to_owned(), Value::from(0.8));
+                insert_python_import_anchor(&mut attributes, source_file, imported);
                 attributes.insert("weight".to_owned(), Value::from(0.8));
                 resolved_edges.push(EdgeRecord {
                     source: source_id.clone(),
@@ -1489,55 +1795,278 @@ struct PythonImport {
     module: String,
     imported: String,
     local: String,
-    line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    start_line: usize,
+    end_line: usize,
+    start_column: usize,
+    end_column: usize,
+    occurrence: usize,
+}
+
+struct PythonImportItem {
+    occurrence: usize,
+    imported: String,
+    local: String,
 }
 
 fn python_symbol_imports(source: &str) -> Vec<PythonImport> {
     let masked = mask_python_non_code(source);
     let lines = masked.lines().collect::<Vec<_>>();
+    let original_lines = source.lines().collect::<Vec<_>>();
+    let line_starts = std::iter::once(0)
+        .chain(
+            masked
+                .bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        )
+        .collect::<Vec<_>>();
     let mut output = Vec::new();
     let mut index = 0;
     while index < lines.len() {
         let line = lines[index];
-        let Some(rest) = line.trim().strip_prefix("from ") else {
+        let trimmed = line.trim_start_matches(is_python_inline_whitespace);
+        if !starts_python_from_import(trimmed) {
             index += 1;
             continue;
-        };
-        let Some((module, first_imports)) = rest.split_once(" import ") else {
-            index += 1;
-            continue;
-        };
-        let start_line = index + 1;
-        let mut imports = first_imports.to_owned();
-        while imports.contains('(') && !imports.contains(')') && index + 1 < lines.len() {
-            index += 1;
-            imports.push(' ');
-            imports.push_str(lines[index].trim());
         }
-        for item in imports
-            .trim_matches(['(', ')'])
-            .split(',')
-            .map(str::trim)
-            .filter(|item| !item.is_empty() && *item != "*")
+        let start_line = index + 1;
+        let start_column = line.len() - trimmed.len();
+        let start_byte = line_starts[index] + start_column;
+        let mut statement = String::new();
+        let mut depth = 0_usize;
+        let mut malformed = false;
+        loop {
+            let physical = if index + 1 == start_line {
+                lines[index].trim_start_matches(is_python_inline_whitespace)
+            } else {
+                lines[index].trim_matches(is_python_inline_whitespace)
+            };
+            let trimmed_end = physical.trim_end_matches(is_python_inline_whitespace);
+            let continued = trimmed_end.ends_with('\\');
+            if continued
+                && original_lines
+                    .get(index)
+                    .is_none_or(|original| !original.ends_with('\\'))
+            {
+                malformed = true;
+                break;
+            }
+            let logical = if continued {
+                trimmed_end.strip_suffix('\\').unwrap_or(trimmed_end)
+            } else {
+                trimmed_end
+            };
+            if !statement.is_empty() {
+                statement.push(' ');
+            }
+            statement.push_str(logical.trim_matches(is_python_inline_whitespace));
+            for character in logical.chars() {
+                match character {
+                    '(' => depth = depth.saturating_add(1),
+                    ')' if depth == 0 => {
+                        malformed = true;
+                        break;
+                    }
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if malformed || (depth == 0 && !continued) {
+                break;
+            }
+            if index + 1 >= lines.len()
+                || starts_python_from_import(
+                    lines[index + 1].trim_start_matches(is_python_inline_whitespace),
+                )
+            {
+                malformed = true;
+                break;
+            }
+            index += 1;
+        }
+        let end_line = index + 1;
+        let end_column = lines[index]
+            .trim_end_matches(is_python_inline_whitespace)
+            .len();
+        let end_byte = line_starts[index] + end_column;
+        if !malformed
+            && depth == 0
+            && let Some((module, items)) = parse_python_from_import(&statement)
         {
-            let item = item.split('#').next().unwrap_or_default().trim();
-            let (imported, local) = item
-                .split_once(" as ")
-                .map_or((item, item), |(imported, local)| {
-                    (imported.trim(), local.trim())
-                });
-            if !imported.is_empty() && !local.is_empty() {
+            for item in items {
                 output.push(PythonImport {
-                    module: module.to_owned(),
-                    imported: imported.to_owned(),
-                    local: local.to_owned(),
-                    line: start_line,
+                    module: module.clone(),
+                    imported: item.imported,
+                    local: item.local,
+                    start_byte,
+                    end_byte,
+                    start_line,
+                    end_line,
+                    start_column,
+                    end_column,
+                    occurrence: item.occurrence,
                 });
             }
         }
         index += 1;
     }
     output
+}
+
+fn starts_python_from_import(statement: &str) -> bool {
+    statement
+        .strip_prefix("from")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(is_python_inline_whitespace)
+}
+
+fn parse_python_from_import(statement: &str) -> Option<(String, Vec<PythonImportItem>)> {
+    let rest = statement.strip_prefix("from")?;
+    let rest = rest
+        .strip_prefix(is_python_inline_whitespace)?
+        .trim_start_matches(is_python_inline_whitespace);
+    let module_end = rest.find(is_python_inline_whitespace)?;
+    let module = &rest[..module_end];
+    if !valid_python_module(module) {
+        return None;
+    }
+    let imports = rest[module_end..]
+        .trim_start_matches(is_python_inline_whitespace)
+        .strip_prefix("import")?;
+    if imports
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphanumeric())
+    {
+        return None;
+    }
+    let imports = imports.trim_matches(is_python_inline_whitespace);
+    let (imports, parenthesized) = if let Some(imports) = imports.strip_prefix('(') {
+        (
+            imports
+                .strip_suffix(')')?
+                .trim_matches(is_python_inline_whitespace),
+            true,
+        )
+    } else {
+        (imports, false)
+    };
+    if imports.is_empty() || imports.contains(['(', ')']) {
+        return None;
+    }
+    let pieces = imports.split(',').collect::<Vec<_>>();
+    if !parenthesized
+        && pieces
+            .last()
+            .is_some_and(|item| item.trim_matches(is_python_inline_whitespace).is_empty())
+    {
+        return None;
+    }
+    let wildcard_count = pieces
+        .iter()
+        .filter(|item| item.trim_matches(is_python_inline_whitespace) == "*")
+        .count();
+    if wildcard_count > 0 {
+        return (!parenthesized && pieces.len() == 1).then(|| (module.to_owned(), Vec::new()));
+    }
+    let piece_count = pieces.len();
+    let mut output = Vec::new();
+    for (occurrence, item) in pieces.into_iter().enumerate() {
+        let item = item.trim_matches(is_python_inline_whitespace);
+        if item.is_empty() {
+            if parenthesized && occurrence + 1 == piece_count {
+                continue;
+            }
+            return None;
+        }
+        let (imported, local) = parse_python_import_item(item)?;
+        if !valid_python_identifier(imported) || !valid_python_identifier(local) {
+            return None;
+        }
+        output.push(PythonImportItem {
+            occurrence,
+            imported: imported.to_owned(),
+            local: local.to_owned(),
+        });
+    }
+    Some((module.to_owned(), output))
+}
+
+fn parse_python_import_item(item: &str) -> Option<(&str, &str)> {
+    let imported_end = item.find(is_python_inline_whitespace).unwrap_or(item.len());
+    let imported = &item[..imported_end];
+    let alias = &item[imported_end..];
+    if alias.is_empty() {
+        return Some((imported, imported));
+    }
+    let alias = alias
+        .trim_start_matches(is_python_inline_whitespace)
+        .strip_prefix("as")?
+        .strip_prefix(is_python_inline_whitespace)?
+        .trim_start_matches(is_python_inline_whitespace);
+    Some((imported, alias))
+}
+
+const fn is_python_inline_whitespace(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\u{000C}')
+}
+
+fn valid_python_module(module: &str) -> bool {
+    let bare = module.trim_start_matches('.');
+    (!bare.is_empty() || module.starts_with('.'))
+        && (bare.is_empty() || bare.split('.').all(valid_python_identifier))
+}
+
+fn valid_python_identifier(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
+        && !is_python_hard_keyword(identifier)
+}
+
+fn is_python_hard_keyword(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 fn mask_python_non_code(source: &str) -> String {
@@ -1971,12 +2500,76 @@ fn resolved_edge(raw: &RawCall, target: &str, confidence: &str, score: f64) -> E
         "source_location".to_owned(),
         Value::String(raw.source_location.clone()),
     );
+    for key in [
+        "language",
+        "extractor",
+        "source_anchor",
+        "start_byte",
+        "end_byte",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+    ] {
+        if let Some(value) = raw.extensions.get(key) {
+            attributes.insert(key.to_owned(), value.clone());
+        }
+    }
     attributes.insert("weight".to_owned(), Value::from(1.0));
     EdgeRecord {
         source: raw.caller_nid.clone(),
         target: target.to_owned(),
         attributes,
     }
+}
+
+fn raw_call_occurrence_site(raw: &RawCall) -> String {
+    occurrence_site(&raw.extensions, &raw.source_file, &raw.source_location)
+}
+
+fn edge_occurrence_site(edge: &EdgeRecord) -> String {
+    occurrence_site(
+        &edge.attributes,
+        &edge.string("source_file"),
+        &edge.string("source_location"),
+    )
+}
+
+fn occurrence_site(attributes: &Map<String, Value>, source_file: &str, location: &str) -> String {
+    serde_json::to_string(&[
+        Value::String(source_file.to_owned()),
+        attributes
+            .get("source_anchor")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("start_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("end_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("line_start").cloned().unwrap_or(Value::Null),
+        attributes
+            .get("column_start")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("line_end").cloned().unwrap_or(Value::Null),
+        attributes.get("column_end").cloned().unwrap_or(Value::Null),
+        Value::String(location.to_owned()),
+    ])
+    .unwrap_or_default()
+}
+
+fn stamp_endpoint_rewrite(edge: &mut EdgeRecord, rule: EndpointRewriteRule, score: f64) {
+    preserve_occurrence_rule(&mut edge.attributes);
+    append_endpoint_rewrite_evidence(
+        &mut edge.attributes,
+        EndpointRewriteEvidence { rule, score },
+    );
+}
+
+fn repository_scope(source: &str) -> String {
+    Path::new(source)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn string_attribute(node: &NodeRecord, key: &str) -> String {
@@ -2016,98 +2609,17 @@ fn is_javascript(source: &str) -> bool {
     )
 }
 
-fn is_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "Number"
-            | "Boolean"
-            | "Object"
-            | "Array"
-            | "Symbol"
-            | "BigInt"
-            | "Date"
-            | "RegExp"
-            | "Error"
-            | "TypeError"
-            | "RangeError"
-            | "SyntaxError"
-            | "ReferenceError"
-            | "EvalError"
-            | "URIError"
-            | "Promise"
-            | "Map"
-            | "Set"
-            | "WeakMap"
-            | "WeakSet"
-            | "JSON"
-            | "Math"
-            | "Reflect"
-            | "Proxy"
-            | "Intl"
-            | "parseInt"
-            | "parseFloat"
-            | "isNaN"
-            | "isFinite"
-            | "encodeURIComponent"
-            | "decodeURIComponent"
-            | "encodeURI"
-            | "decodeURI"
-            | "URL"
-            | "URLSearchParams"
-            | "FormData"
-            | "Blob"
-            | "File"
-            | "Headers"
-            | "Request"
-            | "Response"
-            | "AbortController"
-            | "AbortSignal"
-            | "TextEncoder"
-            | "TextDecoder"
-            | "console"
-            | "str"
-            | "int"
-            | "float"
-            | "bool"
-            | "list"
-            | "dict"
-            | "set"
-            | "tuple"
-            | "bytes"
-            | "len"
-            | "range"
-            | "enumerate"
-            | "zip"
-            | "map"
-            | "filter"
-            | "sum"
-            | "min"
-            | "max"
-            | "print"
-            | "open"
-            | "isinstance"
-            | "type"
-            | "super"
-            | "sorted"
-            | "reversed"
-            | "any"
-            | "all"
-            | "abs"
-            | "round"
-            | "next"
-            | "iter"
-            | "hash"
-            | "id"
-            | "repr"
-            | "callable"
-            | "getattr"
-            | "setattr"
-            | "hasattr"
-            | "delattr"
-            | "vars"
-            | "dir"
-    )
+fn language_name_from_source(source: &str) -> Option<&'static str> {
+    match extension(source).as_str() {
+        "py" | "pyi" => Some("python"),
+        "js" | "jsx" | "mjs" | "cjs" => Some("javascript"),
+        "ts" | "mts" | "cts" => Some("typescript"),
+        "tsx" => Some("tsx"),
+        "go" => Some("go"),
+        "rs" => Some("rust"),
+        "java" => Some("java"),
+        _ => None,
+    }
 }
 
 fn language_family(source: &str) -> Option<&'static str> {
@@ -2146,6 +2658,9 @@ fn extension(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    use compass_graph::{build_from_extraction, normalize_document_v1};
     use serde_json::json;
 
     fn node(id: &str, label: &str, source_file: &str, kind: &str) -> NodeRecord {
@@ -2222,11 +2737,15 @@ mod tests {
         let imports = python_symbol_imports(
             "from pkg.api import (\n  Widget as LocalWidget,\n  helper, # kept\n  *,\n)\nfrom invalid\nimport os\n",
         );
+        assert!(imports.is_empty());
+        let imports = python_symbol_imports(
+            "from pkg.api import (\n  Widget as LocalWidget,\n  helper, # kept\n)\nfrom pkg.api import *\n",
+        );
         assert_eq!(imports.len(), 2);
         assert_eq!(imports[0].module, "pkg.api");
         assert_eq!(imports[0].imported, "Widget");
         assert_eq!(imports[0].local, "LocalWidget");
-        assert_eq!(imports[0].line, 1);
+        assert_eq!(imports[0].start_line, 1);
         assert_eq!(imports[1].imported, "helper");
         let aliases = python_import_aliases("from lib import run as execute");
         assert_eq!(
@@ -2483,8 +3002,12 @@ mod tests {
         assert_eq!(language_family("README"), None);
         assert!(case_insensitive("query.SQL"));
         assert!(is_javascript("view.mjs"));
-        assert!(is_builtin("Promise"));
-        assert!(!is_builtin("project_function"));
+        assert!(is_language_builtin_global("javascript", "Promise"));
+        assert!(!is_language_builtin_global("rust", "Promise"));
+        assert!(!is_language_builtin_global(
+            "javascript",
+            "project_function"
+        ));
     }
 
     #[test]
@@ -2727,10 +3250,169 @@ mod tests {
                 .iter()
                 .all(|candidate| candidate.id != "func-stub")
         );
+        for edge in &extraction.edges {
+            assert!(
+                edge.attributes["_endpoint_rewrite_rules"]
+                    .as_array()
+                    .is_some_and(|entries| entries.iter().any(|entry| {
+                        entry["rule"] == "unique-stub-endpoint-resolution" && entry["score"] == 0.8
+                    }))
+            );
+        }
     }
 
     #[test]
-    fn generic_stub_rewiring_matches_python_ascii_and_case_insensitive_fallbacks() {
+    fn every_resolver_rewrite_family_preserves_occurrences_through_v1()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src"))?;
+        fs::write(root.join("src/lib.rs"), vec![b'x'; 500])?;
+        let rewrite_rules = [
+            EndpointRewriteRule::CsharpNamespaceCanonicalization,
+            EndpointRewriteRule::LanguageFamilyStubResolution,
+            EndpointRewriteRule::PhpQualifiedTypeResolution,
+            EndpointRewriteRule::CanonicalImportTarget,
+            EndpointRewriteRule::UniqueStubEndpointResolution,
+            EndpointRewriteRule::SourceScopedNodeDisambiguation,
+            EndpointRewriteRule::HeaderImportDisambiguation,
+        ];
+
+        for rewrite_rule in rewrite_rules {
+            let anchor = json!({
+                "file":root.join("src/lib.rs"),
+                "startByte":50,
+                "endByte":54,
+                "startLine":6,
+                "startColumn":0,
+                "endLine":6,
+                "endColumn":4
+            });
+            let mut remapped_same = EdgeRecord {
+                source: "pre-rewrite-caller".to_owned(),
+                target: "callee".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("calls")),
+                    ("rule".to_owned(), json!("producer-a")),
+                    ("extractor".to_owned(), json!("test.resolver")),
+                    ("_origin".to_owned(), json!("ast")),
+                    ("confidence".to_owned(), json!("EXTRACTED")),
+                    ("source_anchor".to_owned(), anchor.clone()),
+                ]),
+            };
+            stamp_endpoint_rewrite(&mut remapped_same, rewrite_rule, 0.9);
+            assert_eq!(remapped_same.string("_origin"), "ast");
+            assert_eq!(remapped_same.string("confidence"), "EXTRACTED");
+            assert_eq!(remapped_same.string("rule"), "producer-a");
+            assert_eq!(
+                remapped_same.string("_occurrence_rule"),
+                "producer-a",
+                "lost producer identity for {}",
+                rewrite_rule.as_str()
+            );
+            remapped_same.source = "caller".to_owned();
+            let mut remapped_distinct = remapped_same.clone();
+            remapped_distinct
+                .attributes
+                .insert("rule".to_owned(), json!("producer-b"));
+            remapped_distinct
+                .attributes
+                .insert("_occurrence_rule".to_owned(), json!("producer-b"));
+            let direct_same = EdgeRecord {
+                source: "caller".to_owned(),
+                target: "callee".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("calls")),
+                    ("rule".to_owned(), json!("producer-a")),
+                    ("extractor".to_owned(), json!("test.direct")),
+                    ("_origin".to_owned(), json!("ast")),
+                    ("confidence".to_owned(), json!("EXTRACTED")),
+                    ("source_anchor".to_owned(), anchor.clone()),
+                ]),
+            };
+            let node = |id: &str, qualified_name: &str, start_byte: u64| NodeRecord {
+                id: id.to_owned(),
+                attributes: Map::from_iter([
+                    ("label".to_owned(), json!(qualified_name)),
+                    ("qualified_name".to_owned(), json!(qualified_name)),
+                    ("symbol_kind".to_owned(), json!("function")),
+                    ("file_type".to_owned(), json!("code")),
+                    ("source_file".to_owned(), json!(root.join("src/lib.rs"))),
+                    ("extractor".to_owned(), json!("test.resolver")),
+                    ("_origin".to_owned(), json!("ast")),
+                    (
+                        "source_anchor".to_owned(),
+                        json!({
+                            "file":root.join("src/lib.rs"),
+                            "startByte":start_byte,
+                            "endByte":start_byte + 4,
+                            "startLine":start_byte / 10 + 1,
+                            "startColumn":0,
+                            "endLine":start_byte / 10 + 1,
+                            "endColumn":4
+                        }),
+                    ),
+                ]),
+            };
+            let extraction = Extraction {
+                nodes: vec![
+                    node("caller", "crate::caller", 10),
+                    node("callee", "crate::callee", 30),
+                ],
+                edges: vec![direct_same, remapped_same, remapped_distinct],
+                ..Extraction::default()
+            };
+
+            let flexible = build_from_extraction(&extraction, true, Some(root));
+            let typed = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+
+            assert_eq!(
+                flexible.links.len(),
+                2,
+                "flexible links for {}: {:?}",
+                rewrite_rule.as_str(),
+                flexible.links
+            );
+            assert_eq!(
+                typed.links.len(),
+                2,
+                "typed links for {}: {:?}",
+                rewrite_rule.as_str(),
+                typed.links
+            );
+            let producer_a = typed
+                .links
+                .iter()
+                .find(|edge| {
+                    edge.occurrence_rule
+                        .as_ref()
+                        .is_some_and(|rule| rule.as_str() == "producer-a")
+                })
+                .ok_or("missing producer-a occurrence")?;
+            assert!(
+                producer_a
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.rule.as_deref() == Some(rewrite_rule.as_str())),
+                "missing {} endpoint evidence: {:?}",
+                rewrite_rule.as_str(),
+                producer_a.evidence
+            );
+            assert!(
+                producer_a.evidence.iter().any(|evidence| {
+                    evidence.origin == compass_model::provenance::EvidenceOrigin::Ast
+                        && evidence.rule.as_deref() == Some("producer-a")
+                }),
+                "missing producer evidence for {}: {:?}",
+                rewrite_rule.as_str(),
+                producer_a.evidence
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn generic_stub_rewiring_never_crosses_language_families() {
         let mut extraction = Extraction {
             nodes: vec![
                 node("php-result", "Result", "fixture.php", "class"),
@@ -2749,8 +3431,117 @@ mod tests {
 
         rewire_unique_stub_nodes(&mut extraction);
 
-        assert_eq!(extraction.edges[0].target, "php-result");
-        assert_eq!(extraction.edges[1].target, "imageref");
+        assert_eq!(extraction.edges[0].target, "rust-result");
+        assert_eq!(extraction.edges[1].target, "rust-image");
+    }
+
+    #[test]
+    fn stub_rewiring_requires_compatible_repository_scope() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "package-b-base",
+                    "Base",
+                    "packages/b/src/Base.java",
+                    "class",
+                ),
+                node("base", "Base", "", "stub"),
+                node(
+                    "package-a-child",
+                    "Child",
+                    "packages/a/src/Child.java",
+                    "class",
+                ),
+            ],
+            edges: vec![edge(
+                "package-a-child",
+                "base",
+                "extends",
+                "packages/a/src/Child.java",
+            )],
+            ..Extraction::default()
+        };
+
+        rewire_unique_family_stubs(&mut extraction);
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[0].target, "base");
+        assert!(extraction.nodes.iter().any(|node| node.id == "base"));
+    }
+
+    #[test]
+    fn stub_rewiring_retains_unknown_language_and_scope_as_unresolved() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "definition",
+                    "Shared",
+                    "packages/b/definition.custom",
+                    "class",
+                ),
+                node("shared", "Shared", "", "stub"),
+                node(
+                    "consumer",
+                    "Consumer",
+                    "packages/a/consumer.custom",
+                    "class",
+                ),
+            ],
+            edges: vec![edge(
+                "consumer",
+                "shared",
+                "references",
+                "packages/a/consumer.custom",
+            )],
+            ..Extraction::default()
+        };
+
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[0].target, "shared");
+        assert!(extraction.nodes.iter().any(|node| node.id == "shared"));
+    }
+
+    #[test]
+    fn explicit_import_evidence_allows_cross_scope_stub_rewiring() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "package-b-base",
+                    "Base",
+                    "packages/b/src/Base.java",
+                    "class",
+                ),
+                node("base", "Base", "", "stub"),
+                node(
+                    "package-a-child",
+                    "Child",
+                    "packages/a/src/Child.java",
+                    "class",
+                ),
+            ],
+            edges: vec![
+                edge(
+                    "package-a-child",
+                    "package-b-base",
+                    "imports",
+                    "packages/a/src/Child.java",
+                ),
+                edge(
+                    "package-a-child",
+                    "base",
+                    "extends",
+                    "packages/a/src/Child.java",
+                ),
+            ],
+            ..Extraction::default()
+        };
+
+        rewire_unique_family_stubs(&mut extraction);
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[1].target, "package-b-base");
+        assert!(extraction.nodes.iter().all(|node| node.id != "base"));
     }
 
     #[test]

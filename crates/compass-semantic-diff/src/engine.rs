@@ -713,13 +713,11 @@ fn dependency_finding(
     ));
     let source_file = source
         .as_ref()
-        .and_then(|node| node.attributes.get("source_file"))
-        .and_then(Value::as_str)
+        .and_then(|node| node.source_file())
         .unwrap_or_default();
     let target_file = target
         .as_ref()
-        .and_then(|node| node.attributes.get("source_file"))
-        .and_then(Value::as_str)
+        .and_then(|node| node.source_file())
         .unwrap_or_default();
     let routine = evidence
         .iter()
@@ -944,19 +942,12 @@ fn removed_graph_node_finding(
 }
 
 fn graph_label<'a>(node: &'a compass_model::NodeRecord, fallback: &'a str) -> &'a str {
-    node.attributes
-        .get("label")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(fallback)
+    let label = node.label();
+    if label.is_empty() { fallback } else { label }
 }
 
 fn graph_kind(node: &compass_model::NodeRecord) -> &str {
-    node.attributes
-        .get("symbol_kind")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("symbol")
+    node.kind_name()
 }
 
 fn graph_public_surface_candidate(
@@ -973,9 +964,7 @@ fn graph_public_surface_candidate(
         return false;
     }
     let source = node
-        .attributes
-        .get("source_file")
-        .and_then(Value::as_str)
+        .source_file()
         .unwrap_or_default()
         .replace('\\', "/")
         .to_ascii_lowercase();
@@ -1539,8 +1528,7 @@ fn node_evidence(
     capability: &str,
 ) -> Vec<EvidenceRef> {
     let source_file = node
-        .and_then(|node| node.attributes.get("source_file"))
-        .and_then(Value::as_str)
+        .and_then(|node| node.source_file())
         .unwrap_or_default()
         .to_owned();
     vec![EvidenceRef {
@@ -1640,7 +1628,7 @@ fn confidence_rank(confidence: Confidence) -> u8 {
 }
 
 fn digest_attribute<'a>(node: &'a compass_model::NodeRecord, key: &str) -> Option<&'a str> {
-    node.attributes.get(key).and_then(Value::as_str)
+    node.digest(key)
 }
 
 fn validate_logical_identity(value: &str) -> Result<(), &'static str> {

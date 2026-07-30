@@ -1,4 +1,4 @@
-pub(crate) const LANGUAGE_BUILTIN_GLOBALS: &[&str] = &[
+const JAVASCRIPT_BUILTIN_GLOBALS: &[&str] = &[
     "String",
     "Number",
     "Boolean",
@@ -46,6 +46,9 @@ pub(crate) const LANGUAGE_BUILTIN_GLOBALS: &[&str] = &[
     "TextEncoder",
     "TextDecoder",
     "console",
+];
+
+const PYTHON_BUILTIN_GLOBALS: &[&str] = &[
     "str",
     "int",
     "float",
@@ -88,3 +91,23 @@ pub(crate) const LANGUAGE_BUILTIN_GLOBALS: &[&str] = &[
     "vars",
     "dir",
 ];
+
+const GO_BUILTIN_GLOBALS: &[&str] = &[
+    "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max",
+    "min", "new", "panic", "print", "println", "real", "recover",
+];
+
+/// Return whether `name` is an unresolved global supplied by `language`.
+///
+/// This deliberately is not a union table: the same spelling can be a normal
+/// user declaration in another language, and callers must attempt proven local
+/// or imported resolution before consulting it.
+#[must_use]
+pub fn is_language_builtin_global(language: &str, name: &str) -> bool {
+    match language {
+        "javascript" | "typescript" | "tsx" => JAVASCRIPT_BUILTIN_GLOBALS.contains(&name),
+        "python" => PYTHON_BUILTIN_GLOBALS.contains(&name),
+        "go" => GO_BUILTIN_GLOBALS.contains(&name),
+        _ => false,
+    }
+}

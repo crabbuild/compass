@@ -472,9 +472,9 @@ fn graph_file_index(
         communities.entry(source.clone()).or_default();
         *counts.entry(source.clone()).or_default() += 1;
         if let Some(community) = node
-            .attributes
-            .get("community")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+            .unsigned("community")
+            .and_then(|value| i64::try_from(value).ok())
+            .or_else(|| node.string("community").parse().ok())
         {
             communities.entry(source).or_default().insert(community);
         }
@@ -510,18 +510,13 @@ pub fn build_community_labels(
     let mut labels = BTreeMap::<i64, Vec<String>>::new();
     for node in &document.nodes {
         let Some(community) = node
-            .attributes
-            .get("community")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+            .unsigned("community")
+            .and_then(|value| i64::try_from(value).ok())
+            .or_else(|| node.string("community").parse().ok())
         else {
             continue;
         };
-        let label = node
-            .attributes
-            .get("label")
-            .and_then(Value::as_str)
-            .filter(|label| !label.is_empty())
-            .unwrap_or(&node.id);
+        let label = node.label();
         if !label.is_empty() && labels.entry(community).or_default().len() < top_n {
             labels.entry(community).or_default().push(label.to_owned());
         }
@@ -535,12 +530,15 @@ pub fn attach_graph_impact(
     graph_path: &Path,
     repo: Option<&str>,
 ) -> BTreeMap<i64, Vec<String>> {
-    if GraphDocument::size_cap_exceeded(graph_path).is_some() {
+    let Ok(graph_path) = compass_files::BuildGuard::resolve_requested_artifact(graph_path) else {
+        return BTreeMap::new();
+    };
+    if GraphDocument::size_cap_exceeded(&graph_path).is_some() {
         return BTreeMap::new();
     }
     // `compass prs --graph` accepts any filename, not only a `.json`
     // extension, while retaining the same graph-size guard.
-    let Ok(document) = GraphDocument::load_for_recluster(graph_path) else {
+    let Ok(document) = GraphDocument::load_for_recluster(&graph_path) else {
         return BTreeMap::new();
     };
     let (file_communities, file_counts) = graph_file_index(&document);
@@ -1256,6 +1254,72 @@ mod tests {
         assert_eq!(prs[0].communities_touched, vec![4]);
         assert_eq!(prs[0].nodes_affected, 1);
         assert_eq!(labels.get(&4), Some(&vec!["Alpha".to_owned()]));
+    }
+
+    fn write_impact_graph(path: &Path, label: &str, community: i64) {
+        std::fs::write(
+            path,
+            serde_json::json!({
+                "nodes":[{
+                    "id":format!("node-{community}"),
+                    "label":label,
+                    "source_file":"src/lib.rs",
+                    "community":community
+                }],
+                "links":[]
+            })
+            .to_string(),
+        )
+        .unwrap_or_else(|_| std::process::abort());
+    }
+
+    #[test]
+    fn graph_impact_rereads_the_active_generation_pointer() {
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let output = directory.path();
+        let public = output.join("graph.json");
+        write_impact_graph(&public, "Legacy", 0);
+        let generations = output.join(".compass-generations");
+        let first = generations.join("generation-first");
+        let second = generations.join("generation-second");
+        std::fs::create_dir_all(&first).unwrap_or_else(|_| std::process::abort());
+        std::fs::create_dir_all(&second).unwrap_or_else(|_| std::process::abort());
+        write_impact_graph(&first.join("graph.json"), "First", 1);
+        write_impact_graph(&second.join("graph.json"), "Second", 2);
+
+        std::fs::write(
+            output.join(".compass-active-generation"),
+            "generation-first",
+        )
+        .unwrap_or_else(|_| std::process::abort());
+        let first_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
+        assert_eq!(first_labels.get(&1), Some(&vec!["First".to_owned()]));
+
+        std::fs::write(
+            output.join(".compass-active-generation"),
+            "generation-second",
+        )
+        .unwrap_or_else(|_| std::process::abort());
+        let second_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
+        assert_eq!(second_labels.get(&2), Some(&vec!["Second".to_owned()]));
+    }
+
+    #[test]
+    fn graph_impact_uses_legacy_only_when_the_pointer_is_absent() {
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let public = directory.path().join("graph.json");
+        write_impact_graph(&public, "Legacy", 0);
+
+        let legacy_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
+        assert_eq!(legacy_labels.get(&0), Some(&vec!["Legacy".to_owned()]));
+
+        std::fs::write(
+            directory.path().join(".compass-active-generation"),
+            "../escape",
+        )
+        .unwrap_or_else(|_| std::process::abort());
+        let malformed_labels = attach_graph_impact(&StubRunner::default(), &mut [], &public, None);
+        assert!(malformed_labels.is_empty());
     }
 
     #[test]

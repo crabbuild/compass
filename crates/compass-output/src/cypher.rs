@@ -14,11 +14,12 @@ pub fn cypher_document(document: &GraphDocument) -> String {
     for node in &document.nodes {
         let label = cypher_escape(node.label());
         let id = cypher_escape(&node.id);
-        let raw_type = node
-            .attributes
-            .get("file_type")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("unknown");
+        let raw_type = node.string("file_type");
+        let raw_type = if raw_type.is_empty() {
+            "unknown"
+        } else {
+            &raw_type
+        };
         let mut capitalized = raw_type.to_lowercase();
         if let Some(first) = capitalized.get_mut(0..1) {
             first.make_ascii_uppercase();
@@ -30,19 +31,18 @@ pub fn cypher_document(document: &GraphDocument) -> String {
     }
     lines.push(String::new());
     for edge in &document.links {
-        let relation = edge
-            .attributes
-            .get("relation")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("RELATES_TO")
-            .to_uppercase();
+        let relation = if edge.relation().is_empty() {
+            "RELATES_TO".to_owned()
+        } else {
+            edge.relation().to_uppercase()
+        };
         let relation = cypher_identifier(&relation, "RELATES_TO");
-        let confidence = cypher_escape(
-            edge.attributes
-                .get("confidence")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("EXTRACTED"),
-        );
+        let confidence = edge.string("confidence");
+        let confidence = cypher_escape(if confidence.is_empty() {
+            "EXTRACTED"
+        } else {
+            &confidence
+        });
         let source = cypher_escape(&edge.source);
         let target = cypher_escape(&edge.target);
         lines.push(format!(

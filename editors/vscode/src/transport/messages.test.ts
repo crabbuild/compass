@@ -54,4 +54,23 @@ describe("community graph messages", () => {
       phase: "exporting"
     }).success).toBe(false);
   });
+
+  it("validates graph-node query requests and rejects extra fields", () => {
+    expect(GraphToHostMessageSchema.safeParse({
+      type: "runCodeQuery",
+      repositoryId: "repository-1",
+      operation: "callers",
+      symbol: "handler:create"
+    }).success).toBe(true);
+    expect(GraphToHostMessageSchema.safeParse({
+      type: "runCodeQuery",
+      repositoryId: "repository-1",
+      operation: "all",
+      symbol: "handler:create"
+    }).success).toBe(false);
+    expect(GraphToHostMessageSchema.safeParse({
+      type: "ready",
+      unexpected: true
+    }).success).toBe(false);
+  });
 });

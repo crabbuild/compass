@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value};
 
@@ -144,6 +144,14 @@ fn extract_razor(path: &Path) -> Result<Extraction, ExtractError> {
             "calls",
             line,
         );
+        if let Some(edge) = extraction.edges.last_mut() {
+            crate::facts::stamp_source_range(
+                &mut edge.attributes,
+                source.as_bytes(),
+                matched.start(),
+                matched.end(),
+            );
+        }
     }
 
     let (Ok(code), Ok(method)) = (
@@ -248,9 +256,9 @@ fn extract_blade(path: &Path) -> Result<Extraction, ExtractError> {
     ));
     let mut seen = HashSet::from([file_id.clone()]);
     let patterns = [
-        (r#"@include\(['"]([^'"]+)['"]"#, "includes", true),
-        (r"<livewire:([\w.\-]+)", "uses_component", false),
-        (r#"wire:click=["']([^"']+)["']"#, "binds_method", false),
+        (r#"@include\(['"]([^'"]+)['"]"#, "imports", true),
+        (r"<livewire:([\w.\-]+)", "references", false),
+        (r#"wire:click=["']([^"']+)["']"#, "references", false),
     ];
     for (raw_pattern, relation, slash_id) in patterns {
         let Ok(pattern) = Regex::new(raw_pattern) else {
@@ -444,6 +452,7 @@ fn add_template_import(
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(raw.to_owned()));
         attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+        attributes.insert("symbol_kind".to_owned(), Value::String("module".to_owned()));
         attributes.insert("source_file".to_owned(), Value::String(target_path));
         attributes.insert(
             "confidence".to_owned(),
@@ -597,6 +606,19 @@ fn node(
     let mut attributes = Map::new();
     attributes.insert("label".to_owned(), Value::String(label.to_owned()));
     attributes.insert("file_type".to_owned(), Value::String(file_type.to_owned()));
+    let symbol_kind = if file_type == "concept" {
+        "resource"
+    } else if source_file.is_some_and(|source| id == make_id(&[source])) {
+        "file"
+    } else if line.is_some() {
+        "method"
+    } else {
+        "variable"
+    };
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String(symbol_kind.to_owned()),
+    );
     attributes.insert(
         "source_file".to_owned(),
         source_file.map_or(Value::Null, |value| Value::String(value.to_owned())),

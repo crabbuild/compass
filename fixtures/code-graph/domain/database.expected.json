@@ -1,0 +1,23 @@
+{
+  "node_kinds": [
+    "file",
+    "database",
+    "database_schema",
+    "database_table",
+    "database_view",
+    "database_column",
+    "database_index",
+    "database_constraint",
+    "database_procedure",
+    "database_trigger",
+    "query",
+    "migration"
+  ],
+  "edge_kinds": [
+    "contains",
+    "references",
+    "reads",
+    "writes",
+    "triggers"
+  ]
+}

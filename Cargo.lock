@@ -1045,6 +1045,7 @@ dependencies = [
 name = "compass-files"
 version = "0.1.10"
 dependencies = [
+ "atomicwrites",
  "glob",
  "md-5 0.10.6",
  "rayon",
@@ -1139,14 +1140,16 @@ name = "compass-ingest"
 version = "0.1.10"
 dependencies = [
  "compass-files",
- "compass-transcribe",
  "regex",
  "serde_json",
+ "sha1",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.19",
  "time",
  "ureq",
  "url",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -1165,7 +1168,6 @@ version = "0.1.10"
 dependencies = [
  "compass-files",
  "compass-ir",
- "compass-model",
  "compass-program",
  "compass-tree-sitter-language-pack",
  "flate2",
@@ -1192,6 +1194,7 @@ version = "0.1.10"
 dependencies = [
  "axum",
  "compass-core",
+ "compass-files",
  "compass-graph",
  "compass-model",
  "compass-prs",
@@ -1283,6 +1286,7 @@ dependencies = [
 name = "compass-prs"
 version = "0.1.10"
 dependencies = [
+ "compass-files",
  "compass-model",
  "regex",
  "serde_json",
@@ -1296,12 +1300,21 @@ dependencies = [
 name = "compass-query"
 version = "0.1.10"
 dependencies = [
+ "compass-analysis",
  "compass-cypher",
+ "compass-graph",
  "compass-graphdb",
+ "compass-ir",
+ "compass-languages",
  "compass-model",
+ "libc",
  "regex",
+ "rusqlite",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.19",
  "unicode-normalization",
 ]
@@ -1326,12 +1339,16 @@ name = "compass-resolve"
 version = "0.1.10"
 dependencies = [
  "ahash",
+ "compass-graph",
  "compass-languages",
  "compass-model",
  "rayon",
  "regex",
+ "serde",
  "serde_json",
  "sha1",
+ "tempfile",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1376,6 +1393,7 @@ dependencies = [
 name = "compass-transcribe"
 version = "0.1.10"
 dependencies = [
+ "compass-ingest",
  "compass-whisper",
  "rubato",
  "serde",
@@ -2075,8 +2093,6 @@ dependencies = [
 [[package]]
 name = "gemm-common"
 version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88027625910cc9b1085aaaa1c4bc46bb3a36aad323452b33c25b5e4e7c8e2a3e"
 dependencies = [
  "bytemuck",
  "dyn-stack",

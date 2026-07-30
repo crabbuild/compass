@@ -6,7 +6,6 @@ use std::path::Path;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::cluster::{Communities, PythonRandom};
 
@@ -191,12 +190,12 @@ fn surprising_connections_in(
         .collect::<HashSet<_>>()
         .len();
     if source_count > 1 {
-        let cross_file = cross_file_surprises(&graph, communities, top_n);
+        let cross_file = cross_file_surprises(graph, communities, top_n);
         if !cross_file.is_empty() {
             return cross_file;
         }
     }
-    cross_community_surprises(&graph, communities, top_n)
+    cross_community_surprises(graph, communities, top_n)
 }
 
 #[must_use]
@@ -217,7 +216,7 @@ fn suggest_questions_in(
     top_n: usize,
 ) -> Vec<SuggestedQuestion> {
     let node_community = invert_communities(communities);
-    let cohesion = community_cohesion_scores(&graph, communities, &node_community);
+    let cohesion = community_cohesion_scores(graph, communities, &node_community);
     let mut questions = Vec::new();
     for edge in &graph.edges {
         if edge_string(edge.record, "confidence") != "AMBIGUOUS" {
@@ -243,7 +242,7 @@ fn suggest_questions_in(
     }
 
     if !graph.edges.is_empty() {
-        let centrality = node_betweenness(&graph, graph.len() > 1000);
+        let centrality = node_betweenness(graph, graph.len() > 1000);
         let mut bridges = centrality
             .iter()
             .enumerate()
@@ -319,7 +318,7 @@ fn suggest_questions_in(
             .iter()
             .take(2)
             .map(|edge| {
-                let other = oriented_other(&graph, edge, node);
+                let other = oriented_other(graph, edge, node);
                 graph.nodes[other].label().to_owned()
             })
             .collect::<Vec<_>>();
@@ -342,7 +341,7 @@ fn suggest_questions_in(
             graph.degree(*node) <= 1
                 && !graph.is_file_node(*node)
                 && !is_concept_node(graph.nodes[*node])
-                && attribute(graph.nodes[*node], "file_type") != Some("rationale")
+                && graph.nodes[*node].string("file_type") != "rationale"
         })
         .collect::<Vec<_>>();
     if !isolated.is_empty() {
@@ -511,11 +510,7 @@ pub fn find_import_cycles(
     for edge in &graph.edges {
         let relation = edge_string(edge.record, "relation");
         if !matches!(relation.as_str(), "imports_from" | "re_exports")
-            || edge
-                .record
-                .attributes
-                .get("deferred")
-                .is_some_and(Value::is_boolean_and_true)
+            || edge.record.boolean("deferred") == Some(true)
         {
             continue;
         }
@@ -1058,11 +1053,7 @@ impl<'a> AnalysisGraph<'a> {
     }
     fn is_file_node(&self, node: usize) -> bool {
         let record = self.nodes[node];
-        let label = record
-            .attributes
-            .get("label")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let label = record.label();
         if label.is_empty() {
             return false;
         }
@@ -1093,20 +1084,14 @@ impl<'a> AnalysisGraph<'a> {
 }
 
 fn oriented_endpoints(graph: &AnalysisGraph<'_>, edge: &AnalysisEdge<'_>) -> (usize, usize) {
-    let source = edge
-        .record
-        .attributes
-        .get("_src")
-        .and_then(Value::as_str)
-        .and_then(|id| graph.positions.get(id))
+    let source = graph
+        .positions
+        .get(edge.record.semantic_source())
         .copied()
         .unwrap_or(edge.left);
-    let target = edge
-        .record
-        .attributes
-        .get("_tgt")
-        .and_then(Value::as_str)
-        .and_then(|id| graph.positions.get(id))
+    let target = graph
+        .positions
+        .get(edge.record.semantic_target())
         .copied()
         .unwrap_or(edge.right);
     (source, target)
@@ -1159,21 +1144,21 @@ fn is_json_key_node(node: &NodeRecord) -> bool {
         && JSON_NOISE_LABELS.contains(&node.label().trim().to_lowercase().as_str())
 }
 fn attribute<'a>(node: &'a NodeRecord, key: &str) -> Option<&'a str> {
-    node.attributes.get(key).and_then(Value::as_str)
+    match key {
+        "source_file" => node.source_file(),
+        _ => None,
+    }
 }
 fn edge_string(edge: &EdgeRecord, key: &str) -> String {
-    edge.attributes
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
+    edge.string(key)
 }
 fn defaulted_edge(edge: &EdgeRecord, key: &str, default: &str) -> String {
-    edge.attributes
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or(default)
-        .to_owned()
+    let value = edge.string(key);
+    if value.is_empty() {
+        default.to_owned()
+    } else {
+        value
+    }
 }
 fn diff_edge_key(directed: bool, edge: &EdgeRecord) -> (String, String, String) {
     let (source, target) = if directed || edge.source <= edge.target {
@@ -1344,14 +1329,5 @@ fn file_category(path: &str) -> &'static str {
         "image"
     } else {
         "doc"
-    }
-}
-
-trait BooleanValue {
-    fn is_boolean_and_true(&self) -> bool;
-}
-impl BooleanValue for Value {
-    fn is_boolean_and_true(&self) -> bool {
-        self.as_bool() == Some(true)
     }
 }

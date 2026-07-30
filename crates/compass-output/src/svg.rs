@@ -55,11 +55,7 @@ pub fn spring_layout(document: &GraphDocument) -> BTreeMap<String, (f64, f64)> {
         ) else {
             continue;
         };
-        let weight = edge
-            .attributes
-            .get("weight")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(1.0);
+        let weight = edge.number("weight").unwrap_or(1.0);
         adjacency[source][target] = weight;
         if !document.directed {
             adjacency[target][source] = weight;
@@ -174,12 +170,8 @@ pub fn svg_document(
         ) else {
             continue;
         };
-        let extracted = edge
-            .attributes
-            .get("confidence")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("EXTRACTED")
-            == "EXTRACTED";
+        let confidence = edge.string("confidence");
+        let extracted = confidence.is_empty() || confidence == "EXTRACTED";
         let dash = if extracted {
             ""
         } else {

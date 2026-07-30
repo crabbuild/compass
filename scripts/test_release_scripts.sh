@@ -6,6 +6,43 @@ test -f "$repo_root/scripts/install.sh"
 test -f "$repo_root/scripts/install.ps1"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
+
+cargo metadata --manifest-path "$repo_root/Cargo.toml" --no-deps --format-version 1 \
+    > "$test_root/metadata.json"
+python3 "$repo_root/scripts/publishable_crates.py" \
+    < "$test_root/metadata.json" > "$test_root/publishable-crates.txt"
+python3 - "$test_root/metadata.json" <<'PY'
+import json
+import pathlib
+import sys
+
+metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+packages = {package["name"]: package for package in metadata["packages"]}
+internal = {"compass-transcribe", "compass-whisper"}
+
+for name in internal:
+    assert packages[name]["publish"] == [], f"{name} must set publish = false"
+
+reachable = set()
+pending = ["compass-cli"]
+while pending:
+    name = pending.pop()
+    if name in reachable:
+        continue
+    reachable.add(name)
+    pending.extend(
+        dependency["name"]
+        for dependency in packages[name]["dependencies"]
+        if dependency["kind"] != "dev" and dependency["name"] in packages
+    )
+
+assert not reachable & internal, (
+    "registry CLI graph reaches internal inference crates: "
+    + ", ".join(sorted(reachable & internal))
+)
+PY
+test "$(grep -Ec '^compass-(transcribe|whisper)$' "$test_root/publishable-crates.txt")" -eq 0
+
 mkdir -p "$test_root/fake-checksum-bin"
 
 cat > "$test_root/fake-checksum-bin/shasum" <<'EOF'

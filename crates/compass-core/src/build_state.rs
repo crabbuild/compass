@@ -14,6 +14,21 @@ pub(crate) const BUILD_STATE_FILE: &str = ".compass_build_state.json";
 const BUILD_STATE_SCHEMA: &str = "compass.build-state/1";
 const HASH_BUFFER_BYTES: usize = 1024 * 1024;
 
+fn current_build_fingerprint() -> String {
+    let mut digest = Sha256::new();
+    for component in [
+        compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
+        compass_graph::V1_PUBLICATION_SEMANTICS_VERSION,
+        compass_languages::EXTRACTION_SEMANTICS_VERSION,
+        compass_files::AST_CACHE_VERSION,
+    ] {
+        digest.update(component.as_bytes());
+        digest.update([0]);
+    }
+    digest.update(compass_files::CACHE_ENCODING_VERSION.to_le_bytes());
+    format!("sha256:{:x}", digest.finalize())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ArtifactSeal {
     pub bytes: u64,
@@ -77,6 +92,12 @@ pub(crate) struct BuildProfile {
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub program_analysis: bool,
+    #[serde(default = "default_max_source_bytes")]
+    pub max_source_bytes: u64,
+}
+
+const fn default_max_source_bytes() -> u64 {
+    crate::pipeline::DEFAULT_MAX_SOURCE_BYTES
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -148,7 +169,7 @@ impl BuildState {
         );
         Ok(Self {
             schema: BUILD_STATE_SCHEMA.to_owned(),
-            producer: env!("CARGO_PKG_VERSION").to_owned(),
+            producer: current_build_fingerprint(),
             profile,
             manifest: manifest?,
             graph: graph?,
@@ -182,6 +203,7 @@ pub(crate) fn load_verified(
         Err(_) => return Ok(None),
     };
     if state.schema != BUILD_STATE_SCHEMA
+        || state.producer != current_build_fingerprint()
         || state.profile != *profile
         || !state.manifest.matches(manifest_path)
         || !state.graph.matches(&output_dir.join("graph.json"))
@@ -241,6 +263,7 @@ mod tests {
             resolution: 1.0,
             exclude_hubs: None,
             program_analysis: true,
+            max_source_bytes: default_max_source_bytes(),
         };
         let state = BuildState::capture(
             output,
@@ -265,6 +288,12 @@ mod tests {
         let state_path = output.join(BUILD_STATE_FILE);
         let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&state_path)?)?;
         document["schema"] = serde_json::Value::String("unsupported".to_owned());
+        fs::write(&state_path, serde_json::to_vec(&document)?)?;
+        assert!(load_verified(output, &profile, &manifest, true)?.is_none());
+
+        state.save(output)?;
+        let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+        document["producer"] = serde_json::Value::String("legacy-builder".to_owned());
         fs::write(&state_path, serde_json::to_vec(&document)?)?;
         assert!(load_verified(output, &profile, &manifest, true)?.is_none());
         Ok(())

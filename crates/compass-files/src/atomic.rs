@@ -48,33 +48,48 @@ where
         writer
             .flush()
             .map_err(|source| io_error(&temporary, source))?;
-        drop(writer);
+        let file = writer
+            .into_inner()
+            .map_err(|error| io_error(&temporary, error.into_error()))?;
 
         if let Ok(metadata) = fs::metadata(&destination) {
             fs::set_permissions(&temporary, metadata.permissions())
                 .map_err(|source| io_error(&temporary, source))?;
         }
+        file.sync_all()
+            .map_err(|source| io_error(&temporary, source))?;
+        drop(file);
 
         #[cfg(windows)]
-        if destination.exists() {
-            match fs::rename(&temporary, &destination) {
-                Ok(()) => return Ok(()),
-                Err(_) => {
-                    fs::copy(&temporary, &destination)
-                        .map_err(|source| io_error(&destination, source))?;
-                    fs::remove_file(&temporary).map_err(|source| io_error(&temporary, source))?;
-                    return Ok(());
-                }
-            }
+        {
+            atomicwrites::replace_atomic(&temporary, &destination)
+                .map_err(|source| io_error(&destination, source))?;
         }
 
-        fs::rename(&temporary, &destination).map_err(|source| io_error(&destination, source))
+        #[cfg(not(windows))]
+        fs::rename(&temporary, &destination).map_err(|source| io_error(&destination, source))?;
+
+        sync_directory(parent)
     })();
 
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+pub(crate) fn sync_directory(path: &Path) -> Result<(), FileError> {
+    #[cfg(unix)]
+    {
+        File::open(path)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|source| io_error(path, source))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 pub fn write_text_atomic(path: impl AsRef<Path>, text: &str) -> Result<(), FileError> {

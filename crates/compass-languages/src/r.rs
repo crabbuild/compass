@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use crate::facts::source_range;
 use crate::{Extraction, RawCall, file_stem, make_id};
 
 const NON_CALLS: &[&str] = &[
@@ -184,7 +185,7 @@ impl<'a> State<'a> {
         function: &Function,
         functions: &[Function],
         labels: &HashMap<String, Vec<Function>>,
-        seen: &mut HashSet<(String, String)>,
+        seen: &mut HashSet<(String, String, usize, usize)>,
     ) {
         let Ok(calls) =
             Regex::new(r"([A-Za-z.][A-Za-z0-9._]*(?:(?:::|\$)[A-Za-z.][A-Za-z0-9._]*)?)[ \t]*\(")
@@ -215,9 +216,14 @@ impl<'a> State<'a> {
                 continue;
             }
             let absolute = function.start + raw.start();
+            let end = function.start + raw.end();
             if let Some(target) = call_target(callee, function, labels) {
-                if seen.insert((function.id.clone(), target.clone())) {
+                if seen.insert((function.id.clone(), target.clone(), absolute, end)) {
+                    let range = source_range(self.text.as_bytes(), absolute, end);
                     self.add_edge(&function.id, &target, "calls", self.line_at(absolute));
+                    if let Some(edge) = self.extraction.edges.last_mut() {
+                        edge.attributes.extend(range);
+                    }
                 }
             } else {
                 let source_location = format!("L{}", self.line_at(absolute));
@@ -230,7 +236,7 @@ impl<'a> State<'a> {
                     receiver: None,
                     receiver_type: None,
                     lang: None,
-                    extensions: Map::new(),
+                    extensions: source_range(self.text.as_bytes(), absolute, end),
                 });
             }
         }

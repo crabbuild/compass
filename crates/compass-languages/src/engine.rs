@@ -4,16 +4,17 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use tree_sitter::{Node, Parser, Tree};
 
-use crate::builtins::LANGUAGE_BUILTIN_GLOBALS;
+use crate::builtins::is_language_builtin_global;
 use crate::config::{GenericConfig, generic_config};
 use crate::{
-    CombinedExtraction, ExtractError, Extraction, ExtractorKind, LanguageSpec, RawCall, Registry,
-    file_stem, make_id,
+    CombinedExtraction, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
+    EXTRACTION_QUALITY_REASON_EXTENSION, ExtractError, Extraction, ExtractorKind, LanguageSpec,
+    RawCall, Registry, file_stem, make_id,
 };
 
 const JSON_MAX_BYTES: u64 = 1_048_576;
@@ -27,7 +28,7 @@ impl Engine {
     pub fn extract(&mut self, path: &Path) -> Result<Extraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        match spec.kind {
+        let mut extraction = match spec.kind {
             ExtractorKind::Generic => self.extract_generic(path, spec),
             ExtractorKind::Markdown => crate::markdown::extract(path),
             ExtractorKind::JsonConfig => self.extract_json(path, spec),
@@ -40,8 +41,23 @@ impl Engine {
             ExtractorKind::Solution => crate::dotnet_project::extract_solution(path),
             ExtractorKind::ProjectXml => crate::dotnet_project::extract_project(path),
             ExtractorKind::Xaml => crate::xaml::extract(self, path),
-            ExtractorKind::Template => crate::templates::extract(self, path, spec.name),
-        }
+            ExtractorKind::Template => {
+                let mut extraction = crate::templates::extract(self, path, spec.name)?;
+                if let Ok(source) = fs::read(path) {
+                    crate::frameworks::detect_template_file_route(path, &source, &mut extraction);
+                }
+                Ok(extraction)
+            }
+            ExtractorKind::FrameworkConfig => {
+                let source = fs::read(path).map_err(|source| compass_files::FileError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                Ok(crate::frameworks::detect_config_file(path, &source))
+            }
+        }?;
+        stamp_producer_metadata(&mut extraction, spec.name);
+        Ok(extraction)
     }
 
     /// Extract from bytes already read by the caller. Source-driven extractors
@@ -54,12 +70,17 @@ impl Engine {
     ) -> Result<Extraction, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        match spec.kind {
+        let mut extraction = match spec.kind {
             ExtractorKind::Generic => self.extract_generic_source(path, spec, source),
             ExtractorKind::JsonConfig => self.extract_json_source(path, spec, source),
             ExtractorKind::Terraform => self.extract_terraform_source(path, spec, source),
+            ExtractorKind::FrameworkConfig => {
+                Ok(crate::frameworks::detect_config_file(path, source))
+            }
             _ => self.extract(path),
-        }
+        }?;
+        stamp_producer_metadata(&mut extraction, spec.name);
+        Ok(extraction)
     }
 
     pub fn extract_source_combined(
@@ -85,7 +106,8 @@ impl Engine {
         }
         let tree = self.parse(path, spec, source)?;
         let root = tree.root_node();
-        let graph = Self::extract_generic_from_tree(path, spec, source, root);
+        let mut graph = Self::extract_generic_from_tree(path, spec, source, root);
+        stamp_producer_metadata(&mut graph, spec.name);
         let program = crate::program::extract_from_tree(source_file, spec.name, source, root)
             .map_err(|error| ExtractError::InvalidProgramEvidence {
                 path: path.to_path_buf(),
@@ -127,6 +149,7 @@ impl Engine {
             &generic_config(spec),
             language,
         );
+        stamp_producer_metadata(&mut extraction, language);
         Ok(extraction)
     }
 
@@ -214,6 +237,18 @@ impl Engine {
             add_python_rationale(path, source, root, &mut extraction);
         }
         attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
+        crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
+        crate::frameworks::detect(path, source, root, spec.name, &mut extraction);
+        if root.has_error() {
+            extraction.extensions.insert(
+                EXTRACTION_QUALITY_EXTENSION.to_owned(),
+                Value::String(EXTRACTION_QUALITY_PARTIAL.to_owned()),
+            );
+            extraction.extensions.insert(
+                EXTRACTION_QUALITY_REASON_EXTENSION.to_owned(),
+                Value::String("syntax parser recovered from malformed input".to_owned()),
+            );
+        }
         extraction
     }
 
@@ -356,7 +391,7 @@ struct ExtractState<'source, 'tree> {
     functions: Vec<FunctionBody<'tree>>,
     callables: HashMap<String, Vec<String>>,
     types: HashMap<String, String>,
-    seen_resolved_calls: HashSet<(String, String)>,
+    seen_resolved_calls: HashSet<(String, String, usize, usize)>,
     seen_dynamic_imports: HashSet<(String, String)>,
     python_import_aliases: HashMap<String, String>,
 }
@@ -495,6 +530,41 @@ fn attach_definition_metadata(
             attributes.insert("source_hash".to_owned(), Value::String(source_hash));
         }
     }
+    attach_overload_discriminators(extraction);
+}
+
+fn attach_overload_discriminators(extraction: &mut Extraction) {
+    let mut groups = HashMap::<(String, String, String), Vec<usize>>::new();
+    for (index, node) in extraction.nodes.iter().enumerate() {
+        let source_file = node.string("source_file");
+        let symbol_kind = node.string("symbol_kind");
+        let mut qualified_name = node.string("qualified_name");
+        if qualified_name.is_empty() {
+            qualified_name = node.label().to_owned();
+        }
+        if source_file.is_empty() || symbol_kind.is_empty() || qualified_name.is_empty() {
+            continue;
+        }
+        groups
+            .entry((source_file, symbol_kind, qualified_name))
+            .or_default()
+            .push(index);
+    }
+    for indices in groups.values_mut().filter(|indices| indices.len() > 1) {
+        indices.sort_by_key(|index| {
+            extraction.nodes[*index]
+                .attributes
+                .get("line_start")
+                .and_then(Value::as_u64)
+                .unwrap_or(u64::MAX)
+        });
+        for (position, index) in indices.iter().enumerate() {
+            extraction.nodes[*index].attributes.insert(
+                "overload_discriminator".to_owned(),
+                Value::String(format!("overload:{position}")),
+            );
+        }
+    }
 }
 
 fn attach_basic_symbol_metadata(extraction: &mut Extraction, source: &[u8], language: &str) {
@@ -545,6 +615,34 @@ fn attach_basic_symbol_metadata(extraction: &mut Extraction, source: &[u8], lang
     }
 }
 
+pub(crate) fn stamp_producer_metadata(extraction: &mut Extraction, language: &str) {
+    let extractor = format!("compass.languages.{language}");
+    for attributes in extraction
+        .nodes
+        .iter_mut()
+        .map(|node| &mut node.attributes)
+        .chain(extraction.edges.iter_mut().map(|edge| &mut edge.attributes))
+    {
+        attributes
+            .entry("language".to_owned())
+            .or_insert_with(|| Value::String(language.to_owned()));
+        attributes
+            .entry("extractor".to_owned())
+            .or_insert_with(|| Value::String(extractor.clone()));
+    }
+    if let Some(calls) = extraction.raw_calls.as_mut() {
+        for call in calls {
+            call.lang.get_or_insert_with(|| language.to_owned());
+            call.extensions
+                .entry("language".to_owned())
+                .or_insert_with(|| Value::String(language.to_owned()));
+            call.extensions
+                .entry("extractor".to_owned())
+                .or_insert_with(|| Value::String(extractor.clone()));
+        }
+    }
+}
+
 fn definition_body(node: Node<'_>) -> Option<Node<'_>> {
     node.child_by_field_name("body").or_else(|| {
         let mut cursor = node.walk();
@@ -590,25 +688,25 @@ fn symbol_kind(kind: &str, is_class: bool, is_nested: bool) -> &'static str {
     if is_class {
         if kind.contains("interface") {
             "interface"
+        } else if kind.contains("trait") {
+            "trait"
         } else if kind.contains("enum") {
             "enum"
-        } else if kind.contains("struct") {
+        } else if kind.contains("struct") || kind.contains("record") {
             "struct"
-        } else if kind.contains("record") {
-            "record"
         } else if kind.contains("protocol") {
             "protocol"
         } else if kind.contains("module") || kind.contains("object") {
             "module"
-        } else if kind.contains("type_alias") {
-            "type"
+        } else if kind.contains("type_alias") || kind == "type_item" {
+            "type_alias"
         } else {
             "class"
         }
+    } else if kind.contains("deinit") {
+        "method"
     } else if kind.contains("constructor") || kind.contains("init_declaration") {
         "constructor"
-    } else if kind.contains("deinit") {
-        "destructor"
     } else if kind.contains("method") || is_nested {
         "method"
     } else {
@@ -904,7 +1002,7 @@ fn source_node_text(node: Node<'_>, source: &[u8]) -> String {
 }
 
 impl<'source, 'tree> ExtractState<'source, 'tree> {
-    fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<&str>) {
+    fn walk_declarations(&mut self, node: Node<'tree>, parent_class: Option<(&str, &str)>) {
         let kind = node.kind();
         if self.config.import_types.contains(&kind) && !matches!(self.language, "kotlin" | "lua") {
             self.add_import(node);
@@ -913,11 +1011,18 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if self.config.class_types.contains(&kind)
             && let Some(name) = self.declaration_name(node)
         {
-            let id = make_id(&[&self.stem, &name]);
+            let semantic_scope = parent_class.map_or_else(
+                || name.clone(),
+                |(_, parent_scope)| format!("{parent_scope}::{name}"),
+            );
+            let id = make_id(&[&self.stem, &semantic_scope]);
             self.add_node(&id, &name, line(node), true, None);
             self.types.insert(name.clone(), id.clone());
             self.callables.entry(name).or_default().push(id.clone());
-            let source = parent_class.unwrap_or(&self.file_id).to_owned();
+            let source = parent_class
+                .map(|(class_id, _)| class_id)
+                .unwrap_or(&self.file_id)
+                .to_owned();
             self.add_edge(&source, &id, "contains", line(node), None);
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
@@ -944,7 +1049,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                self.walk_declarations(child, Some(&id));
+                self.walk_declarations(child, Some((&id, &semantic_scope)));
             }
             return;
         }
@@ -952,17 +1057,39 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         if self.config.function_types.contains(&kind)
             && let Some(name) = self.function_name(node)
         {
-            let id = parent_class.map_or_else(
+            let parent_id = parent_class.map(|(class_id, _)| class_id);
+            let base_id = parent_class.map_or_else(
                 || make_id(&[&self.stem, &name]),
-                |class| make_id(&[class, &name]),
+                |(class_id, _)| make_id(&[class_id, &name]),
             );
+            let id = if self.seen_nodes.contains(&base_id) {
+                make_id(&[&base_id, "overload", &line(node).to_string()])
+            } else {
+                base_id
+            };
             let label = if parent_class.is_some() {
                 format!(".{name}()")
             } else {
                 format!("{name}()")
             };
             self.add_node(&id, &label, line(node), true, None);
-            let source = parent_class.unwrap_or(&self.file_id).to_owned();
+            if let Some((_, semantic_owner)) = parent_class
+                && let Some(method) = self
+                    .extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|method| method.id == id)
+            {
+                method.attributes.insert(
+                    "lexical_owner".to_owned(),
+                    Value::String(semantic_owner.to_owned()),
+                );
+                method.attributes.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!("{semantic_owner}::{name}")),
+                );
+            }
+            let source = parent_id.unwrap_or(&self.file_id).to_owned();
             self.add_edge(
                 &source,
                 &id,
@@ -999,7 +1126,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
 
         if self.language == "kotlin" && kind == "enum_entry" {
-            if let Some(class_id) = parent_class
+            if let Some((class_id, _)) = parent_class
                 && let Some(name_node) = first_descendant(node, "simple_identifier")
                     .or_else(|| first_descendant(node, "identifier"))
                 && let Some(name) = self.node_text(name_node).map(clean_name)
@@ -1012,7 +1139,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
 
         if self.language == "kotlin" && kind == "property_declaration" {
-            if let Some(class_id) = parent_class {
+            if let Some((class_id, _)) = parent_class {
                 self.add_kotlin_property_reference(node, class_id);
             }
             return;
@@ -1020,7 +1147,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
 
         if self.language == "scala"
             && matches!(kind, "val_definition" | "var_definition")
-            && let Some(class_id) = parent_class
+            && let Some((class_id, _)) = parent_class
         {
             self.add_scala_field_reference(node, class_id);
         }
@@ -1083,6 +1210,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         {
             let mut extensions = Map::new();
             extensions.insert("symbol_import_use".to_owned(), Value::Bool(true));
+            crate::facts::stamp_node_range(&mut extensions, node);
             self.extraction.raw_calls_mut().push(RawCall {
                 caller_nid: caller.to_owned(),
                 callee: name,
@@ -1178,6 +1306,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         let mut extensions = Map::new();
         extensions.insert("indirect".to_owned(), Value::Bool(true));
         extensions.insert("context".to_owned(), Value::String(context.to_owned()));
+        crate::facts::stamp_node_range(&mut extensions, node);
         self.extraction.raw_calls_mut().push(RawCall {
             caller_nid: caller.to_owned(),
             callee: name,
@@ -1250,9 +1379,12 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             return;
         };
         if target == self.file_id
-            || !self
-                .seen_resolved_calls
-                .insert((self.file_id.clone(), target.clone()))
+            || !self.seen_resolved_calls.insert((
+                self.file_id.clone(),
+                target.clone(),
+                node.start_byte(),
+                node.end_byte(),
+            ))
         {
             return;
         }
@@ -1280,6 +1412,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             target,
             attributes,
         });
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            crate::facts::stamp_node_range(&mut edge.attributes, node);
+        }
     }
 
     fn walk_calls(&mut self, node: Node<'tree>, caller: &str, is_root: bool) {
@@ -1299,7 +1434,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         }
         if self.config.call_types.contains(&kind)
             && let Some(call) = self.call_name(node)
-            && !LANGUAGE_BUILTIN_GLOBALS.contains(&call.name.as_str())
         {
             let candidates = self.callables.get(&call.name).cloned().unwrap_or_default();
             let defer_member = call.member
@@ -1318,12 +1452,16 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 });
             if let Some(target) = target.as_ref().filter(|target| {
                 target.as_str() != caller
-                    && self
-                        .seen_resolved_calls
-                        .insert((caller.to_owned(), (*target).clone()))
+                    && self.seen_resolved_calls.insert((
+                        caller.to_owned(),
+                        (*target).clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    ))
             }) {
-                self.add_edge(caller, target, "calls", line(node), Some("call"));
+                self.add_edge_at(caller, target, "calls", node, Some("call"));
             } else if target.is_none()
+                && !is_language_builtin_global(self.language, &call.name)
                 && !(self.language == "lua" && (call.member || call.name.contains('.')))
             {
                 self.extraction.raw_calls_mut().push(RawCall {
@@ -1335,7 +1473,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: (self.language == "ruby" && call.member).then_some(None),
                     lang: (self.language == "java").then(|| "java".to_owned()),
-                    extensions: Map::new(),
+                    extensions: crate::facts::node_range(node),
                 });
             }
         }
@@ -1426,6 +1564,9 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     target,
                     attributes,
                 });
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    crate::facts::stamp_node_range(&mut edge.attributes, node);
+                }
             }
             break;
         }
@@ -2591,6 +2732,20 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             attributes,
         });
     }
+
+    fn add_edge_at(
+        &mut self,
+        source: &str,
+        target: &str,
+        relation: &str,
+        node: Node<'tree>,
+        context: Option<&str>,
+    ) {
+        self.add_edge(source, target, relation, line(node), context);
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            crate::facts::stamp_node_range(&mut edge.attributes, node);
+        }
+    }
 }
 
 struct CallName {
@@ -3508,7 +3663,7 @@ mod rationale_tests {
     }
 
     #[test]
-    fn rust_calls_named_like_shared_builtins_are_suppressed()
+    fn rust_calls_named_like_other_language_builtins_resolve_locally()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let source = directory.path().join("builtins.rs");
@@ -3524,10 +3679,17 @@ mod rationale_tests {
             .find(|node| node.label() == "caller()")
             .map(|node| node.id.as_str())
             .ok_or("missing caller")?;
-        assert!(!extraction.edges.iter().any(|edge| {
-            edge.source == caller
-                && edge.attributes.get("relation").and_then(Value::as_str) == Some("calls")
-        }));
+        assert_eq!(
+            extraction
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.source == caller
+                        && edge.attributes.get("relation").and_then(Value::as_str) == Some("calls")
+                })
+                .count(),
+            2
+        );
         Ok(())
     }
 
@@ -3569,5 +3731,15 @@ mod rationale_tests {
             tree.root_node().to_sexp()
         );
         Ok(())
+    }
+
+    #[test]
+    fn generic_symbols_emit_only_canonical_v1_kinds() {
+        assert_eq!(symbol_kind("record_declaration", true, false), "struct");
+        assert_eq!(
+            symbol_kind("type_alias_declaration", true, false),
+            "type_alias"
+        );
+        assert_eq!(symbol_kind("deinit_declaration", false, false), "method");
     }
 }

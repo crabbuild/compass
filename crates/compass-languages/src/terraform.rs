@@ -1,11 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{Extraction, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
-use crate::{Extraction, make_id};
+use crate::make_id;
 
 const META_HEADS: &[&str] = &["count", "each", "self", "path", "terraform"];
 
@@ -28,64 +28,26 @@ pub(crate) fn extract(path: &Path, source: &[u8], root: Node<'_>) -> Extraction 
             raw_calls: None,
             ..Extraction::default()
         },
-        seen_nodes: HashSet::from([file_id.clone()]),
+        seen_nodes: HashSet::new(),
         seen_edges: HashSet::new(),
+        addresses: HashMap::new(),
     };
-    state.extraction.nodes.push(
-        state.node(
-            file_id,
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default(),
-            None,
-        ),
+    state.add_file(
+        &file_id,
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default(),
     );
 
     let body = first_child_of_kind(root, "body").unwrap_or(root);
-    let mut cursor = body.walk();
-    for block in body.children(&mut cursor) {
-        if block.kind() != "block" {
-            continue;
-        }
-        let (block_type, labels) = state.block_parts(block);
-        let line = block.start_position().row + 1;
-        let block_body = first_child_of_kind(block, "body");
-        let owner = match (block_type.as_deref(), labels.as_slice()) {
-            (Some("resource"), [resource_type, resource_name, ..]) => Some(state.add_node(
-                &format!("{resource_type}.{resource_name}"),
-                &format!("{resource_type}.{resource_name}"),
-                line,
-            )),
-            (Some("data"), [data_type, data_name, ..]) => Some(state.add_node(
-                &format!("data.{data_type}.{data_name}"),
-                &format!("data.{data_type}.{data_name}"),
-                line,
-            )),
-            (Some("module"), [name, ..]) => {
-                Some(state.add_node(&format!("module.{name}"), &format!("module.{name}"), line))
-            }
-            (Some("variable"), [name, ..]) => {
-                Some(state.add_node(&format!("var.{name}"), &format!("var.{name}"), line))
-            }
-            (Some("output"), [name, ..]) => {
-                Some(state.add_node(&format!("output.{name}"), &format!("output.{name}"), line))
-            }
-            (Some("provider"), [name, ..]) => Some(state.add_node(
-                &format!("provider.{name}"),
-                &format!("provider.{name}"),
-                line,
-            )),
-            (Some("locals"), _) => {
-                if let Some(block_body) = block_body {
-                    state.add_locals(block_body);
-                }
-                None
-            }
-            _ => None,
-        };
-        if let (Some(owner), Some(block_body)) = (owner, block_body) {
-            state.collect_references(block_body, &owner, "references");
-        }
+    let blocks = named_blocks(body);
+    // Declare all owners before resolving expressions so forward references
+    // are exact and never leave dangling endpoints.
+    for block in &blocks {
+        state.declare_block(*block);
+    }
+    for block in blocks {
+        state.link_block(block);
     }
     state.extraction
 }
@@ -97,10 +59,90 @@ struct State<'source> {
     scope: String,
     extraction: Extraction,
     seen_nodes: HashSet<String>,
-    seen_edges: HashSet<(String, String, String)>,
+    seen_edges: HashSet<(String, String, String, usize)>,
+    addresses: HashMap<String, String>,
 }
 
 impl State<'_> {
+    fn declare_block(&mut self, block: Node<'_>) {
+        let (block_type, labels) = self.block_parts(block);
+        let line = block.start_position().row + 1;
+        match (block_type.as_deref(), labels.as_slice()) {
+            (Some("resource"), [resource_type, resource_name, ..]) => {
+                let address = format!("{resource_type}.{resource_name}");
+                self.add_address_node(
+                    &address,
+                    &address,
+                    "resource",
+                    line,
+                    Some(format!("terraform:{address}")),
+                );
+            }
+            (Some("data"), [data_type, data_name, ..]) => {
+                let address = format!("data.{data_type}.{data_name}");
+                self.add_address_node(
+                    &address,
+                    &address,
+                    "resource",
+                    line,
+                    Some(format!("terraform:{address}")),
+                );
+            }
+            (Some("module"), [name, ..]) => {
+                let address = format!("module.{name}");
+                self.add_address_node(&address, &address, "package", line, None);
+            }
+            (Some("variable"), [name, ..]) => {
+                let address = format!("var.{name}");
+                self.add_address_node(&address, &address, "config_key", line, None);
+            }
+            (Some("output"), [name, ..]) => {
+                let address = format!("output.{name}");
+                self.add_address_node(&address, &address, "config_key", line, None);
+            }
+            (Some("provider"), [name, ..]) => {
+                let address = format!("provider.{name}");
+                self.add_address_node(&address, &address, "config_key", line, None);
+            }
+            (Some("terraform"), _) => {
+                self.add_address_node("terraform", "terraform", "config_key", line, None);
+            }
+            (Some("locals"), _) => {
+                if let Some(block_body) = first_child_of_kind(block, "body") {
+                    self.declare_locals(block_body);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn link_block(&mut self, block: Node<'_>) {
+        let (block_type, labels) = self.block_parts(block);
+        let owner = match (block_type.as_deref(), labels.as_slice()) {
+            (Some("resource"), [resource_type, resource_name, ..]) => {
+                self.address_id(&format!("{resource_type}.{resource_name}"))
+            }
+            (Some("data"), [data_type, data_name, ..]) => {
+                self.address_id(&format!("data.{data_type}.{data_name}"))
+            }
+            (Some("module"), [name, ..]) => self.address_id(&format!("module.{name}")),
+            (Some("variable"), [name, ..]) => self.address_id(&format!("var.{name}")),
+            (Some("output"), [name, ..]) => self.address_id(&format!("output.{name}")),
+            (Some("provider"), [name, ..]) => self.address_id(&format!("provider.{name}")),
+            (Some("terraform"), _) => self.address_id("terraform"),
+            (Some("locals"), _) => {
+                if let Some(block_body) = first_child_of_kind(block, "body") {
+                    self.link_locals(block_body);
+                }
+                None
+            }
+            _ => None,
+        };
+        if let (Some(owner), Some(block_body)) = (owner, first_child_of_kind(block, "body")) {
+            self.collect_references(block_body, &owner, "references");
+        }
+    }
+
     fn block_parts(&self, block: Node<'_>) -> (Option<String>, Vec<String>) {
         let mut block_type = None;
         let mut labels = Vec::new();
@@ -118,7 +160,7 @@ impl State<'_> {
         (block_type, labels)
     }
 
-    fn add_locals(&mut self, body: Node<'_>) {
+    fn declare_locals(&mut self, body: Node<'_>) {
         let mut cursor = body.walk();
         for attribute in body.children(&mut cursor) {
             if attribute.kind() != "attribute" {
@@ -129,8 +171,24 @@ impl State<'_> {
             };
             let key = self.text(key_node).to_owned();
             let line = attribute.start_position().row + 1;
-            let owner = self.add_node(&format!("local.{key}"), &format!("local.{key}"), line);
-            self.collect_references(attribute, &owner, "references");
+            let address = format!("local.{key}");
+            self.add_address_node(&address, &address, "config_key", line, None);
+        }
+    }
+
+    fn link_locals(&mut self, body: Node<'_>) {
+        let mut cursor = body.walk();
+        for attribute in body.children(&mut cursor) {
+            if attribute.kind() != "attribute" {
+                continue;
+            }
+            let Some(key_node) = attribute.child(0) else {
+                continue;
+            };
+            let address = format!("local.{}", self.text(key_node));
+            if let Some(owner) = self.address_id(&address) {
+                self.collect_references(attribute, &owner, "references");
+            }
         }
     }
 
@@ -148,7 +206,9 @@ impl State<'_> {
         if node.kind() == "variable_expr"
             && let Some(address) = self.reference_address(node)
         {
-            self.add_edge(owner, &address, relation, node.start_position().row + 1);
+            let line = node.start_position().row + 1;
+            let target = self.ensure_reference_target(&address, line);
+            self.add_edge(owner, &target, relation, line);
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
@@ -187,61 +247,145 @@ impl State<'_> {
             }
         }
         match head {
-            "var" => attributes.first().map(|name| format!("var.{name}")),
-            "local" => attributes.first().map(|name| format!("local.{name}")),
-            "module" => attributes.first().map(|name| format!("module.{name}")),
+            "var" | "local" | "module" if !attributes.is_empty() => {
+                Some(format!("{head}.{}", attributes[0]))
+            }
             "data" if attributes.len() >= 2 => {
                 Some(format!("data.{}.{}", attributes[0], attributes[1]))
             }
-            _ => attributes.first().map(|name| format!("{head}.{name}")),
+            _ if !attributes.is_empty() => Some(format!("{head}.{}", attributes[0])),
+            _ => None,
         }
     }
 
-    fn add_node(&mut self, address: &str, label: &str, line: usize) -> String {
-        let id = make_id(&[&self.scope, address]);
-        if self.seen_nodes.insert(id.clone()) {
-            self.extraction
-                .nodes
-                .push(self.node(id.clone(), label, Some(line)));
-            let mut attributes = edge_attributes(&self.source_file, "contains", line);
-            self.extraction.edges.push(EdgeRecord {
-                source: self.file_id.clone(),
-                target: id.clone(),
-                attributes: std::mem::take(&mut attributes),
-            });
+    fn ensure_reference_target(&mut self, address: &str, line: usize) -> String {
+        if let Some(id) = self.address_id(address) {
+            return id;
         }
+        let kind = if address.starts_with("module.") {
+            "package"
+        } else if address.starts_with("var.")
+            || address.starts_with("local.")
+            || address.starts_with("output.")
+            || address.starts_with("provider.")
+        {
+            "config_key"
+        } else {
+            "resource"
+        };
+        let uri = (kind == "resource").then(|| format!("terraform:{address}"));
+        self.add_address_node(address, address, kind, line, uri)
+    }
+
+    fn add_file(&mut self, id: &str, name: &str) {
+        let attributes = self.base_attributes("file", name, name, 1);
+        self.push_node(id.to_owned(), attributes);
+    }
+
+    fn add_address_node(
+        &mut self,
+        address: &str,
+        label: &str,
+        kind: &str,
+        line: usize,
+        uri: Option<String>,
+    ) -> String {
+        if let Some(id) = self.address_id(address) {
+            return id;
+        }
+        let id = make_id(&["terraform", &self.scope, address]);
+        let mut attributes = self.base_attributes(kind, label, address, line);
+        match kind {
+            "resource" => {
+                attributes.insert("file_type".into(), Value::String("concept".into()));
+                if let Some(uri) = uri {
+                    attributes.insert("uri".into(), Value::String(uri));
+                }
+            }
+            "config_key" => {
+                attributes.insert("format".into(), Value::String("terraform".into()));
+                attributes.insert("key_path".into(), Value::String(address.to_owned()));
+            }
+            _ => {}
+        }
+        self.push_node(id.clone(), attributes);
+        self.addresses.insert(address.to_owned(), id.clone());
+        self.add_edge(&self.file_id.clone(), &id, "contains", line);
         id
     }
 
-    fn add_edge(&mut self, source: &str, address: &str, relation: &str, line: usize) {
-        let target = make_id(&[&self.scope, address]);
-        if source == target {
-            return;
-        }
-        let key = (source.to_owned(), target.clone(), relation.to_owned());
-        if !self.seen_edges.insert(key) {
-            return;
-        }
-        self.extraction.edges.push(EdgeRecord {
-            source: source.to_owned(),
-            target,
-            attributes: edge_attributes(&self.source_file, relation, line),
-        });
+    fn address_id(&self, address: &str) -> Option<String> {
+        self.addresses.get(address).cloned()
     }
 
-    fn node(&self, id: String, label: &str, line: Option<usize>) -> NodeRecord {
+    fn base_attributes(
+        &self,
+        kind: &str,
+        name: &str,
+        qualified_name: &str,
+        line: usize,
+    ) -> Map<String, Value> {
         let mut attributes = Map::new();
-        attributes.insert("label".to_owned(), Value::String(label.to_owned()));
-        attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+        attributes.insert("label".into(), Value::String(name.to_owned()));
+        attributes.insert("name".into(), Value::String(name.to_owned()));
         attributes.insert(
-            "source_file".to_owned(),
+            "qualified_name".into(),
+            Value::String(qualified_name.to_owned()),
+        );
+        attributes.insert("symbol_kind".into(), Value::String(kind.to_owned()));
+        attributes.insert("file_type".into(), Value::String("code".into()));
+        attributes.insert("language".into(), Value::String("terraform".into()));
+        attributes.insert(
+            "source_file".into(),
             Value::String(self.source_file.clone()),
         );
+        attributes.insert("source_location".into(), Value::String(format!("L{line}")));
+        attributes.insert("line_start".into(), Value::from(line));
+        attributes.insert("line_end".into(), Value::from(line));
+        attributes.insert("_origin".into(), Value::String("config".into()));
         attributes.insert(
-            "source_location".to_owned(),
-            line.map_or(Value::Null, |line| Value::String(format!("L{line}"))),
+            "extractor".into(),
+            Value::String("compass.languages.terraform".into()),
         );
-        NodeRecord { id, attributes }
+        attributes
+    }
+
+    fn push_node(&mut self, id: String, attributes: Map<String, Value>) {
+        if self.seen_nodes.insert(id.clone()) {
+            self.extraction.nodes.push(NodeRecord { id, attributes });
+        }
+    }
+
+    fn add_edge(&mut self, source: &str, target: &str, relation: &str, line: usize) {
+        if source == target
+            || !self.seen_edges.insert((
+                source.to_owned(),
+                target.to_owned(),
+                relation.to_owned(),
+                line,
+            ))
+        {
+            return;
+        }
+        let mut attributes = Map::new();
+        attributes.insert("relation".into(), Value::String(relation.to_owned()));
+        attributes.insert("confidence".into(), Value::String("EXTRACTED".into()));
+        attributes.insert(
+            "source_file".into(),
+            Value::String(self.source_file.clone()),
+        );
+        attributes.insert("source_location".into(), Value::String(format!("L{line}")));
+        attributes.insert("weight".into(), json!(1.0));
+        attributes.insert("_origin".into(), Value::String("config".into()));
+        attributes.insert(
+            "extractor".into(),
+            Value::String("compass.languages.terraform".into()),
+        );
+        self.extraction.edges.push(EdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes,
+        });
     }
 
     fn text(&self, node: Node<'_>) -> &str {
@@ -249,27 +393,15 @@ impl State<'_> {
     }
 }
 
+fn named_blocks(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.kind() == "block")
+        .collect()
+}
+
 fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
     node.children(&mut cursor)
         .find(|child| child.kind() == kind)
-}
-
-fn edge_attributes(source_file: &str, relation: &str, line: usize) -> Map<String, Value> {
-    let mut attributes = Map::new();
-    attributes.insert("relation".to_owned(), Value::String(relation.to_owned()));
-    attributes.insert(
-        "confidence".to_owned(),
-        Value::String("EXTRACTED".to_owned()),
-    );
-    attributes.insert(
-        "source_file".to_owned(),
-        Value::String(source_file.to_owned()),
-    );
-    attributes.insert(
-        "source_location".to_owned(),
-        Value::String(format!("L{line}")),
-    );
-    attributes.insert("weight".to_owned(), json!(1.0));
-    attributes
 }

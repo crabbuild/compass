@@ -49,8 +49,7 @@ try {
     if ($Expected -notmatch "^[0-9a-f]{64}$") {
         throw "invalid SHA-256 file for $Archive"
     }
-    $Actual = (Get-FileHash (Join-Path $Temporary $Archive) -Algorithm SHA256).Hash `
-        .ToLowerInvariant()
+    $Actual = (Get-FileHash (Join-Path $Temporary $Archive) -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($Actual -ne $Expected) {
         throw "checksum verification failed for $Archive"
     }

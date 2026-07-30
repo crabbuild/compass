@@ -57,8 +57,9 @@ struct CommonOptions {
 }
 
 fn default_program_path() -> PathBuf {
-    PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
-        .join("program.json")
+    let output =
+        PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
+    output.join("program.json")
 }
 
 fn parse_common(
@@ -109,12 +110,14 @@ fn parse_format(value: &str) -> Result<Format, String> {
 }
 
 pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let resolved = compass_files::BuildGuard::resolve_requested_artifact(path)
+        .map_err(|error| error.to_string())?;
+    let metadata = fs::metadata(&resolved)
+        .map_err(|error| format!("could not read {}: {error}", resolved.display()))?;
     if !metadata.is_file() {
         return Err(format!(
             "Program IR is not a regular file: {}",
-            path.display()
+            resolved.display()
         ));
     }
     if metadata.len() > MAX_PROGRAM_BYTES {
@@ -122,10 +125,10 @@ pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
             "Program IR exceeds the {MAX_PROGRAM_BYTES}-byte safety limit"
         ));
     }
-    let bytes =
-        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let bytes = fs::read(&resolved)
+        .map_err(|error| format!("could not read {}: {error}", resolved.display()))?;
     let analysis: AnalysisBundle = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("invalid Program IR JSON at {}: {error}", path.display()))?;
+        .map_err(|error| format!("invalid Program IR JSON at {}: {error}", resolved.display()))?;
     analysis
         .validate()
         .map_err(|error| format!("invalid Program IR at {}: {error}", path.display()))?;
@@ -541,7 +544,10 @@ fn call_graph(analysis: &AnalysisBundle, args: &[String], format: Format) -> Out
         return usage_error("provide exactly one of --symbol and --at");
     };
     let graph = match graph_path {
-        Some(path) => match GraphDocument::load(&path) {
+        Some(path) => match compass_files::BuildGuard::resolve_requested_artifact(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|resolved| GraphDocument::load(&resolved).map_err(|error| error.to_string()))
+        {
             Ok(graph) => Some(graph),
             Err(error) => {
                 return Outcome::failure_with_code(

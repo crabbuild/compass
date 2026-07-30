@@ -43,7 +43,21 @@ export default async function generate(): Promise<void> {
       {
         id: "helper", label: "helper", kind: "function", community: 0, degree: 2,
         language: "rust", signature: "fn helper()", size: 24,
-        source: { file: "src/lib.rs", startLine: 5, endLine: 7 }
+        source: { file: "src/lib.rs", startLine: 5, endLine: 7 },
+        codeEvidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "rust.functions",
+          confidence: "exact",
+          anchor: {
+            file: "src/lib.rs", startByte: 40, endByte: 64,
+            startLine: 5, startColumn: 0, endLine: 7, endColumn: 1
+          },
+          rule: null,
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }]
       },
       {
         id: "file-only", label: "README", kind: "document", community: 1, degree: 1,
@@ -53,7 +67,28 @@ export default async function generate(): Promise<void> {
     ],
     edges: [
       { id: "e1", source: "run", target: "helper", relation: "calls", confidence: "extracted" },
-      { id: "e2", source: "helper", target: "store", relation: "uses", confidence: "inferred" },
+      {
+        id: "e2", source: "helper", target: "store", relation: "uses",
+        confidence: "inferred",
+        codeEvidence: [{
+          layer: "structural_graph",
+          origin: "heuristic",
+          extractor: "rust.dynamic-dispatch",
+          confidence: "ambiguous",
+          anchor: null,
+          rule: "trait-object-call",
+          wiringSite: {
+            file: "src/lib.rs", startByte: 52, endByte: 60,
+            startLine: 6, startColumn: 2, endLine: 6, endColumn: 10
+          },
+          resolution: "ambiguous",
+          candidates: [{
+            nodeId: "store",
+            reason: "compatible receiver type",
+            confidence: "ambiguous"
+          }]
+        }]
+      },
       { id: "e3", source: "run", target: "file-only", relation: "documents", confidence: "ambiguous" }
     ],
     communities: [
@@ -659,9 +694,18 @@ window.fixtureTimeline=${JSON.stringify(timeline)};
 window.historyGraphs=${JSON.stringify(graphs)};
 window.historyCommunityGraphs=${JSON.stringify(details)};
 window.historyHostMessages=[];
+window.pendingHistoryGraph=null;
 window.historyBootstrapAttempts=0;
 window.historyGeneration=0;
 window.emitHistoryMessage=(message)=>window.postMessage(message,"*");
+window.releaseHistoryGraph=()=>{
+  if(!window.pendingHistoryGraph) {
+    throw new Error("No history graph response is pending");
+  }
+  const response=window.pendingHistoryGraph;
+  window.pendingHistoryGraph=null;
+  window.postMessage(response,"*");
+};
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.historyHostMessages.push(message);
   if(message.type==="ready" || message.type==="retryTimeline") {
@@ -698,7 +742,7 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     },120);
   } else if(message.type==="loadRevision") {
     const loadScenario=new URLSearchParams(window.location.search).get("load");
-    const delay=loadScenario==="slow" ? 500 : message.commit.startsWith("a") ? 180 : 120;
+    const delay=message.commit.startsWith("a") ? 180 : 120;
     if(loadScenario==="error") {
       setTimeout(()=>window.postMessage({
         type:"error",
@@ -707,13 +751,18 @@ window.acquireVsCodeApi=()=>({postMessage(message){
         message:"Fixture graph load failed"
       },"*"),delay);
     } else {
-      setTimeout(()=>window.postMessage({
+      const response={
         type:"graph",
         commit:message.commit,
         realization:"r-"+message.commit.slice(0,1),
         fingerprint:"f-"+message.commit.slice(0,1),
         graph:window.historyGraphs[message.commit]
-      },"*"),delay);
+      };
+      if(loadScenario==="manual") {
+        window.pendingHistoryGraph=response;
+      } else {
+        setTimeout(()=>window.postMessage(response,"*"),delay);
+      }
     }
   } else if(message.type==="changeCounts") {
     setTimeout(()=>window.postMessage({

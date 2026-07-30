@@ -128,7 +128,7 @@ impl RealizationReader<'_> {
                 }
                 Some(match &owned {
                     OwnedHistoryRecordKey::Node(_) => {
-                        HistoryRecord::Node(crate::artifacts::decode_typed(&bytes, schema)?)
+                        HistoryRecord::Node(crate::artifacts::decode_compatible_node(&bytes)?)
                     }
                     OwnedHistoryRecordKey::ProgramModule(_) => HistoryRecord::ProgramModule(
                         crate::artifacts::decode_typed(&bytes, schema)?,

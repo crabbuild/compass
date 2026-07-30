@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
@@ -360,7 +360,7 @@ impl<'tree> State<'_, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
-        seen: &mut HashSet<(String, String)>,
+        seen: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if node.kind() == "function_definition" {
             return;
@@ -372,8 +372,14 @@ impl<'tree> State<'_, 'tree> {
                 .get(&call.name)
                 .filter(|target| target.as_str() != caller);
             if let Some(target) = target {
-                if seen.insert((caller.to_owned(), (*target).clone())) {
+                if seen.insert((
+                    caller.to_owned(),
+                    (*target).clone(),
+                    node.start_byte(),
+                    node.end_byte(),
+                )) {
                     self.add_edge(caller, target, "calls", line(node), Some("call"));
+                    crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                 }
             } else if !call.name.is_empty() {
                 self.extraction.raw_calls_mut().push(RawCall {
@@ -385,7 +391,7 @@ impl<'tree> State<'_, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: None,
                     lang: Some("cpp".to_owned()),
-                    extensions: Map::new(),
+                    extensions: crate::facts::node_range(node),
                 });
             }
         }

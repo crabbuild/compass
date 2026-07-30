@@ -1,0 +1,3 @@
+GET     /java/:id       controllers.PlayController.show(id: Long)
+POST    /java           @controllers.PlayController.create()
+GET     /scala/:id      controllers.ScalaController.show(id: Long)

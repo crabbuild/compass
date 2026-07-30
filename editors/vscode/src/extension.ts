@@ -16,6 +16,11 @@ import { compassSelectionItems } from "./cli/selection";
 import { registerBuildCommands } from "./commands/buildCommands";
 import { resolveInstallCommand } from "./install/command";
 import { GraphPanel } from "./views/graphPanel";
+import {
+  codeQueryRequiresRebuild,
+  runCodeQuery,
+  type CodeQueryRequest
+} from "./views/codeQueryClient";
 import { CallGraphPanel } from "./views/callGraphPanel";
 import { openCallGraphGuidePanel } from "./views/callGraphGuidePanel";
 import { openArchitecturePanel } from "./views/architecturePanel";
@@ -305,6 +310,68 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void vscode.window.showErrorMessage(`Compass call graph failed: ${message(error)}`);
     }
   };
+  const selectedSymbol = async (
+    value: unknown,
+    title: string
+  ): Promise<string | undefined> => {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const candidate = typeof record.id === "string"
+        ? record.id
+        : typeof record.label === "string" ? record.label : undefined;
+      if (candidate?.trim()) return candidate.trim();
+    }
+    const editor = vscode.window.activeTextEditor;
+    const range = editor?.document.getWordRangeAtPosition(editor.selection.active);
+    const word = editor && range ? editor.document.getText(range) : "";
+    return vscode.window.showInputBox({
+      title,
+      prompt: "Enter a Compass symbol ID, name, or qualified name",
+      ...(word ? { value: word } : {}),
+      validateInput: (input) => input.trim() ? undefined : "Enter a symbol"
+    });
+  };
+  const runAndOpenCodeQuery = async (
+    request: CodeQueryRequest,
+    repositoryId?: string
+  ): Promise<void> => {
+    if (!vscode.workspace.isTrusted) {
+      void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
+      return;
+    }
+    const session = await selectRepository(repositoryId);
+    if (!session) return;
+    if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.graph)) return;
+    if (session.graphState !== "available") {
+      const action = await vscode.window.showInformationMessage(
+        "Build the Compass code graph before running code queries.",
+        "Rebuild with Compass"
+      );
+      if (action === "Rebuild with Compass") {
+        await vscode.commands.executeCommand("compass.update", session.id);
+      }
+      return;
+    }
+    const controller = new AbortController();
+    try {
+      const result = await runCodeQuery(session, request, controller.signal);
+      await GraphPanel.open(context, session, output, result);
+    } catch (error) {
+      const detail = message(error);
+      if (codeQueryRequiresRebuild(detail)) {
+        const action = await vscode.window.showWarningMessage(
+          detail,
+          "Rebuild with Compass"
+        );
+        if (action === "Rebuild with Compass") {
+          await vscode.commands.executeCommand("compass.update", session.id);
+        }
+      } else {
+        void vscode.window.showErrorMessage(`Compass code query failed: ${detail}`);
+      }
+    }
+  };
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("compass.status", workspaceTree),
     vscode.window.onDidChangeActiveTextEditor(() => statusBar.refresh()),
@@ -355,6 +422,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       "compass.openCallersAndCallees",
       () => openCallGraph("both")
     ),
+    vscode.commands.registerCommand("compass.searchSymbols", async () => {
+      const query = await vscode.window.showInputBox({
+        title: "Search Compass symbols",
+        prompt: "Search typed symbol names",
+        validateInput: (input) => input.trim() ? undefined : "Enter a search term"
+      });
+      if (query) await runAndOpenCodeQuery({ operation: "search", query });
+    }),
+    vscode.commands.registerCommand("compass.showCodeCallers", async (value?: unknown) => {
+      const symbol = await selectedSymbol(value, "Show Compass callers");
+      if (symbol) await runAndOpenCodeQuery({ operation: "callers", symbol });
+    }),
+    vscode.commands.registerCommand("compass.showCodeCallees", async (value?: unknown) => {
+      const symbol = await selectedSymbol(value, "Show Compass callees");
+      if (symbol) await runAndOpenCodeQuery({ operation: "callees", symbol });
+    }),
+    vscode.commands.registerCommand("compass.showCodeImpact", async (value?: unknown) => {
+      const symbol = await selectedSymbol(value, "Show Compass impact");
+      if (symbol) await runAndOpenCodeQuery({ operation: "impact", symbol });
+    }),
+    vscode.commands.registerCommand("compass.exploreCode", async () => {
+      const input = await vscode.window.showInputBox({
+        title: "Explore related Compass symbols",
+        prompt: "Enter symbol IDs or names separated by commas",
+        validateInput: (value) => value.split(",").some((item) => item.trim())
+          ? undefined
+          : "Enter at least one symbol"
+      });
+      const symbols = input?.split(",").map((item) => item.trim()).filter(Boolean);
+      if (symbols?.length) await runAndOpenCodeQuery({ operation: "explore", symbols });
+    }),
+    vscode.commands.registerCommand("compass.showNodeTrail", async () => {
+      const source = await selectedSymbol(undefined, "Compass node trail source");
+      if (!source) return;
+      const target = await vscode.window.showInputBox({
+        title: "Compass node trail target",
+        prompt: "Enter the destination symbol ID, name, or qualified name",
+        validateInput: (value) => value.trim() ? undefined : "Enter a target symbol"
+      });
+      if (target) {
+        await runAndOpenCodeQuery({ operation: "node", source, target: target.trim() });
+      }
+    }),
     vscode.commands.registerCommand("compass.openArchitecture", async (repositoryId?: string) => {
       const session = await selectRepository(repositoryId);
       if (!session) return;

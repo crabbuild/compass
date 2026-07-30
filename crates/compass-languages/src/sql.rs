@@ -1,56 +1,221 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{Extraction, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
-use crate::{Extraction, file_stem, make_id};
+use crate::{file_stem, make_id};
 
 // SQL object references may contain quoted identifiers, including escaped
 // double quotes, and may be schema-qualified. Keep the quotes in the captured
-// label to match tree-sitter-sql and Python's public extraction contract.
-const OBJECT_REFERENCE: &str =
-    r#"(?:(?:"(?:""|[^"])*")|[\w$]+)(?:\.(?:(?:"(?:""|[^"])*")|[\w$]+))*"#;
+// label to preserve the source spelling and dialect-specific case semantics.
+const IDENTIFIER: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)"#;
+const OBJECT_REFERENCE: &str = r#"(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+)(?:\.(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])+\]|[\w$]+))*"#;
 
 pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
     State::new(path, source).run()
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StatementKind {
+    Database,
+    Schema,
+    Table,
+    View,
+    Procedure,
+    Trigger,
+    Index,
+    AlterTable,
+}
+
+#[derive(Clone, Debug)]
 struct Statement {
     offset: usize,
-    kind: String,
+    end: usize,
+    kind: StatementKind,
     name: String,
+    name_start: usize,
+    name_end: usize,
+    body: Option<Site>,
+    incomplete_body_reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Site {
+    start: usize,
+    end: usize,
+}
+
+struct AccessBindings {
+    aliases: Vec<ScopedAliasBinding>,
+    ctes: Vec<ScopedCteBinding>,
+}
+
+struct ScopedAliasBinding {
+    name: String,
+    target: AliasTarget,
+    visible: Site,
+}
+
+#[derive(Clone, Debug)]
+struct RelationAliasRole {
+    alias: Site,
+    target: Option<Site>,
+}
+
+enum AliasTarget {
+    PhysicalTable(String),
+    Cte,
+}
+
+struct ScopedCteBinding {
+    name: String,
+    visible: Site,
+}
+
+struct BodyBoundary {
+    end: usize,
+    body: Option<Site>,
+    incomplete_reason: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct BoundaryIssue {
+    site: Site,
+    reason: String,
+}
+
+struct ScannedStatement {
+    site: Site,
+    issue: Option<BoundaryIssue>,
+}
+
+struct SqlLexicalOutput {
+    masked: String,
+    issues: Vec<BoundaryIssue>,
+}
+
+type QueryStatement = (usize, usize, usize, String);
+
+enum StatementBoundary {
+    Complete(usize),
+    EndOfInput(usize),
+    IncompleteQuoted { end: usize, issue: BoundaryIssue },
+}
+
+enum DelimitedIdentifierScan {
+    Complete(usize),
+    Incomplete(usize),
+}
+
+impl StatementBoundary {
+    const fn end(&self) -> usize {
+        match self {
+            Self::Complete(end) | Self::EndOfInput(end) | Self::IncompleteQuoted { end, .. } => {
+                *end
+            }
+        }
+    }
+
+    fn into_issue(self) -> Option<BoundaryIssue> {
+        match self {
+            Self::IncompleteQuoted { issue, .. } => Some(issue),
+            Self::Complete(_) | Self::EndOfInput(_) => None,
+        }
+    }
+
+    const fn recovery_end(&self, fallback: usize) -> usize {
+        match self {
+            Self::EndOfInput(_) => fallback,
+            Self::Complete(end) | Self::IncompleteQuoted { end, .. } => *end,
+        }
+    }
+}
+
+impl Site {
+    const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
 }
 
 struct State<'a> {
     path: &'a Path,
     source: &'a [u8],
     text: &'a str,
+    masked: String,
+    lexical_issues: Vec<BoundaryIssue>,
     source_file: String,
-    stem: String,
+    logical_database: String,
     file_id: String,
+    database_id: String,
     extraction: Extraction,
-    seen: HashSet<String>,
-    tables: HashMap<String, String>,
+    seen_nodes: HashSet<String>,
+    seen_edges: HashSet<(String, String, String, usize)>,
+    objects: HashMap<String, String>,
+    short_object_names: HashMap<String, Option<String>>,
+    schemas: HashMap<String, String>,
 }
 
 impl<'a> State<'a> {
     fn new(path: &'a Path, source: &'a [u8]) -> Self {
         let source_file = path.to_string_lossy().into_owned();
+        let logical_database = logical_database(path);
+        let text = std::str::from_utf8(source).unwrap_or_default();
+        let mut lexical = mask_sql_literals_and_comments(text);
+        // The outer pass treats every paired dollar span as data. That makes
+        // ordinary literals and defaults invisible to fact discovery. A
+        // declaration pass over that view can still prove routine ownership
+        // because dollar delimiters remain visible. Only proven routine
+        // bodies are then lexed recursively and restored into the discovery
+        // view, so their SQL belongs to the routine rather than the file.
+        let routine_bodies = statements(&lexical.masked)
+            .into_iter()
+            .filter_map(|statement| {
+                matches!(
+                    statement.kind,
+                    StatementKind::Procedure | StatementKind::Trigger
+                )
+                .then_some(statement.body)
+                .flatten()
+            })
+            .collect::<Vec<_>>();
+        for body in routine_bodies {
+            let Some(body_source) = text.get(body.start..body.end) else {
+                continue;
+            };
+            let nested = mask_sql_literals_and_comments(body_source);
+            lexical
+                .masked
+                .replace_range(body.start..body.end, &nested.masked);
+            lexical
+                .issues
+                .extend(nested.issues.into_iter().map(|issue| BoundaryIssue {
+                    site: Site::new(body.start + issue.site.start, body.start + issue.site.end),
+                    reason: issue.reason,
+                }));
+        }
         Self {
             path,
             source,
-            text: std::str::from_utf8(source).unwrap_or_default(),
-            stem: file_stem(path),
+            text,
+            masked: lexical.masked,
+            lexical_issues: lexical.issues,
             file_id: make_id(&[&source_file]),
+            database_id: make_id(&["sql-database", &logical_database]),
             source_file,
+            logical_database,
             extraction: Extraction {
                 raw_calls: None,
                 ..Extraction::default()
             },
-            seen: HashSet::new(),
-            tables: HashMap::new(),
+            seen_nodes: HashSet::new(),
+            seen_edges: HashSet::new(),
+            objects: HashMap::new(),
+            short_object_names: HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 
@@ -59,194 +224,843 @@ impl<'a> State<'a> {
             .path
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        self.add_file_node(label);
-        for statement in statements(self.text) {
-            match statement.kind.as_str() {
-                "TABLE" => self.add_table(&statement),
-                "VIEW" => self.add_view(&statement),
-                "FUNCTION" | "PROCEDURE" => self.add_routine(&statement),
-                "TRIGGER" => self.add_trigger(&statement),
-                "ALTER TABLE" => self.add_alter_table(&statement),
-                _ => {}
-            }
+            .unwrap_or_default()
+            .to_owned();
+        self.add_file_node(&label);
+        self.add_database_node();
+        self.add_migration_node();
+        for issue in self.lexical_issues.clone() {
+            self.add_boundary_issue_evidence(&issue);
         }
+
+        let declarations = statements(&self.masked);
+        // Discover all declared objects first. Relationships can then resolve
+        // forward references without producing dangling graph endpoints.
+        for statement in &declarations {
+            self.add_declared_object(statement);
+            self.add_incomplete_body_evidence(statement);
+        }
+        for statement in &declarations {
+            self.add_statement_relationships(statement);
+        }
+        self.add_queries(&declarations);
         self.extraction
     }
 
-    fn add_table(&mut self, statement: &Statement) {
-        let id = make_id(&[&self.stem, &statement.name]);
-        let at = self.line_at(statement.offset);
-        self.add_contained_node(&id, &statement.name, at);
-        self.tables
-            .insert(statement.name.to_ascii_lowercase(), id.clone());
-        let Some(open) = self.text[statement.offset..]
+    fn add_file_node(&mut self, label: &str) {
+        let mut attributes = self.base_attributes(
+            "file",
+            label,
+            label,
+            Site::new(0, self.source.len()),
+            "artifact",
+            "sql-text-file",
+        );
+        attributes.insert("file_type".into(), Value::String("code".into()));
+        self.push_node(self.file_id.clone(), attributes);
+    }
+
+    fn add_database_node(&mut self) {
+        let mut attributes = self.base_attributes(
+            "database",
+            &self.logical_database,
+            &self.logical_database,
+            Site::new(0, self.source.len()),
+            "convention",
+            "sql-file-logical-database",
+        );
+        attributes.insert(
+            "logical_database".into(),
+            Value::String(self.logical_database.clone()),
+        );
+        self.push_node(self.database_id.clone(), attributes);
+        self.add_edge_with_origin(
+            &self.file_id.clone(),
+            &self.database_id.clone(),
+            "contains",
+            Site::new(0, self.source.len()),
+            "convention",
+            "sql-file-logical-database",
+        );
+    }
+
+    fn add_migration_node(&mut self) {
+        if !is_migration_path(self.path) {
+            return;
+        }
+        let name = self
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("migration");
+        let qualified_name = format!("{}::{name}", self.logical_database);
+        let id = make_id(&["sql-migration", &self.source_file]);
+        let mut attributes = self.base_attributes(
+            "migration",
+            name,
+            &qualified_name,
+            Site::new(0, self.source.len()),
+            "convention",
+            "sql-migration-path-convention",
+        );
+        attributes.insert(
+            "logical_database".into(),
+            Value::String(self.logical_database.clone()),
+        );
+        self.push_node(id.clone(), attributes);
+        self.add_edge_with_origin(
+            &self.file_id.clone(),
+            &id,
+            "contains",
+            Site::new(0, self.source.len()),
+            "convention",
+            "sql-migration-path-convention",
+        );
+    }
+
+    fn add_declared_object(&mut self, statement: &Statement) {
+        let site = Site::new(statement.name_start, statement.name_end);
+        match statement.kind {
+            StatementKind::Database => {
+                // The per-file logical database remains the stable owner. An
+                // explicit CREATE DATABASE name enriches it without changing
+                // the identity of every dependent object in the same file.
+                let source_location = format!("L{}", self.line_at(site.start));
+                if let Some(node) = self
+                    .extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == self.database_id)
+                {
+                    node.attributes
+                        .insert("name".into(), Value::String(statement.name.clone()));
+                    node.attributes
+                        .insert("label".into(), Value::String(statement.name.clone()));
+                    node.attributes.insert(
+                        "qualified_name".into(),
+                        Value::String(statement.name.clone()),
+                    );
+                    node.attributes
+                        .insert("_origin".into(), Value::String("artifact".into()));
+                    node.attributes.insert(
+                        "rule".into(),
+                        Value::String("sql-text-database-declaration".into()),
+                    );
+                    crate::facts::stamp_source_range(
+                        &mut node.attributes,
+                        self.source,
+                        site.start,
+                        site.end,
+                    );
+                    node.attributes
+                        .insert("source_location".into(), Value::String(source_location));
+                }
+            }
+            StatementKind::Schema => {
+                self.ensure_schema(
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-schema-declaration",
+                );
+            }
+            StatementKind::Table => {
+                let id = self.add_database_object(
+                    "database_table",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-table-declaration",
+                );
+                self.add_table_members(statement, &id);
+            }
+            StatementKind::View => {
+                self.add_database_object(
+                    "database_view",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-view-declaration",
+                );
+            }
+            StatementKind::Procedure => {
+                self.add_database_object(
+                    "database_procedure",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-procedure-declaration",
+                );
+            }
+            StatementKind::Trigger => {
+                let id = self.add_database_object(
+                    "database_trigger",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-trigger-declaration",
+                );
+                let events = trigger_events(
+                    &self.masked[statement.offset..statement.end.min(self.masked.len())],
+                );
+                if !events.is_empty()
+                    && let Some(node) = self.extraction.nodes.iter_mut().find(|node| node.id == id)
+                {
+                    node.attributes.insert(
+                        "trigger_events".into(),
+                        Value::Array(events.into_iter().map(Value::String).collect()),
+                    );
+                }
+            }
+            StatementKind::Index => {
+                self.add_database_object(
+                    "database_index",
+                    &statement.name,
+                    site,
+                    "artifact",
+                    "sql-text-index-declaration",
+                );
+            }
+            StatementKind::AlterTable => {
+                self.ensure_table(&statement.name, site);
+                self.add_alter_constraints(statement);
+            }
+        }
+    }
+
+    fn add_statement_relationships(&mut self, statement: &Statement) {
+        let Some(source) = self.object_id(&statement.name) else {
+            return;
+        };
+        match statement.kind {
+            StatementKind::View => {
+                self.add_data_access_statement(&source, statement.offset, statement.end);
+            }
+            StatementKind::Procedure => {
+                if statement.incomplete_body_reason.is_some() {
+                    return;
+                }
+                if let Some(body) = statement.body {
+                    self.add_data_access_statements(&source, body.start, body.end);
+                } else {
+                    self.add_data_access_statement(&source, statement.offset, statement.end);
+                }
+            }
+            StatementKind::Trigger => {
+                self.link_trigger_to_table(statement, &source);
+                if statement.incomplete_body_reason.is_some() {
+                    return;
+                }
+                if let Some(body) = statement.body {
+                    self.add_data_access_statements(&source, body.start, body.end);
+                }
+            }
+            StatementKind::Table | StatementKind::AlterTable => {
+                self.add_foreign_key_references(&source, statement.offset, statement.end);
+            }
+            StatementKind::Index => self.link_index_to_table(statement, &source),
+            StatementKind::Database | StatementKind::Schema => {}
+        }
+    }
+
+    fn add_table_members(&mut self, statement: &Statement, table_id: &str) {
+        let Some(open) = self.text[statement.offset..statement.end]
             .find('(')
-            .map(|value| statement.offset + value)
+            .map(|offset| statement.offset + offset)
         else {
             return;
         };
-        let close = matching_paren(self.source, open).unwrap_or_else(|| {
-            statement_end(self.text, statement.offset).unwrap_or(self.text.len())
-        });
-        let block = &self.text[open..close.min(self.text.len())];
-        let Ok(references) = Regex::new(&format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"))
-        else {
+        let Some(close) = matching_paren(self.source, open) else {
             return;
         };
+        for (relative_offset, member) in split_top_level(&self.text[open + 1..close - 1]) {
+            let trimmed = member.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let member_offset =
+                open + 1 + relative_offset + member.len() - member.trim_start().len();
+            if is_table_constraint(trimmed) {
+                let (name, site) = constraint_name(trimmed).map_or_else(
+                    || {
+                        (
+                            format!("{}#constraint@{}", statement.name, member_offset),
+                            Site::new(member_offset, member_offset + trimmed.len()),
+                        )
+                    },
+                    |(name, start, end)| {
+                        (name, Site::new(member_offset + start, member_offset + end))
+                    },
+                );
+                let qualified_name = format!("{}::{name}", statement.name);
+                let identity = identifier_key(&format!("{}.{}", statement.name, name));
+                let identity_digest = sha256_prefixed(identity.as_bytes());
+                let id = make_id(&[
+                    "sql-constraint",
+                    &self.logical_database,
+                    &qualified_name,
+                    &identity,
+                    &identity_digest,
+                ]);
+                let attributes = self.database_attributes(
+                    "database_constraint",
+                    &name,
+                    &qualified_name,
+                    site,
+                    "artifact",
+                    "sql-text-table-constraint",
+                );
+                self.push_node(id.clone(), attributes);
+                self.add_edge(table_id, &id, "contains", site, "sql-text-table-member");
+                continue;
+            }
+            let Some((name, start, end)) = first_identifier(trimmed) else {
+                continue;
+            };
+            let site = Site::new(member_offset + start, member_offset + end);
+            let qualified_name = format!("{}.{}", statement.name, name);
+            let identity = identifier_key(&qualified_name);
+            let identity_digest = sha256_prefixed(identity.as_bytes());
+            let id = make_id(&[
+                "sql-column",
+                &self.logical_database,
+                &qualified_name,
+                &identity,
+                &identity_digest,
+            ]);
+            let attributes = self.database_attributes(
+                "database_column",
+                &name,
+                &qualified_name,
+                site,
+                "artifact",
+                "sql-text-column-declaration",
+            );
+            self.push_node(id.clone(), attributes);
+            self.add_edge(table_id, &id, "contains", site, "sql-text-table-member");
+        }
+    }
+
+    fn add_alter_constraints(&mut self, statement: &Statement) {
+        let body = &self.text[statement.offset..statement.end];
+        let Ok(regex) = Regex::new(&format!(r"(?i)\bADD\s+CONSTRAINT\s+({IDENTIFIER})")) else {
+            return;
+        };
+        let Some(table_id) = self.object_id(&statement.name) else {
+            return;
+        };
+        for capture in regex.captures_iter(body) {
+            let Some(name_match) = capture.get(1) else {
+                continue;
+            };
+            let name = name_match.as_str();
+            let site = Site::new(
+                statement.offset + name_match.start(),
+                statement.offset + name_match.end(),
+            );
+            let qualified_name = format!("{}::{name}", statement.name);
+            let identity = identifier_key(&format!("{}.{}", statement.name, name));
+            let identity_digest = sha256_prefixed(identity.as_bytes());
+            let id = make_id(&[
+                "sql-constraint",
+                &self.logical_database,
+                &qualified_name,
+                &identity,
+                &identity_digest,
+            ]);
+            let attributes = self.database_attributes(
+                "database_constraint",
+                name,
+                &qualified_name,
+                site,
+                "artifact",
+                "sql-text-alter-constraint",
+            );
+            self.push_node(id.clone(), attributes);
+            self.add_edge(&table_id, &id, "contains", site, "sql-text-table-member");
+        }
+    }
+
+    fn add_foreign_key_references(&mut self, source: &str, start: usize, end: usize) {
+        let body = self.masked[start..end].to_owned();
+        let Ok(regex) = Regex::new(&format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})")) else {
+            return;
+        };
+        for capture in regex.captures_iter(&body) {
+            let Some(name_match) = capture.get(1) else {
+                continue;
+            };
+            if is_reserved_object_reference(name_match.as_str()) {
+                continue;
+            }
+            let site = Site::new(start + name_match.start(), start + name_match.end());
+            let target = self.ensure_table(name_match.as_str(), site);
+            self.add_edge(
+                source,
+                &target,
+                "references",
+                site,
+                "sql-text-foreign-key-reference",
+            );
+        }
+    }
+
+    fn link_index_to_table(&mut self, statement: &Statement, index_id: &str) {
+        let body = self.masked[statement.offset..statement.end].to_owned();
+        let Ok(regex) = Regex::new(&format!(r"(?i)\bON\s+(?:ONLY\s+)?({OBJECT_REFERENCE})")) else {
+            return;
+        };
+        let Some(capture) = regex.captures(&body) else {
+            return;
+        };
+        let Some(name_match) = capture.get(1) else {
+            return;
+        };
+        if is_reserved_object_reference(name_match.as_str()) {
+            return;
+        }
+        let site = Site::new(
+            statement.offset + name_match.start(),
+            statement.offset + name_match.end(),
+        );
+        let table = self.ensure_table(name_match.as_str(), site);
+        self.add_edge(&table, index_id, "contains", site, "sql-text-index-target");
+    }
+
+    fn link_trigger_to_table(&mut self, statement: &Statement, trigger_id: &str) -> Option<usize> {
+        let body = self.masked[statement.offset..statement.end].to_owned();
+        let Ok(regex) = Regex::new(&format!(r"(?i)\bON\s+({OBJECT_REFERENCE})")) else {
+            return None;
+        };
+        let capture = regex.captures(&body)?;
+        let name_match = capture.get(1)?;
+        if is_reserved_object_reference(name_match.as_str()) {
+            return None;
+        }
+        let site = Site::new(
+            statement.offset + name_match.start(),
+            statement.offset + name_match.end(),
+        );
+        let table = self.ensure_table(name_match.as_str(), site);
+        self.add_edge(
+            &table,
+            trigger_id,
+            "contains",
+            site,
+            "sql-text-trigger-target",
+        );
+        self.add_edge(
+            trigger_id,
+            &table,
+            "triggers",
+            site,
+            "sql-text-trigger-target",
+        );
+        Some(site.end)
+    }
+
+    fn add_queries(&mut self, declarations: &[Statement]) {
+        let (queries, issues) = query_statements(&self.masked, declarations);
+        for issue in &issues {
+            self.add_boundary_issue_evidence(issue);
+        }
+        for (statement_start, _, end, operation) in queries {
+            if self.has_lexical_issue(statement_start, end) {
+                continue;
+            }
+            self.add_query(&operation, statement_start, end);
+        }
+    }
+
+    fn add_query(&mut self, operation: &str, statement_start: usize, end: usize) {
+        let qualified_name = format!(
+            "{}::{}@{}",
+            self.logical_database, operation, statement_start
+        );
+        let id = make_id(&["sql-query", &self.source_file, &statement_start.to_string()]);
+        let site = Site::new(statement_start, end);
+        let mut attributes = self.base_attributes(
+            "query",
+            operation,
+            &qualified_name,
+            site,
+            "artifact",
+            "sql-text-query-statement",
+        );
+        attributes.insert("dialect".into(), Value::String("sql".into()));
+        attributes.insert("operation".into(), Value::String(operation.to_owned()));
+        attributes.insert(
+            "logical_database".into(),
+            Value::String(self.logical_database.clone()),
+        );
+        attributes.insert(
+            "text_digest".into(),
+            Value::String(sha256_prefixed(
+                self.source.get(statement_start..end).unwrap_or_default(),
+            )),
+        );
+        self.push_node(id.clone(), attributes);
+        self.add_edge(
+            &self.file_id.clone(),
+            &id,
+            "contains",
+            site,
+            "sql-text-query-statement",
+        );
+        self.add_data_access_statement(&id, statement_start, end);
+    }
+
+    fn add_data_access_statements(&mut self, source: &str, start: usize, end: usize) {
+        for statement in scan_statement_ranges(&self.masked, start, end) {
+            if let Some(issue) = statement.issue {
+                self.add_boundary_issue_evidence(&issue);
+                continue;
+            }
+            if self.has_lexical_issue(statement.site.start, statement.site.end) {
+                continue;
+            }
+            self.add_data_access_statement(source, statement.site.start, statement.site.end);
+        }
+    }
+
+    fn has_lexical_issue(&self, start: usize, end: usize) -> bool {
+        self.lexical_issues
+            .iter()
+            .any(|issue| issue.site.start < end && issue.site.end > start)
+    }
+
+    fn add_data_access_statement(&mut self, source: &str, start: usize, end: usize) {
+        let body = self.masked[start..end.min(self.masked.len())].to_owned();
+        let ctes = scoped_cte_bindings(&body);
+        let bindings = AccessBindings {
+            aliases: scoped_alias_bindings(&body, &ctes),
+            ctes,
+        };
+        let read_patterns = sql_read_access_patterns();
+        let write_patterns = sql_write_access_patterns();
+        self.add_access_matches(source, start, &body, &read_patterns, "reads", &bindings);
+        self.add_access_matches(source, start, &body, &write_patterns, "writes", &bindings);
+    }
+
+    fn add_access_matches(
+        &mut self,
+        source: &str,
+        start: usize,
+        body: &str,
+        patterns: &[String],
+        relation: &str,
+        bindings: &AccessBindings,
+    ) {
         let mut emitted = HashSet::new();
-        for reference in references.captures_iter(block) {
-            let Some(name) = reference.get(1).map(|value| value.as_str()) else {
-                continue;
-            };
-            if !emitted.insert(name.to_ascii_lowercase()) {
-                continue;
-            }
-            let target = self.resolve_table(name);
-            self.add_edge(&id, &target, "references", at);
-        }
-    }
-
-    fn add_view(&mut self, statement: &Statement) {
-        let id = make_id(&[&self.stem, &statement.name]);
-        let at = self.line_at(statement.offset);
-        self.add_contained_node(&id, &statement.name, at);
-        self.tables
-            .insert(statement.name.to_ascii_lowercase(), id.clone());
-        let end = statement_end(self.text, statement.offset).unwrap_or(self.text.len());
-        self.add_reads(&id, statement.offset, end, false);
-    }
-
-    fn add_routine(&mut self, statement: &Statement) {
-        let id = make_id(&[&self.stem, &statement.name]);
-        let at = self.line_at(statement.offset);
-        self.add_contained_node(&id, &format!("{}()", statement.name), at);
-        let end = routine_end(self.text, statement.offset);
-        let body = &self.text[statement.offset..end];
-        let procedural = body.contains("$$")
-            || body.to_ascii_lowercase().contains("language plpgsql")
-            || body.to_ascii_lowercase().contains("set term");
-        if !procedural {
-            self.add_reads(&id, statement.offset, end, false);
-        }
-    }
-
-    fn add_trigger(&mut self, statement: &Statement) {
-        let id = make_id(&[&self.stem, &statement.name]);
-        let at = self.line_at(statement.offset);
-        self.add_contained_node(&id, &statement.name, at);
-        let end = routine_end(self.text, statement.offset);
-        let body = &self.text[statement.offset..end];
-        if let Some(table) = capture_one(body, r"(?i)\bFOR\s+([\w$]+)") {
-            let target = self.resolve_table(&table);
-            self.add_edge(&id, &target, "triggers", at);
-        }
-        self.add_reads(&id, statement.offset, end, true);
-    }
-
-    fn add_alter_table(&mut self, statement: &Statement) {
-        let at = self.line_at(statement.offset);
-        let source = if let Some(id) = self.tables.get(&statement.name.to_ascii_lowercase()) {
-            id.clone()
-        } else {
-            let id = make_id(&[&self.stem, &statement.name]);
-            self.add_contained_node(&id, &statement.name, at);
-            self.tables
-                .insert(statement.name.to_ascii_lowercase(), id.clone());
-            id
-        };
-        let end = statement_end(self.text, statement.offset).unwrap_or(self.text.len());
-        let body = &self.text[statement.offset..end];
-        let Ok(references) = Regex::new(&format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"))
-        else {
-            return;
-        };
-        for reference in references.captures_iter(body) {
-            if let Some(name) = reference.get(1).map(|value| value.as_str()) {
-                let target = self.resolve_table(name);
-                self.add_edge(&source, &target, "references", at);
-            }
-        }
-    }
-
-    fn add_reads(&mut self, source: &str, start: usize, end: usize, include_writes: bool) {
-        let mut patterns = vec![format!(r"(?i)\b(?:FROM|JOIN|INTO)\s+({OBJECT_REFERENCE})")];
-        if include_writes {
-            patterns.push(format!(r"(?i)\bUPDATE\s+({OBJECT_REFERENCE})"));
-        }
-        let non_tables = [
-            "select", "where", "set", "dual", "null", "true", "false", "first", "skip", "rows",
-            "next", "only", "lateral",
-        ];
-        let body = &self.text[start..end.min(self.text.len())];
-        let mut seen = HashSet::new();
         for pattern in patterns {
-            let Ok(regex) = Regex::new(&pattern) else {
+            let Ok(regex) = Regex::new(pattern) else {
                 continue;
             };
-            for reference in regex.captures_iter(body) {
-                let (Some(full), Some(name_match)) = (reference.get(0), reference.get(1)) else {
+            for capture in regex.captures_iter(body) {
+                let Some(name_match) = capture.get(1) else {
                     continue;
                 };
                 let name = name_match.as_str();
-                let lower = name.to_ascii_lowercase();
-                if non_tables.contains(&lower.as_str()) || !seen.insert(lower) {
+                let key = identifier_key(name);
+                if is_reserved_object_reference(name)
+                    || bindings.ctes.iter().any(|binding| {
+                        binding.name == key
+                            && name_match.start() >= binding.visible.start
+                            && name_match.start() < binding.visible.end
+                    })
+                {
                     continue;
                 }
-                let target = self.resolve_table(name);
-                self.add_edge(
-                    source,
-                    &target,
-                    "reads_from",
-                    self.line_at(start + full.start()),
-                );
+                let target_name =
+                    match resolve_scoped_alias(&bindings.aliases, &key, name_match.start()) {
+                        Some(AliasTarget::PhysicalTable(target)) => target.as_str(),
+                        Some(AliasTarget::Cte) => continue,
+                        None => name,
+                    };
+                let target_key = identifier_key(target_name);
+                if is_reserved_object_reference(target_name)
+                    || bindings.ctes.iter().any(|binding| {
+                        binding.name == target_key
+                            && name_match.start() >= binding.visible.start
+                            && name_match.start() < binding.visible.end
+                    })
+                    || !emitted.insert((identifier_key(target_name), name_match.start()))
+                {
+                    continue;
+                }
+                let site = Site::new(start + name_match.start(), start + name_match.end());
+                let target = self.ensure_table(target_name, site);
+                self.add_edge(source, &target, relation, site, "sql-text-data-access");
             }
         }
     }
 
-    fn resolve_table(&self, name: &str) -> String {
-        self.tables
-            .get(&name.to_ascii_lowercase())
-            .cloned()
-            .unwrap_or_else(|| make_id(&[&self.stem, name]))
+    fn add_incomplete_body_evidence(&mut self, statement: &Statement) {
+        let Some(reason) = statement.incomplete_body_reason.as_deref() else {
+            return;
+        };
+        let site = Site::new(statement.offset, statement.end);
+        let anchor = self.source_anchor(site);
+        let coverage = json!({
+            "capability": "sql:body_ownership",
+            "producer": "compass.languages.sql",
+            "status": "partial",
+            "reason": reason,
+            "anchor": anchor.clone(),
+        });
+        self.push_extension_record("_compass_v1_graph_coverage", coverage);
+        let diagnostic = json!({
+            "severity": "warning",
+            "code": "sql_incomplete_body_boundary",
+            "message": reason,
+            "anchor": anchor,
+        });
+        self.push_extension_record("_compass_v1_graph_diagnostics", diagnostic);
     }
 
-    fn add_file_node(&mut self, label: &str) {
-        self.seen.insert(self.file_id.clone());
+    fn add_boundary_issue_evidence(&mut self, issue: &BoundaryIssue) {
+        let anchor = self.source_anchor(issue.site);
+        self.push_extension_record(
+            "_compass_v1_graph_coverage",
+            json!({
+                "capability": "sql:statement_boundary",
+                "producer": "compass.languages.sql",
+                "status": "partial",
+                "reason": issue.reason,
+                "anchor": anchor.clone(),
+            }),
+        );
+        self.push_extension_record(
+            "_compass_v1_graph_diagnostics",
+            json!({
+                "severity": "warning",
+                "code": "sql_incomplete_quoted_identifier",
+                "message": issue.reason,
+                "anchor": anchor,
+            }),
+        );
+    }
+
+    fn push_extension_record(&mut self, key: &str, record: Value) {
+        match self.extraction.extensions.get_mut(key) {
+            Some(Value::Array(records)) => records.push(record),
+            Some(_) => {}
+            None => {
+                self.extraction
+                    .extensions
+                    .insert(key.to_owned(), Value::Array(vec![record]));
+            }
+        }
+    }
+
+    fn source_anchor(&self, site: Site) -> Value {
+        let mut range = Map::new();
+        crate::facts::stamp_source_range(&mut range, self.source, site.start, site.end);
+        json!({
+            "file": self.source_file,
+            "startByte": range.get("start_byte").cloned().unwrap_or(Value::from(0)),
+            "endByte": range.get("end_byte").cloned().unwrap_or(Value::from(0)),
+            "startLine": range.get("line_start").cloned().unwrap_or(Value::from(1)),
+            "startColumn": range.get("column_start").cloned().unwrap_or(Value::from(0)),
+            "endLine": range.get("line_end").cloned().unwrap_or(Value::from(1)),
+            "endColumn": range.get("column_end").cloned().unwrap_or(Value::from(0)),
+        })
+    }
+
+    fn add_database_object(
+        &mut self,
+        kind: &str,
+        name: &str,
+        site: Site,
+        origin: &str,
+        rule: &str,
+    ) -> String {
+        if let Some(existing) = self.exact_object_id(name) {
+            return existing;
+        }
+        let schema_source = schema_reference(name);
+        let schema = schema_source.as_deref().map(normalized_identifier);
+        let qualified_name = normalized_identifier(name);
+        let identity = identifier_key(name);
+        let identity_digest = sha256_prefixed(identity.as_bytes());
+        let id = make_id(&[
+            kind,
+            &self.logical_database,
+            schema.as_deref().unwrap_or_default(),
+            &qualified_name,
+            &identity,
+            &identity_digest,
+        ]);
+        let attributes = self.database_attributes(kind, name, &qualified_name, site, origin, rule);
+        self.push_node(id.clone(), attributes);
+        self.register_object(name, &id);
+        let parent = schema_source
+            .as_deref()
+            .map(|schema| self.ensure_schema(schema, site, origin, "sql-text-schema-qualification"))
+            .unwrap_or_else(|| self.database_id.clone());
+        self.add_edge(&parent, &id, "contains", site, "sql-text-containment");
+        id
+    }
+
+    fn ensure_table(&mut self, name: &str, site: Site) -> String {
+        self.object_id(name).unwrap_or_else(|| {
+            self.add_database_object(
+                "database_table",
+                name,
+                site,
+                "artifact",
+                "sql-text-table-reference",
+            )
+        })
+    }
+
+    fn ensure_schema(&mut self, name: &str, site: Site, origin: &str, rule: &str) -> String {
+        let normalized = normalized_identifier(name);
+        let key = identifier_key(name);
+        if let Some(id) = self.schemas.get(&key) {
+            return id.clone();
+        }
+        let key_digest = sha256_prefixed(key.as_bytes());
+        let id = make_id(&[
+            "database_schema",
+            &self.logical_database,
+            &normalized,
+            &key,
+            &key_digest,
+        ]);
+        let mut attributes =
+            self.database_attributes("database_schema", name, &normalized, site, origin, rule);
+        attributes.insert("database_schema".into(), Value::String(normalized.clone()));
+        self.push_node(id.clone(), attributes);
+        self.schemas.insert(key, id.clone());
+        self.add_edge(
+            &self.database_id.clone(),
+            &id,
+            "contains",
+            site,
+            "sql-text-containment",
+        );
+        id
+    }
+
+    fn exact_object_id(&self, name: &str) -> Option<String> {
+        self.objects.get(&identifier_key(name)).cloned()
+    }
+
+    fn object_id(&self, name: &str) -> Option<String> {
+        self.exact_object_id(name).or_else(|| {
+            if qualified_identifier_parts(name).len() > 1 {
+                return None;
+            }
+            let short = short_identifier_key(name);
+            self.short_object_names.get(&short).cloned().flatten()
+        })
+    }
+
+    fn register_object(&mut self, name: &str, id: &str) {
+        self.objects.insert(identifier_key(name), id.to_owned());
+        let short = short_identifier_key(name);
+        self.short_object_names
+            .entry(short)
+            .and_modify(|entry| {
+                if entry.as_deref() != Some(id) {
+                    *entry = None;
+                }
+            })
+            .or_insert_with(|| Some(id.to_owned()));
+    }
+
+    fn database_attributes(
+        &self,
+        kind: &str,
+        name: &str,
+        qualified_name: &str,
+        site: Site,
+        origin: &str,
+        rule: &str,
+    ) -> Map<String, Value> {
+        let mut attributes = self.base_attributes(
+            kind,
+            &last_identifier(name),
+            qualified_name,
+            site,
+            origin,
+            rule,
+        );
+        attributes.insert(
+            "logical_database".into(),
+            Value::String(self.logical_database.clone()),
+        );
+        if let Some(schema) = schema_name(name) {
+            attributes.insert("database_schema".into(), Value::String(schema));
+        }
+        attributes
+    }
+
+    fn base_attributes(
+        &self,
+        kind: &str,
+        name: &str,
+        qualified_name: &str,
+        site: Site,
+        origin: &str,
+        rule: &str,
+    ) -> Map<String, Value> {
         let mut attributes = Map::new();
-        attributes.insert("label".into(), Value::String(label.to_owned()));
+        attributes.insert("label".into(), Value::String(name.to_owned()));
+        attributes.insert("name".into(), Value::String(name.to_owned()));
+        attributes.insert(
+            "qualified_name".into(),
+            Value::String(qualified_name.to_owned()),
+        );
+        attributes.insert("symbol_kind".into(), Value::String(kind.to_owned()));
         attributes.insert("file_type".into(), Value::String("code".into()));
+        attributes.insert("language".into(), Value::String("sql".into()));
         attributes.insert(
             "source_file".into(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".into(), Value::Null);
-        self.extraction.nodes.push(NodeRecord {
-            id: self.file_id.clone(),
-            attributes,
-        });
+        attributes.insert("_origin".into(), Value::String(origin.to_owned()));
+        attributes.insert("rule".into(), Value::String(rule.to_owned()));
+        attributes.insert(
+            "extractor".into(),
+            Value::String("compass.languages.sql".into()),
+        );
+        crate::facts::stamp_source_range(&mut attributes, self.source, site.start, site.end);
+        attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{}", self.line_at(site.start))),
+        );
+        attributes
     }
 
-    fn add_contained_node(&mut self, id: &str, label: &str, at: usize) {
-        if !self.seen.insert(id.to_owned()) {
+    fn push_node(&mut self, id: String, attributes: Map<String, Value>) {
+        if self.seen_nodes.insert(id.clone()) {
+            self.extraction.nodes.push(NodeRecord { id, attributes });
+        }
+    }
+
+    fn add_edge(&mut self, source: &str, target: &str, relation: &str, site: Site, rule: &str) {
+        self.add_edge_with_origin(source, target, relation, site, "artifact", rule);
+    }
+
+    fn add_edge_with_origin(
+        &mut self,
+        source: &str,
+        target: &str,
+        relation: &str,
+        site: Site,
+        origin: &str,
+        rule: &str,
+    ) {
+        if !self.seen_edges.insert((
+            source.to_owned(),
+            target.to_owned(),
+            relation.to_owned(),
+            site.start,
+        )) {
             return;
         }
-        let mut attributes = Map::new();
-        attributes.insert("label".into(), Value::String(label.to_owned()));
-        attributes.insert("file_type".into(), Value::String("code".into()));
-        attributes.insert(
-            "source_file".into(),
-            Value::String(self.source_file.clone()),
-        );
-        attributes.insert("source_location".into(), Value::String(format!("L{at}")));
-        self.extraction.nodes.push(NodeRecord {
-            id: id.to_owned(),
-            attributes,
-        });
-        self.add_edge(&self.file_id.clone(), id, "contains", at);
-    }
-
-    fn add_edge(&mut self, source: &str, target: &str, relation: &str, at: usize) {
         let mut attributes = Map::new();
         attributes.insert("relation".into(), Value::String(relation.to_owned()));
         attributes.insert("confidence".into(), Value::String("EXTRACTED".into()));
@@ -254,8 +1068,18 @@ impl<'a> State<'a> {
             "source_file".into(),
             Value::String(self.source_file.clone()),
         );
-        attributes.insert("source_location".into(), Value::String(format!("L{at}")));
+        attributes.insert(
+            "source_location".into(),
+            Value::String(format!("L{}", self.line_at(site.start))),
+        );
         attributes.insert("weight".into(), Value::from(1.0));
+        attributes.insert("_origin".into(), Value::String(origin.to_owned()));
+        attributes.insert(
+            "extractor".into(),
+            Value::String("compass.languages.sql".into()),
+        );
+        attributes.insert("rule".into(), Value::String(rule.to_owned()));
+        crate::facts::stamp_source_range(&mut attributes, self.source, site.start, site.end);
         self.extraction.edges.push(EdgeRecord {
             source: source.to_owned(),
             target: target.to_owned(),
@@ -272,43 +1096,1373 @@ impl<'a> State<'a> {
     }
 }
 
-fn statements(source: &str) -> Vec<Statement> {
-    let Ok(pattern) = Regex::new(&format!(
-        r"(?i)\b(?:CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)|((?:ALTER)\s+TABLE))\s+({OBJECT_REFERENCE})"
-    )) else {
-        return Vec::new();
-    };
-    pattern
-        .captures_iter(source)
-        .filter_map(|capture| {
-            let full = capture.get(0)?;
-            Some(Statement {
-                offset: full.start(),
-                kind: capture
-                    .get(1)
-                    .or_else(|| capture.get(2))?
-                    .as_str()
-                    .to_ascii_uppercase(),
-                name: capture.get(3)?.as_str().to_owned(),
-            })
-        })
+fn sql_read_access_patterns() -> Vec<String> {
+    vec![format!(
+        r"(?i)\b(?:FROM|JOIN|USING)\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
+    )]
+}
+
+fn sql_write_access_patterns() -> Vec<String> {
+    vec![
+        format!(
+            r"(?i)\bINSERT\s+(?:(?:OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)|(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY)(?:\s+IGNORE)?|IGNORE)\s+)?(?:INTO\s+)?({OBJECT_REFERENCE})"
+        ),
+        format!(
+            r"(?i)\bUPDATE\s+(?:LOW_PRIORITY\s+)?(?:IGNORE\s+)?(?:ONLY\s+)?({OBJECT_REFERENCE})"
+        ),
+        format!(
+            r"(?i)\bDELETE\s+(?:LOW_PRIORITY\s+)?(?:QUICK\s+)?(?:IGNORE\s+)?(?:{IDENTIFIER}\s+)?FROM\s+(?:ONLY\s+)?({OBJECT_REFERENCE})"
+        ),
+        format!(r"(?i)\bMERGE\s+(?:INTO\s+)?({OBJECT_REFERENCE})"),
+        format!(r"(?i)\bSELECT\b[\s\S]*?\bINTO\s+({OBJECT_REFERENCE})"),
+    ]
+}
+
+fn sql_alias_target_patterns() -> Vec<String> {
+    sql_read_access_patterns()
+        .into_iter()
+        .chain(sql_write_access_patterns())
         .collect()
 }
 
-fn statement_end(source: &str, start: usize) -> Option<usize> {
-    source[start..].find(';').map(|offset| start + offset + 1)
+fn sql_declaration_pattern() -> Result<Regex, regex::Error> {
+    Regex::new(&format!(
+        r"(?ix)\b(?:
+            CREATE\s+
+                (?:OR\s+(?:REPLACE|ALTER)\s+)?
+                (?:(?:GLOBAL|LOCAL)\s+)?
+                (?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?
+                (?:MATERIALIZED\s+)?
+                (DATABASE|SCHEMA|TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)
+                \s+(?:IF\s+NOT\s+EXISTS\s+)?
+          | CREATE\s+(?:UNIQUE\s+)?(INDEX)(?:\s+CONCURRENTLY)?
+                \s+(?:IF\s+NOT\s+EXISTS\s+)?
+          | ((?:ALTER)\s+TABLE)\s+(?:IF\s+EXISTS\s+)?
+        )({OBJECT_REFERENCE})"
+    ))
 }
 
-fn routine_end(source: &str, start: usize) -> usize {
-    let tail = &source[start..];
-    let Ok(next) = Regex::new(
-        r"(?im)^\s*(?:CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TRIGGER)|ALTER\s+TABLE)\b",
-    ) else {
-        return source.len();
+fn statements(source: &str) -> Vec<Statement> {
+    let Ok(pattern) = sql_declaration_pattern() else {
+        return Vec::new();
     };
-    next.find_iter(tail)
-        .nth(1)
-        .map_or(source.len(), |value| start + value.start())
+    let mut declarations = pattern
+        .captures_iter(source)
+        .filter_map(|capture| {
+            let full = capture.get(0)?;
+            let raw_kind = capture
+                .get(1)
+                .or_else(|| capture.get(2))
+                .or_else(|| capture.get(3))?;
+            let kind = match raw_kind.as_str().to_ascii_uppercase().as_str() {
+                "DATABASE" => StatementKind::Database,
+                "SCHEMA" => StatementKind::Schema,
+                "TABLE" => StatementKind::Table,
+                "VIEW" => StatementKind::View,
+                "FUNCTION" | "PROCEDURE" => StatementKind::Procedure,
+                "TRIGGER" => StatementKind::Trigger,
+                "INDEX" => StatementKind::Index,
+                "ALTER TABLE" => StatementKind::AlterTable,
+                _ => return None,
+            };
+            let name = capture.get(4)?;
+            if is_reserved_object_reference(name.as_str()) {
+                return None;
+            }
+            Some(Statement {
+                offset: full.start(),
+                end: 0,
+                kind,
+                name: name.as_str().to_owned(),
+                name_start: name.start(),
+                name_end: name.end(),
+                body: None,
+                incomplete_body_reason: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    declarations.sort_by_key(|statement| statement.offset);
+    for index in 0..declarations.len() {
+        let next = declarations
+            .get(index + 1)
+            .map_or(source.len(), |statement| statement.offset);
+        let boundary = body_statement_boundary(
+            source,
+            declarations[index].offset,
+            &declarations[index].kind,
+        );
+        if let Some(boundary) = boundary {
+            declarations[index].end = boundary.end;
+            declarations[index].body = boundary.body;
+            declarations[index].incomplete_body_reason = boundary.incomplete_reason;
+        } else {
+            declarations[index].end =
+                scan_statement_boundary(source, declarations[index].offset, next).end();
+        }
+    }
+    let mut top_level = Vec::<Statement>::new();
+    for declaration in declarations {
+        if top_level
+            .last()
+            .is_some_and(|owner| declaration.offset < owner.end)
+        {
+            continue;
+        }
+        top_level.push(declaration);
+    }
+    top_level
+}
+
+fn body_statement_boundary(
+    source: &str,
+    start: usize,
+    kind: &StatementKind,
+) -> Option<BodyBoundary> {
+    if !matches!(kind, StatementKind::Procedure | StatementKind::Trigger) {
+        return None;
+    }
+    match routine_body_dollar_opener(source, start) {
+        DollarBodySearch::Found(open) => {
+            let delimiter = dollar_quote_delimiter_at(source, open)?;
+            let content_start = open + delimiter.len();
+            if let Some(close_end) = paired_dollar_quote_end(source, open, source.len()) {
+                let close_start = close_end.saturating_sub(delimiter.len());
+                let end = scan_statement_boundary(source, close_end, source.len()).end();
+                return Some(BodyBoundary {
+                    end,
+                    body: Some(Site::new(content_start, close_start)),
+                    incomplete_reason: None,
+                });
+            }
+            let boundary = scan_statement_boundary(source, start, source.len());
+            let end = boundary.recovery_end(first_line_end(source, open).min(source.len()));
+            return Some(BodyBoundary {
+                end,
+                body: None,
+                incomplete_reason: Some(format!(
+                    "unterminated SQL routine dollar delimiter {delimiter:?}; body ownership omitted"
+                )),
+            });
+        }
+        DollarBodySearch::Ambiguous(site) => {
+            let boundary = scan_statement_boundary(source, start, source.len());
+            let end = boundary.recovery_end(first_line_end(source, site.start).min(source.len()));
+            return Some(BodyBoundary {
+                end,
+                body: None,
+                incomplete_reason: Some(
+                    "ambiguous SQL routine dollar body position; body ownership omitted".to_owned(),
+                ),
+            });
+        }
+        DollarBodySearch::None => {}
+    }
+    compound_body_boundary(source, start)
+}
+
+fn compound_body_boundary(source: &str, start: usize) -> Option<BodyBoundary> {
+    let words = sql_word_spans(source, start);
+    let header_end = first_unquoted_semicolon(source, start).unwrap_or(source.len());
+    let begin_index = words.iter().position(|(word_start, _, word)| {
+        *word_start < header_end && word.eq_ignore_ascii_case("BEGIN")
+    })?;
+    let body_start = words[begin_index].1;
+    let mut depth = 0_u32;
+    let mut case_depth = 0_u32;
+    let mut skipped_case_suffix = None;
+    for (position, (word_start, end, word)) in words.iter().enumerate().skip(begin_index) {
+        if skipped_case_suffix == Some(position) {
+            continue;
+        }
+        if word.eq_ignore_ascii_case("BEGIN") {
+            depth = depth.saturating_add(1);
+            continue;
+        }
+        if word.eq_ignore_ascii_case("CASE") {
+            case_depth = case_depth.saturating_add(1);
+            continue;
+        }
+        if !word.eq_ignore_ascii_case("END") {
+            continue;
+        }
+        let closer = words
+            .get(position + 1)
+            .map(|(_, _, next)| next.to_ascii_uppercase());
+        if closer.as_deref() == Some("CASE") {
+            case_depth = case_depth.saturating_sub(1);
+            skipped_case_suffix = Some(position + 1);
+            continue;
+        }
+        let qualified_closer = closer
+            .as_deref()
+            .is_some_and(|next| matches!(next, "IF" | "LOOP" | "WHILE" | "REPEAT"));
+        if qualified_closer {
+            continue;
+        }
+        if case_depth > 0 {
+            case_depth -= 1;
+            continue;
+        }
+        depth = depth.saturating_sub(1);
+        if depth == 0 {
+            return Some(BodyBoundary {
+                end: scan_statement_boundary(source, *end, source.len()).end(),
+                body: Some(Site::new(body_start, *word_start)),
+                incomplete_reason: None,
+            });
+        }
+    }
+    let boundary = scan_statement_boundary(source, start, source.len());
+    let end = boundary.recovery_end(first_line_end(source, body_start).min(source.len()));
+    Some(BodyBoundary {
+        end,
+        body: None,
+        incomplete_reason: Some(
+            "unterminated SQL compound routine body; body ownership omitted".to_owned(),
+        ),
+    })
+}
+
+fn sql_word_spans(source: &str, start: usize) -> Vec<(usize, usize, &str)> {
+    let bytes = source.as_bytes();
+    let mut words = Vec::new();
+    let mut index = start;
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
+            continue;
+        }
+        if let Some(end) = skip_dollar_quote(source, index) {
+            index = end;
+            continue;
+        }
+        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
+            let word_start = index;
+            index += 1;
+            while bytes
+                .get(index)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                index += 1;
+            }
+            words.push((word_start, index, &source[word_start..index]));
+            continue;
+        }
+        index += 1;
+    }
+    words
+}
+
+fn scan_statement_ranges(source: &str, start: usize, end: usize) -> Vec<ScannedStatement> {
+    let mut output = Vec::new();
+    let mut cursor = start.min(source.len());
+    let limit = end.min(source.len());
+    while cursor < limit {
+        let boundary = scan_statement_boundary(source, cursor, limit);
+        let statement_end = boundary.end();
+        let issue = boundary.into_issue();
+        if source[cursor..statement_end]
+            .bytes()
+            .any(|byte| !byte.is_ascii_whitespace())
+        {
+            output.push(ScannedStatement {
+                site: Site::new(cursor, statement_end),
+                issue,
+            });
+        }
+        if statement_end <= cursor {
+            break;
+        }
+        cursor = statement_end;
+    }
+    output
+}
+
+fn scan_statement_boundary(source: &str, start: usize, end: usize) -> StatementBoundary {
+    let bytes = source.as_bytes();
+    let limit = end.min(bytes.len());
+    let mut index = start.min(limit);
+    let mut paren_depth = 0_u32;
+    while index < limit {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            match scan_delimited_identifier(source, index, delimiter, limit) {
+                DelimitedIdentifierScan::Complete(end) => {
+                    index = end;
+                    continue;
+                }
+                DelimitedIdentifierScan::Incomplete(recovery_end) => {
+                    let style = match bytes[index] {
+                        b'"' => "double-quoted",
+                        b'`' => "backtick-quoted",
+                        b'[' => "bracket-quoted",
+                        _ => "quoted",
+                    };
+                    return StatementBoundary::IncompleteQuoted {
+                        end: recovery_end,
+                        issue: BoundaryIssue {
+                            site: Site::new(index, recovery_end),
+                            reason: format!(
+                                "unterminated {style} SQL identifier; statement facts omitted"
+                            ),
+                        },
+                    };
+                }
+            }
+        }
+        if let Some(dollar_end) = paired_dollar_quote_end(source, index, limit) {
+            index = dollar_end;
+            continue;
+        }
+        match bytes[index] {
+            b'(' => paren_depth = paren_depth.saturating_add(1),
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b';' if paren_depth == 0 => return StatementBoundary::Complete(index + 1),
+            _ => {}
+        }
+        index += 1;
+    }
+    StatementBoundary::EndOfInput(limit)
+}
+
+fn scan_delimited_identifier(
+    source: &str,
+    open: usize,
+    delimiter: u8,
+    limit: usize,
+) -> DelimitedIdentifierScan {
+    let bytes = source.as_bytes();
+    let limit = limit.min(bytes.len());
+    let mut index = open.saturating_add(1).min(limit);
+    let mut statement_recoveries = Vec::new();
+    let mut fallback_recovery = None;
+    while index < limit {
+        if bytes[index] == delimiter {
+            if bytes.get(index + 1).copied() == Some(delimiter) {
+                index += 2;
+                continue;
+            }
+            let close_end = index + 1;
+            let invalid_outer_follower =
+                !identifier_close_has_valid_follower(source, close_end, limit);
+            if invalid_outer_follower
+                && let Some(recovery) = statement_recoveries.iter().copied().find(|separator| {
+                    proven_statement_after_separator(source, *separator, limit).is_some()
+                })
+            {
+                return DelimitedIdentifierScan::Incomplete(recovery);
+            }
+            return DelimitedIdentifierScan::Complete(close_end);
+        }
+        if fallback_recovery.is_none() && matches!(bytes[index], b';' | b'\n') {
+            fallback_recovery = Some(index + 1);
+        }
+        if matches!(bytes[index], b';' | b'\n') {
+            statement_recoveries.push(index + 1);
+        }
+        index += 1;
+    }
+    DelimitedIdentifierScan::Incomplete(fallback_recovery.unwrap_or(limit))
+}
+
+fn identifier_close_has_valid_follower(source: &str, close_end: usize, limit: usize) -> bool {
+    let bytes = source.as_bytes();
+    let limit = limit.min(bytes.len());
+    if close_end >= limit {
+        return true;
+    }
+    if bytes[close_end].is_ascii_whitespace() {
+        return true;
+    }
+    matches!(
+        bytes[close_end],
+        b'.' | b','
+            | b';'
+            | b'('
+            | b')'
+            | b'='
+            | b'<'
+            | b'>'
+            | b'!'
+            | b'+'
+            | b'-'
+            | b'*'
+            | b'/'
+            | b'%'
+            | b':'
+            | b'|'
+            | b'&'
+            | b'^'
+            | b'~'
+            | b'?'
+    )
+}
+
+fn proven_statement_after_separator(source: &str, start: usize, limit: usize) -> Option<usize> {
+    let statement_start = skip_sql_whitespace(source, start);
+    let (_, keyword_end) = word_at(source, statement_start)?;
+    let keyword = source.get(statement_start..keyword_end)?;
+    if !matches!(
+        keyword.to_ascii_uppercase().as_str(),
+        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" | "CREATE" | "ALTER"
+    ) {
+        return None;
+    }
+    let statement_end = scan_proven_statement_boundary(source, statement_start, limit)?;
+    proven_statement_shape(source, statement_start, statement_end).then_some(statement_end)
+}
+
+fn scan_proven_statement_boundary(source: &str, start: usize, limit: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let limit = limit.min(bytes.len());
+    let mut index = start.min(limit);
+    let mut paren_depth = 0_u32;
+    while index < limit {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            if !identifier_opener_has_boundary(bytes, index) {
+                return None;
+            }
+            let close_end = quoted_identifier_end_bounded(bytes, index, delimiter, limit)?;
+            if !identifier_close_has_valid_follower(source, close_end, limit) {
+                return None;
+            }
+            index = close_end;
+            continue;
+        }
+        if bytes[index] == b'\'' {
+            index = single_quoted_end(bytes, index, limit)?;
+            continue;
+        }
+        if bytes[index] == b'-' && bytes.get(index + 1).copied() == Some(b'-') {
+            index = source[index + 2..limit]
+                .find('\n')
+                .map_or(limit, |offset| index + 2 + offset + 1);
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1).copied() == Some(b'*') {
+            let close = source[index + 2..limit].find("*/")?;
+            index += close + 4;
+            continue;
+        }
+        if dollar_quote_delimiter_at(source, index).is_some() {
+            index = paired_dollar_quote_end(source, index, limit)?;
+            continue;
+        }
+        match bytes[index] {
+            b']' => return None,
+            b'(' => paren_depth = paren_depth.saturating_add(1),
+            b')' => {
+                if paren_depth == 0 {
+                    return None;
+                }
+                paren_depth -= 1;
+            }
+            b';' if paren_depth == 0 => return Some(index + 1),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn identifier_opener_has_boundary(bytes: &[u8], start: usize) -> bool {
+    start == 0
+        || bytes
+            .get(start - 1)
+            .is_some_and(|byte| !is_sql_identifier_continuation(*byte))
+}
+
+fn proven_statement_shape(source: &str, start: usize, end: usize) -> bool {
+    let statement = &source[start..end];
+    let words = sql_word_spans(&source[start..end], 0)
+        .into_iter()
+        .map(|(_, _, word)| word.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    match words.as_slice() {
+        [first, rest @ ..] if first == "SELECT" => !rest.is_empty(),
+        [first, rest @ ..] if first == "INSERT" => rest.iter().any(|word| word == "INTO"),
+        [first, rest @ ..] if first == "UPDATE" => !rest.is_empty(),
+        [first, rest @ ..] if first == "DELETE" => rest.iter().any(|word| word == "FROM"),
+        [first, rest @ ..] if first == "MERGE" => {
+            rest.iter().any(|word| word == "INTO" || word == "USING")
+        }
+        [first, rest @ ..] if first == "WITH" => rest.iter().any(|word| {
+            matches!(
+                word.as_str(),
+                "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
+            )
+        }),
+        [first, ..] if matches!(first.as_str(), "CREATE" | "ALTER") => {
+            proven_declaration_at_start(statement)
+        }
+        _ => false,
+    }
+}
+
+fn proven_declaration_at_start(statement: &str) -> bool {
+    let Ok(pattern) = sql_declaration_pattern() else {
+        return false;
+    };
+    let Some(capture) = pattern.captures(statement) else {
+        return false;
+    };
+    capture.get(0).is_some_and(|full| full.start() == 0)
+        && capture
+            .get(4)
+            .is_some_and(|name| !is_reserved_object_reference(name.as_str()))
+}
+
+fn quoted_identifier_end_bounded(
+    bytes: &[u8],
+    start: usize,
+    delimiter: u8,
+    limit: usize,
+) -> Option<usize> {
+    let mut index = start + 1;
+    while index < limit.min(bytes.len()) {
+        if bytes[index] != delimiter {
+            index += 1;
+            continue;
+        }
+        if index + 1 < limit && bytes.get(index + 1).copied() == Some(delimiter) {
+            index += 2;
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
+}
+
+fn single_quoted_end(bytes: &[u8], start: usize, limit: usize) -> Option<usize> {
+    let mut index = start + 1;
+    while index < limit.min(bytes.len()) {
+        if bytes[index] != b'\'' {
+            index += 1;
+            continue;
+        }
+        if index + 1 < limit && bytes.get(index + 1).copied() == Some(b'\'') {
+            index += 2;
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
+}
+
+fn top_level_statement_ranges(source: &str, declarations: &[Statement]) -> Vec<ScannedStatement> {
+    let mut output = Vec::new();
+    let mut cursor = 0;
+    while cursor < source.len() {
+        let statement_start = skip_sql_whitespace(source, cursor);
+        if let Some(declaration) = declarations
+            .iter()
+            .find(|declaration| declaration.offset == statement_start)
+        {
+            let end = declaration.end.min(source.len());
+            output.push(ScannedStatement {
+                site: Site::new(cursor, end),
+                issue: None,
+            });
+            cursor = end;
+            continue;
+        }
+        let boundary = scan_statement_boundary(source, cursor, source.len());
+        let end = boundary.end();
+        let issue = boundary.into_issue();
+        if end <= cursor {
+            break;
+        }
+        output.push(ScannedStatement {
+            site: Site::new(cursor, end),
+            issue,
+        });
+        cursor = end;
+    }
+    output
+}
+
+enum DollarBodySearch {
+    None,
+    Found(usize),
+    Ambiguous(Site),
+}
+
+fn routine_body_dollar_opener(source: &str, start: usize) -> DollarBodySearch {
+    let bytes = source.as_bytes();
+    let mut index = start;
+    let mut depth = 0_u32;
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
+            continue;
+        }
+        if dollar_quote_delimiter_at(source, index).is_some() {
+            if let Some(end) = paired_dollar_quote_end(source, index, source.len()) {
+                index = end;
+                continue;
+            }
+            return DollarBodySearch::Ambiguous(Site::new(index, first_line_end(source, index)));
+        }
+        if bytes[index] == b';' {
+            return DollarBodySearch::None;
+        }
+        match bytes[index] {
+            b'(' => {
+                depth = depth.saturating_add(1);
+                index += 1;
+                continue;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if depth == 0
+            && let Some(as_end) = consume_keyword(source, index, "AS")
+        {
+            let next = skip_sql_whitespace(source, as_end);
+            if dollar_quote_delimiter_at(source, next).is_some() {
+                return DollarBodySearch::Found(next);
+            }
+        }
+        index += 1;
+    }
+    DollarBodySearch::None
+}
+
+fn skip_dollar_quote(source: &str, start: usize) -> Option<usize> {
+    paired_dollar_quote_end(source, start, source.len())
+}
+
+fn paired_dollar_quote_end(source: &str, start: usize, end: usize) -> Option<usize> {
+    let delimiter = dollar_quote_delimiter_at(source, start)?;
+    paired_dollar_quote_end_with_delimiter(source, start, end, delimiter)
+}
+
+fn paired_dollar_quote_end_with_delimiter(
+    source: &str,
+    start: usize,
+    end: usize,
+    delimiter: &str,
+) -> Option<usize> {
+    let content_start = start + delimiter.len();
+    let limit = end.min(source.len());
+    let mut cursor = content_start;
+    while cursor <= limit {
+        let offset = source.get(cursor..limit)?.find(delimiter)?;
+        let close_start = cursor + offset;
+        let close_end = close_start + delimiter.len();
+        if dollar_quote_close_has_boundary(source, close_end, limit) {
+            return Some(close_end);
+        }
+        cursor = close_start + 1;
+    }
+    None
+}
+
+fn first_unquoted_semicolon(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = start.min(bytes.len());
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter).unwrap_or(bytes.len());
+            continue;
+        }
+        if bytes[index] == b';' {
+            return Some(index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn first_line_end(source: &str, start: usize) -> usize {
+    source[start..]
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset + 1)
+}
+
+fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
+    let statement_start = statement_start_before(source, start);
+    dollar_quote_delimiter_in_statement(source, start, statement_start)
+}
+
+fn dollar_quote_delimiter_in_statement(
+    source: &str,
+    start: usize,
+    statement_start: usize,
+) -> Option<&str> {
+    let delimiter = dollar_delimiter_syntax_at(source, start)?;
+    (!dollar_marker_in_statement_identifier(source, statement_start, start)).then_some(delimiter)
+}
+
+fn dollar_delimiter_syntax_at(source: &str, start: usize) -> Option<&str> {
+    let bytes = source.as_bytes();
+    if bytes.get(start).copied() != Some(b'$') {
+        return None;
+    }
+    if start > 0
+        && bytes
+            .get(start - 1)
+            .is_some_and(|byte| is_sql_identifier_continuation(*byte))
+    {
+        return None;
+    }
+    let mut end = start + 1;
+    if bytes.get(end).copied() == Some(b'$') {
+        end += 1;
+    } else {
+        if !bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+        {
+            return None;
+        }
+        end += 1;
+        while bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            end += 1;
+        }
+        if bytes.get(end).copied() != Some(b'$') {
+            return None;
+        }
+        end += 1;
+    }
+    Some(&source[start..end])
+}
+
+fn dollar_marker_in_statement_identifier(
+    source: &str,
+    statement_start: usize,
+    marker: usize,
+) -> bool {
+    let component = unquoted_identifier_component_at(source, marker);
+    if component.start < marker {
+        return true;
+    }
+    let bytes = source.as_bytes();
+    if component.start > 0 && bytes.get(component.start - 1).copied() == Some(b'.') {
+        return true;
+    }
+    if bytes.get(component.end).copied() == Some(b'.') {
+        return true;
+    }
+    let statement_start = statement_start.min(component.start);
+    let Some(statement) = source.get(statement_start..component.end) else {
+        return false;
+    };
+    let local_marker = marker.saturating_sub(statement_start);
+    static DECLARATION_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    if DECLARATION_PATTERN
+        .get_or_init(|| sql_declaration_pattern().ok())
+        .as_ref()
+        .is_some_and(|pattern| {
+            pattern.captures_iter(statement).any(|capture| {
+                capture
+                    .get(0)
+                    .is_some_and(|full| full.start() == skip_sql_whitespace(statement, 0))
+                    && capture.get(4).is_some_and(|name| {
+                        local_marker >= name.start() && local_marker < name.end()
+                    })
+            })
+        })
+    {
+        return true;
+    }
+    if protected_relation_identifier(statement, local_marker) {
+        return true;
+    }
+    protected_cte_identifier(statement, local_marker)
+}
+
+fn unquoted_identifier_component_at(source: &str, marker: usize) -> Site {
+    let bytes = source.as_bytes();
+    let mut start = marker.min(bytes.len());
+    while start > 0
+        && bytes
+            .get(start - 1)
+            .is_some_and(|byte| is_sql_identifier_continuation(*byte))
+    {
+        start -= 1;
+    }
+    let mut end = marker.min(bytes.len());
+    while bytes
+        .get(end)
+        .is_some_and(|byte| is_sql_identifier_continuation(*byte))
+    {
+        end += 1;
+    }
+    Site::new(start, end)
+}
+
+fn protected_relation_identifier(statement: &str, marker: usize) -> bool {
+    static TARGET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    let target_patterns = TARGET_PATTERNS.get_or_init(|| {
+        sql_read_access_patterns()
+            .into_iter()
+            .chain(sql_write_access_patterns())
+            .chain([
+                format!(r"(?i)\bREFERENCES\s+({OBJECT_REFERENCE})"),
+                format!(
+                    r"(?ix)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?\bON\s+({OBJECT_REFERENCE})"
+                ),
+                format!(r"(?ix)^\s*CREATE\s+TRIGGER[\s\S]*?\bON\s+({OBJECT_REFERENCE})"),
+            ])
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect::<Vec<_>>()
+    });
+    for regex in target_patterns {
+        if regex.captures_iter(statement).any(|capture| {
+            capture
+                .get(1)
+                .is_some_and(|target| marker >= target.start() && marker < target.end())
+        }) {
+            return true;
+        }
+    }
+    relation_alias_roles(statement)
+        .iter()
+        .any(|role| marker >= role.alias.start && marker < role.alias.end)
+}
+
+fn protected_cte_identifier(statement: &str, marker: usize) -> bool {
+    static WITH_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    let Some(with_pattern) = WITH_PATTERN
+        .get_or_init(|| Regex::new(r"(?i)\bWITH\b").ok())
+        .as_ref()
+    else {
+        return false;
+    };
+    with_pattern
+        .find_iter(statement)
+        .any(|with_keyword| cte_identifier_at(statement, with_keyword.start(), marker))
+}
+
+fn cte_identifier_at(statement: &str, start: usize, marker: usize) -> bool {
+    let mut index = consume_keyword(statement, start, "WITH")
+        .map(|end| skip_sql_whitespace(statement, end))
+        .unwrap_or(statement.len());
+    if let Some(end) = consume_keyword(statement, index, "RECURSIVE") {
+        index = skip_sql_whitespace(statement, end);
+    }
+    loop {
+        let name_start = index;
+        let Some(name_end) = parse_identifier_end(statement, name_start) else {
+            return false;
+        };
+        if marker >= name_start && marker < name_end {
+            return true;
+        }
+        index = skip_sql_whitespace(statement, name_end);
+        if statement.as_bytes().get(index).copied() == Some(b'(') {
+            index += 1;
+            loop {
+                index = skip_sql_whitespace(statement, index);
+                if statement.as_bytes().get(index).copied() == Some(b')') {
+                    index = skip_sql_whitespace(statement, index + 1);
+                    break;
+                }
+                let Some(column_end) = parse_identifier_end(statement, index) else {
+                    return false;
+                };
+                if marker >= index && marker < column_end {
+                    return true;
+                }
+                index = skip_sql_whitespace(statement, column_end);
+                match statement.as_bytes().get(index).copied() {
+                    Some(b',') => index += 1,
+                    Some(b')') => {
+                        index = skip_sql_whitespace(statement, index + 1);
+                        break;
+                    }
+                    _ => return false,
+                }
+            }
+        }
+        let Some(as_end) = consume_keyword(statement, index, "AS") else {
+            return false;
+        };
+        index = skip_sql_whitespace(statement, as_end);
+        if let Some(not_end) = consume_keyword(statement, index, "NOT") {
+            index = skip_sql_whitespace(statement, not_end);
+            let Some(materialized_end) = consume_keyword(statement, index, "MATERIALIZED") else {
+                return false;
+            };
+            index = skip_sql_whitespace(statement, materialized_end);
+        } else if let Some(materialized_end) = consume_keyword(statement, index, "MATERIALIZED") {
+            index = skip_sql_whitespace(statement, materialized_end);
+        }
+        if statement.as_bytes().get(index).copied() != Some(b'(') {
+            return false;
+        }
+        let Some(body_end) = balanced_paren_end(statement, index) else {
+            return false;
+        };
+        index = skip_sql_whitespace(statement, body_end);
+        if statement.as_bytes().get(index).copied() != Some(b',') {
+            return false;
+        }
+        index = skip_sql_whitespace(statement, index + 1);
+    }
+}
+
+fn statement_start_before(source: &str, limit: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    let mut statement_start = 0;
+    while index < limit.min(bytes.len()) {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)
+                .filter(|end| *end <= limit)
+                .unwrap_or(limit);
+            continue;
+        }
+        if bytes[index] == b';' {
+            statement_start = index + 1;
+        }
+        index += 1;
+    }
+    statement_start
+}
+
+fn dollar_quote_close_has_boundary(source: &str, close_end: usize, limit: usize) -> bool {
+    close_end >= limit.min(source.len())
+        || source
+            .as_bytes()
+            .get(close_end)
+            .is_some_and(|byte| !is_sql_identifier_continuation(*byte))
+}
+
+fn is_sql_identifier_continuation(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || !byte.is_ascii()
+}
+
+fn query_statements(
+    source: &str,
+    declarations: &[Statement],
+) -> (Vec<QueryStatement>, Vec<BoundaryIssue>) {
+    let Ok(operation_pattern) = Regex::new(r"(?i)^(SELECT|INSERT|UPDATE|DELETE|MERGE)\b") else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut output = Vec::new();
+    let mut issues = Vec::new();
+    for scanned in top_level_statement_ranges(source, declarations) {
+        if let Some(issue) = scanned.issue {
+            issues.push(issue);
+            continue;
+        }
+        let site = scanned.site;
+        let Some(segment) = source.get(site.start..site.end) else {
+            continue;
+        };
+        let leading = segment.len() - segment.trim_start().len();
+        let statement_start = site.start + leading;
+        if declarations.iter().any(|declaration| {
+            statement_start >= declaration.offset && statement_start < declaration.end
+        }) {
+            continue;
+        }
+        let statement = segment.trim_start();
+        let operation = operation_pattern
+            .captures(statement)
+            .and_then(|capture| capture.get(1))
+            .map(|operation| {
+                (
+                    statement_start + operation.start(),
+                    operation.as_str().to_ascii_lowercase(),
+                )
+            })
+            .or_else(|| {
+                statement
+                    .get(..4)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("WITH"))
+                    .then(|| top_level_cte_operation(statement))
+                    .flatten()
+                    .map(|(offset, operation)| (statement_start + offset, operation))
+            });
+        if let Some((operation_start, operation)) = operation {
+            output.push((statement_start, operation_start, site.end, operation));
+        }
+    }
+    (output, issues)
+}
+
+fn top_level_cte_operation(statement: &str) -> Option<(usize, String)> {
+    let parsed = parse_ctes(statement)?;
+    let (start, end) = word_at(statement, parsed.terminal_start)?;
+    let operation = statement[start..end].to_ascii_lowercase();
+    matches!(
+        operation.as_str(),
+        "select" | "insert" | "update" | "delete" | "merge"
+    )
+    .then_some((start, operation))
+}
+
+struct ParsedCte {
+    name: String,
+    body: Site,
+}
+
+struct ParsedCtes {
+    entries: Vec<ParsedCte>,
+    recursive: bool,
+    terminal_start: usize,
+}
+
+fn parse_ctes(statement: &str) -> Option<ParsedCtes> {
+    parse_ctes_at(statement, skip_sql_whitespace(statement, 0))
+}
+
+fn parse_ctes_at(statement: &str, start: usize) -> Option<ParsedCtes> {
+    let mut index = start;
+    index = consume_keyword(statement, index, "WITH")?;
+    index = skip_sql_whitespace(statement, index);
+    let recursive = if let Some(end) = consume_keyword(statement, index, "RECURSIVE") {
+        index = skip_sql_whitespace(statement, end);
+        true
+    } else {
+        false
+    };
+
+    let mut entries = Vec::new();
+    loop {
+        let name_start = index;
+        let name_end = parse_identifier_end(statement, name_start)?;
+        let name = &statement[name_start..name_end];
+        if is_reserved_object_reference(name) {
+            return None;
+        }
+        index = skip_sql_whitespace(statement, name_end);
+
+        if statement.as_bytes().get(index).copied() == Some(b'(') {
+            index = balanced_paren_end(statement, index)?;
+            index = skip_sql_whitespace(statement, index);
+        }
+
+        index = consume_keyword(statement, index, "AS")?;
+        index = skip_sql_whitespace(statement, index);
+        if let Some(not_end) = consume_keyword(statement, index, "NOT") {
+            let materialized_start = skip_sql_whitespace(statement, not_end);
+            index = consume_keyword(statement, materialized_start, "MATERIALIZED")?;
+            index = skip_sql_whitespace(statement, index);
+        } else if let Some(materialized_end) = consume_keyword(statement, index, "MATERIALIZED") {
+            index = skip_sql_whitespace(statement, materialized_end);
+        }
+
+        if statement.as_bytes().get(index).copied() != Some(b'(') {
+            return None;
+        }
+        let body_start = index + 1;
+        let body_end = balanced_paren_end(statement, index)?;
+        entries.push(ParsedCte {
+            name: identifier_key(name),
+            body: Site::new(body_start, body_end.saturating_sub(1)),
+        });
+        index = body_end;
+        index = skip_sql_whitespace(statement, index);
+        if statement.as_bytes().get(index).copied() == Some(b',') {
+            index = skip_sql_whitespace(statement, index + 1);
+            continue;
+        }
+        return Some(ParsedCtes {
+            entries,
+            recursive,
+            terminal_start: index,
+        });
+    }
+}
+
+fn scoped_cte_bindings(statement: &str) -> Vec<ScopedCteBinding> {
+    let mut bindings = Vec::new();
+    for (with_start, _, word) in sql_word_spans(statement, 0) {
+        if !word.eq_ignore_ascii_case("WITH") {
+            continue;
+        }
+        let Some(parsed) = parse_ctes_at(statement, with_start) else {
+            continue;
+        };
+        let scope_end = enclosing_sql_scope(statement, with_start).end;
+        let recursive_start = parsed
+            .entries
+            .iter()
+            .map(|entry| entry.body.start)
+            .min()
+            .unwrap_or(parsed.terminal_start);
+        for entry in parsed.entries {
+            let visible_start = if parsed.recursive {
+                recursive_start
+            } else {
+                entry.body.end
+            };
+            if visible_start < scope_end {
+                bindings.push(ScopedCteBinding {
+                    name: entry.name,
+                    visible: Site::new(visible_start, scope_end),
+                });
+            }
+        }
+    }
+    bindings
+}
+
+fn enclosing_sql_scope(statement: &str, position: usize) -> Site {
+    let bytes = statement.as_bytes();
+    let mut stack = Vec::new();
+    let mut index = 0;
+    while index < position.min(bytes.len()) {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)
+                .filter(|end| *end <= position)
+                .unwrap_or(position);
+            continue;
+        }
+        if let Some(end) = paired_dollar_quote_end(statement, index, position) {
+            index = end;
+            continue;
+        }
+        match bytes[index] {
+            b'(' => stack.push(index),
+            b')' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    let Some(open) = stack.last().copied() else {
+        return Site::new(0, statement.len());
+    };
+    let end =
+        balanced_paren_end(statement, open).map_or(statement.len(), |end| end.saturating_sub(1));
+    Site::new(open.saturating_add(1), end)
+}
+
+fn skip_sql_whitespace(statement: &str, mut index: usize) -> usize {
+    while statement
+        .as_bytes()
+        .get(index)
+        .is_some_and(u8::is_ascii_whitespace)
+    {
+        index += 1;
+    }
+    index
+}
+
+fn consume_keyword(statement: &str, start: usize, keyword: &str) -> Option<usize> {
+    let end = start.checked_add(keyword.len())?;
+    let value = statement.get(start..end)?;
+    if !value.eq_ignore_ascii_case(keyword) {
+        return None;
+    }
+    let before_is_word = start
+        .checked_sub(1)
+        .and_then(|index| statement.as_bytes().get(index))
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$');
+    let after_is_word = statement
+        .as_bytes()
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$');
+    (!before_is_word && !after_is_word).then_some(end)
+}
+
+fn word_at(statement: &str, start: usize) -> Option<(usize, usize)> {
+    let bytes = statement.as_bytes();
+    if !bytes
+        .get(start)
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+    {
+        return None;
+    }
+    let mut end = start + 1;
+    while bytes
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        end += 1;
+    }
+    Some((start, end))
+}
+
+fn parse_identifier_end(statement: &str, start: usize) -> Option<usize> {
+    let bytes = statement.as_bytes();
+    if let Some(delimiter) = bytes.get(start).copied().and_then(identifier_delimiter) {
+        return quoted_identifier_end(bytes, start, delimiter);
+    }
+    if !bytes.get(start).is_some_and(|byte| {
+        byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$' || !byte.is_ascii()
+    }) {
+        return None;
+    }
+    let mut end = start + 1;
+    while bytes.get(end).is_some_and(|byte| {
+        byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$' || !byte.is_ascii()
+    }) {
+        end += 1;
+    }
+    Some(end)
+}
+
+fn balanced_paren_end(statement: &str, open: usize) -> Option<usize> {
+    let bytes = statement.as_bytes();
+    let mut depth = 0_u32;
+    let mut index = open;
+    while index < bytes.len() {
+        if let Some(delimiter) = identifier_delimiter(bytes[index]) {
+            index = quoted_identifier_end(bytes, index, delimiter)?;
+            continue;
+        }
+        if let Some(end) = skip_dollar_quote(statement, index) {
+            index = end;
+            continue;
+        }
+        match bytes[index] {
+            b'(' => depth = depth.saturating_add(1),
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn relation_alias_roles(statement: &str) -> Vec<RelationAliasRole> {
+    static TARGET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    static DELETE_PREFIX_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    let mut roles = Vec::new();
+    let mut seen = HashSet::new();
+    let target_patterns = TARGET_PATTERNS.get_or_init(|| {
+        sql_alias_target_patterns()
+            .into_iter()
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect()
+    });
+    for regex in target_patterns {
+        for capture in regex.captures_iter(statement) {
+            let Some(target) = capture.get(1) else {
+                continue;
+            };
+            let mut alias_start = skip_sql_whitespace(statement, target.end());
+            if let Some(as_end) = consume_keyword(statement, alias_start, "AS") {
+                alias_start = skip_sql_whitespace(statement, as_end);
+            }
+            let Some(alias_end) = parse_identifier_end(statement, alias_start) else {
+                continue;
+            };
+            let alias = &statement[alias_start..alias_end];
+            if is_reserved_object_reference(alias) || !seen.insert((alias_start, alias_end)) {
+                continue;
+            }
+            roles.push(RelationAliasRole {
+                alias: Site::new(alias_start, alias_end),
+                target: Some(Site::new(target.start(), target.end())),
+            });
+        }
+    }
+
+    let delete_prefix = DELETE_PREFIX_PATTERN.get_or_init(|| {
+        Regex::new(&format!(
+            r"(?ix)^\s*DELETE\s+
+          (?:(?:LOW_PRIORITY|QUICK|IGNORE)\s+)*
+          ({IDENTIFIER})"
+        ))
+        .ok()
+    });
+    if let Some(alias) = delete_prefix
+        .as_ref()
+        .and_then(|regex| regex.captures(statement).and_then(|capture| capture.get(1)))
+        && !is_reserved_object_reference(alias.as_str())
+        && seen.insert((alias.start(), alias.end()))
+    {
+        roles.push(RelationAliasRole {
+            alias: Site::new(alias.start(), alias.end()),
+            target: None,
+        });
+    }
+    roles
+}
+
+fn scoped_alias_bindings(statement: &str, ctes: &[ScopedCteBinding]) -> Vec<ScopedAliasBinding> {
+    let mut bindings = Vec::new();
+    for role in relation_alias_roles(statement) {
+        let Some(target_site) = role.target else {
+            continue;
+        };
+        let Some(alias) = statement.get(role.alias.start..role.alias.end) else {
+            continue;
+        };
+        let Some(target) = statement.get(target_site.start..target_site.end) else {
+            continue;
+        };
+        let target_key = identifier_key(target);
+        let target = if ctes.iter().any(|binding| {
+            binding.name == target_key
+                && target_site.start >= binding.visible.start
+                && target_site.start < binding.visible.end
+        }) {
+            AliasTarget::Cte
+        } else {
+            AliasTarget::PhysicalTable(target.to_owned())
+        };
+        bindings.push(ScopedAliasBinding {
+            name: identifier_key(alias),
+            target,
+            visible: enclosing_sql_scope(statement, role.alias.start),
+        });
+    }
+    bindings
+}
+
+fn resolve_scoped_alias<'a>(
+    bindings: &'a [ScopedAliasBinding],
+    name: &str,
+    occurrence: usize,
+) -> Option<&'a AliasTarget> {
+    bindings
+        .iter()
+        .filter(|binding| {
+            binding.name == name
+                && occurrence >= binding.visible.start
+                && occurrence < binding.visible.end
+        })
+        .min_by_key(|binding| binding.visible.end.saturating_sub(binding.visible.start))
+        .map(|binding| &binding.target)
+}
+
+fn trigger_events(statement: &str) -> Vec<String> {
+    let Ok(start_pattern) = Regex::new(r"(?i)\b(?:BEFORE|AFTER|INSTEAD\s+OF)\b") else {
+        return Vec::new();
+    };
+    let Some(start) = start_pattern.find(statement) else {
+        return Vec::new();
+    };
+    let tail = &statement[start.end()..];
+    let Ok(boundary_pattern) = Regex::new(&format!(
+        r"(?i)\b(?:ON\s+{OBJECT_REFERENCE}|AS|BEGIN|EXECUTE)\b"
+    )) else {
+        return Vec::new();
+    };
+    let boundary = boundary_pattern
+        .find(tail)
+        .map_or(tail.len(), |item| item.start());
+    let Ok(event_pattern) = Regex::new(r"(?i)\b(INSERT|UPDATE|DELETE|TRUNCATE)\b") else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    event_pattern
+        .captures_iter(&tail[..boundary])
+        .filter_map(|capture| {
+            let event = capture.get(1)?.as_str().to_ascii_lowercase();
+            seen.insert(event.clone()).then_some(event)
+        })
+        .collect()
 }
 
 fn matching_paren(source: &[u8], open: usize) -> Option<usize> {
@@ -326,7 +2480,7 @@ fn matching_paren(source: &[u8], open: usize) -> Option<usize> {
             }
             continue;
         }
-        if matches!(*byte, b'\'' | b'"') {
+        if matches!(*byte, b'\'' | b'"' | b'`') {
             quote = Some(*byte);
         } else if *byte == b'(' {
             depth += 1;
@@ -340,10 +2494,552 @@ fn matching_paren(source: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-fn capture_one(value: &str, pattern: &str) -> Option<String> {
-    Regex::new(pattern)
-        .ok()?
-        .captures(value)
-        .and_then(|capture| capture.get(1))
-        .map(|capture| capture.as_str().to_owned())
+fn split_top_level(value: &str) -> Vec<(usize, &str)> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth = 0_u32;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, byte) in value.bytes().enumerate() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' | b'`' => quote = Some(byte),
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                parts.push((start, &value[start..index]));
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push((start, &value[start..]));
+    parts
+}
+
+fn mask_sql_literals_and_comments(value: &str) -> SqlLexicalOutput {
+    #[derive(Clone, Copy)]
+    enum LexicalState {
+        Normal,
+        SingleQuoted,
+        LineComment,
+        BlockComment,
+        DollarQuoted { content_end: usize, span_end: usize },
+    }
+
+    let source = value.as_bytes();
+    let mut masked = source.to_vec();
+    let mut issues = Vec::new();
+    let mut state = LexicalState::Normal;
+    let mut index = 0;
+    let mut statement_start = 0;
+    let mut paren_depth = 0_u32;
+    while index < source.len() {
+        match state {
+            LexicalState::Normal if identifier_delimiter(source[index]).is_some() => {
+                let delimiter = identifier_delimiter(source[index]).unwrap_or_default();
+                match scan_delimited_identifier(value, index, delimiter, source.len()) {
+                    DelimitedIdentifierScan::Complete(end) => index = end,
+                    DelimitedIdentifierScan::Incomplete(end) => {
+                        let style = match source[index] {
+                            b'"' => "double-quoted",
+                            b'`' => "backtick-quoted",
+                            b'[' => "bracket-quoted",
+                            _ => "quoted",
+                        };
+                        issues.push(BoundaryIssue {
+                            site: Site::new(index, end),
+                            reason: format!(
+                                "unterminated {style} SQL identifier; statement facts omitted"
+                            ),
+                        });
+                        for byte in &mut masked[index..end] {
+                            if !matches!(*byte, b';' | b'\n' | b'\r') {
+                                *byte = b' ';
+                            }
+                        }
+                        if end > index
+                            && source.get(end - 1).copied() == Some(b'\n')
+                            && let Some(boundary) = masked.get_mut(end - 1)
+                        {
+                            // Keep the byte width stable while making a
+                            // proven newline recovery visible to every
+                            // statement consumer. Anchors and line data still
+                            // come from the untouched source bytes.
+                            *boundary = b';';
+                        }
+                        index = end;
+                    }
+                }
+            }
+            LexicalState::Normal if source[index] == b'\'' => {
+                masked[index] = b' ';
+                state = LexicalState::SingleQuoted;
+                index += 1;
+            }
+            LexicalState::Normal
+                if source[index] == b'-' && source.get(index + 1).copied() == Some(b'-') =>
+            {
+                masked[index] = b' ';
+                masked[index + 1] = b' ';
+                state = LexicalState::LineComment;
+                index += 2;
+            }
+            LexicalState::Normal
+                if source[index] == b'/' && source.get(index + 1).copied() == Some(b'*') =>
+            {
+                masked[index] = b' ';
+                masked[index + 1] = b' ';
+                state = LexicalState::BlockComment;
+                index += 2;
+            }
+            LexicalState::Normal if source[index] == b'$' => {
+                let clean = std::str::from_utf8(&masked).unwrap_or(value);
+                let delimiter = dollar_quote_delimiter_in_statement(clean, index, statement_start)
+                    .map(str::to_owned);
+                if let Some(delimiter) = delimiter
+                    && let Some(span_end) = paired_dollar_quote_end_with_delimiter(
+                        value,
+                        index,
+                        source.len(),
+                        &delimiter,
+                    )
+                {
+                    index += delimiter.len();
+                    state = LexicalState::DollarQuoted {
+                        content_end: span_end.saturating_sub(delimiter.len()),
+                        span_end,
+                    };
+                } else {
+                    index = unquoted_identifier_component_at(clean, index)
+                        .end
+                        .max(index + 1);
+                }
+            }
+            LexicalState::SingleQuoted
+                if source[index] == b'\'' && source.get(index + 1).copied() == Some(b'\'') =>
+            {
+                masked[index] = b' ';
+                masked[index + 1] = b' ';
+                index += 2;
+            }
+            LexicalState::SingleQuoted if source[index] == b'\'' => {
+                masked[index] = b' ';
+                state = LexicalState::Normal;
+                index += 1;
+            }
+            LexicalState::LineComment if source[index] == b'\n' => {
+                state = LexicalState::Normal;
+                index += 1;
+            }
+            LexicalState::BlockComment
+                if source[index] == b'*' && source.get(index + 1).copied() == Some(b'/') =>
+            {
+                masked[index] = b' ';
+                masked[index + 1] = b' ';
+                state = LexicalState::Normal;
+                index += 2;
+            }
+            LexicalState::DollarQuoted {
+                content_end,
+                span_end,
+            } if index >= content_end => {
+                index = span_end;
+                state = LexicalState::Normal;
+            }
+            LexicalState::DollarQuoted { .. } => {
+                if !matches!(source[index], b'\n' | b'\r') {
+                    masked[index] = b' ';
+                }
+                index += 1;
+            }
+            LexicalState::SingleQuoted | LexicalState::LineComment | LexicalState::BlockComment => {
+                if source[index] != b'\n' {
+                    masked[index] = b' ';
+                }
+                index += 1;
+            }
+            LexicalState::Normal => {
+                match source[index] {
+                    b'(' => paren_depth = paren_depth.saturating_add(1),
+                    b')' => paren_depth = paren_depth.saturating_sub(1),
+                    b';' if paren_depth == 0 => statement_start = index + 1,
+                    _ => {}
+                }
+                index += 1;
+            }
+        }
+    }
+    SqlLexicalOutput {
+        masked: String::from_utf8(masked).unwrap_or_else(|_| value.to_owned()),
+        issues,
+    }
+}
+
+fn is_table_constraint(value: &str) -> bool {
+    let upper = value.trim_start().to_ascii_uppercase();
+    [
+        "CONSTRAINT",
+        "PRIMARY",
+        "FOREIGN",
+        "UNIQUE",
+        "CHECK",
+        "EXCLUDE",
+    ]
+    .iter()
+    .any(|prefix| upper.starts_with(prefix))
+}
+
+fn constraint_name(value: &str) -> Option<(String, usize, usize)> {
+    let regex = Regex::new(&format!(r"(?i)^CONSTRAINT\s+({IDENTIFIER})")).ok()?;
+    let trimmed = value.trim_start();
+    let trim_offset = value.len() - trimmed.len();
+    let name = regex.captures(trimmed)?.get(1)?;
+    Some((
+        name.as_str().to_owned(),
+        trim_offset + name.start(),
+        trim_offset + name.end(),
+    ))
+}
+
+fn first_identifier(value: &str) -> Option<(String, usize, usize)> {
+    let regex = Regex::new(&format!(r"^({IDENTIFIER})")).ok()?;
+    let trimmed = value.trim_start();
+    let trim_offset = value.len() - trimmed.len();
+    let name = regex.captures(trimmed)?.get(1)?;
+    Some((
+        name.as_str().to_owned(),
+        trim_offset + name.start(),
+        trim_offset + name.end(),
+    ))
+}
+
+fn logical_database(path: &Path) -> String {
+    let stem = file_stem(path);
+    let normalized = stem
+        .trim_start_matches(|character: char| character.is_ascii_digit() || character == '_')
+        .trim_end_matches(".up")
+        .trim_end_matches(".down");
+    if normalized.is_empty() {
+        "default".to_owned()
+    } else {
+        normalized.to_owned()
+    }
+}
+
+fn is_migration_path(path: &Path) -> bool {
+    if path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("migrations")
+    }) {
+        return true;
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    Regex::new(r"(?i)^(?:V?\d+(?:[._-]\d+)*__|\d{8,}[_-])")
+        .is_ok_and(|pattern| pattern.is_match(name))
+}
+
+fn schema_name(name: &str) -> Option<String> {
+    schema_reference(name).map(|schema| normalized_identifier(&schema))
+}
+
+fn schema_reference(name: &str) -> Option<String> {
+    let mut parts = qualified_identifier_parts(name);
+    (parts.len() > 1).then(|| {
+        parts.pop();
+        parts.join(".")
+    })
+}
+
+fn last_identifier(name: &str) -> String {
+    qualified_identifier_parts(name)
+        .last()
+        .map(|part| normalize_identifier_part(part))
+        .unwrap_or_default()
+}
+
+fn normalized_identifier(name: &str) -> String {
+    qualified_identifier_parts(name)
+        .into_iter()
+        .map(normalize_identifier_part)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn identifier_key(name: &str) -> String {
+    qualified_identifier_parts(name)
+        .into_iter()
+        .map(identifier_part_key)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn short_identifier_key(name: &str) -> String {
+    qualified_identifier_parts(name)
+        .last()
+        .map_or_else(String::new, |part| identifier_part_key(part))
+}
+
+fn identifier_part_key(part: &str) -> String {
+    let trimmed = part.trim();
+    let (quoted, style, value) = if trimmed.starts_with('"') && trimmed.ends_with('"') {
+        (true, "double", normalize_identifier_part(trimmed))
+    } else if trimmed.starts_with('`') && trimmed.ends_with('`') {
+        (true, "backtick", normalize_identifier_part(trimmed))
+    } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        (true, "bracket", normalize_identifier_part(trimmed))
+    } else {
+        (
+            false,
+            "unquoted",
+            normalize_identifier_part(trimmed).to_ascii_lowercase(),
+        )
+    };
+    if !quoted || value == value.to_ascii_lowercase() {
+        return format!("folded:{}:{}", value.len(), value.to_ascii_lowercase());
+    }
+    format!("{style}:{}:{value}", value.len())
+}
+
+fn qualified_identifier_parts(name: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut delimiter = None;
+    let mut characters = name.char_indices().peekable();
+    while let Some((index, character)) = characters.next() {
+        match delimiter {
+            Some(']') if character == ']' => {
+                if characters.peek().is_some_and(|(_, next)| *next == ']') {
+                    characters.next();
+                } else {
+                    delimiter = None;
+                }
+            }
+            Some(quote) if character == quote => {
+                if characters.peek().is_some_and(|(_, next)| *next == quote) {
+                    characters.next();
+                } else {
+                    delimiter = None;
+                }
+            }
+            Some(_) => {}
+            None if character == '"' || character == '`' => delimiter = Some(character),
+            None if character == '[' => delimiter = Some(']'),
+            None if character == '.' => {
+                parts.push(&name[start..index]);
+                start = index + character.len_utf8();
+            }
+            None => {}
+        }
+    }
+    parts.push(&name[start..]);
+    parts
+}
+
+fn normalize_identifier_part(part: &str) -> String {
+    let trimmed = part.trim();
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        trimmed[1..trimmed.len() - 1].replace("\"\"", "\"")
+    } else if trimmed.len() >= 2 && trimmed.starts_with('`') && trimmed.ends_with('`') {
+        trimmed[1..trimmed.len() - 1].replace("``", "`")
+    } else if trimmed.len() >= 2 && trimmed.starts_with('[') && trimmed.ends_with(']') {
+        trimmed[1..trimmed.len() - 1].replace("]]", "]")
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn identifier_delimiter(open: u8) -> Option<u8> {
+    match open {
+        b'"' | b'`' => Some(open),
+        b'[' => Some(b']'),
+        _ => None,
+    }
+}
+
+fn quoted_identifier_end(bytes: &[u8], start: usize, delimiter: u8) -> Option<usize> {
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if bytes[index] != delimiter {
+            index += 1;
+            continue;
+        }
+        if bytes.get(index + 1).copied() == Some(delimiter) {
+            index += 2;
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
+}
+
+fn is_reserved_object_reference(name: &str) -> bool {
+    qualified_identifier_parts(name).into_iter().any(|part| {
+        let trimmed = part.trim();
+        if identifier_delimiter(trimmed.as_bytes().first().copied().unwrap_or_default()).is_some() {
+            return false;
+        }
+        matches!(
+            normalize_identifier_part(trimmed)
+                .to_ascii_lowercase()
+                .as_str(),
+            "all"
+                | "alter"
+                | "and"
+                | "as"
+                | "begin"
+                | "by"
+                | "case"
+                | "create"
+                | "database"
+                | "delayed"
+                | "delete"
+                | "distinct"
+                | "else"
+                | "end"
+                | "exists"
+                | "false"
+                | "first"
+                | "from"
+                | "full"
+                | "function"
+                | "group"
+                | "having"
+                | "high_priority"
+                | "if"
+                | "ignore"
+                | "index"
+                | "inner"
+                | "insert"
+                | "into"
+                | "join"
+                | "lateral"
+                | "left"
+                | "low_priority"
+                | "materialized"
+                | "matched"
+                | "merge"
+                | "next"
+                | "not"
+                | "null"
+                | "of"
+                | "on"
+                | "only"
+                | "or"
+                | "order"
+                | "outer"
+                | "procedure"
+                | "quick"
+                | "recursive"
+                | "replace"
+                | "returning"
+                | "right"
+                | "rows"
+                | "schema"
+                | "select"
+                | "set"
+                | "skip"
+                | "table"
+                | "temporary"
+                | "then"
+                | "trigger"
+                | "true"
+                | "union"
+                | "unique"
+                | "unlogged"
+                | "update"
+                | "using"
+                | "values"
+                | "view"
+                | "when"
+                | "where"
+                | "with"
+        )
+    })
+}
+
+fn sha256_prefixed(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_typed_database_domain_without_dangling_edges() {
+        let source = br#"
+CREATE SCHEMA app;
+CREATE TABLE app.users (
+    id BIGINT PRIMARY KEY,
+    account_id BIGINT,
+    CONSTRAINT users_account_fk FOREIGN KEY (account_id) REFERENCES app.accounts(id)
+);
+CREATE TABLE app.accounts (id BIGINT PRIMARY KEY);
+CREATE UNIQUE INDEX users_account_idx ON app.users(account_id);
+CREATE VIEW app.active_users AS SELECT * FROM app.users;
+CREATE TRIGGER users_audit AFTER UPDATE ON app.users FOR EACH ROW EXECUTE FUNCTION audit_user();
+INSERT INTO app.users(id) SELECT id FROM app.accounts;
+"#;
+        let extraction = extract(Path::new("db/migrations/V1__users.sql"), source);
+        let kinds = extraction
+            .nodes
+            .iter()
+            .map(|node| node.string("symbol_kind"))
+            .collect::<HashSet<_>>();
+        for expected in [
+            "file",
+            "database",
+            "database_schema",
+            "database_table",
+            "database_column",
+            "database_constraint",
+            "database_index",
+            "database_view",
+            "database_trigger",
+            "migration",
+            "query",
+        ] {
+            assert!(kinds.contains(expected), "missing {expected}: {kinds:?}");
+        }
+        let ids = extraction
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<HashSet<_>>();
+        assert!(
+            extraction.edges.iter().all(
+                |edge| ids.contains(edge.source.as_str()) && ids.contains(edge.target.as_str())
+            )
+        );
+        for relation in ["contains", "references", "reads", "writes", "triggers"] {
+            assert!(
+                extraction
+                    .edges
+                    .iter()
+                    .any(|edge| edge.string("relation") == relation),
+                "missing {relation}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_members_ignores_commas_inside_types_and_constraints() {
+        let value = "id decimal(10, 2), pair text CHECK (pair IN ('a,b', 'c')), name text";
+        assert_eq!(split_top_level(value).len(), 3);
+    }
 }

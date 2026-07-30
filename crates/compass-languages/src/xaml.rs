@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
@@ -98,9 +98,17 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
             .unwrap_or_default(),
         Some(1),
         "code",
+        "file",
         &source_file,
     );
-    state.add_node(root_id.clone(), root_type, Some(1), "code", &source_file);
+    state.add_node(
+        root_id.clone(),
+        root_type,
+        Some(1),
+        "code",
+        "component",
+        &source_file,
+    );
     state.add_edge(&file_id, &root_id, "contains", 1, None, "EXTRACTED");
 
     let class_name = root
@@ -120,6 +128,7 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
                 label,
                 Some(state.line_for(Some(class_name))),
                 "code",
+                "class",
                 &source_file,
             );
             id
@@ -189,7 +198,7 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
         let owner_id = if let Some(name) = element_name {
             let id = make_id(&[&state.stem, name]);
             let line = state.line_for(Some(name));
-            state.add_node(id.clone(), name, Some(line), "code", &source_file);
+            state.add_node(id.clone(), name, Some(line), "code", "field", &source_file);
             state.add_edge(&root_id, &id, "contains", line, None, "EXTRACTED");
             let type_id = make_id(&["xaml", element_type]);
             state.add_node(
@@ -197,6 +206,7 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
                 element_type,
                 Some(line),
                 "concept",
+                "resource",
                 &source_file,
             );
             state.add_edge(&id, &type_id, "references", line, Some("type"), "EXTRACTED");
@@ -241,6 +251,7 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
                     &binding_path,
                     Some(line),
                     "concept",
+                    "resource",
                     &source_file,
                 );
                 let context = if attribute_name == "Command" || attribute_name.ends_with(".Command")
@@ -272,7 +283,14 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
             if let Some(converter) = converter {
                 let id = make_id(&["binding_converter", &converter]);
                 let line = state.line_for(Some(value));
-                state.add_node(id.clone(), &converter, Some(line), "concept", &source_file);
+                state.add_node(
+                    id.clone(),
+                    &converter,
+                    Some(line),
+                    "concept",
+                    "resource",
+                    &source_file,
+                );
                 state.add_edge(
                     &owner_id,
                     &id,
@@ -287,7 +305,14 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
                 if !direct.is_empty() && !direct.contains(['{', '}']) {
                     let id = make_id(&["binding", direct]);
                     let line = state.line_for(Some(value));
-                    state.add_node(id.clone(), direct, Some(line), "concept", &source_file);
+                    state.add_node(
+                        id.clone(),
+                        direct,
+                        Some(line),
+                        "concept",
+                        "resource",
+                        &source_file,
+                    );
                     state.add_edge(
                         &owner_id,
                         &id,
@@ -304,7 +329,14 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
             {
                 let id = make_id(&["binding_converter", &converter]);
                 let line = state.line_for(Some(value));
-                state.add_node(id.clone(), &converter, Some(line), "concept", &source_file);
+                state.add_node(
+                    id.clone(),
+                    &converter,
+                    Some(line),
+                    "concept",
+                    "resource",
+                    &source_file,
+                );
                 state.add_edge(
                     &owner_id,
                     &id,
@@ -453,6 +485,7 @@ impl State {
         label: &str,
         line: Option<usize>,
         file_type: &str,
+        symbol_kind: &str,
         source_file: &str,
     ) {
         if !self.seen_nodes.insert(id.clone()) {
@@ -461,6 +494,13 @@ impl State {
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(label.to_owned()));
         attributes.insert("file_type".to_owned(), Value::String(file_type.to_owned()));
+        attributes.insert(
+            "symbol_kind".to_owned(),
+            Value::String(symbol_kind.to_owned()),
+        );
+        if symbol_kind == "component" {
+            attributes.insert("component_type".to_owned(), Value::String(label.to_owned()));
+        }
         attributes.insert(
             "source_file".to_owned(),
             Value::String(source_file.to_owned()),
@@ -838,6 +878,7 @@ fn community_toolkit_members(
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(label.clone()));
         attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+        attributes.insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
         attributes.insert("source_file".to_owned(), Value::String(source_file.clone()));
         attributes.insert(
             "source_location".to_owned(),

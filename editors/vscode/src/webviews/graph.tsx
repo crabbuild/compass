@@ -1,6 +1,7 @@
 import { createRoot, type Root } from "react-dom/client";
 import {
   CompassGraph,
+  type CodeQueryResponse,
   type GraphViewModel,
   type InspectorLayout
 } from "@compass/viewer";
@@ -25,6 +26,7 @@ if (!element) throw new Error("Compass graph root is missing");
 const root: Root = createRoot(element);
 let repositoryId = "";
 let overview: GraphViewModel | undefined;
+let queryResult: CodeQueryResponse | undefined;
 let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
 let communityLoading: number | null = null;
 let communityError: string | undefined;
@@ -33,6 +35,7 @@ let loadingCopy: GraphLoadingCopy | undefined;
 
 function resetGraphState(): void {
   overview = undefined;
+  queryResult = undefined;
   communityDetail = undefined;
   communityLoading = null;
   communityError = undefined;
@@ -74,6 +77,7 @@ function renderGraph(): void {
       communityDetail={communityDetail}
       communityLoading={communityLoading}
       communityError={communityError}
+      queryResult={queryResult}
       onBackToOverview={() => {
         communityDetail = undefined;
         communityLoading = null;
@@ -89,6 +93,14 @@ function renderGraph(): void {
       host={{
         openSource(source) {
           vscode.postMessage({ type: "openSource", repositoryId, source });
+        },
+        queryNode(operation, symbol) {
+          vscode.postMessage({
+            type: "runCodeQuery",
+            repositoryId,
+            operation,
+            symbol
+          });
         },
         openCommunity(communityId) {
           if (communityLoading !== null) return;
@@ -139,6 +151,9 @@ window.addEventListener("message", (event) => {
     communityLoading = null;
     communityError = undefined;
     activeCommunityRequest = "";
+  } else if (parsed.data.type === "codeQueryResult") {
+    if (parsed.data.repositoryId !== repositoryId) return;
+    queryResult = parsed.data.result;
   } else if (parsed.data.requestId === activeCommunityRequest) {
     communityLoading = null;
     if (parsed.data.type === "communityGraph") {

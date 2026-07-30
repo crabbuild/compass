@@ -13,6 +13,10 @@ mod elixir;
 mod engine;
 mod facts;
 mod fortran;
+pub mod frameworks;
+
+/// Version of the extraction contract consumed by graph publication.
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/2";
 mod go;
 mod groovy;
 mod ids;
@@ -31,6 +35,7 @@ mod r;
 mod registry;
 mod rust_lang;
 mod scip;
+mod semantic;
 mod sql;
 mod swift;
 mod templates;
@@ -39,7 +44,13 @@ mod verilog;
 mod xaml;
 mod zig;
 
-pub use facts::{Extraction, RawCall};
+#[doc(hidden)]
+pub use builtins::is_language_builtin_global;
+pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
+pub use frameworks::{
+    FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
+    RawFrameworkOrigin, RawRouteFact,
+};
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
@@ -68,11 +79,21 @@ pub enum ExtractError {
 }
 pub use engine::Engine;
 
+/// Internal extraction-quality marker consumed by the v1 publication pipeline.
+///
+/// This is serialized with cached extraction facts so parser recovery remains
+/// truthful on warm builds.
+pub const EXTRACTION_QUALITY_EXTENSION: &str = "_compass_extraction_quality";
+pub const EXTRACTION_QUALITY_PARTIAL: &str = "partial";
+pub const EXTRACTION_QUALITY_REASON_EXTENSION: &str = "_compass_extraction_quality_reason";
+
 /// Extract deterministic SQL facts from in-memory content.
 ///
 /// Live schema introspectors use a virtual path so credentials and temporary
 /// files never enter the graph.
 #[must_use]
 pub fn extract_sql_content(path: &std::path::Path, content: &[u8]) -> Extraction {
-    sql::extract(path, content)
+    let mut extraction = sql::extract(path, content);
+    engine::stamp_producer_metadata(&mut extraction, "sql");
+    extraction
 }

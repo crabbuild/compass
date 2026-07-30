@@ -162,6 +162,31 @@ fn historical_detection_ignores_caller_local_excludes_but_keeps_committed_rules(
 }
 
 #[test]
+fn detection_ignores_git_worktree_pointer_files() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::write(root.join(".git"), "gitdir: /tmp/example\n")?;
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+
+    let detection = compass_files::detect(
+        root,
+        &DetectOptions {
+            ignore_policy: IgnorePolicy::HistoricalCommit,
+            ..DetectOptions::default()
+        },
+    )?;
+    assert_eq!(detection.files["code"].len(), 1);
+    assert!(detection.files["code"][0].ends_with("main.rs"));
+    assert!(
+        detection
+            .unclassified
+            .iter()
+            .all(|path| !path.ends_with(".git"))
+    );
+    Ok(())
+}
+
+#[test]
 fn classification_exercises_manifests_shebangs_media_papers_and_asset_exclusions()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -202,6 +227,11 @@ fn classification_exercises_manifests_shebangs_media_papers_and_asset_exclusions
     let ordinary_pdf = directory.path().join("paper.pdf");
     fs::write(&ordinary_pdf, b"%PDF")?;
     assert_eq!(classify_file(&ordinary_pdf), Some(FileType::Paper));
+
+    let play_routes = directory.path().join("conf/routes");
+    fs::create_dir_all(play_routes.parent().ok_or("missing routes parent")?)?;
+    fs::write(&play_routes, "GET / controllers.Home.index\n")?;
+    assert_eq!(classify_file(&play_routes), Some(FileType::Code));
     Ok(())
 }
 
@@ -470,7 +500,7 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(slices.len() >= 2);
 
     let guard = BuildGuard::begin(directory.path())?;
-    assert!(BuildGuard::ensure_complete(directory.path()).is_err());
+    BuildGuard::ensure_complete(directory.path())?;
     guard.commit()?;
     BuildGuard::ensure_complete(directory.path())?;
     let not_a_directory = directory.path().join("not-a-directory");
@@ -478,10 +508,81 @@ fn lossy_source_limit_slicing_and_build_guard() -> Result<(), Box<dyn Error>> {
     assert!(BuildGuard::begin(&not_a_directory.join("output")).is_err());
 
     let broken_guard = BuildGuard::begin(directory.path())?;
-    let marker = directory.path().join(".compass-build-incomplete");
+    let marker = broken_guard
+        .staging_directory()
+        .join(".compass-build-incomplete");
     fs::remove_file(&marker)?;
     fs::create_dir(&marker)?;
     assert!(broken_guard.commit().is_err());
+    Ok(())
+}
+
+#[test]
+fn build_guard_publishes_one_complete_generation_at_a_time() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let first = BuildGuard::begin(directory.path())?;
+    fs::write(first.staging_directory().join("graph.json"), "graph-one")?;
+    fs::write(
+        first.staging_directory().join("program.json"),
+        "program-one",
+    )?;
+    first.commit_with_artifacts(&["graph.json", "program.json"])?;
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one"
+    );
+
+    {
+        let failed = BuildGuard::begin(directory.path())?;
+        fs::write(failed.staging_directory().join("graph.json"), "graph-two")?;
+    }
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one"
+    );
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "program.json"
+        )?)?,
+        "program-one"
+    );
+
+    let incomplete = BuildGuard::begin(directory.path())?;
+    fs::remove_file(incomplete.staging_directory().join("program.json"))?;
+    assert!(
+        incomplete
+            .commit_with_artifacts(&["graph.json", "program.json"])
+            .is_err()
+    );
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "graph.json"
+        )?)?,
+        "graph-one"
+    );
+
+    let second = BuildGuard::begin(directory.path())?;
+    fs::write(second.staging_directory().join("graph.json"), "graph-two")?;
+    fs::write(
+        second.staging_directory().join("program.json"),
+        "program-two",
+    )?;
+    second.commit_with_artifacts(&["graph.json", "program.json"])?;
+    assert_eq!(
+        fs::read_to_string(BuildGuard::resolve_artifact(
+            directory.path(),
+            "program.json"
+        )?)?,
+        "program-two"
+    );
     Ok(())
 }
 
@@ -535,7 +636,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v1/e6")
+            .ends_with("ast/v2/e6")
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
 
@@ -834,8 +935,8 @@ fn slicing_hashing_atomic_writes_and_stat_index_cover_hostile_boundaries()
     assert!(write_text_atomic(directory.path().join("not-a-directory/child"), "x").is_err());
 
     let guard = BuildGuard::begin(directory.path())?;
-    fs::remove_file(directory.path().join(".compass-build-incomplete"))?;
-    guard.commit()?;
+    fs::remove_file(guard.staging_directory().join(".compass-build-incomplete"))?;
+    assert!(guard.commit().is_err());
     Ok(())
 }
 

@@ -43,7 +43,8 @@ Input can arrive as:
 - remote ingested corpus file.
 
 `compass-media` enforces raw and archive-expansion limits before extracting
-text. `compass-transcribe` owns bounded audio/video orchestration.
+text. `compass-ingest` owns bounded, verified URL and audio acquisition.
+`compass-transcribe` owns transcription orchestration and backend integration.
 
 The semantic layer represents prepared content as bounded units with source
 identity and evidence metadata.
@@ -239,9 +240,11 @@ Do not let a labeling call rewrite structural topology.
 currently exposes CPU only so released behavior remains portable and
 dependency-free.
 
-`compass-transcribe` keeps model inference behind a trait and owns file/download
-orchestration. No separate public transcription command is exposed merely
-because internals exist.
+`compass-ingest` owns bounded, verified URL and audio acquisition through its
+managed downloader. `compass-transcribe` keeps model inference behind a trait
+and owns transcription orchestration and backend integration. It re-exports
+the downloader API for workspace compatibility. No separate public
+transcription command is exposed merely because internals exist.
 
 ## Tests for provider work
 

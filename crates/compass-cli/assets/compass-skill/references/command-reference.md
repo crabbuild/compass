@@ -8,6 +8,14 @@ whether a Compass capability is covered by the installed skill. Run
 
 - `compass capabilities`: report versioned, read-only machine contracts for
   editor and automation integrations.
+- `compass search`: find typed symbols by name using the local FTS index.
+- `compass callers`: list direct typed call-graph predecessors.
+- `compass callees`: list direct typed call-graph successors.
+- `compass impact`: compute bounded transitive change impact, excluding
+  heuristic evidence unless explicitly requested.
+- `compass explore`: return related source grouped by file plus connecting
+  paths in one bounded response.
+- `compass node`: show an attributable evidence trail between two symbols.
 - `compass call-graph`: trace bounded callers, callees, or both from a source
   position or structural symbol, with optional Program IR enrichment.
 - `compass query`: natural-language graph traversal or deterministic CompassQL.
