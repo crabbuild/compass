@@ -160,6 +160,47 @@ fn raw_semantic_facts_receive_durable_layer_ownership() -> Result<(), Box<dyn st
     Ok(())
 }
 
+#[test]
+fn raw_go_embeddings_remain_first_class_v1_relationships() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut owner = raw_node(root, "owner", "Owner", 10);
+    owner
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("struct"));
+    owner.attributes.insert("language".to_owned(), json!("go"));
+    let mut embedded = raw_node(root, "embedded", "Embedded", 30);
+    embedded
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("interface"));
+    embedded
+        .attributes
+        .insert("language".to_owned(), json!("go"));
+    let graph = normalize_v1(
+        Extraction {
+            nodes: vec![owner, embedded],
+            edges: vec![RawEdgeRecord {
+                source: "owner".to_owned(),
+                target: "embedded".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("embeds")),
+                    ("confidence".to_owned(), json!("EXTRACTED")),
+                    ("extractor".to_owned(), json!("compass.languages.go")),
+                    ("source_anchor".to_owned(), anchor(root, 50)),
+                ]),
+            }],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(graph.links.len(), 1);
+    assert_eq!(graph.links[0].kind, EdgeKind::Embeds);
+    assert!(validate_code_graph(&graph).is_ok());
+    Ok(())
+}
+
 fn raw_class_node(
     root: &Path,
     id: &str,

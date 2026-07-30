@@ -820,10 +820,13 @@ fn normalize_v1_with_mode(
             });
             continue;
         }
-        if matches!(edge.kind, EdgeKind::Extends | EdgeKind::Implements) {
+        if matches!(
+            edge.kind,
+            EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements
+        ) {
             let valid = source_kind.is_type()
                 && match edge.kind {
-                    EdgeKind::Extends => target_kind.is_type(),
+                    EdgeKind::Embeds | EdgeKind::Extends => target_kind.is_type(),
                     EdgeKind::Implements => matches!(
                         target_kind,
                         NodeKind::Interface | NodeKind::Trait | NodeKind::Protocol
@@ -3410,7 +3413,7 @@ fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
         "rationale_for" => (EdgeKind::Documents, None, false),
         "configures" => (EdgeKind::DependsOn, None, false),
         "case_of" | "defines" | "method" => (EdgeKind::Contains, None, false),
-        "embeds" => (EdgeKind::Contains, Some("embedded-member"), false),
+        "embeds" => (EdgeKind::Embeds, Some("embedded-member"), false),
         "mixes_in" => (EdgeKind::Implements, Some("mixin-contract"), false),
         _ => return None,
     };
@@ -4109,6 +4112,7 @@ fn schema_fingerprint() -> String {
         "edges",
         [
             "contains",
+            "embeds",
             "calls",
             "imports",
             "exports",

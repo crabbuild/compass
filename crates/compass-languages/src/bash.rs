@@ -319,6 +319,17 @@ impl<'source, 'tree> BashState<'source, 'tree> {
             Value::String(self.source_file.clone()),
         );
         attributes.insert("source_location".into(), Value::String(format!("L{at}")));
+        attributes.insert(
+            "symbol_kind".into(),
+            Value::String(
+                match kind {
+                    "file" => "file",
+                    "bash_entrypoint" | "bash_function" => "function",
+                    _ => "variable",
+                }
+                .to_owned(),
+            ),
+        );
         attributes.insert("metadata".into(), Value::Object(metadata));
         self.extraction.nodes.push(NodeRecord {
             id: id.to_owned(),

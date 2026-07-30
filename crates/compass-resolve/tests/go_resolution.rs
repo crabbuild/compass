@@ -63,6 +63,131 @@ func (a *Agent) Finish() {}
 }
 
 #[test]
+fn qualified_go_embeddings_bind_packages_without_cross_module_name_joins()
+-> Result<(), Box<dyn Error>> {
+    let agent_path = Path::new("cmd/agent/agent.go");
+    let agent_source = b"package agent\n\ntype Agent interface { Run() }\n";
+    let wrapper_path = Path::new("cmd/client/wrapper.go");
+    let wrapper_source = br#"package client
+
+import "example.com/project/cmd/agent"
+
+type Wrapper interface {
+    agent.Agent
+}
+"#;
+    let context_path = Path::new("internal/contexts/context.go");
+    let context_source = b"package contexts\n\ntype Context struct{}\n";
+    let caller_path = Path::new("cmd/client/run.go");
+    let caller_source = br#"package client
+
+import "context"
+
+func Run(ctx context.Context) {}
+"#;
+    let external_path = Path::new("cmd/external/wrapper.go");
+    let external_source = br#"package external
+
+import "other.example/agent"
+
+type External interface {
+    agent.Agent
+}
+"#;
+
+    let mut engine = Engine::default();
+    let extractions = [
+        engine.extract_source(agent_path, agent_source)?,
+        engine.extract_source(wrapper_path, wrapper_source)?,
+        engine.extract_source(context_path, context_source)?,
+        engine.extract_source(caller_path, caller_source)?,
+        engine.extract_source(external_path, external_source)?,
+    ];
+    let sources = HashMap::from([
+        (
+            agent_path.to_string_lossy().into_owned(),
+            String::from_utf8(agent_source.to_vec())?,
+        ),
+        (
+            wrapper_path.to_string_lossy().into_owned(),
+            String::from_utf8(wrapper_source.to_vec())?,
+        ),
+        (
+            context_path.to_string_lossy().into_owned(),
+            String::from_utf8(context_source.to_vec())?,
+        ),
+        (
+            caller_path.to_string_lossy().into_owned(),
+            String::from_utf8(caller_source.to_vec())?,
+        ),
+        (
+            external_path.to_string_lossy().into_owned(),
+            String::from_utf8(external_source.to_vec())?,
+        ),
+    ]);
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, Path::new("."));
+
+    let agent = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "Agent" && node.string("source_file") == agent_path.to_string_lossy()
+        })
+        .ok_or("missing Agent definition")?;
+    let embedding = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "embeds"
+                && edge.string("source_file") == wrapper_path.to_string_lossy()
+        })
+        .ok_or("missing embedding")?;
+    assert_eq!(
+        embedding.target, agent.id,
+        "nodes={:#?} embedding={embedding:#?}",
+        resolved.nodes
+    );
+
+    let local_context = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "Context"
+                && node.string("source_file") == context_path.to_string_lossy()
+        })
+        .ok_or("missing repository Context")?;
+    let external_context = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "context.Context"
+                && node.string("source_file").is_empty()
+        })
+        .ok_or("missing qualified standard-library Context")?;
+    assert_ne!(external_context.id, local_context.id);
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "references" && edge.target == external_context.id
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("source_file") != caller_path.to_string_lossy()
+            || edge.string("relation") != "references"
+            || edge.target != local_context.id
+    }));
+    let external_agent = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "other.example/agent.Agent")
+        .ok_or("missing path-qualified external Agent")?;
+    assert_ne!(external_agent.id, agent.id);
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("source_file") == external_path.to_string_lossy()
+            && edge.string("relation") == "embeds"
+            && edge.target == external_agent.id
+    }));
+    Ok(())
+}
+
+#[test]
 fn go_local_callback_is_not_exported_for_cross_file_resolution() -> Result<(), Box<dyn Error>> {
     let path = Path::new("internal/pushqueue/pushqueue.go");
     let source = br#"package pushqueue

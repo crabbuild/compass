@@ -256,6 +256,76 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["ambiguous_graphify_nodes"], 1)
         self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
 
+    def test_case_exact_generated_owner_disambiguates_case_distinct_types(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"exported","label":"EphemeralStore","kind":"interface",
+               "source_file":"pkg/checkpoint/api.go","source_location":"L10",
+               "language":"go"},
+              {"id":"private","label":"ephemeralStore","kind":"struct",
+               "source_file":"pkg/checkpoint/store.go","source_location":"L20",
+               "language":"go"}
+            ],"links":[]}
+            """,
+            """
+            {"nodes":[
+              {"id":"pkg_checkpoint_generated_ephemeralstore",
+               "label":"ephemeralStore",
+               "source_file":"pkg/checkpoint/write.go","source_location":"L30"}
+            ],"links":[]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_nodes"], 1)
+        self.assertIn(
+            "dominated:case_exact_owner",
+            result.metrics["graphify_nodes_coverage_reasons"],
+        )
+
+    def test_embedding_relation_requires_first_class_compass_embedding(self) -> None:
+        graphify = """
+            {"nodes":[
+              {"id":"owner","label":"Owner","source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"target","label":"Target","source_file":"pkg/a.go","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"embeds",
+               "source_file":"pkg/a.go","source_location":"L3"}
+            ]}
+        """
+        collapsed = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Owner","kind":"struct",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"target","label":"Target","kind":"interface",
+               "source_file":"pkg/a.go","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"contains",
+               "source_file":"pkg/a.go","source_location":"L3"}
+            ]}
+            """,
+            graphify,
+        )
+        self.assertFalse(collapsed.passed)
+        self.assertEqual(collapsed.metrics["missing_graphify_edges"], 1)
+
+        preserved = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Owner","kind":"struct",
+               "source_file":"pkg/a.go","source_location":"L1"},
+              {"id":"target","label":"Target","kind":"interface",
+               "source_file":"pkg/a.go","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"target","relation":"embeds",
+               "source_file":"pkg/a.go","source_location":"L3"}
+            ]}
+            """,
+            graphify,
+        )
+        self.assertTrue(preserved.passed, preserved.failures)
+
     def test_generated_receiver_id_disambiguates_an_exact_module(self) -> None:
         result = compare_documents(
             """

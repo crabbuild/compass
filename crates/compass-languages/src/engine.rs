@@ -1074,6 +1074,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             self.add_edge(&source, &id, "contains", line(node), None);
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
+                self.add_python_decorators(node, &id);
             } else if self.language == "java" {
                 self.add_java_parent_edges(node, &id);
                 if kind == "enum_declaration" {
@@ -1151,6 +1152,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             );
             if self.language == "python" {
                 self.add_python_function_references(node, &id);
+                self.add_python_decorators(node, &id);
             } else if self.language == "java" {
                 self.add_java_function_references(node, &id);
             } else if self.language == "c" {
@@ -2294,6 +2296,73 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     "target_qualified_name".to_owned(),
                     Value::String(qualified.clone()),
                 );
+            }
+        }
+    }
+
+    fn add_python_decorators(&mut self, node: Node<'tree>, owner_id: &str) {
+        let Some(decorated) = node
+            .parent()
+            .filter(|parent| parent.kind() == "decorated_definition")
+        else {
+            return;
+        };
+        let mut cursor = decorated.walk();
+        let decorators = decorated
+            .children(&mut cursor)
+            .take_while(|child| child.id() != node.id())
+            .filter(|child| child.kind() == "decorator")
+            .collect::<Vec<_>>();
+        for decorator in decorators {
+            let mut inner = decorator.walk();
+            let Some(mut expression) = decorator
+                .children(&mut inner)
+                .find(|child| child.is_named())
+            else {
+                continue;
+            };
+            if expression.kind() == "call" {
+                expression = expression
+                    .child_by_field_name("function")
+                    .unwrap_or(expression);
+            }
+            let Some(spelling) = self
+                .node_text(expression)
+                .map(|text| text.trim().to_owned())
+                .filter(|text| !text.is_empty())
+            else {
+                continue;
+            };
+            let name = spelling.rsplit('.').next().unwrap_or_default().trim();
+            if name.is_empty() {
+                continue;
+            }
+            let target = self.ensure_type_node(name, true);
+            if target == owner_id {
+                continue;
+            }
+            self.add_edge(
+                owner_id,
+                &target,
+                "references",
+                line(decorator),
+                Some("decorator"),
+            );
+            let qualified = self
+                .python_import_targets
+                .get(&spelling)
+                .cloned()
+                .or_else(|| {
+                    let (root, suffix) = spelling.split_once('.')?;
+                    let imported = self.python_import_targets.get(root)?;
+                    Some(format!("{imported}.{suffix}"))
+                });
+            if let Some(edge) = self.extraction.edges.last_mut() {
+                if let Some(qualified) = qualified {
+                    edge.attributes
+                        .insert("target_qualified_name".to_owned(), Value::String(qualified));
+                }
+                crate::facts::stamp_node_range(&mut edge.attributes, decorator);
             }
         }
     }

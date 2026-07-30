@@ -190,6 +190,81 @@ the required `URLResolver`.
 | Entire checkpoint creation | 0.655 s, pass | 1.199 s, pass |
 | Entire repository state | 1.614 s, pass | 1.923 s, pass |
 
+### Phase-two source-backed qualification
+
+Phase two was implemented before its regression tests, following the execution
+rule in the phase plan. The final release binary was rebuilt from the delivery
+tree before evidence collection. Fresh output roots were used for both
+repositories, and every cold and warm graph was byte-identical:
+
+- Django graph SHA-256:
+  `e9aa16897e1e01d0dac5222f65af8efed7c94e11901289435cbd4d6660c6e489`
+- Entire graph SHA-256:
+  `27b28636f29a94470e742a38fe53e0c5f429291b169109420c544377079f758a`
+
+Both final graphs indexed with zero validation errors. The strict comparison
+against the same Graphify 0.9.31 artifacts produced:
+
+| Repository | Graphify fact | Exact | Dominated | Rejected | Ambiguous | Missing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Django | Nodes | 50,457 | 9 | 0 | 33 | 346 |
+| Django | Edges | 100,077 | 1,198 | 53,005 | 63 | 4,367 |
+| Entire | Nodes | 19,655 | 857 | 0 | 72 | 1 |
+| Entire | Edges | 54,323 | 3,029 | 0 | 196 | 3,514 |
+
+The raw Django edge result is intentionally not presented as a coverage win.
+The implementation removed the all-imports × all-classes resolver rule. In the
+pinned corpus, 52,967 Graphify `references` edges use an import statement as
+the occurrence for every class in the importing file; these moved from exact
+to the comparator's explicit `rejected` category. Rejection requires the
+reference target and occurrence to coincide with a real import edge, so it
+does not turn arbitrary missing facts into passes. In exchange, 3,102
+previously missing decorator references became exact at their real decorator
+lines. The phase also moved 46 inherited-type edges from dominated to exact,
+added 32 exact calls, and restored two shell containment edges. A unique
+same-target relationship at the same exact occurrence may now dominate a
+Graphify relationship whose owner is only a broader placeholder; this accounts
+for the increase to 1,198 dominated Django edges.
+
+Entire gained 53 exact and four dominated first-class `embeds` edges, 50 exact
+shell containment edges, 90 exact calls, and 46 exact references. Fifty
+previously missing nodes became exact, leaving one missing node. The stricter
+package identity also moved 2,548 formerly dominated reference edges to
+missing, chiefly cases such as `time.Time` or `context.Context` that Graphify
+had rebound to an unrelated repository-local type with the same final name.
+The remaining raw misses contain both conservative external identities and
+genuine unresolved call/reference targets; they remain visible rather than
+being accepted through label-only matching.
+
+The final release measurements used the same `compass extract --code-only
+--timing --out` contract as the harness:
+
+| Repository | Cold total | Warm p50 | Peak cold RSS | Change from phase one |
+| --- | ---: | ---: | ---: | --- |
+| Django | 9.8 s | 1.60 s | 4.07 GiB | cold -20.7%, warm -26.7% |
+| Entire | 4.3 s | 0.53 s | 1.40 GiB | cold +6.0%, warm -9.6% |
+
+The Entire cold change remains inside the 10% diagnosis gate. Relative to the
+pinned Graphify cold medians, the observed speedups are 5.10x for Django and
+4.10x for Entire. Publication now uses indexed inventory/file-coverage lookups,
+fast hash indexes, a trivial-evidence fast path, and skips a redundant second
+document validation when best-effort sanitization already proved the graph
+valid.
+
+All four semantic query oracles passed on the final graphs:
+
+| Repository / query | Compass phase two |
+| --- | ---: |
+| Django URL resolution | 1.492 s, pass |
+| Django model save | 1.404 s, pass |
+| Entire checkpoint creation | 0.737 s, pass |
+| Entire repository state | 0.677 s, pass |
+
+Strict Graphify-superset quality is therefore still not achieved. Phase two
+improves the source-backed graph and makes baseline conflicts explicit; the
+next quality target is the residual genuine unresolved call/reference set,
+not restoration of the audited false-positive families.
+
 ## Changes validated
 
 - Exact path-aware AST cache keys prevent byte-identical symlinks from losing

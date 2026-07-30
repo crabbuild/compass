@@ -531,6 +531,7 @@ fn endpoint_kinds_are_valid(
 ) -> bool {
     match kind {
         EdgeKind::Contains => contains_endpoint_pair(source.kind, target.kind),
+        EdgeKind::Embeds => source.kind.is_type() && target.kind.is_type(),
         EdgeKind::Calls => {
             is_call_source(source.kind)
                 && (target.kind.is_callable()

@@ -228,6 +228,8 @@ fn finish_resolution(
     profile_internal("resolver import canonicalization", &mut profile_started);
     canonicalize_go_receiver_owners(&mut merged);
     profile_internal("resolver Go receiver ownership", &mut profile_started);
+    canonicalize_go_imported_types(&mut merged, &canonical_root);
+    profile_internal("resolver Go imported types", &mut profile_started);
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
@@ -690,9 +692,19 @@ fn resolve_python_imported_types(extraction: &mut Extraction, root: &Path) {
             continue;
         };
         let label = node.label().trim();
-        if is_type_like_definition(node) && !label.is_empty() {
+        let definition_name = if is_type_like_definition(node) {
+            Some(label)
+        } else if string_attribute(node, "symbol_kind") == "function"
+            && label.ends_with("()")
+            && !label.starts_with('.')
+        {
+            Some(label.trim_end_matches("()"))
+        } else {
+            None
+        };
+        if let Some(definition_name) = definition_name.filter(|name| !name.is_empty()) {
             definitions
-                .entry(format!("{module}.{label}"))
+                .entry(format!("{module}.{definition_name}"))
                 .or_default()
                 .push(node.id.clone());
         }
@@ -714,7 +726,11 @@ fn resolve_python_imported_types(extraction: &mut Extraction, root: &Path) {
             let Some(target) = target.as_str() else {
                 continue;
             };
-            let target = resolve_relative_python_import(&module, target);
+            let package_module = Path::new(&edge.string("source_file"))
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some("__init__.py");
+            let target = resolve_relative_python_import(&module, target, package_module);
             if !local.is_empty() && !target.is_empty() {
                 aliases
                     .entry(format!("{module}.{local}"))
@@ -747,7 +763,10 @@ fn resolve_python_imported_types(extraction: &mut Extraction, root: &Path) {
 
     let mut repointed = HashSet::new();
     for edge in &mut extraction.edges {
-        if !matches!(relation(edge), "inherits" | "implements" | "extends") {
+        if !matches!(
+            relation(edge),
+            "inherits" | "implements" | "extends" | "references"
+        ) {
             continue;
         }
         let Some(requested) = edge
@@ -771,12 +790,7 @@ fn resolve_python_imported_types(extraction: &mut Extraction, root: &Path) {
 }
 
 fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
-    let source_path = Path::new(source_file);
-    let source = source_path
-        .strip_prefix(root)
-        .unwrap_or(source_path)
-        .to_string_lossy()
-        .replace('\\', "/");
+    let source = source_key(source_file, root);
     let source = source.strip_suffix(".py")?;
     let source = source.strip_suffix("/__init__").unwrap_or(source);
     let module = source
@@ -787,7 +801,11 @@ fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
     (!module.is_empty()).then_some(module)
 }
 
-fn resolve_relative_python_import(source_module: &str, target: &str) -> String {
+fn resolve_relative_python_import(
+    source_module: &str,
+    target: &str,
+    package_module: bool,
+) -> String {
     let dots = target
         .chars()
         .take_while(|character| *character == '.')
@@ -797,7 +815,9 @@ fn resolve_relative_python_import(source_module: &str, target: &str) -> String {
     }
     let suffix = target.trim_start_matches('.');
     let mut components = source_module.split('.').collect::<Vec<_>>();
-    components.pop();
+    if !package_module {
+        components.pop();
+    }
     for _ in 1..dots {
         components.pop();
     }
@@ -1059,6 +1079,78 @@ fn canonicalize_go_receiver_owners(extraction: &mut Extraction) {
     });
 }
 
+fn canonicalize_go_imported_types(extraction: &mut Extraction, root: &Path) {
+    let mut definitions = HashMap::<(String, String), Vec<(String, String)>>::new();
+    for node in &extraction.nodes {
+        if string_attribute(node, "language") != "go"
+            || !matches!(
+                string_attribute(node, "symbol_kind").as_str(),
+                "class" | "struct" | "interface" | "type_alias"
+            )
+        {
+            continue;
+        }
+        let package = string_attribute(node, "package");
+        let label = node.label().trim();
+        let source = source_key(&string_attribute(node, "source_file"), root);
+        let directory = Path::new(&source)
+            .parent()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if !package.is_empty() && !label.is_empty() && !directory.is_empty() {
+            definitions
+                .entry((package, label.to_owned()))
+                .or_default()
+                .push((node.id.clone(), directory));
+        }
+    }
+
+    let mut remap = HashMap::<String, String>::new();
+    for node in &extraction.nodes {
+        if string_attribute(node, "language") != "go"
+            || string_attribute(node, "symbol_kind") != "symbol"
+        {
+            continue;
+        }
+        let import_path = string_attribute(node, "go_import_path");
+        let package = string_attribute(node, "go_target_package");
+        let label = node.label().trim();
+        if import_path.is_empty() || package.is_empty() || label.is_empty() {
+            continue;
+        }
+        let Some(candidates) = definitions.get(&(package, label.to_owned())) else {
+            continue;
+        };
+        let compatible = candidates
+            .iter()
+            .filter(|(_, directory)| {
+                import_path == directory.as_str()
+                    || import_path
+                        .strip_suffix(directory.as_str())
+                        .is_some_and(|prefix| prefix.ends_with('/'))
+            })
+            .collect::<Vec<_>>();
+        if let [candidate] = compatible.as_slice() {
+            remap.insert(node.id.clone(), candidate.0.clone());
+        }
+    }
+    if remap.is_empty() {
+        return;
+    }
+    for edge in &mut extraction.edges {
+        if let Some(target) = remap.get(&edge.source) {
+            edge.source.clone_from(target);
+        }
+        if let Some(target) = remap.get(&edge.target) {
+            edge.target.clone_from(target);
+            stamp_endpoint_rewrite(edge, EndpointRewriteRule::UniqueStubEndpointResolution, 1.0);
+        }
+    }
+    extraction
+        .nodes
+        .retain(|node| !remap.contains_key(&node.id));
+}
+
 #[cfg(test)]
 fn disambiguate_colliding_node_ids(extraction: &mut Extraction, root: &Path) {
     let mut raw_calls = extraction.raw_calls.take();
@@ -1256,22 +1348,15 @@ fn resolve_cross_file_calls_with_root_calls(
         .filter(|(source_file, _)| extension(source_file) == "py")
         .map(|(source_file, source)| (source_file.clone(), python_symbol_imports(source)))
         .collect::<HashMap<_, _>>();
-    let (import_edges, class_use_edges) = rayon::join(
-        || {
-            resolve_python_import_guided_with_calls(
-                extraction,
-                sources,
-                root,
-                raw_calls,
-                &python_imports,
-            )
-        },
-        || resolve_python_class_uses(extraction, sources, root, &python_imports),
+    let import_edges = resolve_python_import_guided_with_calls(
+        extraction,
+        sources,
+        root,
+        raw_calls,
+        &python_imports,
     );
     extraction.edges.extend(import_edges);
     profile_internal("resolver Python import-guided calls", &mut profile_started);
-    extraction.edges.extend(class_use_edges);
-    profile_internal("resolver Python class uses", &mut profile_started);
     let mut exact = AHashMap::<String, Vec<String>>::new();
     let mut folded = AHashMap::<String, Vec<String>>::new();
     let mut source_by_id = AHashMap::<String, String>::new();
@@ -1879,121 +1964,6 @@ fn python_module_file(
             .get(&normalize_path(&candidate.to_string_lossy()))
             .cloned()
     })
-}
-
-fn resolve_python_class_uses(
-    extraction: &Extraction,
-    sources: &HashMap<String, String>,
-    root: &Path,
-    python_imports: &HashMap<String, Vec<PythonImport>>,
-) -> Vec<EdgeRecord> {
-    let mut resolved_edges = Vec::new();
-    let mut definitions = HashMap::<String, Vec<(String, String)>>::new();
-    let mut local_classes = HashMap::<String, Vec<String>>::new();
-    for node in &extraction.nodes {
-        let source = string_attribute(node, "source_file");
-        if extension(&source) != "py" {
-            continue;
-        }
-        let label = node.label();
-        if !label.is_empty()
-            && !label.ends_with(')')
-            && !label.ends_with(".py")
-            && !label.starts_with('_')
-            && string_attribute(node, "file_type") != "rationale"
-        {
-            definitions
-                .entry(label.to_owned())
-                .or_default()
-                .push((source.clone(), node.id.clone()));
-        }
-        if !label.ends_with(')')
-            && !label.ends_with(".py")
-            && string_attribute(node, "file_type") != "rationale"
-            && !is_file_node(node, &source)
-        {
-            local_classes
-                .entry(source)
-                .or_default()
-                .push(node.id.clone());
-        }
-    }
-    let normalized_sources = sources
-        .iter()
-        .map(|(source_file, source)| {
-            (
-                normalize_path(source_file),
-                (source_file.as_str(), source.as_str()),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    let mut known = extraction
-        .edges
-        .iter()
-        .map(|edge| {
-            (
-                edge.source.clone(),
-                edge.target.clone(),
-                relation(edge).to_owned(),
-            )
-        })
-        .collect::<HashSet<_>>();
-    for source_file in sources.keys() {
-        if extension(source_file) != "py" {
-            continue;
-        }
-        let Some(classes) = local_classes.get(source_file) else {
-            continue;
-        };
-        let Some(imports) = python_imports.get(source_file) else {
-            continue;
-        };
-        for imported in imports {
-            let candidates = python_resolved_definition_candidates(
-                Path::new(source_file),
-                root,
-                &imported.module,
-                &imported.imported,
-                &definitions,
-                &normalized_sources,
-                true,
-            );
-            if candidates.len() != 1 {
-                continue;
-            }
-            for source_id in classes {
-                let target = &candidates[0];
-                if !known.insert((source_id.clone(), target.clone(), "uses".to_owned())) {
-                    continue;
-                }
-                let mut attributes = Map::new();
-                attributes.insert("relation".to_owned(), Value::String("uses".to_owned()));
-                attributes.insert(
-                    "confidence".to_owned(),
-                    Value::String("INFERRED".to_owned()),
-                );
-                attributes.insert("language".to_owned(), Value::String("python".to_owned()));
-                attributes.insert(
-                    "extractor".to_owned(),
-                    Value::String("compass.resolve.python-imports".to_owned()),
-                );
-                attributes.insert("_origin".to_owned(), Value::String("heuristic".to_owned()));
-                attributes.insert(
-                    "rule".to_owned(),
-                    Value::String("python-imported-class-use-inference".to_owned()),
-                );
-                attributes.insert("confidence_score".to_owned(), Value::from(0.8));
-                insert_python_import_anchor(&mut attributes, source_file, imported);
-                attributes.insert("weight".to_owned(), Value::from(0.8));
-                resolved_edges.push(EdgeRecord {
-                    source: source_id.clone(),
-                    target: target.clone(),
-                    attributes,
-                });
-            }
-        }
-    }
-    resolved_edges
 }
 
 #[cfg(test)]
@@ -3239,7 +3209,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_adds_import_guided_calls_and_class_uses() {
+    fn resolve_adds_import_guided_calls_without_unused_class_edges() {
         let file_a = make_id(&["app/a.py"]);
         let file_b = make_id(&["app/b.py"]);
         let mut import_call = raw("caller", "run", "app/a.py");
@@ -3269,10 +3239,10 @@ mod tests {
                 && relation(candidate) == "calls"
                 && candidate.string("confidence") == "EXTRACTED"
         }));
-        assert!(resolved.edges.iter().any(|candidate| {
-            candidate.source == "local-class"
-                && candidate.target == "widget"
-                && relation(candidate) == "uses"
+        assert!(resolved.edges.iter().all(|candidate| {
+            candidate.source != "local-class"
+                || candidate.target != "widget"
+                || relation(candidate) != "uses"
         }));
         assert!(resolved.edges.iter().any(|candidate| {
             candidate.source == file_a

@@ -579,6 +579,13 @@ def _classify_nodes(
             if _compatible_definition(graphify, candidate)
         ]
         reason = "canonical_owner" if graphify.source_file else "resolved_definition"
+        if len(candidates) > 1:
+            case_exact = [
+                candidate for candidate in candidates if candidate.label == graphify.label
+            ]
+            if len(case_exact) == 1:
+                candidates = case_exact
+                reason = "case_exact_owner"
         if len(candidates) > 1 and not graphify.module:
             module_candidates = [
                 candidate
@@ -621,6 +628,10 @@ def _canonical_compass_endpoints(
             for candidate in anchored_by_label.get(node.normalized_label, [])
             if _compatible_definition(node, candidate)
         ]
+        if len(candidates) > 1:
+            case_exact = [candidate for candidate in candidates if candidate.label == node.label]
+            if len(case_exact) == 1:
+                candidates = case_exact
         if len(candidates) == 1:
             canonical[node.identifier] = candidates[0].identifier
     return canonical

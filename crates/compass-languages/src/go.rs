@@ -44,6 +44,12 @@ struct LexicalBinding {
     active_until: usize,
 }
 
+struct GoTypeRef {
+    name: String,
+    qualifier: Option<String>,
+    generic: bool,
+}
+
 struct GoState<'source, 'tree> {
     source: &'source [u8],
     source_file: String,
@@ -53,7 +59,7 @@ struct GoState<'source, 'tree> {
     extraction: Extraction,
     seen: HashSet<String>,
     function_bodies: Vec<(String, Node<'tree>, Vec<LexicalBinding>)>,
-    imported_packages: HashSet<String>,
+    imported_packages: HashMap<String, String>,
 }
 
 impl<'source, 'tree> GoState<'source, 'tree> {
@@ -76,7 +82,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             extraction: Extraction::default(),
             seen: HashSet::new(),
             function_bodies: Vec::new(),
-            imported_packages: HashSet::new(),
+            imported_packages: HashMap::new(),
         };
         let label = path
             .file_name()
@@ -87,6 +93,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
     }
 
     fn run(mut self, root: Node<'tree>) -> Extraction {
+        self.prescan_imports(root);
         self.walk_type_declarations(root);
         self.walk(root);
         self.walk_calls();
@@ -100,6 +107,23 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                     ))
         });
         self.extraction
+    }
+
+    fn prescan_imports(&mut self, node: Node<'tree>) {
+        if node.kind() == "import_declaration" {
+            let mut specs = Vec::new();
+            collect_kind(node, "import_spec", &mut specs);
+            for spec in specs {
+                if let Some((local, raw)) = go_import_binding(spec, self.source) {
+                    self.imported_packages.insert(local, raw);
+                }
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.prescan_imports(child);
+        }
     }
 
     fn walk_type_declarations(&mut self, node: Node<'tree>) {
@@ -259,15 +283,20 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                 });
                 let mut refs = Vec::new();
                 collect_type_refs(type_node, self.source, false, &mut refs);
-                for (name, generic) in refs {
-                    let target = self.ensure_named_node(&name);
+                for reference in refs {
+                    let target =
+                        self.ensure_named_node(&reference.name, reference.qualifier.as_deref());
                     if target == type_id {
                         continue;
                     }
-                    if !has_name && !generic {
+                    if !has_name && !reference.generic {
                         self.add_edge(type_id, &target, "embeds", line(field), None);
                     } else {
-                        let context = if generic { "generic_arg" } else { "field" };
+                        let context = if reference.generic {
+                            "generic_arg"
+                        } else {
+                            "field"
+                        };
                         self.add_edge(type_id, &target, "references", line(field), Some(context));
                     }
                 }
@@ -289,12 +318,13 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             {
                 collect_type_refs(Some(child), self.source, false, &mut refs);
             }
-            for (name, generic) in refs {
-                let target = self.ensure_named_node(&name);
+            for reference in refs {
+                let target =
+                    self.ensure_named_node(&reference.name, reference.qualifier.as_deref());
                 if target == type_id {
                     continue;
                 }
-                if generic {
+                if reference.generic {
                     self.add_edge(
                         type_id,
                         &target,
@@ -354,15 +384,19 @@ impl<'source, 'tree> GoState<'source, 'tree> {
     ) {
         let mut refs = Vec::new();
         collect_type_refs(node, self.source, false, &mut refs);
-        for (name, generic) in refs {
-            let target = self.ensure_named_node(&name);
+        for reference in refs {
+            let target = self.ensure_named_node(&reference.name, reference.qualifier.as_deref());
             if target != id {
                 self.add_edge(
                     id,
                     &target,
                     "references",
                     at,
-                    Some(if generic { "generic_arg" } else { context }),
+                    Some(if reference.generic {
+                        "generic_arg"
+                    } else {
+                        context
+                    }),
                 );
             }
         }
@@ -384,12 +418,8 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                 line(spec),
                 Some("import"),
             );
-            let local = spec
-                .child_by_field_name("name")
-                .map(|name| self.text(name))
-                .unwrap_or_else(|| raw.rsplit('/').next().unwrap_or_default().to_owned());
-            if !matches!(local.as_str(), "" | "_" | ".") {
-                self.imported_packages.insert(local);
+            if let Some((local, _)) = go_import_binding(spec, self.source) {
+                self.imported_packages.insert(local, raw);
             }
         }
     }
@@ -440,7 +470,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                     .child_by_field_name("operand")
                     .map(|operand| self.text(operand))
                     .unwrap_or_default();
-                (callee, !self.imported_packages.contains(&receiver))
+                (callee, !self.imported_packages.contains_key(&receiver))
             } else {
                 (None, false)
             };
@@ -486,7 +516,42 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn ensure_named_node(&mut self, name: &str) -> String {
+    fn ensure_named_node(&mut self, name: &str, qualifier: Option<&str>) -> String {
+        if let Some(qualifier) = qualifier {
+            let imported = self
+                .imported_packages
+                .get(qualifier)
+                .map_or(qualifier, String::as_str);
+            let target_package = imported.rsplit('/').next().unwrap_or(qualifier);
+            let id = make_id(&[imported, name]);
+            if self.seen.insert(id.clone()) {
+                let mut attributes = Map::new();
+                attributes.insert("label".into(), Value::String(name.to_owned()));
+                attributes.insert("file_type".into(), Value::String("code".into()));
+                attributes.insert("symbol_kind".into(), Value::String("symbol".into()));
+                attributes.insert("source_file".into(), Value::String(String::new()));
+                attributes.insert("source_location".into(), Value::String(String::new()));
+                attributes.insert(
+                    "origin_file".into(),
+                    Value::String(self.source_file.clone()),
+                );
+                attributes.insert(
+                    "qualified_name".into(),
+                    Value::String(format!("{imported}.{name}")),
+                );
+                attributes.insert("package".into(), Value::String(imported.to_owned()));
+                attributes.insert("go_import_path".into(), Value::String(imported.to_owned()));
+                attributes.insert(
+                    "go_target_package".into(),
+                    Value::String(target_package.to_owned()),
+                );
+                self.extraction.nodes.push(NodeRecord {
+                    id: id.clone(),
+                    attributes,
+                });
+            }
+            return id;
+        }
         let local = make_id(&[&self.package_scope, name]);
         if self.seen.contains(&local) {
             return local;
@@ -496,6 +561,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             let mut attributes = Map::new();
             attributes.insert("label".into(), Value::String(name.to_owned()));
             attributes.insert("file_type".into(), Value::String("code".into()));
+            attributes.insert("symbol_kind".into(), Value::String("symbol".into()));
             attributes.insert("source_file".into(), Value::String(String::new()));
             attributes.insert("source_location".into(), Value::String(String::new()));
             attributes.insert(
@@ -522,6 +588,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             Value::String(self.source_file.clone()),
         );
         attributes.insert("source_location".into(), Value::String(format!("L{at}")));
+        attributes.insert("package".into(), Value::String(self.package_scope.clone()));
         self.extraction.nodes.push(NodeRecord {
             id: id.to_owned(),
             attributes,
@@ -681,26 +748,32 @@ fn collect_type_refs(
     node: Option<Node<'_>>,
     source: &[u8],
     generic: bool,
-    output: &mut Vec<(String, bool)>,
+    output: &mut Vec<GoTypeRef>,
 ) {
     let Some(node) = node else { return };
     match node.kind() {
         "type_identifier" => {
             let name = node.utf8_text(source).unwrap_or_default();
             if !name.is_empty() && !PREDECLARED_TYPES.contains(&name) {
-                output.push((name.to_owned(), generic));
+                output.push(GoTypeRef {
+                    name: name.to_owned(),
+                    qualifier: None,
+                    generic,
+                });
             }
             return;
         }
         "qualified_type" => {
-            let name = node
-                .utf8_text(source)
-                .unwrap_or_default()
-                .rsplit('.')
-                .next()
-                .unwrap_or_default();
+            let raw = node.utf8_text(source).unwrap_or_default();
+            let (qualifier, name) = raw
+                .rsplit_once('.')
+                .map_or((None, raw), |(qualifier, name)| (Some(qualifier), name));
             if !name.is_empty() && !PREDECLARED_TYPES.contains(&name) {
-                output.push((name.to_owned(), generic));
+                output.push(GoTypeRef {
+                    name: name.to_owned(),
+                    qualifier: qualifier.map(str::to_owned),
+                    generic,
+                });
             }
             return;
         }
@@ -737,6 +810,21 @@ fn collect_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tre
             collect_kind(child, kind, output);
         }
     }
+}
+
+fn go_import_binding(spec: Node<'_>, source: &[u8]) -> Option<(String, String)> {
+    let raw = spec
+        .child_by_field_name("path")?
+        .utf8_text(source)
+        .ok()?
+        .trim_matches('"')
+        .to_owned();
+    let local = spec
+        .child_by_field_name("name")
+        .and_then(|name| name.utf8_text(source).ok())
+        .map(str::to_owned)
+        .unwrap_or_else(|| raw.rsplit('/').next().unwrap_or_default().to_owned());
+    (!raw.is_empty() && !matches!(local.as_str(), "" | "_" | ".")).then_some((local, raw))
 }
 
 fn has_descendant_kind(node: Node<'_>, kind: &str) -> bool {

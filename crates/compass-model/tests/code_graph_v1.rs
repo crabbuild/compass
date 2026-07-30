@@ -65,6 +65,7 @@ fn v1_vocabularies_serialize_to_the_closed_contract() -> Result<(), Box<dyn std:
 
     let edge_kinds = [
         (EdgeKind::Contains, "contains"),
+        (EdgeKind::Embeds, "embeds"),
         (EdgeKind::Calls, "calls"),
         (EdgeKind::Imports, "imports"),
         (EdgeKind::Exports, "exports"),

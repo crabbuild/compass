@@ -194,6 +194,7 @@ pub enum NodeRole {
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
     Contains,
+    Embeds,
     Calls,
     Imports,
     Exports,
@@ -228,6 +229,7 @@ impl EdgeKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Contains => "contains",
+            Self::Embeds => "embeds",
             Self::Calls => "calls",
             Self::Imports => "imports",
             Self::Exports => "exports",
