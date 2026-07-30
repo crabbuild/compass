@@ -182,6 +182,11 @@ impl BuildEvidence {
             generation.update(value.as_bytes());
         }
         let generation_id = format!("sha256:{:x}", generation.finalize());
+        let published_file_ids = files
+            .iter()
+            .map(|file| (file.path.clone(), file.id.clone()))
+            .collect::<HashMap<_, _>>();
+        let mut coverage_file_ids = HashMap::<String, Option<String>>::new();
         let mut declared_coverage = BTreeSet::new();
         for node in &extraction.nodes {
             if let Some(kind) =
@@ -190,7 +195,12 @@ impl BuildEvidence {
                 declared_coverage.insert((
                     format!("node:{kind}"),
                     coverage_producer(&node.attributes),
-                    coverage_file_id(&node.attributes, &repository_root)?,
+                    coverage_file_id(
+                        &node.attributes,
+                        &repository_root,
+                        &published_file_ids,
+                        &mut coverage_file_ids,
+                    )?,
                 ));
             }
         }
@@ -199,7 +209,12 @@ impl BuildEvidence {
                 declared_coverage.insert((
                     format!("edge:{relation}"),
                     coverage_producer(&edge.attributes),
-                    coverage_file_id(&edge.attributes, &repository_root)?,
+                    coverage_file_id(
+                        &edge.attributes,
+                        &repository_root,
+                        &published_file_ids,
+                        &mut coverage_file_ids,
+                    )?,
                 ));
             }
         }
@@ -440,14 +455,23 @@ fn coverage_producer(attributes: &Map<String, Value>) -> String {
 fn coverage_file_id(
     attributes: &Map<String, Value>,
     root: &Path,
+    published_file_ids: &HashMap<String, String>,
+    cache: &mut HashMap<String, Option<String>>,
 ) -> Result<Option<String>, GraphError> {
-    optional_source_path(attributes, "source_file")
-        .map(|path| {
-            portable_path(&path, root)
-                .map(|path| root.join(&path).is_file().then(|| file_id(&path)))
-        })
-        .transpose()
-        .map(Option::flatten)
+    let Some(path) = attributes
+        .get("source_file")
+        .and_then(Value::as_str)
+        .filter(|path| !path.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    if let Some(file_id) = cache.get(path) {
+        return Ok(file_id.clone());
+    }
+    let portable = portable_path(path, root)?;
+    let file_id = published_file_ids.get(&portable).cloned();
+    cache.insert(path.to_owned(), file_id.clone());
+    Ok(file_id)
 }
 
 /// Publish resolved raw facts as a validated, deterministic Compass graph v1 document.
