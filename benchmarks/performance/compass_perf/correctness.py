@@ -535,6 +535,15 @@ def _compatible_definition(graphify: NodeFact, compass: NodeFact) -> bool:
     return True
 
 
+def _identifier_carries_module(identifier: str, module: str) -> bool:
+    normalized_module = re.sub(r"[^a-z0-9]+", "_", module.casefold()).strip("_")
+    normalized_identifier = re.sub(r"[^a-z0-9]+", "_", identifier.casefold()).strip("_")
+    return bool(
+        normalized_module
+        and normalized_identifier.startswith(f"{normalized_module}_")
+    )
+
+
 def _classify_nodes(
     graphify_nodes: dict[str, NodeFact],
     compass_nodes: dict[str, NodeFact],
@@ -569,8 +578,18 @@ def _classify_nodes(
             for candidate in compass_by_label.get(graphify.normalized_label, [])
             if _compatible_definition(graphify, candidate)
         ]
+        reason = "canonical_owner" if graphify.source_file else "resolved_definition"
+        if len(candidates) > 1 and not graphify.module:
+            module_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.module
+                and _identifier_carries_module(graphify.identifier, candidate.module)
+            ]
+            if len(module_candidates) == 1:
+                candidates = module_candidates
+                reason = "qualified_generated_owner"
         if len(candidates) == 1:
-            reason = "canonical_owner" if graphify.source_file else "resolved_definition"
             coverage[identifier] = Coverage(
                 "dominated", reason, candidates[0].identifier
             )

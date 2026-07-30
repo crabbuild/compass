@@ -256,6 +256,29 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["ambiguous_graphify_nodes"], 1)
         self.assertEqual(result.metrics["missing_graphify_nodes"], 0)
 
+    def test_generated_receiver_id_disambiguates_an_exact_module(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"left","label":"Agent","kind":"class",
+               "source_file":"pkg/left/agent.go","source_location":"L1","language":"go"},
+              {"id":"right","label":"Agent","kind":"class",
+               "source_file":"pkg/right/agent.go","source_location":"L1","language":"go"}
+            ],"links":[]}
+            """,
+            """
+            {"nodes":[
+              {"id":"pkg_left_generated_go_agent","label":"Agent"}
+            ],"links":[]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_nodes"], 1)
+        self.assertIn(
+            "dominated:qualified_generated_owner",
+            result.metrics["graphify_nodes_coverage_reasons"],
+        )
+
     def test_two_hop_containment_dominates_flat_graphify_ownership(self) -> None:
         result = compare_documents(
             """
