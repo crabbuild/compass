@@ -748,13 +748,6 @@ fn build_graph_inner(
             });
         if empty_structured_document && combined.graph.error.is_none() {
             combined.graph.error = Some(format!("{language} extraction failed: empty document"));
-        } else if bytes.is_empty() && combined.graph.error.is_none() {
-            combined.graph.nodes.clear();
-            combined.graph.edges.clear();
-            combined.graph.hyperedges.clear();
-            combined.graph.framework_facts.clear();
-            combined.graph.raw_calls = None;
-            combined.program = None;
         }
         let prepared = combined.program.map(|batch| PreparedSyntaxInput {
             source_file,
