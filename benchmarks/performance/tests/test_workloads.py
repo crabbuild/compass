@@ -78,6 +78,17 @@ class WorkloadTests(unittest.TestCase):
         )
         return FakeAdapter(Path(sys.executable), revision)
 
+    def graphify_adapter(self) -> FakeAdapter:
+        revision = ToolRevision(
+            "graphify",
+            "https://example.invalid/graphify.git",
+            "d" * 40,
+            "e" * 40,
+            False,
+            "f" * 64,
+        )
+        return FakeAdapter(Path(sys.executable), revision)
+
     def test_mutation_selection_and_restoration_are_clean(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             checkout = self.make_checkout(Path(directory))
@@ -107,6 +118,27 @@ class WorkloadTests(unittest.TestCase):
                 timeout_seconds=5,
             )
             self.assertEqual([result.workload for result in results], ["cold", "warm", "incremental"])
+            self.assertTrue(all(result.correctness.passed for result in results))
+            self.assertTrue(all(result.aggregate is not None for result in results))
+
+    def test_graphify_build_matrix_validates_without_a_compass_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = QualificationWorkspace.create(root / "workspace")
+            checkout = self.make_checkout(root)
+            spec = RepositorySpec(
+                "fixture",
+                "https://example.invalid/fixture.git",
+                ".py",
+                (),
+            )
+            results = run_build_matrix(
+                self.graphify_adapter(),
+                checkout,
+                workspace.root / "artifacts",
+                spec,
+                timeout_seconds=5,
+            )
             self.assertTrue(all(result.correctness.passed for result in results))
             self.assertTrue(all(result.aggregate is not None for result in results))
 

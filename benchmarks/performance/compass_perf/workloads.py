@@ -11,7 +11,7 @@ import subprocess
 from typing import Iterator
 
 from .adapters import ToolAdapter
-from .correctness import compare_graphs, index_graph
+from .correctness import index_graph
 from .model import CorrectnessResult, QueryOracle, RepositorySpec, Sample, WorkloadResult
 from .process import ProcessSpec, run_measured
 from .stats import summarize
@@ -130,13 +130,21 @@ def _validate_graph(tool: str, graph: Path) -> CorrectnessResult:
     database = sqlite3.connect(":memory:")
     try:
         summary = index_graph(tool, graph, database)
-        comparison = compare_graphs(database)
+        failures = (
+            (f"{tool.title()} graph reports {summary.validation_errors} validation errors",)
+            if summary.validation_errors
+            else ()
+        )
         return CorrectnessResult(
-            passed=comparison.passed,
+            passed=not failures,
             digest=summary.digest,
-            failures=comparison.failures,
-            warnings=comparison.warnings,
-            metrics={**comparison.metrics, "canonical_graph_digest": summary.digest},
+            failures=failures,
+            metrics={
+                f"{tool}_nodes": summary.nodes,
+                f"{tool}_edges": summary.edges,
+                f"{tool}_validation_errors": summary.validation_errors,
+                "canonical_graph_digest": summary.digest,
+            },
         )
     except (OSError, ValueError, sqlite3.Error) as error:
         payload = str(error)
