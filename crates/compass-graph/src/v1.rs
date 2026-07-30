@@ -1,7 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord, Registry};
 use compass_model::code_graph::{
     BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, CoverageStatus,
