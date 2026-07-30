@@ -221,9 +221,36 @@ change Compass runtime output.
 - A containment path longer than the fixed bound is not accepted.
 - Comparator failure never changes or repairs production graph output.
 
-## Test strategy
+## Implementation-plan requirements
 
-Implementation will follow red-green-refactor.
+The implementation plan must be self-contained and begin with enough context
+to execute it without access to this conversation. Its opening sections will
+include:
+
+- the Django and Entire baseline measurements and representative missing facts;
+- the distinction between literal Graphify compatibility and semantic
+  dominance;
+- the confirmed macOS canonical-root/logical-root cache regression;
+- the production data flow from extraction through resolution, graph-v1
+  normalization, and comparison;
+- the relevant crate and file boundaries;
+- correctness, determinism, evidence, ambiguity, memory, and latency
+  constraints; and
+- the commands and artifacts used for focused and real-corpus verification.
+
+Tasks will use an implementation-first sequence. For each bounded behavior:
+
+1. restate the diagnosed root cause and invariant;
+2. make the smallest production change that implements the approved design;
+3. add focused regression and failure-mode coverage immediately afterward;
+4. run the relevant crate checks and inspect the resulting graph facts; and
+5. commit the verified behavior before starting the next one.
+
+The plan must not require test-first or red-green sequencing. Tests remain
+mandatory verification and regression protection after each implementation
+change.
+
+## Verification strategy
 
 ### Cache tests
 
