@@ -371,6 +371,80 @@ class CorrectnessTests(unittest.TestCase):
         self.assertFalse(occurrence.passed)
         self.assertEqual(occurrence.metrics["missing_graphify_edges"], 1)
 
+    def test_module_import_projection_is_rejected_but_real_use_is_required(self) -> None:
+        graphify = """
+            {"nodes":[
+              {"id":"module","label":"app.py",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"owner","label":"Owner",
+               "source_file":"app.py","source_location":"L20"},
+              {"id":"symbol","label":"Widget",
+               "source_file":"lib.py","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"symbol","relation":"uses",
+               "source_file":"app.py","source_location":"L3"},
+              {"source":"owner","target":"symbol","relation":"uses",
+               "source_file":"app.py","source_location":"L21"}
+            ]}
+        """
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"module","label":"app.py","kind":"file",
+               "source_file":"app.py","source_location":"L1"},
+              {"id":"owner","label":"Owner","kind":"class",
+               "source_file":"app.py","source_location":"L20"},
+              {"id":"symbol","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L2"}
+            ],"links":[
+              {"source":"module","target":"symbol","relation":"imports",
+               "source_file":"app.py","source_location":"L3"}
+            ]}
+            """,
+            graphify,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertEqual(result.metrics["missing_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:module_import_projected_to_symbol",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_exact_occurrence_with_more_precise_owner_dominates_baseline(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"outer","label":"run","kind":"function",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"inner","label":"run_inner","kind":"function",
+               "source_file":"app.py","source_location":"L20"},
+              {"id":"target","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L2"}
+            ],"links":[
+              {"source":"inner","target":"target","relation":"calls",
+               "source_file":"app.py","source_location":"L21"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"outer","label":"run()",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"target","label":"Widget",
+               "source_file":"lib.py","source_location":"L2"}
+            ],"links":[
+              {"source":"outer","target":"target","relation":"calls",
+               "source_file":"app.py","source_location":"L21"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["dominated_graphify_edges"], 1)
+        self.assertIn(
+            "dominated:precise_occurrence_owner",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

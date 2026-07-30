@@ -651,7 +651,24 @@ def _classify_edges(
 ) -> list[Coverage]:
     exact_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
+    occurrence_target_index: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     containment: dict[str, set[str]] = {}
+    import_occurrences: set[tuple[str, str, str]] = set()
+    for edges in (graphify_edges, compass_edges):
+        for edge in edges:
+            if (
+                edge.relation == "imports"
+                and edge.target_fact_key
+                and edge.occurrence_file
+                and edge.occurrence_location
+            ):
+                import_occurrences.add(
+                    (
+                        edge.target_fact_key,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                    )
+                )
     canonical_endpoints = _canonical_compass_endpoints(compass_nodes)
     for edge in compass_edges:
         exact_index.setdefault(
@@ -660,11 +677,35 @@ def _classify_edges(
         source = canonical_endpoints.get(edge.source, edge.source)
         target = canonical_endpoints.get(edge.target, edge.target)
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
+        if edge.occurrence_file and edge.occurrence_location:
+            occurrence_target_index.setdefault(
+                (
+                    edge.relation,
+                    edge.target_fact_key,
+                    edge.occurrence_file,
+                    edge.occurrence_location,
+                ),
+                [],
+            ).append(edge)
         if edge.relation == "contains":
             containment.setdefault(source, set()).add(target)
 
     output: list[Coverage] = []
     for graphify in graphify_edges:
+        if (
+            graphify.relation == "references"
+            and (
+                graphify.target_fact_key,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+            )
+            in import_occurrences
+        ):
+            output.append(
+                Coverage("rejected", "module_import_projected_to_symbol", None)
+            )
+            continue
+
         exact = [
             edge
             for edge in exact_index.get(
@@ -679,6 +720,28 @@ def _classify_edges(
         ]
         if exact:
             output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
+            continue
+
+        precise_owner = occurrence_target_index.get(
+            (
+                graphify.relation,
+                graphify.target_fact_key,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+            ),
+            [],
+        )
+        if (
+            graphify.relation in {"calls", "references", "rationale_for"}
+            and len(precise_owner) == 1
+        ):
+            output.append(
+                Coverage(
+                    "dominated",
+                    "precise_occurrence_owner",
+                    precise_owner[0].payload_sha256,
+                )
+            )
             continue
 
         source_coverage = node_coverage.get(graphify.source)
@@ -744,7 +807,7 @@ def _classify_edges(
 
 def _coverage_metrics(prefix: str, coverage: list[Coverage]) -> dict[str, int | str]:
     metrics: dict[str, int | str] = {}
-    for status in ("exact", "dominated", "ambiguous", "missing"):
+    for status in ("exact", "dominated", "rejected", "ambiguous", "missing"):
         metrics[f"{status}_graphify_{prefix}"] = sum(
             fact.status == status for fact in coverage
         )
