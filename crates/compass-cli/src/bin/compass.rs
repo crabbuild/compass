@@ -6,6 +6,10 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    let one_shot_build = matches!(
+        arguments.first().and_then(|argument| argument.to_str()),
+        Some("extract" | "update")
+    );
     let events = match compass_cli::ide_contract::take_jsonl_events(&mut arguments) {
         Ok(enabled) => enabled,
         Err(error) => {
@@ -78,7 +82,7 @@ fn main() -> ExitCode {
     let mut stderr = io::stderr();
     let input_is_terminal = stdin.is_terminal();
     let prompt_is_terminal = stderr.is_terminal();
-    let code = compass_cli::write_outcome(&outcome, &mut stdout, &mut stderr);
+    let mut code = compass_cli::write_outcome(&outcome, &mut stdout, &mut stderr);
     if code == 0 && !events {
         let mut locked = stdin.lock();
         if let Err(error) = compass_cli::prompt_to_open_html(
@@ -90,6 +94,12 @@ fn main() -> ExitCode {
         ) {
             let _ = writeln!(stderr, "warning: {error}");
         }
+    }
+    if stdout.flush().is_err() || stderr.flush().is_err() {
+        code = 1;
+    }
+    if one_shot_build {
+        std::process::exit(i32::from(code));
     }
     ExitCode::from(code)
 }

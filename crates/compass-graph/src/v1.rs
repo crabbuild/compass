@@ -38,6 +38,7 @@ const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
 const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
+const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 
@@ -444,6 +445,11 @@ fn normalize_v1_with_mode(
     mode: PublicationMode,
 ) -> Result<PublicationOutcome, GraphError> {
     let mut quarantine = QuarantineCollector::default();
+    let canonical_raw_order = extraction
+        .extensions
+        .remove(CANONICAL_RAW_ORDER)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(value) = extraction.extensions.remove(TRUSTED_GRAPH_COVERAGE) {
         let mut coverage = serde_json::from_value::<Vec<CoverageRecord>>(value)
             .map_err(|error| raw_error("graph.coverage", &error.to_string()))?;
@@ -459,8 +465,12 @@ fn normalize_v1_with_mode(
     normalize_file_inventory(&mut evidence.files, &evidence.repository_root)?;
     let file_facts = published_file_facts(&evidence)?;
     split_sourceless_placeholders(&mut extraction, &evidence.repository_root, &file_facts)?;
-    let stub_wiring_sites =
-        collect_stub_wiring_sites(&extraction.edges, &evidence.repository_root, &file_facts)?;
+    let stub_wiring_sites = collect_stub_wiring_sites(
+        &extraction.nodes,
+        &extraction.edges,
+        &evidence.repository_root,
+        &file_facts,
+    )?;
     resolve_or_drop_generic_symbols(
         &mut extraction,
         &mut evidence.diagnostics,
@@ -471,16 +481,14 @@ fn normalize_v1_with_mode(
         &mut quarantine,
     )?;
 
-    if mode == PublicationMode::BestEffort {
+    if mode == PublicationMode::BestEffort && !canonical_raw_order {
         extraction.nodes.sort_by_cached_key(raw_node_sort_key);
         extraction.edges.sort_by_cached_key(raw_edge_sort_key);
     }
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
-    let mut nodes = BTreeMap::<String, NodeRecord>::new();
-    for raw in extraction.nodes {
+    let mut nodes = HashMap::<String, NodeRecord>::with_capacity(extraction.nodes.len());
+    for mut raw in extraction.nodes {
         let raw_id = raw.id.clone();
-        let diagnostic_anchor =
-            best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts);
         if id_remap.contains_key(&raw_id) {
             let error = raw_error(
                 &raw_id,
@@ -490,14 +498,19 @@ fn normalize_v1_with_mode(
                 return Err(error);
             }
             id_remap.remove(&raw_id);
-            quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
+            quarantine.omit_node(
+                &raw_id,
+                &error.to_string(),
+                best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
+            );
             continue;
         }
-        let normalized = match raw.attributes.get(TRUSTED_NODE_RECORD) {
-            Some(value) => serde_json::from_value::<NodeRecord>(value.clone())
+        let trusted = raw.attributes.get(TRUSTED_NODE_RECORD).cloned();
+        let normalized = match trusted {
+            Some(value) => serde_json::from_value::<NodeRecord>(value)
                 .map_err(|error| raw_error(&raw_id, &error.to_string())),
             None => normalize_node(
-                raw.clone(),
+                &mut raw,
                 &evidence.repository_root,
                 &file_facts,
                 stub_wiring_sites.get(&raw_id),
@@ -506,7 +519,11 @@ fn normalize_v1_with_mode(
         let node = match normalized {
             Ok(node) => node,
             Err(error) if mode == PublicationMode::BestEffort => {
-                quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
+                quarantine.omit_node(
+                    &raw_id,
+                    &error.to_string(),
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
+                );
                 continue;
             }
             Err(error) => return Err(error),
@@ -521,7 +538,8 @@ fn normalize_v1_with_mode(
                 quarantine.identity_collision(
                     &raw_id,
                     &error.to_string(),
-                    diagnostic_anchor.or_else(|| best_effort_node_anchor(existing)),
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts)
+                        .or_else(|| best_effort_node_anchor(existing)),
                 );
                 continue;
             }
@@ -551,18 +569,15 @@ fn normalize_v1_with_mode(
         recompute_route_resolution(details);
     }
 
-    let mut links = BTreeMap::<String, EdgeRecord>::new();
+    let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
     for (index, raw) in extraction.edges.into_iter().enumerate() {
-        let raw_identity = raw_edge_identity(&raw, index);
-        let diagnostic_anchor =
-            best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts);
         let source = match id_remap.get(&raw.source) {
             Some(source) => source.clone(),
             None if mode == PublicationMode::BestEffort => {
                 quarantine.omit_edge(
-                    &raw_identity,
+                    &raw_edge_identity(&raw, index),
                     &format!("source {} does not match a retained raw node", raw.source),
-                    diagnostic_anchor,
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
                 );
                 continue;
             }
@@ -577,9 +592,9 @@ fn normalize_v1_with_mode(
             Some(target) => target.clone(),
             None if mode == PublicationMode::BestEffort => {
                 quarantine.omit_edge(
-                    &raw_identity,
+                    &raw_edge_identity(&raw, index),
                     &format!("target {} does not match a retained raw node", raw.target),
-                    diagnostic_anchor,
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
                 );
                 continue;
             }
@@ -593,7 +608,7 @@ fn normalize_v1_with_mode(
         let trusted_edge = raw.attributes.contains_key(TRUSTED_EDGE_RECORD);
         let normalized = match raw.attributes.get(TRUSTED_EDGE_RECORD).cloned() {
             Some(value) => normalize_trusted_edge(
-                raw,
+                &raw,
                 value,
                 &source,
                 &target,
@@ -602,7 +617,7 @@ fn normalize_v1_with_mode(
                 &file_facts,
             ),
             None => normalize_edge(
-                raw,
+                &raw,
                 &source,
                 &target,
                 index,
@@ -613,7 +628,11 @@ fn normalize_v1_with_mode(
         let mut edge = match normalized {
             Ok(edge) => edge,
             Err(error) if mode == PublicationMode::BestEffort => {
-                quarantine.omit_edge(&raw_identity, &error.to_string(), diagnostic_anchor);
+                quarantine.omit_edge(
+                    &raw_edge_identity(&raw, index),
+                    &error.to_string(),
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
+                );
                 continue;
             }
             Err(error) => return Err(error),
@@ -1177,7 +1196,7 @@ fn remap_diagnostic_ids(diagnostic: &mut GraphDiagnostic, id_remap: &HashMap<Str
 }
 
 fn normalize_trusted_edge(
-    raw: RawEdgeRecord,
+    raw: &RawEdgeRecord,
     trusted: Value,
     source: &str,
     target: &str,
@@ -1346,16 +1365,37 @@ fn is_unresolved_external_node(node: &NodeRecord) -> bool {
 }
 
 fn collect_stub_wiring_sites(
+    nodes: &[RawNodeRecord],
     edges: &[RawEdgeRecord],
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
 ) -> Result<HashMap<String, SourceAnchor>, GraphError> {
+    let mut sourceless = HashSet::new();
+    for node in nodes
+        .iter()
+        .filter(|node| node.attributes.get(TRUSTED_NODE_RECORD).is_none())
+    {
+        if raw_anchor(&node.attributes, root, file_facts)?.is_none() {
+            sourceless.insert(node.id.as_str());
+        }
+    }
     let mut sites = HashMap::new();
     for edge in edges {
+        let source_needs_site = sourceless.contains(edge.source.as_str());
+        let target_needs_site = sourceless.contains(edge.target.as_str());
+        if !source_needs_site && !target_needs_site {
+            continue;
+        }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
         };
-        for endpoint in [&edge.source, &edge.target] {
+        for endpoint in [
+            source_needs_site.then_some(&edge.source),
+            target_needs_site.then_some(&edge.target),
+        ]
+        .into_iter()
+        .flatten()
+        {
             sites
                 .entry(endpoint.clone())
                 .and_modify(|existing: &mut SourceAnchor| {
@@ -1395,6 +1435,11 @@ fn split_sourceless_placeholders(
     let mut scopes = HashMap::<String, BTreeSet<String>>::new();
     let mut inferred_kinds = HashMap::<(String, String), &'static str>::new();
     for edge in &extraction.edges {
+        let source_is_sourceless = sourceless.contains(&edge.source);
+        let target_is_sourceless = sourceless.contains(&edge.target);
+        if !source_is_sourceless && !target_is_sourceless {
+            continue;
+        }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
         };
@@ -1413,7 +1458,7 @@ fn split_sourceless_placeholders(
                     &anchor,
                 ));
         }
-        if sourceless.contains(&edge.target)
+        if target_is_sourceless
             && let Some(kind) = inferred_external_target_kind(&edge.attributes)
             && let Some(attributes) = node_attributes.get(&edge.target)
         {
@@ -1479,6 +1524,9 @@ fn split_sourceless_placeholders(
     extraction.nodes = expanded;
 
     for edge in &mut extraction.edges {
+        if !split_ids.contains_key(&edge.source) && !split_ids.contains_key(&edge.target) {
+            continue;
+        }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
         };
@@ -1989,6 +2037,28 @@ pub fn normalize_document_v1_with_inventory_best_effort(
     normalize_v1_best_effort(extraction, evidence)
 }
 
+/// Publish an owned analysis document without cloning its node and edge facts.
+///
+/// Callers that already hold a deterministic publication-only document can
+/// transfer its buffers across the v1 boundary and avoid retaining a second
+/// full raw graph or re-sorting its canonical raw order.
+pub fn normalize_document_v1_with_inventory_best_effort_owned(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input_owned(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+    )?;
+    normalize_v1_best_effort(extraction, evidence)
+}
+
 fn document_publication_input(
     document: &compass_model::GraphDocument,
     repository_root: &Path,
@@ -2016,6 +2086,46 @@ fn document_publication_input(
                 source: edge.source.clone(),
                 target: edge.target.clone(),
                 attributes: edge.attributes.clone(),
+            })
+            .collect(),
+        extensions,
+        ..Extraction::default()
+    };
+    let mut evidence =
+        BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    evidence.include_inventory(inventory)?;
+    evidence.build.source_commit = source_commit.map(str::to_owned);
+    Ok((extraction, evidence))
+}
+
+fn document_publication_input_owned(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<(Extraction, BuildEvidence), GraphError> {
+    let mut extensions = Map::new();
+    extensions.insert(CANONICAL_RAW_ORDER.to_owned(), Value::Bool(true));
+    if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
+        extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
+    }
+    let extraction = Extraction {
+        nodes: document
+            .nodes
+            .into_iter()
+            .map(|node| RawNodeRecord {
+                id: node.id,
+                attributes: node.attributes,
+            })
+            .collect(),
+        edges: document
+            .links
+            .into_iter()
+            .map(|edge| RawEdgeRecord {
+                source: edge.source,
+                target: edge.target,
+                attributes: edge.attributes,
             })
             .collect(),
         extensions,
@@ -2463,7 +2573,7 @@ fn normalize_source_derived_scopes(
 }
 
 fn normalize_node(
-    mut raw: RawNodeRecord,
+    raw: &mut RawNodeRecord,
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
     inferred_wiring_site: Option<&SourceAnchor>,
@@ -2532,16 +2642,45 @@ fn normalize_node(
         })
         .transpose()?
         .unwrap_or_default();
-    let mut evidence = vec![normalize_provenance(
-        &raw.attributes,
-        source.clone().or_else(|| external_wiring_site.clone()),
-        &raw.id,
-        root,
-        external_wiring_site
-            .as_ref()
-            .map(|_| "external-symbol-placeholder"),
-        external_wiring_site.is_some(),
-    )?];
+    let primary_evidence = if kind == NodeKind::File
+        && source.as_ref().is_some_and(|anchor| {
+            anchor.start_byte == anchor.end_byte
+                && file_facts
+                    .get(&anchor.file)
+                    .is_some_and(|file| file.byte_size == 0)
+        }) {
+        let provenance = Provenance {
+            origin: EvidenceOrigin::Convention,
+            extractor: optional_string(&raw.attributes, "extractor").unwrap_or_else(|| {
+                optional_any_string(&raw.attributes, &["language", "lang"]).map_or_else(
+                    || "compass.files.detect".to_owned(),
+                    |language| format!("compass.languages.{language}"),
+                )
+            }),
+            confidence: EvidenceConfidence::Exact,
+            rule: Some("empty-file-inventory".to_owned()),
+            anchors: source.clone().into_iter().collect(),
+            wiring_site: None,
+            score: None,
+            candidates: Vec::new(),
+        };
+        provenance
+            .validate()
+            .map_err(|error| raw_error(&raw.id, &error.to_string()))?;
+        provenance
+    } else {
+        normalize_provenance(
+            &raw.attributes,
+            source.clone().or_else(|| external_wiring_site.clone()),
+            &raw.id,
+            root,
+            external_wiring_site
+                .as_ref()
+                .map(|_| "external-symbol-placeholder"),
+            external_wiring_site.is_some(),
+        )?
+    };
+    let mut evidence = vec![primary_evidence];
     if let Some(coalesced) = raw
         .attributes
         .get(COALESCED_NODE_EVIDENCE_ATTRIBUTE)
@@ -2612,7 +2751,7 @@ fn normalize_node(
 }
 
 fn normalize_edge(
-    raw: RawEdgeRecord,
+    raw: &RawEdgeRecord,
     source: &str,
     target: &str,
     index: usize,
@@ -3491,13 +3630,7 @@ fn raw_anchor(
         .or_else(|| attributes.get("sourceAnchor"))
         .or_else(|| attributes.get("anchor"))
     {
-        let mut anchor =
-            serde_json::from_value::<SourceAnchor>(value.clone()).map_err(|error| {
-                raw_error(
-                    "source anchor",
-                    &format!("invalid structured anchor: {error}"),
-                )
-            })?;
+        let mut anchor = structured_source_anchor(value)?;
         anchor.file = portable_path(&anchor.file, root)?;
         return Ok(Some(anchor));
     }
@@ -3530,6 +3663,67 @@ fn raw_anchor(
         end_line,
         end_column,
     }))
+}
+
+fn structured_source_anchor(value: &Value) -> Result<SourceAnchor, GraphError> {
+    const FIELDS: [&str; 7] = [
+        "file",
+        "startByte",
+        "endByte",
+        "startLine",
+        "startColumn",
+        "endLine",
+        "endColumn",
+    ];
+    let object = value.as_object().ok_or_else(|| {
+        raw_error(
+            "source anchor",
+            "invalid structured anchor: expected an object",
+        )
+    })?;
+    if object.len() != FIELDS.len() || object.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+        return Err(raw_error(
+            "source anchor",
+            "invalid structured anchor: expected exactly the v1 source anchor fields",
+        ));
+    }
+    let text = |field: &str| {
+        object
+            .get(field)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                raw_error(
+                    "source anchor",
+                    &format!("invalid structured anchor field {field:?}"),
+                )
+            })
+    };
+    let number = |field: &str| {
+        object.get(field).and_then(Value::as_u64).ok_or_else(|| {
+            raw_error(
+                "source anchor",
+                &format!("invalid structured anchor field {field:?}"),
+            )
+        })
+    };
+    let u32_number = |field: &str| {
+        u32::try_from(number(field)?).map_err(|_| {
+            raw_error(
+                "source anchor",
+                &format!("structured anchor field {field:?} exceeds u32"),
+            )
+        })
+    };
+    Ok(SourceAnchor {
+        file: text("file")?,
+        start_byte: number("startByte")?,
+        end_byte: number("endByte")?,
+        start_line: u32_number("startLine")?,
+        start_column: u32_number("startColumn")?,
+        end_line: u32_number("endLine")?,
+        end_column: u32_number("endColumn")?,
+    })
 }
 
 fn raw_origin_anchor(

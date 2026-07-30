@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -12,9 +13,9 @@ use sha2::{Digest, Sha256};
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 /// Changes whenever cached extraction semantics change, even if the wire encoding does not.
-pub const AST_CACHE_VERSION: &str = "2";
+pub const AST_CACHE_VERSION: &str = "3";
 /// Portable cache encoding version used in the on-disk namespace.
-pub const CACHE_ENCODING_VERSION: u32 = 6;
+pub const CACHE_ENCODING_VERSION: u32 = 7;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,6 +110,7 @@ impl CacheKind {
 #[derive(Debug)]
 pub struct Cache {
     root: PathBuf,
+    logical_root: PathBuf,
     cache_base: PathBuf,
     ast_cache_version: String,
     hashes: StatHashIndex,
@@ -126,8 +128,16 @@ struct SessionHash {
 
 impl Cache {
     pub fn open(root: impl AsRef<Path>, options: CacheOptions<'_>) -> Result<Self, FileError> {
+        let requested_root = root.as_ref();
+        let logical_root = if requested_root.is_absolute() {
+            requested_root.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|source| io_error(requested_root, source))?
+                .join(requested_root)
+        };
         let root =
-            fs::canonicalize(root.as_ref()).map_err(|source| io_error(root.as_ref(), source))?;
+            fs::canonicalize(requested_root).map_err(|source| io_error(requested_root, source))?;
         let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
         let storage_root = options
             .storage_root
@@ -142,6 +152,7 @@ impl Cache {
         let hashes = StatHashIndex::load(&storage_root, &output_name);
         let cache = Self {
             root,
+            logical_root,
             cache_base,
             ast_cache_version: AST_CACHE_VERSION.to_owned(),
             hashes,
@@ -182,10 +193,11 @@ impl Cache {
         allow_partial: bool,
     ) -> Result<Option<Value>, FileError> {
         let hash = self.content_hash(path)?;
+        let key = self.source_cache_key(path, &hash);
         if deterministic_binary_kind(kind) {
             let entry = self
                 .directory(kind, prompt_fingerprint)
-                .join(format!("{hash}.{MESSAGEPACK_EXTENSION}"));
+                .join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
             if let Ok(bytes) = fs::read(entry)
                 && let Some(mut value) = decode_messagepack::<Value>(&bytes)
             {
@@ -199,7 +211,7 @@ impl Cache {
         }
         let entry = self
             .directory(kind, prompt_fingerprint)
-            .join(format!("{hash}.json"));
+            .join(format!("{key}.json"));
         if !entry.exists() {
             return Ok(None);
         }
@@ -219,10 +231,11 @@ impl Cache {
         let mut on_disk = value.clone();
         relativize_source_files(&mut on_disk, &self.root);
         let hash = self.content_hash(path)?;
+        let key = self.source_cache_key(path, &hash);
         let directory = self.directory(kind, prompt_fingerprint);
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
         if deterministic_binary_kind(kind) {
-            let destination = directory.join(format!("{hash}.{MESSAGEPACK_EXTENSION}"));
+            let destination = directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
             let bytes = rmp_serde::to_vec_named(&on_disk).map_err(|source| {
                 FileError::MessagePackEncode {
                     path: destination.clone(),
@@ -231,7 +244,7 @@ impl Cache {
             })?;
             write_cache_bytes(&destination, &bytes)
         } else {
-            write_json_atomic(directory.join(format!("{hash}.json")), &on_disk, false)
+            write_json_atomic(directory.join(format!("{key}.json")), &on_disk, false)
         }
     }
 
@@ -251,12 +264,13 @@ impl Cache {
                 continue;
             }
             let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
             let extension = if deterministic_binary_kind(kind) {
                 MESSAGEPACK_EXTENSION
             } else {
                 "json"
             };
-            jobs.push((directory.join(format!("{hash}.{extension}")), value));
+            jobs.push((directory.join(format!("{key}.{extension}")), value));
         }
         let root = &self.root;
         jobs.into_par_iter().try_for_each(|(destination, value)| {
@@ -293,8 +307,9 @@ impl Cache {
                 continue;
             }
             let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
             jobs.push((
-                directory.join(format!("{hash}.{MESSAGEPACK_EXTENSION}")),
+                directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}")),
                 value,
             ));
         }
@@ -414,6 +429,18 @@ impl Cache {
         removed
     }
 
+    /// Derive the complete path-sensitive entry keys used to retain live
+    /// source-backed cache records during pruning.
+    pub fn source_cache_keys(&mut self, paths: &[PathBuf]) -> Result<BTreeSet<String>, FileError> {
+        paths
+            .iter()
+            .map(|path| {
+                let hash = self.content_hash(path)?;
+                Ok(self.source_cache_key(path, &hash))
+            })
+            .collect()
+    }
+
     fn cleanup_stale_ast(&self) {
         let base = self.cache_base.join("ast");
         let current = format!("v{}", self.ast_cache_version);
@@ -454,6 +481,18 @@ impl Cache {
             },
         );
         Ok(value)
+    }
+
+    fn source_cache_key(&self, path: &Path, content_hash: &str) -> String {
+        let logical_path = self.logical_source_path(path);
+        format!("{content_hash}-{}", logical_key_hash(&logical_path))
+    }
+
+    fn logical_source_path<'a>(&'a self, path: &'a Path) -> Cow<'a, str> {
+        path.strip_prefix(&self.logical_root)
+            .or_else(|_| path.strip_prefix(&self.root))
+            .unwrap_or(path)
+            .to_string_lossy()
     }
 }
 

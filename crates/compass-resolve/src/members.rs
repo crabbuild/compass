@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use compass_languages::{Extraction, RawCall, is_language_builtin_global};
+use compass_languages::{Extraction, RawCall, is_language_builtin_global, make_id};
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 
@@ -36,40 +36,44 @@ pub(crate) fn collect_language_call_facts_owned(
 }
 
 pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut Extraction) {
-    let indexes = Indexes::new(&merged.nodes, &merged.edges);
-    let mut existing = merged
-        .edges
-        .iter()
-        .map(|edge| {
-            (
-                edge.source.clone(),
-                edge.target.clone(),
-                occurrence_site(
-                    &edge.attributes,
-                    &edge.string("source_file"),
-                    &edge.string("source_location"),
-                ),
-            )
-        })
-        .collect::<HashSet<_>>();
+    let external_nodes = {
+        let indexes = Indexes::new(&merged.nodes, &merged.edges);
+        let mut existing = merged
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge.source.clone(),
+                    edge.target.clone(),
+                    occurrence_site(
+                        &edge.attributes,
+                        &edge.string("source_file"),
+                        &edge.string("source_location"),
+                    ),
+                )
+            })
+            .collect::<HashSet<_>>();
 
-    resolve_swift_registry_compatibility(
-        &facts.calls,
-        &indexes,
-        &facts.tables,
-        &mut existing,
-        &mut merged.edges,
-    );
-    resolve_typed_members(
-        &facts.calls,
-        &indexes,
-        &facts.tables,
-        &mut existing,
-        &mut merged.edges,
-    );
-    resolve_python_members(&facts.calls, &indexes, &mut existing, &mut merged.edges);
-    resolve_ruby_members(&facts.calls, &indexes, &mut existing, &mut merged.edges);
-    resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut merged.edges);
+        resolve_swift_registry_compatibility(
+            &facts.calls,
+            &indexes,
+            &facts.tables,
+            &mut existing,
+            &mut merged.edges,
+        );
+        resolve_typed_members(
+            &facts.calls,
+            &indexes,
+            &facts.tables,
+            &mut existing,
+            &mut merged.edges,
+        );
+        resolve_python_members(&facts.calls, &indexes, &mut existing, &mut merged.edges);
+        resolve_ruby_members(&facts.calls, &indexes, &mut existing, &mut merged.edges);
+        resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut merged.edges);
+        retain_qualified_python_external_calls(&facts.calls, &mut existing, &mut merged.edges)
+    };
+    merged.nodes.extend(external_nodes);
 }
 
 /// Preserve Compass's resolver-registry ordering for strict external parity.
@@ -434,6 +438,101 @@ fn resolve_python_members(
             );
         }
     }
+}
+
+fn retain_qualified_python_external_calls(
+    calls: &[RawCall],
+    existing: &mut HashSet<(String, String, String)>,
+    edges: &mut Vec<EdgeRecord>,
+) -> Vec<NodeRecord> {
+    let mut nodes = Vec::new();
+    let mut created = HashSet::new();
+    let mut resolved_sites = existing
+        .iter()
+        .map(|(caller, _, occurrence)| (caller.clone(), occurrence.clone()))
+        .collect::<HashSet<_>>();
+    for call in calls {
+        if call.is_member_call != Some(true) || extension(&call.source_file) != "py" {
+            continue;
+        }
+        let site = occurrence_site(&call.extensions, &call.source_file, &call.source_location);
+        if resolved_sites.contains(&(call.caller_nid.clone(), site.clone())) {
+            continue;
+        }
+        let Some(qualified) = call
+            .extensions
+            .get("python_qualified_target")
+            .and_then(Value::as_str)
+            .filter(|target| valid_python_qualified_name(target))
+        else {
+            continue;
+        };
+        let Some((module, label)) = qualified.rsplit_once('.') else {
+            continue;
+        };
+        if label != call.callee {
+            continue;
+        }
+        resolved_sites.insert((call.caller_nid.clone(), site));
+        let id = make_id(&[
+            "external",
+            "python",
+            qualified,
+            &call.source_file.replace('\\', "/"),
+        ]);
+        if created.insert(id.clone()) {
+            nodes.push(NodeRecord {
+                id: id.clone(),
+                attributes: Map::from_iter([
+                    ("label".to_owned(), Value::String(label.to_owned())),
+                    (
+                        "qualified_name".to_owned(),
+                        Value::String(qualified.to_owned()),
+                    ),
+                    (
+                        "symbol_kind".to_owned(),
+                        Value::String("function".to_owned()),
+                    ),
+                    ("file_type".to_owned(), Value::String("code".to_owned())),
+                    ("source_file".to_owned(), Value::String(String::new())),
+                    ("language".to_owned(), Value::String("python".to_owned())),
+                    ("module".to_owned(), Value::String(module.to_owned())),
+                    (
+                        "extractor".to_owned(),
+                        Value::String("compass.graph.external-placeholder".to_owned()),
+                    ),
+                ]),
+            });
+        }
+        emit(
+            call,
+            &id,
+            "calls",
+            "external_call",
+            ("INFERRED", 0.95),
+            existing,
+            edges,
+        );
+    }
+    nodes
+}
+
+fn valid_python_qualified_name(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let mut count = 0_usize;
+    for part in &mut parts {
+        count += 1;
+        let mut characters = part.chars();
+        let Some(first) = characters.next() else {
+            return false;
+        };
+        if !(first == '_' || first.is_ascii_alphabetic())
+            || characters.any(|character| !(character == '_' || character.is_ascii_alphanumeric()))
+        {
+            return false;
+        }
+    }
+    count >= 2
 }
 
 fn resolve_ruby_members(

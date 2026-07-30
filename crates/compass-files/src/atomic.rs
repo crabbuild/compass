@@ -2,6 +2,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(windows)]
+use std::thread;
+#[cfg(windows)]
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -9,6 +13,10 @@ use crate::{FileError, io_error};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const ATOMIC_WRITE_BUFFER_BYTES: usize = 1024 * 1024;
+#[cfg(windows)]
+const WINDOWS_REPLACE_ATTEMPTS: u32 = 8;
+#[cfg(windows)]
+const WINDOWS_REPLACE_RETRY_MILLIS: u64 = 10;
 
 fn resolved_destination(path: &Path) -> PathBuf {
     if path.is_symlink() {
@@ -62,7 +70,7 @@ where
 
         #[cfg(windows)]
         {
-            atomicwrites::replace_atomic(&temporary, &destination)
+            replace_atomic_windows(&temporary, &destination)
                 .map_err(|source| io_error(&destination, source))?;
         }
 
@@ -76,6 +84,31 @@ where
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+#[cfg(windows)]
+fn replace_atomic_windows(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        match atomicwrites::replace_atomic(source, destination) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if attempt + 1 < WINDOWS_REPLACE_ATTEMPTS
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::PermissionDenied
+                            | std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::Interrupted
+                    ) =>
+            {
+                attempt += 1;
+                thread::sleep(Duration::from_millis(
+                    WINDOWS_REPLACE_RETRY_MILLIS * u64::from(attempt),
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub(crate) fn sync_directory(path: &Path) -> Result<(), FileError> {

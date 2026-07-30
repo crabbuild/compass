@@ -5,7 +5,7 @@ use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::Engine;
-use compass_model::code_graph::EdgeKind;
+use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin};
 use compass_resolve::resolve_with_root;
 
@@ -662,6 +662,152 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
     }
 
     assert_eq!(newline_snapshots[0], newline_snapshots[1]);
+    Ok(())
+}
+
+#[test]
+fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "first.py",
+            "from unittest import mock\n\
+             def first():\n    mock.patch('service.first')\n",
+        ),
+        (
+            "second.py",
+            "from unittest import mock\n\
+             def second():\n    mock.patch('service.second')\n",
+        ),
+        (
+            "other.py",
+            "from vendor import mock\n\
+             def other():\n    mock.patch('service.other')\n",
+        ),
+        (
+            "ambiguous.py",
+            "from unittest import mock\n\
+             from vendor import mock\n\
+             def ambiguous():\n    mock.patch('service.ambiguous')\n",
+        ),
+        ("pkg/__init__.py", ""),
+        ("pkg/mock.py", "def patch(value):\n    return value\n"),
+        (
+            "internal.py",
+            "from pkg import mock\n\
+             def internal():\n    mock.patch('service.internal')\n",
+        ),
+    ];
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = write(root, relative, source)?;
+        extractions.push(engine.extract(Path::new(&path))?);
+        sources.insert(path, source.to_owned());
+    }
+
+    let mut extraction = resolve_with_root(&extractions, &sources, root);
+    let placeholders = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("extractor") == "compass.graph.external-placeholder")
+        .collect::<Vec<_>>();
+    assert_eq!(placeholders.len(), 3);
+    assert_eq!(
+        placeholders
+            .iter()
+            .filter(|node| node.string("qualified_name") == "unittest.mock.patch")
+            .count(),
+        2,
+        "the same external symbol must remain scoped to each exact source occurrence"
+    );
+    assert_eq!(
+        placeholders
+            .iter()
+            .filter(|node| node.string("qualified_name") == "vendor.mock.patch")
+            .count(),
+        1
+    );
+    assert!(
+        placeholders
+            .iter()
+            .all(|node| node.string("qualified_name") != "pkg.mock.patch")
+    );
+
+    let placeholder_ids = placeholders
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let external_edges = extraction
+        .edges
+        .iter()
+        .filter(|edge| placeholder_ids.contains(edge.target.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(external_edges.len(), 3);
+    assert!(external_edges.iter().all(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("context") == "external_call"
+            && edge.string("confidence") == "INFERRED"
+            && edge
+                .attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .zip(
+                    edge.attributes
+                        .get("end_byte")
+                        .and_then(serde_json::Value::as_u64),
+                )
+                .is_some_and(|(start, end)| start < end)
+    }));
+
+    let node_ids = extraction
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    extraction.edges.retain(|edge| {
+        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
+    });
+    let evidence =
+        BuildEvidence::from_extraction(root, &extraction, "sha256:python-external-calls")?;
+    let graph = normalize_v1(extraction, evidence)?;
+    let published_placeholders = graph
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.kind == NodeKind::Function
+                && node.source.is_none()
+                && matches!(
+                    node.qualified_name.as_str(),
+                    "unittest.mock.patch" | "vendor.mock.patch"
+                )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(published_placeholders.len(), 3);
+    assert!(published_placeholders.iter().all(|node| {
+        node.evidence.iter().any(|evidence| {
+            evidence.origin == EvidenceOrigin::Heuristic
+                && evidence.confidence == EvidenceConfidence::Inferred
+                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+                && evidence.wiring_site.is_some()
+        })
+    }));
+    assert_eq!(
+        graph
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.kind == EdgeKind::Calls
+                    && published_placeholders
+                        .iter()
+                        .any(|node| node.id == edge.target)
+            })
+            .count(),
+        3
+    );
     Ok(())
 }
 

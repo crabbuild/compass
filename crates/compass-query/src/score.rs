@@ -611,4 +611,23 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn architecture_phrase_prefers_camel_case_resolver_over_generic_url_symbol()
+    -> Result<(), Box<dyn Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [
+                {"id":"url","label":"url()","source_file":"template/defaulttags.py"},
+                {"id":"resolver","label":"URLResolver","source_file":"urls/resolvers.py"}
+            ],
+            "links": []
+        }))?;
+        let graph = Graph::from_document(document)?;
+        let terms = crate::text::query_terms("where is URL resolution implemented");
+        let scores = score_nodes(&graph, &terms, true);
+
+        let first = scores.ranked.first().ok_or("missing score")?;
+        assert_eq!(graph.node(first.node).id, "resolver");
+        Ok(())
+    }
 }

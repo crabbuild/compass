@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use compass_core::{BuildOptions, build_graph_with_layers, build_local_graph};
-use compass_files::{Cache, CacheOptions};
+use compass_files::{AST_CACHE_VERSION, Cache, CacheOptions};
 use compass_languages::{Extraction, Registry};
-use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument};
+use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument, NodeKind};
 use compass_model::provenance::EvidenceOrigin;
 use compass_model::validate_code_graph;
 use sha2::{Digest, Sha256};
@@ -139,13 +139,19 @@ fn zero_byte_registered_source_is_truthful_inventory() -> Result<(), Box<dyn Err
             && coverage.producer == "compass.languages.rust"
             && coverage.status == CoverageStatus::Complete
     }));
+    let empty_nodes = graph
+        .nodes
+        .iter()
+        .filter(|node| node.source_file() == Some("src/empty.rs"))
+        .collect::<Vec<_>>();
+    assert_eq!(empty_nodes.len(), 1);
+    assert_eq!(empty_nodes[0].kind, NodeKind::File);
     assert!(
-        graph.nodes.iter().all(|node| {
-            node.source
-                .as_ref()
-                .is_none_or(|anchor| anchor.file != "src/empty.rs")
-        }),
-        "zero-byte input invented a non-empty AST anchor"
+        graph
+            .links
+            .iter()
+            .all(|edge| edge.source != empty_nodes[0].id && edge.target != empty_nodes[0].id),
+        "zero-byte input must not invent body relationships"
     );
     for (path, language) in [
         ("config/Empty.csproj", "project-xml"),
@@ -290,7 +296,10 @@ fn legacy_markerless_ast_cache_is_reextracted_conservatively() -> Result<(), Box
     cache.save_portable_ast_batch(&[(source, Extraction::default())])?;
     drop(cache);
     let ast_root = directory.path().join("compass-out/cache/ast");
-    fs::rename(ast_root.join("v2"), ast_root.join("v1"))?;
+    fs::rename(
+        ast_root.join(format!("v{AST_CACHE_VERSION}")),
+        ast_root.join("v1"),
+    )?;
 
     let graph = build(directory.path())?;
     let recovered = graph

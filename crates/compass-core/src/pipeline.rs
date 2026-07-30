@@ -14,7 +14,8 @@ use compass_graph::{
     PublicationOmissions, PublicationOutcome, build_owned_with_tiebreaker as build_document,
     canonical_edge_kind, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
     graph_insights, label_communities_by_hub, normalize_document_v1_with_inventory_best_effort,
-    remap_communities_to_previous, score_communities,
+    normalize_document_v1_with_inventory_best_effort_owned, remap_communities_to_previous,
+    score_communities,
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
@@ -499,13 +500,16 @@ fn build_graph_inner(
             }),
     );
 
-    let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && read_prior_published_graph
+    let reusable_semantic_layer = semantic.is_none()
+        || (options.purpose == BuildPurpose::Extract
+            && semantic.is_some_and(semantic_layer_is_empty));
+    let manifest_unchanged = read_prior_published_graph
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let verified_state = if semantic.is_none() && supplemental.is_empty() && manifest_unchanged {
+    let verified_state = if reusable_semantic_layer && supplemental.is_empty() && manifest_unchanged
+    {
         load_verified(
             &output_dir,
             &build_profile,
@@ -560,7 +564,7 @@ fn build_graph_inner(
         }
     }
     let unchanged_program = if options.program_analysis
-        && semantic.is_none()
+        && reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
         && verified_output
@@ -569,7 +573,7 @@ fn build_graph_inner(
     } else {
         None
     };
-    if semantic.is_none()
+    if reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
         && verified_output
@@ -750,13 +754,6 @@ fn build_graph_inner(
             });
         if empty_structured_document && combined.graph.error.is_none() {
             combined.graph.error = Some(format!("{language} extraction failed: empty document"));
-        } else if bytes.is_empty() && combined.graph.error.is_none() {
-            combined.graph.nodes.clear();
-            combined.graph.edges.clear();
-            combined.graph.hyperedges.clear();
-            combined.graph.framework_facts.clear();
-            combined.graph.raw_calls = None;
-            combined.program = None;
         }
         let prepared = combined.program.map(|batch| PreparedSyntaxInput {
             source_file,
@@ -1223,25 +1220,6 @@ fn build_graph_inner(
             .ok()
             .and_then(|directory| git_commit(&directory))
     });
-    let preflight_started = Instant::now();
-    let preflight = normalize_document_v1_with_inventory_best_effort(
-        &document,
-        &root,
-        graph_configuration_digest(options, &output_dir)?,
-        commit.as_deref(),
-        detection_inventory(
-            &detection,
-            semantic,
-            &extraction_failures,
-            &extraction_partials,
-            &root,
-        ),
-    )?;
-    if preflight.document.nodes.is_empty() {
-        return Err(CoreError::EmptyGraph);
-    }
-    profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
-
     let unchanged_artifacts_complete = match options.purpose {
         BuildPurpose::Update => update_artifacts_complete(&output_dir),
         BuildPurpose::Extract => {
@@ -1252,78 +1230,92 @@ fn build_graph_inner(
     let unchanged_layers = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
             && semantic.is_some_and(semantic_layer_is_empty));
-    if !preflight.omissions.is_partial()
-        && unchanged_layers
-        && supplemental.is_empty()
-        && !options.force
-        && unchanged_artifacts_complete
-        && GraphDocument::load(&output_dir.join("graph.json"))
-            .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+    if unchanged_layers && supplemental.is_empty() && !options.force && unchanged_artifacts_complete
     {
-        let communities = previous_communities(&output_dir.join("graph.json"))
-            .values()
-            .copied()
-            .collect::<HashSet<_>>()
-            .len();
-        let mut manifest = prior_manifest;
-        save_build_manifest(
-            &mut manifest,
-            &detection.files,
-            &manifest_path,
+        let preflight_started = Instant::now();
+        let preflight = normalize_document_v1_with_inventory_best_effort(
+            &document,
             &root,
-            semantic,
+            graph_configuration_digest(options, &output_dir)?,
+            commit.as_deref(),
+            detection_inventory(
+                &detection,
+                semantic,
+                &extraction_failures,
+                &extraction_partials,
+                &root,
+            ),
         )?;
-        remove_if_exists(&output_dir.join("needs_update"))?;
-        publish_build_state(
-            options,
-            &output_dir,
-            &manifest_path,
-            sources.len(),
-            document.nodes.len(),
-            document.links.len(),
-            communities,
-            PublicationOmissions::default(),
-            program.as_ref(),
-        )?;
-        let published_output_dir = commit_generation(guard, &output_container)?;
-        return Ok(BuildResult {
-            root,
-            output_dir: published_output_dir,
-            detection,
-            files_considered: sources.len(),
-            files_extracted: missing.len(),
-            files_cached: sources.len().saturating_sub(missing.len()),
-            empty_files,
-            nodes: document.nodes.len(),
-            edges: document.links.len(),
-            communities,
-            omitted_nodes: 0,
-            omitted_edges: 0,
-            identity_collisions: 0,
-            partial_graph: false,
-            html_written: output_dir.join("graph.html").is_file(),
-            outputs_changed: false,
-            program_modules: program_modules(program.as_ref()),
-            program_summaries: program_summaries(program.as_ref()),
-            program_syntax_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.syntax_analyzed),
-            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
-            program_artifacts_loaded: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_loaded),
-            program_artifacts_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_reused),
-            program_artifact_documents_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_analyzed),
-            program_artifact_documents_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_reused),
-            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
-            timings,
-        });
+        profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
+        if !preflight.omissions.is_partial()
+            && GraphDocument::load(&output_dir.join("graph.json"))
+                .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+        {
+            let communities = previous_communities(&output_dir.join("graph.json"))
+                .values()
+                .copied()
+                .collect::<HashSet<_>>()
+                .len();
+            let mut manifest = prior_manifest;
+            save_build_manifest(
+                &mut manifest,
+                &detection.files,
+                &manifest_path,
+                &root,
+                semantic,
+            )?;
+            remove_if_exists(&output_dir.join("needs_update"))?;
+            publish_build_state(
+                options,
+                &output_dir,
+                &manifest_path,
+                sources.len(),
+                document.nodes.len(),
+                document.links.len(),
+                communities,
+                PublicationOmissions::default(),
+                program.as_ref(),
+            )?;
+            let published_output_dir = commit_generation(guard, &output_container)?;
+            return Ok(BuildResult {
+                root,
+                output_dir: published_output_dir,
+                detection,
+                files_considered: sources.len(),
+                files_extracted: missing.len(),
+                files_cached: sources.len().saturating_sub(missing.len()),
+                empty_files,
+                nodes: document.nodes.len(),
+                edges: document.links.len(),
+                communities,
+                omitted_nodes: 0,
+                omitted_edges: 0,
+                identity_collisions: 0,
+                partial_graph: false,
+                html_written: output_dir.join("graph.html").is_file(),
+                outputs_changed: false,
+                program_modules: program_modules(program.as_ref()),
+                program_summaries: program_summaries(program.as_ref()),
+                program_syntax_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.syntax_analyzed),
+                program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+                program_artifacts_loaded: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_loaded),
+                program_artifacts_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_reused),
+                program_artifact_documents_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_analyzed),
+                program_artifact_documents_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_reused),
+                program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
+                timings,
+            });
+        }
     }
 
     // A history realization must depend only on the target commit and build
@@ -1820,9 +1812,9 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
 
 fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, root: &Path) {
     let canonical = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-    let Ok(relative) = canonical
+    let Ok(relative) = source
         .strip_prefix(root)
-        .or_else(|_| source.strip_prefix(root))
+        .or_else(|_| canonical.strip_prefix(root))
     else {
         return;
     };
@@ -1840,6 +1832,13 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
                 value.replace('\\', "/")
             }
         };
+        let normalize_origin_path = |value: &str| {
+            if Path::new(value) == source {
+                portable.clone()
+            } else {
+                normalize_path(value)
+            }
+        };
         for key in ["source_file", "origin_file"] {
             let Some(value) = attributes
                 .get(key)
@@ -1848,7 +1847,7 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             else {
                 continue;
             };
-            let normalized = normalize_path(value);
+            let normalized = normalize_origin_path(value);
             if normalized != value {
                 attributes.insert(key.to_owned(), serde_json::Value::String(normalized));
             }
@@ -1863,7 +1862,7 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
         {
             anchor.insert(
                 "file".to_owned(),
-                serde_json::Value::String(normalize_path(&value)),
+                serde_json::Value::String(normalize_origin_path(&value)),
             );
         }
         if let Some(target) = attributes
@@ -3138,7 +3137,7 @@ fn save_build_manifest(
     root: &Path,
     semantic: Option<&SemanticLayer>,
 ) -> Result<(), CoreError> {
-    let Some(layer) = semantic else {
+    let Some(layer) = semantic.filter(|layer| !semantic_layer_is_empty(layer)) else {
         let scan_corpus = files.values().flatten().cloned().collect::<BTreeSet<_>>();
         manifest.save(
             files,
@@ -3279,8 +3278,8 @@ fn published_v1_document(
             );
         }
     }
-    Ok(normalize_document_v1_with_inventory_best_effort(
-        &publication_source,
+    Ok(normalize_document_v1_with_inventory_best_effort_owned(
+        publication_source,
         root,
         configuration_digest,
         source_commit,

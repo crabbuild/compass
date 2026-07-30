@@ -221,6 +221,71 @@ fn assert_containment_sites_belong_to_targets(extraction: &Extraction) {
 }
 
 #[test]
+fn javascript_prototype_and_fn_assignments_publish_bounded_methods() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("prototype.js");
+    let source = br#"
+function Widget() {}
+function Other() {}
+function Plugin() {}
+function helper() {}
+Widget.prototype.render = function () { helper(); };
+Other.prototype.render = () => helper();
+Plugin.fn.install = function () { helper(); };
+const config = {};
+config.render = function () { helper(); };
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let prototype_methods = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.string("qualified_name").as_str(),
+                "Widget.prototype::render" | "Other.prototype::render" | "Plugin.fn::install"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(prototype_methods.len(), 3);
+    assert!(prototype_methods.iter().all(|node| {
+        node.string("symbol_kind") == "method"
+            && extraction.edges.iter().any(|edge| {
+                edge.string("relation") == "contains"
+                    && edge.target == node.id
+                    && extraction.nodes.iter().any(|owner| {
+                        owner.id == edge.source
+                            && matches!(owner.label(), "Widget()" | "Other()" | "Plugin()")
+                    })
+            })
+            && extraction.edges.iter().any(|edge| {
+                edge.string("relation") == "calls"
+                    && edge.source == node.id
+                    && extraction
+                        .nodes
+                        .iter()
+                        .any(|target| target.id == edge.target && target.label() == "helper()")
+            })
+    }));
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.label() == ".render()")
+            .count(),
+        2,
+        "ordinary object-property assignments must not become prototype methods"
+    );
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .all(|node| node.string("qualified_name") != "config::render")
+    );
+    assert_unique_node_ids(&extraction);
+    Ok(())
+}
+
+#[test]
 fn rust_semantics_publish_first_class_declarations_and_local_relationships()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

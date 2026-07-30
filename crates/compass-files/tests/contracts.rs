@@ -420,6 +420,85 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
 }
 
 #[test]
+fn cache_keeps_distinct_extractions_for_identical_source_bytes() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let first = directory.path().join("AGENTS.md");
+    let second = directory.path().join("CLAUDE.md");
+    fs::write(&first, "# Shared instructions\n")?;
+    fs::write(&second, "# Shared instructions\n")?;
+    let first_value =
+        json!({"nodes":[{"id":"agents","source_file":first.to_string_lossy()}],"edges":[]});
+    let second_value =
+        json!({"nodes":[{"id":"claude","source_file":second.to_string_lossy()}],"edges":[]});
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
+
+    cache.save_batch(
+        &[
+            (first.clone(), first_value.clone()),
+            (second.clone(), second_value.clone()),
+        ],
+        &CacheKind::Ast,
+        None,
+    )?;
+
+    assert_eq!(
+        cache.load(&first, &CacheKind::Ast, None, false)?,
+        Some(first_value)
+    );
+    assert_eq!(
+        cache.load(&second, &CacheKind::Ast, None, false)?,
+        Some(second_value)
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_normalizes_root_aliases_without_collapsing_leaf_symlinks() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let requested_root = directory.path().join("repository");
+    let aliased_root = directory.path().join("repository-alias");
+    fs::create_dir(&requested_root)?;
+    symlink(&requested_root, &aliased_root)?;
+    let canonical_root = fs::canonicalize(&requested_root)?;
+
+    let canonical_source = canonical_root.join("main.py");
+    let aliased_source = aliased_root.join("main.py");
+    fs::write(&canonical_source, "def main(): pass\n")?;
+    let value = json!({"nodes":[{"id":"main","source_file":canonical_source.to_string_lossy()}],"edges":[]});
+    let mut cache = Cache::open(&aliased_root, CacheOptions::output_directory(None))?;
+
+    cache.save(&canonical_source, &value, &CacheKind::Ast, None)?;
+    assert_eq!(
+        cache.load(&aliased_source, &CacheKind::Ast, None, false)?,
+        Some(value)
+    );
+
+    let target = canonical_root.join("AGENTS.md");
+    let link = canonical_root.join("CLAUDE.md");
+    fs::write(&target, "# Shared instructions\n")?;
+    symlink(&target, &link)?;
+    let target_value =
+        json!({"nodes":[{"id":"agents","source_file":target.to_string_lossy()}],"edges":[]});
+    let link_value =
+        json!({"nodes":[{"id":"claude","source_file":link.to_string_lossy()}],"edges":[]});
+
+    cache.save(&target, &target_value, &CacheKind::Ast, None)?;
+    cache.save(&link, &link_value, &CacheKind::Ast, None)?;
+    assert_eq!(
+        cache.load(&target, &CacheKind::Ast, None, false)?,
+        Some(target_value)
+    );
+    assert_eq!(
+        cache.load(&link, &CacheKind::Ast, None, false)?,
+        Some(link_value)
+    );
+    Ok(())
+}
+
+#[test]
 fn malformed_and_non_object_cache_entries_fail_closed() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("main.py");
@@ -636,7 +715,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(
         default_cache
             .directory(&CacheKind::Ast, None)
-            .ends_with("ast/v2/e6")
+            .ends_with("ast/v3/e7")
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
 
@@ -964,7 +1043,7 @@ fn program_cache_is_path_sensitive_and_namespace_isolated() -> Result<(), Box<dy
     )?;
     cache.save_program(&artifact, "index.scip:bbbbbbbb", &json!({"kind":"scip"}))?;
     let syntax_directory = cache.directory(&syntax, None);
-    assert!(syntax_directory.ends_with("e6"));
+    assert!(syntax_directory.ends_with("e7"));
     assert!(
         fs::read_dir(&syntax_directory)?
             .filter_map(Result::ok)
