@@ -3967,6 +3967,12 @@ mod tests {
     fn canonical_compass_skill_package_is_native() {
         let body = asset_text(SKILL_ASSET).unwrap_or_default();
         assert!(body.starts_with("---\nname: compass\n"));
+        assert!(
+            EMBEDDED_ASSETS
+                .iter()
+                .all(|asset| !asset.bytes.contains(&b'\r')),
+            "embedded text assets must use canonical LF line endings"
+        );
         assert!(body.contains("references/query.md"));
         assert!(body.contains("compass query"));
         assert!(!body.contains("python -m"), "stale token python -m");
