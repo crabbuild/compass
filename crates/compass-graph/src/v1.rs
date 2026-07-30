@@ -234,22 +234,44 @@ impl BuildEvidence {
         &mut self,
         inventory: impl IntoIterator<Item = InventoryEvidence>,
     ) -> Result<(), GraphError> {
+        let mut file_positions = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| (file.path.clone(), index))
+            .collect::<HashMap<_, _>>();
+        let mut coverage_by_file = HashMap::<String, Vec<usize>>::new();
+        for (index, coverage) in self.coverage.iter().enumerate() {
+            if let Some(file_id) = &coverage.file_id {
+                coverage_by_file
+                    .entry(file_id.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
         for item in inventory {
             let path = portable_path(&item.path.to_string_lossy(), &self.repository_root)?;
             let absolute = self.repository_root.join(&path);
             if !absolute.is_file() {
                 continue;
             }
-            let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
-                path: absolute,
-                source,
-            })?;
+            let existing_position = file_positions.get(&path).copied();
+            let (content_digest, byte_size) = if let Some(position) = existing_position {
+                let existing = &self.files[position];
+                (existing.content_digest.clone(), existing.byte_size)
+            } else {
+                let bytes = fs::read(&absolute).map_err(|source| GraphError::Read {
+                    path: absolute,
+                    source,
+                })?;
+                (sha256_prefixed(&bytes), bytes.len() as u64)
+            };
             let record = FileRecord {
                 id: file_id(&path),
                 path: path.clone(),
                 language: item.language.clone(),
-                content_digest: sha256_prefixed(&bytes),
-                byte_size: bytes.len() as u64,
+                content_digest,
+                byte_size,
                 generated: item.status == ExtractionStatus::Generated,
                 extraction_status: item.status,
                 extractor_versions: vec![format!(
@@ -261,29 +283,35 @@ impl BuildEvidence {
                     .into_iter()
                     .collect(),
             };
-            if let Some(existing) = self.files.iter_mut().find(|file| file.path == path) {
-                *existing = record;
+            if let Some(position) = existing_position {
+                self.files[position] = record;
             } else {
+                file_positions.insert(path.clone(), self.files.len());
                 self.files.push(record);
             }
             let status = coverage_status(item.status);
             let file_record_id = file_id(&path);
-            for coverage in &mut self.coverage {
-                if coverage.file_id.as_deref() == Some(file_record_id.as_str())
-                    && status != CoverageStatus::Complete
-                {
-                    coverage.status = status;
-                    coverage.reason.clone_from(&item.reason);
+            if status != CoverageStatus::Complete
+                && let Some(indexes) = coverage_by_file.get(&file_record_id)
+            {
+                for &index in indexes {
+                    self.coverage[index].status = status;
+                    self.coverage[index].reason.clone_from(&item.reason);
                 }
             }
+            let coverage_index = self.coverage.len();
             self.coverage.push(CoverageRecord {
                 capability: "file_inventory".to_owned(),
                 producer: item.producer,
                 status,
-                file_id: Some(file_record_id),
+                file_id: Some(file_record_id.clone()),
                 reason: item.reason.clone(),
                 anchor: None,
             });
+            coverage_by_file
+                .entry(file_record_id)
+                .or_default()
+                .push(coverage_index);
             if let Some(diagnostic) =
                 inventory_diagnostic(&path, item.status, item.reason.as_deref())
             {
