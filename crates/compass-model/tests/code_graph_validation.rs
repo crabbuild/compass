@@ -122,10 +122,15 @@ fn whole_document_validation_accepts_the_supported_route_shape() {
 }
 
 #[test]
-fn structured_validation_classifies_document_node_and_edge_failures() {
+fn structured_validation_classifies_document_node_and_edge_failures() -> Result<(), Box<dyn Error>>
+{
     let mut graph = document();
     graph.directed = false;
-    graph.nodes[0].source.as_mut().unwrap().end_byte = 101;
+    let source = graph.nodes[0]
+        .source
+        .as_mut()
+        .ok_or("fixture node must remain source-backed")?;
+    source.end_byte = 101;
     graph.nodes[1].kind = NodeKind::Route;
 
     let report = validate_code_graph_records(&graph);
@@ -147,10 +152,11 @@ fn structured_validation_classifies_document_node_and_edge_failures() {
             .iter()
             .any(|error| error.contains("invalid routes_to"))
     );
+    Ok(())
 }
 
 #[test]
-fn structured_validation_preserves_strict_error_order() {
+fn structured_validation_preserves_strict_error_order() -> Result<(), Box<dyn Error>> {
     let mut graph = document();
     graph.multigraph = false;
     graph.nodes[0].name.clear();
@@ -171,11 +177,15 @@ fn structured_validation_preserves_strict_error_order() {
             .flat_map(|record| record.errors.iter().cloned()),
     );
 
+    let errors = validate_code_graph(&graph)
+        .err()
+        .ok_or("invalid fixture unexpectedly passed strict validation")?
+        .errors;
     assert_eq!(
-        validate_code_graph(&graph).unwrap_err().errors,
-        expected,
+        errors, expected,
         "strict validation must remain an ordered projection of the report"
     );
+    Ok(())
 }
 
 #[test]
@@ -640,3 +650,4 @@ fn unknown_rewrite_like_names_remain_valid_open_ended_producer_rules() {
     graph.links[0].evidence[0].rule = Some("future-endpoint-remap".to_owned());
     assert!(validate_code_graph(&graph).is_ok());
 }
+use std::error::Error;

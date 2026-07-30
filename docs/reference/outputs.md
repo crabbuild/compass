@@ -104,6 +104,12 @@ promotion.
 - use canonical/semantic equivalence for graph comparisons;
 - validate file size and JSON at your trust boundary.
 
+Compass readers use a bounded 1 GiB default graph-size cap. This accommodates
+qualified enterprise artifacts while preventing unbounded input reads.
+Operators can set `COMPASS_MAX_GRAPH_BYTES` to an explicit byte count or
+`<N>MB`/`<N>GB`; raising it also raises the memory exposure of JSON decoding
+and indexing.
+
 ### Partial publication diagnostics
 
 A successful build can publish a strictly valid partial graph after

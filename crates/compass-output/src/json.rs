@@ -5,7 +5,7 @@ use std::path::Path;
 
 use compass_files::write_json_ascii_atomic;
 use compass_graph::Communities;
-use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::{DEFAULT_GRAPH_SIZE_CAP_BYTES, EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Serialize, Serializer};
@@ -15,8 +15,6 @@ use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 use ahash::AHashMap;
 
 use crate::OutputError;
-
-const DEFAULT_GRAPH_SIZE_CAP: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct JsonExportOptions<'a> {
@@ -411,11 +409,11 @@ fn enforce_shrink_guard(path: &Path, new_count: usize, force: bool) -> Result<()
 
 fn graph_size_cap() -> u64 {
     let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
-        return DEFAULT_GRAPH_SIZE_CAP;
+        return DEFAULT_GRAPH_SIZE_CAP_BYTES;
     };
     let text = raw.trim().to_uppercase();
     if text.is_empty() {
-        return DEFAULT_GRAPH_SIZE_CAP;
+        return DEFAULT_GRAPH_SIZE_CAP_BYTES;
     }
     let (number, multiplier) = if let Some(number) = text.strip_suffix("GB") {
         (number, 1024_u64 * 1024 * 1024)
@@ -430,7 +428,7 @@ fn graph_size_cap() -> u64 {
         .ok()
         .and_then(|value| value.checked_mul(multiplier))
         .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_GRAPH_SIZE_CAP)
+        .unwrap_or(DEFAULT_GRAPH_SIZE_CAP_BYTES)
 }
 
 pub(crate) fn escape_non_ascii(value: &str) -> String {
