@@ -81,6 +81,7 @@ pub struct CodeQueryEngine {
     pub(crate) index_path: PathBuf,
     pub(crate) adjacency: CodeAdjacencyIndex,
     pub(crate) lookup: CodeLookupIndex,
+    pub(crate) partial_graph_message: Option<String>,
 }
 
 pub(crate) struct CodeLookupIndex {
@@ -310,7 +311,7 @@ impl CodeQueryEngine {
                 node_id: None,
                 path: None,
             });
-            return Ok(response);
+            return self.finish_response(&mut response);
         }
         let mut statement = self
             .connection
@@ -400,13 +401,7 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        if self.program.is_some() {
-            join_program_evidence(&mut response, self.program.as_ref());
-        } else {
-            response.sort_stable();
-        }
-        enforce_response_size(&mut response)?;
-        Ok(response)
+        self.finish_response(&mut response)
     }
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
@@ -430,7 +425,7 @@ impl CodeQueryEngine {
         };
         let mut response = CodeQueryResponse::empty(operation, request.limits.clone());
         let Some(seed) = self.resolve_symbol(&request.symbol, &mut response) else {
-            return Ok(response);
+            return self.finish_response(&mut response);
         };
         let kinds: &[EdgeKind] = if inbound {
             &[EdgeKind::Calls, EdgeKind::RoutesTo]
@@ -461,7 +456,7 @@ impl CodeQueryEngine {
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Impact, request.limits.clone());
         let Some(seed) = self.resolve_symbol(&request.symbol, &mut response) else {
-            return Ok(response);
+            return self.finish_response(&mut response);
         };
         let max_depth = usize::try_from(request.limits.max_depth).unwrap_or(usize::MAX);
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
@@ -580,10 +575,10 @@ impl CodeQueryEngine {
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::NodeTrail, request.limits.clone());
         let Some(source) = self.resolve_symbol(&request.source, &mut response) else {
-            return Ok(response);
+            return self.finish_response(&mut response);
         };
         let Some(target) = self.resolve_symbol(&request.target, &mut response) else {
-            return Ok(response);
+            return self.finish_response(&mut response);
         };
         let mut budget = TraversalBudget::new(&request.limits);
         let (path, truncated) = self.shortest_path(
@@ -604,7 +599,7 @@ impl CodeQueryEngine {
                 node_id: Some(source),
                 path: None,
             });
-            return Ok(response);
+            return self.finish_response(&mut response);
         };
         let ids = nodes.iter().cloned().collect::<HashSet<_>>();
         self.add_nodes(&ids, &mut response);
@@ -842,6 +837,14 @@ impl CodeQueryEngine {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::BoundedTruncation,
                 message: "One or more query bounds truncated the response".to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
+        if let Some(message) = &self.partial_graph_message {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::IncompleteCoverage,
+                message: message.clone(),
                 node_id: None,
                 path: None,
             });

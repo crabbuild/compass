@@ -3,7 +3,7 @@ use std::path::Path;
 
 use compass_graph::{
     BuildEvidence, InventoryEvidence, build_from_extraction, extraction_from_v1,
-    normalize_document_v1, normalize_v1,
+    normalize_document_v1, normalize_v1, normalize_v1_best_effort,
 };
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
@@ -15,6 +15,7 @@ use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
     SEMANTIC_LAYER_EXTRACTOR, TRUSTED_EDGE_RECORD_ATTRIBUTE, append_endpoint_rewrite_evidence,
 };
+use compass_model::validate_code_graph;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -1016,6 +1017,244 @@ fn normalization_rejects_unknown_aliases_and_missing_wiring_sites() {
     missing_site.edges[0].attributes.remove("source_anchor");
     let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
     assert!(normalize_v1(missing_site, evidence).is_err());
+}
+
+#[test]
+fn best_effort_normalization_omits_an_unknown_relation() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut source = extraction(root);
+    source.edges[0]
+        .attributes
+        .insert("relation".to_owned(), json!("bound_to"));
+
+    let outcome = normalize_v1_best_effort(source, build_evidence(root)?)?;
+
+    assert_eq!(outcome.document.nodes.len(), 2);
+    assert!(outcome.document.links.is_empty());
+    assert_eq!(outcome.omissions.edges, 1);
+    assert_eq!(outcome.omissions.nodes, 0);
+    assert!(outcome.document.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "publication_omitted_edge"
+            && diagnostic.message.contains("unknown raw relation")
+    }));
+    assert!(validate_code_graph(&outcome.document).is_ok());
+    Ok(())
+}
+
+#[test]
+fn best_effort_normalization_quarantines_unwired_placeholders()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = Extraction {
+        nodes: vec![
+            raw_node(root, "raw:valid", "valid", 10),
+            raw_external_node("raw:model", "ExternalModel"),
+        ],
+        edges: vec![RawEdgeRecord {
+            source: "raw:valid".to_owned(),
+            target: "raw:model".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("references")),
+                ("extractor".to_owned(), json!("test.rust")),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+
+    let outcome = normalize_v1_best_effort(source, build_evidence(root)?)?;
+
+    assert_eq!(outcome.document.nodes.len(), 1);
+    assert!(outcome.document.links.is_empty());
+    assert_eq!(outcome.omissions.nodes, 1);
+    assert_eq!(outcome.omissions.edges, 1);
+    assert!(validate_code_graph(&outcome.document).is_ok());
+    Ok(())
+}
+
+#[test]
+fn best_effort_stable_identity_collision_is_order_independent()
+-> Result<(), Box<dyn std::error::Error>> {
+    let left_directory = tempfile::tempdir()?;
+    let right_directory = tempfile::tempdir()?;
+    let left_root = left_directory.path();
+    let right_root = right_directory.path();
+    let source_at = |root: &Path| Extraction {
+        nodes: vec![
+            raw_node(root, "raw:first", "repeated", 10),
+            raw_node(root, "raw:second", "repeated", 30),
+        ],
+        ..Extraction::default()
+    };
+
+    let left = normalize_v1_best_effort(source_at(left_root), build_evidence(left_root)?)?;
+    let mut reversed = source_at(right_root);
+    reversed.nodes.reverse();
+    let right = normalize_v1_best_effort(reversed, build_evidence(right_root)?)?;
+
+    assert_eq!(left.document, right.document);
+    assert_eq!(left.omissions, right.omissions);
+    assert_eq!(left.document.nodes.len(), 1);
+    assert_eq!(left.omissions.nodes, 1);
+    assert_eq!(left.omissions.identity_collisions, 1);
+    assert!(validate_code_graph(&left.document).is_ok());
+    Ok(())
+}
+
+#[test]
+fn best_effort_typed_validation_omits_invalid_endpoint_edges()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut source = extraction(root);
+    source.nodes[0]
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("method"));
+    source.nodes[1]
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("module"));
+    source.edges[0]
+        .attributes
+        .insert("relation".to_owned(), json!("calls"));
+    source.edges[0]
+        .attributes
+        .insert("_origin".to_owned(), json!("ast"));
+    source.edges[0]
+        .attributes
+        .insert("confidence".to_owned(), json!("EXTRACTED"));
+
+    let outcome = normalize_v1_best_effort(source, build_evidence(root)?)?;
+
+    assert_eq!(outcome.document.nodes.len(), 2);
+    assert!(outcome.document.links.is_empty());
+    assert_eq!(outcome.omissions.edges, 1);
+    assert!(outcome.document.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "publication_omitted_edge"
+            && diagnostic
+                .message
+                .contains("invalid calls endpoints method -> module")
+    }));
+    assert!(validate_code_graph(&outcome.document).is_ok());
+    Ok(())
+}
+
+#[test]
+fn best_effort_route_stage_becomes_unresolved_when_handler_edge_is_quarantined()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut route = raw_node(root, "raw:route", "GET /items", 10);
+    route
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("route"));
+    route
+        .attributes
+        .insert("framework".to_owned(), json!("express"));
+    route
+        .attributes
+        .insert("operation".to_owned(), json!("GET"));
+    route.attributes.insert("path".to_owned(), json!("/items"));
+    route
+        .attributes
+        .insert("declaring_scope".to_owned(), json!("router"));
+    route.attributes.insert(
+        "stages".to_owned(),
+        json!([{
+            "stage": "handler",
+            "position": 0,
+            "reference": "handlers.listItems",
+            "resolution": "exact",
+            "target": "raw:handler",
+            "candidates": []
+        }]),
+    );
+    let mut invalid_handler = raw_node(root, "raw:handler", "handlers", 30);
+    invalid_handler
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("module"));
+    let outcome = normalize_v1_best_effort(
+        Extraction {
+            nodes: vec![route, invalid_handler],
+            edges: vec![RawEdgeRecord {
+                source: "raw:route".to_owned(),
+                target: "raw:handler".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("routes_to")),
+                    ("stage".to_owned(), json!("handler")),
+                    ("position".to_owned(), json!(0)),
+                    ("operation".to_owned(), json!("GET")),
+                    ("extractor".to_owned(), json!("test.routes")),
+                    ("source_anchor".to_owned(), anchor(root, 10)),
+                ]),
+            }],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert!(outcome.document.links.is_empty());
+    let route = outcome
+        .document
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Route)
+        .ok_or("missing route")?;
+    let compass_model::code_graph::NodeDetails::Route(details) =
+        route.details.as_ref().ok_or("missing route details")?
+    else {
+        return Err("wrong route details".into());
+    };
+    assert_eq!(
+        details.resolution,
+        compass_model::provenance::ResolutionState::Unresolved
+    );
+    assert_eq!(
+        details.stages[0].resolution,
+        compass_model::provenance::ResolutionState::Unresolved
+    );
+    assert!(details.stages[0].target.is_none());
+    assert!(validate_code_graph(&outcome.document).is_ok());
+    Ok(())
+}
+
+#[test]
+fn best_effort_diagnostic_examples_are_bounded_with_exact_counts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut source = extraction(root);
+    source.edges = (0..110)
+        .map(|index| RawEdgeRecord {
+            source: "raw:a".to_owned(),
+            target: "raw:b".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!(format!("unknown_{index}"))),
+                ("source_anchor".to_owned(), anchor(root, 50)),
+            ]),
+        })
+        .collect();
+
+    let outcome = normalize_v1_best_effort(source, build_evidence(root)?)?;
+
+    assert_eq!(outcome.omissions.edges, 110);
+    assert_eq!(outcome.omissions.examples_omitted, 10);
+    assert_eq!(
+        outcome
+            .document
+            .graph
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "publication_omitted_edge")
+            .count(),
+        100
+    );
+    assert!(outcome.document.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "publication_omission_summary"
+            && diagnostic.message.contains("110 edges")
+            && diagnostic.message.contains("10 examples")
+    }));
+    Ok(())
 }
 
 #[test]

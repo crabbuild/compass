@@ -789,20 +789,26 @@ resolution, or provenance classification.
 
 Graph publication fails for:
 
-- unknown node, role, or edge values;
-- invalid endpoint-kind combinations;
-- duplicate stable IDs with conflicting content;
-- dangling endpoints;
-- missing provenance;
-- heuristic relationships without a rule or wiring site;
-- invalid source anchors;
+- invalid envelope or build metadata;
+- invalid or repository-escaping file inventory;
+- no usable nodes after record quarantine;
 - repository-escaping paths;
 - mismatched graph, Program IR, manifest, or build fingerprints.
+
+Unknown node, role, or edge values, invalid endpoint-kind combinations,
+conflicting stable identities, dangling endpoints, missing record provenance,
+heuristic relationships without a rule or wiring site, and invalid record
+anchors quarantine the affected node or edge in normal builds. The remaining
+document is still validated by the unchanged strict validator. Strict
+normalization APIs continue to reject those producer defects for qualification
+and tests.
 
 ### Partial extraction
 
 An unsupported or unparsable file is represented by failed or indeterminate
-coverage and a diagnostic. It does not silently disappear.
+coverage and a diagnostic. An invalid individual graph record is represented by
+a bounded quarantine diagnostic and exact publication omission summary. Neither
+silently disappears.
 
 The default developer build may publish a partial graph when all structural
 invariants remain valid. Strict mode fails publication when required coverage

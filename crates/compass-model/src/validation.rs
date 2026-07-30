@@ -173,17 +173,59 @@ impl std::fmt::Display for ExtractionValidationError {
 
 impl std::error::Error for ExtractionValidationError {}
 
-/// Validate all cross-record invariants of a strict `compass.graph/1` document.
-pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraphValidationError> {
-    let mut errors = Vec::new();
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RecordValidationErrors {
+    pub id: String,
+    pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CodeGraphValidationReport {
+    pub document_errors: Vec<String>,
+    pub node_errors: Vec<RecordValidationErrors>,
+    pub edge_errors: Vec<RecordValidationErrors>,
+}
+
+impl CodeGraphValidationReport {
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.document_errors.is_empty()
+            && self.node_errors.is_empty()
+            && self.edge_errors.is_empty()
+    }
+
+    fn into_errors(self) -> Vec<String> {
+        let mut errors = self.document_errors;
+        errors.extend(
+            self.node_errors
+                .into_iter()
+                .flat_map(|record| record.errors),
+        );
+        errors.extend(
+            self.edge_errors
+                .into_iter()
+                .flat_map(|record| record.errors),
+        );
+        errors
+    }
+}
+
+/// Classify strict `compass.graph/1` validation failures by owning record.
+#[must_use]
+pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphValidationReport {
+    let mut report = CodeGraphValidationReport::default();
     if !document.directed {
-        errors.push("directed must be true".to_owned());
+        report
+            .document_errors
+            .push("directed must be true".to_owned());
     }
     if !document.multigraph {
-        errors.push("multigraph must be true".to_owned());
+        report
+            .document_errors
+            .push("multigraph must be true".to_owned());
     }
     if document.graph.schema != CODE_GRAPH_SCHEMA_V1 {
-        errors.push(format!(
+        report.document_errors.push(format!(
             "graph.schema must be {CODE_GRAPH_SCHEMA_V1}, got {}",
             document.graph.schema
         ));
@@ -192,22 +234,26 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
     let mut files = HashMap::new();
     for file in &document.graph.files {
         if file.id.trim().is_empty() {
-            errors.push("file ID must not be empty".to_owned());
+            report
+                .document_errors
+                .push("file ID must not be empty".to_owned());
         }
         if file.path.is_empty()
             || std::path::Path::new(&file.path).is_absolute()
             || file.path.contains('\\')
         {
-            errors.push(format!(
+            report.document_errors.push(format!(
                 "file {} has a non-portable repository path",
                 file.id
             ));
         }
         if files.insert(file.path.as_str(), file.byte_size).is_some() {
-            errors.push(format!("duplicate file path {}", file.path));
+            report
+                .document_errors
+                .push(format!("duplicate file path {}", file.path));
         }
         if file.id != file_id(&file.path) {
-            errors.push(format!(
+            report.document_errors.push(format!(
                 "file {} does not match its deterministic path identity",
                 file.path
             ));
@@ -216,6 +262,7 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
 
     let mut nodes = HashMap::new();
     for node in &document.nodes {
+        let mut errors = Vec::new();
         if node.id.trim().is_empty() {
             errors.push("node ID must not be empty".to_owned());
         }
@@ -242,10 +289,17 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
                 node.kind.as_str()
             ));
         }
+        if !errors.is_empty() {
+            report.node_errors.push(RecordValidationErrors {
+                id: node.id.clone(),
+                errors,
+            });
+        }
     }
 
     let mut edge_ids = HashSet::new();
     for edge in &document.links {
+        let mut errors = Vec::new();
         if edge
             .occurrence_rule
             .as_ref()
@@ -290,6 +344,10 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
                 "edge {} source {} does not match a node",
                 edge.id, edge.source
             ));
+            report.edge_errors.push(RecordValidationErrors {
+                id: edge.id.clone(),
+                errors,
+            });
             continue;
         };
         let Some(target) = nodes.get(edge.target.as_str()) else {
@@ -297,6 +355,10 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
                 "edge {} target {} does not match a node",
                 edge.id, edge.target
             ));
+            report.edge_errors.push(RecordValidationErrors {
+                id: edge.id.clone(),
+                errors,
+            });
             continue;
         };
         if edge.source == edge.target && edge.kind != EdgeKind::Calls {
@@ -330,8 +392,24 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
                 site
             ));
         }
+        if !errors.is_empty() {
+            report.edge_errors.push(RecordValidationErrors {
+                id: edge.id.clone(),
+                errors,
+            });
+        }
     }
 
+    report
+}
+
+/// Validate all cross-record invariants of a strict `compass.graph/1` document.
+pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraphValidationError> {
+    let report = validate_code_graph_records(document);
+    if report.is_valid() {
+        return Ok(());
+    }
+    let errors = report.into_errors();
     if errors.is_empty() {
         Ok(())
     } else {

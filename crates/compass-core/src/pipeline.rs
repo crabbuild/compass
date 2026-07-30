@@ -11,10 +11,10 @@ use compass_files::{
 };
 use compass_graph::{
     ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION, InventoryEvidence,
-    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
-    cluster, dedupe_edges, dedupe_nodes, extraction_from_v1, graph_insights,
-    label_communities_by_hub, normalize_document_v1_with_inventory, remap_communities_to_previous,
-    score_communities,
+    PublicationOmissions, PublicationOutcome, build_owned_with_tiebreaker as build_document,
+    canonical_edge_kind, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
+    graph_insights, label_communities_by_hub, normalize_document_v1_with_inventory_best_effort,
+    remap_communities_to_previous, score_communities,
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
@@ -123,6 +123,23 @@ struct OutputStats {
     edges: usize,
     communities: usize,
     clustered: bool,
+    #[serde(default)]
+    omitted_nodes: usize,
+    #[serde(default)]
+    omitted_edges: usize,
+    #[serde(default)]
+    identity_collisions: usize,
+}
+
+impl OutputStats {
+    const fn omissions(&self) -> PublicationOmissions {
+        PublicationOmissions {
+            nodes: self.omitted_nodes,
+            edges: self.omitted_edges,
+            identity_collisions: self.identity_collisions,
+            examples_omitted: 0,
+        }
+    }
 }
 
 impl BuildOptions {
@@ -178,6 +195,10 @@ pub struct BuildResult {
     pub nodes: usize,
     pub edges: usize,
     pub communities: usize,
+    pub omitted_nodes: usize,
+    pub omitted_edges: usize,
+    pub identity_collisions: usize,
+    pub partial_graph: bool,
     pub html_written: bool,
     pub outputs_changed: bool,
     pub program_modules: usize,
@@ -516,6 +537,12 @@ fn build_graph_inner(
                 nodes: state.stats.nodes,
                 edges: state.stats.edges,
                 communities: state.stats.communities,
+                omitted_nodes: state.stats.omitted_nodes,
+                omitted_edges: state.stats.omitted_edges,
+                identity_collisions: state.stats.identity_collisions,
+                partial_graph: state.stats.omitted_nodes > 0
+                    || state.stats.omitted_edges > 0
+                    || state.stats.identity_collisions > 0,
                 html_written: output_dir.join("graph.html").is_file(),
                 outputs_changed: false,
                 program_modules: state.stats.program_modules,
@@ -563,6 +590,7 @@ fn build_graph_inner(
             stats.nodes,
             stats.edges,
             stats.communities,
+            stats.omissions(),
             unchanged_program.as_ref(),
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
@@ -577,6 +605,10 @@ fn build_graph_inner(
             nodes: stats.nodes,
             edges: stats.edges,
             communities: stats.communities,
+            omitted_nodes: stats.omitted_nodes,
+            omitted_edges: stats.omitted_edges,
+            identity_collisions: stats.identity_collisions,
+            partial_graph: stats.omissions().is_partial(),
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
             program_modules: program_modules(unchanged_program.as_ref()),
@@ -1003,6 +1035,7 @@ fn build_graph_inner(
         && semantic.is_some_and(semantic_layer_is_empty)
         && let Ok(document) = GraphDocument::load(&output_dir.join("graph.json"))
     {
+        let omissions = saved_publication_omissions(&output_dir);
         let mut manifest = prior_manifest;
         save_build_manifest(
             &mut manifest,
@@ -1019,6 +1052,7 @@ fn build_graph_inner(
             document.nodes.len(),
             document.links.len(),
             0,
+            omissions,
             program.as_ref(),
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
@@ -1033,6 +1067,10 @@ fn build_graph_inner(
             nodes: document.nodes.len(),
             edges: document.links.len(),
             communities: 0,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
+            partial_graph: omissions.is_partial(),
             html_written: false,
             outputs_changed: false,
             program_modules: program_modules(program.as_ref()),
@@ -1058,7 +1096,7 @@ fn build_graph_inner(
         });
     }
     if options.no_cluster {
-        let (nodes, edges) = (dedupe_nodes(&resolved.nodes), dedupe_edges(&resolved.edges));
+        let nodes = dedupe_nodes(&resolved.nodes);
         enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
         let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
@@ -1066,7 +1104,7 @@ fn build_graph_inner(
             .built_at_commit
             .clone()
             .or_else(|| git_commit(&root));
-        let published = normalize_document_v1_with_inventory(
+        let published = normalize_document_v1_with_inventory_best_effort(
             &document,
             &root,
             configuration_digest,
@@ -1079,9 +1117,22 @@ fn build_graph_inner(
                 &root,
             ),
         )?;
-        write_json_atomic(output_dir.join("graph.json"), &published, false)?;
+        if published.document.nodes.is_empty() {
+            return Err(CoreError::EmptyGraph);
+        }
+        let omissions = published.omissions;
+        let published_nodes = published.document.nodes.len();
+        let published_edges = published.document.links.len();
+        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
-        save_output_stats(&output_dir, nodes.len(), edges.len(), 0, false)?;
+        save_output_stats(
+            &output_dir,
+            published_nodes,
+            published_edges,
+            0,
+            false,
+            omissions,
+        )?;
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
@@ -1103,9 +1154,10 @@ fn build_graph_inner(
             &output_dir,
             &manifest_path,
             sources.len(),
-            nodes.len(),
-            edges.len(),
+            published_nodes,
+            published_edges,
             0,
+            omissions,
             program.as_ref(),
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
@@ -1118,9 +1170,13 @@ fn build_graph_inner(
             files_extracted: missing.len(),
             files_cached: sources.len().saturating_sub(missing.len()),
             empty_files,
-            nodes: nodes.len(),
-            edges: edges.len(),
+            nodes: published_nodes,
+            edges: published_edges,
             communities: 0,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
+            partial_graph: omissions.is_partial(),
             html_written: false,
             outputs_changed: true,
             program_modules: program_modules(program.as_ref()),
@@ -1158,7 +1214,7 @@ fn build_graph_inner(
             .and_then(|directory| git_commit(&directory))
     });
     let preflight_started = Instant::now();
-    normalize_document_v1_with_inventory(
+    let preflight = normalize_document_v1_with_inventory_best_effort(
         &document,
         &root,
         graph_configuration_digest(options, &output_dir)?,
@@ -1171,6 +1227,9 @@ fn build_graph_inner(
             &root,
         ),
     )?;
+    if preflight.document.nodes.is_empty() {
+        return Err(CoreError::EmptyGraph);
+    }
     profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
 
     let unchanged_artifacts_complete = match options.purpose {
@@ -1183,7 +1242,8 @@ fn build_graph_inner(
     let unchanged_layers = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
             && semantic.is_some_and(semantic_layer_is_empty));
-    if unchanged_layers
+    if !preflight.omissions.is_partial()
+        && unchanged_layers
         && supplemental.is_empty()
         && !options.force
         && unchanged_artifacts_complete
@@ -1212,6 +1272,7 @@ fn build_graph_inner(
             document.nodes.len(),
             document.links.len(),
             communities,
+            PublicationOmissions::default(),
             program.as_ref(),
         )?;
         let published_output_dir = commit_generation(guard, &output_container)?;
@@ -1226,6 +1287,10 @@ fn build_graph_inner(
             nodes: document.nodes.len(),
             edges: document.links.len(),
             communities,
+            omitted_nodes: 0,
+            omitted_edges: 0,
+            identity_collisions: 0,
+            partial_graph: false,
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
             program_modules: program_modules(program.as_ref()),
@@ -1287,7 +1352,7 @@ fn build_graph_inner(
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
 
-    let graph_output = || -> Result<Duration, CoreError> {
+    let graph_output = || -> Result<(Duration, PublicationOmissions, usize, usize), CoreError> {
         let started = Instant::now();
         let mut output_profile_started = Instant::now();
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
@@ -1305,7 +1370,12 @@ fn build_graph_inner(
             configuration_digest,
             commit.as_deref(),
         )?;
-        write_json_atomic(output_dir.join("graph.json"), &published, false)?;
+        if published.document.nodes.is_empty() {
+            return Err(CoreError::EmptyGraph);
+        }
+        let published_nodes = published.document.nodes.len();
+        let published_edges = published.document.links.len();
+        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
         profile_internal("graph.json v1 publication", &mut output_profile_started);
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
@@ -1318,7 +1388,12 @@ fn build_graph_inner(
                 &mut output_profile_started,
             );
         }
-        Ok(started.elapsed())
+        Ok((
+            started.elapsed(),
+            published.omissions,
+            published_nodes,
+            published_edges,
+        ))
     };
     let graph_analyses = || -> Result<(bool, Duration), CoreError> {
         let started = Instant::now();
@@ -1424,7 +1499,7 @@ fn build_graph_inner(
         Ok((html_written, started.elapsed()))
     };
     let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
-    let graph_output_elapsed = graph_output_elapsed?;
+    let (graph_output_elapsed, omissions, published_nodes, published_edges) = graph_output_elapsed?;
     let (html_written, analysis_elapsed) = analysis_result?;
     profile_internal_duration("graph and overview publication", graph_output_elapsed);
     profile_internal_duration(
@@ -1451,19 +1526,21 @@ fn build_graph_inner(
     }
     save_output_stats(
         &output_dir,
-        document.nodes.len(),
-        document.links.len(),
+        published_nodes,
+        published_edges,
         communities.len(),
         true,
+        omissions,
     )?;
     publish_build_state(
         options,
         &output_dir,
         &manifest_path,
         sources.len(),
-        document.nodes.len(),
-        document.links.len(),
+        published_nodes,
+        published_edges,
         communities.len(),
+        omissions,
         program.as_ref(),
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
@@ -1476,9 +1553,13 @@ fn build_graph_inner(
         files_extracted: missing.len(),
         files_cached: sources.len().saturating_sub(missing.len()),
         empty_files,
-        nodes: document.nodes.len(),
-        edges: document.links.len(),
+        nodes: published_nodes,
+        edges: published_edges,
         communities: communities.len(),
+        omitted_nodes: omissions.nodes,
+        omitted_edges: omissions.edges,
+        identity_collisions: omissions.identity_collisions,
+        partial_graph: omissions.is_partial(),
         html_written,
         outputs_changed: true,
         program_modules: program_modules(program.as_ref()),
@@ -1565,6 +1646,7 @@ fn publish_build_state(
     nodes: usize,
     edges: usize,
     communities: usize,
+    omissions: PublicationOmissions,
     program: Option<&ProgramBuild>,
 ) -> Result<(), CoreError> {
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
@@ -1601,6 +1683,9 @@ fn publish_build_state(
             nodes,
             edges,
             communities,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
             program_modules: program_modules(program),
             program_summaries: program_summaries(program),
             program_providers: program_providers(program),
@@ -3159,7 +3244,7 @@ fn published_v1_document(
     evidence: PublicationEvidence<'_>,
     configuration_digest: String,
     source_commit: Option<&str>,
-) -> Result<compass_model::code_graph::GraphDocument, CoreError> {
+) -> Result<PublicationOutcome, CoreError> {
     let mut publication_source = document.clone();
     let node_communities = communities
         .iter()
@@ -3184,7 +3269,7 @@ fn published_v1_document(
             );
         }
     }
-    Ok(normalize_document_v1_with_inventory(
+    Ok(normalize_document_v1_with_inventory_best_effort(
         &publication_source,
         root,
         configuration_digest,
@@ -3486,6 +3571,9 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             edges: document.links.len(),
             communities: 0,
             clustered: false,
+            omitted_nodes: 0,
+            omitted_edges: 0,
+            identity_collisions: 0,
         };
         let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
         return Some(stats);
@@ -3511,9 +3599,19 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             .collect::<HashSet<_>>()
             .len(),
         clustered: true,
+        omitted_nodes: 0,
+        omitted_edges: 0,
+        identity_collisions: 0,
     };
     let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
     Some(stats)
+}
+
+fn saved_publication_omissions(output_dir: &Path) -> PublicationOmissions {
+    fs::read(output_dir.join(OUTPUT_STATS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OutputStats>(&bytes).ok())
+        .map_or_else(PublicationOmissions::default, |stats| stats.omissions())
 }
 
 fn save_output_stats(
@@ -3522,6 +3620,7 @@ fn save_output_stats(
     edges: usize,
     communities: usize,
     clustered: bool,
+    omissions: PublicationOmissions,
 ) -> Result<(), CoreError> {
     let graph_bytes = fs::metadata(output_dir.join("graph.json"))
         .map_err(|source| compass_files::FileError::Io {
@@ -3537,6 +3636,9 @@ fn save_output_stats(
             edges,
             communities,
             clustered,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
         },
         true,
     )?;

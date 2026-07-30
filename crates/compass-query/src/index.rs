@@ -68,6 +68,17 @@ pub fn open(
         .map_err(sql_error)?;
     let adjacency = crate::code_query::CodeAdjacencyIndex::build(&graph);
     let lookup = crate::code_query::CodeLookupIndex::build(&graph);
+    let partial_graph_message = graph
+        .graph
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "publication_omission_summary")
+        .map(|diagnostic| {
+            format!(
+                "Published graph coverage is incomplete: {}",
+                diagnostic.message
+            )
+        });
     Ok(CodeQueryEngine {
         graph,
         program,
@@ -76,6 +87,7 @@ pub fn open(
         index_path,
         adjacency,
         lookup,
+        partial_graph_message,
     })
 }
 

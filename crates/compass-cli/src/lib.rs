@@ -898,7 +898,17 @@ fn write_watch_status_mode(
                 "[compass watch] graph artifacts updated in {}",
                 result.output_dir.display()
             );
+            if result.partial_graph {
+                let _result = native_line!(
+                    stderr,
+                    "[compass watch] warning: partial graph published after omitting {} nodes and {} edges; {} identity collisions quarantined",
+                    result.omitted_nodes,
+                    result.omitted_edges,
+                    result.identity_collisions
+                );
+            }
             let _result = stdout.flush();
+            let _result = stderr.flush();
         }
         WatchStatus::UpToDate { reason } => {
             if frontend == Frontend::Compass {
@@ -2046,8 +2056,14 @@ fn command_build_with_validation_inner(
                 output.push_str(&notes.join("\n"));
             }
             let mut outcome = Outcome::success(output);
-            if let Some(warning) = global_warning {
+            if let Some(warning) = format_partial_graph_warning(&result) {
                 outcome.stderr = warning;
+            }
+            if let Some(warning) = global_warning {
+                if !outcome.stderr.is_empty() {
+                    outcome.stderr.push('\n');
+                }
+                outcome.stderr.push_str(&warning);
             }
             if timing {
                 if !outcome.stderr.is_empty() {
@@ -3767,6 +3783,15 @@ fn format_program_analysis(result: &BuildResult) -> String {
     )
 }
 
+fn format_partial_graph_warning(result: &BuildResult) -> Option<String> {
+    result.partial_graph.then(|| {
+        format!(
+            "warning: Compass published a partial graph after omitting {} nodes and {} edges; {} identity collisions quarantined.",
+            result.omitted_nodes, result.omitted_edges, result.identity_collisions
+        )
+    })
+}
+
 #[cfg(test)]
 mod mcp_option_tests {
     use super::*;
@@ -3797,6 +3822,10 @@ mod mcp_option_tests {
             nodes: 3,
             edges: 2,
             communities: 1,
+            omitted_nodes: 0,
+            omitted_edges: 0,
+            identity_collisions: 0,
+            partial_graph: false,
             html_written,
             outputs_changed,
             program_modules: 0,
@@ -3810,6 +3839,22 @@ mod mcp_option_tests {
             program_conflicts: 0,
             timings: BuildTimings::default(),
         }
+    }
+
+    #[test]
+    fn partial_graph_warning_discloses_exact_omission_counts() {
+        let mut result = sample_build_result(true, false);
+        result.partial_graph = true;
+        result.omitted_nodes = 3;
+        result.omitted_edges = 5;
+        result.identity_collisions = 2;
+
+        assert_eq!(
+            format_partial_graph_warning(&result).as_deref(),
+            Some(
+                "warning: Compass published a partial graph after omitting 3 nodes and 5 edges; 2 identity collisions quarantined."
+            )
+        );
     }
 
     #[test]

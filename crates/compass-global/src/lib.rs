@@ -9,12 +9,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use compass_files::{FileError, write_json_atomic, write_text_atomic};
-use compass_model::{EdgeRecord, GraphDocument, GraphError};
+use compass_model::{DEFAULT_GRAPH_SIZE_CAP_BYTES, EdgeRecord, GraphDocument, GraphError};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-const MAX_GRAPH_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
@@ -371,7 +370,7 @@ fn effective_graph_cap() -> u64 {
     let raw = env::var("COMPASS_MAX_GRAPH_BYTES").unwrap_or_default();
     let text = raw.trim().to_ascii_uppercase();
     if text.is_empty() {
-        return MAX_GRAPH_BYTES;
+        return DEFAULT_GRAPH_SIZE_CAP_BYTES;
     }
     let (number, multiplier) = if let Some(number) = text.strip_suffix("GB") {
         (number.trim(), 1024_u64 * 1024 * 1024)
@@ -385,7 +384,7 @@ fn effective_graph_cap() -> u64 {
         .ok()
         .filter(|value| *value > 0)
         .and_then(|value| value.checked_mul(multiplier))
-        .unwrap_or(MAX_GRAPH_BYTES)
+        .unwrap_or(DEFAULT_GRAPH_SIZE_CAP_BYTES)
 }
 
 fn save_global_graph(paths: &GlobalPaths, graph: &GraphDocument) -> Result<(), GlobalError> {

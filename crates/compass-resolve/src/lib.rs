@@ -732,6 +732,7 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
     let mut stub_families = HashMap::<String, HashSet<&'static str>>::new();
     let mut stub_scopes = HashMap::<String, HashSet<String>>::new();
     let mut stub_consumers = HashMap::<String, HashSet<String>>::new();
+    let mut stub_source_files = HashMap::<String, HashSet<String>>::new();
     let mut imports = HashMap::<String, HashSet<String>>::new();
     let mut imports_by_file = HashMap::<String, HashSet<String>>::new();
     for edge in &extraction.edges {
@@ -758,6 +759,10 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                     .entry(endpoint.clone())
                     .or_default()
                     .insert(repository_scope(&edge.string("source_file")));
+                stub_source_files
+                    .entry(endpoint.clone())
+                    .or_default()
+                    .insert(edge.string("source_file"));
                 let counterpart = if endpoint == &edge.source {
                     &edge.target
                 } else {
@@ -775,6 +780,7 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         let families = stub_families.get(&stub);
         let scopes = stub_scopes.get(&stub);
         let consumers = stub_consumers.get(&stub);
+        let source_files = stub_source_files.get(&stub);
         let compatible_unique = |items: Option<&Vec<String>>| {
             let compatible = items?
                 .iter()
@@ -796,12 +802,11 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                                 .get(consumer)
                                 .is_some_and(|targets| targets.contains(*candidate))
                         })
-                    }) || scopes.is_some_and(|_| {
-                        extraction.edges.iter().any(|edge| {
-                            (edge.source == stub || edge.target == stub)
-                                && imports_by_file
-                                    .get(&edge.string("source_file"))
-                                    .is_some_and(|targets| targets.contains(*candidate))
+                    }) || source_files.is_some_and(|files| {
+                        files.iter().any(|source_file| {
+                            imports_by_file
+                                .get(source_file)
+                                .is_some_and(|targets| targets.contains(*candidate))
                         })
                     });
                     family_compatible && (scope_compatible || explicitly_imported)
@@ -3619,6 +3624,54 @@ mod tests {
             edges: vec![
                 edge(
                     "package-a-child",
+                    "package-b-base",
+                    "imports",
+                    "packages/a/src/Child.java",
+                ),
+                edge(
+                    "package-a-child",
+                    "base",
+                    "extends",
+                    "packages/a/src/Child.java",
+                ),
+            ],
+            ..Extraction::default()
+        };
+
+        rewire_unique_family_stubs(&mut extraction);
+        rewire_unique_stub_nodes(&mut extraction);
+
+        assert_eq!(extraction.edges[1].target, "package-b-base");
+        assert!(extraction.nodes.iter().all(|node| node.id != "base"));
+    }
+
+    #[test]
+    fn file_scoped_import_evidence_allows_cross_scope_stub_rewiring() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                node(
+                    "package-b-base",
+                    "Base",
+                    "packages/b/src/Base.java",
+                    "class",
+                ),
+                node("base", "Base", "", "stub"),
+                node(
+                    "package-a-child",
+                    "Child",
+                    "packages/a/src/Child.java",
+                    "class",
+                ),
+                node(
+                    "package-a-import",
+                    "BaseImport",
+                    "packages/a/src/Child.java",
+                    "import",
+                ),
+            ],
+            edges: vec![
+                edge(
+                    "package-a-import",
                     "package-b-base",
                     "imports",
                     "packages/a/src/Child.java",

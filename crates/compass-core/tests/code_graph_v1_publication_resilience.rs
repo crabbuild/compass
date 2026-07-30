@@ -8,6 +8,7 @@ use compass_files::{Cache, CacheOptions};
 use compass_languages::{Extraction, Registry};
 use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument};
 use compass_model::provenance::EvidenceOrigin;
+use compass_model::validate_code_graph;
 use sha2::{Digest, Sha256};
 
 fn build(root: &Path) -> Result<GraphDocument, Box<dyn Error>> {
@@ -30,15 +31,14 @@ fn write(root: &Path, relative: &str, source: &str) -> Result<(), Box<dyn Error>
 }
 
 #[test]
-fn failed_topology_preflight_preserves_the_last_known_good_generation() -> Result<(), Box<dyn Error>>
+fn invalid_topology_is_quarantined_and_the_valid_graph_is_published() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
     write(directory.path(), "src/main.rs", "pub fn healthy() {}\n")?;
     let mut options = BuildOptions::new(directory.path());
     options.no_viz = true;
     options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
-    let first = build_local_graph(&options)?;
-    let graph_before = fs::read(first.output_dir.join("graph.json"))?;
+    let _first = build_local_graph(&options)?;
     let pointer = directory
         .path()
         .join("compass-out/.compass-active-generation");
@@ -78,18 +78,39 @@ fn failed_topology_preflight_preserves_the_last_known_good_generation() -> Resul
             "extractor": "test.invalid"
         }]
     });
-    let error = match build_graph_with_layers(&options, None, &[invalid_layer]) {
-        Ok(_) => return Err("invalid endpoint topology passed publication preflight".into()),
-        Err(error) => error,
-    };
-    assert!(
-        error.to_string().contains("contains")
-            && error.to_string().contains("variable")
-            && error.to_string().contains("method"),
-        "unexpected preflight error: {error}"
-    );
-    assert_eq!(fs::read_to_string(&pointer)?, active_before);
-    assert_eq!(fs::read(first.output_dir.join("graph.json"))?, graph_before);
+    let result = build_graph_with_layers(&options, None, &[invalid_layer])?;
+    assert!(result.partial_graph);
+    assert_eq!(result.omitted_nodes, 0);
+    assert_eq!(result.omitted_edges, 1);
+    assert_eq!(result.identity_collisions, 0);
+    assert_ne!(fs::read_to_string(&pointer)?, active_before);
+
+    let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+    validate_code_graph(&graph)?;
+    let owner = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "owner")
+        .ok_or("missing retained owner")?;
+    let method = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == ".method()")
+        .ok_or("missing retained method")?;
+    assert!(graph.links.iter().all(|edge| {
+        !(edge.source == owner.id && edge.target == method.id && edge.kind.as_str() == "contains")
+    }));
+    assert!(graph.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "publication_omission_summary"
+            && diagnostic.message.contains("0 nodes and 1 edges")
+    }));
+
+    let stats: serde_json::Value = serde_json::from_slice(&fs::read(
+        result.output_dir.join(".compass_output_stats.json"),
+    )?)?;
+    assert_eq!(stats["omitted_nodes"], 0);
+    assert_eq!(stats["omitted_edges"], 1);
+    assert_eq!(stats["identity_collisions"], 0);
     Ok(())
 }
 

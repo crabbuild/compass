@@ -1,6 +1,10 @@
 mod support;
 
 use compass_model::query_contract::{CodeQueryLimits, SearchRequest};
+use compass_model::{
+    code_graph::{DiagnosticSeverity, GraphDiagnostic, GraphDocument},
+    query_contract::QueryDiagnosticCode,
+};
 use compass_query::open;
 
 #[test]
@@ -78,5 +82,34 @@ fn search_limits_are_enforced_before_sqlite_work() -> Result<(), Box<dyn std::er
             })
             .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn search_discloses_partial_publication_coverage() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    graph.graph.diagnostics.push(GraphDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "publication_omission_summary".to_owned(),
+        message:
+            "partial graph published after quarantining 2 nodes and 3 edges with 1 identity collisions; 0 examples omitted by the diagnostic cap"
+                .to_owned(),
+        anchor: None,
+        related_ids: Vec::new(),
+    });
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let response = engine.search(SearchRequest {
+        query: "list".to_owned(),
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert!(response.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == QueryDiagnosticCode::IncompleteCoverage
+            && diagnostic.message.contains("2 nodes and 3 edges")
+    }));
     Ok(())
 }
