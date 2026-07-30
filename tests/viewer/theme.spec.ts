@@ -48,6 +48,23 @@ for (const theme of themeCases) {
     await expect(page.getByRole("textbox", { name: "Natural-language query" }))
       .toHaveCSS("background-color", hexToRgb(theme.input));
   });
+
+  test(`version comparison inherits ${theme.name} VS Code tokens`, async ({ page }) => {
+    await page.goto("/history.html");
+    await applyTheme(page, theme);
+
+    const picker = page.getByRole("combobox", { name: "Comparison revision" });
+    await expect(picker).toHaveCSS("background-color", hexToRgb(theme.input));
+    await expect(picker).toHaveCSS("color", hexToRgb(theme.foreground));
+    await expect(picker).toHaveCSS(
+      "color-scheme",
+      theme.name.includes("light") ? "light" : "dark"
+    );
+    await expect(picker).toHaveCSS("border-top-color", hexToRgb(theme.foreground));
+    if (theme.name.includes("high contrast")) {
+      await expect(picker).toHaveCSS("border-top-width", "2px");
+    }
+  });
 }
 
 test("high-contrast themes use the VS Code contrast border", async ({ page }) => {
@@ -69,8 +86,9 @@ test("high-contrast themes use the VS Code contrast border", async ({ page }) =>
 
 test("history comparison and source diffs follow the light VS Code theme", async ({ page }) => {
   await page.goto("/history.html");
-  await page.getByRole("option", { name: /Revision B graph/i }).click();
-  await page.getByRole("button", { name: /Compare parent 1/i }).click();
+  await page.getByRole("listbox", { name: "Git commit timeline" })
+    .getByRole("option", { name: /Revision B graph/i }).click();
+  await page.getByRole("button", { name: /Compare revisions/i }).click();
   await expect(page.locator(".history-source-diff")).toBeVisible();
 
   await applyTheme(page, themeCases[0]);
@@ -205,6 +223,9 @@ async function applyTheme(
     root.setProperty("--vscode-sideBar-foreground", tokens.foreground);
     root.setProperty("--vscode-input-background", tokens.input);
     root.setProperty("--vscode-input-foreground", tokens.foreground);
+    root.setProperty("--vscode-dropdown-background", tokens.input);
+    root.setProperty("--vscode-dropdown-foreground", tokens.foreground);
+    root.setProperty("--vscode-dropdown-border", tokens.foreground);
     root.setProperty("--vscode-panel-border", tokens.foreground);
     root.setProperty("--vscode-focusBorder", tokens.foreground);
     if (tokens.contrastBorder) {

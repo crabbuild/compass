@@ -63,7 +63,7 @@ export function HistoryWorkspace({
   enableState,
   loadingMore = false,
   loadMoreError,
-  buildState,
+  buildStates,
   operationError,
   onSelectCommit,
   host
@@ -84,13 +84,14 @@ export function HistoryWorkspace({
   enableState?: HistoryBuildState | undefined;
   loadingMore?: boolean | undefined;
   loadMoreError?: string | undefined;
-  buildState?: HistoryBuildState | undefined;
+  buildStates?: ReadonlyMap<string, HistoryBuildState> | undefined;
   operationError?: HistoryOperationError | undefined;
   onSelectCommit(commit: string): void;
   host: HistoryHost;
 }) {
   const [query, setQuery] = useState("");
   const [comparisonTab, setComparisonTab] = useState<ComparisonTab>("source");
+  const [comparisonCommit, setComparisonCommit] = useState("");
   useEffect(() => {
     setComparisonTab("source");
   }, [comparison?.parent, selectedCommit]);
@@ -103,12 +104,28 @@ export function HistoryWorkspace({
       || entry.graphState.replaceAll("_", " ").includes(normalizedQuery));
   }, [query, timeline.entries]);
   const selected = timeline.entries.find((entry) => entry.commit === selectedCommit);
-  const availableCommits = useMemo(
-    () => new Set(timeline.entries
-      .filter((entry) => entry.presentationAvailable)
-      .map((entry) => entry.commit)),
-    [timeline.entries]
+  const comparisonEntries = useMemo(
+    () => timeline.entries.filter((entry) => entry.commit !== selected?.commit),
+    [selected?.commit, timeline.entries]
   );
+  useEffect(() => {
+    setComparisonCommit((current) => {
+      if (comparisonEntries.some((entry) => entry.commit === current)) return current;
+      const loadedParent = selected?.parents.find((parent) =>
+        comparisonEntries.some((entry) => entry.commit === parent)
+      );
+      const activeBaseline = comparisonEntries.some(
+        (entry) => entry.commit === comparison?.parent
+      )
+        ? comparison?.parent
+        : undefined;
+      return loadedParent ?? activeBaseline ?? comparisonEntries[0]?.commit ?? "";
+    });
+  }, [comparison?.parent, comparisonEntries, selected?.parents]);
+  const comparisonEntry = comparisonEntries.find(
+    (entry) => entry.commit === comparisonCommit
+  );
+  const selectedBuildState = selected ? buildStates?.get(selected.commit) : undefined;
   const visibleGraph = comparison?.graph
     ?? (graph && graphCommit === selected?.commit ? graph : undefined);
   const loadedEntries = timeline.entries.length;
@@ -225,10 +242,26 @@ export function HistoryWorkspace({
             <CommitDetails
               entry={selected}
               operationError={operationError?.operation === "Load graph" ? undefined : operationError}
-              availableCommits={availableCommits}
-              onCompare={(parent) => host.compare(selected.commit, parent)}
+              comparisonEntries={comparisonEntries}
+              comparisonCommit={comparisonCommit}
+              selectedBuildState={selectedBuildState}
+              comparisonBuildState={comparisonEntry
+                ? buildStates?.get(comparisonEntry.commit)
+                : undefined}
+              hasMore={timeline.hasMore ?? false}
+              onComparisonCommit={(commit) => {
+                setComparisonCommit(commit);
+                if (comparison && comparison.parent !== commit) onExitComparison?.();
+              }}
+              onCompare={() => {
+                if (comparisonEntry) host.compare(selected.commit, comparisonEntry.commit);
+              }}
+              onBuildRevision={host.buildRevision}
               onQuery={() => host.queryRevision(selected.commit)}
-              changeCounts={changeCounts?.commit === selected.commit ? changeCounts : undefined}
+              changeCounts={changeCounts?.commit === selected.commit
+                && changeCounts.parent === comparisonCommit
+                ? changeCounts
+                : undefined}
             />
             {comparison && (
               <ComparisonOverlay
@@ -394,23 +427,23 @@ export function HistoryWorkspace({
                         />
                       </div>
                     </div>
-                  ) : buildState?.status === "requesting" ? (
+                  ) : selectedBuildState?.status === "requesting" ? (
                     <WorkspaceState
                       kind="running"
                       title="Choosing a build profile"
                       description="Select how Compass should materialize this revision graph."
                     />
-                  ) : buildState?.status === "running" ? (
+                  ) : selectedBuildState?.status === "running" ? (
                     <WorkspaceState
                       kind="running"
                       title="Building revision graph"
                       description={`Compass is materializing ${selected.commit.slice(0, 9)}. You can cancel from the VS Code progress notification.`}
                     />
-                  ) : buildState?.status === "failed" ? (
+                  ) : selectedBuildState?.status === "failed" ? (
                     <WorkspaceState
                       kind="error"
                       title="Revision build failed"
-                      description={buildState.message}
+                      description={selectedBuildState.message}
                       action={{
                         label: "Retry build",
                         onClick: () => host.buildRevision(selected.commit)
