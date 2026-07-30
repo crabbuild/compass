@@ -984,6 +984,51 @@ fn repeated_anonymous_class_methods_receive_cross_definition_discriminators()
 }
 
 #[test]
+fn go_grouped_and_method_predeclared_types_keep_definition_anchors() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let package = directory.path().join("generated");
+    fs::create_dir(&package)?;
+    let path = package.join("types.go");
+    let source = br#"package generated
+
+func (value *Later) Use() {}
+
+type Later struct {
+    Value string
+}
+
+type (
+    optionFunc[C any] func(*C)
+)
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let later = extraction
+        .nodes
+        .iter()
+        .find(|node| node.id == make_id(&["generated", "Later"]))
+        .ok_or("missing later type")?;
+    assert_eq!(later.label(), "Later");
+    assert_eq!(later.string("source_location"), "L5");
+
+    let option = extraction
+        .nodes
+        .iter()
+        .find(|node| node.id == make_id(&["generated", "optionFunc"]))
+        .ok_or("missing grouped generic type")?;
+    assert_eq!(option.label(), "optionFunc");
+    assert_eq!(option.string("source_location"), "L10");
+    assert_eq!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.id == later.id || node.id == option.id)
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
 fn objective_c_go_and_swift_fixtures_cover_type_members_calls_and_imports()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

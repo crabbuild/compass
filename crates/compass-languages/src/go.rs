@@ -87,6 +87,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
     }
 
     fn run(mut self, root: Node<'tree>) -> Extraction {
+        self.walk_type_declarations(root);
         self.walk(root);
         self.walk_calls();
         let valid = &self.seen;
@@ -99,6 +100,17 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                     ))
         });
         self.extraction
+    }
+
+    fn walk_type_declarations(&mut self, node: Node<'tree>) {
+        if node.kind() == "type_declaration" {
+            self.add_types(node);
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.walk_type_declarations(child);
+        }
     }
 
     fn walk(&mut self, node: Node<'tree>) {
@@ -123,7 +135,6 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                 return;
             }
             "type_declaration" => {
-                self.add_types(node);
                 return;
             }
             "import_declaration" => {
@@ -174,26 +185,35 @@ impl<'source, 'tree> GoState<'source, 'tree> {
     }
 
     fn add_types(&mut self, node: Node<'tree>) {
+        self.add_type_specs(node);
+    }
+
+    fn add_type_specs(&mut self, node: Node<'tree>) {
+        if node.kind() == "type_spec" {
+            self.add_type_spec(node);
+            return;
+        }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() != "type_spec" {
-                continue;
-            }
-            let Some(name_node) = child.child_by_field_name("name") else {
-                continue;
-            };
-            let name = self.text(name_node);
-            let at = line(child);
-            let id = make_id(&[&self.package_scope, &name]);
-            self.add_node(&id, &name, at);
-            self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
-            let mut body_cursor = child.walk();
-            for body in child.children(&mut body_cursor) {
-                match body.kind() {
-                    "struct_type" => self.add_struct_references(body, &id),
-                    "interface_type" => self.add_interface_references(body, &id),
-                    _ => {}
-                }
+            self.add_type_specs(child);
+        }
+    }
+
+    fn add_type_spec(&mut self, node: Node<'tree>) {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return;
+        };
+        let name = self.text(name_node);
+        let at = line(node);
+        let id = make_id(&[&self.package_scope, &name]);
+        self.add_node(&id, &name, at);
+        self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
+        let mut body_cursor = node.walk();
+        for body in node.children(&mut body_cursor) {
+            match body.kind() {
+                "struct_type" => self.add_struct_references(body, &id),
+                "interface_type" => self.add_interface_references(body, &id),
+                _ => {}
             }
         }
     }
