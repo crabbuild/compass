@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use compass_languages::{
-    Engine, Extraction, FrameworkLimits, RawFrameworkFact, RawNodeRecord, make_id,
+    Engine, Extraction, FrameworkLimits, ProjectEvidenceIndex, RawFrameworkFact, RawNodeRecord,
+    make_id,
 };
 use compass_model::provenance::ResolutionState;
 use compass_resolve::frameworks::{RouteStageRole, resolve_and_publish_framework_routes};
@@ -340,5 +342,63 @@ fn nuxt_route_middleware_is_a_separate_domain_fact() -> Result<(), Box<dyn std::
                     && domain.origin == compass_languages::RawFrameworkOrigin::Convention
         )
     }));
+    Ok(())
+}
+
+#[test]
+fn repository_file_routes_require_matching_project_dependencies()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (dependency, relative_path, source, expected_framework) in [
+        (
+            "@sveltejs/kit",
+            "src/routes/users/[id]/+page.svelte",
+            "<h1>User</h1>",
+            "sveltekit",
+        ),
+        (
+            "nuxt",
+            "pages/users/[id].vue",
+            "<template><h1>User</h1></template>",
+            "nuxt",
+        ),
+        (
+            "astro",
+            "src/pages/users/[id].astro",
+            "<h1>User</h1>",
+            "astro",
+        ),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let route = directory.path().join(relative_path);
+        fs::create_dir_all(route.parent().ok_or("route has no parent")?)?;
+        fs::write(&route, source)?;
+        fs::write(
+            directory.path().join("package.json"),
+            format!(r#"{{"dependencies":{{"{dependency}":"1.0.0"}}}}"#),
+        )?;
+
+        let evidence = ProjectEvidenceIndex::build(directory.path(), std::slice::from_ref(&route));
+        let extraction = Engine::with_project_evidence(Arc::new(evidence)).extract(&route)?;
+        assert!(
+            routes(&extraction).any(|route| route.framework == expected_framework),
+            "{relative_path} should activate {expected_framework}"
+        );
+    }
+
+    let directory = tempfile::tempdir()?;
+    let route = directory.path().join("src/routes/users/[id]/+page.svelte");
+    fs::create_dir_all(route.parent().ok_or("route has no parent")?)?;
+    fs::write(&route, "<h1>User</h1>")?;
+    fs::write(
+        directory.path().join("package.json"),
+        r#"{"dependencies":{"nuxt":"1.0.0"}}"#,
+    )?;
+    let evidence = ProjectEvidenceIndex::build(directory.path(), std::slice::from_ref(&route));
+    let extraction = Engine::with_project_evidence(Arc::new(evidence)).extract(&route)?;
+    assert_eq!(
+        routes(&extraction).count(),
+        0,
+        "an unrelated framework dependency must not activate a SvelteKit file route"
+    );
     Ok(())
 }

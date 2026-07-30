@@ -7,11 +7,12 @@ use super::evidence::{EvidenceKind, EvidenceSet};
 use super::{
     RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
 };
-use crate::{Extraction, RawEdgeRecord, RawNodeRecord, make_id};
+use crate::{Extraction, ProjectEvidence, RawEdgeRecord, RawNodeRecord, make_id};
 
 pub(super) fn detect(
     path: &Path,
     source: &[u8],
+    project: Option<&ProjectEvidence>,
     extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
     if source.is_empty() {
@@ -21,7 +22,8 @@ pub(super) fn detect(
     let lower = portable.to_ascii_lowercase();
     let evidence = EvidenceSet::new()
         .direct_if(
-            segment_after(&portable, "src/routes/").is_some()
+            project.is_none_or(|project| project.has_dependency("@sveltejs/kit"))
+                && segment_after(&portable, "src/routes/").is_some()
                 && matches!(
                     path.file_name().and_then(|name| name.to_str()),
                     Some("+page.svelte" | "+page.ts" | "+server.ts" | "+server.js")
@@ -31,17 +33,19 @@ pub(super) fn detect(
             "SvelteKit src/routes artifact",
         )
         .direct_if(
-            (segment_after(&portable, "pages/").is_some() && lower.ends_with(".vue"))
-                || segment_after(&portable, "server/api/").is_some()
-                || (segment_after(&portable, "middleware/").is_some()
-                    && lower.ends_with(".ts")
-                    && lower.contains("nuxt")),
+            project.is_none_or(|project| project.has_dependency("nuxt"))
+                && ((segment_after(&portable, "pages/").is_some() && lower.ends_with(".vue"))
+                    || segment_after(&portable, "server/api/").is_some()
+                    || (segment_after(&portable, "middleware/").is_some()
+                        && lower.ends_with(".ts")
+                        && lower.contains("nuxt"))),
             "nuxt",
             EvidenceKind::ConfigurationContract,
             "Nuxt route artifact",
         )
         .direct_if(
-            segment_after(&portable, "src/pages/").is_some()
+            project.is_none_or(|project| project.has_dependency("astro"))
+                && segment_after(&portable, "src/pages/").is_some()
                 && (lower.ends_with(".astro")
                     || matches!(
                         path.extension().and_then(|extension| extension.to_str()),

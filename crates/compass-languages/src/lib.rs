@@ -31,6 +31,7 @@ mod pascal_forms;
 mod php;
 mod powershell;
 mod program;
+mod project_evidence;
 mod r;
 mod registry;
 mod rust_lang;
@@ -53,6 +54,9 @@ pub use frameworks::{
 };
 pub use ids::{file_stem, make_id, normalize_id};
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
+pub use project_evidence::{
+    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidence, ProjectEvidenceIndex,
+};
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};
 

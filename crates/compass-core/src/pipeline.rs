@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ahash::{AHashMap, AHashSet};
@@ -18,7 +18,8 @@ use compass_graph::{
 };
 use compass_languages::{
     EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
-    Engine, Extraction, ExtractorKind, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
+    Engine, Extraction, ExtractorKind, FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidenceIndex,
+    RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
 };
 use compass_model::code_graph::{
     DiagnosticSeverity, ExtractionStatus, GraphDiagnostic, GraphDocument as V1GraphDocument,
@@ -638,6 +639,7 @@ fn build_graph_inner(
         CacheOptions::shared_history,
     );
     let mut cache = Cache::open(&root, cache_options)?;
+    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
     if reuse_cached_analysis {
@@ -658,7 +660,11 @@ fn build_graph_inner(
                         path: path.clone(),
                         source,
                     })?;
-                extractions.insert(path.clone(), extraction);
+                if cached_framework_evidence_matches(&extraction, path, &project_evidence) {
+                    extractions.insert(path.clone(), extraction);
+                } else {
+                    missing.push(path.clone());
+                }
             } else {
                 missing.push(path.clone());
             }
@@ -776,16 +782,20 @@ fn build_graph_inner(
         Ok((path.clone(), combined.graph, source, prepared))
     };
     let fresh_outcomes = if missing.len() < 256 {
-        let mut engine = Engine::default();
+        let mut engine = Engine::with_project_evidence(Arc::clone(&project_evidence));
         missing
             .iter()
             .map(|path| extract_source(&mut engine, path))
             .collect::<Vec<_>>()
     } else {
+        let worker_evidence = Arc::clone(&project_evidence);
         let extract = || {
             missing
                 .par_iter()
-                .map_init(Engine::default, extract_source)
+                .map_init(
+                    || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
+                    extract_source,
+                )
                 .collect::<Vec<_>>()
         };
         if let Some(pool) = &worker_pool {
@@ -3801,6 +3811,18 @@ fn read_source_text_with_limit(path: &Path, max_source_bytes: u64) -> Option<(St
         })
 }
 
+fn cached_framework_evidence_matches(
+    extraction: &Extraction,
+    path: &Path,
+    project_evidence: &ProjectEvidenceIndex,
+) -> bool {
+    extraction
+        .extensions
+        .get(FRAMEWORK_PROJECT_EVIDENCE_EXTENSION)
+        .and_then(serde_json::Value::as_str)
+        == Some(project_evidence.fingerprint_for(path))
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -3833,6 +3855,47 @@ mod tests {
                 .as_deref(),
             Some("0123456789")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn framework_cache_reuse_is_scoped_to_project_evidence() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("src/routes/+page.svelte");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "<h1>Home</h1>")?;
+        fs::write(
+            directory.path().join("package.json"),
+            r#"{"dependencies":{}}"#,
+        )?;
+
+        let initial = ProjectEvidenceIndex::build(directory.path(), std::slice::from_ref(&source));
+        let mut extraction = Extraction::default();
+        assert!(!cached_framework_evidence_matches(
+            &extraction,
+            &source,
+            &initial
+        ));
+        extraction.extensions.insert(
+            FRAMEWORK_PROJECT_EVIDENCE_EXTENSION.to_owned(),
+            Value::String(initial.fingerprint_for(&source).to_owned()),
+        );
+        assert!(cached_framework_evidence_matches(
+            &extraction,
+            &source,
+            &initial
+        ));
+
+        fs::write(
+            directory.path().join("package.json"),
+            r#"{"dependencies":{"@sveltejs/kit":"2.0.0"}}"#,
+        )?;
+        let changed = ProjectEvidenceIndex::build(directory.path(), std::slice::from_ref(&source));
+        assert!(!cached_framework_evidence_matches(
+            &extraction,
+            &source,
+            &changed
+        ));
         Ok(())
     }
 
