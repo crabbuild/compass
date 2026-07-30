@@ -465,8 +465,12 @@ fn normalize_v1_with_mode(
     normalize_file_inventory(&mut evidence.files, &evidence.repository_root)?;
     let file_facts = published_file_facts(&evidence)?;
     split_sourceless_placeholders(&mut extraction, &evidence.repository_root, &file_facts)?;
-    let stub_wiring_sites =
-        collect_stub_wiring_sites(&extraction.edges, &evidence.repository_root, &file_facts)?;
+    let stub_wiring_sites = collect_stub_wiring_sites(
+        &extraction.nodes,
+        &extraction.edges,
+        &evidence.repository_root,
+        &file_facts,
+    )?;
     resolve_or_drop_generic_symbols(
         &mut extraction,
         &mut evidence.diagnostics,
@@ -482,7 +486,7 @@ fn normalize_v1_with_mode(
         extraction.edges.sort_by_cached_key(raw_edge_sort_key);
     }
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
-    let mut nodes = BTreeMap::<String, NodeRecord>::new();
+    let mut nodes = HashMap::<String, NodeRecord>::with_capacity(extraction.nodes.len());
     for raw in extraction.nodes {
         let raw_id = raw.id.clone();
         let diagnostic_anchor =
@@ -558,7 +562,7 @@ fn normalize_v1_with_mode(
         recompute_route_resolution(details);
     }
 
-    let mut links = BTreeMap::<String, EdgeRecord>::new();
+    let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
     for (index, raw) in extraction.edges.into_iter().enumerate() {
         let raw_identity = raw_edge_identity(&raw, index);
         let diagnostic_anchor =
@@ -1353,16 +1357,37 @@ fn is_unresolved_external_node(node: &NodeRecord) -> bool {
 }
 
 fn collect_stub_wiring_sites(
+    nodes: &[RawNodeRecord],
     edges: &[RawEdgeRecord],
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
 ) -> Result<HashMap<String, SourceAnchor>, GraphError> {
+    let mut sourceless = HashSet::new();
+    for node in nodes
+        .iter()
+        .filter(|node| node.attributes.get(TRUSTED_NODE_RECORD).is_none())
+    {
+        if raw_anchor(&node.attributes, root, file_facts)?.is_none() {
+            sourceless.insert(node.id.as_str());
+        }
+    }
     let mut sites = HashMap::new();
     for edge in edges {
+        let source_needs_site = sourceless.contains(edge.source.as_str());
+        let target_needs_site = sourceless.contains(edge.target.as_str());
+        if !source_needs_site && !target_needs_site {
+            continue;
+        }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
         };
-        for endpoint in [&edge.source, &edge.target] {
+        for endpoint in [
+            source_needs_site.then_some(&edge.source),
+            target_needs_site.then_some(&edge.target),
+        ]
+        .into_iter()
+        .flatten()
+        {
             sites
                 .entry(endpoint.clone())
                 .and_modify(|existing: &mut SourceAnchor| {
@@ -1402,6 +1427,11 @@ fn split_sourceless_placeholders(
     let mut scopes = HashMap::<String, BTreeSet<String>>::new();
     let mut inferred_kinds = HashMap::<(String, String), &'static str>::new();
     for edge in &extraction.edges {
+        let source_is_sourceless = sourceless.contains(&edge.source);
+        let target_is_sourceless = sourceless.contains(&edge.target);
+        if !source_is_sourceless && !target_is_sourceless {
+            continue;
+        }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
         };
@@ -1420,7 +1450,7 @@ fn split_sourceless_placeholders(
                     &anchor,
                 ));
         }
-        if sourceless.contains(&edge.target)
+        if target_is_sourceless
             && let Some(kind) = inferred_external_target_kind(&edge.attributes)
             && let Some(attributes) = node_attributes.get(&edge.target)
         {
@@ -1486,6 +1516,9 @@ fn split_sourceless_placeholders(
     extraction.nodes = expanded;
 
     for edge in &mut extraction.edges {
+        if !split_ids.contains_key(&edge.source) && !split_ids.contains_key(&edge.target) {
+            continue;
+        }
         let Some(anchor) = raw_anchor(&edge.attributes, root, file_facts)? else {
             continue;
         };
@@ -3589,13 +3622,7 @@ fn raw_anchor(
         .or_else(|| attributes.get("sourceAnchor"))
         .or_else(|| attributes.get("anchor"))
     {
-        let mut anchor =
-            serde_json::from_value::<SourceAnchor>(value.clone()).map_err(|error| {
-                raw_error(
-                    "source anchor",
-                    &format!("invalid structured anchor: {error}"),
-                )
-            })?;
+        let mut anchor = structured_source_anchor(value)?;
         anchor.file = portable_path(&anchor.file, root)?;
         return Ok(Some(anchor));
     }
@@ -3628,6 +3655,67 @@ fn raw_anchor(
         end_line,
         end_column,
     }))
+}
+
+fn structured_source_anchor(value: &Value) -> Result<SourceAnchor, GraphError> {
+    const FIELDS: [&str; 7] = [
+        "file",
+        "startByte",
+        "endByte",
+        "startLine",
+        "startColumn",
+        "endLine",
+        "endColumn",
+    ];
+    let object = value.as_object().ok_or_else(|| {
+        raw_error(
+            "source anchor",
+            "invalid structured anchor: expected an object",
+        )
+    })?;
+    if object.len() != FIELDS.len() || object.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+        return Err(raw_error(
+            "source anchor",
+            "invalid structured anchor: expected exactly the v1 source anchor fields",
+        ));
+    }
+    let text = |field: &str| {
+        object
+            .get(field)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                raw_error(
+                    "source anchor",
+                    &format!("invalid structured anchor field {field:?}"),
+                )
+            })
+    };
+    let number = |field: &str| {
+        object.get(field).and_then(Value::as_u64).ok_or_else(|| {
+            raw_error(
+                "source anchor",
+                &format!("invalid structured anchor field {field:?}"),
+            )
+        })
+    };
+    let u32_number = |field: &str| {
+        u32::try_from(number(field)?).map_err(|_| {
+            raw_error(
+                "source anchor",
+                &format!("structured anchor field {field:?} exceeds u32"),
+            )
+        })
+    };
+    Ok(SourceAnchor {
+        file: text("file")?,
+        start_byte: number("startByte")?,
+        end_byte: number("endByte")?,
+        start_line: u32_number("startLine")?,
+        start_column: u32_number("startColumn")?,
+        end_line: u32_number("endLine")?,
+        end_column: u32_number("endColumn")?,
+    })
 }
 
 fn raw_origin_anchor(
