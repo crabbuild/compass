@@ -62,6 +62,9 @@ const QUERY_STOPWORDS: &[&str] = &[
     "work",
     "works",
     "working",
+    "implement",
+    "implemented",
+    "implementation",
     "der",
     "die",
     "das",
@@ -169,7 +172,10 @@ pub fn strip_diacritics(text: &str) -> String {
 
 #[must_use]
 pub fn search_tokens(text: &str) -> Vec<String> {
-    unicode_words(&strip_diacritics(text).to_lowercase())
+    unicode_words(&split_identifier_words(&strip_diacritics(text)).to_lowercase())
+        .into_iter()
+        .map(canonical_search_token)
+        .collect()
 }
 
 #[must_use]
@@ -195,7 +201,7 @@ pub fn query_terms(question: &str) -> Vec<String> {
                 }
             }
         } else {
-            for token in unicode_words(&raw.to_lowercase()) {
+            for token in search_tokens(raw) {
                 if is_searchable(&token) {
                     terms.push(token);
                 }
@@ -312,6 +318,33 @@ fn unicode_words(text: &str) -> Vec<String> {
         words.push(current);
     }
     words
+}
+
+fn split_identifier_words(text: &str) -> String {
+    let characters = text.chars().collect::<Vec<_>>();
+    let mut words = String::with_capacity(text.len());
+    for (index, &character) in characters.iter().enumerate() {
+        let previous = index.checked_sub(1).and_then(|at| characters.get(at));
+        let next = characters.get(index + 1);
+        let boundary = character.is_uppercase()
+            && previous.is_some_and(|value| {
+                value.is_lowercase()
+                    || value.is_numeric()
+                    || (value.is_uppercase() && next.is_some_and(|next| next.is_lowercase()))
+            });
+        if boundary {
+            words.push(' ');
+        }
+        words.push(character);
+    }
+    words
+}
+
+fn canonical_search_token(token: String) -> String {
+    match token.as_str() {
+        "resolution" | "resolved" | "resolver" | "resolving" => "resolve".to_owned(),
+        _ => token,
+    }
 }
 
 fn is_chinese(character: char) -> bool {
