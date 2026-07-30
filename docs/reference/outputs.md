@@ -104,6 +104,25 @@ promotion.
 - use canonical/semantic equivalence for graph comparisons;
 - validate file size and JSON at your trust boundary.
 
+### Partial publication diagnostics
+
+A successful build can publish a strictly valid partial graph after
+quarantining invalid individual records. The durable warning codes are:
+
+- `publication_omitted_node`
+- `publication_omitted_edge`
+- `publication_identity_collision`
+- `publication_omission_summary`
+
+The first three provide bounded examples. The summary contains exact omitted
+node, omitted edge, identity-collision, and capped-example counts. At most 100
+examples of each record category are stored.
+
+The private `.compass_output_stats.json` and sealed build state retain the same
+counts so no-op and watch results preserve the partial status. They are
+operational state, not an alternative graph schema. Consumers should use graph
+diagnostics or typed query `incomplete_coverage` diagnostics.
+
 ## `GRAPH_REPORT.md`
 
 The report can include:

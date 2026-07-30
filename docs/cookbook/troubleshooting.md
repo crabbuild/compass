@@ -55,6 +55,7 @@ Record:
 | provider requested unexpectedly | semantic sources present | inspect command and file classes | configure intentionally or use code-only |
 | graph changed on no-op | config/version/input changed | compare manifest/version/options | clean qualification and investigate fingerprint |
 | `graph.html` missing | disabled or graph too large | inspect command/report | query JSON; HTML is optional |
+| partial graph warning | invalid records were quarantined | inspect `publication_omission_summary` and bounded examples in `graph.json` | fix the named producer/source shape; do not weaken the validator |
 
 ## Query
 
@@ -64,6 +65,7 @@ Record:
 | graph must be JSON | wrong input/export | inspect suffix/content | use canonical graph JSON |
 | node not found | label mismatch/duplicates | broad query by file/domain | use stable ID or more context |
 | path not found | wrong endpoint/direction/missing edge | explain both endpoints | verify graph coverage and relation |
+| `incomplete_coverage` | the published graph omitted invalid records | inspect the publication summary and relevant source | treat absence as uncertain until the producer issue is fixed |
 | too many results | generic phrase/hub | inspect anchors | add behavior/domain terms or CompassQL |
 | limit/timeout | query expansion too broad | run `EXPLAIN`, reduce path/labels | narrow query; approved budget only |
 | JSON consumer breaks | schema mismatch or parsed human text | inspect version tag | consume documented JSON/JSONL and reject unknown major |

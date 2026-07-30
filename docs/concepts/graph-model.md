@@ -195,6 +195,29 @@ Graph loading is guarded by:
 This protects query commands from treating arbitrary, oversized, or stale
 cache content as a valid graph.
 
+## Partial publication and quarantine
+
+Compass publishes only records that satisfy the closed graph vocabulary and
+endpoint rules. If one extracted node or edge is invalid, the normal build
+quarantines that record instead of weakening validation for the artifact:
+
+- an invalid node is omitted with all incident edges;
+- an invalid edge is omitted without inventing a generic relationship;
+- a conflicting stable identity keeps one deterministic survivor;
+- a route whose handler edge is omitted becomes unresolved;
+- the remaining `compass.graph/1` document passes the full strict validator.
+
+The graph records bounded examples in `graph.diagnostics` and an exact
+`publication_omission_summary`. Build output reports retained counts and warns
+when the artifact is partial. Search, callers, callees, impact, explore, and
+node-trail responses surface the same condition as `incomplete_coverage`.
+Missing topology in such a response may reflect quarantine, so it is not proof
+that no relationship exists in source.
+
+Invalid document metadata, unsafe file inventory, an empty usable graph, and
+publication I/O failures remain hard failures. Atomic publication preserves the
+last known good generation when one of those failures occurs.
+
 ## Provenance and confidence
 
 Relationships can carry:
