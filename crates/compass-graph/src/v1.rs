@@ -493,11 +493,12 @@ fn normalize_v1_with_mode(
             quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
             continue;
         }
-        let normalized = match raw.attributes.get(TRUSTED_NODE_RECORD) {
-            Some(value) => serde_json::from_value::<NodeRecord>(value.clone())
+        let trusted = raw.attributes.get(TRUSTED_NODE_RECORD).cloned();
+        let normalized = match trusted {
+            Some(value) => serde_json::from_value::<NodeRecord>(value)
                 .map_err(|error| raw_error(&raw_id, &error.to_string())),
             None => normalize_node(
-                raw.clone(),
+                raw,
                 &evidence.repository_root,
                 &file_facts,
                 stub_wiring_sites.get(&raw_id),
