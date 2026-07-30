@@ -15,6 +15,7 @@ pub use error::GraphError;
 pub use graph::{EdgeIndex, Graph, NodeIndex};
 pub use query_index::{QueryIndex, SchemaFingerprint, cypher_node_label, cypher_relationship_type};
 pub use validation::{
-    CodeGraphValidationError, ExtractionValidationError, assert_valid_extraction,
-    validate_code_graph, validate_extraction,
+    CodeGraphValidationError, CodeGraphValidationReport, ExtractionValidationError,
+    RecordValidationErrors, assert_valid_extraction, validate_code_graph,
+    validate_code_graph_records, validate_extraction,
 };

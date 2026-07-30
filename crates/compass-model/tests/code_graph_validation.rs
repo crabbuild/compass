@@ -6,7 +6,7 @@ use compass_model::provenance::{
     EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, ResolutionCandidate,
     SourceAnchor,
 };
-use compass_model::validate_code_graph;
+use compass_model::{validate_code_graph, validate_code_graph_records};
 
 const CLOSED_ENDPOINT_REWRITE_RULES: [&str; 12] = [
     "csharp-namespace-canonicalization",
@@ -119,6 +119,72 @@ fn document() -> GraphDocument {
 #[test]
 fn whole_document_validation_accepts_the_supported_route_shape() {
     assert!(validate_code_graph(&document()).is_ok());
+}
+
+#[test]
+fn structured_validation_classifies_document_node_and_edge_failures() {
+    let mut graph = document();
+    graph.directed = false;
+    graph.nodes[0].source.as_mut().unwrap().end_byte = 101;
+    graph.nodes[1].kind = NodeKind::Route;
+
+    let report = validate_code_graph_records(&graph);
+
+    assert_eq!(report.document_errors, vec!["directed must be true"]);
+    assert_eq!(report.node_errors.len(), 1);
+    assert_eq!(report.node_errors[0].id, "route");
+    assert!(
+        report.node_errors[0]
+            .errors
+            .iter()
+            .any(|error| error.contains("source anchor exceeds"))
+    );
+    assert_eq!(report.edge_errors.len(), 1);
+    assert_eq!(report.edge_errors[0].id, graph.links[0].id);
+    assert!(
+        report.edge_errors[0]
+            .errors
+            .iter()
+            .any(|error| error.contains("invalid routes_to"))
+    );
+}
+
+#[test]
+fn structured_validation_preserves_strict_error_order() {
+    let mut graph = document();
+    graph.multigraph = false;
+    graph.nodes[0].name.clear();
+    graph.nodes[1].kind = NodeKind::Route;
+
+    let report = validate_code_graph_records(&graph);
+    let mut expected = report.document_errors.clone();
+    expected.extend(
+        report
+            .node_errors
+            .iter()
+            .flat_map(|record| record.errors.iter().cloned()),
+    );
+    expected.extend(
+        report
+            .edge_errors
+            .iter()
+            .flat_map(|record| record.errors.iter().cloned()),
+    );
+
+    assert_eq!(
+        validate_code_graph(&graph).unwrap_err().errors,
+        expected,
+        "strict validation must remain an ordered projection of the report"
+    );
+}
+
+#[test]
+fn structured_validation_is_empty_for_a_valid_document() {
+    let report = validate_code_graph_records(&document());
+    assert!(report.is_valid());
+    assert!(report.document_errors.is_empty());
+    assert!(report.node_errors.is_empty());
+    assert!(report.edge_errors.is_empty());
 }
 
 #[test]
