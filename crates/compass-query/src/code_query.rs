@@ -1116,9 +1116,12 @@ fn sql_error(error: rusqlite::Error) -> QueryError {
 #[cfg(test)]
 mod adjacency_tests {
     use compass_model::code_graph::{
-        BuildMetadata, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
+        BuildMetadata, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeKind,
+        NodeRecord,
     };
-    use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
+    use compass_model::identity::{edge_id, file_id};
+    use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+    use compass_model::validate_code_graph;
 
     use super::{CodeAdjacencyIndex, EdgeKind};
 
@@ -1137,6 +1140,32 @@ mod adjacency_tests {
             context: None,
             deferred: false,
             diagnostics: Vec::new(),
+        }
+    }
+
+    fn scale_anchor(start_byte: u64) -> SourceAnchor {
+        let line = u32::try_from(start_byte.saturating_add(1)).unwrap_or(u32::MAX);
+        SourceAnchor {
+            file: "scale.rs".to_owned(),
+            start_byte,
+            end_byte: start_byte.saturating_add(1),
+            start_line: line,
+            start_column: 0,
+            end_line: line,
+            end_column: 1,
+        }
+    }
+
+    fn scale_evidence(anchor: SourceAnchor) -> Provenance {
+        Provenance {
+            origin: EvidenceOrigin::Ast,
+            extractor: "compass-query-scale".to_owned(),
+            confidence: EvidenceConfidence::Exact,
+            rule: None,
+            anchors: vec![anchor],
+            wiring_site: None,
+            score: None,
+            candidates: Vec::new(),
         }
     }
 
@@ -1231,7 +1260,8 @@ mod adjacency_tests {
     }
 
     #[test]
-    fn bounded_matching_scales_with_response_budget_on_500k_edges() {
+    fn bounded_matching_scales_with_response_budget_on_500k_edges()
+    -> Result<(), Box<dyn std::error::Error>> {
         const NODES: usize = 100_000;
         const EDGES: usize = 500_000;
         const LIMIT: usize = 4;
@@ -1243,6 +1273,18 @@ mod adjacency_tests {
             configuration_digest: "config".to_owned(),
             generation_id: "generation".to_owned(),
             source_commit: None,
+        });
+        graph.graph.files.push(FileRecord {
+            id: file_id("scale.rs"),
+            path: "scale.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:scale-fixture".to_owned(),
+            byte_size: u64::try_from(EDGES).unwrap_or(u64::MAX),
+            generated: true,
+            extraction_status: ExtractionStatus::Generated,
+            extractor_versions: vec!["compass-query-scale/1".to_owned()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
         });
         graph.nodes.reserve(NODES);
         for index in 0..NODES {
@@ -1256,7 +1298,7 @@ mod adjacency_tests {
                 framework: None,
                 source: None,
                 details: None,
-                evidence: Vec::new(),
+                evidence: vec![scale_evidence(scale_anchor(0))],
                 coverage: Vec::new(),
                 diagnostics: Vec::new(),
                 community: None,
@@ -1264,24 +1306,39 @@ mod adjacency_tests {
         }
         graph.links.reserve(EDGES);
         for index in 0..EDGES {
-            graph.links.push(edge(
-                &format!("e:{index:06}"),
-                "hub",
-                if index % 2 == 0 {
-                    EdgeKind::Calls
-                } else {
-                    EdgeKind::RoutesTo
-                },
-                &format!("n:{:05}", index % NODES),
-            ));
+            let source = "n:00000";
+            let target = format!("n:{:05}", index % NODES);
+            let kind = if index % 2 == 0 {
+                EdgeKind::Calls
+            } else {
+                EdgeKind::Overrides
+            };
+            let relationship_site = scale_anchor(u64::try_from(index).unwrap_or(u64::MAX));
+            let id = edge_id(source, kind, &target, Some(&relationship_site), None);
+            graph.links.push(EdgeRecord {
+                id: id.clone(),
+                key: id,
+                source: source.to_owned(),
+                target,
+                kind,
+                occurrence_rule: None,
+                relationship_site: Some(relationship_site.clone()),
+                details: None,
+                evidence: vec![scale_evidence(relationship_site)],
+                weight: None,
+                context: None,
+                deferred: false,
+                diagnostics: Vec::new(),
+            });
         }
 
+        validate_code_graph(&graph)?;
         let adjacency = CodeAdjacencyIndex::build(&graph);
         let (matching, truncated, examined) = adjacency.matching_bounded(
             &graph,
-            "hub",
+            "n:00000",
             false,
-            &[EdgeKind::Calls, EdgeKind::RoutesTo],
+            &[EdgeKind::Calls, EdgeKind::Overrides],
             true,
             LIMIT,
         );
@@ -1296,5 +1353,6 @@ mod adjacency_tests {
             graph.nodes.len(),
             matching.len()
         );
+        Ok(())
     }
 }
