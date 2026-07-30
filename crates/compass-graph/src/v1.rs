@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord, Registry};
@@ -497,6 +498,7 @@ fn normalize_v1_with_mode(
     mut evidence: BuildEvidence,
     mode: PublicationMode,
 ) -> Result<PublicationOutcome, GraphError> {
+    let mut profile_started = Instant::now();
     let mut quarantine = QuarantineCollector::default();
     let canonical_raw_order = extraction
         .extensions
@@ -533,6 +535,7 @@ fn normalize_v1_with_mode(
         mode,
         &mut quarantine,
     )?;
+    profile_v1("v1 preparation", &mut profile_started);
 
     if mode == PublicationMode::BestEffort && !canonical_raw_order {
         extraction.nodes.sort_by_cached_key(raw_node_sort_key);
@@ -621,6 +624,7 @@ fn normalize_v1_with_mode(
         }
         recompute_route_resolution(details);
     }
+    profile_v1("v1 node normalization", &mut profile_started);
 
     let mut links = HashMap::<String, EdgeRecord>::with_capacity(extraction.edges.len());
     for (index, raw) in extraction.edges.into_iter().enumerate() {
@@ -872,6 +876,7 @@ fn normalize_v1_with_mode(
             links.insert(edge.id.clone(), edge);
         }
     }
+    profile_v1("v1 edge normalization", &mut profile_started);
     for edge in links.values() {
         let Some(EdgeDetails::Route(edge_details)) = edge.details.as_ref() else {
             continue;
@@ -982,6 +987,7 @@ fn normalize_v1_with_mode(
         (left.code.as_str(), left.message.as_str())
             .cmp(&(right.code.as_str(), right.message.as_str()))
     });
+    profile_v1("v1 canonical ordering", &mut profile_started);
 
     let mut document = GraphDocument {
         directed: true,
@@ -999,6 +1005,7 @@ fn normalize_v1_with_mode(
     if mode == PublicationMode::BestEffort {
         sanitize_document(&mut document, &mut quarantine)?;
     }
+    profile_v1("v1 best-effort sanitization", &mut profile_started);
     let omissions = quarantine.finish(&mut document.graph.diagnostics);
     sort_dedup_serialized(&mut document.graph.diagnostics);
     document.graph.diagnostics.sort_by(|left, right| {
@@ -1006,6 +1013,7 @@ fn normalize_v1_with_mode(
             .cmp(&(right.code.as_str(), right.message.as_str()))
     });
     validate_code_graph(&document)?;
+    profile_v1("v1 strict validation", &mut profile_started);
     Ok(PublicationOutcome {
         document,
         omissions,
@@ -2041,6 +2049,16 @@ fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
 
 fn serialized<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_default()
+}
+
+fn profile_v1(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    *started = Instant::now();
 }
 
 /// Convert the canonical internal analysis graph at the sole v1 publication boundary.
