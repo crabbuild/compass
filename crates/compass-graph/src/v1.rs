@@ -487,10 +487,8 @@ fn normalize_v1_with_mode(
     }
     let mut id_remap = HashMap::with_capacity(extraction.nodes.len());
     let mut nodes = HashMap::<String, NodeRecord>::with_capacity(extraction.nodes.len());
-    for raw in extraction.nodes {
+    for mut raw in extraction.nodes {
         let raw_id = raw.id.clone();
-        let diagnostic_anchor =
-            best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts);
         if id_remap.contains_key(&raw_id) {
             let error = raw_error(
                 &raw_id,
@@ -500,7 +498,11 @@ fn normalize_v1_with_mode(
                 return Err(error);
             }
             id_remap.remove(&raw_id);
-            quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
+            quarantine.omit_node(
+                &raw_id,
+                &error.to_string(),
+                best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
+            );
             continue;
         }
         let trusted = raw.attributes.get(TRUSTED_NODE_RECORD).cloned();
@@ -508,7 +510,7 @@ fn normalize_v1_with_mode(
             Some(value) => serde_json::from_value::<NodeRecord>(value)
                 .map_err(|error| raw_error(&raw_id, &error.to_string())),
             None => normalize_node(
-                raw,
+                &mut raw,
                 &evidence.repository_root,
                 &file_facts,
                 stub_wiring_sites.get(&raw_id),
@@ -517,7 +519,11 @@ fn normalize_v1_with_mode(
         let node = match normalized {
             Ok(node) => node,
             Err(error) if mode == PublicationMode::BestEffort => {
-                quarantine.omit_node(&raw_id, &error.to_string(), diagnostic_anchor);
+                quarantine.omit_node(
+                    &raw_id,
+                    &error.to_string(),
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts),
+                );
                 continue;
             }
             Err(error) => return Err(error),
@@ -532,7 +538,8 @@ fn normalize_v1_with_mode(
                 quarantine.identity_collision(
                     &raw_id,
                     &error.to_string(),
-                    diagnostic_anchor.or_else(|| best_effort_node_anchor(existing)),
+                    best_effort_raw_anchor(&raw.attributes, &evidence.repository_root, &file_facts)
+                        .or_else(|| best_effort_node_anchor(existing)),
                 );
                 continue;
             }
@@ -2566,7 +2573,7 @@ fn normalize_source_derived_scopes(
 }
 
 fn normalize_node(
-    mut raw: RawNodeRecord,
+    raw: &mut RawNodeRecord,
     root: &Path,
     file_facts: &HashMap<String, PublishedFileFacts>,
     inferred_wiring_site: Option<&SourceAnchor>,
