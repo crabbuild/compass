@@ -15,6 +15,13 @@
 - Load architecture exports up to 128 MiB while keeping ordinary Compass
   commands at the 8 MiB safety ceiling.
 
+## 0.1.8
+
+- Add first-run Compass CLI installation in a visible VS Code terminal on
+  macOS, Linux, and Windows.
+- Verify and activate installed or manually selected CLIs without reloading the
+  editor.
+
 ## 0.1.6
 
 - Place the Marketplace logo on a high-contrast indigo badge so it remains

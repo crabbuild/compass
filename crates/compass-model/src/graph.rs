@@ -23,7 +23,7 @@ pub struct Graph {
 }
 
 impl Graph {
-    /// Load a graph file with the same default 512 MiB safety cap as Python.
+    /// Load a graph file with the default bounded enterprise graph size cap.
     ///
     /// # Errors
     ///
@@ -313,7 +313,7 @@ fn ensure_endpoint(id: &str, nodes: &mut Vec<NodeRecord>, ids: &mut HashMap<Stri
 }
 
 pub(crate) fn graph_size_cap() -> u64 {
-    const DEFAULT: u64 = 512 * 1024 * 1024;
+    const DEFAULT: u64 = crate::DEFAULT_GRAPH_SIZE_CAP_BYTES;
     let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
         return DEFAULT;
     };

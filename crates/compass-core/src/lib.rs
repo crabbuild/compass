@@ -24,8 +24,9 @@ pub use history::{
 pub use merge::{MergeResult, merge_graphs};
 pub use pipeline::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings, CoreError,
-    SemanticLayer, build_graph_with_layers, build_graph_with_layers_and_progress,
-    build_graph_with_layers_and_tiebreaker, build_graph_with_semantic, build_local_graph,
+    DEFAULT_MAX_SOURCE_BYTES, SemanticLayer, build_graph_with_layers,
+    build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
+    build_graph_with_semantic, build_local_graph,
 };
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,
@@ -63,13 +64,8 @@ impl ExportInputs {
         if communities.is_empty() {
             for node in &document.nodes {
                 let community = node
-                    .attributes
-                    .get("community")
-                    .and_then(|value| {
-                        value
-                            .as_u64()
-                            .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-                    })
+                    .unsigned("community")
+                    .or_else(|| node.string("community").parse().ok())
                     .and_then(|value| usize::try_from(value).ok());
                 if let Some(community) = community {
                     communities
@@ -184,8 +180,11 @@ impl LoadedGraph {
 
 #[must_use]
 pub fn default_graph_path() -> PathBuf {
-    PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
-        .join("graph.json")
+    let output =
+        PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
+    let requested = output.join("graph.json");
+    compass_files::BuildGuard::resolve_requested_artifact(&requested)
+        .unwrap_or_else(|_| output.join(".compass-invalid-active-generation"))
 }
 
 fn load_learning_overlay(graph_path: &Path) -> HashMap<String, Map<String, Value>> {

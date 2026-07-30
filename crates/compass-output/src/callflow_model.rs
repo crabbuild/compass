@@ -159,12 +159,10 @@ pub fn callflow_view_model(
             .nodes
             .iter()
             .filter(|node| {
-                let community = node_community.get(node.id.as_str()).cloned().or_else(|| {
-                    node.attributes
-                        .get("community")
-                        .and_then(serde_json::Value::as_u64)
-                        .map(|value| value.to_string())
-                });
+                let community = node_community
+                    .get(node.id.as_str())
+                    .cloned()
+                    .or_else(|| node.unsigned("community").map(|value| value.to_string()));
                 section.id != "overview"
                     && community.is_some_and(|community| section.communities.contains(&community))
             })

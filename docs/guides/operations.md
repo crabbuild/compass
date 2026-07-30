@@ -85,6 +85,19 @@ compass update .
 
 That separates watcher/event problems from extraction problems.
 
+### Operate partial graph warnings
+
+A warning that a partial graph was published is a successful, atomic build,
+not a retryable watcher failure. Compass has omitted invalid individual records
+while keeping the remaining artifact strictly valid.
+
+Record the exact omitted counts, inspect `publication_omission_summary` and its
+bounded examples in `graph.json`, and prioritize repeated producer or
+framework-specific reasons. Queries add `incomplete_coverage`; downstream
+automation must not interpret a missing path as proof of absence while that
+diagnostic is present. Escalate a sudden increase in omissions even when the
+command exits successfully.
+
 ## MCP service
 
 Start by inspecting:

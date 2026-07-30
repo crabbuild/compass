@@ -1,1 +1,3 @@
 crates/compass-cli/assets/vendor/pierre-diffs-v1.2.12.js -whitespace
+crates/compass-output/assets/viewer/graph.js -whitespace
+crates/compass-cli/assets/compass-skill/** text eol=lf

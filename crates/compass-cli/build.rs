@@ -25,6 +25,10 @@ fn collect(root: &Path, directory: &Path, files: &mut Vec<PathBuf>) -> io::Resul
     Ok(())
 }
 
+fn canonical_text(input: &str) -> String {
+    input.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "cargo:rustc-env=COMPASS_BUILD_TARGET={}",
@@ -45,17 +49,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for directory in ["compass-skill", "compass-integrations"] {
         collect(&root, &root.join(directory), &mut files)?;
     }
+    let output = PathBuf::from(env::var("OUT_DIR")?);
+    let embedded_root = output.join("install-assets");
     let mut generated = String::from("static EMBEDDED_ASSETS: &[EmbeddedAsset] = &[\n");
     for relative in files {
         let source = root.join(&relative);
+        let embedded = embedded_root.join(&relative);
+        if let Some(parent) = embedded.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = fs::read_to_string(&source)?;
+        fs::write(&embedded, canonical_text(&body))?;
         generated.push_str(&format!(
             "    EmbeddedAsset {{ path: {:?}, bytes: include_bytes!({:?}) }},\n",
             relative.to_string_lossy().replace('\\', "/"),
-            source
+            embedded
         ));
     }
     generated.push_str("];\n");
-    let output = PathBuf::from(env::var("OUT_DIR")?);
     fs::write(output.join("install_assets.rs"), generated)?;
     Ok(())
 }

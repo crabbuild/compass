@@ -1,0 +1,9 @@
+{
+  "name": "qualification",
+  "dependencies": {
+    "example-runtime": "1.0.0"
+  },
+  "scripts": {
+    "verify": "compass"
+  }
+}

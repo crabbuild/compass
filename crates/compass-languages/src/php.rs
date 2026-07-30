@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
@@ -290,12 +290,35 @@ impl<'tree> State<'_, 'tree> {
             || make_id(&[&self.stem, &name]),
             |class| make_id(&[class, &name]),
         );
+        let semantic_owner = parent_class.and_then(|class| {
+            self.extraction
+                .nodes
+                .iter()
+                .find(|node| node.id == class)
+                .map(|node| node.label().to_owned())
+        });
         let label = if parent_class.is_some() {
             format!(".{name}()")
         } else {
             format!("{name}()")
         };
         self.add_node(id.clone(), &label, line(node), true, true);
+        if let Some(semantic_owner) = semantic_owner
+            && let Some(method) = self
+                .extraction
+                .nodes
+                .iter_mut()
+                .find(|method| method.id == id)
+        {
+            method.attributes.insert(
+                "lexical_owner".to_owned(),
+                Value::String(semantic_owner.clone()),
+            );
+            method.attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!("{semantic_owner}::{name}")),
+            );
+        }
         let owner = parent_class.unwrap_or(&self.file_id).to_owned();
         self.add_edge(
             &owner,
@@ -436,7 +459,7 @@ impl<'tree> State<'_, 'tree> {
         caller: &str,
         labels: &HashMap<String, String>,
         labels_ci: &HashMap<String, String>,
-        seen_calls: &mut HashSet<(String, String)>,
+        seen_calls: &mut HashSet<(String, String, usize, usize)>,
         seen_special: &mut HashSet<(String, String, String)>,
     ) {
         if matches!(node.kind(), "function_definition" | "method_declaration") {
@@ -449,8 +472,14 @@ impl<'tree> State<'_, 'tree> {
                     .get(&call.name)
                     .filter(|target| target.as_str() != caller)
                 {
-                    if seen_calls.insert((caller.to_owned(), (*target).clone())) {
+                    if seen_calls.insert((
+                        caller.to_owned(),
+                        (*target).clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    )) {
                         self.add_edge(caller, target, "calls", line(node), Some("call"), false);
+                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
                 } else if !call.name.is_empty() {
                     self.extraction.raw_calls_mut().push(RawCall {
@@ -462,7 +491,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(None),
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
                 if call.name == "config" {
@@ -639,11 +668,12 @@ impl<'tree> State<'_, 'tree> {
             attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
             attributes.insert("source_file".to_owned(), Value::String(String::new()));
             attributes.insert("source_location".to_owned(), Value::String(String::new()));
-            if origin {
-                attributes.insert(
-                    "origin_file".to_owned(),
-                    Value::String(self.source_file.clone()),
-                );
+            attributes.insert(
+                "origin_file".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
+            if !origin {
+                attributes.insert("type".to_owned(), Value::String("class".to_owned()));
             }
             self.extraction.nodes.push(NodeRecord {
                 id: id.clone(),

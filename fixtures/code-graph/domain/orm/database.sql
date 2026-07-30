@@ -1,0 +1,10 @@
+CREATE SCHEMA billing;
+CREATE TABLE customers (id INTEGER);
+CREATE TABLE invoices (id INTEGER);
+CREATE TABLE orders (id INTEGER);
+CREATE TABLE billing.payments (id INTEGER);
+CREATE TABLE products (id INTEGER);
+CREATE TABLE audit_entries (id INTEGER);
+CREATE TABLE accounts (id INTEGER);
+CREATE TABLE users (id INTEGER);
+CREATE TABLE sessions (id INTEGER);

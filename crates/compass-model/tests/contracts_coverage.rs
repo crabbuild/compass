@@ -146,6 +146,30 @@ fn graph_size_cap_units_and_fallbacks_are_accepted_without_global_side_effects()
 }
 
 #[test]
+fn default_graph_size_cap_accepts_heavy_artifacts_but_remains_bounded() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    let file = fs::File::create(&path)?;
+
+    file.set_len(768 * 1024 * 1024)?;
+    assert!(
+        compass_model::code_graph::GraphDocument::size_cap_exceeded(&path).is_none(),
+        "the default cap must accept qualified enterprise artifacts"
+    );
+
+    file.set_len(compass_model::DEFAULT_GRAPH_SIZE_CAP_BYTES + 1)?;
+    assert_eq!(
+        compass_model::code_graph::GraphDocument::size_cap_exceeded(&path),
+        Some((
+            compass_model::DEFAULT_GRAPH_SIZE_CAP_BYTES + 1,
+            compass_model::DEFAULT_GRAPH_SIZE_CAP_BYTES,
+        ))
+    );
+    Ok(())
+}
+
+#[test]
 fn graph_size_cap_child() -> Result<(), Box<dyn Error>> {
     let Some(path) = std::env::var_os("COMPASS_GRAPH_CAP_FIXTURE") else {
         return Ok(());

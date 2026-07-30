@@ -29,16 +29,17 @@ pub fn graph_operations(
         .nodes
         .iter()
         .map(|node| {
-            let mut props = primitive_properties(&node.attributes);
+            let mut props = primitive_properties(node.properties());
             props.insert("id".to_owned(), Value::String(node.id.clone()));
             if let Some(community) = node_community.get(node.id.as_str()) {
                 props.insert("community".to_owned(), Value::from(*community));
             }
-            let file_type = node
-                .attributes
-                .get("file_type")
-                .and_then(Value::as_str)
-                .unwrap_or("Entity");
+            let file_type = node.string("file_type");
+            let file_type = if file_type.is_empty() {
+                "Entity"
+            } else {
+                &file_type
+            };
             let label = safe_label(&python_capitalize(file_type));
             CypherOperation {
                 statement: format!("MERGE (n:{label} {{id: $id}}) SET n += $props"),
@@ -53,11 +54,11 @@ pub fn graph_operations(
         .links
         .iter()
         .map(|edge| {
-            let relation = edge
-                .attributes
-                .get("relation")
-                .and_then(Value::as_str)
-                .unwrap_or("RELATED_TO");
+            let relation = if edge.relation().is_empty() {
+                "RELATED_TO"
+            } else {
+                edge.relation()
+            };
             let relation = safe_relation(relation);
             CypherOperation {
                 statement: format!(
@@ -68,7 +69,7 @@ pub fn graph_operations(
                     ("tgt".to_owned(), Value::String(edge.target.clone())),
                     (
                         "props".to_owned(),
-                        Value::Object(primitive_properties(&edge.attributes)),
+                        Value::Object(primitive_properties(edge.properties())),
                     ),
                 ]),
             }
@@ -88,14 +89,15 @@ pub fn falkordb_query(operation: &CypherOperation) -> String {
     format!("CYPHER {params} {}", operation.statement)
 }
 
-fn primitive_properties(attributes: &Map<String, Value>) -> Map<String, Value> {
+fn primitive_properties<'a>(
+    attributes: impl Iterator<Item = (&'a str, Value)>,
+) -> Map<String, Value> {
     attributes
-        .iter()
         .filter(|(key, value)| {
             !key.starts_with('_')
                 && matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_))
         })
-        .map(|(key, value)| (key.clone(), value.clone()))
+        .map(|(key, value)| (key.to_owned(), value))
         .collect()
 }
 

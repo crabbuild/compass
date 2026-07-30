@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ahash::AHashMap;
-use compass_model::{EdgeRecord, NodeRecord};
+use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::Value;
 use sha1::{Digest, Sha1};
 use unicode_casefold::UnicodeCaseFold;

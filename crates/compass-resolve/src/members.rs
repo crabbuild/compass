@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use compass_languages::{Extraction, RawCall};
-use compass_model::{EdgeRecord, NodeRecord};
+use compass_languages::{Extraction, RawCall, is_language_builtin_global};
+use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 
 /// Apply the deterministic language-specific member-call passes to merged facts.
@@ -40,7 +40,17 @@ pub(crate) fn resolve_language_call_facts(facts: LanguageCallFacts, merged: &mut
     let mut existing = merged
         .edges
         .iter()
-        .map(|edge| (edge.source.clone(), edge.target.clone()))
+        .map(|edge| {
+            (
+                edge.source.clone(),
+                edge.target.clone(),
+                occurrence_site(
+                    &edge.attributes,
+                    &edge.string("source_file"),
+                    &edge.string("source_location"),
+                ),
+            )
+        })
         .collect::<HashSet<_>>();
 
     resolve_swift_registry_compatibility(
@@ -73,7 +83,7 @@ fn resolve_swift_registry_compatibility(
     calls: &[RawCall],
     indexes: &Indexes,
     tables: &TypeTables,
-    existing: &mut HashSet<(String, String)>,
+    existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
     if tables.swift.is_empty() {
@@ -255,7 +265,7 @@ fn resolve_typed_members(
     calls: &[RawCall],
     indexes: &Indexes,
     tables: &TypeTables,
-    existing: &mut HashSet<(String, String)>,
+    existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
     for call in calls {
@@ -378,7 +388,7 @@ fn resolve_typed_members(
 fn resolve_python_members(
     calls: &[RawCall],
     indexes: &Indexes,
-    existing: &mut HashSet<(String, String)>,
+    existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
     for call in calls {
@@ -429,7 +439,7 @@ fn resolve_python_members(
 fn resolve_ruby_members(
     calls: &[RawCall],
     indexes: &Indexes,
-    existing: &mut HashSet<(String, String)>,
+    existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
     let mut ruby_types = HashMap::new();
@@ -496,7 +506,7 @@ fn resolve_ruby_members(
 fn resolve_pascal_inherited(
     calls: &[RawCall],
     indexes: &Indexes,
-    existing: &mut HashSet<(String, String)>,
+    existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
     for call in calls {
@@ -568,10 +578,16 @@ fn emit(
     relation: &str,
     context: &str,
     confidence: (&str, f64),
-    existing: &mut HashSet<(String, String)>,
+    existing: &mut HashSet<(String, String, String)>,
     edges: &mut Vec<EdgeRecord>,
 ) {
-    if target == call.caller_nid || !existing.insert((call.caller_nid.clone(), target.to_owned())) {
+    if target == call.caller_nid
+        || !existing.insert((
+            call.caller_nid.clone(),
+            target.to_owned(),
+            occurrence_site(&call.extensions, &call.source_file, &call.source_location),
+        ))
+    {
         return;
     }
     let mut attributes = Map::new();
@@ -587,12 +603,48 @@ fn emit(
         "source_location".into(),
         Value::String(call.source_location.clone()),
     );
+    for key in [
+        "language",
+        "extractor",
+        "source_anchor",
+        "start_byte",
+        "end_byte",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+    ] {
+        if let Some(value) = call.extensions.get(key) {
+            attributes.insert(key.to_owned(), value.clone());
+        }
+    }
     attributes.insert("weight".into(), Value::from(1.0));
     edges.push(EdgeRecord {
         source: call.caller_nid.clone(),
         target: target.to_owned(),
         attributes,
     });
+}
+
+fn occurrence_site(attributes: &Map<String, Value>, source_file: &str, location: &str) -> String {
+    serde_json::to_string(&[
+        Value::String(source_file.to_owned()),
+        attributes
+            .get("source_anchor")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("start_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("end_byte").cloned().unwrap_or(Value::Null),
+        attributes.get("line_start").cloned().unwrap_or(Value::Null),
+        attributes
+            .get("column_start")
+            .cloned()
+            .unwrap_or(Value::Null),
+        attributes.get("line_end").cloned().unwrap_or(Value::Null),
+        attributes.get("column_end").cloned().unwrap_or(Value::Null),
+        Value::String(location.to_owned()),
+    ])
+    .unwrap_or_default()
 }
 
 fn collect_table(
@@ -637,52 +689,7 @@ fn is_builtin_type(indexes: &Indexes, owner: &str) -> bool {
     indexes
         .nodes
         .get(owner)
-        .is_some_and(|node| is_builtin(node.label()))
-}
-
-fn is_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "Number"
-            | "Boolean"
-            | "Object"
-            | "Array"
-            | "Symbol"
-            | "BigInt"
-            | "Date"
-            | "RegExp"
-            | "Error"
-            | "TypeError"
-            | "RangeError"
-            | "SyntaxError"
-            | "ReferenceError"
-            | "EvalError"
-            | "URIError"
-            | "Promise"
-            | "Map"
-            | "Set"
-            | "WeakMap"
-            | "WeakSet"
-            | "JSON"
-            | "Math"
-            | "Reflect"
-            | "Proxy"
-            | "Intl"
-            | "URL"
-            | "URLSearchParams"
-            | "FormData"
-            | "Blob"
-            | "File"
-            | "Headers"
-            | "Request"
-            | "Response"
-            | "AbortController"
-            | "AbortSignal"
-            | "TextEncoder"
-            | "TextDecoder"
-            | "console"
-    )
+        .is_some_and(|node| is_language_builtin_global("typescript", node.label()))
 }
 
 fn key(label: &str) -> String {
@@ -817,8 +824,8 @@ mod tests {
         ] {
             assert!(!is_type_like(&node(value)));
         }
-        assert!(is_builtin("Promise"));
-        assert!(!is_builtin("Custom"));
+        assert!(is_language_builtin_global("typescript", "Promise"));
+        assert!(!is_language_builtin_global("typescript", "Custom"));
         assert_eq!(key("HTTP_Client.run()"), "httpclientrun");
         assert_eq!(receiver(&call(Some(Some("service")))), Some("service"));
         assert_eq!(receiver(&call(Some(None))), None);
@@ -918,6 +925,52 @@ mod tests {
         assert_eq!(edges[0].string("relation"), "calls");
         assert_eq!(edges[0].attributes["confidence_score"], 0.8);
         assert_eq!(edges[0].attributes["source_location"], "L2");
+    }
+
+    #[test]
+    fn edge_emission_preserves_distinct_member_call_occurrences() {
+        let mut first = call(Some(Some("service")));
+        first.extensions.extend([
+            ("start_byte".to_owned(), Value::from(10)),
+            ("end_byte".to_owned(), Value::from(18)),
+            (
+                "extractor".to_owned(),
+                Value::String("compass.languages.typescript".to_owned()),
+            ),
+            (
+                "language".to_owned(),
+                Value::String("typescript".to_owned()),
+            ),
+        ]);
+        let mut second = first.clone();
+        second
+            .extensions
+            .insert("start_byte".to_owned(), Value::from(20));
+        second
+            .extensions
+            .insert("end_byte".to_owned(), Value::from(28));
+        let mut existing = HashSet::new();
+        let mut edges = Vec::new();
+
+        for call in [&first, &second] {
+            emit(
+                call,
+                "target",
+                "calls",
+                "call",
+                ("EXTRACTED", 1.0),
+                &mut existing,
+                &mut edges,
+            );
+        }
+
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].attributes["start_byte"], 10);
+        assert_eq!(edges[1].attributes["start_byte"], 20);
+        assert!(edges.iter().all(|edge| {
+            edge.string("language") == "typescript"
+                && edge.string("extractor") == "compass.languages.typescript"
+        }));
     }
 
     #[test]

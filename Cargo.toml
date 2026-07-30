@@ -31,7 +31,7 @@ members = [
     "vendor/compass-tree-sitter-language-pack",
 ]
 resolver = "3"
-exclude = ["fuzz"]
+exclude = ["fuzz", "vendor/gemm-common"]
 
 [workspace.package]
 version = "0.1.10"
@@ -71,6 +71,8 @@ oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compre
 ctrlc = "3.5.2"
 strsim = "0.11"
 rayon = "1"
+rusqlite = { version = "0.31.0", features = ["bundled", "modern_sqlite"] }
+rustix = { version = "1.1", features = ["fs"] }
 rand = "0.8.7"
 realfft = "3.5.0"
 regex = "1"
@@ -125,3 +127,6 @@ codegen-units = 1
 lto = "thin"
 panic = "abort"
 strip = "symbols"
+
+[patch.crates-io]
+gemm-common = { path = "vendor/gemm-common" }

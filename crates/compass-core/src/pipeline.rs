@@ -7,23 +7,39 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheKind, CacheOptions, DetectOptions, Detection, IgnorePolicy,
-    Manifest, ManifestKind, detect, write_json_ascii_atomic, write_json_atomic, write_text_atomic,
+    Manifest, ManifestKind, detect, write_json_atomic, write_text_atomic,
 };
 use compass_graph::{
-    ClusterOptions, EntityTiebreaker, build_owned_with_tiebreaker as build_document, cluster,
-    dedupe_edges, dedupe_nodes, graph_insights, label_communities_by_hub,
+    ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION, InventoryEvidence,
+    PublicationOmissions, PublicationOutcome, build_owned_with_tiebreaker as build_document,
+    canonical_edge_kind, canonical_raw_edge_sites, cluster, dedupe_nodes, extraction_from_v1,
+    graph_insights, label_communities_by_hub, normalize_document_v1_with_inventory_best_effort,
     remap_communities_to_previous, score_communities,
 };
-use compass_languages::{Engine, Extraction, Registry, file_stem, make_id};
+use compass_languages::{
+    EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL, EXTRACTION_QUALITY_REASON_EXTENSION,
+    Engine, Extraction, ExtractorKind, RawEdgeRecord, RawNodeRecord, Registry, file_stem, make_id,
+};
+use compass_model::code_graph::{
+    DiagnosticSeverity, ExtractionStatus, GraphDiagnostic, GraphDocument as V1GraphDocument,
+    NodeKind,
+};
+use compass_model::provenance::{
+    COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
+    EndpointRewriteEvidence, EndpointRewriteRule, EvidenceOrigin, OCCURRENCE_RULE_ATTRIBUTE,
+    Provenance, SEMANTIC_LAYER_EXTRACTOR, SourceAnchor, TRUSTED_EDGE_RECORD_ATTRIBUTE,
+    append_endpoint_rewrite_evidence,
+};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
-    DetectionSummary, HtmlOptions, JsonExportOptions, OutputError, ReportOptions, TokenCost,
-    generate_report, graph_view_model_document, write_html, write_json,
+    DetectionSummary, HtmlOptions, OutputError, ReportOptions, TokenCost, generate_report,
+    graph_view_model_document, write_html,
 };
 use compass_resolve::{merge_decl_def_classes, resolve_owned_with_root};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::build_state::{
     ArtifactSeal, BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified,
@@ -34,6 +50,13 @@ use crate::program::{
 };
 use crate::raw_guard::enforce_incomplete_raw_guard;
 
+/// Default upper bound for one source file entering the parser pipeline.
+///
+/// Syntax and semantic extractors can retain several multiples of the source
+/// size while building records. Callers may raise this bound explicitly for
+/// repositories with intentionally large generated sources.
+pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
     pub root: PathBuf,
@@ -42,8 +65,8 @@ pub struct BuildOptions {
     /// Explicit repository-private cache root used by exact history builds.
     pub cache_root: Option<PathBuf>,
     pub force: bool,
-    /// Preserve validated extraction and completed-output fast paths while
-    /// retaining force authorization for output replacement.
+    /// Reuse validated AST and Program cache entries while retaining force
+    /// authorization for output replacement.
     pub reuse_cache_on_force: bool,
     pub no_cluster: bool,
     pub no_viz: bool,
@@ -63,6 +86,11 @@ pub struct BuildOptions {
     /// Maximum number of worker threads used by the deterministic AST stages.
     /// `None` uses the host CPU count in a build-local Rayon pool.
     pub max_workers: Option<usize>,
+    /// Maximum size of one source file admitted to AST and Program analysis.
+    ///
+    /// Oversized files remain in the inventory with partial coverage and an
+    /// explicit reason; they are not read into memory.
+    pub max_source_bytes: u64,
     /// Override the commit recorded in update artifacts.
     ///
     /// This is primarily useful for reproducible builds and compatibility
@@ -84,7 +112,10 @@ const OUTPUT_STATS_FILE: &str = ".compass_output_stats.json";
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
 const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/1";
 const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
-
+const MAX_INCREMENTAL_REMAP_DIAGNOSTICS: usize = 100;
+const INCREMENTAL_REMAP_DROP_DIAGNOSTIC: &str = "dropped_incremental_remap_without_wiring_site";
+const INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC: &str =
+    "incremental_remap_without_wiring_site_truncated";
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct OutputStats {
     graph_bytes: u64,
@@ -92,6 +123,23 @@ struct OutputStats {
     edges: usize,
     communities: usize,
     clustered: bool,
+    #[serde(default)]
+    omitted_nodes: usize,
+    #[serde(default)]
+    omitted_edges: usize,
+    #[serde(default)]
+    identity_collisions: usize,
+}
+
+impl OutputStats {
+    const fn omissions(&self) -> PublicationOmissions {
+        PublicationOmissions {
+            nodes: self.omitted_nodes,
+            edges: self.omitted_edges,
+            identity_collisions: self.identity_collisions,
+            examples_omitted: 0,
+        }
+    }
 }
 
 impl BuildOptions {
@@ -119,11 +167,20 @@ impl BuildOptions {
             // Large builds use a local host-sized pool. Keeping this unset also
             // lets CLI callers provide an explicit memory/throughput bound.
             max_workers: None,
+            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
             precomputed_detection: None,
         }
     }
+}
+
+const fn cache_reuse_enabled(force: bool, reuse_cache_on_force: bool) -> bool {
+    !force || reuse_cache_on_force
+}
+
+const fn prior_published_graph_input_enabled(force: bool) -> bool {
+    !force
 }
 
 #[derive(Clone, Debug)]
@@ -138,6 +195,10 @@ pub struct BuildResult {
     pub nodes: usize,
     pub edges: usize,
     pub communities: usize,
+    pub omitted_nodes: usize,
+    pub omitted_edges: usize,
+    pub identity_collisions: usize,
+    pub partial_graph: bool,
     pub html_written: bool,
     pub outputs_changed: bool,
     pub program_modules: usize,
@@ -335,23 +396,24 @@ fn build_graph_inner(
         .output_root
         .as_deref()
         .map_or_else(|| root.clone(), absolutize);
-    let output_dir = output_root.join(&output_name);
-    fs::create_dir_all(&output_dir).map_err(|source| compass_files::FileError::Io {
-        path: output_dir.clone(),
+    let reuse_cached_analysis = cache_reuse_enabled(options.force, options.reuse_cache_on_force);
+    let read_prior_published_graph = prior_published_graph_input_enabled(options.force);
+    let output_container = output_root.join(&output_name);
+    fs::create_dir_all(&output_container).map_err(|source| compass_files::FileError::Io {
+        path: output_container.clone(),
         source,
     })?;
-    let prior_build_complete = BuildGuard::ensure_complete(&output_dir).is_ok();
-    let guard = BuildGuard::begin(&output_dir)?;
+    let prior_build_complete = BuildGuard::ensure_complete(&output_container).is_ok();
+    let guard = BuildGuard::begin(&output_container)?;
+    let output_dir = guard.staging_directory().to_path_buf();
+    if !options.program_analysis {
+        remove_if_exists(&output_dir.join("program.json"))?;
+    }
     if options.force || !prior_build_complete {
         remove_if_exists(&output_dir.join(BUILD_STATE_FILE))?;
     }
     let manifest_path = output_dir.join("manifest.json");
     let prior_manifest = Manifest::load(&manifest_path, Some(&root));
-    let has_confirmed_deletion = prior_manifest
-        .entries()
-        .keys()
-        .any(|path| !Path::new(path).exists());
-
     let detect_options = DetectOptions {
         scan_filesystem: options.scan_filesystem,
         gitignore: options.gitignore,
@@ -407,9 +469,7 @@ fn build_graph_inner(
     timings.detect = stage_started.elapsed();
     stage_started = Instant::now();
     let mut internal_started = Instant::now();
-    let mut semantic_documents = if options.purpose == BuildPurpose::Update
-        || (options.purpose == BuildPurpose::Extract && !options.force)
-    {
+    let mut semantic_documents = if read_prior_published_graph {
         semantic_document_sources(&output_dir.join("graph.json"), &root)
     } else {
         HashSet::new()
@@ -439,7 +499,7 @@ fn build_graph_inner(
     );
 
     let manifest_unchanged = options.purpose == BuildPurpose::Update
-        && (!options.force || options.reuse_cache_on_force)
+        && read_prior_published_graph
         && prior_manifest.is_unchanged(&detection.files, ManifestKind::Ast);
     let build_profile = build_profile(options);
     let has_program_artifacts =
@@ -465,10 +525,10 @@ fn build_graph_inner(
                 remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
             }
             remove_if_exists(&output_dir.join("needs_update"))?;
-            guard.commit()?;
+            let published_output_dir = commit_generation(guard, &output_container)?;
             return Ok(BuildResult {
                 root,
-                output_dir: output_dir.clone(),
+                output_dir: published_output_dir,
                 detection,
                 files_considered: state.stats.files,
                 files_extracted: 0,
@@ -477,6 +537,12 @@ fn build_graph_inner(
                 nodes: state.stats.nodes,
                 edges: state.stats.edges,
                 communities: state.stats.communities,
+                omitted_nodes: state.stats.omitted_nodes,
+                omitted_edges: state.stats.omitted_edges,
+                identity_collisions: state.stats.identity_collisions,
+                partial_graph: state.stats.omitted_nodes > 0
+                    || state.stats.omitted_edges > 0
+                    || state.stats.identity_collisions > 0,
                 html_written: output_dir.join("graph.html").is_file(),
                 outputs_changed: false,
                 program_modules: state.stats.program_modules,
@@ -524,12 +590,13 @@ fn build_graph_inner(
             stats.nodes,
             stats.edges,
             stats.communities,
+            stats.omissions(),
             unchanged_program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         return Ok(BuildResult {
             root,
-            output_dir: output_dir.clone(),
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: 0,
@@ -538,6 +605,10 @@ fn build_graph_inner(
             nodes: stats.nodes,
             edges: stats.edges,
             communities: stats.communities,
+            omitted_nodes: stats.omitted_nodes,
+            omitted_edges: stats.omitted_edges,
+            identity_collisions: stats.identity_collisions,
+            partial_graph: stats.omissions().is_partial(),
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
             program_modules: program_modules(unchanged_program.as_ref()),
@@ -569,8 +640,17 @@ fn build_graph_inner(
     let mut cache = Cache::open(&root, cache_options)?;
     let mut extractions = BTreeMap::<PathBuf, Extraction>::new();
     let mut missing = Vec::new();
-    if !options.force || options.reuse_cache_on_force {
+    if reuse_cached_analysis {
         for path in &sources {
+            if fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.len() > options.max_source_bytes
+            }) {
+                extractions.insert(
+                    path.clone(),
+                    oversized_source_extraction(path, options.max_source_bytes)?,
+                );
+                continue;
+            }
             let cached = cache.load(path, &CacheKind::Ast, None, false)?;
             if let Some(value) = cached {
                 let extraction =
@@ -584,7 +664,18 @@ fn build_graph_inner(
             }
         }
     } else {
-        missing.clone_from(&sources);
+        for path in &sources {
+            if fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.len() > options.max_source_bytes
+            }) {
+                extractions.insert(
+                    path.clone(),
+                    oversized_source_extraction(path, options.max_source_bytes)?,
+                );
+            } else {
+                missing.push(path.clone());
+            }
+        }
     }
     let worker_count = options.max_workers.unwrap_or_else(default_ast_workers);
     let worker_pool = if missing.len() >= 256 || sources.len() >= 256 {
@@ -606,25 +697,15 @@ fn build_graph_inner(
     // cannot silently serialize cold extraction.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
-    let extract_source =
-        |engine: &mut Engine, path: &PathBuf| -> Result<_, compass_languages::ExtractError> {
-            let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let source_file = path
-                .strip_prefix(&root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            let language = Registry::resolve(path).map_or("", |spec| spec.name);
-            let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
-            let prepared = combined.program.map(|batch| PreparedSyntaxInput {
-                source_file,
-                language: language.to_owned(),
-                bytes: bytes.clone(),
-                batch,
-            });
+    let extract_source = |engine: &mut Engine,
+                          path: &PathBuf|
+     -> Result<_, compass_languages::ExtractError> {
+        let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if metadata.len() > options.max_source_bytes {
+            let graph = oversized_source_extraction(path, options.max_source_bytes)?;
             if let Some(progress) = progress {
                 let mut completed = completed_files
                     .lock()
@@ -636,33 +717,120 @@ fn build_graph_inner(
                     path: path.clone(),
                 });
             }
-            let source = (
-                path.to_string_lossy().into_owned(),
-                String::from_utf8_lossy(&bytes).into_owned(),
-            );
-            Ok((path.clone(), combined.graph, source, prepared))
-        };
-    let fresh = if missing.len() < 256 {
+            return Ok((
+                path.clone(),
+                graph,
+                (path.to_string_lossy().into_owned(), String::new()),
+                None,
+            ));
+        }
+        let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let source_file = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let language = Registry::resolve(path).map_or("", |spec| spec.name);
+        let mut combined = engine.extract_source_combined(path, &source_file, &bytes)?;
+        let empty_structured_document = bytes.is_empty()
+            && Registry::resolve(path).is_some_and(|spec| {
+                matches!(
+                    spec.kind,
+                    ExtractorKind::JsonConfig | ExtractorKind::ProjectXml | ExtractorKind::Xaml
+                )
+            });
+        if empty_structured_document && combined.graph.error.is_none() {
+            combined.graph.error = Some(format!("{language} extraction failed: empty document"));
+        } else if bytes.is_empty() && combined.graph.error.is_none() {
+            combined.graph.nodes.clear();
+            combined.graph.edges.clear();
+            combined.graph.hyperedges.clear();
+            combined.graph.framework_facts.clear();
+            combined.graph.raw_calls = None;
+            combined.program = None;
+        }
+        let prepared = combined.program.map(|batch| PreparedSyntaxInput {
+            source_file,
+            language: language.to_owned(),
+            bytes: bytes.clone(),
+            batch,
+        });
+        if let Some(progress) = progress {
+            let mut completed = completed_files
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *completed += 1;
+            progress(BuildFileProgress {
+                current: *completed,
+                total: total_files,
+                path: path.clone(),
+            });
+        }
+        let source = (
+            path.to_string_lossy().into_owned(),
+            String::from_utf8_lossy(&bytes).into_owned(),
+        );
+        Ok((path.clone(), combined.graph, source, prepared))
+    };
+    let fresh_outcomes = if missing.len() < 256 {
         let mut engine = Engine::default();
         missing
             .iter()
             .map(|path| extract_source(&mut engine, path))
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Vec<_>>()
     } else {
         let extract = || {
             missing
                 .par_iter()
                 .map_init(Engine::default, extract_source)
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Vec<_>>()
         };
         if let Some(pool) = &worker_pool {
-            pool.install(extract)?
+            pool.install(extract)
         } else {
-            extract()?
+            extract()
         }
     };
+    let mut extraction_failures = BTreeMap::new();
+    let mut fresh = missing
+        .iter()
+        .cloned()
+        .zip(fresh_outcomes)
+        .filter_map(|(path, outcome)| match outcome {
+            Ok(extracted) => Some(extracted),
+            Err(error) => {
+                extraction_failures.insert(
+                    canonical_identity(&path),
+                    portable_diagnostic_reason(&error.to_string(), &path, &root),
+                );
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut extraction_partials = BTreeMap::new();
+    for (path, extraction) in &mut extractions {
+        prepare_extraction_for_publication(
+            path,
+            extraction,
+            &root,
+            &mut extraction_failures,
+            &mut extraction_partials,
+        );
+    }
+    for (path, extraction, _, _) in &mut fresh {
+        prepare_extraction_for_publication(
+            path,
+            extraction,
+            &root,
+            &mut extraction_failures,
+            &mut extraction_partials,
+        );
+    }
     profile_internal("tree-sitter combined extraction", &mut internal_started);
-    let prepared = if options.force && !options.reuse_cache_on_force {
+    let prepared = if !reuse_cached_analysis {
         fresh
             .iter()
             .filter_map(|(_, _, _, prepared)| prepared.clone())
@@ -674,7 +842,7 @@ fn build_graph_inner(
         let program_root = root.clone();
         let program_sources = sources.clone();
         let mut program_options = options.clone();
-        program_options.force = options.force && !options.reuse_cache_on_force;
+        program_options.force = !reuse_cached_analysis;
         let program_cache_root = options.cache_root.clone();
         let program_output_cache_root = output_cache_root.map(Path::to_path_buf);
         let program_output_dir = output_dir.clone();
@@ -779,14 +947,7 @@ fn build_graph_inner(
         })
         .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
     profile_internal("portable AST ID remapping", &mut internal_started);
-    let read_source = |path: &PathBuf| {
-        fs::read(path).ok().map(|bytes| {
-            (
-                path.to_string_lossy().into_owned(),
-                String::from_utf8_lossy(&bytes).into_owned(),
-            )
-        })
-    };
+    let read_source = |path: &PathBuf| read_source_text_with_limit(path, options.max_source_bytes);
     let read_cached_source = |path: &PathBuf| {
         (!fresh_paths.contains(path))
             .then(|| read_source(path))
@@ -820,9 +981,7 @@ fn build_graph_inner(
     };
     profile_internal("wait for Program analysis", &mut internal_started);
     stage_started = Instant::now();
-    if options.purpose == BuildPurpose::Update
-        || (options.purpose == BuildPurpose::Extract && !options.force)
-    {
+    if read_prior_published_graph {
         let refreshed = semantic
             .map(|layer| {
                 let mut refreshed = canonical_source_set(&layer.refreshed_files, &root);
@@ -876,6 +1035,7 @@ fn build_graph_inner(
         && semantic.is_some_and(semantic_layer_is_empty)
         && let Ok(document) = GraphDocument::load(&output_dir.join("graph.json"))
     {
+        let omissions = saved_publication_omissions(&output_dir);
         let mut manifest = prior_manifest;
         save_build_manifest(
             &mut manifest,
@@ -892,12 +1052,13 @@ fn build_graph_inner(
             document.nodes.len(),
             document.links.len(),
             0,
+            omissions,
             program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         return Ok(BuildResult {
             root,
-            output_dir,
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: 0,
@@ -906,6 +1067,10 @@ fn build_graph_inner(
             nodes: document.nodes.len(),
             edges: document.links.len(),
             communities: 0,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
+            partial_graph: omissions.is_partial(),
             html_written: false,
             outputs_changed: false,
             program_modules: program_modules(program.as_ref()),
@@ -931,19 +1096,43 @@ fn build_graph_inner(
         });
     }
     if options.no_cluster {
-        let (nodes, edges) = (dedupe_nodes(&resolved.nodes), dedupe_edges(&resolved.edges));
-        let tokens = semantic_tokens(semantic);
+        let nodes = dedupe_nodes(&resolved.nodes);
         enforce_incomplete_raw_guard(semantic, &output_dir.join("graph.json"), &root, nodes.len())?;
-        write_raw_graph(
-            &output_dir.join("graph.json"),
-            &resolved,
-            &nodes,
-            &edges,
-            options.purpose,
-            tokens,
+        let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+        let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        let source_commit = options
+            .built_at_commit
+            .clone()
+            .or_else(|| git_commit(&root));
+        let published = normalize_document_v1_with_inventory_best_effort(
+            &document,
+            &root,
+            configuration_digest,
+            source_commit.as_deref(),
+            detection_inventory(
+                &detection,
+                semantic,
+                &extraction_failures,
+                &extraction_partials,
+                &root,
+            ),
         )?;
+        if published.document.nodes.is_empty() {
+            return Err(CoreError::EmptyGraph);
+        }
+        let omissions = published.omissions;
+        let published_nodes = published.document.nodes.len();
+        let published_edges = published.document.links.len();
+        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
-        save_output_stats(&output_dir, nodes.len(), edges.len(), 0, false)?;
+        save_output_stats(
+            &output_dir,
+            published_nodes,
+            published_edges,
+            0,
+            false,
+            omissions,
+        )?;
         write_semantic_marker(&output_dir, semantic)?;
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
@@ -965,24 +1154,29 @@ fn build_graph_inner(
             &output_dir,
             &manifest_path,
             sources.len(),
-            nodes.len(),
-            edges.len(),
+            published_nodes,
+            published_edges,
             0,
+            omissions,
             program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         timings.publish = stage_started.elapsed();
         return Ok(BuildResult {
             root,
-            output_dir,
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: missing.len(),
             files_cached: sources.len().saturating_sub(missing.len()),
             empty_files,
-            nodes: nodes.len(),
-            edges: edges.len(),
+            nodes: published_nodes,
+            edges: published_edges,
             communities: 0,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
+            partial_graph: omissions.is_partial(),
             html_written: false,
             outputs_changed: true,
             program_modules: program_modules(program.as_ref()),
@@ -1007,13 +1201,36 @@ fn build_graph_inner(
             timings,
         });
     }
-    let document = build_document(resolved, false, true, Some(&root), tiebreaker)?;
+    let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
     profile_internal("graph document build and dedup", &mut internal_started);
     timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
     if document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
+    let commit = options.built_at_commit.clone().or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|directory| git_commit(&directory))
+    });
+    let preflight_started = Instant::now();
+    let preflight = normalize_document_v1_with_inventory_best_effort(
+        &document,
+        &root,
+        graph_configuration_digest(options, &output_dir)?,
+        commit.as_deref(),
+        detection_inventory(
+            &detection,
+            semantic,
+            &extraction_failures,
+            &extraction_partials,
+            &root,
+        ),
+    )?;
+    if preflight.document.nodes.is_empty() {
+        return Err(CoreError::EmptyGraph);
+    }
+    profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
 
     let unchanged_artifacts_complete = match options.purpose {
         BuildPurpose::Update => update_artifacts_complete(&output_dir),
@@ -1025,7 +1242,8 @@ fn build_graph_inner(
     let unchanged_layers = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
             && semantic.is_some_and(semantic_layer_is_empty));
-    if unchanged_layers
+    if !preflight.omissions.is_partial()
+        && unchanged_layers
         && supplemental.is_empty()
         && !options.force
         && unchanged_artifacts_complete
@@ -1054,12 +1272,13 @@ fn build_graph_inner(
             document.nodes.len(),
             document.links.len(),
             communities,
+            PublicationOmissions::default(),
             program.as_ref(),
         )?;
-        guard.commit()?;
+        let published_output_dir = commit_generation(guard, &output_container)?;
         return Ok(BuildResult {
             root,
-            output_dir: output_dir.clone(),
+            output_dir: published_output_dir,
             detection,
             files_considered: sources.len(),
             files_extracted: missing.len(),
@@ -1068,6 +1287,10 @@ fn build_graph_inner(
             nodes: document.nodes.len(),
             edges: document.links.len(),
             communities,
+            omitted_nodes: 0,
+            omitted_edges: 0,
+            identity_collisions: 0,
+            partial_graph: false,
             html_written: output_dir.join("graph.html").is_file(),
             outputs_changed: false,
             program_modules: program_modules(program.as_ref()),
@@ -1128,33 +1351,32 @@ fn build_graph_inner(
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
-    let commit = options.built_at_commit.clone().or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .and_then(|directory| git_commit(&directory))
-    });
 
-    let incomplete_semantic = semantic.is_some_and(|layer| semantic_is_incomplete(layer, &root));
-    let graph_output = || -> Result<Duration, CoreError> {
+    let graph_output = || -> Result<(Duration, PublicationOmissions, usize, usize), CoreError> {
         let started = Instant::now();
         let mut output_profile_started = Instant::now();
-        write_json(
+        let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        let published = published_v1_document(
             &document,
             &communities,
-            output_dir.join("graph.json"),
-            &JsonExportOptions {
-                force: semantic.map_or(options.force || has_confirmed_deletion, |layer| {
-                    !incomplete_semantic || layer.allow_partial
-                }),
-                built_at_commit: commit.as_deref(),
-                community_labels: (options.purpose == BuildPurpose::Update && !labels.is_empty())
-                    .then_some(&labels),
+            &labels,
+            &root,
+            PublicationEvidence {
+                detection: &detection,
+                semantic,
+                extraction_failures: &extraction_failures,
+                extraction_partials: &extraction_partials,
             },
+            configuration_digest,
+            commit.as_deref(),
         )?;
-        profile_internal(
-            "graph.json borrowed publication",
-            &mut output_profile_started,
-        );
+        if published.document.nodes.is_empty() {
+            return Err(CoreError::EmptyGraph);
+        }
+        let published_nodes = published.document.nodes.len();
+        let published_edges = published.document.links.len();
+        write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        profile_internal("graph.json v1 publication", &mut output_profile_started);
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
                 output_dir.join(".compass_root"),
@@ -1166,7 +1388,12 @@ fn build_graph_inner(
                 &mut output_profile_started,
             );
         }
-        Ok(started.elapsed())
+        Ok((
+            started.elapsed(),
+            published.omissions,
+            published_nodes,
+            published_edges,
+        ))
     };
     let graph_analyses = || -> Result<(bool, Duration), CoreError> {
         let started = Instant::now();
@@ -1272,7 +1499,7 @@ fn build_graph_inner(
         Ok((html_written, started.elapsed()))
     };
     let (graph_output_elapsed, analysis_result) = rayon::join(graph_output, graph_analyses);
-    let graph_output_elapsed = graph_output_elapsed?;
+    let (graph_output_elapsed, omissions, published_nodes, published_edges) = graph_output_elapsed?;
     let (html_written, analysis_elapsed) = analysis_result?;
     profile_internal_duration("graph and overview publication", graph_output_elapsed);
     profile_internal_duration(
@@ -1299,34 +1526,40 @@ fn build_graph_inner(
     }
     save_output_stats(
         &output_dir,
-        document.nodes.len(),
-        document.links.len(),
+        published_nodes,
+        published_edges,
         communities.len(),
         true,
+        omissions,
     )?;
     publish_build_state(
         options,
         &output_dir,
         &manifest_path,
         sources.len(),
-        document.nodes.len(),
-        document.links.len(),
+        published_nodes,
+        published_edges,
         communities.len(),
+        omissions,
         program.as_ref(),
     )?;
     profile_internal("Program output and build seals", &mut internal_started);
-    guard.commit()?;
+    let published_output_dir = commit_generation(guard, &output_container)?;
     Ok(BuildResult {
         root,
-        output_dir,
+        output_dir: published_output_dir,
         detection,
         files_considered: sources.len(),
         files_extracted: missing.len(),
         files_cached: sources.len().saturating_sub(missing.len()),
         empty_files,
-        nodes: document.nodes.len(),
-        edges: document.links.len(),
+        nodes: published_nodes,
+        edges: published_edges,
         communities: communities.len(),
+        omitted_nodes: omissions.nodes,
+        omitted_edges: omissions.edges,
+        identity_collisions: omissions.identity_collisions,
+        partial_graph: omissions.is_partial(),
         html_written,
         outputs_changed: true,
         program_modules: program_modules(program.as_ref()),
@@ -1350,6 +1583,30 @@ fn build_graph_inner(
         program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
         timings,
     })
+}
+
+fn oversized_source_extraction(
+    path: &Path,
+    max_source_bytes: u64,
+) -> Result<Extraction, compass_languages::ExtractError> {
+    let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut extraction = Extraction::default();
+    extraction.extensions.insert(
+        EXTRACTION_QUALITY_EXTENSION.to_owned(),
+        serde_json::Value::String(EXTRACTION_QUALITY_PARTIAL.to_owned()),
+    );
+    extraction.extensions.insert(
+        EXTRACTION_QUALITY_REASON_EXTENSION.to_owned(),
+        serde_json::Value::String(format!(
+            "source is {} bytes, exceeding the configured {} byte extraction limit",
+            metadata.len(),
+            max_source_bytes
+        )),
+    );
+    Ok(extraction)
 }
 
 fn program_modules(program: Option<&ProgramBuild>) -> usize {
@@ -1376,6 +1633,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         resolution: options.resolution,
         exclude_hubs: options.exclude_hubs,
         program_analysis: options.program_analysis,
+        max_source_bytes: options.max_source_bytes,
     }
 }
 
@@ -1388,6 +1646,7 @@ fn publish_build_state(
     nodes: usize,
     edges: usize,
     communities: usize,
+    omissions: PublicationOmissions,
     program: Option<&ProgramBuild>,
 ) -> Result<(), CoreError> {
     let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
@@ -1424,6 +1683,9 @@ fn publish_build_state(
             nodes,
             edges,
             communities,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
             program_modules: program_modules(program),
             program_summaries: program_summaries(program),
             program_providers: program_providers(program),
@@ -1431,6 +1693,15 @@ fn publish_build_state(
         },
     )?;
     state.save(output_dir)
+}
+
+fn commit_generation(guard: BuildGuard, output_container: &Path) -> Result<PathBuf, CoreError> {
+    let mut artifacts = vec!["graph.json", "manifest.json", BUILD_STATE_FILE];
+    if guard.staging_directory().join("program.json").is_file() {
+        artifacts.push("program.json");
+    }
+    guard.commit_with_artifacts(&artifacts)?;
+    Ok(BuildGuard::resolve_active_directory(output_container)?)
 }
 
 #[cfg(target_os = "macos")]
@@ -1520,21 +1791,18 @@ fn finalize_ast_extraction(extraction: &mut Extraction, root: &Path) {
         || {
             extraction.nodes.par_iter_mut().for_each(|node| {
                 normalize_source_attribute_cached(&mut node.attributes, root, &canonical_sources);
-                node.attributes.remove("origin_file");
                 node.attributes.remove("_callable");
-                node.attributes.insert(
-                    "_origin".to_owned(),
-                    serde_json::Value::String("ast".to_owned()),
-                );
+                node.attributes
+                    .entry("_origin".to_owned())
+                    .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
             });
         },
         || {
             extraction.edges.par_iter_mut().for_each(|edge| {
                 normalize_source_attribute_cached(&mut edge.attributes, root, &canonical_sources);
-                edge.attributes.insert(
-                    "_origin".to_owned(),
-                    serde_json::Value::String("ast".to_owned()),
-                );
+                edge.attributes
+                    .entry("_origin".to_owned())
+                    .or_insert_with(|| serde_json::Value::String("ast".to_owned()));
             });
         },
     );
@@ -1550,28 +1818,54 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
     };
     let portable = relative.to_string_lossy().replace('\\', "/");
     let set_portable = |attributes: &mut serde_json::Map<String, serde_json::Value>| {
+        let normalize_path = |value: &str| {
+            let path = Path::new(value);
+            if path.is_absolute() {
+                let canonical = canonicalize_allow_missing(path);
+                canonical.strip_prefix(root).map_or_else(
+                    |_| portable_out_of_root_source(&canonical, root),
+                    |relative| relative.to_string_lossy().replace('\\', "/"),
+                )
+            } else {
+                value.replace('\\', "/")
+            }
+        };
         for key in ["source_file", "origin_file"] {
-            if attributes
+            let Some(value) = attributes
                 .get(key)
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|value| !value.is_empty())
-            {
-                attributes.insert(key.to_owned(), serde_json::Value::String(portable.clone()));
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let normalized = normalize_path(value);
+            if normalized != value {
+                attributes.insert(key.to_owned(), serde_json::Value::String(normalized));
             }
+        }
+        if let Some(anchor) = attributes
+            .get_mut("origin_source_anchor")
+            .and_then(serde_json::Value::as_object_mut)
+            && let Some(value) = anchor
+                .get("file")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        {
+            anchor.insert(
+                "file".to_owned(),
+                serde_json::Value::String(normalize_path(&value)),
+            );
         }
         if let Some(target) = attributes
             .get("target_file")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
         {
-            let target = Path::new(&target);
-            let canonical = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
-            if let Ok(relative) = canonical.strip_prefix(root) {
-                attributes.insert(
-                    "target_file".to_owned(),
-                    serde_json::Value::String(relative.to_string_lossy().replace('\\', "/")),
-                );
-            }
+            let normalized = normalize_path(&target);
+            attributes.insert(
+                "target_file".to_owned(),
+                serde_json::Value::String(normalized),
+            );
         }
     };
     for node in &mut extraction.nodes {
@@ -1696,12 +1990,20 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
             "_origin".to_owned(),
             serde_json::Value::String("semantic".to_owned()),
         );
+        node.attributes.insert(
+            "extractor".to_owned(),
+            serde_json::Value::String(SEMANTIC_LAYER_EXTRACTOR.to_owned()),
+        );
     }
     for edge in &mut extraction.edges {
         normalize_source_attribute(&mut edge.attributes, root);
         edge.attributes.insert(
             "_origin".to_owned(),
             serde_json::Value::String("semantic".to_owned()),
+        );
+        edge.attributes.insert(
+            "extractor".to_owned(),
+            serde_json::Value::String(SEMANTIC_LAYER_EXTRACTOR.to_owned()),
         );
     }
     for hyperedge in &mut extraction.hyperedges {
@@ -1712,6 +2014,10 @@ fn finalize_semantic_extraction(extraction: &mut Extraction, root: &Path) {
         attributes.insert(
             "_origin".to_owned(),
             serde_json::Value::String("semantic".to_owned()),
+        );
+        attributes.insert(
+            "extractor".to_owned(),
+            serde_json::Value::String(SEMANTIC_LAYER_EXTRACTOR.to_owned()),
         );
     }
 }
@@ -2004,90 +2310,692 @@ fn preserve_semantic_layer(
     root: &Path,
     refreshed: &HashSet<PathBuf>,
 ) {
-    let Ok(existing) = GraphDocument::load(graph_path) else {
+    let Ok(existing) = V1GraphDocument::load(graph_path) else {
         return;
     };
-    let ast_ids = extraction
+    let mut existing_raw = extraction_from_v1(&existing);
+    let current_ast_by_key = extraction
         .nodes
         .iter()
+        .filter_map(|node| raw_node_match_key(node).map(|key| (key, node.id.clone())))
+        .collect::<HashMap<_, _>>();
+    let typed_ast_remap = existing
+        .nodes
+        .iter()
+        .filter(|node| node_has_origin(node, EvidenceOrigin::Ast))
+        .filter_map(|node| {
+            typed_node_match_key(node)
+                .and_then(|key| current_ast_by_key.get(&key))
+                .map(|current| (node.id.clone(), current.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut dropped_edges = HashSet::new();
+    let mut remapped_edges = HashSet::new();
+    let mut remap_diagnostics = Vec::new();
+    let mut dropped_without_site = 0_usize;
+    for (index, edge) in existing_raw.edges.iter_mut().enumerate() {
+        let source = typed_ast_remap
+            .get(&edge.source)
+            .cloned()
+            .unwrap_or_else(|| edge.source.clone());
+        let target = typed_ast_remap
+            .get(&edge.target)
+            .cloned()
+            .unwrap_or_else(|| edge.target.clone());
+        if source == edge.source && target == edge.target {
+            continue;
+        }
+        if !has_exact_remap_site(&edge.attributes) {
+            dropped_edges.insert(index);
+            dropped_without_site = dropped_without_site.saturating_add(1);
+            if remap_diagnostics.len() < MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
+                let mut related_ids = edge
+                    .attributes
+                    .get(compass_model::provenance::TRUSTED_EDGE_RECORD_ATTRIBUTE)
+                    .and_then(|record| record.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                related_ids.extend([edge.source.clone(), edge.target.clone()]);
+                remap_diagnostics.push(GraphDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: INCREMENTAL_REMAP_DROP_DIAGNOSTIC.to_owned(),
+                    message: "dropped preserved edge whose AST endpoint changed without an authoritative producer wiring site".to_owned(),
+                    anchor: None,
+                    related_ids,
+                });
+            }
+            continue;
+        }
+        edge.source = source;
+        edge.target = target;
+        append_endpoint_rewrite_evidence(
+            &mut edge.attributes,
+            EndpointRewriteEvidence {
+                rule: EndpointRewriteRule::IncrementalAstEndpointRemap,
+                score: 1.0,
+            },
+        );
+        remapped_edges.insert(index);
+    }
+    if dropped_without_site > MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
+        remap_diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC.to_owned(),
+            message: format!(
+                "omitted {} additional incremental remap diagnostics",
+                dropped_without_site - MAX_INCREMENTAL_REMAP_DIAGNOSTICS
+            ),
+            anchor: None,
+            related_ids: Vec::new(),
+        });
+    }
+    let mut fresh_edge_sites = HashMap::<IncrementalEdgeKey, Vec<SourceAnchor>>::new();
+    let raw_edge_sites = canonical_raw_edge_sites(&extraction.edges, root);
+    for (edge, site) in extraction.edges.iter().zip(raw_edge_sites) {
+        let Some(key) = incremental_edge_key(edge) else {
+            continue;
+        };
+        let Some(site) = site else {
+            continue;
+        };
+        fresh_edge_sites.entry(key).or_default().push(site);
+    }
+    for sites in fresh_edge_sites.values_mut() {
+        sites.sort_by(|left, right| {
+            incremental_anchor_key(left).cmp(&incremental_anchor_key(right))
+        });
+    }
+    let mut mixed_edges = HashMap::<IncrementalEdgeKey, Vec<(usize, SourceAnchor)>>::new();
+    for (index, (raw, typed)) in existing_raw
+        .edges
+        .iter()
+        .zip(existing.links.iter())
+        .enumerate()
+    {
+        if dropped_edges.contains(&index)
+            || !typed
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin == EvidenceOrigin::Ast)
+            || !typed.evidence.iter().any(is_semantic_layer_evidence)
+        {
+            continue;
+        }
+        let Some(key) = incremental_edge_key(raw) else {
+            continue;
+        };
+        let Some(site) = typed.relationship_site.clone() else {
+            continue;
+        };
+        mixed_edges.entry(key).or_default().push((index, site));
+    }
+    let mut refreshed_mixed_sites = HashMap::<usize, SourceAnchor>::new();
+    let mut semantic_only_mixed_edges = HashSet::<usize>::new();
+    for (key, mut prior) in mixed_edges {
+        let Some(current) = fresh_edge_sites.get(&key) else {
+            semantic_only_mixed_edges.extend(prior.into_iter().map(|(index, _)| index));
+            continue;
+        };
+        prior.sort_by(|left, right| {
+            incremental_anchor_key(&left.1)
+                .cmp(&incremental_anchor_key(&right.1))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        // Exact shared sites are authoritative even when occurrence cardinality changed.
+        // Equal residual cardinality has one stable sorted bijection (the existing moved-site
+        // behavior). Unequal residual cardinality is ambiguous: fresh occurrences stay AST-only,
+        // while prior occurrences may survive only through semantic-only revalidation below.
+        let mut matched_current = vec![false; current.len()];
+        let mut unmatched_prior = Vec::new();
+        for (index, prior_site) in prior {
+            let exact = current
+                .iter()
+                .enumerate()
+                .position(|(current_index, site)| {
+                    !matched_current[current_index]
+                        && incremental_anchor_key(&prior_site) == incremental_anchor_key(site)
+                });
+            if let Some(current_index) = exact {
+                matched_current[current_index] = true;
+                refreshed_mixed_sites.insert(index, current[current_index].clone());
+            } else {
+                unmatched_prior.push((index, prior_site));
+            }
+        }
+        let unmatched_current = current
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !matched_current[*index])
+            .map(|(_, site)| site)
+            .collect::<Vec<_>>();
+        if unmatched_prior.len() == unmatched_current.len() {
+            for ((index, _), site) in unmatched_prior.into_iter().zip(unmatched_current) {
+                refreshed_mixed_sites.insert(index, site.clone());
+            }
+        } else {
+            semantic_only_mixed_edges.extend(unmatched_prior.into_iter().map(|(index, _)| index));
+        }
+    }
+    let prior_diagnostics = existing_raw.extensions.remove(GRAPH_DIAGNOSTICS_EXTENSION);
+    append_graph_diagnostics(extraction, prior_diagnostics, remap_diagnostics);
+    for prior in &existing.nodes {
+        let Some(current_raw_id) = typed_ast_remap.get(&prior.id) else {
+            continue;
+        };
+        let Some(current) = extraction
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == *current_raw_id)
+        else {
+            continue;
+        };
+        let fresh_site = raw_source_anchor(&current.attributes, root);
+        let semantic_evidence = prior
+            .evidence
+            .iter()
+            .filter(|evidence| is_semantic_layer_evidence(evidence))
+            .cloned()
+            .map(|mut evidence| {
+                rebind_preserved_node_evidence(
+                    &mut evidence,
+                    prior.source.as_ref(),
+                    fresh_site.as_ref(),
+                );
+                evidence
+            })
+            .filter_map(|evidence| serde_json::to_value(evidence).ok())
+            .collect::<Vec<_>>();
+        if semantic_evidence.is_empty() {
+            continue;
+        }
+        let evidence = current
+            .attributes
+            .entry(COALESCED_NODE_EVIDENCE_ATTRIBUTE.to_owned())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        let Some(evidence) = evidence.as_array_mut() else {
+            continue;
+        };
+        evidence.extend(semantic_evidence);
+        evidence.sort_by_cached_key(serde_json::Value::to_string);
+        evidence.dedup();
+    }
+    let preserved_node_ids = existing
+        .nodes
+        .iter()
+        .filter(|node| {
+            !typed_ast_remap.contains_key(&node.id)
+                && node.evidence.iter().any(is_semantic_layer_evidence)
+        })
         .map(|node| node.id.as_str())
-        .collect::<std::collections::HashSet<_>>();
-    let mut preserved_nodes = existing
+        .collect::<HashSet<_>>();
+    let mut preserved_nodes = existing_raw
         .nodes
         .into_iter()
         .filter(|node| {
-            !ast_ids.contains(node.id.as_str())
-                && node
-                    .attributes
-                    .get("_origin")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("ast")
+            preserved_node_ids.contains(node.id.as_str())
                 && !source_in_set(node.attributes.get("source_file"), root, refreshed)
                 && !source_was_deleted(node.attributes.get("source_file"), root)
         })
         .collect::<Vec<_>>();
+    for node in &mut preserved_nodes {
+        strip_preserved_ast_node_evidence(&mut node.attributes);
+    }
     let all_ids = extraction
         .nodes
         .iter()
         .map(|node| node.id.clone())
         .chain(preserved_nodes.iter().map(|node| node.id.clone()))
         .collect::<std::collections::HashSet<_>>();
-    let mut preserved_edges = existing
-        .links
+    let mut preserved_edges = existing_raw
+        .edges
         .into_iter()
-        .filter(|edge| {
-            all_ids.contains(&edge.source)
-                && all_ids.contains(&edge.target)
-                && edge
-                    .attributes
-                    .get("_origin")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("ast")
-                && !source_in_set(edge.attributes.get("source_file"), root, refreshed)
-                && !source_was_deleted(edge.attributes.get("source_file"), root)
-        })
-        .collect::<Vec<_>>();
-    extraction.nodes.append(&mut preserved_nodes);
-    extraction.edges.append(&mut preserved_edges);
-    let new_hyperedge_ids = extraction
-        .hyperedges
-        .iter()
-        .filter_map(|value| value.get("id").and_then(serde_json::Value::as_str))
-        .collect::<HashSet<_>>();
-    let existing_hyperedges = existing
-        .extras
-        .get("hyperedges")
-        .or_else(|| existing.graph.get("hyperedges"))
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|hyperedge| {
-            let Some(object) = hyperedge.as_object() else {
-                return false;
-            };
-            if object
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|id| new_hyperedge_ids.contains(id))
-                || source_in_set(object.get("source_file"), root, refreshed)
-                || source_was_deleted(object.get("source_file"), root)
-            {
-                return false;
+        .zip(existing.links)
+        .enumerate()
+        .filter_map(|(index, (mut raw, typed))| {
+            if dropped_edges.contains(&index) {
+                return None;
             }
-            ["nodes", "members", "node_ids"]
-                .into_iter()
-                .find_map(|key| object.get(key).and_then(serde_json::Value::as_array))
-                .is_none_or(|members| {
-                    members.iter().all(|member| {
-                        member
-                            .as_str()
-                            .is_some_and(|member| all_ids.contains(member))
-                    })
-                })
+            let preserve = typed.evidence.iter().any(is_semantic_layer_evidence)
+                && all_ids.contains(&raw.source)
+                && all_ids.contains(&raw.target)
+                && !source_in_set(raw.attributes.get("source_file"), root, refreshed)
+                && !source_was_deleted(raw.attributes.get("source_file"), root);
+            if !preserve {
+                return None;
+            }
+            if let Some(site) = refreshed_mixed_sites.get(&index) {
+                refresh_preserved_mixed_edge(&mut raw.attributes, &raw.source, &raw.target, site);
+            } else if semantic_only_mixed_edges.contains(&index)
+                && !retain_preserved_mixed_edge_as_semantic_only(
+                    &mut raw.attributes,
+                    remapped_edges.contains(&index),
+                )
+            {
+                return None;
+            }
+            Some(raw)
         })
         .collect::<Vec<_>>();
-    extraction.hyperedges.extend(existing_hyperedges);
+    extraction
+        .nodes
+        .extend(preserved_nodes.drain(..).map(|node| RawNodeRecord {
+            id: node.id,
+            attributes: node.attributes,
+        }));
+    extraction
+        .edges
+        .extend(preserved_edges.drain(..).map(|edge| RawEdgeRecord {
+            source: edge.source,
+            target: edge.target,
+            attributes: edge.attributes,
+        }));
+}
+
+type IncrementalEdgeKey = (String, String, String, Option<String>);
+
+fn incremental_anchor_key(anchor: &SourceAnchor) -> (&str, u64, u64) {
+    (&anchor.file, anchor.start_byte, anchor.end_byte)
+}
+
+fn incremental_edge_key(edge: &RawEdgeRecord) -> Option<IncrementalEdgeKey> {
+    let relation = edge.attributes.get("relation")?.as_str()?;
+    Some((
+        edge.source.clone(),
+        edge.target.clone(),
+        canonical_edge_kind(relation)?.as_str().to_owned(),
+        edge.attributes
+            .get(OCCURRENCE_RULE_ATTRIBUTE)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+    ))
+}
+
+fn refresh_preserved_mixed_edge(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    source: &str,
+    target: &str,
+    fresh_site: &SourceAnchor,
+) {
+    let Some(record) = attributes.get_mut(TRUSTED_EDGE_RECORD_ATTRIBUTE) else {
+        return;
+    };
+    let Ok(mut edge) =
+        serde_json::from_value::<compass_model::code_graph::EdgeRecord>(record.clone())
+    else {
+        return;
+    };
+    let prior_site = edge.relationship_site.clone();
+    edge.evidence.retain(|evidence| {
+        is_semantic_layer_evidence(evidence)
+            && evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+    });
+    for evidence in &mut edge.evidence {
+        if evidence.wiring_site.as_ref() == prior_site.as_ref() {
+            evidence.wiring_site = Some(fresh_site.clone());
+        }
+        for anchor in &mut evidence.anchors {
+            if Some(&*anchor) == prior_site.as_ref() {
+                anchor.clone_from(fresh_site);
+            }
+        }
+    }
+    edge.source = source.to_owned();
+    edge.target = target.to_owned();
+    edge.relationship_site = Some(fresh_site.clone());
+    *record = serde_json::to_value(edge).unwrap_or(serde_json::Value::Null);
+    rebind_raw_anchor(attributes, fresh_site);
+}
+
+fn retain_preserved_mixed_edge_as_semantic_only(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    remapped_in_current_pass: bool,
+) -> bool {
+    if remapped_in_current_pass
+        && !attributes
+            .get("_endpoint_rewrite_rules")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|rewrites| {
+                rewrites.iter().any(|rewrite| {
+                    rewrite.get("rule").and_then(serde_json::Value::as_str)
+                        == Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+                })
+            })
+    {
+        return false;
+    }
+    let Some(record) = attributes.get_mut(TRUSTED_EDGE_RECORD_ATTRIBUTE) else {
+        return false;
+    };
+    let Ok(mut edge) =
+        serde_json::from_value::<compass_model::code_graph::EdgeRecord>(record.clone())
+    else {
+        return false;
+    };
+    edge.evidence.retain(|evidence| {
+        is_semantic_layer_evidence(evidence)
+            && evidence.rule.as_deref()
+                != Some(EndpointRewriteRule::IncrementalAstEndpointRemap.as_str())
+    });
+    let Some(primary) = edge
+        .evidence
+        .iter()
+        .find(|evidence| {
+            evidence
+                .rule
+                .as_deref()
+                .and_then(EndpointRewriteRule::from_wire_name)
+                .is_none()
+        })
+        .cloned()
+    else {
+        // Endpoint rewrites describe transport, not an independently justified relationship.
+        // Without a non-AST producer assertion, an unmatched prior occurrence is stale.
+        return false;
+    };
+    edge.relationship_site = None;
+    *record = serde_json::to_value(edge).unwrap_or(serde_json::Value::Null);
+    for key in [
+        "source_file",
+        "source_location",
+        "source_anchor",
+        "start_byte",
+        "end_byte",
+        "line_start",
+        "line_end",
+        "column_start",
+        "column_end",
+        "_coalesced_edge_evidence",
+    ] {
+        attributes.remove(key);
+    }
+    if !remapped_in_current_pass {
+        attributes.remove("_endpoint_rewrite_rules");
+        attributes.remove(CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE);
+    } else {
+        attributes.insert(
+            CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE.to_owned(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    project_preserved_semantic_evidence(attributes, &primary);
+    true
+}
+
+fn project_preserved_semantic_evidence(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    evidence: &compass_model::provenance::Provenance,
+) {
+    attributes.insert(
+        "_origin".to_owned(),
+        serde_json::Value::String(evidence.origin.as_str().to_owned()),
+    );
+    attributes.insert(
+        "confidence".to_owned(),
+        serde_json::Value::String(evidence.confidence.legacy_str().to_owned()),
+    );
+    attributes.insert(
+        "extractor".to_owned(),
+        serde_json::Value::String(evidence.extractor.clone()),
+    );
+    if let Some(rule) = &evidence.rule {
+        attributes.insert("rule".to_owned(), serde_json::Value::String(rule.clone()));
+    } else {
+        attributes.remove("rule");
+    }
+    if let Some(score) = evidence.score {
+        attributes.insert("confidence_score".to_owned(), score.into());
+    } else {
+        attributes.remove("confidence_score");
+    }
+    if evidence.candidates.is_empty() {
+        attributes.remove("candidates");
+    } else {
+        attributes.insert(
+            "candidates".to_owned(),
+            serde_json::to_value(&evidence.candidates).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let semantic_site = evidence
+        .wiring_site
+        .as_ref()
+        .or_else(|| evidence.anchors.first());
+    if let Some(site) = semantic_site {
+        attributes.insert(
+            "source_file".to_owned(),
+            serde_json::Value::String(site.file.clone()),
+        );
+        attributes.insert(
+            "source_anchor".to_owned(),
+            serde_json::to_value(site).unwrap_or(serde_json::Value::Null),
+        );
+    }
+}
+
+fn rebind_raw_anchor(
+    attributes: &mut serde_json::Map<String, serde_json::Value>,
+    fresh_site: &SourceAnchor,
+) {
+    attributes.insert(
+        "source_file".to_owned(),
+        serde_json::Value::String(fresh_site.file.clone()),
+    );
+    attributes.insert(
+        "source_location".to_owned(),
+        serde_json::Value::String(format!(
+            "L{}:{}-L{}:{}",
+            fresh_site.start_line,
+            fresh_site.start_column,
+            fresh_site.end_line,
+            fresh_site.end_column
+        )),
+    );
+    attributes.insert(
+        "source_anchor".to_owned(),
+        serde_json::to_value(fresh_site).unwrap_or(serde_json::Value::Null),
+    );
+    for (key, value) in [
+        ("start_byte", fresh_site.start_byte.into()),
+        ("end_byte", fresh_site.end_byte.into()),
+        ("line_start", fresh_site.start_line.into()),
+        ("line_end", fresh_site.end_line.into()),
+        ("column_start", fresh_site.start_column.into()),
+        ("column_end", fresh_site.end_column.into()),
+    ] {
+        if attributes.contains_key(key) {
+            attributes.insert(key.to_owned(), value);
+        }
+    }
+}
+
+fn strip_preserved_ast_node_evidence(attributes: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(record) = attributes.get_mut(compass_model::provenance::TRUSTED_NODE_RECORD_ATTRIBUTE)
+    else {
+        return;
+    };
+    let Ok(mut node) =
+        serde_json::from_value::<compass_model::code_graph::NodeRecord>(record.clone())
+    else {
+        return;
+    };
+    node.evidence.retain(is_semantic_layer_evidence);
+    *record = serde_json::to_value(node).unwrap_or(serde_json::Value::Null);
+}
+
+fn rebind_preserved_node_evidence(
+    evidence: &mut compass_model::provenance::Provenance,
+    prior_site: Option<&SourceAnchor>,
+    fresh_site: Option<&SourceAnchor>,
+) {
+    let (Some(prior_site), Some(fresh_site)) = (prior_site, fresh_site) else {
+        return;
+    };
+    if evidence.wiring_site.as_ref() == Some(prior_site) {
+        evidence.wiring_site = Some(fresh_site.clone());
+    }
+    for anchor in &mut evidence.anchors {
+        if anchor == prior_site {
+            anchor.clone_from(fresh_site);
+        }
+    }
+}
+
+fn raw_source_anchor(
+    attributes: &serde_json::Map<String, serde_json::Value>,
+    root: &Path,
+) -> Option<SourceAnchor> {
+    let mut site = attributes
+        .get("source_anchor")
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+        .or_else(|| {
+            Some(SourceAnchor {
+                file: attributes.get("source_file")?.as_str()?.to_owned(),
+                start_byte: attributes.get("start_byte")?.as_u64()?,
+                end_byte: attributes.get("end_byte")?.as_u64()?,
+                start_line: u32::try_from(attributes.get("line_start")?.as_u64()?).ok()?,
+                start_column: u32::try_from(attributes.get("column_start")?.as_u64()?).ok()?,
+                end_line: u32::try_from(attributes.get("line_end")?.as_u64()?).ok()?,
+                end_column: u32::try_from(attributes.get("column_end")?.as_u64()?).ok()?,
+            })
+        })?;
+    let path = Path::new(&site.file);
+    if path.is_absolute()
+        && let Ok(relative) = path.strip_prefix(root)
+    {
+        site.file = relative.to_string_lossy().replace('\\', "/");
+    }
+    Some(site)
+}
+
+fn has_exact_remap_site(attributes: &serde_json::Map<String, serde_json::Value>) -> bool {
+    attributes
+        .get("source_anchor")
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+        .is_some_and(|site| site.is_valid() && site.start_byte < site.end_byte)
+}
+
+fn append_graph_diagnostics(
+    extraction: &mut Extraction,
+    prior: Option<serde_json::Value>,
+    diagnostics: Vec<GraphDiagnostic>,
+) {
+    let mut values = extraction
+        .extensions
+        .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    values.extend(
+        prior
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default(),
+    );
+    values.extend(
+        diagnostics
+            .into_iter()
+            .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok()),
+    );
+    let mut remap_drops = Vec::new();
+    let mut unrelated = Vec::new();
+    let mut omitted = 0_usize;
+    for value in values {
+        match value
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+        {
+            INCREMENTAL_REMAP_DROP_DIAGNOSTIC => remap_drops.push(value),
+            INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC => {
+                omitted = omitted.saturating_add(remap_truncation_count(&value));
+            }
+            _ => unrelated.push(value),
+        }
+    }
+    remap_drops.sort_by_cached_key(serde_json::Value::to_string);
+    remap_drops.dedup();
+    if remap_drops.len() > MAX_INCREMENTAL_REMAP_DIAGNOSTICS {
+        omitted = omitted.saturating_add(
+            remap_drops
+                .len()
+                .saturating_sub(MAX_INCREMENTAL_REMAP_DIAGNOSTICS),
+        );
+        remap_drops.truncate(MAX_INCREMENTAL_REMAP_DIAGNOSTICS);
+    }
+    unrelated.append(&mut remap_drops);
+    if omitted > 0
+        && let Ok(summary) = serde_json::to_value(GraphDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: INCREMENTAL_REMAP_TRUNCATION_DIAGNOSTIC.to_owned(),
+            message: format!("omitted {omitted} additional incremental remap diagnostics"),
+            anchor: None,
+            related_ids: Vec::new(),
+        })
+    {
+        unrelated.push(summary);
+    }
+    unrelated.sort_by_cached_key(serde_json::Value::to_string);
+    unrelated.dedup();
+    extraction.extensions.insert(
+        GRAPH_DIAGNOSTICS_EXTENSION.to_owned(),
+        serde_json::Value::Array(unrelated),
+    );
+}
+
+fn remap_truncation_count(value: &serde_json::Value) -> usize {
+    value
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|message| {
+            message
+                .strip_prefix("omitted ")
+                .and_then(|message| {
+                    message.strip_suffix(" additional incremental remap diagnostics")
+                })
+                .and_then(|count| count.parse().ok())
+        })
+        .unwrap_or_default()
+}
+
+fn raw_node_match_key(node: &RawNodeRecord) -> Option<(String, String, String)> {
+    Some((
+        node.attributes.get("source_file")?.as_str()?.to_owned(),
+        node.label().to_owned(),
+        node.attributes
+            .get("symbol_kind")
+            .or_else(|| node.attributes.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("symbol")
+            .to_owned(),
+    ))
+}
+
+fn typed_node_match_key(
+    node: &compass_model::code_graph::NodeRecord,
+) -> Option<(String, String, String)> {
+    Some((
+        node.source_file()?.to_owned(),
+        node.label().to_owned(),
+        node.kind.as_str().to_owned(),
+    ))
+}
+
+fn node_has_origin(node: &compass_model::code_graph::NodeRecord, origin: EvidenceOrigin) -> bool {
+    node.evidence
+        .iter()
+        .any(|evidence| evidence.origin == origin)
+}
+
+fn is_semantic_layer_evidence(evidence: &Provenance) -> bool {
+    evidence.extractor == SEMANTIC_LAYER_EXTRACTOR
+}
+
+fn node_has_semantic_layer_evidence(node: &compass_model::code_graph::NodeRecord) -> bool {
+    node.evidence.iter().any(is_semantic_layer_evidence)
+}
+
+fn edge_has_semantic_layer_evidence(edge: &compass_model::code_graph::EdgeRecord) -> bool {
+    edge.evidence.iter().any(is_semantic_layer_evidence)
 }
 
 fn canonical_source_set(paths: &[PathBuf], root: &Path) -> HashSet<PathBuf> {
@@ -2144,7 +3052,7 @@ fn stale_semantic_sources(
     root: &Path,
     detected: &BTreeMap<String, Vec<String>>,
 ) -> HashSet<PathBuf> {
-    let Ok(existing) = GraphDocument::load(graph_path) else {
+    let Ok(existing) = V1GraphDocument::load(graph_path) else {
         return HashSet::new();
     };
     let live = detected
@@ -2155,45 +3063,23 @@ fn stale_semantic_sources(
     let mut stale = existing
         .nodes
         .iter()
-        .filter(|node| {
-            node.attributes
-                .get("_origin")
-                .and_then(serde_json::Value::as_str)
-                != Some("ast")
-        })
-        .filter_map(|node| semantic_source_under_root(node.attributes.get("source_file"), root))
+        .filter(|node| node_has_semantic_layer_evidence(node))
+        .filter_map(|node| semantic_path_under_root(node.source_file(), root))
         .filter(|source| !live.contains(source))
         .collect::<HashSet<_>>();
     stale.extend(
         existing
             .links
             .iter()
-            .filter(|edge| {
-                edge.attributes
-                    .get("_origin")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("ast")
-            })
-            .filter_map(|edge| semantic_source_under_root(edge.attributes.get("source_file"), root))
-            .filter(|source| !live.contains(source)),
-    );
-    let hyperedges = existing
-        .extras
-        .get("hyperedges")
-        .or_else(|| existing.graph.get("hyperedges"))
-        .and_then(serde_json::Value::as_array);
-    stale.extend(
-        hyperedges
-            .into_iter()
-            .flatten()
-            .filter_map(|hyperedge| semantic_source_under_root(hyperedge.get("source_file"), root))
+            .filter(|edge| edge_has_semantic_layer_evidence(edge))
+            .filter_map(|edge| semantic_path_under_root(edge.source_file(), root))
             .filter(|source| !live.contains(source)),
     );
     stale
 }
 
-fn semantic_source_under_root(value: Option<&serde_json::Value>, root: &Path) -> Option<PathBuf> {
-    let source = value.and_then(serde_json::Value::as_str)?;
+fn semantic_path_under_root(source: Option<&str>, root: &Path) -> Option<PathBuf> {
+    let source = source?;
     let path = Path::new(source);
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -2307,42 +3193,228 @@ fn save_build_manifest(
 }
 
 fn semantic_document_sources(graph_path: &Path, root: &Path) -> HashSet<PathBuf> {
-    let Ok(existing) = GraphDocument::load(graph_path) else {
+    let Ok(existing) = V1GraphDocument::load(graph_path) else {
         return HashSet::new();
     };
     existing
         .nodes
         .into_iter()
-        .filter(|node| {
-            node.attributes
-                .get("_origin")
-                .and_then(serde_json::Value::as_str)
-                != Some("ast")
-                && matches!(
-                    node.attributes
-                        .get("file_type")
-                        .and_then(serde_json::Value::as_str),
-                    Some("document" | "concept" | "rationale" | "paper")
-                )
-        })
+        .filter(|node| node_has_semantic_layer_evidence(node) && node.kind == NodeKind::Resource)
         .filter_map(|node| {
-            node.attributes
-                .get("source_file")
-                .and_then(serde_json::Value::as_str)
-                .map(Path::new)
-                .map(|path| {
-                    if path.is_absolute() {
-                        canonical_identity(path)
-                    } else {
-                        canonical_identity(&root.join(path))
-                    }
-                })
+            node.source_file().map(Path::new).map(|path| {
+                if path.is_absolute() {
+                    canonical_identity(path)
+                } else {
+                    canonical_identity(&root.join(path))
+                }
+            })
         })
         .collect()
 }
 
 fn canonical_identity(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn graph_configuration_digest(
+    options: &BuildOptions,
+    output_dir: &Path,
+) -> Result<String, CoreError> {
+    let bytes = serde_json::to_vec(&build_profile(options)).map_err(|source| {
+        CoreError::SerializeExtraction {
+            path: output_dir.join("graph.json"),
+            source,
+        }
+    })?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+}
+
+struct PublicationEvidence<'a> {
+    detection: &'a Detection,
+    semantic: Option<&'a SemanticLayer>,
+    extraction_failures: &'a BTreeMap<PathBuf, String>,
+    extraction_partials: &'a BTreeMap<PathBuf, String>,
+}
+
+fn published_v1_document(
+    document: &GraphDocument,
+    communities: &compass_graph::Communities,
+    labels: &BTreeMap<usize, String>,
+    root: &Path,
+    evidence: PublicationEvidence<'_>,
+    configuration_digest: String,
+    source_commit: Option<&str>,
+) -> Result<PublicationOutcome, CoreError> {
+    let mut publication_source = document.clone();
+    let node_communities = communities
+        .iter()
+        .flat_map(|(community, members)| {
+            members
+                .iter()
+                .map(move |member| (member.as_str(), *community))
+        })
+        .collect::<HashMap<_, _>>();
+    for node in &mut publication_source.nodes {
+        let Some(&community_index) = node_communities.get(node.id.as_str()) else {
+            continue;
+        };
+        let community = u64::try_from(community_index)
+            .map_err(|_| CoreError::InvalidBuildState("community ID exceeds u64".to_owned()))?;
+        node.attributes
+            .insert("community".to_owned(), serde_json::Value::from(community));
+        if let Some(label) = labels.get(&community_index) {
+            node.attributes.insert(
+                "community_name".to_owned(),
+                serde_json::Value::String(label.clone()),
+            );
+        }
+    }
+    Ok(normalize_document_v1_with_inventory_best_effort(
+        &publication_source,
+        root,
+        configuration_digest,
+        source_commit,
+        detection_inventory(
+            evidence.detection,
+            evidence.semantic,
+            evidence.extraction_failures,
+            evidence.extraction_partials,
+            root,
+        ),
+    )?)
+}
+
+fn detection_inventory(
+    detection: &Detection,
+    semantic: Option<&SemanticLayer>,
+    extraction_failures: &BTreeMap<PathBuf, String>,
+    extraction_partials: &BTreeMap<PathBuf, String>,
+    root: &Path,
+) -> Vec<InventoryEvidence> {
+    let mut inventory = detection
+        .files
+        .iter()
+        .flat_map(|(category, paths)| {
+            paths.iter().map(move |path| {
+                let absolute = if Path::new(path).is_absolute() {
+                    PathBuf::from(path)
+                } else {
+                    root.join(path)
+                };
+                let identity = canonical_identity(&absolute);
+                let spec = Registry::resolve(Path::new(path));
+                let status = if extraction_failures.contains_key(&identity) {
+                    ExtractionStatus::ParseFailure
+                } else if extraction_partials.contains_key(&identity)
+                    || semantic.is_some_and(|layer| {
+                        layer.partial_files.iter().any(|partial| {
+                            canonical_identity(partial) == canonical_identity(&absolute)
+                        })
+                    })
+                {
+                    ExtractionStatus::Partial
+                } else if source_is_generated(&absolute) {
+                    ExtractionStatus::Generated
+                } else {
+                    match category.as_str() {
+                        "image" | "video" => ExtractionStatus::Binary,
+                        "code" | "document" if spec.is_some() => ExtractionStatus::Extracted,
+                        _ => ExtractionStatus::Unsupported,
+                    }
+                };
+                InventoryEvidence {
+                    path: PathBuf::from(path),
+                    language: spec.map(|spec| spec.name.to_owned()),
+                    producer: spec.map_or_else(
+                        || "compass.files.detect".to_owned(),
+                        |spec| format!("compass.languages.{}", spec.name),
+                    ),
+                    status,
+                    reason: extraction_failures
+                        .get(&identity)
+                        .or_else(|| extraction_partials.get(&identity))
+                        .cloned()
+                        .or_else(|| {
+                            (status == ExtractionStatus::Unsupported)
+                                .then(|| format!("no extractor for detected {category} file"))
+                        }),
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    inventory.extend(detection.unclassified.iter().map(|path| InventoryEvidence {
+        path: PathBuf::from(path),
+        language: None,
+        producer: "compass.files.detect".to_owned(),
+        status: ExtractionStatus::Unsupported,
+        reason: Some("unclassified by detector".to_owned()),
+    }));
+    inventory.extend(detection.ignored.iter().map(|path| InventoryEvidence {
+        path: PathBuf::from(path),
+        language: None,
+        producer: "compass.files.detect".to_owned(),
+        status: ExtractionStatus::Excluded,
+        reason: Some("excluded by ignore policy".to_owned()),
+    }));
+    inventory
+}
+
+fn prepare_extraction_for_publication(
+    path: &Path,
+    extraction: &mut Extraction,
+    root: &Path,
+    failures: &mut BTreeMap<PathBuf, String>,
+    partials: &mut BTreeMap<PathBuf, String>,
+) {
+    let identity = canonical_identity(path);
+    if let Some(error) = extraction.error.take() {
+        failures.insert(identity, portable_diagnostic_reason(&error, path, root));
+        *extraction = Extraction::default();
+        extraction.raw_calls = None;
+        return;
+    }
+    if extraction
+        .extensions
+        .get(EXTRACTION_QUALITY_EXTENSION)
+        .and_then(serde_json::Value::as_str)
+        != Some(EXTRACTION_QUALITY_PARTIAL)
+    {
+        return;
+    }
+    let reason = extraction
+        .extensions
+        .get(EXTRACTION_QUALITY_REASON_EXTENSION)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("extraction completed with parser recovery");
+    partials.insert(identity, portable_diagnostic_reason(reason, path, root));
+    extraction.edges.clear();
+    extraction.hyperedges.clear();
+    extraction.framework_facts.clear();
+    extraction.raw_calls = None;
+}
+
+fn portable_diagnostic_reason(reason: &str, path: &Path, root: &Path) -> String {
+    let root_text = root.to_string_lossy();
+    let path_text = path.to_string_lossy();
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let sanitized = reason
+        .replace(root_text.as_ref(), ".")
+        .replace(path_text.as_ref(), &relative)
+        .replace('\\', "/");
+    sanitized.chars().take(512).collect()
+}
+
+fn source_is_generated(path: &Path) -> bool {
+    fs::read(path).ok().is_some_and(|bytes| {
+        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(2_048)]);
+        ["DO NOT EDIT", "@generated", "Generated by"]
+            .iter()
+            .any(|marker| head.contains(marker))
+    })
 }
 
 fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {
@@ -2356,63 +3428,6 @@ fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {
         root.join(path)
     };
     Registry::resolve(path).is_some() && !absolute.exists()
-}
-
-fn write_raw_graph(
-    path: &Path,
-    extraction: &Extraction,
-    nodes: &[NodeRecord],
-    edges: &[EdgeRecord],
-    purpose: BuildPurpose,
-    tokens: (u64, u64),
-) -> Result<(), CoreError> {
-    let document = RawGraphOutput {
-        extraction,
-        nodes,
-        edges,
-        purpose,
-        tokens,
-    };
-    write_json_ascii_atomic(path, &document, true, purpose == BuildPurpose::Update)?;
-    Ok(())
-}
-
-struct RawGraphOutput<'a> {
-    extraction: &'a Extraction,
-    nodes: &'a [NodeRecord],
-    edges: &'a [EdgeRecord],
-    purpose: BuildPurpose,
-    tokens: (u64, u64),
-}
-
-impl Serialize for RawGraphOutput<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-
-        if self.purpose == BuildPurpose::Extract {
-            let mut map = serializer.serialize_map(Some(5))?;
-            map.serialize_entry("nodes", self.nodes)?;
-            map.serialize_entry("edges", self.edges)?;
-            map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
-            map.serialize_entry("input_tokens", &self.tokens.0)?;
-            map.serialize_entry("output_tokens", &self.tokens.1)?;
-            map.end()
-        } else {
-            let fields = 4 + usize::from(!self.extraction.hyperedges.is_empty());
-            let mut map = serializer.serialize_map(Some(fields))?;
-            map.serialize_entry("input_tokens", &0_u64)?;
-            map.serialize_entry("output_tokens", &0_u64)?;
-            map.serialize_entry("nodes", self.nodes)?;
-            map.serialize_entry("links", self.edges)?;
-            if !self.extraction.hyperedges.is_empty() {
-                map.serialize_entry("hyperedges", &self.extraction.hyperedges)?;
-            }
-            map.end()
-        }
-    }
 }
 
 fn report_root_label(path: &Path) -> String {
@@ -2556,6 +3571,9 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             edges: document.links.len(),
             communities: 0,
             clustered: false,
+            omitted_nodes: 0,
+            omitted_edges: 0,
+            identity_collisions: 0,
         };
         let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
         return Some(stats);
@@ -2581,9 +3599,19 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             .collect::<HashSet<_>>()
             .len(),
         clustered: true,
+        omitted_nodes: 0,
+        omitted_edges: 0,
+        identity_collisions: 0,
     };
     let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
     Some(stats)
+}
+
+fn saved_publication_omissions(output_dir: &Path) -> PublicationOmissions {
+    fs::read(output_dir.join(OUTPUT_STATS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OutputStats>(&bytes).ok())
+        .map_or_else(PublicationOmissions::default, |stats| stats.omissions())
 }
 
 fn save_output_stats(
@@ -2592,6 +3620,7 @@ fn save_output_stats(
     edges: usize,
     communities: usize,
     clustered: bool,
+    omissions: PublicationOmissions,
 ) -> Result<(), CoreError> {
     let graph_bytes = fs::metadata(output_dir.join("graph.json"))
         .map_err(|source| compass_files::FileError::Io {
@@ -2607,6 +3636,9 @@ fn save_output_stats(
             edges,
             communities,
             clustered,
+            omitted_nodes: omissions.nodes,
+            omitted_edges: omissions.edges,
+            identity_collisions: omissions.identity_collisions,
         },
         true,
     )?;
@@ -2756,13 +3788,53 @@ fn absolutize_from(root: &Path, path: &Path) -> PathBuf {
     }
 }
 
+fn read_source_text_with_limit(path: &Path, max_source_bytes: u64) -> Option<(String, String)> {
+    fs::metadata(path)
+        .ok()
+        .filter(|metadata| metadata.is_file() && metadata.len() <= max_source_bytes)
+        .and_then(|_| fs::read(path).ok())
+        .map(|bytes| {
+            (
+                path.to_string_lossy().into_owned(),
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
 
+    use compass_model::code_graph::GraphDocument as V1GraphDocument;
     use serde_json::{Map, Value};
 
     use super::*;
+
+    #[test]
+    fn force_cache_reuse_never_authorizes_prior_published_graph_input() {
+        assert!(cache_reuse_enabled(false, false));
+        assert!(cache_reuse_enabled(false, true));
+        assert!(!cache_reuse_enabled(true, false));
+        assert!(cache_reuse_enabled(true, true));
+        assert!(prior_published_graph_input_enabled(false));
+        assert!(!prior_published_graph_input_enabled(true));
+    }
+
+    #[test]
+    fn resolver_source_text_enforces_the_pre_read_byte_limit() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("oversized.py");
+        fs::write(&source, b"0123456789")?;
+
+        assert!(read_source_text_with_limit(&source, 9).is_none());
+        assert_eq!(
+            read_source_text_with_limit(&source, 10)
+                .map(|(_, body)| body)
+                .as_deref(),
+            Some("0123456789")
+        );
+        Ok(())
+    }
 
     #[test]
     fn precomputed_detection_cannot_cross_repository_roots() -> Result<(), Box<dyn Error>> {
@@ -2781,7 +3853,10 @@ mod tests {
         let mut options = BuildOptions::new(build_root.path());
         options.precomputed_detection = Some(detection);
 
-        let error = build_local_graph(&options).expect_err("mismatched detection must fail");
+        let error = match build_local_graph(&options) {
+            Ok(_) => return Err("mismatched detection unexpectedly succeeded".into()),
+            Err(error) => error,
+        };
         assert!(matches!(error, CoreError::DetectionRootMismatch));
         Ok(())
     }
@@ -2799,14 +3874,14 @@ mod tests {
         let prefix_symbol_id = make_id(&[&file_stem(&source)]);
         let mut extraction = Extraction {
             nodes: vec![
-                NodeRecord {
+                RawNodeRecord {
                     id: file_id,
                     attributes: Map::from_iter([(
                         "source_file".to_owned(),
                         Value::String(source_text.clone()),
                     )]),
                 },
-                NodeRecord {
+                RawNodeRecord {
                     id: prefix_symbol_id.clone(),
                     attributes: Map::from_iter([(
                         "source_file".to_owned(),
@@ -2814,7 +3889,7 @@ mod tests {
                     )]),
                 },
             ],
-            edges: vec![EdgeRecord {
+            edges: vec![RawEdgeRecord {
                 source: "caller".to_owned(),
                 target: prefix_symbol_id.clone(),
                 attributes: Map::new(),
@@ -2846,14 +3921,14 @@ mod tests {
         let old_id = make_id(&[&external_text]);
         let source_id = "webapi".to_owned();
         let mut extraction = Extraction {
-            nodes: vec![NodeRecord {
+            nodes: vec![RawNodeRecord {
                 id: old_id.clone(),
                 attributes: Map::from_iter([(
                     "source_file".to_owned(),
                     Value::String(external_text),
                 )]),
             }],
-            edges: vec![EdgeRecord {
+            edges: vec![RawEdgeRecord {
                 source: source_id.clone(),
                 target: old_id,
                 attributes: Map::from_iter([(
@@ -2878,7 +3953,7 @@ mod tests {
     fn astro_import_identities_do_not_include_checkout_root() -> Result<(), Box<dyn Error>> {
         let first = tempfile::tempdir()?;
         let second = tempfile::tempdir()?;
-        let build = |root: &Path| -> Result<GraphDocument, Box<dyn Error>> {
+        let build = |root: &Path| -> Result<V1GraphDocument, Box<dyn Error>> {
             let source = root.join("src");
             fs::create_dir_all(&source)?;
             fs::create_dir_all(root.join(".hidden"))?;
@@ -2889,14 +3964,14 @@ mod tests {
             fs::write(root.join(".hidden/Layout.astro"), "<slot />\n")?;
             let mut options = BuildOptions::new(root);
             options.no_viz = true;
-            build_local_graph(&options)?;
-            Ok(GraphDocument::load(
-                &root.join("compass-out").join("graph.json"),
+            let result = build_local_graph(&options)?;
+            Ok(V1GraphDocument::load(
+                &result.output_dir.join("graph.json"),
             )?)
         };
         let first_graph = build(first.path())?;
         let second_graph = build(second.path())?;
-        let identities = |document: &GraphDocument| {
+        let identities = |document: &V1GraphDocument| {
             let mut nodes = document
                 .nodes
                 .iter()
@@ -2909,7 +3984,7 @@ mod tests {
                     (
                         edge.source.clone(),
                         edge.target.clone(),
-                        edge.string("relation"),
+                        edge.relation().to_owned(),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -2922,7 +3997,12 @@ mod tests {
             .nodes
             .iter()
             .chain(&second_graph.nodes)
-            .flat_map(|node| [node.id.clone(), node.string("source_file")])
+            .flat_map(|node| {
+                [
+                    node.id.clone(),
+                    node.source_file().unwrap_or_default().to_owned(),
+                ]
+            })
             .chain(
                 first_graph
                     .links
@@ -2932,7 +4012,7 @@ mod tests {
                         [
                             edge.source.clone(),
                             edge.target.clone(),
-                            edge.string("source_file"),
+                            edge.source_file().unwrap_or_default().to_owned(),
                         ]
                     }),
             )
@@ -2945,16 +4025,22 @@ mod tests {
         let punctuation_symbols = first_graph
             .nodes
             .iter()
-            .filter(|node| node.string("label") == "[]")
+            .filter(|node| node.label() == "[]")
             .collect::<Vec<_>>();
         assert!(
-            !punctuation_symbols.is_empty(),
-            "fixture must exercise the punctuation-symbol identity collision"
+            punctuation_symbols.is_empty(),
+            "generic punctuation symbols must not be guessed into the typed graph"
         );
         assert!(
-            punctuation_symbols
-                .iter()
-                .all(|node| node.id.starts_with("src_page_"))
+            first_graph.graph.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "unresolved_node_kind"
+                    && diagnostic
+                        .anchor
+                        .as_ref()
+                        .is_some_and(|anchor| anchor.file == "src/Page.astro")
+            }),
+            "omitted generic symbols must remain visible as anchored diagnostics: {:#?}",
+            first_graph.graph.diagnostics
         );
         Ok(())
     }
@@ -2996,10 +4082,14 @@ mod tests {
         assert_eq!(overview["model"]["schema"], "compass.viewer.graph/1");
         assert!(cold.output_dir.join("manifest.json").is_file());
         assert!(!cold.output_dir.join(".compass_incomplete").exists());
-        let cold_graph = GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
         assert!(cold_graph.nodes.iter().all(|node| {
-            node.attributes.get("_origin").and_then(Value::as_str) == Some("ast")
-                && !Path::new(&node.string("source_file")).is_absolute()
+            node.evidence
+                .first()
+                .is_some_and(|evidence| evidence.origin == EvidenceOrigin::Ast)
+                && node
+                    .source_file()
+                    .is_none_or(|source| !Path::new(source).is_absolute())
         }));
         let cold_graph_bytes = fs::read(cold.output_dir.join("graph.json"))?;
         let cold_report_bytes = fs::read(cold.output_dir.join("GRAPH_REPORT.md"))?;
@@ -3022,13 +4112,13 @@ mod tests {
         let changed = build_local_graph(&options)?;
         assert_eq!(changed.files_extracted, 1);
         assert_eq!(changed.files_cached, 1);
-        let changed_graph = GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
         let changed_graph_bytes = fs::read(changed.output_dir.join("graph.json"))?;
         assert_ne!(
             changed_graph_bytes, cold_graph_bytes,
             "a body-only edit must update definition hashes"
         );
-        let identities = |document: &GraphDocument| {
+        let identities = |document: &V1GraphDocument| {
             (
                 document
                     .nodes
@@ -3038,23 +4128,18 @@ mod tests {
                 document
                     .links
                     .iter()
-                    .map(|edge| {
-                        (
-                            edge.source.clone(),
-                            edge.target.clone(),
-                            edge.string("relation"),
-                        )
-                    })
+                    .map(|edge| (edge.source.clone(), edge.target.clone(), edge.relation()))
                     .collect::<HashSet<_>>(),
             )
         };
         assert_eq!(identities(&changed_graph), identities(&cold_graph));
-        let implementation_hash = |document: &GraphDocument| {
+        let implementation_hash = |document: &V1GraphDocument| {
             document
                 .nodes
                 .iter()
                 .find(|node| node.label() == "work()")
-                .map(|node| node.string("implementation_hash"))
+                .and_then(|node| node.digest("implementation_hash"))
+                .map(str::to_owned)
         };
         assert_ne!(
             implementation_hash(&changed_graph),
@@ -3071,12 +4156,12 @@ mod tests {
         fs::remove_file(root.join("helper.py"))?;
         let deleted = build_local_graph(&options)?;
         assert_eq!(deleted.files_considered, 1);
-        let graph = GraphDocument::load(&deleted.output_dir.join("graph.json"))?;
+        let graph = V1GraphDocument::load(&deleted.output_dir.join("graph.json"))?;
         assert!(
             graph
                 .nodes
                 .iter()
-                .all(|node| node.string("source_file") != "helper.py")
+                .all(|node| node.source_file() != Some("helper.py"))
         );
         Ok(())
     }
@@ -3086,29 +4171,31 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let root = directory.path();
         fs::write(root.join("main.py"), "def before():\n    return 1\n")?;
+        fs::write(root.join("domain.md"), "# Domain rule\n")?;
         let mut options = BuildOptions::new(root);
         options.no_viz = true;
-        let first = build_local_graph(&options)?;
-        let graph_path = first.output_dir.join("graph.json");
-        let mut graph = GraphDocument::load(&graph_path)?;
-        let mut attributes = Map::new();
-        attributes.insert("label".to_owned(), Value::String("Domain rule".to_owned()));
-        attributes.insert("file_type".to_owned(), Value::String("concept".to_owned()));
-        graph.nodes.push(NodeRecord {
-            id: "semantic_domain_rule".to_owned(),
-            attributes,
-        });
-        write_json_atomic(&graph_path, &graph, true)?;
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "semantic_domain_rule",
+                    "label": "Domain rule",
+                    "file_type": "concept",
+                    "source_file": "domain.md",
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![PathBuf::from("domain.md")],
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        build_graph_with_semantic(&options, &semantic)?;
 
         fs::write(root.join("main.py"), "def after():\n    return 2\n")?;
-        build_local_graph(&options)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(
-            graph
-                .nodes
-                .iter()
-                .any(|node| node.id == "semantic_domain_rule")
-        );
+        let updated = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&updated.output_dir.join("graph.json"))?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Domain rule"));
         assert!(graph.nodes.iter().any(|node| node.label() == "after()"));
         assert!(!graph.nodes.iter().any(|node| node.label() == "before()"));
         Ok(())
@@ -3121,46 +4208,39 @@ mod tests {
         fs::write(root.join("guide.md"), "# Guide\n\nLocal structure.\n")?;
         let mut options = BuildOptions::new(root);
         options.no_viz = true;
-        let first = build_local_graph(&options)?;
-        let graph_path = first.output_dir.join("graph.json");
-        let semantic = GraphDocument {
-            directed: false,
-            multigraph: false,
-            graph: Map::new(),
-            nodes: vec![NodeRecord {
-                id: "semantic_guide".to_owned(),
-                attributes: Map::from_iter([
-                    (
-                        "label".to_owned(),
-                        Value::String("Guide concept".to_owned()),
-                    ),
-                    ("file_type".to_owned(), Value::String("concept".to_owned())),
-                    (
-                        "source_file".to_owned(),
-                        Value::String("guide.md".to_owned()),
-                    ),
-                ]),
-            }],
-            links: Vec::new(),
-            extras: BTreeMap::new(),
+        let semantic = SemanticLayer {
+            fragment: json!({
+                "nodes": [{
+                    "id": "semantic_guide",
+                    "label": "Guide concept",
+                    "file_type": "concept",
+                    "source_file": "guide.md",
+                }],
+                "edges": [],
+                "hyperedges": [],
+                "failed_chunks": 0,
+            }),
+            refreshed_files: vec![PathBuf::from("guide.md")],
+            partial_files: Vec::new(),
+            allow_partial: false,
         };
-        write_json_atomic(&graph_path, &semantic, true)?;
+        build_graph_with_semantic(&options, &semantic)?;
 
-        build_local_graph(&options)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.nodes[0].id, "semantic_guide");
-        assert!(
+        let updated = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&updated.output_dir.join("graph.json"))?;
+        assert_eq!(
             graph
                 .nodes
                 .iter()
-                .all(|node| node.attributes.get("_origin").is_none())
+                .filter(|node| node.label() == "Guide concept")
+                .count(),
+            1
         );
         Ok(())
     }
 
     #[test]
-    fn no_cluster_schema_tracks_command_purpose() -> Result<(), Box<dyn Error>> {
+    fn no_cluster_always_publishes_the_v1_contract() -> Result<(), Box<dyn Error>> {
         let extract_dir = tempfile::tempdir()?;
         fs::write(
             extract_dir.path().join("main.py"),
@@ -3172,9 +4252,11 @@ mod tests {
         let result = build_local_graph(&extract)?;
         let value: Value =
             serde_json::from_slice(&fs::read(result.output_dir.join("graph.json"))?)?;
-        assert!(value.get("edges").is_some());
-        assert!(value.get("links").is_none());
-        assert!(value.get("directed").is_none());
+        assert_eq!(value["graph"]["schema"], "compass.graph/1");
+        assert_eq!(value["directed"], true);
+        assert_eq!(value["multigraph"], true);
+        assert!(value.get("links").is_some());
+        assert!(value.get("edges").is_none());
         assert!(!result.output_dir.join("GRAPH_REPORT.md").exists());
         assert!(!result.output_dir.join(".compass_analysis.json").exists());
 
@@ -3184,8 +4266,10 @@ mod tests {
         update.no_cluster = true;
         let result = build_local_graph(&update)?;
         let bytes = fs::read(result.output_dir.join("graph.json"))?;
-        assert_eq!(bytes.last(), Some(&b'\n'));
         let value: Value = serde_json::from_slice(&bytes)?;
+        assert_eq!(value["graph"]["schema"], "compass.graph/1");
+        assert_eq!(value["directed"], true);
+        assert_eq!(value["multigraph"], true);
         assert!(value.get("links").is_some());
         assert!(value.get("edges").is_none());
         assert!(result.output_dir.join(".compass_root").is_file());
@@ -3193,7 +4277,7 @@ mod tests {
     }
 
     #[test]
-    fn code_sources_precede_deterministic_documents() -> Result<(), Box<dyn Error>> {
+    fn code_and_deterministic_document_sources_are_both_published() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         fs::write(
             directory.path().join("zzz.py"),
@@ -3208,30 +4292,20 @@ mod tests {
         options.no_viz = true;
 
         let result = build_local_graph(&options)?;
-        let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
-        let code_positions = graph
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        let code_nodes = graph
             .nodes
             .iter()
-            .enumerate()
-            .filter_map(|(position, node)| {
-                (node.string("source_file") == "zzz.py").then_some(position)
-            })
+            .filter(|node| node.source_file() == Some("zzz.py"))
             .collect::<Vec<_>>();
-        let document_positions = graph
+        let document_nodes = graph
             .nodes
             .iter()
-            .enumerate()
-            .filter_map(|(position, node)| {
-                (node.string("source_file") == "aaa.md").then_some(position)
-            })
+            .filter(|node| node.source_file() == Some("aaa.md"))
             .collect::<Vec<_>>();
 
-        assert!(!code_positions.is_empty());
-        assert!(!document_positions.is_empty());
-        assert!(
-            code_positions.iter().max() < document_positions.iter().min(),
-            "Python compatibility requires every code extraction to precede deterministic document extraction"
-        );
+        assert!(!code_nodes.is_empty());
+        assert!(!document_nodes.is_empty());
         Ok(())
     }
 
@@ -3251,7 +4325,7 @@ mod tests {
         options.no_viz = true;
 
         let result = build_local_graph(&options)?;
-        let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
         assert!(
             graph
                 .nodes
@@ -3262,7 +4336,7 @@ mod tests {
             graph
                 .nodes
                 .iter()
-                .all(|node| node.string("source_file") != "vendor-treadmill")
+                .all(|node| node.source_file() != Some("vendor-treadmill"))
         );
         Ok(())
     }
@@ -3282,12 +4356,12 @@ mod tests {
         let graph_path = cold.output_dir.join("graph.json");
         let graph_bytes = fs::read(&graph_path)?;
         let manifest_bytes = fs::read(cold.output_dir.join("manifest.json"))?;
-        fs::remove_dir_all(cold.output_dir.join("cache"))?;
+        fs::remove_dir_all(directory.path().join("compass-out").join("cache"))?;
 
         let warm = build_local_graph(&options)?;
         assert_eq!(warm.files_extracted, 0);
         assert_eq!(warm.files_cached, 1);
-        assert_eq!(fs::read(graph_path)?, graph_bytes);
+        assert_eq!(fs::read(warm.output_dir.join("graph.json"))?, graph_bytes);
         assert_eq!(
             fs::read(warm.output_dir.join("manifest.json"))?,
             manifest_bytes
@@ -3356,8 +4430,8 @@ mod tests {
         };
         let first = build_graph_with_semantic(&options, &first_layer)?;
         let graph_path = first.output_dir.join("graph.json");
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(graph.nodes.iter().any(|node| node.id == "old_concept"));
+        let graph = V1GraphDocument::load(&graph_path)?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Old concept"));
         let manifest: Value =
             serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
         assert!(
@@ -3392,15 +4466,19 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        build_graph_with_semantic(&options, &second_layer)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(!graph.nodes.iter().any(|node| node.id == "old_concept"));
-        assert!(graph.nodes.iter().any(|node| node.id == "new_concept"));
-        let Some(semantic) = graph.nodes.iter().find(|node| node.id == "new_concept") else {
+        let second = build_graph_with_semantic(&options, &second_layer)?;
+        let graph = V1GraphDocument::load(&second.output_dir.join("graph.json"))?;
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Old concept"));
+        assert!(graph.nodes.iter().any(|node| node.label() == "New concept"));
+        let Some(semantic) = graph
+            .nodes
+            .iter()
+            .find(|node| node.label() == "New concept")
+        else {
             return Err("new semantic node was not written".into());
         };
-        assert_eq!(semantic.string("source_file"), "diagram.png");
-        assert_eq!(semantic.string("_origin"), "semantic");
+        assert_eq!(semantic.source_file(), Some("diagram.png"));
+        assert!(node_has_origin(semantic, EvidenceOrigin::Heuristic));
         Ok(())
     }
 
@@ -3418,8 +4496,8 @@ mod tests {
         let complete = SemanticLayer {
             fragment: json!({
                 "nodes": [
-                    {"id":"concept_a", "source_file":"diagram.png"},
-                    {"id":"concept_b", "source_file":"diagram.png"}
+                    {"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"},
+                    {"id":"concept_b", "label":"Concept B", "file_type":"concept", "source_file":"diagram.png"}
                 ],
                 "edges": [],
                 "hyperedges": [],
@@ -3436,7 +4514,7 @@ mod tests {
         let original = fs::read(&graph_path)?;
         let mut incomplete = SemanticLayer {
             fragment: json!({
-                "nodes": [{"id":"concept_a", "source_file":"diagram.png"}],
+                "nodes": [{"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"}],
                 "edges": [],
                 "hyperedges": [],
                 "input_tokens": 2,
@@ -3455,15 +4533,12 @@ mod tests {
         assert_eq!(fs::read(&graph_path)?, original);
 
         incomplete.allow_partial = true;
-        build_graph_with_semantic(&options, &incomplete)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(graph.nodes.iter().any(|node| node.id == "concept_a"));
-        assert!(!graph.nodes.iter().any(|node| node.id == "concept_b"));
-        let raw: Value = serde_json::from_slice(&fs::read(&graph_path)?)?;
-        assert_eq!(raw["input_tokens"], 2);
-        assert_eq!(raw["output_tokens"], 1);
+        let partial = build_graph_with_semantic(&options, &incomplete)?;
+        let graph = V1GraphDocument::load(&partial.output_dir.join("graph.json"))?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Concept A"));
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Concept B"));
         let manifest: Value =
-            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+            serde_json::from_slice(&fs::read(partial.output_dir.join("manifest.json"))?)?;
         assert_eq!(manifest["diagram.png"]["semantic_hash"], "");
         Ok(())
     }
@@ -3481,8 +4556,8 @@ mod tests {
         let complete = SemanticLayer {
             fragment: json!({
                 "nodes": [
-                    {"id":"concept_a", "source_file":"diagram.png"},
-                    {"id":"concept_b", "source_file":"diagram.png"}
+                    {"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"},
+                    {"id":"concept_b", "label":"Concept B", "file_type":"concept", "source_file":"diagram.png"}
                 ],
                 "edges": [],
                 "hyperedges": [],
@@ -3492,11 +4567,11 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        let first = build_graph_with_semantic(&options, &complete)?;
+        build_graph_with_semantic(&options, &complete)?;
 
         let smaller = SemanticLayer {
             fragment: json!({
-                "nodes": [{"id":"concept_a", "source_file":"diagram.png"}],
+                "nodes": [{"id":"concept_a", "label":"Concept A", "file_type":"concept", "source_file":"diagram.png"}],
                 "edges": [],
                 "hyperedges": [],
                 "failed_chunks": 0,
@@ -3505,11 +4580,10 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        build_graph_with_semantic(&options, &smaller)?;
-        let graph_path = first.output_dir.join("graph.json");
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(graph.nodes.iter().any(|node| node.id == "concept_a"));
-        assert!(!graph.nodes.iter().any(|node| node.id == "concept_b"));
+        let smaller = build_graph_with_semantic(&options, &smaller)?;
+        let graph = V1GraphDocument::load(&smaller.output_dir.join("graph.json"))?;
+        assert!(graph.nodes.iter().any(|node| node.label() == "Concept A"));
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Concept B"));
 
         fs::remove_file(&image)?;
         let empty = SemanticLayer {
@@ -3523,11 +4597,11 @@ mod tests {
             partial_files: Vec::new(),
             allow_partial: false,
         };
-        build_graph_with_semantic(&options, &empty)?;
-        let graph = GraphDocument::load(&graph_path)?;
-        assert!(!graph.nodes.iter().any(|node| node.id == "concept_a"));
+        let empty = build_graph_with_semantic(&options, &empty)?;
+        let graph = V1GraphDocument::load(&empty.output_dir.join("graph.json"))?;
+        assert!(!graph.nodes.iter().any(|node| node.label() == "Concept A"));
         let manifest: Value =
-            serde_json::from_slice(&fs::read(first.output_dir.join("manifest.json"))?)?;
+            serde_json::from_slice(&fs::read(empty.output_dir.join("manifest.json"))?)?;
         assert!(manifest.get("diagram.png").is_none());
         Ok(())
     }

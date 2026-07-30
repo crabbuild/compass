@@ -44,11 +44,7 @@ pub fn build_tree(document: &GraphDocument, options: &TreeOptions<'_>) -> TreeNo
         .nodes
         .iter()
         .filter_map(|node| {
-            let source = node
-                .attributes
-                .get("source_file")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
+            let source = node.source_file().unwrap_or_default();
             (!source.is_empty()).then_some((source, node))
         })
         .collect::<Vec<_>>();
@@ -106,16 +102,8 @@ pub fn build_tree(document: &GraphDocument, options: &TreeOptions<'_>) -> TreeNo
         let mut children = symbols
             .into_iter()
             .filter_map(|node| {
-                let label = node
-                    .attributes
-                    .get("label")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(&node.id);
-                let file_type = node
-                    .attributes
-                    .get("file_type")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
+                let label = node.label();
+                let file_type = node.string("file_type");
                 (label
                     != source_path
                         .file_name()

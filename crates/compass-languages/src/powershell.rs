@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
@@ -325,7 +325,7 @@ impl<'source, 'tree> ScriptState<'source, 'tree> {
         node: Node<'tree>,
         caller: &str,
         labels: &HashMap<String, String>,
-        seen: &mut HashSet<(String, String)>,
+        seen: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if matches!(node.kind(), "function_statement" | "class_statement") {
             return;
@@ -340,8 +340,14 @@ impl<'source, 'tree> ScriptState<'source, 'tree> {
                     .get(&lower)
                     .filter(|target| target.as_str() != caller)
                 {
-                    if seen.insert((caller.to_owned(), target.clone())) {
+                    if seen.insert((
+                        caller.to_owned(),
+                        target.clone(),
+                        node.start_byte(),
+                        node.end_byte(),
+                    )) {
                         self.add_edge(caller, target, "calls", line(node), None);
+                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                     }
                 } else if !command.is_empty() {
                     self.extraction.raw_calls_mut().push(RawCall {
@@ -353,7 +359,7 @@ impl<'source, 'tree> ScriptState<'source, 'tree> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }

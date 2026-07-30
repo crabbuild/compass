@@ -1,0 +1,9 @@
+<?php
+
+class ExampleController {
+    public function view() {}
+}
+
+class ExampleForm {}
+
+function hook_entity_type_build() {}

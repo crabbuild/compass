@@ -105,11 +105,26 @@ pub fn introspect_cargo(root: &Path) -> Result<CargoGraph, CargoIntrospectionErr
             id: manifest.id.clone(),
             attributes: Map::from_iter([
                 ("label".to_owned(), Value::String(name.clone())),
+                ("name".to_owned(), Value::String(name.clone())),
+                ("qualified_name".to_owned(), Value::String(name.clone())),
+                (
+                    "symbol_kind".to_owned(),
+                    Value::String("package".to_owned()),
+                ),
+                ("file_type".to_owned(), Value::String("code".to_owned())),
+                ("language".to_owned(), Value::String("rust".to_owned())),
                 (
                     "source_file".to_owned(),
                     Value::String(relative_posix(&manifest.path, &root)?),
                 ),
                 ("source_location".to_owned(), Value::String("L1".to_owned())),
+                ("line_start".to_owned(), Value::from(1)),
+                ("line_end".to_owned(), Value::from(1)),
+                ("_origin".to_owned(), Value::String("ast".to_owned())),
+                (
+                    "extractor".to_owned(),
+                    Value::String("compass.cargo".to_owned()),
+                ),
             ]),
         });
     }
@@ -141,7 +156,7 @@ pub fn introspect_cargo(root: &Path) -> Result<CargoGraph, CargoIntrospectionErr
                 attributes: Map::from_iter([
                     (
                         "relation".to_owned(),
-                        Value::String("crate_depends_on".to_owned()),
+                        Value::String("depends_on".to_owned()),
                     ),
                     (
                         "context".to_owned(),
@@ -154,6 +169,11 @@ pub fn introspect_cargo(root: &Path) -> Result<CargoGraph, CargoIntrospectionErr
                     ),
                     ("source_file".to_owned(), Value::String(source_file.clone())),
                     ("source_location".to_owned(), Value::String("L1".to_owned())),
+                    ("_origin".to_owned(), Value::String("ast".to_owned())),
+                    (
+                        "extractor".to_owned(),
+                        Value::String("compass.cargo".to_owned()),
+                    ),
                 ]),
             });
         }

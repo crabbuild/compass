@@ -192,7 +192,7 @@ fn format_environment_keys(keys: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compass_model::NodeRecord;
+    use compass_graph::RawNodeRecord as NodeRecord;
     use serde_json::{Map, Value};
     use std::io::{Read, Write};
     use std::net::TcpListener;

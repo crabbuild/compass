@@ -94,6 +94,14 @@ compass extract [PATH]
 
 Use `--code-only` for an explicit fully local structural profile.
 
+`update`, `extract`, and watch rebuilds may succeed with a warning that Compass
+published a partial graph. The warning reports exact omitted node, omitted
+edge, and identity-collision counts. The retained `graph.json` remains strictly
+valid and queryable; record examples and the exact summary are in
+`graph.diagnostics`. Document-level corruption, an unsafe inventory, no usable
+nodes, serialization failure, and atomic publication failure still return a
+nonzero exit.
+
 ### `watch`
 
 ```text

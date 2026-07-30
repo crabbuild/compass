@@ -25,9 +25,28 @@ jobs:
           test "$(printf '%s\n' "$versions" | wc -l | tr -d ' ')" = "1"
           test "$GITHUB_REF_NAME" = "compass-v$versions"
 
+  code-graph-qualification:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+          key: release-code-graph-qualification
+      - name: Qualify pinned enterprise repository
+        shell: bash
+        run: >-
+          ./scripts/qualify_code_graph_v1.sh
+          --repositories tests/qualification/code-graph-v1-repositories.toml
+
   build:
     name: Build ${{ matrix.target }}
-    needs: metadata
+    needs: [metadata, code-graph-qualification]
     strategy:
       fail-fast: false
       matrix:

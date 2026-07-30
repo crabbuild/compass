@@ -676,11 +676,7 @@ impl ChangeSink for DirectChanges {
                 ) {
                     return Ok(());
                 }
-                let source_file = value
-                    .and_then(|value| value.get("source_file"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
+                let source_file = value.map(graph_edge_source_file).unwrap_or_default();
                 self.dependencies.push(DependencyDelta {
                     source: source.to_owned(),
                     target: target.to_owned(),
@@ -720,9 +716,11 @@ fn graph_node_delta(
 ) -> GraphNodeDelta {
     GraphNodeDelta {
         id: id.to_owned(),
-        label: graph_string(value, "label"),
-        kind: graph_string(value, "kind"),
-        source_file: graph_string(value, "source_file"),
+        label: graph_string(value, "label")
+            .or_else(|| graph_string(value, "name"))
+            .unwrap_or_default(),
+        kind: graph_string(value, "kind").unwrap_or_default(),
+        source_file: value.map(graph_node_source_file).unwrap_or_default(),
         changed_fields,
     }
 }
@@ -740,17 +738,60 @@ fn graph_edge_delta(
         target: target.to_owned(),
         relation: relation.to_owned(),
         key: key.to_owned(),
-        source_file: graph_string(value, "source_file"),
+        source_file: value.map(graph_edge_source_file).unwrap_or_default(),
         changed_fields,
     }
 }
 
-fn graph_string(value: Option<&serde_json::Value>, key: &str) -> String {
+fn graph_string(value: Option<&serde_json::Value>, key: &str) -> Option<String> {
     value
         .and_then(|value| value.get(key))
         .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .and_then(|value| value.get("attributes"))
+                .and_then(|attributes| attributes.get(key))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::to_owned)
+}
+
+fn graph_node_source_file(value: &serde_json::Value) -> String {
+    graph_string(Some(value), "source_file")
+        .or_else(|| nested_string(value, &["source", "file"]))
         .unwrap_or_default()
-        .to_owned()
+}
+
+fn graph_edge_source_file(value: &serde_json::Value) -> String {
+    graph_string(Some(value), "source_file")
+        .or_else(|| nested_string(value, &["relationshipSite", "file"]))
+        .or_else(|| nested_string(value, &["relationship_site", "file"]))
+        .or_else(|| {
+            value
+                .get("evidence")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|items| items.iter().find_map(evidence_source_file))
+        })
+        .unwrap_or_default()
+}
+
+fn evidence_source_file(value: &serde_json::Value) -> Option<String> {
+    nested_string(value, &["wiringSite", "file"])
+        .or_else(|| nested_string(value, &["wiring_site", "file"]))
+        .or_else(|| {
+            value
+                .get("anchors")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|anchors| anchors.first())
+                .and_then(|anchor| nested_string(anchor, &["file"]))
+        })
+}
+
+fn nested_string(value: &serde_json::Value, path: &[&str]) -> Option<String> {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
 }
 
 fn meaningful_graph_fields(
@@ -882,6 +923,53 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn typed_graph_records_decode_into_flat_semantic_deltas() {
+        let node = serde_json::json!({
+            "id": "node",
+            "kind": "function",
+            "name": "serve",
+            "qualifiedName": "api::serve",
+            "source": {
+                "file": "src/api.rs",
+                "startByte": 10,
+                "endByte": 20,
+                "startLine": 2,
+                "startColumn": 0,
+                "endLine": 2,
+                "endColumn": 10
+            }
+        });
+        let edge = serde_json::json!({
+            "source": "route",
+            "target": "node",
+            "kind": "routes_to",
+            "relationshipSite": {
+                "file": "src/routes.rs",
+                "startByte": 1,
+                "endByte": 5,
+                "startLine": 1,
+                "startColumn": 1,
+                "endLine": 1,
+                "endColumn": 5
+            }
+        });
+
+        let node_delta = graph_node_delta("node", Some(&node), Vec::new());
+        assert_eq!(node_delta.label, "serve");
+        assert_eq!(node_delta.kind, "function");
+        assert_eq!(node_delta.source_file, "src/api.rs");
+        let edge_delta = graph_edge_delta(
+            "route",
+            "node",
+            "routes_to",
+            "edge",
+            Some(&edge),
+            Vec::new(),
+        );
+        assert_eq!(edge_delta.source_file, "src/routes.rs");
     }
 
     #[test]

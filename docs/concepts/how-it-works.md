@@ -232,15 +232,18 @@ include:
 
 | Artifact | Responsibility |
 | --- | --- |
-| `graph.json` | Complete machine-readable node-link graph |
+| `graph.json` | Strictly valid machine-readable node-link graph |
 | `GRAPH_REPORT.md` | Human-readable orientation and diagnostics |
 | `graph.html` | Optional interactive visualization |
 | `manifest.json` | Incremental build state |
 
-The build pipeline treats output as a set. A failed semantic provider,
-validation error, or incomplete build must not publish a graph as if it were a
-complete successful result. Write paths use temporary or staged artifacts and
-atomic replacement where the contract requires it.
+The build pipeline treats output as a set. Invalid individual node and edge
+records are deterministically quarantined and reported before the remaining
+graph passes strict validation. A partial graph is published with an explicit
+warning and exact omission summary. Document-level validation errors or an
+empty usable graph remain failures and cannot replace the active generation.
+Write paths use temporary or staged artifacts and atomic replacement where the
+contract requires it.
 
 Consumers should still avoid reading files while a writer is replacing an
 artifact set. A long-lived integration can either watch for completion, invoke

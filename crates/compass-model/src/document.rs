@@ -24,6 +24,26 @@ impl NodeRecord {
         self.attributes
             .get(key)
             .and_then(value_as_python_string)
+            .or_else(|| match key {
+                "label" => self
+                    .attributes
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                "source_file" => self
+                    .attributes
+                    .get("source")
+                    .and_then(Value::as_object)
+                    .and_then(|source| source.get("file"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                "symbol_kind" | "type" | "node_type" => self
+                    .attributes
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                _ => None,
+            })
             .unwrap_or_default()
     }
 
@@ -32,7 +52,74 @@ impl NodeRecord {
         self.attributes
             .get("label")
             .and_then(Value::as_str)
+            .filter(|label| !label.trim().is_empty())
+            .or_else(|| {
+                self.attributes
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+            })
             .unwrap_or(&self.id)
+    }
+
+    #[must_use]
+    pub fn source_file(&self) -> Option<&str> {
+        self.attributes
+            .get("source_file")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                self.attributes
+                    .get("source")
+                    .and_then(Value::as_object)
+                    .and_then(|source| source.get("file"))
+                    .and_then(Value::as_str)
+            })
+    }
+
+    #[must_use]
+    pub fn language_name(&self) -> Option<&str> {
+        self.attributes.get("language").and_then(Value::as_str)
+    }
+
+    #[must_use]
+    pub fn kind_name(&self) -> &str {
+        self.attributes
+            .get("symbol_kind")
+            .or_else(|| self.attributes.get("type"))
+            .or_else(|| self.attributes.get("kind"))
+            .and_then(Value::as_str)
+            .unwrap_or("symbol")
+    }
+
+    #[must_use]
+    pub fn digest(&self, key: &str) -> Option<&str> {
+        self.attributes.get(key).and_then(Value::as_str)
+    }
+
+    #[must_use]
+    pub fn unsigned(&self, key: &str) -> Option<u64> {
+        self.attributes.get(key).and_then(|value| {
+            value.as_u64().or_else(|| {
+                (key == "community")
+                    .then(|| value.as_object()?.get("id")?.as_u64())
+                    .flatten()
+            })
+        })
+    }
+
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<Value> {
+        (key == "id")
+            .then(|| Value::String(self.id.clone()))
+            .or_else(|| self.attributes.get(key).cloned())
+    }
+
+    pub fn properties(&self) -> impl Iterator<Item = (&str, Value)> {
+        std::iter::once(("id", Value::String(self.id.clone()))).chain(
+            self.attributes
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        )
     }
 }
 
@@ -51,8 +138,115 @@ impl EdgeRecord {
         self.attributes
             .get(key)
             .and_then(value_as_python_string)
+            .or_else(|| match key {
+                "relation" => self
+                    .attributes
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                "source_file" => self
+                    .attributes
+                    .get("relationshipSite")
+                    .and_then(Value::as_object)
+                    .and_then(|site| site.get("file"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                "_origin" => evidence_field(&self.attributes, "origin").map(str::to_owned),
+                "confidence" => evidence_field(&self.attributes, "confidence").map(|confidence| {
+                    match confidence {
+                        "exact" => "EXTRACTED",
+                        "inferred" => "INFERRED",
+                        "ambiguous" => "AMBIGUOUS",
+                        "unresolved" => "UNRESOLVED",
+                        other => other,
+                    }
+                    .to_owned()
+                }),
+                _ => None,
+            })
             .unwrap_or_default()
     }
+
+    #[must_use]
+    pub fn relation(&self) -> &str {
+        self.attributes
+            .get("relation")
+            .or_else(|| self.attributes.get("kind"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn source_file(&self) -> Option<&str> {
+        self.attributes
+            .get("source_file")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                self.attributes
+                    .get("relationshipSite")
+                    .and_then(Value::as_object)
+                    .and_then(|site| site.get("file"))
+                    .and_then(Value::as_str)
+            })
+    }
+
+    #[must_use]
+    pub fn semantic_source(&self) -> &str {
+        self.attributes
+            .get("_src")
+            .and_then(Value::as_str)
+            .unwrap_or(&self.source)
+    }
+
+    #[must_use]
+    pub fn semantic_target(&self) -> &str {
+        self.attributes
+            .get("_tgt")
+            .and_then(Value::as_str)
+            .unwrap_or(&self.target)
+    }
+
+    #[must_use]
+    pub fn number(&self, key: &str) -> Option<f64> {
+        self.attributes.get(key).and_then(Value::as_f64)
+    }
+
+    #[must_use]
+    pub fn boolean(&self, key: &str) -> Option<bool> {
+        self.attributes.get(key).and_then(Value::as_bool)
+    }
+
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<Value> {
+        match key {
+            "source" => Some(Value::String(self.source.clone())),
+            "target" => Some(Value::String(self.target.clone())),
+            _ => self.attributes.get(key).cloned(),
+        }
+    }
+
+    pub fn properties(&self) -> impl Iterator<Item = (&str, Value)> {
+        [
+            ("source", Value::String(self.source.clone())),
+            ("target", Value::String(self.target.clone())),
+        ]
+        .into_iter()
+        .chain(
+            self.attributes
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        )
+    }
+}
+
+fn evidence_field<'a>(attributes: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
+    attributes
+        .get("evidence")
+        .and_then(Value::as_array)
+        .and_then(|evidence| evidence.first())
+        .and_then(Value::as_object)
+        .and_then(|evidence| evidence.get(field))
+        .and_then(Value::as_str)
 }
 
 /// Full node-link document, retaining unknown top-level fields.

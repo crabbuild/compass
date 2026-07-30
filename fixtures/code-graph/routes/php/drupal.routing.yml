@@ -1,0 +1,11 @@
+example.view:
+  path: '/examples/{example}'
+  defaults:
+    _controller: '\Drupal\example\Controller\ExampleController::view'
+  requirements:
+    _method: 'GET'
+
+example.form:
+  path: '/examples/create'
+  defaults:
+    _form: '\Drupal\example\Form\ExampleForm'

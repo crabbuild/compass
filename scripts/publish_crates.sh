@@ -21,7 +21,11 @@ if [[ "$(git describe --tags --exact-match 2>/dev/null || true)" != "compass-v$v
   exit 2
 fi
 
-cargo package --workspace --locked --no-verify
+# Private inference crates remain workspace-native, but have no registry graph
+# and therefore are intentionally excluded from the release package set.
+cargo package --workspace --locked --no-verify \
+  --exclude compass-transcribe \
+  --exclude compass-whisper
 
 # Prove that compass-languages' normalized registry manifest points at the
 # published static adapter by package name. A path-only dependency would work
@@ -36,6 +40,27 @@ if ! rg -q 'package = "compass-tree-sitter-language-pack"' \
   exit 2
 fi
 
+# A publishable registry crate may only depend on other registry crates. Compute
+# the complete dependency-first order from workspace metadata so newly added
+# product crates cannot be silently omitted from a release.
+mapfile -t crates < <(
+  cargo metadata --no-deps --format-version 1 \
+    | python3 scripts/publishable_crates.py
+)
+
+# Normalized manifests are Cargo's actual registry contracts. Keep inference
+# crates out of both the ingest boundary and the installable CLI package.
+for packaged_crate in compass-ingest compass-cli; do
+  normalized_manifest="$(
+    tar -xOf "target/package/$packaged_crate-$version.crate" \
+      "$packaged_crate-$version/Cargo.toml"
+  )"
+  if rg -q 'compass-(transcribe|whisper)' <<<"$normalized_manifest"; then
+    echo "error: packaged $packaged_crate reaches an internal inference crate" >&2
+    exit 2
+  fi
+done
+
 # A registry install cannot inherit this repository's .cargo/config.toml. The
 # adapter therefore owns Compass's compile-time grammar selection and must be
 # published before compass-languages. Its version follows the pinned upstream
@@ -49,30 +74,6 @@ fi
 
 # Cargo waits for each new package to become available in the registry index,
 # so downstream crates can be published immediately in topological order.
-crates=(
-  compass-model
-  compass-graphdb
-  compass-files
-  compass-media
-  compass-whisper
-  compass-cargo
-  compass-google-workspace
-  compass-prs
-  compass-query
-  compass-reflect
-  compass-global
-  compass-semantic
-  compass-transcribe
-  compass-ingest
-  compass-languages
-  compass-postgres
-  compass-graph
-  compass-resolve
-  compass-output
-  compass-core
-  compass-mcp
-  compass-cli
-)
 for crate in "${crates[@]}"; do
   cargo publish --locked -p "$crate"
 done

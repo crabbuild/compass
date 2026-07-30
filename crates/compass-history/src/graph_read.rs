@@ -92,7 +92,7 @@ impl RealizationReader<'_> {
                 ));
             }
             let id = text(id, "node ID")?;
-            let node: NodeRecord = crate::artifacts::decode_typed(&bytes, "compass.node")?;
+            let node = crate::artifacts::decode_compatible_node(&bytes)?;
             if node.id != id || !node_ids.insert(id.clone()) {
                 return Err(HistoryError::InvalidArtifacts(format!(
                     "node key does not match unique node ID {id}"
@@ -121,7 +121,7 @@ impl RealizationReader<'_> {
                     "invalid edge key".to_owned(),
                 ));
             }
-            let edge: EdgeRecord = crate::artifacts::decode_typed(&bytes, "compass.edge")?;
+            let edge = crate::artifacts::decode_compatible_edge(&bytes)?;
             if !node_ids.contains(&edge.source) || !node_ids.contains(&edge.target) {
                 return Err(HistoryError::InvalidArtifacts(format!(
                     "edge references a missing endpoint {} -> {}",

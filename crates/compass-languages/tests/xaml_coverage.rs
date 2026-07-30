@@ -77,6 +77,17 @@ public partial class MainWindowViewModel {
             .and_then(serde_json::Value::as_str)
             == Some("communitytoolkit_observable_property")
     }));
+    for command in ["SaveCommand", "CancelCommand"] {
+        assert_eq!(
+            extraction
+                .nodes
+                .iter()
+                .find(|node| node.label() == command)
+                .map(|node| node.string("symbol_kind")),
+            Some("property".to_owned()),
+            "CommunityToolkit generates an ICommand property for {command}"
+        );
+    }
     assert!(extraction.edges.iter().any(|edge| {
         edge.attributes
             .get("context")

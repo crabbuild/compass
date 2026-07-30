@@ -5,6 +5,7 @@ use std::path::{Component, Path};
 use compass_analysis::{AnalysisBundle, FunctionSummary};
 use compass_files::{write_bytes_atomic, write_json_atomic};
 use compass_ir::{EvidenceRecord, FunctionIr, ModuleIr, ProgramBundle, ProviderDescriptor};
+use compass_model::code_graph::GraphDocument as TrustedGraphDocument;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ const ANALYSIS_KIND: &[u8] = &[4];
 const METADATA_SCHEMA: &[u8] = &[1];
 const METADATA_KIND: &[u8] = &[5];
 const MOVED_NODE_FIELDS: [&str; 3] = ["community", "community_name", "norm_label"];
+const TRUSTED_GRAPH_CONTENT: &str = ".compass-history/graph.v1.json";
 
 /// All authoritative inputs needed to reconstruct a complete Compass output.
 #[derive(Clone, Debug, PartialEq)]
@@ -127,6 +129,21 @@ impl GraphArtifacts {
         artifact_registry(self)
     }
 
+    /// Return the canonical durable graph artifact retained by this realization.
+    pub fn graph_json_bytes(&self) -> Result<Vec<u8>, HistoryError> {
+        authoritative_graph_bytes(self)
+    }
+
+    /// Return authoritative sidecars intended for product output.
+    #[must_use]
+    pub fn export_sidecars(&self) -> BTreeMap<String, ArtifactContent> {
+        self.authoritative_sidecars
+            .iter()
+            .filter(|(path, _)| path.as_str() != TRUSTED_GRAPH_CONTENT)
+            .map(|(path, content)| (path.clone(), content.clone()))
+            .collect()
+    }
+
     /// Load the built-in authoritative Compass artifact contract.
     pub fn load(output_dir: &Path) -> Result<Self, HistoryError> {
         Self::load_with_registry(output_dir, &[])
@@ -151,8 +168,10 @@ impl GraphArtifacts {
             verify_registry_content(entry, &bytes)?;
             authoritative_sidecars.insert(entry.relative_path.clone(), bytes);
         }
+        let (document, trusted_graph) = load_trusted_graph(&output_dir.join("graph.json"))?;
+        authoritative_sidecars.insert(TRUSTED_GRAPH_CONTENT.to_owned(), trusted_graph);
         let artifacts = Self {
-            document: GraphDocument::load_for_recluster(&output_dir.join("graph.json"))?,
+            document,
             program: read_optional_program(&output_dir.join("program.json"))?,
             analysis: read_optional_json(&output_dir.join(".compass_analysis.json"))?,
             labels: read_optional_json(&output_dir.join(".compass_labels.json"))?,
@@ -178,6 +197,11 @@ impl GraphArtifacts {
     ) -> Result<PartitionedGraph, HistoryError> {
         completion.validate()?;
         validate_sidecar_paths(&self.authoritative_sidecars)?;
+        let trusted_graph = self
+            .authoritative_sidecars
+            .get(TRUSTED_GRAPH_CONTENT)
+            .map(|bytes| serde_json::from_slice::<TrustedGraphDocument>(bytes))
+            .transpose()?;
         canonicalize_graph_document(&mut self.document)?;
         let registry = artifact_registry_from_canonical(&self)?;
         let mut partitioned = PartitionedGraph::default();
@@ -260,71 +284,115 @@ impl GraphArtifacts {
         // The owned document was canonicalized before its registry digest was
         // computed, so records can consume that exact order without retaining
         // a second graph-sized allocation.
-        for (rank, mut node) in std::mem::take(&mut self.document.nodes)
-            .into_iter()
-            .enumerate()
-        {
-            for field in MOVED_NODE_FIELDS {
-                if let Some(value) = node.attributes.remove(field) {
-                    partitioned.analysis.push((
-                        analysis_key(&[b"node", node.id.as_bytes(), field.as_bytes()]),
-                        encode_record("compass.analysis.node", &value)?,
-                    ));
-                }
+        if let Some(trusted) = &trusted_graph {
+            for (rank, node) in trusted.nodes.iter().enumerate() {
+                let key = node_key(&node.id);
+                partitioned.nodes.push((
+                    key.clone(),
+                    encode_record("compass.graph.node.v1", &serde_json::to_value(node)?)?,
+                ));
+                partitioned.metadata.push((
+                    metadata_rank_key("node-order", rank)?,
+                    encode_record(
+                        "compass.metadata.order",
+                        &serde_json::to_value(OrderedRecord {
+                            key,
+                            location: None,
+                        })?,
+                    )?,
+                ));
             }
-            let key = node_key(&node.id);
-            partitioned.nodes.push((
-                key.clone(),
-                encode_record("compass.node", &serde_json::to_value(node)?)?,
-            ));
-            partitioned.metadata.push((
-                metadata_rank_key("node-order", rank)?,
-                encode_record(
-                    "compass.metadata.order",
-                    &serde_json::to_value(OrderedRecord {
-                        key,
-                        location: None,
-                    })?,
-                )?,
-            ));
+        } else {
+            for (rank, mut node) in std::mem::take(&mut self.document.nodes)
+                .into_iter()
+                .enumerate()
+            {
+                for field in MOVED_NODE_FIELDS {
+                    if let Some(value) = node.attributes.remove(field) {
+                        partitioned.analysis.push((
+                            analysis_key(&[b"node", node.id.as_bytes(), field.as_bytes()]),
+                            encode_record("compass.analysis.node", &value)?,
+                        ));
+                    }
+                }
+                let key = node_key(&node.id);
+                partitioned.nodes.push((
+                    key.clone(),
+                    encode_record("compass.node", &serde_json::to_value(node)?)?,
+                ));
+                partitioned.metadata.push((
+                    metadata_rank_key("node-order", rank)?,
+                    encode_record(
+                        "compass.metadata.order",
+                        &serde_json::to_value(OrderedRecord {
+                            key,
+                            location: None,
+                        })?,
+                    )?,
+                ));
+            }
         }
 
         let mut edge_occurrences = BTreeMap::<Vec<u8>, u64>::new();
-        for (rank, edge) in std::mem::take(&mut self.document.links)
-            .into_iter()
-            .enumerate()
-        {
-            let canonical = canonical_json_bytes(&serde_json::to_value(&edge)?)?;
-            let discriminator = edge_discriminator(
-                &edge,
-                self.document.multigraph,
-                &canonical,
-                &mut edge_occurrences,
-            )?;
-            let (source, target) = edge_identity_endpoints(&edge);
-            // Compass keeps an undirected NetworkX header while its
-            // persisted link endpoints retain the true semantic direction.
-            let key = edge_key(
-                source,
-                target,
-                &edge.string("relation"),
-                true,
-                discriminator.as_deref(),
-            );
-            partitioned.edges.push((
-                key.clone(),
-                encode_record("compass.edge", &serde_json::to_value(edge)?)?,
-            ));
-            partitioned.metadata.push((
-                metadata_rank_key("edge-order", rank)?,
-                encode_record(
-                    "compass.metadata.order",
-                    &serde_json::to_value(OrderedRecord {
-                        key,
-                        location: None,
-                    })?,
-                )?,
-            ));
+        if let Some(trusted) = &trusted_graph {
+            for (rank, edge) in trusted.links.iter().enumerate() {
+                let key = edge_key(
+                    &edge.source,
+                    &edge.target,
+                    edge.kind.as_str(),
+                    true,
+                    Some(edge.id.as_bytes()),
+                );
+                partitioned.edges.push((
+                    key.clone(),
+                    encode_record("compass.graph.edge.v1", &serde_json::to_value(edge)?)?,
+                ));
+                partitioned.metadata.push((
+                    metadata_rank_key("edge-order", rank)?,
+                    encode_record(
+                        "compass.metadata.order",
+                        &serde_json::to_value(OrderedRecord {
+                            key,
+                            location: None,
+                        })?,
+                    )?,
+                ));
+            }
+        } else {
+            for (rank, edge) in std::mem::take(&mut self.document.links)
+                .into_iter()
+                .enumerate()
+            {
+                let canonical = canonical_json_bytes(&serde_json::to_value(&edge)?)?;
+                let discriminator = edge_discriminator(
+                    &edge,
+                    self.document.multigraph,
+                    &canonical,
+                    &mut edge_occurrences,
+                )?;
+                let (source, target) = edge_identity_endpoints(&edge);
+                let key = edge_key(
+                    source,
+                    target,
+                    &edge.string("relation"),
+                    true,
+                    discriminator.as_deref(),
+                );
+                partitioned.edges.push((
+                    key.clone(),
+                    encode_record("compass.edge", &serde_json::to_value(edge)?)?,
+                ));
+                partitioned.metadata.push((
+                    metadata_rank_key("edge-order", rank)?,
+                    encode_record(
+                        "compass.metadata.order",
+                        &serde_json::to_value(OrderedRecord {
+                            key,
+                            location: None,
+                        })?,
+                    )?,
+                ));
+            }
         }
 
         let graph_hyperedges_present = self.document.graph.contains_key("hyperedges");
@@ -443,8 +511,8 @@ impl GraphArtifacts {
     pub fn reconstruct(partitioned: &PartitionedGraph) -> Result<Self, HistoryError> {
         let program =
             reconstruct_program(&partitioned.program_facts, &partitioned.program_summaries)?;
-        let mut nodes = decode_map::<NodeRecord>(&partitioned.nodes, "compass.node")?;
-        let mut edges = decode_map::<EdgeRecord>(&partitioned.edges, "compass.edge")?;
+        let mut nodes = decode_node_map(&partitioned.nodes)?;
+        let mut edges = decode_edge_map(&partitioned.edges)?;
         let mut hyperedges = decode_value_map(&partitioned.hyperedges, "compass.hyperedge")?;
         let mut node_analysis = BTreeMap::<String, Map<String, Value>>::new();
         let mut analysis = None;
@@ -626,7 +694,11 @@ impl GraphArtifacts {
         fs::create_dir_all(output_dir)
             .map_err(|source| crate::error::io_error(output_dir, source))?;
         validate_sidecar_paths(&self.authoritative_sidecars)?;
-        write_json_atomic(output_dir.join("graph.json"), &self.document, false)?;
+        if let Some(trusted) = self.authoritative_sidecars.get(TRUSTED_GRAPH_CONTENT) {
+            write_bytes_atomic(output_dir.join("graph.json"), trusted)?;
+        } else {
+            write_json_atomic(output_dir.join("graph.json"), &self.document, false)?;
+        }
         if let Some(program) = &self.program {
             write_bytes_atomic(output_dir.join("program.json"), &program.canonical_bytes()?)?;
         }
@@ -640,6 +712,9 @@ impl GraphArtifacts {
             write_json_atomic(output_dir.join("manifest.json"), value, false)?;
         }
         for (path, bytes) in &self.authoritative_sidecars {
+            if path == TRUSTED_GRAPH_CONTENT {
+                continue;
+            }
             let destination = output_dir.join(path);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)
@@ -653,6 +728,51 @@ impl GraphArtifacts {
             false,
         )?;
         Ok(())
+    }
+}
+
+fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryError> {
+    let trusted = TrustedGraphDocument::load_for_recluster(path)?;
+    let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+    let graph = serde_json::to_value(&trusted.graph)?
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    let nodes = trusted.nodes.iter().map(compat_node).collect();
+    let links = trusted.links.iter().map(compat_edge).collect();
+    Ok((
+        GraphDocument {
+            directed: trusted.directed,
+            multigraph: trusted.multigraph,
+            graph,
+            nodes,
+            links,
+            extras: BTreeMap::new(),
+        },
+        trusted_bytes,
+    ))
+}
+
+fn compat_node(node: &compass_model::code_graph::NodeRecord) -> NodeRecord {
+    NodeRecord {
+        id: node.id.clone(),
+        attributes: node
+            .properties()
+            .filter(|(key, _)| *key != "id")
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    }
+}
+
+fn compat_edge(edge: &compass_model::code_graph::EdgeRecord) -> EdgeRecord {
+    EdgeRecord {
+        source: edge.source.clone(),
+        target: edge.target.clone(),
+        attributes: edge
+            .properties()
+            .filter(|(key, _)| !matches!(*key, "source" | "target"))
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
     }
 }
 
@@ -733,15 +853,29 @@ fn add_optional_analysis(
 fn artifact_registry(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
-    let graph_bytes = canonical_graph_bytes(&artifacts.document)?;
+    let graph_bytes = authoritative_graph_bytes(artifacts)?;
     artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
 }
 
 fn artifact_registry_from_canonical(
     artifacts: &GraphArtifacts,
 ) -> Result<Vec<ArtifactRegistryEntry>, HistoryError> {
-    let graph_bytes = canonical_json_bytes(&serde_json::to_value(&artifacts.document)?)?;
+    let graph_bytes = artifacts
+        .authoritative_sidecars
+        .get(TRUSTED_GRAPH_CONTENT)
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(|| canonical_json_bytes(&serde_json::to_value(&artifacts.document)?))?;
     artifact_registry_with_graph_bytes(artifacts, &graph_bytes)
+}
+
+fn authoritative_graph_bytes(artifacts: &GraphArtifacts) -> Result<Vec<u8>, HistoryError> {
+    artifacts
+        .authoritative_sidecars
+        .get(TRUSTED_GRAPH_CONTENT)
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(|| canonical_graph_bytes(&artifacts.document))
 }
 
 fn artifact_registry_with_graph_bytes(
@@ -781,6 +915,9 @@ fn artifact_registry_with_graph_bytes(
         }
     }
     for (path, bytes) in &artifacts.authoritative_sidecars {
+        if path == TRUSTED_GRAPH_CONTENT {
+            continue;
+        }
         let mut entry = authoritative_entry(path, "application/octet-stream", bytes);
         entry.storage = Some(bytes.clone());
         registry.push(entry);
@@ -962,7 +1099,7 @@ fn verify_builtin_registry_content(
         .filter(|entry| entry.class == ArtifactClass::Authoritative)
     {
         let bytes = match entry.relative_path.as_str() {
-            "graph.json" => Some(canonical_graph_bytes(&artifacts.document)?),
+            "graph.json" => Some(authoritative_graph_bytes(artifacts)?),
             ".compass_analysis.json" => artifacts
                 .analysis
                 .as_ref()
@@ -1273,14 +1410,60 @@ pub(crate) fn decode_typed<T: for<'de> Deserialize<'de>>(
     serde_json::from_value(decode_record(bytes, schema)?).map_err(HistoryError::from)
 }
 
-fn decode_map<T: for<'de> Deserialize<'de>>(
+fn decode_node_map(
     entries: &[(Vec<u8>, Vec<u8>)],
-    schema: &str,
-) -> Result<BTreeMap<Vec<u8>, T>, HistoryError> {
+) -> Result<BTreeMap<Vec<u8>, NodeRecord>, HistoryError> {
     entries
         .iter()
-        .map(|(key, value)| Ok((key.clone(), decode_typed(value, schema)?)))
+        .map(|(key, bytes)| Ok((key.clone(), decode_compatible_node(bytes)?)))
         .collect()
+}
+
+pub(crate) fn decode_compatible_node(bytes: &[u8]) -> Result<NodeRecord, HistoryError> {
+    let envelope = VersionedValue::from_bytes(bytes)?;
+    match envelope.schema.as_str() {
+        "compass.node" => {
+            envelope.require_schema("compass.node", RECORD_VERSION)?;
+            serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
+        }
+        "compass.graph.node.v1" => {
+            envelope.require_schema("compass.graph.node.v1", RECORD_VERSION)?;
+            let typed =
+                serde_json::from_slice::<compass_model::code_graph::NodeRecord>(&envelope.payload)?;
+            Ok(compat_node(&typed))
+        }
+        schema => Err(HistoryError::InvalidArtifacts(format!(
+            "unexpected node record schema {schema}"
+        ))),
+    }
+}
+
+fn decode_edge_map(
+    entries: &[(Vec<u8>, Vec<u8>)],
+) -> Result<BTreeMap<Vec<u8>, EdgeRecord>, HistoryError> {
+    entries
+        .iter()
+        .map(|(key, bytes)| Ok((key.clone(), decode_compatible_edge(bytes)?)))
+        .collect()
+}
+
+pub(crate) fn decode_compatible_edge(bytes: &[u8]) -> Result<EdgeRecord, HistoryError> {
+    let envelope = VersionedValue::from_bytes(bytes)?;
+    match envelope.schema.as_str() {
+        "compass.edge" => {
+            envelope.require_schema("compass.edge", RECORD_VERSION)?;
+            serde_json::from_slice(&envelope.payload).map_err(HistoryError::from)
+        }
+        "compass.graph.edge.v1" => {
+            envelope.require_schema("compass.graph.edge.v1", RECORD_VERSION)?;
+            let typed =
+                serde_json::from_slice::<compass_model::code_graph::EdgeRecord>(&envelope.payload)?;
+            Ok(compat_edge(&typed))
+        }
+        schema => Err(HistoryError::InvalidArtifacts(format!(
+            "unexpected edge record schema {schema}"
+        ))),
+    }
 }
 
 fn decode_value_map(

@@ -10,6 +10,7 @@ readme.workspace = true
 description.workspace = true
 keywords.workspace = true
 categories.workspace = true
+publish = false
 
 [features]
 default = ["native-whisper"]
@@ -27,6 +28,7 @@ rubato.workspace = true
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true
+compass-ingest = { version = "0.1.4", path = "../compass-ingest" }
 compass-whisper = { version = "0.1.4", path = "../compass-whisper", optional = true }
 
 [lints]

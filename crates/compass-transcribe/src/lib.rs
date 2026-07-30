@@ -7,11 +7,10 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use sha1::{Digest, Sha1};
-
 pub mod audio;
 mod avi;
-pub mod downloader;
+pub use compass_ingest::downloader;
+pub use compass_ingest::downloader::{AudioDownloader, audio_cache_key};
 pub mod models;
 #[cfg(feature = "native-whisper")]
 pub mod native;
@@ -42,10 +41,6 @@ pub struct BackendTranscript {
 
 pub trait WhisperBackend {
     fn transcribe(&mut self, request: &BackendRequest<'_>) -> Result<BackendTranscript, String>;
-}
-
-pub trait AudioDownloader {
-    fn download_audio(&mut self, url: &str, output_dir: &Path) -> Result<PathBuf, String>;
 }
 
 #[derive(Debug, Default)]
@@ -113,12 +108,6 @@ pub fn build_whisper_prompt_with_override<'a>(
         "Technical discussion about {}. Use proper punctuation and paragraph breaks.",
         labels.join(", ")
     )
-}
-
-#[must_use]
-pub fn audio_cache_key(url: &str) -> String {
-    let digest = Sha1::digest(url.as_bytes());
-    format!("{digest:x}")[..12].to_owned()
 }
 
 #[must_use]

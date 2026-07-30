@@ -12,8 +12,10 @@ import type {
   GraphViewModel,
   SourceLocation
 } from "../contracts/graph";
+import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { ChangeEvidence, type GraphSourceRevisions } from "./ChangeEvidence";
 import { ChangedSymbolList } from "./ChangedSymbolList";
+import { CodeEvidence } from "./CodeEvidence";
 import { navigableSource } from "./sourceNavigation";
 
 function lineRange(node: GraphNode): string | undefined {
@@ -74,10 +76,12 @@ export function GraphInspector({
   hiddenCommunities,
   comparisonMode,
   sourceRevisions,
+  queryResult,
   onQueryChange,
   onFocus,
   onOpenSource,
   onOpenCommunity,
+  onQueryNode,
   onToggleCommunity,
   onSetAllVisible,
   collapsed,
@@ -92,10 +96,15 @@ export function GraphInspector({
   hiddenCommunities: ReadonlySet<number>;
   comparisonMode: boolean;
   sourceRevisions?: GraphSourceRevisions | undefined;
+  queryResult?: CodeQueryResponse | undefined;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation, revision?: string): void;
   onOpenCommunity?: ((communityId: number) => void) | undefined;
+  onQueryNode?: ((
+    operation: "callers" | "callees" | "impact",
+    symbol: string
+  ) => void) | undefined;
   onToggleCommunity(communityId: number): void;
   onSetAllVisible(visible: boolean): void;
   collapsed: boolean;
@@ -117,6 +126,17 @@ export function GraphInspector({
     () => new Map(model.nodes.map((node) => [node.id, node])),
     [model.nodes]
   );
+  const selectedQueryNode = selected
+    ? queryResult?.nodes.find((node) => node.id === selected.id)
+    : undefined;
+  const selectedCodeEvidence = selectedQueryNode?.evidence ?? selected?.codeEvidence ?? [];
+  const relationshipCodeEvidence = selected
+    ? (queryResult
+      ? queryResult.edges
+        .filter((edge) => edge.source === selected.id || edge.target === selected.id)
+        .flatMap((edge) => edge.evidence)
+      : connectedEdges.flatMap((edge) => edge.codeEvidence ?? []))
+    : [];
 
   const choose = (node: GraphNode) => {
     onFocus(node.id);
@@ -315,6 +335,31 @@ export function GraphInspector({
             {selected.signature && (
               <code className="compass-signature-block">{selected.signature}</code>
             )}
+            {onQueryNode && (
+              <div className="compass-code-query-actions" aria-label="Code graph queries">
+                <button type="button" onClick={() => onQueryNode("callers", selected.id)}>
+                  Callers
+                </button>
+                <button type="button" onClick={() => onQueryNode("callees", selected.id)}>
+                  Callees
+                </button>
+                <button type="button" onClick={() => onQueryNode("impact", selected.id)}>
+                  Impact
+                </button>
+              </div>
+            )}
+            <CodeEvidence
+              evidence={selectedCodeEvidence}
+              diagnostics={queryResult?.diagnostics}
+              truncated={queryResult?.truncated}
+              title="Node evidence"
+              onOpenSource={onOpenSource}
+            />
+            <CodeEvidence
+              evidence={relationshipCodeEvidence}
+              title="Relationship evidence"
+              onOpenSource={onOpenSource}
+            />
             {model.stats.aggregated
               && selected.memberCount !== undefined
               && onOpenCommunity && (

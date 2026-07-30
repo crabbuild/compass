@@ -141,7 +141,7 @@ fn enforce_graph_size_cap(path: &Path) -> Result<(), CoreError> {
 }
 
 fn graph_size_cap() -> u128 {
-    const DEFAULT: u128 = 512 * 1024 * 1024;
+    const DEFAULT: u128 = compass_model::DEFAULT_GRAPH_SIZE_CAP_BYTES as u128;
     let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
         return DEFAULT;
     };

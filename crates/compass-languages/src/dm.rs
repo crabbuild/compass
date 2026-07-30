@@ -4,12 +4,13 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use flate2::read::ZlibDecoder;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
+use crate::facts::{node_range, stamp_node_range};
 use crate::{ExtractError, Extraction, RawCall, file_stem, make_id};
 
 pub(crate) fn extract_source(path: &Path, source: &[u8], root: Node<'_>) -> Extraction {
@@ -249,7 +250,7 @@ impl<'tree> SourceState<'_, '_, 'tree> {
         caller: &str,
         labels: &HashMap<String, Vec<String>>,
         paths: &HashMap<String, Vec<String>>,
-        seen_calls: &mut HashSet<(String, String)>,
+        seen_calls: &mut HashSet<(String, String, usize, usize)>,
     ) {
         if matches!(
             node.kind(),
@@ -266,14 +267,7 @@ impl<'tree> SourceState<'_, '_, 'tree> {
                 if let Some(name) = node.child_by_field_name("name") {
                     let callee = self.text(name).to_owned();
                     if !callee.is_empty() && callee != ".." {
-                        self.emit_call(
-                            caller,
-                            &callee,
-                            node.start_position().row + 1,
-                            false,
-                            labels,
-                            seen_calls,
-                        );
+                        self.emit_call(caller, &callee, node, false, labels, seen_calls);
                     }
                 }
             }
@@ -281,14 +275,7 @@ impl<'tree> SourceState<'_, '_, 'tree> {
                 if let Some(name) = node.child_by_field_name("proc") {
                     let callee = self.text(name).to_owned();
                     if !callee.is_empty() {
-                        self.emit_call(
-                            caller,
-                            &callee,
-                            node.start_position().row + 1,
-                            true,
-                            labels,
-                            seen_calls,
-                        );
+                        self.emit_call(caller, &callee, node, true, labels, seen_calls);
                     }
                 }
             }
@@ -300,17 +287,24 @@ impl<'tree> SourceState<'_, '_, 'tree> {
                         && candidates[0] != caller
                     {
                         let target = candidates[0].clone();
-                        let pair = (caller.to_owned(), target.clone());
+                        let pair = (
+                            caller.to_owned(),
+                            target.clone(),
+                            node.start_byte(),
+                            node.end_byte(),
+                        );
                         if seen_calls.insert(pair) {
+                            let mut attributes = edge_attributes(
+                                &self.source_file,
+                                "instantiates",
+                                node.start_position().row + 1,
+                                Some("call"),
+                            );
+                            stamp_node_range(&mut attributes, node);
                             self.extraction.edges.push(EdgeRecord {
                                 source: caller.to_owned(),
                                 target,
-                                attributes: edge_attributes(
-                                    &self.source_file,
-                                    "instantiates",
-                                    node.start_position().row + 1,
-                                    Some("call"),
-                                ),
+                                attributes,
                             });
                         }
                     }
@@ -328,10 +322,10 @@ impl<'tree> SourceState<'_, '_, 'tree> {
         &mut self,
         caller: &str,
         callee: &str,
-        line: usize,
+        node: Node<'tree>,
         is_member: bool,
         labels: &HashMap<String, Vec<String>>,
-        seen_calls: &mut HashSet<(String, String)>,
+        seen_calls: &mut HashSet<(String, String, usize, usize)>,
     ) {
         let target = labels
             .get(&callee.to_lowercase())
@@ -340,12 +334,24 @@ impl<'tree> SourceState<'_, '_, 'tree> {
             .filter(|target| target.as_str() != caller)
             .cloned();
         if let Some(target) = target {
-            let pair = (caller.to_owned(), target.clone());
+            let pair = (
+                caller.to_owned(),
+                target.clone(),
+                node.start_byte(),
+                node.end_byte(),
+            );
             if seen_calls.insert(pair) {
+                let mut attributes = edge_attributes(
+                    &self.source_file,
+                    "calls",
+                    node.start_position().row + 1,
+                    Some("call"),
+                );
+                stamp_node_range(&mut attributes, node);
                 self.extraction.edges.push(EdgeRecord {
                     source: caller.to_owned(),
                     target,
-                    attributes: edge_attributes(&self.source_file, "calls", line, Some("call")),
+                    attributes,
                 });
             }
         } else {
@@ -354,11 +360,11 @@ impl<'tree> SourceState<'_, '_, 'tree> {
                 callee: callee.to_owned(),
                 is_member_call: Some(is_member),
                 source_file: self.source_file.clone(),
-                source_location: format!("L{line}"),
+                source_location: format!("L{}", node.start_position().row + 1),
                 receiver: None,
                 receiver_type: None,
                 lang: None,
-                extensions: Map::new(),
+                extensions: node_range(node),
             });
         }
     }
@@ -799,6 +805,19 @@ fn code_node(id: String, label: &str, source_file: &str, location: &str) -> Node
     let mut attributes = Map::new();
     attributes.insert("label".to_owned(), Value::String(label.to_owned()));
     attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+    let symbol_kind = if id == make_id(&[source_file]) {
+        "file"
+    } else if label.ends_with("()") {
+        "method"
+    } else if label.starts_with('/') {
+        "class"
+    } else {
+        "variable"
+    };
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String(symbol_kind.to_owned()),
+    );
     attributes.insert(
         "source_file".to_owned(),
         Value::String(source_file.to_owned()),

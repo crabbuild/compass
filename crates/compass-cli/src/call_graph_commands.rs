@@ -16,7 +16,20 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
         Ok(options) => options,
         Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 2),
     };
-    let graph = match GraphDocument::load(&options.graph) {
+    let resolved_graph = match compass_files::BuildGuard::resolve_requested_artifact(&options.graph)
+    {
+        Ok(path) => path,
+        Err(error) => {
+            return Outcome::failure_with_code(
+                format!(
+                    "error: could not resolve graph {}: {error}",
+                    options.graph.display()
+                ),
+                3,
+            );
+        }
+    };
+    let graph = match GraphDocument::load(&resolved_graph) {
         Ok(graph) => graph,
         Err(error) => {
             return Outcome::failure_with_code(

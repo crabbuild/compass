@@ -89,8 +89,7 @@ pub(super) fn command_prs(frontend: Frontend, args: &[String]) -> Outcome {
     for pr in &mut prs {
         pr.worktree_path = worktrees.get(&pr.branch).cloned();
     }
-    let needs_impact =
-        parsed.graph.exists() && (parsed.number.is_some() || parsed.triage || parsed.conflicts);
+    let needs_impact = parsed.number.is_some() || parsed.triage || parsed.conflicts;
     let community_labels = if needs_impact {
         attach_graph_impact(&runner, &mut prs, &parsed.graph, parsed.repo.as_deref())
     } else {

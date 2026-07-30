@@ -99,7 +99,7 @@ pub(crate) fn build_program(
         });
         inputs
     } else {
-        read_sources(root, sources)?
+        read_sources(root, sources, options.max_source_bytes)?
     };
     let source_digests = inputs
         .iter()
@@ -324,7 +324,7 @@ pub(crate) fn load_current_program(
         return Ok(None);
     }
 
-    let inputs = read_sources(root, sources)?;
+    let inputs = read_sources(root, sources, options.max_source_bytes)?;
     let source_digests = inputs
         .iter()
         .map(|input| (input.source_file.clone(), input.digest.clone()))
@@ -399,7 +399,7 @@ pub(crate) fn current_provider_manifest(
     sources: &[PathBuf],
     options: &BuildOptions,
 ) -> Result<Vec<ProviderDescriptor>, CoreError> {
-    let inputs = read_sources(root, sources)?;
+    let inputs = read_sources(root, sources, options.max_source_bytes)?;
     let source_digests = inputs
         .iter()
         .map(|input| (input.source_file.clone(), input.digest.clone()))
@@ -448,9 +448,20 @@ pub(crate) fn write_program(output_dir: &Path, canonical_bytes: &[u8]) -> Result
     Ok(())
 }
 
-fn read_sources(root: &Path, sources: &[PathBuf]) -> Result<Vec<SourceInput>, CoreError> {
+fn read_sources(
+    root: &Path,
+    sources: &[PathBuf],
+    max_source_bytes: u64,
+) -> Result<Vec<SourceInput>, CoreError> {
     let mut inputs = Vec::with_capacity(sources.len());
     for path in sources {
+        let metadata = fs::metadata(path).map_err(|source| FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if metadata.len() > max_source_bytes {
+            continue;
+        }
         let canonical = fs::canonicalize(path).map_err(|source| FileError::Io {
             path: path.clone(),
             source,

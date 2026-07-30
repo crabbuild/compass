@@ -10,8 +10,106 @@ use compass_ir::{
     hex_sha256,
 };
 use compass_model::GraphDocument;
-use serde_json::json;
+use compass_model::identity::file_id;
+use prolly::VersionedValue;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+
+fn empty_trusted_graph() -> Value {
+    let digest = format!("sha256:{}", "0".repeat(64));
+    json!({
+        "directed": true,
+        "multigraph": true,
+        "graph": {
+            "schema": "compass.graph/1",
+            "build": {
+                "builderVersion": "test",
+                "schemaFingerprint": digest,
+                "sourceTreeDigest": digest,
+                "configurationDigest": digest,
+                "generationId": digest
+            }
+        },
+        "nodes": [],
+        "links": []
+    })
+}
+
+fn empty_trusted_artifacts() -> Result<GraphArtifacts, Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    std::fs::write(
+        directory.path().join("graph.json"),
+        canonical_json_bytes(&empty_trusted_graph())?,
+    )?;
+    Ok(GraphArtifacts::load(directory.path())?)
+}
+
+#[test]
+fn trusted_graph_partitions_store_full_typed_node_records() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let mut graph = empty_trusted_graph();
+    graph["graph"]["files"] = json!([{
+        "id":file_id("src/lib.rs"),
+        "path":"src/lib.rs",
+        "contentDigest":"sha256:fixture",
+        "byteSize":10,
+        "generated":false,
+        "extractionStatus":"extracted"
+    }]);
+    graph["nodes"] = json!([{
+        "id":"symbol:test",
+        "kind":"function",
+        "name":"test",
+        "qualifiedName":"fixture.test",
+        "source":{
+            "file":"src/lib.rs",
+            "startByte":0,
+            "endByte":4,
+            "startLine":1,
+            "startColumn":0,
+            "endLine":1,
+            "endColumn":4
+        },
+        "evidence":[{
+            "origin":"config",
+            "extractor":"fixture",
+            "confidence":"exact",
+            "anchors":[{
+                "file":"src/lib.rs",
+                "startByte":0,
+                "endByte":4,
+                "startLine":1,
+                "startColumn":0,
+                "endLine":1,
+                "endColumn":4
+            }]
+        }],
+        "coverage":[{
+            "capability":"node:function",
+            "producer":"fixture",
+            "status":"partial",
+            "reason":"fixture"
+        }],
+        "diagnostics":[{
+            "severity":"warning",
+            "code":"fixture",
+            "message":"fixture warning"
+        }]
+    }]);
+    std::fs::write(
+        directory.path().join("graph.json"),
+        canonical_json_bytes(&graph)?,
+    )?;
+    let partition = GraphArtifacts::load(directory.path())?.partition(&completion())?;
+    let record = VersionedValue::from_bytes(&partition.nodes[0].1)?;
+    assert_eq!(record.schema, "compass.graph.node.v1");
+    let payload: Value = serde_json::from_slice(&record.payload)?;
+    assert_eq!(payload["evidence"][0]["origin"], "config");
+    assert_eq!(payload["coverage"][0]["status"], "partial");
+    assert_eq!(payload["diagnostics"][0]["code"], "fixture");
+    Ok(())
+}
 
 fn completion() -> CompletionEvidence {
     CompletionEvidence {
@@ -306,18 +404,12 @@ fn operational_provenance_does_not_change_partition_identity()
 fn completed_seed_writes_normalized_marker_and_opaque_sidecars()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
+    let mut artifacts = empty_trusted_artifacts()?;
+    artifacts
+        .authoritative_sidecars
+        .insert("semantic/custom.bin".to_owned(), vec![0, 1, 255]);
     let completed = compass_history::CompletedGraphArtifacts {
-        artifacts: GraphArtifacts {
-            document: serde_json::from_value(json!({"nodes": [], "links": []}))?,
-            program: None,
-            analysis: None,
-            labels: None,
-            manifest: None,
-            authoritative_sidecars: BTreeMap::from([(
-                "semantic/custom.bin".to_owned(),
-                vec![0, 1, 255],
-            )]),
-        },
+        artifacts,
         completion: completion(),
     };
     completed.write_seed(directory.path())?;
@@ -340,14 +432,11 @@ fn completed_seed_writes_normalized_marker_and_opaque_sidecars()
 fn seed_round_trip_includes_every_optional_authoritative_json_file()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
-    let artifacts = GraphArtifacts {
-        document: serde_json::from_value(json!({"nodes": [], "links": []}))?,
-        program: Some(program_fixture(b"seed")?),
-        analysis: Some(json!({"score": 1})),
-        labels: Some(json!({"0": "Core"})),
-        manifest: Some(json!({"fixture.rs": {"ast_hash": "abc"}})),
-        authoritative_sidecars: BTreeMap::new(),
-    };
+    let mut artifacts = empty_trusted_artifacts()?;
+    artifacts.program = Some(program_fixture(b"seed")?);
+    artifacts.analysis = Some(json!({"score": 1}));
+    artifacts.labels = Some(json!({"0": "Core"}));
+    artifacts.manifest = Some(json!({"fixture.rs": {"ast_hash": "abc"}}));
     artifacts.write_seed(directory.path(), &completion())?;
     assert_eq!(
         std::fs::read(directory.path().join("program.json"))?,
@@ -391,13 +480,7 @@ fn incomplete_completion_and_unsafe_sidecar_paths_are_rejected()
 fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
-    let document: GraphDocument = serde_json::from_value(json!({
-        "directed": true,
-        "multigraph": false,
-        "nodes": [{"id":"a"}],
-        "links": []
-    }))?;
-    let graph = canonical_json_bytes(&serde_json::to_value(&document)?)?;
+    let graph = canonical_json_bytes(&empty_trusted_graph())?;
     let analysis = canonical_json_bytes(&json!({"score": 1}))?;
     let labels = canonical_json_bytes(&json!({"0": "Core"}))?;
     let manifest = canonical_json_bytes(&json!({"a.rs": {"ast_hash": "a", "mtime": 0}}))?;
@@ -453,7 +536,11 @@ fn registry_loading_verifies_builtin_opaque_derived_and_operational_artifacts()
         regeneration_version: None,
     });
     let loaded = GraphArtifacts::load_with_registry(directory.path(), &registry)?;
-    assert_eq!(loaded.document, document);
+    assert!(loaded.document.nodes.is_empty());
+    assert_eq!(
+        loaded.document.graph["schema"],
+        serde_json::Value::String("compass.graph/1".to_owned())
+    );
     assert_eq!(loaded.analysis, Some(json!({"score": 1})));
     assert_eq!(loaded.labels, Some(json!({"0": "Core"})));
     assert_eq!(loaded.authoritative_sidecars["semantic/facts.bin"], opaque);

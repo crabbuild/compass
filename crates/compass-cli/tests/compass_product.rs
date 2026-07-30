@@ -2,6 +2,7 @@ use std::error::Error;
 use std::path::Path;
 use std::process::Command;
 
+use compass_files::BuildGuard;
 use serde_json::Value;
 
 fn run_update(root: &Path, configure: impl FnOnce(&mut Command)) -> Result<(), Box<dyn Error>> {
@@ -27,7 +28,9 @@ fn update_writes_to_compass_out_by_default() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     run_update(root.path(), |_| {})?;
 
-    assert!(root.path().join("compass-out/graph.json").is_file());
+    assert!(
+        BuildGuard::resolve_artifact(&root.path().join("compass-out"), "graph.json")?.is_file()
+    );
     assert!(!root.path().join("graphify-out").exists());
     Ok(())
 }
@@ -41,7 +44,9 @@ fn compass_out_overrides_the_output_and_graphify_out_is_ignored() -> Result<(), 
             .env("GRAPHIFY_OUT", "legacy-output");
     })?;
 
-    assert!(root.path().join("chosen-output/graph.json").is_file());
+    assert!(
+        BuildGuard::resolve_artifact(&root.path().join("chosen-output"), "graph.json")?.is_file()
+    );
     assert!(!root.path().join("legacy-output").exists());
     Ok(())
 }

@@ -2,10 +2,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use crate::facts::stamp_source_range;
 use crate::{Extraction, file_stem, make_id};
 
 const SCALAR_TYPES: &[&str] = &[
@@ -19,6 +20,7 @@ pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
 
 struct State<'a> {
     path: &'a Path,
+    source: &'a [u8],
     text: String,
     source_file: String,
     stem: String,
@@ -29,7 +31,7 @@ struct State<'a> {
 }
 
 impl<'a> State<'a> {
-    fn new(path: &'a Path, source: &[u8]) -> Self {
+    fn new(path: &'a Path, source: &'a [u8]) -> Self {
         let source_file = path.to_string_lossy().into_owned();
         let text = strip_comments(std::str::from_utf8(source).unwrap_or_default());
         let mut stem = file_stem(path);
@@ -42,6 +44,7 @@ impl<'a> State<'a> {
         }
         Self {
             path,
+            source,
             text,
             source_file,
             stem,
@@ -181,16 +184,16 @@ impl<'a> State<'a> {
                         .map_or(self.text.len(), |value| value + 1);
                     self.set_callable_range(&id, start, close, "class");
                     let body = self.text[open..close].to_owned();
-                    self.add_class_framework(&id, &body);
+                    self.add_class_framework(&id, &body, open);
                 }
             }
         }
     }
 
-    fn add_class_framework(&mut self, owner: &str, body: &str) {
+    fn add_class_framework(&mut self, owner: &str, body: &str, body_start: usize) {
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bon<(\w+)>\s*\(",
             "calls",
             "bloc_event",
@@ -198,7 +201,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:emit|yield)\s*\(?\s*(?:const\s+)?([A-Z]\w*)\b",
             "calls",
             "emit_state",
@@ -206,7 +209,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:\w*[Bb]loc\w*|context\.read<\w+>\(\))\.add\(\s*(?:const\s+)?([A-Z]\w*)\b",
             "calls",
             "bloc_add_event",
@@ -214,7 +217,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bref\.(?:watch|read|listen)\s*\(\s*(\w+)\b",
             "references",
             "riverpod_reference",
@@ -222,7 +225,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bBloc(?:Builder|Listener|Consumer|Provider|Selector)\s*<\s*([A-Za-z0-9_]+)\b",
             "references",
             "bloc_widget_binding",
@@ -230,7 +233,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:read|watch|select|of)\s*<([A-Za-z0-9_]+)>",
             "references",
             "bloc_lookup",
@@ -499,17 +502,17 @@ impl<'a> State<'a> {
                     .map_or(self.text.len(), |value| value + 1);
                 self.set_callable_range(&id, start, close, "function");
                 let body = self.text[open..close].to_owned();
-                self.add_function_framework(&id, &body);
+                self.add_function_framework(&id, &body, open);
             } else if let Some(end) = semicolon {
                 self.set_callable_range(&id, start, end.saturating_add(1), "function");
             }
         }
     }
 
-    fn add_function_framework(&mut self, owner: &str, body: &str) {
+    fn add_function_framework(&mut self, owner: &str, body: &str, body_start: usize) {
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\bref\.(?:watch|read|listen)\s*\(\s*(\w+)\b",
             "references",
             "riverpod_reference",
@@ -517,7 +520,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:\w*[Bb]loc\w*|context\.read<\w+>\(\))\.add\(\s*(?:const\s+)?([A-Z]\w*)\b",
             "calls",
             "bloc_add_event",
@@ -525,7 +528,7 @@ impl<'a> State<'a> {
         );
         self.add_pattern_relations(
             owner,
-            body,
+            (body, body_start),
             r"\b(?:read|watch|select|of)\s*<([A-Za-z0-9_]+)>",
             "references",
             "bloc_lookup",
@@ -536,13 +539,22 @@ impl<'a> State<'a> {
         ) {
             let values: Vec<_> = pattern
                 .captures_iter(body)
-                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+                .filter_map(|capture| {
+                    Some((
+                        capture.get(1)?.as_str().to_owned(),
+                        body_start + capture.get(0)?.start(),
+                        body_start + capture.get(0)?.end(),
+                    ))
+                })
                 .collect();
-            for route in values {
+            for (route, start, end) in values {
                 let normalized = route.replace(['/', '?', '=', '&'], "_");
                 let target = make_id(&["route", &normalized]);
                 self.add_node(&target, &format!("Route {route}"), "concept", None);
                 self.add_edge_with_context(owner, &target, "navigates", "route_path");
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    stamp_source_range(&mut edge.attributes, self.source, start, end);
+                }
             }
         }
         if let Ok(pattern) = Regex::new(
@@ -550,12 +562,21 @@ impl<'a> State<'a> {
         ) {
             let values: Vec<_> = pattern
                 .captures_iter(body)
-                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+                .filter_map(|capture| {
+                    Some((
+                        capture.get(1)?.as_str().to_owned(),
+                        body_start + capture.get(0)?.start(),
+                        body_start + capture.get(0)?.end(),
+                    ))
+                })
                 .collect();
-            for route in values {
+            for (route, start, end) in values {
                 let target = make_id(&["route", &route.replace('.', "_")]);
                 self.add_node(&target, &route, "concept", None);
                 self.add_edge_with_context(owner, &target, "navigates", "route_const");
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    stamp_source_range(&mut edge.attributes, self.source, start, end);
+                }
             }
         }
         if let Ok(pattern) = Regex::new(
@@ -563,12 +584,21 @@ impl<'a> State<'a> {
         ) {
             let values: Vec<_> = pattern
                 .captures_iter(body)
-                .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+                .filter_map(|capture| {
+                    Some((
+                        capture.get(1)?.as_str().to_owned(),
+                        body_start + capture.get(0)?.start(),
+                        body_start + capture.get(0)?.end(),
+                    ))
+                })
                 .collect();
-            for route in values {
+            for (route, start, end) in values {
                 let target = make_id(&[&route]);
                 self.add_node(&target, &route, "code", None);
                 self.add_edge_with_context(owner, &target, "navigates", "route_object");
+                if let Some(edge) = self.extraction.edges.last_mut() {
+                    stamp_source_range(&mut edge.attributes, self.source, start, end);
+                }
             }
         }
     }
@@ -586,7 +616,31 @@ impl<'a> State<'a> {
             for package in packages {
                 let target = make_id(&[&package]);
                 self.add_node(&target, &package, "code", None);
+                if let Some(resource) = self
+                    .extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|resource| resource.id == target)
+                {
+                    resource.attributes.insert(
+                        "symbol_kind".to_owned(),
+                        Value::String("resource".to_owned()),
+                    );
+                }
                 self.add_edge(&self.file_id.clone(), &target, relation, None);
+                if !package.contains(':')
+                    && !Path::new(&package).is_absolute()
+                    && let Some(edge) = self.extraction.edges.last_mut()
+                {
+                    let target_file = Path::new(&self.source_file)
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(&package);
+                    edge.attributes.insert(
+                        "target_file".to_owned(),
+                        Value::String(target_file.to_string_lossy().replace('\\', "/")),
+                    );
+                }
             }
         }
     }
@@ -615,26 +669,36 @@ impl<'a> State<'a> {
     fn add_pattern_relations(
         &mut self,
         owner: &str,
-        body: &str,
+        body: (&str, usize),
         pattern: &str,
         relation: &str,
         context: &str,
         filter_builtins: bool,
     ) {
+        let (body, body_start) = body;
         let Ok(pattern) = Regex::new(pattern) else {
             return;
         };
         let values: Vec<_> = pattern
             .captures_iter(body)
-            .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+            .filter_map(|capture| {
+                Some((
+                    capture.get(1)?.as_str().to_owned(),
+                    body_start + capture.get(0)?.start(),
+                    body_start + capture.get(0)?.end(),
+                ))
+            })
             .collect();
-        for value in values {
+        for (value, start, end) in values {
             if filter_builtins && is_builtin(&value, true) {
                 continue;
             }
             let target = make_id(&[&value]);
             self.add_node(&target, &value, "code", None);
             self.add_edge_with_context(owner, &target, relation, context);
+            if let Some(edge) = self.extraction.edges.last_mut() {
+                stamp_source_range(&mut edge.attributes, self.source, start, end);
+            }
         }
     }
 
@@ -681,7 +745,7 @@ impl<'a> State<'a> {
     }
 
     fn line_at(&self, offset: usize) -> usize {
-        self.text.as_bytes()[..offset.min(self.text.len())]
+        self.source[..offset.min(self.source.len())]
             .iter()
             .filter(|byte| **byte == b'\n')
             .count()
@@ -724,7 +788,14 @@ fn strip_comments(source: &str) -> String {
         .replace_all(source, |captures: &regex::Captures<'_>| {
             let value = captures.get(0).map_or("", |value| value.as_str());
             if value.starts_with('/') {
-                String::new()
+                value
+                    .bytes()
+                    .map(|byte| match byte {
+                        b'\n' => '\n',
+                        b'\r' => '\r',
+                        _ => ' ',
+                    })
+                    .collect::<String>()
             } else {
                 value.to_owned()
             }

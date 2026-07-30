@@ -27,9 +27,8 @@ The first release includes:
   extension;
 - a hard cutover from the current unversioned graph artifact.
 
-Graphify and the embedded TypeScript CodeGraph are not runtime dependencies.
-Their behavior may inform fixtures and expected outcomes, but Compass owns the
-new implementation and contract.
+Compass owns the implementation, contract, fixtures, qualification evidence,
+and release lifecycle end to end.
 
 ## Product goals
 
@@ -48,8 +47,6 @@ new implementation and contract.
 
 ## Non-goals
 
-- Enhancing or changing Graphify.
-- Invoking or shipping the embedded TypeScript CodeGraph as part of Compass.
 - Replacing Program IR with the structural graph.
 - Treating numeric heuristic scores as calibrated probabilities.
 - Using an LLM to create structural graph facts.
@@ -61,7 +58,6 @@ new implementation and contract.
 ## Architectural approach
 
 Compass will implement native Rust framework and domain intelligence packs.
-The embedded TypeScript CodeGraph is a reference oracle only.
 
 ```text
 compass-languages
@@ -172,7 +168,8 @@ Compass keeps a NetworkX-compatible node-link envelope:
       "schemaFingerprint": "sha256:example-schema-fingerprint",
       "sourceTreeDigest": "sha256:example-source-tree-digest",
       "configurationDigest": "sha256:example-configuration-digest",
-      "generationId": "sha256:example-generation-id"
+      "generationId": "sha256:example-generation-id",
+      "sourceCommit": "0123456789abcdef0123456789abcdef01234567"
     },
     "files": [],
     "coverage": [],
@@ -792,20 +789,26 @@ resolution, or provenance classification.
 
 Graph publication fails for:
 
-- unknown node, role, or edge values;
-- invalid endpoint-kind combinations;
-- duplicate stable IDs with conflicting content;
-- dangling endpoints;
-- missing provenance;
-- heuristic relationships without a rule or wiring site;
-- invalid source anchors;
+- invalid envelope or build metadata;
+- invalid or repository-escaping file inventory;
+- no usable nodes after record quarantine;
 - repository-escaping paths;
 - mismatched graph, Program IR, manifest, or build fingerprints.
+
+Unknown node, role, or edge values, invalid endpoint-kind combinations,
+conflicting stable identities, dangling endpoints, missing record provenance,
+heuristic relationships without a rule or wiring site, and invalid record
+anchors quarantine the affected node or edge in normal builds. The remaining
+document is still validated by the unchanged strict validator. Strict
+normalization APIs continue to reject those producer defects for qualification
+and tests.
 
 ### Partial extraction
 
 An unsupported or unparsable file is represented by failed or indeterminate
-coverage and a diagnostic. It does not silently disappear.
+coverage and a diagnostic. An invalid individual graph record is represented by
+a bounded quarantine diagnostic and exact publication omission summary. Neither
+silently disappears.
 
 The default developer build may publish a partial graph when all structural
 invariants remain valid. Strict mode fails publication when required coverage

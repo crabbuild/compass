@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
@@ -238,6 +238,7 @@ impl<'source, 'tree> State<'source, 'tree> {
                     line(node),
                     Some("call"),
                 );
+                crate::facts::stamp_last_edge_range(&mut self.extraction, node);
             }
         }
         let mut cursor = node.walk();

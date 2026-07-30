@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
+use crate::facts::{source_range, stamp_source_range};
 use crate::{Extraction, RawCall, file_stem, make_id};
 
 const KEYWORDS: &[&str] = &[
@@ -92,7 +93,7 @@ pub(crate) fn extract(path: &Path, source: &[u8]) -> Extraction {
 
 struct Procedure {
     id: String,
-    line: usize,
+    body_start: usize,
     body: String,
     container: String,
     name: String,
@@ -325,7 +326,7 @@ impl<'a> State<'a> {
             };
             self.procedures.push(Procedure {
                 id,
-                line: at,
+                body_start: sections.implementation_offset + body_start,
                 body,
                 container,
                 name,
@@ -342,7 +343,7 @@ impl<'a> State<'a> {
         let procedures = std::mem::take(&mut self.procedures);
         for procedure in procedures {
             for call in calls.captures_iter(&procedure.body) {
-                let (Some(full), Some(name_match)) = (call.get(0), call.get(1)) else {
+                let Some(name_match) = call.get(1) else {
                     continue;
                 };
                 let name = name_match
@@ -354,14 +355,32 @@ impl<'a> State<'a> {
                 if KEYWORDS.contains(&name.as_str()) {
                     continue;
                 }
-                let at = procedure.line + procedure.body[..full.start()].matches('\n').count();
+                let start = procedure.body_start + name_match.start();
+                let end = procedure.body_start + name_match.end();
+                let at = self.line_at(start);
                 let target = resolver.resolve(&procedure.id, &name);
                 if target.as_deref() == Some(procedure.id.as_str()) {
                     continue;
                 }
                 if let Some(target) = target {
-                    if seen.insert((procedure.id.clone(), target.clone())) {
-                        self.add_edge(&procedure.id, &target, "calls", at, Some("call"));
+                    if seen.insert((procedure.id.clone(), target.clone(), start, end)) {
+                        let mut attributes = Map::new();
+                        attributes.insert("relation".into(), Value::String("calls".into()));
+                        attributes.insert("confidence".into(), Value::String("EXTRACTED".into()));
+                        attributes.insert(
+                            "source_file".into(),
+                            Value::String(self.source_file.clone()),
+                        );
+                        attributes
+                            .insert("source_location".into(), Value::String(format!("L{at}")));
+                        attributes.insert("weight".into(), Value::from(1.0));
+                        attributes.insert("context".into(), Value::String("call".into()));
+                        stamp_source_range(&mut attributes, self.source, start, end);
+                        self.extraction.edges.push(EdgeRecord {
+                            source: procedure.id.clone(),
+                            target,
+                            attributes,
+                        });
                     }
                 } else {
                     self.extraction.raw_calls_mut().push(RawCall {
@@ -373,7 +392,7 @@ impl<'a> State<'a> {
                         receiver: None,
                         receiver_type: None,
                         lang: None,
-                        extensions: Map::new(),
+                        extensions: source_range(self.source, start, end),
                     });
                 }
             }

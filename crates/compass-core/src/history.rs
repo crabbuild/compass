@@ -579,15 +579,10 @@ fn validate_completed(
     profile: &BuildProfile,
     worktree: &WorktreeGuard,
 ) -> Result<(), MaterializeError> {
-    let built_at = completed
-        .artifacts
-        .document
-        .extras
-        .get("built_at_commit")
-        .and_then(serde_json::Value::as_str);
+    let built_at = source_commit(&completed.artifacts.document);
     if built_at != Some(commit.as_str()) {
         return Err(MaterializeError::Incomplete(format!(
-            "built_at_commit is {:?}, expected {commit}",
+            "sourceCommit is {:?}, expected {commit}",
             built_at
         )));
     }
@@ -667,15 +662,10 @@ fn validate_promoted(
     commit: &CommitId,
     profile: &BuildProfile,
 ) -> Result<(), MaterializeError> {
-    let built_at = completed
-        .artifacts
-        .document
-        .extras
-        .get("built_at_commit")
-        .and_then(serde_json::Value::as_str);
+    let built_at = source_commit(&completed.artifacts.document);
     if built_at != Some(commit.as_str()) {
         return Err(MaterializeError::Incomplete(format!(
-            "built_at_commit is {:?}, expected {commit}",
+            "sourceCommit is {:?}, expected {commit}",
             built_at
         )));
     }
@@ -697,6 +687,21 @@ fn validate_promoted(
         &detection.files,
     )?;
     Ok(())
+}
+
+fn source_commit(document: &compass_model::GraphDocument) -> Option<&str> {
+    document
+        .graph
+        .get("build")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|build| build.get("sourceCommit"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            document
+                .extras
+                .get("built_at_commit")
+                .and_then(serde_json::Value::as_str)
+        })
 }
 
 fn attach_source_inventory(

@@ -61,11 +61,9 @@ created earlier in this plan, “Modify” means the file exists by that point.
 - `explore` returns source only when the current file digest matches the
   digest recorded in the graph.
 - CLI, MCP, viewer, and VS Code consume the same `compass.query/1` semantics.
-- Do not change Graphify or invoke Graphify’s TypeScript CodeGraph at runtime.
+- Keep implementation, validation, and release qualification Compass-native.
 - Preserve unrelated worktree changes, especially
   `editors/vscode/package.json` and the call-graph hardening documents.
-- After any task that changes code, run `graphify update .` from
-  `/Users/haipingfu/graphify` after the task’s Compass verification succeeds.
 
 ---
 
@@ -146,13 +144,12 @@ facts out of `compass-model`.
 
 - Create: `crates/compass-model/src/code_graph.rs`
 - Create: `crates/compass-model/src/provenance.rs`
-- Create: `crates/compass-model/src/validation.rs`
 - Modify: `crates/compass-model/src/lib.rs`
 - Test: `crates/compass-model/tests/code_graph_v1.rs`
 
 **Implementation:**
 
-- [ ] Freeze the serialized node values as:
+- [x] Freeze the serialized node values as:
   `file`, `module`, `package`, `namespace`, `class`, `struct`, `interface`,
   `trait`, `protocol`, `enum`, `enum_member`, `type_alias`, `function`,
   `method`, `constructor`, `property`, `field`, `variable`, `constant`,
@@ -162,13 +159,13 @@ facts out of `compass-model`.
   `database_schema`, `database_table`, `database_view`, `database_column`,
   `database_index`, `database_constraint`, `database_procedure`, and
   `database_trigger`.
-- [ ] Freeze the serialized edge values as:
+- [x] Freeze the serialized edge values as:
   `contains`, `calls`, `imports`, `exports`, `extends`, `implements`,
   `references`, `type_of`, `returns`, `instantiates`, `overrides`,
   `decorates`, `routes_to`, `reads`, `writes`, `aliases`, `registers`,
   `handles`, `publishes`, `subscribes`, `produces`, `consumes`, `schedules`,
   `triggers`, `tests`, `depends_on`, `documents`, and `maps_to`.
-- [ ] Add serde `snake_case` enums with the exact closed vocabulary:
+- [x] Add serde `snake_case` enums with the exact closed vocabulary:
 
 ```rust
 pub enum NodeKind {
@@ -198,28 +195,29 @@ pub enum EdgeKind {
 }
 ```
 
-- [ ] Define `SourceAnchor`, `EvidenceOrigin`, `EvidenceConfidence`,
+- [x] Define `SourceAnchor`, `EvidenceOrigin`, `EvidenceConfidence`,
   `ResolutionState`, `ResolutionCandidate`, and `Provenance`.
-  `EvidenceOrigin` is exactly `ast`, `scip`, `configuration`, `convention`,
-  `heuristic`, or `program_ir`. This task establishes their serialized shape;
-  Task 3 adds construction and whole-graph invariants.
-- [ ] Define typed `NodeRecord`, `EdgeRecord`, `FileRecord`,
+  `EvidenceOrigin` is exactly `ast`, `config`, `convention`, `artifact`, or
+  `heuristic`. SCIP is an `artifact`; Program IR remains a separate query
+  evidence layer and is not a durable structural origin. This task establishes
+  the serialized shape; Task 3 adds construction and whole-graph invariants.
+- [x] Define typed `NodeRecord`, `EdgeRecord`, `FileRecord`,
   `GraphMetadata`, `CoverageRecord`, and `GraphDiagnostic`. Put kind-specific
   fields in tagged detail enums instead of a flattened attributes map. Keep
   community IDs, scores, colors, and labels typed and optional so existing
   clustering can enrich v1 nodes without reopening the vocabulary.
-- [ ] Give each edge both `id` and NetworkX `key`; require them to contain the
+- [x] Give each edge both `id` and NetworkX `key`; require them to contain the
   same deterministic identity. Use `kind`, never `relation`, as the published
   relationship field.
-- [ ] Apply `#[serde(deny_unknown_fields)]` to structured records. Unknown
+- [x] Apply `#[serde(deny_unknown_fields)]` to structured records. Unknown
   enum values and misspelled required fields must fail deserialization.
-- [ ] Export the module as `compass_model::code_graph` but do not replace the
+- [x] Export the module as `compass_model::code_graph` but do not replace the
   existing root-level flexible record exports yet.
 
 **Contract produced:** Later tasks can build against
 `compass_model::code_graph::{NodeRecord, EdgeRecord, NodeKind, EdgeKind,
-GraphMetadata}` without changing current extractors. The NetworkX envelope
-switches to these records in Task 3.
+GraphMetadata}` without changing current extractors. Task 3 constructs the v1
+envelope in parallel; Task 4 switches existing consumers to it.
 
 **Verification:**
 
@@ -253,6 +251,7 @@ relocates the flexible types.
 **Files:**
 
 - Modify: `crates/compass-languages/src/facts.rs`
+- Modify: `crates/compass-languages/Cargo.toml`
 - Modify: `crates/compass-languages/src/lib.rs`
 - Modify: `crates/compass-languages/src/apex.rs`
 - Modify: `crates/compass-languages/src/bash.rs`
@@ -290,11 +289,14 @@ relocates the flexible types.
 - Modify: `crates/compass-resolve/src/members.rs`
 - Modify: `crates/compass-graph/src/dedup.rs`
 - Modify: `crates/compass-graph/src/lib.rs`
+- Modify: `crates/compass-graph/src/analyze.rs` (Rust 1.97 lint cleanup required by the verification gate)
+- Modify: `crates/compass-cli/src/dedup_commands.rs`
+- Modify: `crates/compass-core/src/pipeline.rs`
 - Test: `crates/compass-languages/tests/typed_extraction.rs`
 
 **Implementation:**
 
-- [ ] Define `RawNodeRecord` and `RawEdgeRecord` in `facts.rs` with the current
+- [x] Define `RawNodeRecord` and `RawEdgeRecord` in `facts.rs` with the current
   `id`/endpoint fields and flattened JSON maps. Change `Extraction` to:
 
 ```rust
@@ -307,12 +309,12 @@ pub struct Extraction {
     pub extensions: serde_json::Map<String, serde_json::Value>,
 }
 ```
-- [ ] Re-export the raw records from `compass-languages`. Update extractors
+- [x] Re-export the raw records from `compass-languages`. Update extractors
   mechanically to construct them; do not change producer semantics in this
   task.
-- [ ] Update resolution and deduplication signatures to consume raw records.
+- [x] Update resolution and deduplication signatures to consume raw records.
   Keep current string relations and attributes lossless through these phases.
-- [ ] Change `compass-graph::build`, `build_with_tiebreaker`, and
+- [x] Change `compass-graph::build`, `build_with_tiebreaker`, and
   `build_owned_with_tiebreaker` to accept raw extraction records. They may
   still return the current permissive document until Task 3 installs the v1
   normalization boundary.
@@ -367,10 +369,10 @@ must use.
 
 **Implementation:**
 
-- [ ] Add constructors and validation for the Task 1 evidence records.
+- [x] Add constructors and validation for the Task 1 evidence records.
   Heuristic evidence requires both `rule` and `wiring_site`;
   non-heuristic structural evidence requires at least one anchor.
-- [ ] Implement length-prefixed SHA-256 identity functions so IDs are stable
+- [x] Implement length-prefixed SHA-256 identity functions so IDs are stable
   across checkout roots:
 
 ```rust
@@ -389,18 +391,18 @@ pub fn edge_id(source: &str, kind: EdgeKind, target: &str,
                rule: Option<&str>) -> String;
 ```
 
-- [ ] Normalize paths to repository-relative forward-slash form before
+- [x] Normalize paths to repository-relative forward-slash form before
   hashing. Do not include an absolute checkout root, timestamps, extraction
   order, or machine-specific data.
-- [ ] Include the `compass.graph/1` schema identity in every hash preimage.
+- [x] Include the `compass.graph/1` schema identity in every hash preimage.
   Treat a rename or move as remove/add unless exact alias evidence establishes
   continuity; never infer continuity from name similarity.
-- [ ] Implement
+- [x] Implement
   `normalize_v1(Extraction, BuildEvidence) -> Result<
   compass_model::code_graph::GraphDocument, GraphError>` in
   `compass-graph/src/v1.rs`. This is the only function allowed to turn raw
   records into durable records.
-- [ ] Define the v1 envelope in `code_graph.rs`:
+- [x] Define the v1 envelope in `code_graph.rs`:
 
 ```rust
 pub struct GraphDocument {
@@ -415,7 +417,7 @@ pub struct GraphDocument {
   Keep it under `compass_model::code_graph` for this task. The existing
   crate-root loader and production builder remain on the temporary permissive
   document until Task 4 migrates all consumers in one compilable change.
-- [ ] Encode the current relation migration table:
+- [x] Encode the current relation migration table:
 
 | Raw relation | Published kind | Additional evidence |
 |---|---|---|
@@ -431,11 +433,11 @@ pub struct GraphDocument {
 | `embeds` | `contains` | rule `embedded-member` |
 | `mixes_in` | `implements` | rule `mixin-contract` |
 
-- [ ] Normalize current semantic/media nodes to `resource` and set
+- [x] Normalize current semantic/media nodes to `resource` and set
   `resource_kind` to `document`, `paper`, `image`, `concept`, or `rationale`.
   Reject any raw kind or relation not present in an explicit normalization
   table; report its producer path and anchor.
-- [ ] Validate endpoint-kind compatibility, duplicate identities, missing
+- [x] Validate endpoint-kind compatibility, duplicate identities, missing
   files, invalid anchors, heuristic evidence, candidate bounds, and edge
   `id == key` before returning a document. The initial closed endpoint matrix
   includes:
@@ -538,11 +540,11 @@ property projections, then migrates all durable consumers.
   re-exports of `code_graph::GraphDocument`, `NodeRecord`, and `EdgeRecord`.
   Remove the flattened durable definitions, export typed records at the crate
   root, and route `compass-graph::build*` through `normalize_v1`.
-- [ ] Add typed convenience accessors for frequently used structural fields:
+- [x] Add typed convenience accessors for frequently used structural fields:
   label, kind, roles, source anchor, language, framework, community, evidence,
   edge kind, and edge endpoints. These methods read typed fields and do not
   reconstruct a mutable attribute map.
-- [ ] Add read-only `NodePropertyProjection` and `EdgePropertyProjection`
+- [x] Add read-only `NodePropertyProjection` and `EdgePropertyProjection`
   iterators for generic consumers such as CompassQL, Cypher, GraphML, and JSON
   export. The projection has an explicit key registry and converts typed
   fields to `GraphProperty` values; unknown keys return `None`.
@@ -635,12 +637,12 @@ Program IR, manifest, and build state as one generation.
 - [ ] Sanitize diagnostics so paths remain repository-relative and messages do
   not copy unrelated environment variables, credentials, or configuration
   secrets.
-- [ ] Sort files by normalized path, nodes by ID, and links by
+- [x] Sort files by normalized path, nodes by ID, and links by
   `(source, kind, target, key)`. Canonicalize maps before serialization so
   clean and incremental builds produce byte-identical JSON. Always publish
   `directed: true` and `multigraph: true`; do not derive either flag from the
   current edge inventory.
-- [ ] Replace signature-only graph caches with a content-addressed key over
+- [x] Replace signature-only graph caches with a content-addressed key over
   graph digest and schema fingerprint. Treat caches as disposable and rebuild
   them after corruption or mismatch.
 - [ ] Stage `graph.json`, `program.json`, manifest, and build state under one
@@ -698,19 +700,19 @@ only evidence that can be tied to exact syntax or configuration anchors.
 
 **Implementation:**
 
-- [ ] Extend SQL extraction to emit raw facts for database, schema, table,
+- [x] Extend SQL extraction to emit raw facts for database, schema, table,
   view, column, index, constraint, procedure, trigger, query, and migration
   when the parsed statement provides an exact name and anchor.
-- [ ] Model SQL containment explicitly:
+- [x] Model SQL containment explicitly:
   database → database_schema → table/view/procedure, and table/view → columns,
   indexes, constraints, and triggers.
-- [ ] Emit `reads` and `writes` from exact SQL table references. Preserve
+- [x] Emit `reads` and `writes` from exact SQL table references. Preserve
   qualification and aliases in typed detail; do not resolve dynamic SQL
   strings as exact.
-- [ ] Emit packages, resources, and config keys from manifest, JSON, and
+- [x] Emit packages, resources, and config keys from manifest, JSON, and
   Terraform syntax. Use `depends_on`, `contains`, and `references` only when
   the source declares that relation.
-- [ ] Add producer identifiers to coverage metadata so the release gate can
+- [x] Add producer identifiers to coverage metadata so the release gate can
   prove which extractor emitted each declared kind and edge.
 
 **Contract produced:** The v1 vocabulary has anchored database and
@@ -757,14 +759,14 @@ candidate behavior.
 
 **Implementation:**
 
-- [ ] Define `RawFrameworkFact::Route(RawRouteFact)` and
+- [x] Define `RawFrameworkFact::Route(RawRouteFact)` and
   `RawFrameworkFact::Domain(RawDomainFact)`.
-- [ ] Add `framework_facts: Vec<RawFrameworkFact>` to `Extraction` with an
+- [x] Add `framework_facts: Vec<RawFrameworkFact>` to `Extraction` with an
   empty default so non-framework extractors remain unchanged.
-- [ ] Define `RawRouteFact` with framework, operation, raw and normalized path,
+- [x] Define `RawRouteFact` with framework, operation, raw and normalized path,
   declaring scope, route anchor, handler reference, ordered middleware
   references, provenance origin, and framework-specific detail.
-- [ ] Define resolver output as:
+- [x] Define resolver output as:
 
 ```rust
 pub struct ResolvedRoute {
@@ -782,21 +784,21 @@ pub struct RouteStage {
 }
 ```
 
-- [ ] Resolve exact handler IDs by qualified name, import/export aliases,
+- [x] Resolve exact handler IDs by qualified name, import/export aliases,
   declaring scope, and framework convention. If several candidates remain,
   return at most 20, sorted by stable ID, with reasons and confidence.
-- [ ] Centralize `FrameworkLimits` with `max_candidates: 20`,
+- [x] Centralize `FrameworkLimits` with `max_candidates: 20`,
   `max_include_depth: 32`, `max_alias_expansions: 1_000`, and
   `max_facts_per_file: 100_000`. Configuration parsers and resolvers fail with
   a diagnostic when a bound is reached; they do not continue partial
   recursive expansion silently.
-- [ ] Publish a `route` node and one `routes_to` edge per execution stage.
+- [x] Publish a `route` node and one `routes_to` edge per execution stage.
   Middleware edges carry `stage: "middleware"` and zero-based `position`; the
   final handler carries `stage: "handler"`.
-- [ ] Use `ast` for explicit bindings, `configuration` for routing files,
+- [x] Use `ast` for explicit bindings, `config` for routing files,
   `convention` for file-based routes, and `heuristic` only at a dynamic
   dispatch boundary with a rule and wiring site.
-- [ ] Reject URL-looking strings unless a recognized framework shape or
+- [x] Reject URL-looking strings unless a recognized framework shape or
   convention produced them.
 
 **Contract produced:** Framework packs only detect local shapes; the shared
@@ -839,19 +841,19 @@ belongs in `compass-resolve`, not in the AST visitor.
 
 **Implementation:**
 
-- [ ] Detect Django `path`, `re_path`, legacy `url`, `include`, class-based
+- [x] Detect Django `path`, `re_path`, legacy `url`, `include`, class-based
   `.as_view()`, and dotted handler strings in recognized URL modules.
-- [ ] Resolve `include()` recursively with cycle detection and a 32-file
+- [x] Resolve `include()` recursively with cycle detection and a 32-file
   nesting bound. Compose parent and child paths without discarding source
   anchors.
-- [ ] Detect Flask `@app.route` and blueprint routes, including declared HTTP
+- [x] Detect Flask `@app.route` and blueprint routes, including declared HTTP
   method arrays and blueprint prefixes.
-- [ ] Detect FastAPI `@app` and `@router` decorators for every standard HTTP
+- [x] Detect FastAPI `@app` and `@router` decorators for every standard HTTP
   method, router prefixes, and dependency/middleware execution stages that
   can be proven statically.
-- [ ] Resolve imported functions, bound methods, class-based views, aliases,
+- [x] Resolve imported functions, bound methods, class-based views, aliases,
   and dotted paths against existing Python symbol facts.
-- [ ] Leave dynamic import strings and computed route expressions unresolved
+- [x] Leave dynamic import strings and computed route expressions unresolved
   or heuristic; never report them as exact.
 
 **Contract produced:** Python framework files emit `route` nodes and ordered
@@ -905,23 +907,23 @@ WebSocket, page component, endpoint, and route-middleware roles.
 
 **Implementation:**
 
-- [ ] Detect Express `app`/`router` verb calls and preserve every handler in
+- [x] Detect Express `app`/`router` verb calls and preserve every handler in
   the middleware chain in source order.
-- [ ] Detect NestJS `@Controller` plus HTTP method decorators; GraphQL
+- [x] Detect NestJS `@Controller` plus HTTP method decorators; GraphQL
   `@Resolver`, `@Query`, and `@Mutation`; `@MessagePattern`,
   `@EventPattern`, and `@SubscribeMessage`. HTTP and GraphQL operations
   publish route nodes and `routes_to` edges with distinct operation types;
   message, event, and WebSocket facts feed Task 12.
-- [ ] Detect React Router route elements/configuration and Vue Router route
+- [x] Detect React Router route elements/configuration and Vue Router route
   objects only when path and component/loader/action fields match the
   supported AST shape.
-- [ ] Derive SvelteKit, Nuxt, and Astro page/endpoint routes from
+- [x] Derive SvelteKit, Nuxt, and Astro page/endpoint routes from
   repository-relative paths. Support `[param]` and `[...rest]`, preserve the
   original convention path, and use `convention` provenance.
-- [ ] Emit Nuxt server endpoints and route middleware separately from page
+- [x] Emit Nuxt server endpoints and route middleware separately from page
   components. Resolve imported components and handlers through the existing
   TypeScript import/export graph.
-- [ ] Mark reflective NestJS wiring heuristic only when its registration site
+- [x] Mark reflective NestJS wiring heuristic only when its registration site
   is known; leave arbitrary computed router calls unresolved.
 
 **Contract produced:** JavaScript ecosystems share route semantics while
@@ -978,19 +980,19 @@ existing language symbol IDs.
 
 **Implementation:**
 
-- [ ] Detect Laravel `Route` verbs, `resource`, `Controller@action`, class
+- [x] Detect Laravel `Route` verbs, `resource`, `Controller@action`, class
   constants, and tuple syntax. Expand resource routes into stable individual
   route nodes with evidence pointing to the resource declaration.
-- [ ] Parse Drupal `*.routing.yml` for `_controller`, `_form`, and entity
+- [x] Parse Drupal `*.routing.yml` for `_controller`, `_form`, and entity
   handlers; connect recognized `hook_*` implementations in supported
   `.module`, `.theme`, `.install`, and `.inc` files.
-- [ ] Detect Rails verb routes using `to:` and hash-rocket syntax and resolve
+- [x] Detect Rails verb routes using `to:` and hash-rocket syntax and resolve
   `users#index` to controller class plus action method.
-- [ ] Detect Spring `@GetMapping`, `@PostMapping`, other composed mappings,
+- [x] Detect Spring `@GetMapping`, `@PostMapping`, other composed mappings,
   and method-level `@RequestMapping`; compose class and method prefixes.
-- [ ] Parse Play verb routes from `conf/routes` and resolve Java or Scala
+- [x] Parse Play verb routes from `conf/routes` and resolve Java or Scala
   controller actions, including static and injected controller forms.
-- [ ] Give YAML and route-file edges `configuration` provenance and exact line
+- [x] Give YAML and route-file edges `config` provenance and exact line
   anchors. Dynamic controller names remain bounded candidates or unresolved.
 
 **Contract produced:** PHP/Ruby/JVM handlers have the same canonical
@@ -1045,18 +1047,18 @@ attributes, or macros rather than matching method names alone.
 
 **Implementation:**
 
-- [ ] Detect Gin group/engine verbs, chi methods, gorilla/mux
+- [x] Detect Gin group/engine verbs, chi methods, gorilla/mux
   `HandleFunc`/method chains, and nested path prefixes.
-- [ ] Detect Axum and Actix `.route(..., get(handler))` forms and Rocket
+- [x] Detect Axum and Actix `.route(..., get(handler))` forms and Rocket
   route attributes/macros, preserving macro or call anchors.
-- [ ] Detect ASP.NET HTTP method attributes on controller actions and compose
+- [x] Detect ASP.NET HTTP method attributes on controller actions and compose
   controller-level route attributes with action templates.
-- [ ] Detect Vapor application and route-group methods, including segmented
+- [x] Detect Vapor application and route-group methods, including segmented
   string paths and explicit `use:` handlers.
-- [ ] Resolve closures as anchored function-like symbols when they exist in
+- [x] Resolve closures as anchored function-like symbols when they exist in
   the structural graph. Do not invent exact handler symbols for opaque
   runtime values.
-- [ ] Require recognized imports, receiver types, namespaces, attributes, or
+- [x] Require recognized imports, receiver types, namespaces, attributes, or
   macros before emitting a route fact.
 
 **Contract produced:** All remaining release-one server frameworks publish
@@ -1130,24 +1132,24 @@ database entities only when exact metadata or query evidence exists.
 
 **Implementation:**
 
-- [ ] Convert recognized NestJS `@MessagePattern`, `@EventPattern`, and
+- [x] Convert recognized NestJS `@MessagePattern`, `@EventPattern`, and
   `@SubscribeMessage` plus Spring message/event annotations into event,
   message, topic, queue, and WebSocket subscription facts with `publishes`,
   `subscribes`, `produces`, `consumes`, `handles`, and `registers` edges as
   appropriate.
-- [ ] Detect Spring scheduled jobs, ASP.NET hosted/background services, and
+- [x] Detect Spring scheduled jobs, ASP.NET hosted/background services, and
   Celery tasks/schedules. Publish job nodes and `schedules`, `triggers`, or
   `handles` edges using exact declaration sites.
-- [ ] Extract ORM model/table/column metadata for Django, SQLAlchemy, TypeORM,
+- [x] Extract ORM model/table/column metadata for Django, SQLAlchemy, TypeORM,
   JPA, Entity Framework, Active Record, Eloquent, GORM, and Diesel.
-- [ ] Emit `maps_to` only for explicit table/schema/column mapping or a
+- [x] Emit `maps_to` only for explicit table/schema/column mapping or a
   framework convention with unambiguous model identity. Emit `reads` and
   `writes` only for exact query evidence.
-- [ ] Join ORM targets to Task 6 database entities by normalized qualified
+- [x] Join ORM targets to Task 6 database entities by normalized qualified
   identity. If the database target is absent, retain the mapping target as an
   unresolved domain reference and diagnostic rather than creating an
   unsupported exact entity.
-- [ ] Treat runtime registries, computed topic names, and dynamic schedules as
+- [x] Treat runtime registries, computed topic names, and dynamic schedules as
   heuristic only when a wiring site is available; otherwise leave them
   unresolved.
 
@@ -1202,12 +1204,12 @@ overwrite or silently contradict structural facts.
 
 **Implementation:**
 
-- [ ] Define bounded request types for search, callers/callees, impact,
+- [x] Define bounded request types for search, callers/callees, impact,
   explore, and node trail. Require explicit limits for depth, nodes, paths,
   candidates, source bytes, and total response bytes. The public names are
   `SearchRequest`, `CallRequest`, `ImpactRequest`, `ExploreRequest`, and
   `NodeTrailRequest`.
-- [ ] Define one additive response:
+- [x] Define one additive response:
 
 ```rust
 pub struct CodeQueryResponse {
@@ -1224,26 +1226,26 @@ pub struct CodeQueryResponse {
 }
 ```
 
-- [ ] Define the response members `SearchHit`, `QueryNode`, `QueryEdge`,
+- [x] Define the response members `SearchHit`, `QueryNode`, `QueryEdge`,
   `QueryFile`, `QueryPath`, `QueryDiagnostic`, and `CodeQueryLimits` in the
   same module. Do not reuse the existing CompassQL `QueryLimits` type.
-- [ ] Put evidence records on query nodes and edges with a `layer` of
+- [x] Put evidence records on query nodes and edges with a `layer` of
   `structural_graph` or `program_ir`. Preserve origin, confidence, anchor,
   rule, wiring site, and resolution state.
-- [ ] Add `compass-analysis` and `compass-ir` dependencies to
+- [x] Add `compass-analysis` and `compass-ir` dependencies to
   `compass-query`. Join Program evidence only through stable
   `graph_node_id`.
-- [ ] When Program IR has an orphan symbol or contradicts a structural fact,
+- [x] When Program IR has an orphan symbol or contradicts a structural fact,
   retain the structural record and add a typed diagnostic. Do not create a
   new durable node or change `graph.json`.
-- [ ] Return no match, ambiguous match, unresolved handler, incomplete
+- [x] Return no match, ambiguous match, unresolved handler, incomplete
   coverage, stale source, and bounded truncation as successful typed responses
   with diagnostics. Return corrupt authoritative artifacts, schema mismatch,
   unsafe paths, and violated graph invariants as `QueryError`.
-- [ ] Sort every response collection by a documented stable key. Search is
+- [x] Sort every response collection by a documented stable key. Search is
   the only operation that populates `results`; other operations return an
   empty array rather than omitting the field.
-- [ ] Generate a complete example response and a deterministic fingerprint of
+- [x] Generate a complete example response and a deterministic fingerprint of
   the Rust field/enum contract under `fixtures/contracts/`. Tasks 16–18 use
   these files for transport and TypeScript parity.
 
@@ -1290,19 +1292,19 @@ corruption. `graph.json` and `program.json` remain the sources of truth.
 
 **Implementation:**
 
-- [ ] Add workspace `rusqlite = { version = "0.31.0", features =
+- [x] Add workspace `rusqlite = { version = "0.31.0", features =
   ["bundled", "modern_sqlite"] }` and use its bundled FTS5-capable SQLite.
-- [ ] Key the index directory by SHA-256 of graph digest, optional Program
+- [x] Key the index directory by SHA-256 of graph digest, optional Program
   digest, graph schema fingerprint, query schema fingerprint, and index
   format version.
-- [ ] Create normalized relational tables for nodes, edges, files, evidence,
+- [x] Create normalized relational tables for nodes, edges, files, evidence,
   aliases, and Program joins plus an FTS5 table over name, qualified name,
   aliases, kind, roles, language, framework, and normalized path.
-- [ ] Build into a temporary database, use transactions and prepared
+- [x] Build into a temporary database, use transactions and prepared
   statements, run integrity checks, fsync, and atomically rename into place.
   A lock coordinates concurrent builders; readers may continue using the
   last complete matching index.
-- [ ] Implement:
+- [x] Implement:
 
 ```rust
 pub fn open(graph_path: &Path, program_path: Option<&Path>,
@@ -1313,10 +1315,10 @@ pub fn search(&self, request: SearchRequest)
 
   Ranking order is exact qualified name, exact name, prefix, FTS rank, then
   stable node ID.
-- [ ] Escape FTS syntax through bound parameters and a conservative query
+- [x] Escape FTS syntax through bound parameters and a conservative query
   builder. Enforce term, token, result, and response-size limits before
   executing SQLite work.
-- [ ] Delete and rebuild on schema mismatch, digest mismatch, incomplete
+- [x] Delete and rebuild on schema mismatch, digest mismatch, incomplete
   build marker, failed integrity check, or SQLite corruption.
 
 **Contract produced:** `search` returns ranked `SearchHit` records and the
@@ -1363,27 +1365,27 @@ heuristic impact, and return digest-verified source grouped by file.
 
 **Implementation:**
 
-- [ ] Implement one-hop callers over inbound `calls` and `routes_to`; implement
+- [x] Implement one-hop callers over inbound `calls` and `routes_to`; implement
   one-hop callees over outbound `calls`. Preserve parallel edges and return
   all evidence records.
-- [ ] Implement impact as bounded reverse traversal over the approved impact
+- [x] Implement impact as bounded reverse traversal over the approved impact
   family: `calls`, `routes_to`, `imports`, `exports`, `references`,
   `depends_on`, `reads`, `writes`, `publishes`, `subscribes`, `produces`,
   `consumes`, `schedules`, `triggers`, and `maps_to`.
-- [ ] Default impact to exact/configuration/convention evidence. Add an
+- [x] Default impact to exact/config/convention evidence. Add an
   explicit request option for heuristic edges and label every affected path
   with its weakest resolution/evidence state.
-- [ ] Implement explore by resolving several requested symbols, selecting a
+- [x] Implement explore by resolving several requested symbols, selecting a
   minimal bounded connecting subgraph, and grouping source slices by
   normalized file path. Include the call/route path among selected symbols.
-- [ ] Before returning source, recompute the file digest and compare it to the
+- [x] Before returning source, recompute the file digest and compare it to the
   graph’s `FileRecord`. On mismatch, omit source and emit
   `stale_source_digest`; never return unverified current text as indexed
   source.
-- [ ] Implement node trail as a bounded best-path search ordered by hop count,
+- [x] Implement node trail as a bounded best-path search ordered by hop count,
   evidence quality, and stable edge identity. Include route middleware stages
   and heuristic wiring sites inline.
-- [ ] Expose the operations with these engine signatures:
+- [x] Expose the operations with these engine signatures:
 
 ```rust
 pub fn callers(&self, request: CallRequest)
@@ -1398,7 +1400,7 @@ pub fn node_trail(&self, request: NodeTrailRequest)
     -> Result<CodeQueryResponse, QueryError>;
 ```
 
-- [ ] Apply `CodeQueryLimits` during candidate resolution, traversal, source
+- [x] Apply `CodeQueryLimits` during candidate resolution, traversal, source
   reading, and serialization. Set `truncated` and diagnostics whenever a
   bound changes the result.
 
@@ -1454,22 +1456,22 @@ delegate to `CodeQueryEngine` and return the shared response unchanged.
 
 **Implementation:**
 
-- [ ] Add CLI subcommands `search`, `callers`, `callees`, `impact`, `explore`,
+- [x] Add CLI subcommands `search`, `callers`, `callees`, `impact`, `explore`,
   and `node`, each accepting `--format json|text` plus operation-specific
   limits and evidence options.
-- [ ] Serialize `CodeQueryResponse` directly for JSON. Implement text as a
+- [x] Serialize `CodeQueryResponse` directly for JSON. Implement text as a
   renderer over the response; never build a second semantic result shape.
-- [ ] Route existing overlapping call-graph/affected functionality through
+- [x] Route existing overlapping call-graph/affected functionality through
   the new engine where v1 semantics apply, while retaining explicitly
   separate CQL and natural-language commands.
-- [ ] Add MCP tools `search_symbols`, `get_callers`, `get_callees`,
+- [x] Add MCP tools `search_symbols`, `get_callers`, `get_callees`,
   `get_impact`, `explore_code`, and `get_node`. Replace the existing
   `get_node` implementation rather than registering a duplicate name.
-- [ ] Use bounded JSON schemas with the same defaults as Rust request types.
+- [x] Use bounded JSON schemas with the same defaults as Rust request types.
   Return structured JSON plus concise text content. Reserve MCP protocol
   errors for invalid requests, corrupt schemas, unsafe paths, or engine
   failures; valid empty results remain successful responses.
-- [ ] Ensure pre-contract graphs return the same rebuild diagnostic through
+- [x] Ensure pre-contract graphs return the same rebuild diagnostic through
   CLI and MCP.
 
 **Contract produced:** Agents and scripts receive byte-equivalent JSON
@@ -1516,23 +1518,23 @@ VS Code webview cannot drift.
 
 **Implementation:**
 
-- [ ] Mirror every `compass.query/1` enum and record in strict Zod schemas.
+- [x] Mirror every `compass.query/1` enum and record in strict Zod schemas.
   Reject unknown variants and unsafe source anchors. Export inferred
   TypeScript types from the schema module.
-- [ ] Decode `fixtures/contracts/compass-query-v1.example.json` and compare
+- [x] Decode `fixtures/contracts/compass-query-v1.example.json` and compare
   `fixtures/contracts/compass-query-v1.fingerprint` with the fingerprint
   generated from the TypeScript enum/field manifest so Rust/TypeScript drift
   fails CI.
-- [ ] Render exact, configuration, convention, ambiguous, unresolved, and
+- [x] Render exact, config, convention, ambiguous, unresolved, and
   heuristic states with text and icons. For heuristic edges, show rule,
   wiring file/line, extractor, confidence, and candidates inline.
-- [ ] Add `routes_to` and enterprise edge labels without collapsing them into
+- [x] Add `routes_to` and enterprise edge labels without collapsing them into
   generic references. Show middleware stage and position on route edges.
-- [ ] Integrate `CodeEvidence` into the graph inspector and query-result
+- [x] Integrate `CodeEvidence` into the graph inspector and query-result
   projection. Use text and icons in addition to color, expose diagnostics and
   truncation, and keep source actions callback-based so the package remains
   host-neutral.
-- [ ] Export the decoder, types, and evidence component from the viewer
+- [x] Export the decoder, types, and evidence component from the viewer
   package entry point.
 
 **Contract produced:** Browser clients share one strict decoder and evidence
@@ -1582,23 +1584,23 @@ rebuild actions remain host responsibilities.
 
 **Implementation:**
 
-- [ ] Implement `codeQueryClient` through the existing Compass process
+- [x] Implement `codeQueryClient` through the existing Compass process
   manager. Pass literal argument arrays, require JSON output, validate it with
   `CodeQueryResponseSchema`, and support cancellation and process cleanup.
-- [ ] Register extension actions for symbol search, callers, callees, impact,
+- [x] Register extension actions for symbol search, callers, callees, impact,
   explore selection, and node trail. Add context-menu actions on graph nodes
   and editor symbols.
-- [ ] Send validated query responses to the graph webview through strict host
+- [x] Send validated query responses to the graph webview through strict host
   and webview message unions. The webview consumes Task 17’s components and
   does not read `graph.json`.
-- [ ] Open returned source anchors through VS Code APIs only after confirming
+- [x] Open returned source anchors through VS Code APIs only after confirming
   the normalized path remains inside the active repository. For stale source,
   show the diagnostic and offer rebuild rather than opening mismatched text.
-- [ ] On an unsupported graph schema, present “Rebuild with Compass” and invoke
+- [x] On an unsupported graph schema, present “Rebuild with Compass” and invoke
   the normal index/update workflow after user action.
-- [ ] Keep `routes_to` evidence visible when callers of a handler are shown,
+- [x] Keep `routes_to` evidence visible when callers of a handler are shown,
   including middleware order and heuristic wiring-site navigation.
-- [ ] Before editing `editors/vscode/package.json`, inspect and preserve the
+- [x] Before editing `editors/vscode/package.json`, inspect and preserve the
   existing user-owned modification; stage only intentional command/menu
   additions.
 
@@ -1654,12 +1656,12 @@ toy fixtures.
 
 **Implementation:**
 
-- [ ] Implement the coverage checker to fail when a declared node or edge kind
+- [x] Implement the coverage checker to fail when a declared node or edge kind
   has zero producers; a framework lacks positive, near-match, exact,
   ambiguous, unresolved, or incremental coverage; a heuristic edge lacks
   wiring evidence; clean and incremental bytes differ; or Rust/CLI/MCP/VS
   Code schema fingerprints differ.
-- [ ] Implement `qualify_code_graph_v1.sh --fixtures-only` to run:
+- [x] Implement `qualify_code_graph_v1.sh --fixtures-only` to run:
 
 ```bash
 cargo fmt --all -- --check
@@ -1671,28 +1673,28 @@ npm run build
 python3 scripts/check_code_graph_v1_coverage.py
 ```
 
-- [ ] Define the real-repository lock format with `name`, `url`, immutable
+- [x] Define the real-repository lock format with `name`, `url`, immutable
   40-hex `commit`, `size_class`, `language_family`, `frameworks`, and at least
   three named route-to-handler flows for every framework. Reject branches,
   tags, shortened hashes, duplicate size/language cells, or insufficient
   framework flows.
-- [ ] Make full qualification clone locked repositories into temporary
+- [x] Make full qualification clone locked repositories into temporary
   directories, build clean and incremental graphs, execute the declared
   queries, and record Compass revision, repository revision, graph digest,
   counts, coverage, unresolved/ambiguous totals, false exact resolutions,
   index time, and query latency.
-- [ ] Commit the generated evidence in
+- [x] Commit the generated evidence in
   `docs/design/code-graph-v1-qualification.md`. Qualification fails if any
   declared flow does not resolve as expected or if a bounded ambiguous result
   is reported as exact.
-- [ ] Add Linux fixture qualification to
+- [x] Add Linux fixture qualification to
   `.github/workflows/compass-ci.yml`. Run platform-sensitive suites on macOS,
   Linux, and Windows for path normalization, atomic publication, SQLite,
   process cancellation, source navigation, and VS Code packaging.
-- [ ] Document the hard cutover and rebuild requirement under the Unreleased
+- [x] Document the hard cutover and rebuild requirement under the Unreleased
   section of `CHANGELOG.md`; do not describe pre-contract graphs as a
   supported old v1.
-- [ ] Add `make qualify-code-graph-v1` as the release entry point.
+- [x] Add `make qualify-code-graph-v1` as the release entry point.
 
 **Contract produced:** Release engineering has a single command and an
 immutable evidence report for every vocabulary producer, framework, client,
@@ -1713,13 +1715,6 @@ and platform claim.
   --repositories tests/qualification/code-graph-v1-repositories.toml
 ```
 
-- Run the outer graph refresh after the final code change:
-
-```bash
-cd /Users/haipingfu/graphify
-graphify update .
-```
-
 **Done when:** Both qualification modes exit 0, the evidence report contains
 no unresolved release gate, every declared kind has a producer, every
 framework has three real flows, and the cross-platform CI matrix is green.
@@ -1730,24 +1725,24 @@ framework has three real flows, and the cross-platform CI matrix is green.
 
 ## Final release review
 
-- [ ] Confirm the durable artifact is a NetworkX-compatible
+- [x] Confirm the durable artifact is a NetworkX-compatible
   `compass.graph/1` envelope and contains no `relation` aliases or flattened
   unknown attributes.
-- [ ] Confirm pre-contract artifacts rebuild on update and fail with rebuild
+- [x] Confirm pre-contract artifacts rebuild on update and fail with rebuild
   guidance on read-only paths; no adapter or dual representation exists.
-- [ ] Confirm Program IR remains `http://crab.build/compass/v1` and is joined
+- [x] Confirm Program IR remains `http://crab.build/compass/v1` and is joined
   only at query time.
-- [ ] Confirm all core, enterprise, database, event, job, schema, and resource
+- [x] Confirm all core, enterprise, database, event, job, schema, and resource
   kinds have validated producers.
-- [ ] Confirm all approved frameworks publish `route` nodes and canonical
-  `routes_to` edges with exact, convention, configuration, ambiguous, or
+- [x] Confirm all approved frameworks publish `route` nodes and canonical
+  `routes_to` edges with exact, convention, config, ambiguous, or
   surfaced heuristic evidence.
-- [ ] Confirm search uses FTS5 and callers, callees, impact, explore, and node
+- [x] Confirm search uses FTS5 and callers, callees, impact, explore, and node
   trail share `compass.query/1`.
-- [ ] Confirm CLI, MCP, viewer, and VS Code schema fingerprints match.
-- [ ] Confirm heuristic rule and wiring-site evidence appears inline in
+- [x] Confirm CLI, MCP, viewer, and VS Code schema fingerprints match.
+- [x] Confirm heuristic rule and wiring-site evidence appears inline in
   explore, node trail, the viewer, and VS Code.
-- [ ] Confirm clean and incremental graph bytes match across checkout roots.
+- [x] Confirm clean and incremental graph bytes match across checkout roots.
 - [ ] Confirm real-repository qualification and macOS/Linux/Windows gates pass.
-- [ ] Inspect `git status --short` and verify unrelated user changes remain
+- [x] Inspect `git status --short` and verify unrelated user changes remain
   unmodified and unstaged.

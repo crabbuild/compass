@@ -62,7 +62,7 @@ impl QueryIndex {
                 .entry(node.label().to_owned())
                 .or_default()
                 .push(index);
-            if let Some(source_file) = node.attributes.get("source_file").and_then(Value::as_str) {
+            if let Some(source_file) = node.source_file() {
                 nodes_by_source_file
                     .entry(source_file.to_owned())
                     .or_default()
@@ -150,11 +150,8 @@ impl QueryIndex {
 
 #[must_use]
 pub fn cypher_node_label(node: &NodeRecord) -> String {
-    let raw = node
-        .attributes
-        .get("file_type")
-        .and_then(Value::as_str)
-        .unwrap_or("Entity");
+    let raw = node.string("file_type");
+    let raw = if raw.is_empty() { "Entity" } else { &raw };
     let mut value = raw.to_lowercase();
     if let Some(first) = value.get_mut(0..1) {
         first.make_ascii_uppercase();
@@ -164,12 +161,11 @@ pub fn cypher_node_label(node: &NodeRecord) -> String {
 
 #[must_use]
 pub fn cypher_relationship_type(edge: &EdgeRecord) -> String {
-    let raw = edge
-        .attributes
-        .get("relation")
-        .and_then(Value::as_str)
-        .unwrap_or("RELATES_TO")
-        .to_uppercase();
+    let raw = if edge.relation().is_empty() {
+        "RELATES_TO".to_owned()
+    } else {
+        edge.relation().to_uppercase()
+    };
     cypher_identifier(&raw, "RELATES_TO")
 }
 
@@ -195,15 +191,15 @@ fn fingerprint_schema(nodes: &[NodeRecord], edges: &[EdgeRecord]) -> SchemaFinge
         entries.insert(format!("N:L:{}", cypher_node_label(node)));
         entries.insert("N:P:id:string".to_owned());
         entries.insert("N:P:label:string".to_owned());
-        for (key, value) in &node.attributes {
-            entries.insert(format!("N:P:{key}:{}", value_kind(value)));
+        for (key, value) in node.properties() {
+            entries.insert(format!("N:P:{key}:{}", value_kind(&value)));
         }
     }
     for edge in edges {
         entries.insert(format!("R:T:{}", cypher_relationship_type(edge)));
         entries.insert("R:P:confidence:string".to_owned());
-        for (key, value) in &edge.attributes {
-            entries.insert(format!("R:P:{key}:{}", value_kind(value)));
+        for (key, value) in edge.properties() {
+            entries.insert(format!("R:P:{key}:{}", value_kind(&value)));
         }
     }
     let mut digest = Sha256::new();

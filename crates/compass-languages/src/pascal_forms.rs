@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
@@ -57,6 +57,7 @@ fn parse_form(path: &Path, text: &str) -> Extraction {
         path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
+        "file",
         1,
     );
     let mut stack = vec![file_id];
@@ -68,7 +69,7 @@ fn parse_form(path: &Path, text: &str) -> Extraction {
             .map(|capture| capture.as_str())
         {
             let id = make_id(&[&stem, class_name]);
-            state.add_node(id.clone(), class_name, line);
+            state.add_node(id.clone(), class_name, "class", line);
             if let Some(parent) = stack.last() {
                 state.add_edge(parent, &id, "contains", line, None);
             }
@@ -82,7 +83,7 @@ fn parse_form(path: &Path, text: &str) -> Extraction {
             && stack.len() > 1
         {
             let id = make_id(&[&stem, handler]);
-            state.add_node(id.clone(), &format!("{handler}()"), line);
+            state.add_node(id.clone(), &format!("{handler}()"), "method", line);
             if let Some(parent) = stack.last() {
                 state.add_edge(parent, &id, "references", line, Some("event"));
             }
@@ -132,6 +133,7 @@ pub(crate) fn extract_package(path: &Path) -> Result<Extraction, ExtractError> {
         path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default(),
+        "file",
         1,
     );
     let package_name = document
@@ -153,7 +155,7 @@ pub(crate) fn extract_package(path: &Path) -> Result<Extraction, ExtractError> {
             str::to_owned,
         );
     let package_id = make_id(&[&stem, &package_name]);
-    state.add_node(package_id.clone(), &package_name, 1);
+    state.add_node(package_id.clone(), &package_name, "package", 1);
     state.add_edge(&file_id, &package_id, "contains", 1, None);
 
     for dependency in child_items(&document, "RequiredPkgs") {
@@ -161,7 +163,7 @@ pub(crate) fn extract_package(path: &Path) -> Result<Extraction, ExtractError> {
             && !name.is_empty()
         {
             let id = make_id(&[name]);
-            state.add_node(id.clone(), name, 1);
+            state.add_node(id.clone(), name, "package", 1);
             state.add_edge(&package_id, &id, "imports", 1, Some("import"));
         }
     }
@@ -170,7 +172,7 @@ pub(crate) fn extract_package(path: &Path) -> Result<Extraction, ExtractError> {
             && !name.is_empty()
         {
             let id = resolve_unit(path, name);
-            state.add_node(id.clone(), name, 1);
+            state.add_node(id.clone(), name, "module", 1);
             state.add_edge(&package_id, &id, "contains", 1, None);
         }
     }
@@ -289,13 +291,17 @@ impl State {
         }
     }
 
-    fn add_node(&mut self, id: String, label: &str, line: usize) {
+    fn add_node(&mut self, id: String, label: &str, symbol_kind: &str, line: usize) {
         if !self.seen_nodes.insert(id.clone()) {
             return;
         }
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(label.to_owned()));
         attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+        attributes.insert(
+            "symbol_kind".to_owned(),
+            Value::String(symbol_kind.to_owned()),
+        );
         attributes.insert(
             "source_file".to_owned(),
             Value::String(self.source_file.clone()),

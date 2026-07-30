@@ -3,6 +3,8 @@
 mod analyze;
 mod cluster;
 mod dedup;
+mod quarantine;
+mod v1;
 
 pub use analyze::{
     DiffEdge, DiffNode, GodNode, GraphDiff, ImportCycle, SuggestedQuestion, SurpriseConnection,
@@ -13,21 +15,55 @@ pub use cluster::{
     ClusterOptions, Communities, cluster, cohesion_score, community_member_signatures,
     label_communities_by_hub, remap_communities_to_previous, score_communities,
 };
+pub use compass_languages::{RawEdgeRecord, RawNodeRecord};
 use dedup::deduplicate_owned;
 pub use dedup::{
     AmbiguousPair, DedupError, DedupResult, DedupStats, EntityTiebreaker, deduplicate_entities,
     deduplicate_entities_with_tiebreaker,
 };
+pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
+pub use v1::{
+    BuildEvidence, InventoryEvidence, V1_PUBLICATION_SEMANTICS_VERSION, canonical_edge_kind,
+    canonical_raw_edge_sites, extraction_from_v1, normalize_document_v1,
+    normalize_document_v1_with_inventory, normalize_document_v1_with_inventory_best_effort,
+    normalize_v1, normalize_v1_best_effort,
+};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, file_stem, make_id, normalize_id};
-use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::provenance::{
+    EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE, SourceAnchor,
+    append_endpoint_rewrite_evidence, preserve_occurrence_rule,
+};
+use compass_model::{
+    EdgeRecord as LegacyEdgeRecord, GraphDocument, NodeRecord as LegacyNodeRecord,
+};
 use rayon::prelude::*;
 use serde_json::{Map, Value};
+
+type EdgeRecord = RawEdgeRecord;
+type NodeRecord = RawNodeRecord;
+type EndpointAliases = HashMap<String, BTreeSet<String>>;
+
+const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
+pub const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
+
+enum EndpointResolution {
+    Exact(String),
+    Rewritten {
+        endpoint: String,
+        evidence: EndpointRewriteEvidence,
+    },
+    Ambiguous {
+        alias: String,
+        candidates: Vec<String>,
+    },
+    Missing,
+}
 
 /// Merge resolved extraction chunks, apply native entity deduplication, and build
 /// a node-link graph. This is the deterministic counterpart of `compass.build`.
@@ -110,6 +146,11 @@ fn build_from_owned_extraction(
     root: Option<&Path>,
 ) -> GraphDocument {
     let mut profile_started = Instant::now();
+    let mut graph_diagnostics = extraction
+        .extensions
+        .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
     let rekey = semantic_id_remap(&extraction.nodes, root);
     let mut prepared_nodes = std::mem::take(&mut extraction.nodes)
         .into_iter()
@@ -150,27 +191,72 @@ fn build_from_owned_extraction(
     let mut endpoint_remap = rekey.clone();
     endpoint_remap.extend(doc_remap.clone());
     endpoint_remap.extend(ghost_remap.clone());
+    let mut endpoint_rewrite_evidence = HashMap::new();
+    for old in rekey.keys() {
+        endpoint_rewrite_evidence.insert(
+            old.clone(),
+            EndpointRewriteEvidence {
+                rule: EndpointRewriteRule::GraphSemanticIdRemap,
+                score: 1.0,
+            },
+        );
+    }
+    for old in doc_remap.keys() {
+        endpoint_rewrite_evidence.insert(
+            old.clone(),
+            EndpointRewriteEvidence {
+                rule: EndpointRewriteRule::GraphDocumentTwinRemap,
+                score: 1.0,
+            },
+        );
+    }
+    for old in ghost_remap.keys() {
+        endpoint_rewrite_evidence.insert(
+            old.clone(),
+            EndpointRewriteEvidence {
+                rule: EndpointRewriteRule::GraphGhostEndpointRemap,
+                score: 0.95,
+            },
+        );
+    }
 
-    let mut normalized = HashMap::<String, String>::new();
+    let mut normalized = EndpointAliases::new();
     for node in &nodes {
-        normalized.insert(normalize_id(&node.id), node.id.clone());
+        normalized
+            .entry(normalize_id(&node.id))
+            .or_default()
+            .insert(node.id.clone());
     }
     for (legacy, canonical) in &endpoint_remap {
-        normalized
-            .entry(normalize_id(legacy))
-            .or_insert_with(|| canonical.clone());
+        let canonical = remap_endpoint(canonical, &endpoint_remap);
+        if positions.contains_key(&canonical) {
+            normalized
+                .entry(normalize_id(legacy))
+                .or_default()
+                .insert(canonical);
+        }
     }
-    let needed_aliases =
-        needed_legacy_aliases(&extraction, &endpoint_remap, &positions, &normalized);
-    add_unambiguous_legacy_aliases(&nodes, &needed_aliases, &mut normalized);
+    let needed_aliases = referenced_legacy_aliases(&extraction, &endpoint_remap, &positions);
+    add_legacy_alias_candidates(&nodes, &needed_aliases, &mut normalized);
     profile_internal("graph alias preparation", &mut profile_started);
 
     let mut source_edges = std::mem::take(&mut extraction.edges);
     for edge in &mut source_edges {
+        preserve_occurrence_rule(&mut edge.attributes);
         let original_source = edge.source.clone();
         let original_target = edge.target.clone();
-        edge.source = remap_endpoint(&edge.source, &endpoint_remap);
-        edge.target = remap_endpoint(&edge.target, &endpoint_remap);
+        let (source, mut rewrites) =
+            remap_endpoint_with_evidence(&edge.source, &endpoint_remap, &endpoint_rewrite_evidence);
+        let (target, target_rewrites) =
+            remap_endpoint_with_evidence(&edge.target, &endpoint_remap, &endpoint_rewrite_evidence);
+        edge.source = source;
+        edge.target = target;
+        rewrites.extend(target_rewrites);
+        rewrites.sort_by_key(|rewrite| rewrite.rule);
+        rewrites.dedup_by_key(|rewrite| rewrite.rule);
+        if !rewrites.is_empty() {
+            stamp_graph_endpoint_rewrites(edge, &rewrites);
+        }
         if edge.source == edge.target
             && (doc_remap.contains_key(&remap_endpoint(&original_source, &rekey))
                 || doc_remap.contains_key(&remap_endpoint(&original_target, &rekey)))
@@ -179,22 +265,38 @@ fn build_from_owned_extraction(
                 .insert("_drop".to_owned(), Value::Bool(true));
         }
     }
-    source_edges.par_sort_by(|left, right| {
-        (left.source.as_str(), left.target.as_str(), relation(left)).cmp(&(
-            right.source.as_str(),
-            right.target.as_str(),
-            relation(right),
-        ))
-    });
+    source_edges
+        .par_sort_by(|left, right| edge_occurrence_key(left).cmp(&edge_occurrence_key(right)));
     profile_internal("graph edge cloning and sort", &mut profile_started);
-    let normalized_edges = source_edges
+    let normalized_results = source_edges
         .into_par_iter()
-        .filter_map(|mut edge| {
+        .map(|mut edge| {
+            let mut diagnostics = Vec::new();
             if edge.attributes.remove("_drop") == Some(Value::Bool(true)) {
-                return None;
+                return (None, diagnostics);
             }
-            let source = resolve_endpoint(&edge.source, &positions, &normalized)?;
-            let target = resolve_endpoint(&edge.target, &positions, &normalized)?;
+            let source_value = edge.source.clone();
+            let target_value = edge.target.clone();
+            let Some(source) = resolve_edge_endpoint(
+                &source_value,
+                "source",
+                &mut edge,
+                &positions,
+                &normalized,
+                &mut diagnostics,
+            ) else {
+                return (None, diagnostics);
+            };
+            let Some(target) = resolve_edge_endpoint(
+                &target_value,
+                "target",
+                &mut edge,
+                &positions,
+                &normalized,
+                &mut diagnostics,
+            ) else {
+                return (None, diagnostics);
+            };
             edge.source = source;
             edge.target = target;
             edge.attributes.remove("target_file");
@@ -202,22 +304,30 @@ fn build_from_owned_extraction(
             sanitize_numeric(&mut edge.attributes, "confidence_score");
             backfill_source_file(&mut edge, &nodes, &positions);
             normalize_attribute_path(&mut edge.attributes, "source_file", root);
+            normalize_source_anchor_path(&mut edge.attributes, root);
             if is_cross_language_phantom(&edge, &nodes, &positions) {
-                return None;
+                return (None, diagnostics);
             }
             edge.attributes
                 .insert("_src".to_owned(), Value::String(edge.source.clone()));
             edge.attributes
                 .insert("_tgt".to_owned(), Value::String(edge.target.clone()));
-            Some(edge)
+            (Some(edge), diagnostics)
         })
         .collect::<Vec<_>>();
+    let mut normalized_edges = Vec::new();
+    for (edge, mut diagnostics) in normalized_results {
+        graph_diagnostics.append(&mut diagnostics);
+        if let Some(edge) = edge {
+            normalized_edges.push(edge);
+        }
+    }
     let mut links = Vec::<EdgeRecord>::new();
-    let mut edge_positions = HashMap::<(String, String, String), usize>::new();
+    let mut edge_positions = HashMap::<(String, String, String, String, String), usize>::new();
     for edge in normalized_edges {
-        let key = edge_key(&edge.source, &edge.target, relation(&edge));
+        let key = edge_occurrence_key(&edge);
         if let Some(&position) = edge_positions.get(&key) {
-            links[position].attributes.extend(edge.attributes);
+            merge_edge_attributes(&mut links[position].attributes, edge.attributes);
         } else {
             edge_positions.insert(key, links.len());
             links.push(edge);
@@ -226,10 +336,25 @@ fn build_from_owned_extraction(
     profile_internal("graph edge normalization", &mut profile_started);
 
     let mut graph = Map::new();
-    let hyperedges =
-        canonical_hyperedges(&extraction, &positions, &normalized, &endpoint_remap, root);
+    let (hyperedges, mut hyperedge_diagnostics) = canonical_hyperedges(
+        &extraction,
+        &positions,
+        &normalized,
+        &endpoint_remap,
+        &endpoint_rewrite_evidence,
+        root,
+    );
+    graph_diagnostics.append(&mut hyperedge_diagnostics);
     if !hyperedges.is_empty() {
         graph.insert("hyperedges".to_owned(), Value::Array(hyperedges));
+    }
+    if !graph_diagnostics.is_empty() {
+        graph_diagnostics.sort_by_cached_key(Value::to_string);
+        graph_diagnostics.dedup();
+        graph.insert(
+            GRAPH_DIAGNOSTICS_EXTENSION.to_owned(),
+            Value::Array(graph_diagnostics),
+        );
     }
     let links = networkx_edge_order(&nodes, links, directed);
     profile_internal("graph NetworkX edge ordering", &mut profile_started);
@@ -238,9 +363,24 @@ fn build_from_owned_extraction(
         directed,
         multigraph,
         graph,
-        nodes,
-        links,
+        nodes: nodes.into_iter().map(publish_legacy_node).collect(),
+        links: links.into_iter().map(publish_legacy_edge).collect(),
         extras: BTreeMap::new(),
+    }
+}
+
+fn publish_legacy_node(record: RawNodeRecord) -> LegacyNodeRecord {
+    LegacyNodeRecord {
+        id: record.id,
+        attributes: record.attributes,
+    }
+}
+
+fn publish_legacy_edge(record: RawEdgeRecord) -> LegacyEdgeRecord {
+    LegacyEdgeRecord {
+        source: record.source,
+        target: record.target,
+        attributes: record.attributes,
     }
 }
 
@@ -339,90 +479,82 @@ fn doc_twin_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
 }
 
 fn ghost_duplicate_remap(nodes: &[NodeRecord]) -> HashMap<String, String> {
-    let mut ordered = nodes.iter().collect::<Vec<_>>();
-    ordered.sort_by(|left, right| left.id.cmp(&right.id));
-    let ast_ids = nodes
-        .iter()
-        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) == Some("ast"))
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    let mut non_ast_sources = HashMap::<&str, HashSet<String>>::new();
+    let mut canonical = HashMap::<(String, String, String, String), Vec<String>>::new();
     for node in nodes
         .iter()
-        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) != Some("ast"))
+        .filter(|node| node.attributes.get("_origin").and_then(Value::as_str) == Some("ast"))
     {
-        non_ast_sources
-            .entry(node.id.as_str())
-            .or_default()
-            .insert(node.string("source_file"));
-    }
-    let mut canonical = HashMap::<(String, String), String>::new();
-    let mut collisions = HashSet::new();
-    for node in &ordered {
-        let label = node.label().trim();
-        let source = node.string("source_file");
-        let basename = Path::new(&source)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-        if label.is_empty() || basename.is_empty() {
-            continue;
-        }
-        let ast = node.attributes.get("_origin").and_then(Value::as_str) == Some("ast");
-        let located = node
-            .attributes
-            .get("source_location")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty());
-        if !ast && !located {
-            continue;
-        }
-        let key = (basename.to_owned(), label.to_owned());
-        if ast {
-            if canonical
-                .get(&key)
-                .is_some_and(|existing| ast_ids.contains(existing.as_str()))
-            {
-                collisions.insert(key.clone());
-            }
-            canonical.insert(key, node.id.clone());
-        } else if let Some(existing) = canonical.get(&key) {
-            let different_source = non_ast_sources
-                .get(existing.as_str())
-                .is_some_and(|sources| sources.iter().any(|candidate| candidate != &source));
-            if different_source {
-                collisions.insert(key);
-            }
-        } else {
-            canonical.insert(key, node.id.clone());
+        if let Some(identity) = ghost_semantic_identity(node) {
+            canonical.entry(identity).or_default().push(node.id.clone());
         }
     }
     let mut remap = HashMap::new();
-    for node in ordered {
+    for node in nodes {
         if node.attributes.get("_origin").and_then(Value::as_str) == Some("ast") {
             continue;
         }
-        let source = node.string("source_file");
-        let basename = Path::new(&source)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-        let key = (basename.to_owned(), node.label().trim().to_owned());
-        if key.0.is_empty() || key.1.is_empty() || collisions.contains(&key) {
+        let Some(identity) = ghost_semantic_identity(node) else {
             continue;
-        }
-        if let Some(target) = canonical.get(&key).filter(|target| *target != &node.id) {
+        };
+        if let Some([target]) = canonical.get(&identity).map(Vec::as_slice)
+            && target != &node.id
+        {
             remap.insert(node.id.clone(), target.clone());
         }
     }
     remap
 }
 
-fn needed_legacy_aliases(
+fn ghost_semantic_identity(node: &NodeRecord) -> Option<(String, String, String, String)> {
+    let source = node.string("source_file");
+    let kind = node
+        .attributes
+        .get("symbol_kind")
+        .or_else(|| node.attributes.get("type"))
+        .or_else(|| node.attributes.get("file_type"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let qualified_name = node
+        .attributes
+        .get("qualified_name")
+        .or_else(|| node.attributes.get("qualifiedName"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| node.label())
+        .trim();
+    if source.is_empty() || kind.is_empty() || qualified_name.is_empty() {
+        return None;
+    }
+    let mut details = Map::new();
+    for key in [
+        "signature",
+        "declaring_type",
+        "overload_discriminator",
+        "resource_kind",
+        "config_path",
+        "package_name",
+        "database",
+        "database_schema",
+        "logical_database",
+        "transport",
+        "subject",
+    ] {
+        if let Some(value) = node.attributes.get(key) {
+            details.insert(key.to_owned(), value.clone());
+        }
+    }
+    Some((
+        source,
+        kind.to_owned(),
+        qualified_name.to_owned(),
+        Value::Object(details).to_string(),
+    ))
+}
+
+fn referenced_legacy_aliases(
     extraction: &Extraction,
     endpoint_remap: &HashMap<String, String>,
     positions: &HashMap<String, usize>,
-    normalized: &HashMap<String, String>,
 ) -> HashSet<String> {
     let mut needed = HashSet::new();
     let mut inspect = |endpoint: &str| {
@@ -439,10 +571,7 @@ fn needed_legacy_aliases(
         } else {
             endpoint
         };
-        let alias = normalize_id(endpoint);
-        if !normalized.contains_key(&alias) {
-            needed.insert(alias);
-        }
+        needed.insert(normalize_id(endpoint));
     };
     for edge in &extraction.edges {
         inspect(&edge.source);
@@ -463,10 +592,10 @@ fn needed_legacy_aliases(
     needed
 }
 
-fn add_unambiguous_legacy_aliases(
+fn add_legacy_alias_candidates(
     nodes: &[NodeRecord],
     needed: &HashSet<String>,
-    normalized: &mut HashMap<String, String>,
+    normalized: &mut EndpointAliases,
 ) {
     if needed.is_empty() {
         return;
@@ -522,11 +651,7 @@ fn add_unambiguous_legacy_aliases(
             combined
         });
     for (alias, ids) in candidates {
-        if ids.len() == 1
-            && let Some(id) = ids.into_iter().next()
-        {
-            normalized.entry(alias).or_insert(id);
-        }
+        normalized.entry(alias).or_default().extend(ids);
     }
 }
 
@@ -544,6 +669,146 @@ fn remap_endpoint(value: &str, remap: &HashMap<String, String>) -> String {
         remaining -= 1;
     }
     current.to_owned()
+}
+
+fn remap_endpoint_with_evidence(
+    value: &str,
+    remap: &HashMap<String, String>,
+    evidence: &HashMap<String, EndpointRewriteEvidence>,
+) -> (String, Vec<EndpointRewriteEvidence>) {
+    let mut current = value;
+    let mut rewrites = Vec::new();
+    let mut remaining = remap.len() + 1;
+    while remaining > 0 {
+        let Some(next) = remap.get(current) else {
+            break;
+        };
+        if next == current {
+            break;
+        }
+        if let Some(item) = evidence.get(current) {
+            rewrites.push(*item);
+        }
+        current = next;
+        remaining -= 1;
+    }
+    (current.to_owned(), rewrites)
+}
+
+fn stamp_graph_endpoint_rewrites(edge: &mut EdgeRecord, rewrites: &[EndpointRewriteEvidence]) {
+    stamp_endpoint_rewrite_attributes(&mut edge.attributes, rewrites);
+}
+
+fn stamp_endpoint_rewrite_attributes(
+    attributes: &mut Map<String, Value>,
+    rewrites: &[EndpointRewriteEvidence],
+) {
+    for rewrite in rewrites {
+        append_endpoint_rewrite_evidence(attributes, *rewrite);
+    }
+}
+
+fn merge_edge_attributes(existing: &mut Map<String, Value>, incoming: Map<String, Value>) {
+    let mut snapshots = edge_evidence_snapshots(existing);
+    snapshots.extend(edge_evidence_snapshots(&incoming));
+    snapshots.sort_by_cached_key(Value::to_string);
+    snapshots.dedup();
+
+    let mut merged = Map::new();
+    for attributes in [existing.clone(), incoming] {
+        for (key, value) in attributes {
+            if key == COALESCED_EDGE_EVIDENCE {
+                continue;
+            }
+            match merged.get(&key) {
+                Some(current) if json_value_is_at_most(current, &value) => {}
+                _ => {
+                    merged.insert(key, value);
+                }
+            }
+        }
+    }
+
+    let primary_heuristic = snapshots
+        .iter()
+        .filter_map(Value::as_object)
+        .filter(|attributes| edge_evidence_is_heuristic(attributes))
+        .min_by_key(|attributes| Value::Object((*attributes).clone()).to_string())
+        .cloned();
+    if let Some(primary) = primary_heuristic {
+        for key in [
+            "_origin",
+            "origin",
+            "confidence",
+            "rule",
+            "confidence_score",
+            "score",
+            "extractor",
+            "source_file",
+            "source_location",
+            "source_anchor",
+            "line_start",
+            "line_end",
+            "column_start",
+            "column_end",
+            "start_byte",
+            "end_byte",
+            "candidates",
+        ] {
+            merged.remove(key);
+            if let Some(value) = primary.get(key) {
+                merged.insert(key.to_owned(), value.clone());
+            }
+        }
+        if let Some(rewrite_entries) = primary
+            .get("_endpoint_rewrite_rules")
+            .and_then(Value::as_array)
+        {
+            merged.insert(
+                "_endpoint_rewrite_rules".to_owned(),
+                Value::Array(rewrite_entries.clone()),
+            );
+        } else {
+            merged.remove("_endpoint_rewrite_rules");
+        }
+    }
+    merged.insert(COALESCED_EDGE_EVIDENCE.to_owned(), Value::Array(snapshots));
+    merged.sort_keys();
+    *existing = merged;
+}
+
+fn json_value_is_at_most(left: &Value, right: &Value) -> bool {
+    let left = left.to_string();
+    let right = right.to_string();
+    left <= right
+}
+
+fn edge_evidence_snapshots(attributes: &Map<String, Value>) -> Vec<Value> {
+    if let Some(snapshots) = attributes
+        .get(COALESCED_EDGE_EVIDENCE)
+        .and_then(Value::as_array)
+    {
+        return snapshots.clone();
+    }
+    let mut snapshot = attributes.clone();
+    snapshot.remove(COALESCED_EDGE_EVIDENCE);
+    vec![Value::Object(snapshot)]
+}
+
+fn edge_evidence_is_heuristic(attributes: &Map<String, Value>) -> bool {
+    attributes
+        .get("_endpoint_rewrite_rules")
+        .and_then(Value::as_array)
+        .is_some_and(|rules| !rules.is_empty())
+        || attributes
+            .get("_origin")
+            .or_else(|| attributes.get("origin"))
+            .and_then(Value::as_str)
+            == Some("heuristic")
+        || matches!(
+            attributes.get("confidence").and_then(Value::as_str),
+            Some("INFERRED" | "inferred" | "AMBIGUOUS" | "ambiguous")
+        )
 }
 
 fn networkx_edge_order(
@@ -678,6 +943,21 @@ fn normalize_attribute_path(attributes: &mut Map<String, Value>, key: &str, root
     attributes.insert(key.to_owned(), Value::String(normalized));
 }
 
+fn normalize_source_anchor_path(attributes: &mut Map<String, Value>, root: Option<&Path>) {
+    for key in ["source_anchor", "sourceAnchor", "anchor"] {
+        let Some(anchor) = attributes.get_mut(key).and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let Some(file) = anchor.get("file").and_then(Value::as_str) else {
+            continue;
+        };
+        anchor.insert(
+            "file".to_owned(),
+            Value::String(normalize_source_file(file, root)),
+        );
+    }
+}
+
 fn normalize_source_file(value: &str, root: Option<&Path>) -> String {
     let portable = value.replace('\\', "/");
     let path = Path::new(&portable);
@@ -697,13 +977,68 @@ fn path_text(path: &Path) -> String {
 fn resolve_endpoint(
     value: &str,
     positions: &HashMap<String, usize>,
-    normalized: &HashMap<String, String>,
-) -> Option<String> {
+    normalized: &EndpointAliases,
+) -> EndpointResolution {
     if positions.contains_key(value) {
-        Some(value.to_owned())
-    } else {
-        normalized.get(&normalize_id(value)).cloned()
+        return EndpointResolution::Exact(value.to_owned());
     }
+    let alias = normalize_id(value);
+    let Some(candidates) = normalized.get(&alias) else {
+        return EndpointResolution::Missing;
+    };
+    if candidates.len() == 1 {
+        return EndpointResolution::Rewritten {
+            endpoint: candidates.iter().next().cloned().unwrap_or_default(),
+            evidence: EndpointRewriteEvidence {
+                rule: EndpointRewriteRule::GraphNormalizedIdRemap,
+                score: 0.8,
+            },
+        };
+    }
+    EndpointResolution::Ambiguous {
+        alias,
+        candidates: candidates.iter().cloned().collect(),
+    }
+}
+
+fn resolve_edge_endpoint(
+    value: &str,
+    role: &str,
+    edge: &mut EdgeRecord,
+    positions: &HashMap<String, usize>,
+    normalized: &EndpointAliases,
+    diagnostics: &mut Vec<Value>,
+) -> Option<String> {
+    match resolve_endpoint(value, positions, normalized) {
+        EndpointResolution::Exact(endpoint) => Some(endpoint),
+        EndpointResolution::Rewritten { endpoint, evidence } => {
+            stamp_graph_endpoint_rewrites(edge, &[evidence]);
+            Some(endpoint)
+        }
+        EndpointResolution::Ambiguous { alias, candidates } => {
+            diagnostics.push(ambiguous_endpoint_diagnostic(
+                value, &alias, role, candidates,
+            ));
+            None
+        }
+        EndpointResolution::Missing => None,
+    }
+}
+
+fn ambiguous_endpoint_diagnostic(
+    value: &str,
+    alias: &str,
+    role: &str,
+    candidates: Vec<String>,
+) -> Value {
+    serde_json::json!({
+        "severity": "warning",
+        "code": "ambiguous_normalized_endpoint",
+        "message": format!(
+            "{role} endpoint {value:?} has ambiguous normalized alias {alias:?}; topology omitted"
+        ),
+        "relatedIds": candidates,
+    })
 }
 
 fn relation(edge: &EdgeRecord) -> &str {
@@ -822,8 +1157,71 @@ fn edge_language_family(extension: &str) -> Option<&'static str> {
     }
 }
 
-fn edge_key(source: &str, target: &str, relation: &str) -> (String, String, String) {
-    (source.to_owned(), target.to_owned(), relation.to_owned())
+fn edge_occurrence_key(edge: &EdgeRecord) -> (String, String, String, String, String) {
+    (
+        edge.source.clone(),
+        edge.target.clone(),
+        relation(edge).to_owned(),
+        edge_anchor_key(&edge.attributes),
+        edge_rule_key(&edge.attributes),
+    )
+}
+
+fn edge_anchor_key(attributes: &Map<String, Value>) -> String {
+    if let Some(anchor) = canonical_edge_anchor(attributes) {
+        return serde_json::to_string(&[
+            Value::String(anchor.file),
+            Value::from(anchor.start_byte),
+            Value::from(anchor.end_byte),
+            Value::from(anchor.start_line),
+            Value::from(anchor.start_column),
+            Value::from(anchor.end_line),
+            Value::from(anchor.end_column),
+        ])
+        .unwrap_or_default();
+    }
+    serde_json::to_string(&[
+        attributes
+            .get("source_file")
+            .and_then(Value::as_str)
+            .map(|file| Value::String(file.replace('\\', "/")))
+            .unwrap_or(Value::Null),
+        attributes
+            .get("source_location")
+            .cloned()
+            .unwrap_or(Value::Null),
+    ])
+    .unwrap_or_default()
+}
+
+fn canonical_edge_anchor(attributes: &Map<String, Value>) -> Option<SourceAnchor> {
+    if let Some(mut anchor) = attributes
+        .get("source_anchor")
+        .or_else(|| attributes.get("sourceAnchor"))
+        .or_else(|| attributes.get("anchor"))
+        .and_then(|value| serde_json::from_value::<SourceAnchor>(value.clone()).ok())
+    {
+        anchor.file = anchor.file.replace('\\', "/");
+        return Some(anchor);
+    }
+    Some(SourceAnchor {
+        file: attributes.get("source_file")?.as_str()?.replace('\\', "/"),
+        start_byte: attributes.get("start_byte")?.as_u64()?,
+        end_byte: attributes.get("end_byte")?.as_u64()?,
+        start_line: u32::try_from(attributes.get("line_start")?.as_u64()?).ok()?,
+        start_column: u32::try_from(attributes.get("column_start")?.as_u64()?).ok()?,
+        end_line: u32::try_from(attributes.get("line_end")?.as_u64()?).ok()?,
+        end_column: u32::try_from(attributes.get("column_end")?.as_u64()?).ok()?,
+    })
+}
+
+fn edge_rule_key(attributes: &Map<String, Value>) -> String {
+    attributes
+        .get(OCCURRENCE_RULE_ATTRIBUTE)
+        .or_else(|| attributes.get("rule"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn has_parallel_edges(links: &[EdgeRecord], directed: bool) -> bool {
@@ -843,51 +1241,72 @@ fn has_parallel_edges(links: &[EdgeRecord], directed: bool) -> bool {
 fn canonical_hyperedges(
     extraction: &Extraction,
     positions: &HashMap<String, usize>,
-    normalized: &HashMap<String, String>,
+    normalized: &EndpointAliases,
     rekey: &HashMap<String, String>,
+    rewrite_evidence: &HashMap<String, EndpointRewriteEvidence>,
     root: Option<&Path>,
-) -> Vec<Value> {
-    extraction
-        .hyperedges
-        .iter()
-        .filter_map(|value| {
-            let mut hyperedge = value.as_object()?.clone();
-            if !hyperedge.get("nodes").is_some_and(Value::is_array) {
-                for alias in ["members", "node_ids"] {
-                    if let Some(members) = hyperedge.get(alias).and_then(Value::as_array) {
-                        let mut deduped = Vec::new();
-                        for member in members {
-                            if !deduped.contains(member) {
-                                deduped.push(member.clone());
-                            }
+) -> (Vec<Value>, Vec<Value>) {
+    let mut output = Vec::new();
+    let mut diagnostics = Vec::new();
+    for value in &extraction.hyperedges {
+        let Some(mut hyperedge) = value.as_object().cloned() else {
+            continue;
+        };
+        if !hyperedge.get("nodes").is_some_and(Value::is_array) {
+            for alias in ["members", "node_ids"] {
+                if let Some(members) = hyperedge.get(alias).and_then(Value::as_array) {
+                    let mut deduped = Vec::new();
+                    for member in members {
+                        if !deduped.contains(member) {
+                            deduped.push(member.clone());
                         }
-                        hyperedge.insert("nodes".to_owned(), Value::Array(deduped));
-                        break;
                     }
+                    hyperedge.insert("nodes".to_owned(), Value::Array(deduped));
+                    break;
                 }
             }
-            hyperedge.remove("members");
-            hyperedge.remove("node_ids");
-            if let Some(source_file) = hyperedge.get("source_file").and_then(Value::as_str) {
-                hyperedge.insert(
-                    "source_file".to_owned(),
-                    Value::String(normalize_source_file(source_file, root)),
-                );
-            }
-            if let Some(members) = hyperedge.get("nodes").and_then(Value::as_array) {
-                let valid = members
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(|member| remap_endpoint(member, rekey))
-                    .filter_map(|member| resolve_endpoint(&member, positions, normalized))
-                    .map(Value::String)
-                    .collect::<Vec<_>>();
-                if valid.is_empty() {
-                    return None;
+        }
+        hyperedge.remove("members");
+        hyperedge.remove("node_ids");
+        if let Some(source_file) = hyperedge.get("source_file").and_then(Value::as_str) {
+            hyperedge.insert(
+                "source_file".to_owned(),
+                Value::String(normalize_source_file(source_file, root)),
+            );
+        }
+        if let Some(members) = hyperedge.get("nodes").and_then(Value::as_array) {
+            let mut valid = Vec::new();
+            let mut rewrites = Vec::new();
+            let mut ambiguous = false;
+            for member in members.iter().filter_map(Value::as_str) {
+                let (remapped, mut member_rewrites) =
+                    remap_endpoint_with_evidence(member, rekey, rewrite_evidence);
+                rewrites.append(&mut member_rewrites);
+                match resolve_endpoint(&remapped, positions, normalized) {
+                    EndpointResolution::Exact(endpoint) => valid.push(Value::String(endpoint)),
+                    EndpointResolution::Rewritten { endpoint, evidence } => {
+                        valid.push(Value::String(endpoint));
+                        rewrites.push(evidence);
+                    }
+                    EndpointResolution::Ambiguous { alias, candidates } => {
+                        ambiguous = true;
+                        diagnostics.push(ambiguous_endpoint_diagnostic(
+                            member,
+                            &alias,
+                            "hyperedge member",
+                            candidates,
+                        ));
+                    }
+                    EndpointResolution::Missing => {}
                 }
-                hyperedge.insert("nodes".to_owned(), Value::Array(valid));
             }
-            Some(Value::Object(hyperedge))
-        })
-        .collect()
+            if ambiguous || valid.is_empty() {
+                continue;
+            }
+            hyperedge.insert("nodes".to_owned(), Value::Array(valid));
+            stamp_endpoint_rewrite_attributes(&mut hyperedge, &rewrites);
+        }
+        output.push(Value::Object(hyperedge));
+    }
+    (output, diagnostics)
 }

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use compass_files::write_json_ascii_atomic;
 use compass_graph::Communities;
-use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::{DEFAULT_GRAPH_SIZE_CAP_BYTES, EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Serialize, Serializer};
@@ -15,8 +15,6 @@ use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 use ahash::AHashMap;
 
 use crate::OutputError;
-
-const DEFAULT_GRAPH_SIZE_CAP: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct JsonExportOptions<'a> {
@@ -113,8 +111,8 @@ impl Serialize for BorrowedNode<'_> {
         let mut emitted_community = false;
         let mut emitted_community_name = false;
         let mut emitted_norm_label = false;
-        for (key, value) in &self.node.attributes {
-            match key.as_str() {
+        for (key, value) in self.node.properties() {
+            match key {
                 "id" => {
                     output.serialize_entry(key, &self.node.id)?;
                     emitted_id = true;
@@ -131,7 +129,7 @@ impl Serialize for BorrowedNode<'_> {
                     output.serialize_entry(key, self.normalized_label)?;
                     emitted_norm_label = true;
                 }
-                _ => output.serialize_entry(key, value)?,
+                _ => output.serialize_entry(key, &value)?,
             }
         }
         if !emitted_id {
@@ -170,17 +168,11 @@ struct BorrowedLink<'a> {
 
 impl Serialize for BorrowedLink<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let source = self.edge.attributes.get("_src");
-        let target = self.edge.attributes.get("_tgt");
+        let source = self.edge.property("_src");
+        let target = self.edge.property("_tgt");
         let confidence_score =
-            (!self.edge.attributes.contains_key("confidence_score")).then(|| {
-                match self
-                    .edge
-                    .attributes
-                    .get("confidence")
-                    .and_then(Value::as_str)
-                    .unwrap_or("EXTRACTED")
-                {
+            self.edge.property("confidence_score").is_none().then(|| {
+                match self.edge.string("confidence").as_str() {
                     "INFERRED" => 0.5,
                     "AMBIGUOUS" => 0.2,
                     _ => 1.0,
@@ -189,11 +181,11 @@ impl Serialize for BorrowedLink<'_> {
         let mut output = serializer.serialize_map(None)?;
         let mut emitted_source = false;
         let mut emitted_target = false;
-        for (key, value) in &self.edge.attributes {
-            match key.as_str() {
+        for (key, value) in self.edge.properties() {
+            match key {
                 "_src" | "_tgt" => {}
                 "source" => {
-                    if let Some(source) = source {
+                    if let Some(source) = &source {
                         output.serialize_entry(key, source)?;
                     } else {
                         output.serialize_entry(key, &self.edge.source)?;
@@ -201,25 +193,25 @@ impl Serialize for BorrowedLink<'_> {
                     emitted_source = true;
                 }
                 "target" => {
-                    if let Some(target) = target {
+                    if let Some(target) = &target {
                         output.serialize_entry(key, target)?;
                     } else {
                         output.serialize_entry(key, &self.edge.target)?;
                     }
                     emitted_target = true;
                 }
-                _ => output.serialize_entry(key, value)?,
+                _ => output.serialize_entry(key, &value)?,
             }
         }
         if !emitted_source {
-            if let Some(source) = source {
+            if let Some(source) = &source {
                 output.serialize_entry("source", source)?;
             } else {
                 output.serialize_entry("source", &self.edge.source)?;
             }
         }
         if !emitted_target {
-            if let Some(target) = target {
+            if let Some(target) = &target {
                 output.serialize_entry("target", target)?;
             } else {
                 output.serialize_entry("target", &self.edge.target)?;
@@ -250,7 +242,10 @@ pub fn export_json_value(
         .nodes
         .iter()
         .map(|node| {
-            let mut output = node.attributes.clone();
+            let mut output = node
+                .properties()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect::<Map<_, _>>();
             output.insert("id".to_owned(), Value::String(node.id.clone()));
             let community = node_community.get(node.id.as_str()).copied();
             output.insert(
@@ -284,7 +279,10 @@ pub fn export_json_value(
         .links
         .iter()
         .map(|edge| {
-            let mut output = edge.attributes.clone();
+            let mut output = edge
+                .properties()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect::<Map<_, _>>();
             let needs_score = !output.contains_key("confidence_score");
             let confidence = output
                 .get("confidence")
@@ -353,10 +351,7 @@ pub fn write_json(
         .nodes
         .par_iter()
         .map(|node| {
-            node.attributes
-                .get("label")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
+            node.label()
                 .nfkd()
                 .filter(|character| !is_combining_mark(*character))
                 .collect::<String>()
@@ -414,11 +409,11 @@ fn enforce_shrink_guard(path: &Path, new_count: usize, force: bool) -> Result<()
 
 fn graph_size_cap() -> u64 {
     let Ok(raw) = std::env::var("COMPASS_MAX_GRAPH_BYTES") else {
-        return DEFAULT_GRAPH_SIZE_CAP;
+        return DEFAULT_GRAPH_SIZE_CAP_BYTES;
     };
     let text = raw.trim().to_uppercase();
     if text.is_empty() {
-        return DEFAULT_GRAPH_SIZE_CAP;
+        return DEFAULT_GRAPH_SIZE_CAP_BYTES;
     }
     let (number, multiplier) = if let Some(number) = text.strip_suffix("GB") {
         (number, 1024_u64 * 1024 * 1024)
@@ -433,7 +428,7 @@ fn graph_size_cap() -> u64 {
         .ok()
         .and_then(|value| value.checked_mul(multiplier))
         .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_GRAPH_SIZE_CAP)
+        .unwrap_or(DEFAULT_GRAPH_SIZE_CAP_BYTES)
 }
 
 pub(crate) fn escape_non_ascii(value: &str) -> String {

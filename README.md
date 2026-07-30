@@ -24,8 +24,9 @@ less searching, smaller context, traceable evidence
 [View releases](https://github.com/crabbuild/compass/releases)
 
 Use Compass inside your editor with the first-party
-[VS Code extension guide](docs/guides/vscode.md): current graph, cursor-rooted
-call graphs, architecture flow, queries, and exact Git evolution.
+[Compass Codegraph extension for VS Code](https://marketplace.visualstudio.com/items?itemName=crabbuild.crabbuild-compass-vscode).
+See the [VS Code extension guide](docs/guides/vscode.md) for current graphs,
+cursor-rooted call graphs, architecture flow, queries, and exact Git evolution.
 
 ## What Compass gives you
 
@@ -155,7 +156,21 @@ Compass verifies the official release checksum before replacing the executable.
 If no newer release is available, it exits successfully and reports that the
 installed version is already the latest.
 
-### 2. Initialize and build a local graph
+### 2. Install the VS Code extension (optional)
+
+After installing the Compass CLI, install
+[Compass Codegraph from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=crabbuild.crabbuild-compass-vscode)
+by selecting **Install** on its Marketplace page. You can also install it from
+a terminal:
+
+```bash
+code --install-extension crabbuild.crabbuild-compass-vscode
+```
+
+Open your repository in VS Code. The extension detects the installed Compass
+CLI and guides you to initialize the repository from the Compass sidebar.
+
+### 3. Initialize and build a local graph
 
 ```bash
 cd your-project
@@ -183,7 +198,7 @@ compass-out/
 └── manifest.json     incremental build state
 ```
 
-### 3. Ask useful questions
+### 4. Ask useful questions
 
 ```bash
 compass query "where is authentication enforced?"

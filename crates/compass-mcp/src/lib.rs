@@ -1,5 +1,6 @@
 //! Native MCP service for Compass-compatible Compass graph queries.
 
+mod code_query;
 mod transport;
 
 pub use transport::{HttpOptions, serve_http, serve_stdio};
@@ -36,6 +37,35 @@ use time::format_description::well_known::Rfc3339;
 
 const SERVER_NAME: &str = "compass";
 
+#[derive(Debug)]
+enum InvocationError {
+    InvalidParams(String),
+    Internal(String),
+}
+
+impl InvocationError {
+    fn protocol_error(self) -> ErrorData {
+        match self {
+            Self::InvalidParams(message) => ErrorData::invalid_params(message, None),
+            Self::Internal(message) => ErrorData::internal_error(message, None),
+        }
+    }
+}
+
+impl std::fmt::Display for InvocationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidParams(message) | Self::Internal(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl From<String> for InvocationError {
+    fn from(message: String) -> Self {
+        Self::InvalidParams(message)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FileKey {
     modified: Option<SystemTime>,
@@ -56,9 +86,8 @@ impl GraphContext {
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
             if let Some(community) = node
-                .attributes
-                .get("community")
-                .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+                .unsigned("community")
+                .or_else(|| node.string("community").parse().ok())
                 .and_then(|value| usize::try_from(value).ok())
             {
                 communities.entry(community).or_default().push(index);
@@ -121,20 +150,25 @@ impl GraphStore {
         }
     }
 
-    fn resolve(&self, project_path: Option<&str>) -> PathBuf {
+    fn resolve(&self, project_path: Option<&str>) -> Result<PathBuf, String> {
         project_path.map_or_else(
-            || self.inner.default_graph.clone(),
+            || {
+                compass_files::BuildGuard::resolve_requested_artifact(&self.inner.default_graph)
+                    .map_err(|error| error.to_string())
+            },
             |project| {
                 let output = std::env::var_os("COMPASS_OUT")
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("compass-out"));
-                Path::new(project).join(output).join("graph.json")
+                let output = Path::new(project).join(output);
+                compass_files::BuildGuard::resolve_requested_artifact(&output.join("graph.json"))
+                    .map_err(|error| error.to_string())
             },
         )
     }
 
     fn load(&self, project_path: Option<&str>) -> Result<Arc<GraphContext>, String> {
-        let path = self.resolve(project_path);
+        let path = self.resolve(project_path)?;
         let metadata =
             fs::metadata(&path).map_err(|_| format!("graph.json not found: {}", path.display()))?;
         let key = FileKey {
@@ -195,20 +229,13 @@ impl CompassMcp {
     /// Invoke a graph tool without a transport, primarily for compatibility tests.
     #[must_use]
     pub fn invoke(&self, name: &str, mut arguments: Map<String, Value>) -> String {
-        if !tool_specs().iter().any(|tool| tool.name == name) {
-            return format!("Unknown tool: {name}");
-        }
-        let project_path = arguments
-            .remove("project_path")
-            .and_then(|value| value.as_str().map(str::to_owned));
-        let context = match self.store.load(project_path.as_deref()) {
-            Ok(context) => context,
-            Err(error) => return format!("Error executing {name}: {error}"),
-        };
-        match invoke_tool(name, &arguments, &context) {
-            Ok(output) => output,
-            Err(error) => format!("Error executing {name}: {error}"),
-        }
+        self.invoke_result(name, &mut arguments)
+            .map(|result| {
+                result
+                    .structured_content
+                    .map_or(result.text, |value| value.to_string())
+            })
+            .unwrap_or_else(|error| format!("Error executing {name}: {error}"))
     }
 
     /// Read a compass resource without a transport.
@@ -249,8 +276,16 @@ impl ServerHandler for CompassMcp {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        let output = self.invoke(&request.name, request.arguments.unwrap_or_default());
-        Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+        let mut arguments = request.arguments.unwrap_or_default();
+        let result = self
+            .invoke_result(&request.name, &mut arguments)
+            .map_err(InvocationError::protocol_error)?;
+        let mut response = result.structured_content.map_or_else(
+            || CallToolResult::success(Vec::new()),
+            CallToolResult::structured,
+        );
+        response.content = vec![ContentBlock::text(result.text)];
+        Ok(response)
     }
 
     async fn list_resources(
@@ -280,12 +315,102 @@ impl ServerHandler for CompassMcp {
     }
 }
 
+struct ToolInvocation {
+    text: String,
+    structured_content: Option<Value>,
+}
+
+impl CompassMcp {
+    fn invoke_result(
+        &self,
+        name: &str,
+        arguments: &mut Map<String, Value>,
+    ) -> Result<ToolInvocation, InvocationError> {
+        if !tool_specs().iter().any(|tool| tool.name == name) {
+            return Err(InvocationError::InvalidParams(format!(
+                "unknown tool: {name}"
+            )));
+        }
+        let project_path = arguments
+            .remove("project_path")
+            .and_then(|value| value.as_str().map(str::to_owned));
+        let context = self
+            .store
+            .load(project_path.as_deref())
+            .map_err(InvocationError::Internal)?;
+        if matches!(
+            name,
+            "search_symbols"
+                | "get_callers"
+                | "get_callees"
+                | "get_impact"
+                | "explore_code"
+                | "get_node"
+        ) {
+            let response = code_query::invoke(name, arguments, &context.path)?;
+            let text = format!(
+                "{:?}: {} nodes, {} edges, {} paths{}",
+                response.operation,
+                response.nodes.len(),
+                response.edges.len(),
+                response.paths.len(),
+                if response.truncated {
+                    " (truncated)"
+                } else {
+                    ""
+                }
+            );
+            return Ok(ToolInvocation {
+                text,
+                structured_content: Some(
+                    serde_json::to_value(response)
+                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
+                ),
+            });
+        }
+        Ok(ToolInvocation {
+            text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
+            structured_content: None,
+        })
+    }
+}
+
 fn tool_specs() -> Vec<Tool> {
     let project = json!({
         "type": "string",
         "description": "Absolute path to a project directory containing compass-out/graph.json. Optional — defaults to the graph this server was started with."
     });
     let mut specs = vec![
+        tool(
+            "search_symbols",
+            "Search Compass code symbols with the trusted FTS5 index.",
+            code_query::schema(&["query"]),
+        ),
+        tool(
+            "get_callers",
+            "Return one-hop callers and route bindings for a symbol.",
+            code_query::schema(&["symbol"]),
+        ),
+        tool(
+            "get_callees",
+            "Return one-hop callees for a symbol.",
+            code_query::schema(&["symbol"]),
+        ),
+        tool(
+            "get_impact",
+            "Return the bounded transitive impact radius for a symbol.",
+            code_query::schema(&["symbol"]),
+        ),
+        tool(
+            "explore_code",
+            "Return related symbols, connecting paths, and verified source grouped by file.",
+            code_query::schema(&["symbols"]),
+        ),
+        tool(
+            "get_node",
+            "Return the trusted evidence trail between two code-graph nodes.",
+            code_query::schema(&["source", "target"]),
+        ),
         tool(
             "query_graph",
             "Search the knowledge graph using BFS or DFS. Returns relevant nodes and edges as text context.",
@@ -296,11 +421,6 @@ fn tool_specs() -> Vec<Tool> {
                 "token_budget":{"type":"integer","default":2000,"description":"Max output tokens"},
                 "context_filter":{"type":"array","items":{"type":"string"},"description":"Optional explicit edge-context filter, e.g. ['call', 'field']"}
             },"required":["question"]}),
-        ),
-        tool(
-            "get_node",
-            "Get full details for a specific node by label or ID.",
-            json!({"type":"object","properties":{"label":{"type":"string","description":"Node label or ID to look up"}},"required":["label"]}),
         ),
         tool(
             "get_neighbors",
@@ -416,8 +536,9 @@ fn invoke_tool(
     context: &GraphContext,
 ) -> Result<String, String> {
     match name {
+        "search_symbols" | "get_callers" | "get_callees" | "get_impact" | "explore_code"
+        | "get_node" => Err("code query tool requires typed invocation".to_owned()),
         "query_graph" => tool_query_graph(arguments, context),
-        "get_node" => tool_get_node(arguments, context),
         "get_neighbors" => tool_get_neighbors(arguments, context),
         "get_community" => tool_get_community(arguments, context),
         "god_nodes" => tool_god_nodes(arguments, context),
@@ -583,31 +704,6 @@ fn expand_home(path: &Path) -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .map_or_else(|| path.to_path_buf(), |home| home.join(suffix))
-}
-
-fn tool_get_node(arguments: &Map<String, Value>, context: &GraphContext) -> Result<String, String> {
-    let query = string_argument(arguments, "label")?.to_lowercase();
-    let Some((index, node)) = context.graph.nodes().find(|(_, node)| {
-        node.label().to_lowercase().contains(&query) || node.id.to_lowercase() == query
-    }) else {
-        return Ok(format!("No node matching '{query}' found."));
-    };
-    let community_name = node.string("community_name");
-    let community = if community_name.is_empty() {
-        node.string("community")
-    } else {
-        community_name
-    };
-    Ok(format!(
-        "Node: {}\n  ID: {}\n  Source: {} {}\n  Type: {}\n  Community: {}\n  Degree: {}",
-        sanitize_label(node.label()),
-        sanitize_label(&node.id),
-        sanitize_label(&node.string("source_file")),
-        sanitize_label(&node.string("source_location")),
-        sanitize_label(&node.string("file_type")),
-        sanitize_label(&community),
-        context.graph.degree(index)
-    ))
 }
 
 fn tool_get_neighbors(
@@ -1170,6 +1266,22 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Strin
 mod tests {
     use super::*;
 
+    #[test]
+    fn invocation_errors_preserve_json_rpc_taxonomy() {
+        assert_eq!(
+            InvocationError::InvalidParams("bad input".to_owned())
+                .protocol_error()
+                .code,
+            rmcp::model::ErrorCode::INVALID_PARAMS
+        );
+        assert_eq!(
+            InvocationError::Internal("corrupt graph".to_owned())
+                .protocol_error()
+                .code,
+            rmcp::model::ErrorCode::INTERNAL_ERROR
+        );
+    }
+
     fn sample(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         fs::write(
             path,
@@ -1184,7 +1296,7 @@ mod tests {
         let graph = temp.path().join("graph.json");
         sample(&graph)?;
         let server = CompassMcp::new(graph);
-        assert_eq!(CompassMcp::tools().len(), 10);
+        assert_eq!(CompassMcp::tools().len(), 15);
         assert_eq!(CompassMcp::resources().len(), 6);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
@@ -1221,6 +1333,72 @@ mod tests {
     }
 
     #[test]
+    fn project_path_fails_closed_on_a_malformed_generation_pointer()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let default = temp.path().join("default.json");
+        sample(&default)?;
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("compass-out"))?;
+        sample(&project.join("compass-out/graph.json"))?;
+        fs::write(
+            project.join("compass-out/.compass-active-generation"),
+            "../escape",
+        )?;
+        let server = CompassMcp::new(default);
+        let mut args = Map::new();
+        args.insert(
+            "project_path".to_owned(),
+            Value::String(project.to_string_lossy().into_owned()),
+        );
+        let result = server.invoke("graph_stats", args);
+        assert!(result.contains("generation"), "{result}");
+        assert!(!result.contains("Nodes: 2"), "{result}");
+        Ok(())
+    }
+
+    #[test]
+    fn default_public_graph_tracks_generation_changes_and_fails_closed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let output = temp.path().join("compass-out");
+        fs::create_dir_all(&output)?;
+        sample(&output.join("graph.json"))?;
+
+        let first = compass_files::BuildGuard::begin(&output)?;
+        fs::write(
+            first.staging_directory().join("graph.json"),
+            r#"{"directed":true,"nodes":[{"id":"generation-one"}],"links":[]}"#,
+        )?;
+        first.commit_with_artifacts(&["graph.json"])?;
+
+        let server = CompassMcp::new(output.join("graph.json"));
+        assert!(
+            server
+                .invoke("graph_stats", Map::new())
+                .contains("Nodes: 1")
+        );
+
+        let second = compass_files::BuildGuard::begin(&output)?;
+        fs::write(
+            second.staging_directory().join("graph.json"),
+            r#"{"directed":true,"nodes":[{"id":"a"},{"id":"b"},{"id":"c"}],"links":[]}"#,
+        )?;
+        second.commit_with_artifacts(&["graph.json"])?;
+        assert!(
+            server
+                .invoke("graph_stats", Map::new())
+                .contains("Nodes: 3")
+        );
+
+        fs::write(output.join(".compass-active-generation"), "../escape")?;
+        let malformed = server.invoke("graph_stats", Map::new());
+        assert!(malformed.contains("generation"), "{malformed}");
+        assert!(!malformed.contains("Nodes: 2"), "{malformed}");
+        Ok(())
+    }
+
+    #[test]
     fn python_rounding_is_bankers_rounding() {
         assert_eq!(python_percent(1, 8), 12);
         assert_eq!(python_percent(1, 40), 2);
@@ -1232,7 +1410,7 @@ mod tests {
         let server = CompassMcp::new("missing.json");
         assert_eq!(
             server.invoke("not_a_tool", Map::new()),
-            "Unknown tool: not_a_tool"
+            "Error executing not_a_tool: unknown tool: not_a_tool"
         );
     }
 
@@ -1282,9 +1460,10 @@ mod tests {
         let invoke = |name: &str, value: Value| {
             server.invoke(name, value.as_object().cloned().unwrap_or_default())
         };
-        assert!(invoke("get_node", json!({"label":"alpha"})).contains("Node: Alpha"));
-        assert!(invoke("get_node", json!({"label":"absent"})).contains("No node"));
-        assert!(invoke("get_node", json!({})).contains("'label'"));
+        assert!(
+            invoke("get_node", json!({"source":"a","target":"b"}))
+                .contains("requires compass.graph/1")
+        );
         let neighbors = invoke("get_neighbors", json!({"label":"Beta"}));
         assert!(neighbors.contains("--> Delta"));
         assert!(neighbors.contains("<-- Alpha"));

@@ -16,11 +16,12 @@ const FILE_COUNT_UPPER: usize = 500;
 const CODE_EXTENSIONS: &[&str] = &[
     "py", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "ejs", "ets", "go", "rs", "java",
     "groovy", "gradle", "cpp", "cc", "cxx", "c", "h", "hpp", "cu", "cuh", "metal", "rb", "rake",
-    "swift", "kt", "kts", "cs", "scala", "php", "lua", "luau", "toc", "zig", "ps1", "psm1", "psd1",
-    "ex", "exs", "m", "mm", "jl", "vue", "svelte", "astro", "dart", "v", "sv", "svh", "sql", "r",
-    "pl", "pm", "f", "f90", "f95", "f03", "f08", "pas", "pp", "dpr", "dpk", "lpr", "inc", "dfm",
-    "lfm", "lpk", "sh", "bash", "json", "tf", "tfvars", "hcl", "dm", "dme", "dmi", "dmm", "dmf",
-    "sln", "slnx", "csproj", "fsproj", "vbproj", "xaml", "razor", "cshtml", "cls", "trigger",
+    "swift", "kt", "kts", "cs", "scala", "php", "module", "theme", "install", "lua", "luau", "toc",
+    "zig", "ps1", "psm1", "psd1", "ex", "exs", "m", "mm", "jl", "vue", "svelte", "astro", "dart",
+    "v", "sv", "svh", "sql", "r", "pl", "pm", "f", "f90", "f95", "f03", "f08", "pas", "pp", "dpr",
+    "dpk", "lpr", "inc", "dfm", "lfm", "lpk", "sh", "bash", "json", "tf", "tfvars", "hcl", "dm",
+    "dme", "dmi", "dmm", "dmf", "sln", "slnx", "csproj", "fsproj", "vbproj", "xaml", "razor",
+    "cshtml", "cls", "trigger",
 ];
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "md", "mdx", "qmd", "skill", "txt", "rst", "html", "yaml", "yml", "docx", "xlsx", "gdoc",
@@ -46,6 +47,7 @@ const SECRET_PRONE_EXTENSIONS: &[&str] = &[
     "tfvars",
 ];
 const SKIP_FILES: &[&str] = &[
+    ".git",
     "package-lock.json",
     "yarn.lock",
     "pnpm-lock.yaml",
@@ -654,6 +656,7 @@ fn looks_like_paper(path: &Path) -> bool {
 
 pub fn classify_file(path: &Path) -> Option<FileType> {
     if is_package_manifest(path)
+        || is_play_routes_file(path)
         || path
             .file_name()
             .and_then(|value| value.to_str())
@@ -707,6 +710,7 @@ fn graphable_source(path: &Path) -> bool {
         return false;
     }
     if is_package_manifest(path)
+        || is_play_routes_file(path)
         || path
             .file_name()
             .and_then(|value| value.to_str())
@@ -718,6 +722,15 @@ fn graphable_source(path: &Path) -> bool {
         return shebang_is_code(path);
     }
     CODE_EXTENSIONS.contains(&ext.as_str())
+}
+
+fn is_play_routes_file(path: &Path) -> bool {
+    path.file_name().and_then(|value| value.to_str()) == Some("routes")
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|value| value.to_str())
+            .is_some_and(|parent| parent.eq_ignore_ascii_case("conf"))
 }
 
 fn generic_keyword_hit(name: &str) -> bool {

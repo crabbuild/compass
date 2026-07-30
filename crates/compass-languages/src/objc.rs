@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use compass_model::{EdgeRecord, NodeRecord};
+use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
@@ -196,6 +196,7 @@ impl<'tree> State<'_, 'tree> {
         let name = self.text(*name_node).to_owned();
         let id = make_id(&[&self.stem, &name]);
         self.add_node(id.clone(), &name, line(node));
+        self.set_node_kind(&id, "class", node);
         self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
         let mut colon = false;
         let mut cursor = node.walk();
@@ -252,6 +253,7 @@ impl<'tree> State<'_, 'tree> {
         let id = make_id(&[&self.stem, &name]);
         if !self.seen_nodes.contains(&id) {
             self.add_node(id.clone(), &name, line(node));
+            self.set_node_kind(&id, "class", node);
             self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
         }
         for definition in direct_children(node, "implementation_definition") {
@@ -269,13 +271,16 @@ impl<'tree> State<'_, 'tree> {
         let name = self.text(name_node).to_owned();
         let id = make_id(&[&self.stem, &name]);
         self.add_node(id.clone(), &format!("<{name}>"), line(node));
+        self.set_node_kind(&id, "protocol", node);
         self.add_edge(&self.file_id.clone(), &id, "contains", line(node), None);
+        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
         for references in direct_children(node, "protocol_reference_list") {
             for base in direct_children(references, "identifier") {
                 let name = self.text(base).to_owned();
                 let target = self.ensure_named(&name);
                 if target != id {
-                    self.add_edge(&id, &target, "implements", line(node), None);
+                    self.add_edge(&id, &target, "implements", line(base), None);
+                    crate::facts::stamp_last_edge_range(&mut self.extraction, base);
                 }
             }
         }
@@ -303,6 +308,7 @@ impl<'tree> State<'_, 'tree> {
         let name = parts.join("");
         let id = make_id(&[&container, &name]);
         self.add_node(id.clone(), &format!("{prefix}{name}"), line(node));
+        self.set_node_kind(&id, "method", node);
         self.add_edge(&container, &id, "method", line(node), None);
         if node.kind() == "method_definition" {
             self.method_bodies.push(MethodBody {
@@ -383,9 +389,8 @@ impl<'tree> State<'_, 'tree> {
                 for candidate in index.all_ids.iter().filter(|candidate| {
                     candidate.ends_with(&needle) && candidate.as_str() != caller
                 }) {
-                    if seen.insert((caller.to_owned(), candidate.clone())) {
-                        self.add_edge(caller, candidate, "calls", line(node), Some("call"));
-                    }
+                    self.add_edge(caller, candidate, "calls", line(node), Some("call"));
+                    crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                 }
                 if let Some(receiver) = receiver.filter(|receiver| receiver.kind() == "identifier")
                 {
@@ -399,7 +404,7 @@ impl<'tree> State<'_, 'tree> {
                         receiver: Some(Some(receiver)),
                         receiver_type: None,
                         lang: Some("objc".to_owned()),
-                        extensions: Map::new(),
+                        extensions: crate::facts::node_range(node),
                     });
                 }
             }
@@ -426,9 +431,8 @@ impl<'tree> State<'_, 'tree> {
                 .collect();
             if matches.len() == 1 {
                 let target = matches.into_iter().next().unwrap_or_default();
-                if seen.insert((caller.to_owned(), target.clone())) {
-                    self.add_edge(caller, &target, "calls", line(node), Some("call"));
-                }
+                self.add_edge(caller, &target, "calls", line(node), Some("call"));
+                crate::facts::stamp_last_edge_range(&mut self.extraction, node);
             }
         }
         let mut cursor = node.walk();
@@ -481,6 +485,20 @@ impl<'tree> State<'_, 'tree> {
             Value::String(format!("L{at_line}")),
         );
         self.extraction.nodes.push(NodeRecord { id, attributes });
+    }
+
+    fn set_node_kind(&mut self, id: &str, kind: &str, node: Node<'_>) {
+        if let Some(record) = self
+            .extraction
+            .nodes
+            .iter_mut()
+            .find(|record| record.id == id)
+        {
+            record
+                .attributes
+                .insert("symbol_kind".to_owned(), Value::String(kind.to_owned()));
+            crate::facts::stamp_node_range(&mut record.attributes, node);
+        }
     }
 
     fn add_edge(
