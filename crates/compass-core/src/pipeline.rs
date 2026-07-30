@@ -1358,6 +1358,7 @@ fn build_graph_inner(
         let started = Instant::now();
         let mut output_profile_started = Instant::now();
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        let normalization_started = Instant::now();
         let published = published_v1_document(
             &document,
             &communities,
@@ -1372,12 +1373,21 @@ fn build_graph_inner(
             configuration_digest,
             commit.as_deref(),
         )?;
+        profile_internal_duration(
+            "graph.json v1 normalization",
+            normalization_started.elapsed(),
+        );
         if published.document.nodes.is_empty() {
             return Err(CoreError::EmptyGraph);
         }
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
+        let serialization_started = Instant::now();
         write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        profile_internal_duration(
+            "graph.json v1 serialization",
+            serialization_started.elapsed(),
+        );
         profile_internal("graph.json v1 publication", &mut output_profile_started);
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
