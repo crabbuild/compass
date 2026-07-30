@@ -106,6 +106,12 @@ pub(crate) struct SavedStats {
     pub nodes: usize,
     pub edges: usize,
     pub communities: usize,
+    #[serde(default)]
+    pub omitted_nodes: usize,
+    #[serde(default)]
+    pub omitted_edges: usize,
+    #[serde(default)]
+    pub identity_collisions: usize,
     pub program_modules: usize,
     pub program_summaries: usize,
     pub program_providers: usize,

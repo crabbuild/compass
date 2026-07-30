@@ -1962,6 +1962,40 @@ pub fn normalize_document_v1_with_inventory(
     source_commit: Option<&str>,
     inventory: Vec<InventoryEvidence>,
 ) -> Result<GraphDocument, GraphError> {
+    let (extraction, evidence) = document_publication_input(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+    )?;
+    normalize_v1(extraction, evidence)
+}
+
+pub fn normalize_document_v1_with_inventory_best_effort(
+    document: &compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+    )?;
+    normalize_v1_best_effort(extraction, evidence)
+}
+
+fn document_publication_input(
+    document: &compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+) -> Result<(Extraction, BuildEvidence), GraphError> {
     let mut extensions = Map::new();
     if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
         extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
@@ -1991,7 +2025,7 @@ pub fn normalize_document_v1_with_inventory(
         BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
     evidence.include_inventory(inventory)?;
     evidence.build.source_commit = source_commit.map(str::to_owned);
-    normalize_v1(extraction, evidence)
+    Ok((extraction, evidence))
 }
 
 /// Project trusted v1 records back into flexible facts for incremental recomposition.
