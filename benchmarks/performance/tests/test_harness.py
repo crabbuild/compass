@@ -5,7 +5,7 @@ import subprocess
 import sys
 import unittest
 
-from benchmarks.performance.harness import build_parser
+from benchmarks.performance.harness import _existing_ancestor, build_parser
 
 
 HARNESS = Path(__file__).parents[1] / "harness.py"
@@ -48,6 +48,10 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertNotEqual(0, completed.returncode)
         self.assertIn("at least 3", completed.stderr)
+
+    def test_disk_check_accepts_a_not_yet_created_workspace(self) -> None:
+        missing = Path("/tmp") / "compass-does-not-exist" / "workspace"
+        self.assertEqual(Path("/tmp").resolve(), _existing_ancestor(missing))
 
 
 if __name__ == "__main__":

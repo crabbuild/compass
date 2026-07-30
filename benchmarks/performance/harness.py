@@ -142,6 +142,15 @@ def _selected(suite_path: Path, names: Sequence[str]):
     return suite, selected
 
 
+def _existing_ancestor(path: Path) -> Path:
+    candidate = path.resolve(strict=False)
+    while not candidate.exists():
+        if candidate.parent == candidate:
+            raise ValueError(f"no existing ancestor for {path}")
+        candidate = candidate.parent
+    return candidate
+
+
 def doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, object]] = []
 
@@ -170,14 +179,15 @@ def doctor(args: argparse.Namespace) -> int:
     required_disk = (
         SELECTED_REPOSITORY_DISK_BYTES if args.repository else FULL_SUITE_DISK_BYTES
     )
+    disk_anchor = _existing_ancestor(args.workspace)
     check(
         "disk",
-        lambda: f"{shutil.disk_usage(args.workspace.parent).free} bytes free"
-        if shutil.disk_usage(args.workspace.parent).free >= required_disk
+        lambda: f"{shutil.disk_usage(disk_anchor).free} bytes free"
+        if shutil.disk_usage(disk_anchor).free >= required_disk
         else (_ for _ in ()).throw(
             RuntimeError(
                 f"{required_disk} bytes required; "
-                f"{shutil.disk_usage(args.workspace.parent).free} available"
+                f"{shutil.disk_usage(disk_anchor).free} available"
             )
         ),
     )
