@@ -1216,25 +1216,6 @@ fn build_graph_inner(
             .ok()
             .and_then(|directory| git_commit(&directory))
     });
-    let preflight_started = Instant::now();
-    let preflight = normalize_document_v1_with_inventory_best_effort(
-        &document,
-        &root,
-        graph_configuration_digest(options, &output_dir)?,
-        commit.as_deref(),
-        detection_inventory(
-            &detection,
-            semantic,
-            &extraction_failures,
-            &extraction_partials,
-            &root,
-        ),
-    )?;
-    if preflight.document.nodes.is_empty() {
-        return Err(CoreError::EmptyGraph);
-    }
-    profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
-
     let unchanged_artifacts_complete = match options.purpose {
         BuildPurpose::Update => update_artifacts_complete(&output_dir),
         BuildPurpose::Extract => {
@@ -1245,78 +1226,92 @@ fn build_graph_inner(
     let unchanged_layers = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
             && semantic.is_some_and(semantic_layer_is_empty));
-    if !preflight.omissions.is_partial()
-        && unchanged_layers
-        && supplemental.is_empty()
-        && !options.force
-        && unchanged_artifacts_complete
-        && GraphDocument::load(&output_dir.join("graph.json"))
-            .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+    if unchanged_layers && supplemental.is_empty() && !options.force && unchanged_artifacts_complete
     {
-        let communities = previous_communities(&output_dir.join("graph.json"))
-            .values()
-            .copied()
-            .collect::<HashSet<_>>()
-            .len();
-        let mut manifest = prior_manifest;
-        save_build_manifest(
-            &mut manifest,
-            &detection.files,
-            &manifest_path,
+        let preflight_started = Instant::now();
+        let preflight = normalize_document_v1_with_inventory_best_effort(
+            &document,
             &root,
-            semantic,
+            graph_configuration_digest(options, &output_dir)?,
+            commit.as_deref(),
+            detection_inventory(
+                &detection,
+                semantic,
+                &extraction_failures,
+                &extraction_partials,
+                &root,
+            ),
         )?;
-        remove_if_exists(&output_dir.join("needs_update"))?;
-        publish_build_state(
-            options,
-            &output_dir,
-            &manifest_path,
-            sources.len(),
-            document.nodes.len(),
-            document.links.len(),
-            communities,
-            PublicationOmissions::default(),
-            program.as_ref(),
-        )?;
-        let published_output_dir = commit_generation(guard, &output_container)?;
-        return Ok(BuildResult {
-            root,
-            output_dir: published_output_dir,
-            detection,
-            files_considered: sources.len(),
-            files_extracted: missing.len(),
-            files_cached: sources.len().saturating_sub(missing.len()),
-            empty_files,
-            nodes: document.nodes.len(),
-            edges: document.links.len(),
-            communities,
-            omitted_nodes: 0,
-            omitted_edges: 0,
-            identity_collisions: 0,
-            partial_graph: false,
-            html_written: output_dir.join("graph.html").is_file(),
-            outputs_changed: false,
-            program_modules: program_modules(program.as_ref()),
-            program_summaries: program_summaries(program.as_ref()),
-            program_syntax_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.syntax_analyzed),
-            program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
-            program_artifacts_loaded: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_loaded),
-            program_artifacts_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifacts_reused),
-            program_artifact_documents_analyzed: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_analyzed),
-            program_artifact_documents_reused: program
-                .as_ref()
-                .map_or(0, |program| program.artifact_documents_reused),
-            program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
-            timings,
-        });
+        profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
+        if !preflight.omissions.is_partial()
+            && GraphDocument::load(&output_dir.join("graph.json"))
+                .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+        {
+            let communities = previous_communities(&output_dir.join("graph.json"))
+                .values()
+                .copied()
+                .collect::<HashSet<_>>()
+                .len();
+            let mut manifest = prior_manifest;
+            save_build_manifest(
+                &mut manifest,
+                &detection.files,
+                &manifest_path,
+                &root,
+                semantic,
+            )?;
+            remove_if_exists(&output_dir.join("needs_update"))?;
+            publish_build_state(
+                options,
+                &output_dir,
+                &manifest_path,
+                sources.len(),
+                document.nodes.len(),
+                document.links.len(),
+                communities,
+                PublicationOmissions::default(),
+                program.as_ref(),
+            )?;
+            let published_output_dir = commit_generation(guard, &output_container)?;
+            return Ok(BuildResult {
+                root,
+                output_dir: published_output_dir,
+                detection,
+                files_considered: sources.len(),
+                files_extracted: missing.len(),
+                files_cached: sources.len().saturating_sub(missing.len()),
+                empty_files,
+                nodes: document.nodes.len(),
+                edges: document.links.len(),
+                communities,
+                omitted_nodes: 0,
+                omitted_edges: 0,
+                identity_collisions: 0,
+                partial_graph: false,
+                html_written: output_dir.join("graph.html").is_file(),
+                outputs_changed: false,
+                program_modules: program_modules(program.as_ref()),
+                program_summaries: program_summaries(program.as_ref()),
+                program_syntax_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.syntax_analyzed),
+                program_syntax_reused: program.as_ref().map_or(0, |program| program.syntax_reused),
+                program_artifacts_loaded: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_loaded),
+                program_artifacts_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifacts_reused),
+                program_artifact_documents_analyzed: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_analyzed),
+                program_artifact_documents_reused: program
+                    .as_ref()
+                    .map_or(0, |program| program.artifact_documents_reused),
+                program_conflicts: program.as_ref().map_or(0, |program| program.conflicts),
+                timings,
+            });
+        }
     }
 
     // A history realization must depend only on the target commit and build
