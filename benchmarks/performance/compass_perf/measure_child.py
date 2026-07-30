@@ -74,12 +74,12 @@ def main() -> int:
             timed_out = True
             _terminate_group(process)
             return_code = process.returncode if process.returncode is not None else -signal.SIGKILL
+        elapsed = time.monotonic() - started
         stdout.flush()
         stderr.flush()
         os.fsync(stdout.fileno())
         os.fsync(stderr.fileno())
 
-    elapsed = time.monotonic() - started
     usage = resource.getrusage(resource.RUSAGE_CHILDREN)
     peak_rss_kib = int(usage.ru_maxrss / 1024) if sys.platform == "darwin" else int(usage.ru_maxrss)
     result = {
@@ -103,4 +103,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
