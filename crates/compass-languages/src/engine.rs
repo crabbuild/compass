@@ -1475,6 +1475,20 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 && !is_language_builtin_global(self.language, &call.name)
                 && !(self.language == "lua" && (call.member || call.name.contains('.')))
             {
+                let mut extensions = crate::facts::node_range(node);
+                if self.language == "python"
+                    && call.member
+                    && let Some(receiver) = call.receiver.as_deref()
+                    && let Some(imported) = self
+                        .python_import_targets
+                        .get(receiver)
+                        .filter(|target| !target.is_empty())
+                {
+                    extensions.insert(
+                        "python_qualified_target".to_owned(),
+                        Value::String(format!("{imported}.{}", call.name)),
+                    );
+                }
                 self.extraction.raw_calls_mut().push(RawCall {
                     caller_nid: caller.to_owned(),
                     callee: call.name,
@@ -1484,7 +1498,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     receiver: Some(call.receiver),
                     receiver_type: (self.language == "ruby" && call.member).then_some(None),
                     lang: (self.language == "java").then(|| "java".to_owned()),
-                    extensions: crate::facts::node_range(node),
+                    extensions,
                 });
             }
         }
@@ -3024,7 +3038,14 @@ fn python_import_maps(
                     if !callable_name.is_empty() && !local_name.is_empty() {
                         aliases.insert(local_name.to_owned(), callable_name.to_owned());
                     }
-                    targets.insert(local.to_owned(), format!("{module}.{imported}"));
+                    let qualified = format!("{module}.{imported}");
+                    match targets.get_mut(local) {
+                        Some(existing) if existing != &qualified => existing.clear(),
+                        Some(_) => {}
+                        None => {
+                            targets.insert(local.to_owned(), qualified);
+                        }
+                    }
                 }
             }
         }
@@ -3792,6 +3813,56 @@ mod rationale_tests {
                     .and_then(Value::as_str)
                     == Some("django.test.TestCase")
         }));
+        Ok(())
+    }
+
+    #[test]
+    fn python_member_calls_retain_unambiguous_import_qualification()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("tests.py");
+        fs::write(
+            &source,
+            "from unittest import mock\n\
+             def exercise():\n    mock.patch('service.call')\n",
+        )?;
+
+        let extraction = Engine::default().extract(&source)?;
+        let call = extraction
+            .raw_calls
+            .iter()
+            .flatten()
+            .find(|call| call.callee == "patch")
+            .ok_or("missing mock.patch raw call")?;
+        assert_eq!(
+            call.extensions
+                .get("python_qualified_target")
+                .and_then(Value::as_str),
+            Some("unittest.mock.patch")
+        );
+        assert!(
+            call.extensions
+                .get("start_byte")
+                .and_then(Value::as_u64)
+                .zip(call.extensions.get("end_byte").and_then(Value::as_u64))
+                .is_some_and(|(start, end)| start < end)
+        );
+
+        fs::write(
+            &source,
+            "from unittest import mock\n\
+             from vendor import mock\n\
+             def exercise():\n    mock.patch('service.call')\n",
+        )?;
+        let ambiguous = Engine::default().extract(&source)?;
+        assert!(
+            ambiguous
+                .raw_calls
+                .iter()
+                .flatten()
+                .filter(|call| call.callee == "patch")
+                .all(|call| !call.extensions.contains_key("python_qualified_target"))
+        );
         Ok(())
     }
 
