@@ -3264,7 +3264,12 @@ fn published_v1_document(
     configuration_digest: String,
     source_commit: Option<&str>,
 ) -> Result<PublicationOutcome, CoreError> {
+    let mut publication_profile_started = Instant::now();
     let mut publication_source = document.clone();
+    profile_internal(
+        "graph publication source clone",
+        &mut publication_profile_started,
+    );
     let node_communities = communities
         .iter()
         .flat_map(|(community, members)| {
@@ -3288,7 +3293,11 @@ fn published_v1_document(
             );
         }
     }
-    Ok(normalize_document_v1_with_inventory_best_effort_owned(
+    profile_internal(
+        "graph publication community projection",
+        &mut publication_profile_started,
+    );
+    let published = normalize_document_v1_with_inventory_best_effort_owned(
         publication_source,
         root,
         configuration_digest,
@@ -3300,7 +3309,12 @@ fn published_v1_document(
             evidence.extraction_partials,
             root,
         ),
-    )?)
+    )?;
+    profile_internal(
+        "graph publication v1 boundary",
+        &mut publication_profile_started,
+    );
+    Ok(published)
 }
 
 fn detection_inventory(

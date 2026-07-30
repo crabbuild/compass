@@ -2183,6 +2183,7 @@ fn document_publication_input_owned(
     source_commit: Option<&str>,
     inventory: Vec<InventoryEvidence>,
 ) -> Result<(Extraction, BuildEvidence), GraphError> {
+    let mut profile_started = Instant::now();
     let mut extensions = Map::new();
     extensions.insert(CANONICAL_RAW_ORDER.to_owned(), Value::Bool(true));
     if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
@@ -2209,9 +2210,12 @@ fn document_publication_input_owned(
         extensions,
         ..Extraction::default()
     };
+    profile_v1("v1 raw input transfer", &mut profile_started);
     let mut evidence =
         BuildEvidence::from_extraction(repository_root, &extraction, configuration_digest)?;
+    profile_v1("v1 build evidence", &mut profile_started);
     evidence.include_inventory(inventory)?;
+    profile_v1("v1 inventory enrichment", &mut profile_started);
     evidence.build.source_commit = source_commit.map(str::to_owned);
     Ok((extraction, evidence))
 }
