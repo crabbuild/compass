@@ -1,9 +1,7 @@
 //! Corpus-level semantic extraction, reconciliation, and caching.
 
 use super::*;
-use compass_files::{
-    Cache, CacheKind, CacheOptions, bisect_slice, file_hash, prompt_fingerprint, split_file,
-};
+use compass_files::{Cache, CacheKind, CacheOptions, bisect_slice, prompt_fingerprint, split_file};
 
 /// Load one semantic chunk, call a resolved provider, validate its untrusted
 /// graph fragment, and bind code-symbol evidence to the exact text sent to the
@@ -871,13 +869,10 @@ where
     }
 
     let pruned_entries = if let (Some(cache), Some(live_files)) =
-        (cache.as_ref(), options.prune_live_files.as_ref())
+        (cache.as_mut(), options.prune_live_files.as_ref())
     {
-        let live_hashes = live_files
-            .iter()
-            .filter_map(|path| file_hash(path, root).ok())
-            .collect::<BTreeSet<_>>();
-        cache.prune_semantic(&live_hashes)
+        let live_keys = cache.source_cache_keys(live_files)?;
+        cache.prune_semantic(&live_keys)
     } else {
         0
     };

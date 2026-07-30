@@ -452,6 +452,52 @@ fn cache_keeps_distinct_extractions_for_identical_source_bytes() -> Result<(), B
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn cache_normalizes_root_aliases_without_collapsing_leaf_symlinks() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let requested_root = directory.path().join("repository");
+    let aliased_root = directory.path().join("repository-alias");
+    fs::create_dir(&requested_root)?;
+    symlink(&requested_root, &aliased_root)?;
+    let canonical_root = fs::canonicalize(&requested_root)?;
+
+    let canonical_source = canonical_root.join("main.py");
+    let aliased_source = aliased_root.join("main.py");
+    fs::write(&canonical_source, "def main(): pass\n")?;
+    let value = json!({"nodes":[{"id":"main","source_file":canonical_source.to_string_lossy()}],"edges":[]});
+    let mut cache = Cache::open(&aliased_root, CacheOptions::output_directory(None))?;
+
+    cache.save(&canonical_source, &value, &CacheKind::Ast, None)?;
+    assert_eq!(
+        cache.load(&aliased_source, &CacheKind::Ast, None, false)?,
+        Some(value)
+    );
+
+    let target = canonical_root.join("AGENTS.md");
+    let link = canonical_root.join("CLAUDE.md");
+    fs::write(&target, "# Shared instructions\n")?;
+    symlink(&target, &link)?;
+    let target_value =
+        json!({"nodes":[{"id":"agents","source_file":target.to_string_lossy()}],"edges":[]});
+    let link_value =
+        json!({"nodes":[{"id":"claude","source_file":link.to_string_lossy()}],"edges":[]});
+
+    cache.save(&target, &target_value, &CacheKind::Ast, None)?;
+    cache.save(&link, &link_value, &CacheKind::Ast, None)?;
+    assert_eq!(
+        cache.load(&target, &CacheKind::Ast, None, false)?,
+        Some(target_value)
+    );
+    assert_eq!(
+        cache.load(&link, &CacheKind::Ast, None, false)?,
+        Some(link_value)
+    );
+    Ok(())
+}
+
 #[test]
 fn malformed_and_non_object_cache_entries_fail_closed() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

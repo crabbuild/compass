@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -109,6 +110,7 @@ impl CacheKind {
 #[derive(Debug)]
 pub struct Cache {
     root: PathBuf,
+    logical_root: PathBuf,
     cache_base: PathBuf,
     ast_cache_version: String,
     hashes: StatHashIndex,
@@ -126,8 +128,16 @@ struct SessionHash {
 
 impl Cache {
     pub fn open(root: impl AsRef<Path>, options: CacheOptions<'_>) -> Result<Self, FileError> {
+        let requested_root = root.as_ref();
+        let logical_root = if requested_root.is_absolute() {
+            requested_root.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|source| io_error(requested_root, source))?
+                .join(requested_root)
+        };
         let root =
-            fs::canonicalize(root.as_ref()).map_err(|source| io_error(root.as_ref(), source))?;
+            fs::canonicalize(requested_root).map_err(|source| io_error(requested_root, source))?;
         let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
         let storage_root = options
             .storage_root
@@ -142,6 +152,7 @@ impl Cache {
         let hashes = StatHashIndex::load(&storage_root, &output_name);
         let cache = Self {
             root,
+            logical_root,
             cache_base,
             ast_cache_version: AST_CACHE_VERSION.to_owned(),
             hashes,
@@ -418,6 +429,18 @@ impl Cache {
         removed
     }
 
+    /// Derive the complete path-sensitive entry keys used to retain live
+    /// source-backed cache records during pruning.
+    pub fn source_cache_keys(&mut self, paths: &[PathBuf]) -> Result<BTreeSet<String>, FileError> {
+        paths
+            .iter()
+            .map(|path| {
+                let hash = self.content_hash(path)?;
+                Ok(self.source_cache_key(path, &hash))
+            })
+            .collect()
+    }
+
     fn cleanup_stale_ast(&self) {
         let base = self.cache_base.join("ast");
         let current = format!("v{}", self.ast_cache_version);
@@ -461,11 +484,15 @@ impl Cache {
     }
 
     fn source_cache_key(&self, path: &Path, content_hash: &str) -> String {
-        let logical_path = path
-            .strip_prefix(&self.root)
-            .unwrap_or(path)
-            .to_string_lossy();
+        let logical_path = self.logical_source_path(path);
         format!("{content_hash}-{}", logical_key_hash(&logical_path))
+    }
+
+    fn logical_source_path<'a>(&'a self, path: &'a Path) -> Cow<'a, str> {
+        path.strip_prefix(&self.logical_root)
+            .or_else(|_| path.strip_prefix(&self.root))
+            .unwrap_or(path)
+            .to_string_lossy()
     }
 }
 
