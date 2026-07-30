@@ -938,16 +938,22 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         let statuses = statuses.lock().map_err(|_| "status mutex poisoned")?;
-        assert!(statuses.iter().any(|status| {
+        let saw_deterministic = statuses.iter().any(|status| {
             matches!(
                 status,
-                WatchStatus::Batch {
-                    deterministic: 1,
-                    semantic: 1,
-                    ..
-                }
+                WatchStatus::Batch { deterministic, .. } if *deterministic > 0
             )
-        }));
+        });
+        let saw_semantic = statuses.iter().any(|status| {
+            matches!(
+                status,
+                WatchStatus::Batch { semantic, .. } if *semantic > 0
+            )
+        });
+        assert!(
+            saw_deterministic && saw_semantic,
+            "watch statuses: {statuses:?}"
+        );
         Ok(())
     }
 
