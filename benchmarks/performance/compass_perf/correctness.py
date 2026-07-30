@@ -44,7 +44,13 @@ def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, 
     source = record.get("source")
     nested = source if isinstance(source, dict) else {}
     label = _text(record.get("name", record.get("label", identifier))).strip()
-    normalized_label = label.casefold().lstrip(".")
+    details = record.get("details")
+    detail_data = details.get("data") if isinstance(details, dict) else None
+    resource_kind = (
+        detail_data.get("resourceKind") if isinstance(detail_data, dict) else None
+    )
+    rationale = record.get("file_type") == "rationale" or resource_kind == "rationale"
+    normalized_label = "rationale" if rationale else label.casefold().lstrip(".")
     normalized_label = re.sub(r"\(\)$", "", normalized_label)
     if "/" in normalized_label or "\\" in normalized_label:
         normalized_label = Path(normalized_label.replace("\\", "/")).name
@@ -60,7 +66,7 @@ def _source_fact(record: dict[str, object], identifier: str) -> tuple[str, str, 
 
 def _shared_relation(tool: str, relation: str) -> str:
     if tool == "compass":
-        return {"instantiates": "calls"}.get(relation, relation)
+        return {"documents": "rationale_for", "instantiates": "calls"}.get(relation, relation)
     return {
         "defines": "contains",
         "indirect_call": "calls",

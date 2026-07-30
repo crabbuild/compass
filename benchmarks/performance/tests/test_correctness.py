@@ -134,6 +134,40 @@ class CorrectnessTests(unittest.TestCase):
         result = compare_graphs(database)
         self.assertTrue(result.passed, result.failures)
 
+    def test_rationale_facts_match_by_source_anchor_across_schema_names(self) -> None:
+        database = sqlite3.connect(":memory:")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compass = root / "compass.json"
+            graphify = root / "graphify.json"
+            compass.write_text(
+                """
+                {"graph":{"diagnostics":[]},"nodes":[
+                  {"id":"r","kind":"resource","name":"Long rationale without ellipsis",
+                   "source":{"file":"src/a.py","startLine":9},
+                   "details":{"type":"resource","data":{"resourceKind":"rationale"}}},
+                  {"id":"f","kind":"function","name":"run",
+                   "source":{"file":"src/a.py","startLine":10}}
+                ],"edges":[{"source":"r","target":"f","kind":"documents"}]}
+                """,
+                encoding="utf-8",
+            )
+            graphify.write_text(
+                """
+                {"nodes":[
+                  {"id":"legacy_r","label":"Long rationale…","file_type":"rationale",
+                   "source_file":"src/a.py","source_location":"L9"},
+                  {"id":"legacy_f","label":"run()","source_file":"src/a.py","source_location":"L10"}
+                ],"links":[{"source":"legacy_r","target":"legacy_f",
+                            "relation":"rationale_for"}]}
+                """,
+                encoding="utf-8",
+            )
+            index_graph("compass", compass, database)
+            index_graph("graphify", graphify, database)
+        result = compare_graphs(database)
+        self.assertTrue(result.passed, result.failures)
+
     def test_dangling_edge_is_rejected(self) -> None:
         database = sqlite3.connect(":memory:")
         with tempfile.TemporaryDirectory() as directory:
