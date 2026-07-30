@@ -515,6 +515,42 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_qualified_external_target_rejects_same_named_local_rebinding(self) -> None:
+        result = compare_documents(
+            """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"owner","label":"Run","kind":"function",
+               "source_file":"app.go","source_location":"L10","language":"go"},
+              {"id":"external","label":"Context","kind":"type_alias",
+               "source_file":"","source_location":"","language":"go",
+               "qualified_name":"context.context"},
+              {"id":"local","label":"Context","kind":"struct",
+               "source_file":"internal/contexts.go","source_location":"L2",
+               "language":"go"}
+            ],"links":[
+              {"source":"owner","target":"external","relation":"references",
+               "source_file":"app.go","source_location":"L11"}
+            ]}
+            """,
+            """
+            {"nodes":[
+              {"id":"owner","label":"Run()",
+               "source_file":"app.go","source_location":"L10"},
+              {"id":"local","label":"Context",
+               "source_file":"internal/contexts.go","source_location":"L2"}
+            ],"links":[
+              {"source":"owner","target":"local","relation":"uses",
+               "source_file":"app.go","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.metrics["rejected_graphify_edges"], 1)
+        self.assertIn(
+            "rejected:qualified_external_target_rebound_to_local",
+            result.metrics["graphify_edges_coverage_reasons"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

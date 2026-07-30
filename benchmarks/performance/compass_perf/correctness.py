@@ -663,6 +663,7 @@ def _classify_edges(
     exact_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     occurrence_target_index: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     containment: dict[str, set[str]] = {}
     import_occurrences: set[tuple[str, str, str]] = set()
     for edges in (graphify_edges, compass_edges):
@@ -698,6 +699,21 @@ def _classify_edges(
                 ),
                 [],
             ).append(edge)
+            target_node = compass_nodes.get(edge.target)
+            if (
+                target_node is not None
+                and target_node.placeholder
+                and "." in target_node.qualified_name
+            ):
+                qualified_external_targets.setdefault(
+                    (
+                        edge.relation,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        target_node.normalized_label,
+                    ),
+                    set(),
+                ).add(edge.target)
         if edge.relation == "contains":
             containment.setdefault(source, set()).add(target)
 
@@ -731,6 +747,30 @@ def _classify_edges(
         ]
         if exact:
             output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
+            continue
+
+        graphify_target = graphify_nodes.get(graphify.target)
+        corrected_targets = qualified_external_targets.get(
+            (
+                graphify.relation,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+                graphify_target.normalized_label if graphify_target is not None else "",
+            ),
+            set(),
+        )
+        if (
+            graphify_target is not None
+            and graphify_target.source_file
+            and len(corrected_targets) == 1
+        ):
+            output.append(
+                Coverage(
+                    "rejected",
+                    "qualified_external_target_rebound_to_local",
+                    next(iter(corrected_targets)),
+                )
+            )
             continue
 
         precise_owner = occurrence_target_index.get(
