@@ -64,7 +64,9 @@ PY
 
 echo "[code-graph-v1] build qualifying production binary once"
 cargo build --locked -p compass-cli --bin compass
-COMPASS_BIN="$QUALIFY_ROOT/target/debug/compass"
+QUALIFY_TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c \
+  'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+COMPASS_BIN="$QUALIFY_TARGET/debug/compass"
 
 if [[ "$MODE" == repositories ]]; then
   [[ -f "$REPOSITORIES_MANIFEST" ]] || {
