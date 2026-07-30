@@ -12,9 +12,9 @@ use sha2::{Digest, Sha256};
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 /// Changes whenever cached extraction semantics change, even if the wire encoding does not.
-pub const AST_CACHE_VERSION: &str = "2";
+pub const AST_CACHE_VERSION: &str = "3";
 /// Portable cache encoding version used in the on-disk namespace.
-pub const CACHE_ENCODING_VERSION: u32 = 6;
+pub const CACHE_ENCODING_VERSION: u32 = 7;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -182,10 +182,11 @@ impl Cache {
         allow_partial: bool,
     ) -> Result<Option<Value>, FileError> {
         let hash = self.content_hash(path)?;
+        let key = self.source_cache_key(path, &hash);
         if deterministic_binary_kind(kind) {
             let entry = self
                 .directory(kind, prompt_fingerprint)
-                .join(format!("{hash}.{MESSAGEPACK_EXTENSION}"));
+                .join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
             if let Ok(bytes) = fs::read(entry)
                 && let Some(mut value) = decode_messagepack::<Value>(&bytes)
             {
@@ -199,7 +200,7 @@ impl Cache {
         }
         let entry = self
             .directory(kind, prompt_fingerprint)
-            .join(format!("{hash}.json"));
+            .join(format!("{key}.json"));
         if !entry.exists() {
             return Ok(None);
         }
@@ -219,10 +220,11 @@ impl Cache {
         let mut on_disk = value.clone();
         relativize_source_files(&mut on_disk, &self.root);
         let hash = self.content_hash(path)?;
+        let key = self.source_cache_key(path, &hash);
         let directory = self.directory(kind, prompt_fingerprint);
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
         if deterministic_binary_kind(kind) {
-            let destination = directory.join(format!("{hash}.{MESSAGEPACK_EXTENSION}"));
+            let destination = directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}"));
             let bytes = rmp_serde::to_vec_named(&on_disk).map_err(|source| {
                 FileError::MessagePackEncode {
                     path: destination.clone(),
@@ -231,7 +233,7 @@ impl Cache {
             })?;
             write_cache_bytes(&destination, &bytes)
         } else {
-            write_json_atomic(directory.join(format!("{hash}.json")), &on_disk, false)
+            write_json_atomic(directory.join(format!("{key}.json")), &on_disk, false)
         }
     }
 
@@ -251,12 +253,13 @@ impl Cache {
                 continue;
             }
             let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
             let extension = if deterministic_binary_kind(kind) {
                 MESSAGEPACK_EXTENSION
             } else {
                 "json"
             };
-            jobs.push((directory.join(format!("{hash}.{extension}")), value));
+            jobs.push((directory.join(format!("{key}.{extension}")), value));
         }
         let root = &self.root;
         jobs.into_par_iter().try_for_each(|(destination, value)| {
@@ -293,8 +296,9 @@ impl Cache {
                 continue;
             }
             let hash = self.content_hash(path)?;
+            let key = self.source_cache_key(path, &hash);
             jobs.push((
-                directory.join(format!("{hash}.{MESSAGEPACK_EXTENSION}")),
+                directory.join(format!("{key}.{MESSAGEPACK_EXTENSION}")),
                 value,
             ));
         }
@@ -454,6 +458,14 @@ impl Cache {
             },
         );
         Ok(value)
+    }
+
+    fn source_cache_key(&self, path: &Path, content_hash: &str) -> String {
+        let logical_path = path
+            .strip_prefix(&self.root)
+            .unwrap_or(path)
+            .to_string_lossy();
+        format!("{content_hash}-{}", logical_key_hash(&logical_path))
     }
 }
 
