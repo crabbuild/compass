@@ -138,6 +138,97 @@ urlpatterns = [path("users/<int:user_id>/", detail)]
 }
 
 #[test]
+fn django_relative_module_import_resolves_class_based_view_route()
+-> Result<(), Box<dyn std::error::Error>> {
+    let urls_source = br#"
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path("profile/", views.ProfileView.as_view()),
+]
+"#;
+    let views_source = br#"
+class ProfileView:
+    pass
+"#;
+    let mut engine = Engine::default();
+    let urls = engine.extract_source(Path::new("accounts/urls.py"), urls_source)?;
+    let views = engine.extract_source(Path::new("accounts/views.py"), views_source)?;
+    let sources = HashMap::from([
+        (
+            "accounts/urls.py".to_owned(),
+            String::from_utf8(urls_source.to_vec())?,
+        ),
+        (
+            "accounts/views.py".to_owned(),
+            String::from_utf8(views_source.to_vec())?,
+        ),
+    ]);
+
+    let extraction = resolve(&[urls, views], &sources);
+    let route = resolve_routes(&extraction, FrameworkLimits::default())?
+        .into_iter()
+        .find(|route| route.route.handler_reference.contains("ProfileView"))
+        .ok_or("missing profile route")?;
+
+    assert_eq!(route.state, ResolutionState::Exact, "{route:#?}");
+    let target = route
+        .candidates
+        .first()
+        .and_then(|candidate| {
+            extraction
+                .nodes
+                .iter()
+                .find(|node| node.id == candidate.node_id)
+        })
+        .ok_or("missing route target")?;
+    assert_eq!(target.string("symbol_kind"), "class");
+    assert_eq!(target.label(), "ProfileView");
+    Ok(())
+}
+
+#[test]
+fn django_relative_symbol_import_resolves_class_based_view_route()
+-> Result<(), Box<dyn std::error::Error>> {
+    let urls_source = br#"
+from django.urls import path
+from .views import ProfileView
+
+urlpatterns = [
+    path("profile/", ProfileView.as_view()),
+]
+"#;
+    let views_source = br#"
+class ProfileView:
+    pass
+"#;
+    let mut engine = Engine::default();
+    let urls = engine.extract_source(Path::new("accounts/urls.py"), urls_source)?;
+    let views = engine.extract_source(Path::new("accounts/views.py"), views_source)?;
+    let sources = HashMap::from([
+        (
+            "accounts/urls.py".to_owned(),
+            String::from_utf8(urls_source.to_vec())?,
+        ),
+        (
+            "accounts/views.py".to_owned(),
+            String::from_utf8(views_source.to_vec())?,
+        ),
+    ]);
+
+    let extraction = resolve(&[urls, views], &sources);
+    let route = resolve_routes(&extraction, FrameworkLimits::default())?
+        .into_iter()
+        .find(|route| route.route.handler_reference.contains("ProfileView"))
+        .ok_or("missing profile route")?;
+
+    assert_eq!(route.state, ResolutionState::Exact, "{route:#?}");
+    assert_eq!(route.candidates.len(), 1, "{route:#?}");
+    Ok(())
+}
+
+#[test]
 fn django_include_cycles_stop_and_depth_overflow_fails_explicitly()
 -> Result<(), Box<dyn std::error::Error>> {
     let source = |target: &str| {

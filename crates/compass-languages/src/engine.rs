@@ -1989,6 +1989,18 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 "object" | "array" | "as_expression" | "call_expression" | "new_expression"
             ) {
                 self.add_node(&id, &name, line(declaration), false, None);
+                if name_node.kind() == "identifier"
+                    && let Some(binding) = self
+                        .extraction
+                        .nodes
+                        .iter_mut()
+                        .find(|binding| binding.id == id)
+                {
+                    binding.attributes.insert(
+                        "symbol_kind".to_owned(),
+                        Value::String("variable".to_owned()),
+                    );
+                }
                 self.add_edge(
                     &self.file_id.clone(),
                     &id,

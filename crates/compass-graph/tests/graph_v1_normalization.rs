@@ -641,6 +641,143 @@ fn route_identity_uses_handler_reference_instead_of_extractor_local_target()
 }
 
 #[test]
+fn duplicate_route_registrations_coalesce_without_losing_relationship_sites()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let route = |id: &str, start: u64| {
+        let mut route = raw_node(root, id, "GET /items", start);
+        route
+            .attributes
+            .insert("symbol_kind".to_owned(), json!("route"));
+        route
+            .attributes
+            .insert("framework".to_owned(), json!("express"));
+        route
+            .attributes
+            .insert("operation".to_owned(), json!("GET"));
+        route.attributes.insert("path".to_owned(), json!("/items"));
+        route
+            .attributes
+            .insert("declaring_scope".to_owned(), json!("router"));
+        route.attributes.insert(
+            "stages".to_owned(),
+            json!([{
+                "stage": "handler",
+                "position": 0,
+                "reference": "handlers.listItems",
+                "resolution": "exact",
+                "target": "raw:handler",
+                "candidates": []
+            }]),
+        );
+        route
+    };
+    let route_edge = |source: &str, start: u64| RawEdgeRecord {
+        source: source.to_owned(),
+        target: "raw:handler".to_owned(),
+        attributes: Map::from_iter([
+            ("relation".to_owned(), json!("routes_to")),
+            ("stage".to_owned(), json!("handler")),
+            ("position".to_owned(), json!(0)),
+            ("operation".to_owned(), json!("GET")),
+            ("extractor".to_owned(), json!("test.routes")),
+            ("source_anchor".to_owned(), anchor(root, start)),
+        ]),
+    };
+    let mut route_with_middleware = route("raw:route-b", 100);
+    route_with_middleware.attributes.insert(
+        "stages".to_owned(),
+        json!([
+            {
+                "stage": "middleware",
+                "position": 0,
+                "reference": "authenticate",
+                "resolution": "unresolved",
+                "candidates": []
+            },
+            {
+                "stage": "handler",
+                "position": 1,
+                "reference": "handlers.listItems",
+                "resolution": "exact",
+                "target": "raw:handler",
+                "candidates": []
+            }
+        ]),
+    );
+    let document = normalize_v1(
+        Extraction {
+            nodes: vec![
+                route("raw:route-a", 10),
+                route_with_middleware,
+                raw_node(root, "raw:handler", "listItems", 200),
+            ],
+            edges: vec![
+                route_edge("raw:route-a", 10),
+                route_edge("raw:route-b", 100),
+            ],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    let routes = document
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Route)
+        .collect::<Vec<_>>();
+    assert_eq!(routes.len(), 1, "nodes={:#?}", document.nodes);
+    let route_edges = document
+        .links
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::RoutesTo && edge.source == routes[0].id)
+        .collect::<Vec<_>>();
+    assert_eq!(route_edges.len(), 2, "edges={:#?}", document.links);
+    assert_ne!(
+        route_edges[0].relationship_site,
+        route_edges[1].relationship_site
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_enum_variant_calls_normalize_to_instantiations() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let caller = raw_node(root, "raw:caller", "poll", 10);
+    let mut variant = raw_node(root, "raw:variant", "Ready", 30);
+    variant
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("enum_member"));
+    let document = normalize_v1(
+        Extraction {
+            nodes: vec![caller, variant],
+            edges: vec![RawEdgeRecord {
+                source: "raw:caller".to_owned(),
+                target: "raw:variant".to_owned(),
+                attributes: Map::from_iter([
+                    ("relation".to_owned(), json!("calls")),
+                    ("extractor".to_owned(), json!("test.rust")),
+                    ("source_anchor".to_owned(), anchor(root, 50)),
+                ]),
+            }],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    assert!(
+        document
+            .links
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::Instantiates),
+        "edges={:#?}",
+        document.links
+    );
+    Ok(())
+}
+
+#[test]
 fn route_stage_becomes_ambiguous_when_multiple_edges_bind_after_remap()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

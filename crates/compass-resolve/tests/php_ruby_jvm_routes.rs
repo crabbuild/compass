@@ -137,6 +137,39 @@ fn spring_composes_class_and_method_mappings_without_custom_annotation_matches()
 }
 
 #[test]
+fn spring_kotlin_controllers_publish_exact_routes() -> Result<(), Box<dyn Error>> {
+    let source = br#"
+package example
+
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/api")
+class KotlinController {
+    @GetMapping("/users/{id}")
+    fun show(id: Long): String = id.toString()
+}
+"#;
+    let mut engine = Engine::default();
+    let mut extraction = engine.extract_source(Path::new("src/KotlinController.kt"), source)?;
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+
+    assert!(
+        resolved.iter().any(|route| {
+            route.route.operation == "GET"
+                && route.route.normalized_path == "/api/users/{id}"
+                && route.route.handler_reference == "KotlinController.show"
+                && route.state == ResolutionState::Exact
+        }),
+        "routes={resolved:#?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn play_config_routes_resolve_java_scala_and_injected_controllers() -> Result<(), Box<dyn Error>> {
     let route_path = fixture("jvm/play/conf/routes");
     let spec = Registry::resolve(&route_path).ok_or("Play routes are not registered")?;

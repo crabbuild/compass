@@ -35,7 +35,7 @@ pub(crate) fn detect(
         "python" => python::detect(path, source, root),
         "php" => php::detect(path, source, root),
         "ruby" => ruby::detect(path, source, root),
-        "java" => java::detect(path, source, root),
+        "java" | "kotlin" => java::detect(path, source, root),
         "go" => go::detect(path, source, root),
         "rust" => rust::detect(path, source, root),
         "csharp" => csharp::detect(path, source, root),

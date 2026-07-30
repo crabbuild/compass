@@ -462,7 +462,11 @@ impl<'source, 'tree> RustState<'source, 'tree> {
                 _ => (None, false, false),
             };
             if let Some(callee) = callee {
-                if let Some(target) = labels.get(&callee).filter(|target| *target != caller) {
+                if let Some(target) = (!scoped)
+                    .then(|| labels.get(&callee))
+                    .flatten()
+                    .filter(|target| *target != caller)
+                {
                     let pair = (
                         caller.to_owned(),
                         target.clone(),
