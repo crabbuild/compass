@@ -64,6 +64,85 @@ describe("CompassProcessManager", () => {
     });
   });
 
+  it("keeps the ordinary stdout ceiling at 8 MiB", async () => {
+    const { child, stdout } = childProcess();
+    const processes = new CompassProcessManager(
+      "compass",
+      vi.fn(() => child) as never
+    );
+    const command = processes.startCommand("/repo", ["export", "json"]);
+
+    stdout.write("x".repeat(8 * 1024 * 1024 + 1));
+
+    await expect(command.completed).rejects.toThrow(
+      "Compass stdout exceeded the 8 MiB safety limit"
+    );
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("allows architecture stdout between 8 MiB and 128 MiB", async () => {
+    const { child, stdout } = childProcess();
+    const processes = new CompassProcessManager(
+      "compass",
+      vi.fn(() => child) as never
+    );
+    const command = processes.startCommand(
+      "/repo",
+      ["export", "callflow-json"],
+      { stdoutBytes: 128 * 1024 * 1024 }
+    );
+    const payload = "x".repeat(9 * 1024 * 1024);
+
+    stdout.write(payload);
+    child.emit("close", 0);
+
+    await expect(command.completed).resolves.toEqual({
+      code: 0,
+      stdout: payload,
+      stderr: ""
+    });
+  });
+
+  it("measures multibyte output as UTF-8 bytes", async () => {
+    const { child, stdout } = childProcess();
+    const processes = new CompassProcessManager(
+      "compass",
+      vi.fn(() => child) as never
+    );
+    const command = processes.startCommand(
+      "/repo",
+      ["capabilities"],
+      { stdoutBytes: 3 }
+    );
+
+    stdout.write("éé");
+
+    await expect(command.completed).rejects.toThrow(
+      "Compass stdout exceeded the 0.00 MiB safety limit"
+    );
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("keeps stderr at 8 MiB when stdout has the architecture ceiling", async () => {
+    const { child, stderr } = childProcess();
+    const processes = new CompassProcessManager(
+      "compass",
+      vi.fn(() => child) as never
+    );
+    const command = processes.startCommand(
+      "/repo",
+      ["export", "callflow-json"],
+      { stdoutBytes: 128 * 1024 * 1024 }
+    );
+
+    stderr.write("x".repeat(8 * 1024 * 1024 + 1));
+
+    await expect(command.completed).rejects.toThrow(
+      "Compass stderr exceeded the 8 MiB safety limit"
+    );
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
   it("switches future launches to an activated executable", () => {
     const first = childProcess();
     const second = childProcess();

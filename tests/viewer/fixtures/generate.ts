@@ -2,6 +2,8 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { graphStaticLoadingMarkup } from "../../../editors/vscode/src/webviews/graphLoadingMarkup";
+import { ArchitectureIndex } from "../../../editors/vscode/src/views/architectureIndex";
+import { CallflowViewModelSchema } from "../../../packages/compass-viewer/src/contracts/callflow";
 
 export default async function generate(): Promise<void> {
   const root = path.resolve("../..");
@@ -141,7 +143,8 @@ export default async function generate(): Promise<void> {
     id: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol-${index}`,
     label: index === 0 ? "authenticate" : index === 1 ? "database" : `symbol${index}`,
     kind: index % 5 === 0 ? "class" : "function",
-    sourceFile: `src/api/module-${index}.ts`
+    sourceFile: `src/api/module-${index}.ts`,
+    scope: "production"
   }));
   const architectureEdges = Array.from({ length: 53 }, (_, index) => ({
     source: "authenticate",
@@ -149,36 +152,80 @@ export default async function generate(): Promise<void> {
     relation: index % 3 === 0 ? "calls" : "uses",
     confidence: index % 5 === 0 ? "inferred" : "extracted"
   }));
-  const architectureSections = Array.from({ length: 26 }, (_, index) => ({
-    id: `section-${index}`,
-    name: index === 0 ? "API" : index === 1 ? "Storage" : `Section ${index}`,
-    communities: [`${index}`],
-    nodes: index === 0
+  const architectureSectionNodeId = (index: number) =>
+    index === 0 ? "authenticate" : index === 1 ? "database-adapter" : `section-node-${index}`;
+  const architectureSections = Array.from({ length: 26 }, (_, index) => {
+    const nodes = index === 0
       ? architectureNodes
       : index === 1
         ? [{
           id: "database-adapter",
           label: "database adapter",
           kind: "class",
-          sourceFile: "src/storage/database.ts"
+          sourceFile: "src/storage/database.ts",
+          scope: "production"
         }]
-        : [],
-    edges: index === 0 ? architectureEdges : []
+        : [{
+          id: architectureSectionNodeId(index),
+          label: `section ${index} entry`,
+          kind: "function",
+          sourceFile: `src/section-${index}/entry.ts`,
+          scope: "production"
+        }];
+    const edges = index === 0 ? architectureEdges : [];
+    return {
+      id: `section-${index}`,
+      name: index === 0 ? "API" : index === 1 ? "Storage" : `Section ${index}`,
+      communities: [`${index}`],
+      nodeCount: nodes.length,
+      internalCallCount: edges.length,
+      nodes,
+      edges
+    };
+  });
+  const architectureOverviewLinks = Array.from({ length: 25 }, (_, index) => ({
+    sourceSection: `section-${index}`,
+    targetSection: `section-${index + 1}`,
+    calls: index + 1
   }));
+  const architectureCrossSectionCalls = architectureOverviewLinks.flatMap((link, index) =>
+    Array.from({ length: link.calls }, () => ({
+      source: architectureSectionNodeId(index),
+      target: architectureSectionNodeId(index + 1),
+      sourceSection: link.sourceSection,
+      targetSection: link.targetSection,
+      relation: "calls",
+      confidence: "extracted"
+    }))
+  );
   const architecture = {
     schema: "compass.viewer.callflow/1",
     title: "Fixture — Architecture Flow",
     sections: [
-      { id: "overview", name: "Overview", communities: [], nodes: [], edges: [] },
+      {
+        id: "overview",
+        name: "Overview",
+        communities: [],
+        nodeCount: 0,
+        internalCallCount: 0,
+        nodes: [],
+        edges: []
+      },
       ...architectureSections
     ],
-    overviewLinks: Array.from({ length: 25 }, (_, index) => ({
-      sourceSection: `section-${index}`,
-      targetSection: `section-${index + 1}`,
-      calls: index + 1
-    })),
+    overviewLinks: architectureOverviewLinks,
+    crossSectionCalls: architectureCrossSectionCalls,
+    coverage: { internal: 53, crossSection: 325, unassigned: 0 },
     reportHighlights: [],
-    statistics: { nodes: 32, edges: 53, communities: 26, hyperedges: 0, extracted: 42, inferred: 11, ambiguous: 0 },
+    statistics: {
+      nodes: 56,
+      edges: 378,
+      communities: 26,
+      hyperedges: 0,
+      extracted: 367,
+      inferred: 11,
+      ambiguous: 0
+    },
     provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
   };
   const calls = {
@@ -533,8 +580,64 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 }
 
 function architectureHarness(model: unknown): string {
+  const parsedModel = CallflowViewModelSchema.parse(model);
+  const index = new ArchitectureIndex(parsedModel);
+  const overview = index.overview("production", "all");
+  const sectionPages: Record<string, unknown> = {};
+  for (const section of overview.sections) {
+    for (const kind of ["symbols", "calls"] as const) {
+      for (const query of ["", "database"]) {
+        for (const page of [1, 2]) {
+          const key = [section.id, kind, page, query].join("|");
+          sectionPages[key] = index.sectionPage({
+            sectionId: section.id,
+            kind,
+            page,
+            pageSize: 100,
+            query,
+            scope: "production",
+            evidence: "all"
+          });
+        }
+      }
+    }
+  }
+  const routePages = Object.fromEntries(
+    overview.routes.map((route) => [
+      [route.id, 1, ""].join("|"),
+      index.routePage({
+        routeId: route.id,
+        page: 1,
+        pageSize: 100,
+        query: "",
+        scope: "production",
+        evidence: "all"
+      })
+    ])
+  );
+  const searchPages = Object.fromEntries(
+    ["", "database"].map((query) => [
+      [1, query].join("|"),
+      index.search({
+        query,
+        page: 1,
+        pageSize: 100,
+        scope: "production",
+        evidence: "all"
+      })
+    ])
+  );
+  const fixture = { overview, sectionPages, routePages, searchPages };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass architecture fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.architectureHostMessages=[];
+const architectureFixture=${JSON.stringify(fixture)};
+const architectureIdentity=(message)=>({
+  requestId:message.requestId||"fixture-bootstrap",
+  repositoryId:"fixture",
+  generation:1
+});
+const sendArchitecture=(message,delay=0)=>
+  setTimeout(()=>window.postMessage(message,"*"),delay);
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.architectureHostMessages.push(message);
   if(message.type==="showOutput") {
@@ -545,18 +648,59 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     window.openedArchitectureSource=message.file;
     return;
   }
-  if(message.type!=="ready" && message.type!=="retry") return;
   const params=new URLSearchParams(window.location.search);
-  if(params.has("error")) {
+  if((message.type==="ready" || message.type==="retry") && params.has("error")) {
     setTimeout(()=>window.postMessage({type:"error",message:"Architecture export failed"},"*"),20);
     return;
   }
-  const delay=params.has("delay") ? 800 : 0;
-  setTimeout(()=>window.postMessage({
-    type:"hydrate",
-    repositoryId:"fixture",
-    model:${JSON.stringify(model)}
-  },"*"),delay);
+  if(message.type==="ready" || message.type==="retry") {
+    const delayed=params.has("delay");
+    if(delayed) sendArchitecture({
+      type:"architectureLoading",
+      phase:"indexing",
+      message:"Preparing symbol index"
+    },20);
+    sendArchitecture({
+      type:"architectureOverview",
+      ...architectureIdentity(message),
+      model:architectureFixture.overview
+    },delayed ? 800 : 20);
+    return;
+  }
+  if(message.type==="requestSection") {
+    const key=[message.sectionId,message.kind,message.page,message.query||""].join("|");
+    sendArchitecture({
+      type:"architectureSectionPage",
+      ...architectureIdentity(message),
+      model:architectureFixture.sectionPages[key]
+    });
+    return;
+  }
+  if(message.type==="requestRoute") {
+    const key=[message.routeId,message.page,message.query||""].join("|");
+    sendArchitecture({
+      type:"architectureRoutePage",
+      ...architectureIdentity(message),
+      model:architectureFixture.routePages[key]
+    });
+    return;
+  }
+  if(message.type==="searchArchitecture") {
+    const key=[message.page,message.query].join("|");
+    sendArchitecture({
+      type:"architectureSearchResults",
+      ...architectureIdentity(message),
+      model:architectureFixture.searchPages[key]
+    });
+    return;
+  }
+  if(message.type==="setArchitectureFilters") {
+    sendArchitecture({
+      type:"architectureOverview",
+      ...architectureIdentity(message),
+      model:{...architectureFixture.overview,scope:message.scope,evidence:message.evidence}
+    });
+  }
 }})</script><script src="/architecture.js"></script></body></html>`;
 }
 

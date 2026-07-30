@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+const ConfidenceSchema = z.enum(["extracted", "inferred", "ambiguous"]);
+const SourceScopeSchema = z.enum([
+  "production",
+  "test",
+  "generated",
+  "vendor",
+  "unknown"
+]);
+
 export const CallflowViewModelSchema = z.object({
   schema: z.literal("compass.viewer.callflow/1"),
   title: z.string(),
@@ -7,17 +16,20 @@ export const CallflowViewModelSchema = z.object({
     id: z.string(),
     name: z.string(),
     communities: z.array(z.string()),
+    nodeCount: z.number().int().nonnegative(),
+    internalCallCount: z.number().int().nonnegative(),
     nodes: z.array(z.object({
       id: z.string(),
       label: z.string(),
       kind: z.string(),
-      sourceFile: z.string().nullable()
+      sourceFile: z.string().nullable(),
+      scope: SourceScopeSchema
     })),
     edges: z.array(z.object({
       source: z.string(),
       target: z.string(),
       relation: z.string(),
-      confidence: z.enum(["extracted", "inferred", "ambiguous"])
+      confidence: ConfidenceSchema
     }))
   })),
   overviewLinks: z.array(z.object({
@@ -25,6 +37,19 @@ export const CallflowViewModelSchema = z.object({
     targetSection: z.string(),
     calls: z.number().int().nonnegative()
   })),
+  crossSectionCalls: z.array(z.object({
+    source: z.string(),
+    target: z.string(),
+    sourceSection: z.string(),
+    targetSection: z.string(),
+    relation: z.string(),
+    confidence: ConfidenceSchema
+  })),
+  coverage: z.object({
+    internal: z.number().int().nonnegative(),
+    crossSection: z.number().int().nonnegative(),
+    unassigned: z.number().int().nonnegative()
+  }),
   reportHighlights: z.array(z.string()),
   statistics: z.object({
     nodes: z.number().int().nonnegative(),
