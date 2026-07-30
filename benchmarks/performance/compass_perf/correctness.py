@@ -11,7 +11,7 @@ import re
 import sqlite3
 from typing import Any, Iterator
 
-from .jsonstream import iter_top_level_array, read_top_level_value
+from .jsonstream import iter_top_level_array, read_top_level_object_value
 from .model import CorrectnessResult
 
 
@@ -113,12 +113,9 @@ def _records(path: Path, preferred: str, fallback: str | None = None) -> Iterato
 
 def _validation_errors(path: Path) -> int:
     try:
-        metadata = read_top_level_value(path, "graph")
+        diagnostics = read_top_level_object_value(path, "graph", "diagnostics")
     except KeyError:
         return 0
-    if not isinstance(metadata, dict):
-        return 0
-    diagnostics = metadata.get("diagnostics", [])
     if not isinstance(diagnostics, list):
         return 1
     return sum(

@@ -229,3 +229,40 @@ def read_top_level_value(path: Path, key: str) -> Any:
             first = False
     finally:
         reader.close()
+
+
+def read_top_level_object_value(path: Path, object_key: str, key: str) -> Any:
+    """Read one bounded member without decoding its potentially large parent object."""
+    reader = _Reader(path, chunk_chars=_CHUNK_CHARS)
+    try:
+        reader.expect("{")
+        first = True
+        while True:
+            reader.whitespace()
+            if reader.peek() == "}":
+                raise KeyError(object_key)
+            if not first:
+                reader.expect(",")
+            name = reader.decode()
+            reader.expect(":")
+            if name != object_key:
+                reader.skip_value()
+                first = False
+                continue
+
+            reader.expect("{")
+            member_first = True
+            while True:
+                reader.whitespace()
+                if reader.peek() == "}":
+                    raise KeyError(key)
+                if not member_first:
+                    reader.expect(",")
+                member_name = reader.decode()
+                reader.expect(":")
+                if member_name == key:
+                    return reader.decode()
+                reader.skip_value()
+                member_first = False
+    finally:
+        reader.close()

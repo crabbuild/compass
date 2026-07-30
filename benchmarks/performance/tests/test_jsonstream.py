@@ -7,6 +7,7 @@ import unittest
 
 from benchmarks.performance.compass_perf.jsonstream import (
     iter_top_level_array,
+    read_top_level_object_value,
     read_top_level_value,
 )
 
@@ -34,6 +35,19 @@ class JsonStreamTests(unittest.TestCase):
             )
             self.assertEqual(read_top_level_value(path, "graph")["note"], 'brace } and quote "')
 
+    def test_nested_value_does_not_decode_large_parent_member(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write(
+                directory,
+                '{"graph":{"communities":{"payload":"'
+                + ("x" * (17 * 1024 * 1024))
+                + '"},"diagnostics":[{"severity":"error"}]},"nodes":[]}',
+            )
+
+            diagnostics = read_top_level_object_value(path, "graph", "diagnostics")
+
+        self.assertEqual(diagnostics, [{"severity": "error"}])
+
     def test_edges_fallback_is_a_caller_decision(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.write(directory, '{"nodes":[],"edges":[{"source":"a","target":"b"}]}')
@@ -59,7 +73,5 @@ class JsonStreamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 list(iter_top_level_array(path, "nodes", chunk_chars=2))
 
-
 if __name__ == "__main__":
     unittest.main()
-
