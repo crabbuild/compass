@@ -5,12 +5,19 @@ use regex::Regex;
 use serde_json::Map;
 use tree_sitter::Node;
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{join_route_path, line_anchor, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
     let body = text(source);
-    if !body.contains("import Vapor") {
+    let evidence = EvidenceSet::new().direct_if(
+        body.contains("import Vapor"),
+        "vapor",
+        EvidenceKind::Import,
+        "Vapor",
+    );
+    if !evidence.activates("vapor") {
         return Vec::new();
     }
     let Ok(group) =

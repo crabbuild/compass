@@ -3,27 +3,117 @@ use std::path::Path;
 use regex::Regex;
 use serde_json::{Map, Value};
 
+use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{line_anchor, text};
 use super::{RawDomainFact, RawFrameworkFact, RawFrameworkOrigin};
 
 pub(super) fn detect(path: &Path, source: &[u8], language: &str) -> Vec<RawFrameworkFact> {
     let body = text(source);
+    let evidence = enterprise_evidence(body, language);
     match language {
-        "python" => python(path, source, body),
-        "typescript" | "tsx" | "javascript" => typescript(path, source, body),
-        "java" => java(path, source, body),
-        "csharp" => csharp(path, source, body),
-        "ruby" => ruby(path, source, body),
-        "php" => php(path, source, body),
-        "go" => go(path, source, body),
-        "rust" => rust(path, source, body),
+        "python" => python(path, source, body, &evidence),
+        "typescript" | "tsx" | "javascript" => typescript(path, source, body, &evidence),
+        "java" => java(path, source, body, &evidence),
+        "csharp" => csharp(path, source, body, &evidence),
+        "ruby" => ruby(path, source, body, &evidence),
+        "php" => php(path, source, body, &evidence),
+        "go" => go(path, source, body, &evidence),
+        "rust" => rust(path, source, body, &evidence),
         _ => Vec::new(),
     }
 }
 
-fn python(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
+fn enterprise_evidence(body: &str, language: &str) -> EvidenceSet {
+    match language {
+        "python" => EvidenceSet::new()
+            .direct_if(
+                body.contains("from celery") || body.contains("import celery"),
+                "celery",
+                EvidenceKind::Import,
+                "celery",
+            )
+            .direct_if(
+                body.contains("django.db"),
+                "django-orm",
+                EvidenceKind::Import,
+                "django.db",
+            )
+            .direct_if(
+                body.contains("sqlalchemy"),
+                "sqlalchemy",
+                EvidenceKind::Import,
+                "sqlalchemy",
+            ),
+        "typescript" | "tsx" | "javascript" => EvidenceSet::new()
+            .direct_if(
+                body.contains("@nestjs/"),
+                "nestjs",
+                EvidenceKind::Import,
+                "@nestjs/",
+            )
+            .direct_if(
+                body.contains("typeorm"),
+                "typeorm",
+                EvidenceKind::Import,
+                "typeorm",
+            ),
+        "java" => EvidenceSet::new()
+            .direct_if(
+                body.contains("org.springframework."),
+                "spring",
+                EvidenceKind::Import,
+                "org.springframework",
+            )
+            .direct_if(
+                body.contains("jakarta.persistence") || body.contains("javax.persistence"),
+                "jpa",
+                EvidenceKind::Import,
+                "JPA persistence namespace",
+            ),
+        "csharp" => EvidenceSet::new()
+            .direct_if(
+                body.contains("Microsoft.Extensions.Hosting"),
+                "aspnet",
+                EvidenceKind::Import,
+                "Microsoft.Extensions.Hosting",
+            )
+            .direct_if(
+                body.contains("System.ComponentModel.DataAnnotations.Schema"),
+                "entity-framework",
+                EvidenceKind::Import,
+                "System.ComponentModel.DataAnnotations.Schema",
+            ),
+        "ruby" => EvidenceSet::new().direct_if(
+            body.contains("< ApplicationRecord") || body.contains("< ActiveRecord::Base"),
+            "active-record",
+            EvidenceKind::Receiver,
+            "ActiveRecord base class",
+        ),
+        "php" => EvidenceSet::new().direct_if(
+            body.contains("Illuminate\\Database\\Eloquent"),
+            "eloquent",
+            EvidenceKind::Import,
+            "Illuminate\\Database\\Eloquent",
+        ),
+        "go" => EvidenceSet::new().direct_if(
+            body.contains("gorm.io/gorm"),
+            "gorm",
+            EvidenceKind::Import,
+            "gorm.io/gorm",
+        ),
+        "rust" => EvidenceSet::new().direct_if(
+            body.contains("diesel::") || body.contains("use diesel"),
+            "diesel",
+            EvidenceKind::Import,
+            "diesel",
+        ),
+        _ => EvidenceSet::new(),
+    }
+}
+
+fn python(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
     let mut facts = Vec::new();
-    if body.contains("celery") {
+    if evidence.activates("celery") {
         let mut pending_task = None::<(Option<String>, Option<String>, usize, String)>;
         let task = Regex::new(r#"^\s*@(?:app\.task|shared_task)(?:\((.*)\))?"#).ok();
         let function = Regex::new(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)").ok();
@@ -71,8 +161,8 @@ fn python(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
             offset += line.len();
         }
     }
-    if body.contains("django.db") || body.contains("sqlalchemy") {
-        let framework = if body.contains("django.db") {
+    if evidence.activates("django-orm") || evidence.activates("sqlalchemy") {
+        let framework = if evidence.activates("django-orm") {
             "django-orm"
         } else {
             "sqlalchemy"
@@ -93,9 +183,14 @@ fn python(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
     facts
 }
 
-fn typescript(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
+fn typescript(
+    path: &Path,
+    source: &[u8],
+    body: &str,
+    evidence: &EvidenceSet,
+) -> Vec<RawFrameworkFact> {
     let mut facts = Vec::new();
-    if body.contains("@nestjs/") {
+    if evidence.activates("nestjs") {
         let class = Regex::new(r"\bclass\s+([A-Za-z_]\w*)").ok();
         let method = Regex::new(r"^\s*(?:async\s+)?([A-Za-z_]\w*)\s*\(").ok();
         let publish = Regex::new(r#"\.(emit|publish|send)\(\s*["'`]([^"'`]+)["'`]"#).ok();
@@ -154,7 +249,7 @@ fn typescript(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
             offset += line.len();
         }
     }
-    if body.contains("typeorm") {
+    if evidence.activates("typeorm") {
         facts.extend(decorator_table_mappings(
             "typeorm",
             path,
@@ -167,7 +262,7 @@ fn typescript(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
     facts
 }
 
-fn java(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
+fn java(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
     let mut facts = Vec::new();
     let class = Regex::new(r"\bclass\s+([A-Za-z_]\w*)").ok();
     let method = Regex::new(
@@ -247,7 +342,9 @@ fn java(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
             } else {
                 format!("{}.{}", owner, name.as_str())
             };
-            if let Some((kind, subject, relationship, at, anchor_line)) = pending_message.take() {
+            if evidence.activates("spring")
+                && let Some((kind, subject, relationship, at, anchor_line)) = pending_message.take()
+            {
                 facts.push(message_fact(
                     "spring",
                     &kind,
@@ -267,7 +364,9 @@ fn java(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
                     &anchor_line,
                 ));
             }
-            if let Some((schedule, at, anchor_line)) = pending_job.take() {
+            if evidence.activates("spring")
+                && let Some((schedule, at, anchor_line)) = pending_job.take()
+            {
                 facts.push(job_fact(
                     "spring",
                     &handler,
@@ -283,15 +382,15 @@ fn java(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
         }
         offset += line.len();
     }
-    if body.contains("jakarta.persistence") || body.contains("javax.persistence") {
+    if evidence.activates("jpa") {
         facts.extend(java_table_mappings(path, source, body));
     }
     facts
 }
 
-fn csharp(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
+fn csharp(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
     let mut facts = Vec::new();
-    if body.contains("BackgroundService") || body.contains("IHostedService") {
+    if evidence.activates("aspnet") {
         let class =
             Regex::new(r"\bclass\s+([A-Za-z_]\w*)\s*:[^{]*(?:BackgroundService|IHostedService)")
                 .ok();
@@ -319,7 +418,7 @@ fn csharp(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
             }
         }
     }
-    if body.contains("System.ComponentModel.DataAnnotations.Schema") {
+    if evidence.activates("entity-framework") {
         facts.extend(decorator_table_mappings(
             "entity-framework",
             path,
@@ -332,8 +431,8 @@ fn csharp(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
     facts
 }
 
-fn ruby(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    if !body.contains("ActiveRecord") && !body.contains("ApplicationRecord") {
+fn ruby(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
+    if !evidence.activates("active-record") {
         return Vec::new();
     }
     class_table_mappings(
@@ -346,8 +445,8 @@ fn ruby(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
     )
 }
 
-fn php(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    if !body.contains("Illuminate\\Database\\Eloquent") {
+fn php(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
+    if !evidence.activates("eloquent") {
         return Vec::new();
     }
     class_table_mappings(
@@ -360,8 +459,8 @@ fn php(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
     )
 }
 
-fn go(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    if !body.contains("gorm.io/gorm") {
+fn go(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
+    if !evidence.activates("gorm") {
         return Vec::new();
     }
     let Ok(pattern) = Regex::new(
@@ -390,8 +489,8 @@ fn go(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
         .collect()
 }
 
-fn rust(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    if !body.contains("diesel") {
+fn rust(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
+    if !evidence.activates("diesel") {
         return Vec::new();
     }
     decorator_table_mappings(

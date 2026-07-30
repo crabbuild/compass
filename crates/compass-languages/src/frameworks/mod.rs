@@ -1,5 +1,6 @@
 mod csharp;
 mod enterprise;
+mod evidence;
 mod file_routes;
 mod go;
 mod java;
@@ -41,8 +42,7 @@ pub(crate) fn detect(
         "csharp" => csharp::detect(path, source, root),
         "swift" => swift::detect(path, source, root),
         "javascript" | "typescript" | "tsx" => {
-            let mut facts = typescript::detect(path, source, root);
-            typescript::attach_import_aliases(path, source, root, extraction);
+            let mut facts = typescript::detect(path, source, root, extraction);
             facts.extend(file_routes::detect(path, source, extraction));
             facts
         }
