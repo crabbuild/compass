@@ -38,6 +38,7 @@ const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
 const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
+const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 
@@ -444,6 +445,11 @@ fn normalize_v1_with_mode(
     mode: PublicationMode,
 ) -> Result<PublicationOutcome, GraphError> {
     let mut quarantine = QuarantineCollector::default();
+    let canonical_raw_order = extraction
+        .extensions
+        .remove(CANONICAL_RAW_ORDER)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(value) = extraction.extensions.remove(TRUSTED_GRAPH_COVERAGE) {
         let mut coverage = serde_json::from_value::<Vec<CoverageRecord>>(value)
             .map_err(|error| raw_error("graph.coverage", &error.to_string()))?;
@@ -471,7 +477,7 @@ fn normalize_v1_with_mode(
         &mut quarantine,
     )?;
 
-    if mode == PublicationMode::BestEffort {
+    if mode == PublicationMode::BestEffort && !canonical_raw_order {
         extraction.nodes.sort_by_cached_key(raw_node_sort_key);
         extraction.edges.sort_by_cached_key(raw_edge_sort_key);
     }
@@ -1992,8 +1998,9 @@ pub fn normalize_document_v1_with_inventory_best_effort(
 
 /// Publish an owned analysis document without cloning its node and edge facts.
 ///
-/// Callers that already hold a publication-only document can transfer its
-/// buffers across the v1 boundary and avoid retaining a second full raw graph.
+/// Callers that already hold a deterministic publication-only document can
+/// transfer its buffers across the v1 boundary and avoid retaining a second
+/// full raw graph or re-sorting its canonical raw order.
 pub fn normalize_document_v1_with_inventory_best_effort_owned(
     document: compass_model::GraphDocument,
     repository_root: &Path,
@@ -2058,6 +2065,7 @@ fn document_publication_input_owned(
     inventory: Vec<InventoryEvidence>,
 ) -> Result<(Extraction, BuildEvidence), GraphError> {
     let mut extensions = Map::new();
+    extensions.insert(CANONICAL_RAW_ORDER.to_owned(), Value::Bool(true));
     if let Some(diagnostics) = document.graph.get(TRUSTED_GRAPH_DIAGNOSTICS) {
         extensions.insert(TRUSTED_GRAPH_DIAGNOSTICS.to_owned(), diagnostics.clone());
     }
