@@ -1115,7 +1115,9 @@ fn sql_error(error: rusqlite::Error) -> QueryError {
 
 #[cfg(test)]
 mod adjacency_tests {
-    use compass_model::code_graph::{BuildMetadata, EdgeRecord, GraphDocument};
+    use compass_model::code_graph::{
+        BuildMetadata, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
+    };
     use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
 
     use super::{CodeAdjacencyIndex, EdgeKind};
@@ -1242,6 +1244,24 @@ mod adjacency_tests {
             generation_id: "generation".to_owned(),
             source_commit: None,
         });
+        graph.nodes.reserve(NODES);
+        for index in 0..NODES {
+            graph.nodes.push(NodeRecord {
+                id: format!("n:{index:05}"),
+                kind: NodeKind::Function,
+                roles: Vec::new(),
+                name: format!("f{index:05}"),
+                qualified_name: format!("scale.f{index:05}"),
+                language: None,
+                framework: None,
+                source: None,
+                details: None,
+                evidence: Vec::new(),
+                coverage: Vec::new(),
+                diagnostics: Vec::new(),
+                community: None,
+            });
+        }
         graph.links.reserve(EDGES);
         for index in 0..EDGES {
             graph.links.push(edge(
@@ -1272,7 +1292,8 @@ mod adjacency_tests {
             "bounded lookup examined {examined} bucket heads"
         );
         println!(
-            "{{\"nodes\":{NODES},\"edges\":{EDGES},\"retained\":{},\"examined\":{examined}}}",
+            "{{\"nodes\":{},\"edges\":{EDGES},\"retained\":{},\"examined\":{examined}}}",
+            graph.nodes.len(),
             matching.len()
         );
     }

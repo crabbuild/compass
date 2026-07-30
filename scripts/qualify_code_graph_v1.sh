@@ -26,12 +26,18 @@ python3 scripts/check_code_graph_v1_coverage.py \
   --corpus-manifest "$CORPUS_MANIFEST"
 
 echo "[code-graph-v1] enforce in-process scale ceilings"
+cargo test --locked -p compass-core --lib \
+  resolver_source_text_enforces_the_pre_read_byte_limit
+cargo test --locked -p compass-query --lib \
+  bounded_matching_scales_with_response_budget_on_500k_edges
+cargo test --locked -p compass-resolve --lib \
+  ambiguous_terminal_lookup_is_bounded_by_candidate_budget
 cargo test --locked -p compass-core --test pipeline_scale \
   cold_and_warm_in_process_builds_stay_within_enterprise_ceiling
 cargo test --locked -p compass-query --test code_query_scale \
   enterprise_queries_stay_within_in_process_ceiling
 cargo test --locked -p compass-resolve --test framework_resolution_scale \
-  indexed_framework_resolution_stays_within_enterprise_ceiling
+  shared_production_framework_resolution_stays_within_enterprise_ceiling
 
 echo "[code-graph-v1] build qualifying production binary once"
 cargo build --locked -p compass-cli --bin compass

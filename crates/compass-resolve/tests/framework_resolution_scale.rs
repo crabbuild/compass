@@ -1,11 +1,11 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use compass_languages::{
-    Extraction, FrameworkLimits, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact,
-    RawFrameworkOrigin, RawNodeRecord, RawRouteFact,
+    Extraction, RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin,
+    RawNodeRecord, RawRouteFact,
 };
-use compass_model::provenance::ResolutionState;
-use compass_resolve::frameworks::{resolve_domains, resolve_routes};
+use compass_resolve::resolve_owned_with_root;
 use serde_json::{Map, Value};
 
 const TARGETS: usize = 100_000;
@@ -14,7 +14,7 @@ const DOMAIN_FACTS: usize = 50_000;
 const RESOLUTION_CEILING: Duration = Duration::from_secs(30);
 
 #[test]
-fn indexed_framework_resolution_stays_within_enterprise_ceiling()
+fn shared_production_framework_resolution_stays_within_enterprise_ceiling()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut extraction = Extraction::default();
     extraction.nodes.reserve(TARGETS);
@@ -33,32 +33,33 @@ fn indexed_framework_resolution_stays_within_enterprise_ceiling()
             .push(RawFrameworkFact::Domain(domain_fact(index)));
     }
 
+    let root = tempfile::tempdir()?;
     let started = Instant::now();
-    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
-    let domains = resolve_domains(&extraction, FrameworkLimits::default())?;
+    let resolved = resolve_owned_with_root(vec![extraction], &HashMap::new(), root.path());
     let elapsed = started.elapsed();
 
-    assert_eq!(routes.len(), ROUTES);
-    assert!(
-        routes
-            .iter()
-            .all(|route| route.state == ResolutionState::Exact)
-    );
-    assert_eq!(domains.len(), DOMAIN_FACTS);
-    assert!(
-        domains
-            .iter()
-            .all(|fact| fact.state == ResolutionState::Exact)
-    );
+    let routes = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "routes_to")
+        .count();
+    let domains = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "handles")
+        .count();
+    assert_eq!(routes, ROUTES);
+    assert_eq!(domains, DOMAIN_FACTS);
+    assert_eq!(resolved.error, None);
     assert!(
         elapsed < RESOLUTION_CEILING,
-        "indexed framework resolution took {elapsed:?}, exceeding {RESOLUTION_CEILING:?}"
+        "production framework resolution took {elapsed:?}, exceeding {RESOLUTION_CEILING:?}"
     );
     println!(
         "{{\"targets\":{TARGETS},\"facts\":{},\"routes\":{},\"domains\":{},\"elapsedMs\":{}}}",
         ROUTES + DOMAIN_FACTS,
-        routes.len(),
-        domains.len(),
+        routes,
+        domains,
         elapsed.as_millis()
     );
     Ok(())

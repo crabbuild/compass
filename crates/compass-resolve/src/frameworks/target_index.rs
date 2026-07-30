@@ -263,11 +263,21 @@ fn bounded_union<'a>(
     buckets: impl Iterator<Item = &'a [usize]>,
     limit: usize,
 ) -> (Vec<usize>, bool) {
+    let (retained, truncated, _) = bounded_union_measured(buckets, limit);
+    (retained, truncated)
+}
+
+fn bounded_union_measured<'a>(
+    buckets: impl Iterator<Item = &'a [usize]>,
+    limit: usize,
+) -> (Vec<usize>, bool, usize) {
     let buckets = buckets.collect::<Vec<_>>();
     let mut positions = vec![0_usize; buckets.len()];
     let mut retained = Vec::with_capacity(limit.min(64).saturating_add(1));
     let mut seen = HashSet::with_capacity(limit.min(64).saturating_add(1));
+    let mut examined = 0_usize;
     while retained.len() <= limit {
+        examined = examined.saturating_add(buckets.len());
         let next = buckets
             .iter()
             .enumerate()
@@ -290,7 +300,7 @@ fn bounded_union<'a>(
     if truncated {
         retained.truncate(limit);
     }
-    (retained, truncated)
+    (retained, truncated, examined)
 }
 
 fn target_families(node: &RawNodeRecord) -> Vec<TargetFamily> {
@@ -353,4 +363,57 @@ fn lexical_path(path: &std::path::Path) -> String {
         }
     }
     output.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use compass_languages::{Extraction, RawNodeRecord};
+    use serde_json::{Map, Value};
+
+    use super::{FrameworkTargetIndex, TargetFamily, bounded_union_measured};
+
+    #[test]
+    fn ambiguous_terminal_lookup_is_bounded_by_candidate_budget() {
+        const TARGETS: usize = 100_000;
+        const LIMIT: usize = 20;
+
+        let mut extraction = Extraction::default();
+        extraction.nodes.reserve(TARGETS);
+        for index in 0..TARGETS {
+            extraction.nodes.push(RawNodeRecord {
+                id: format!("node:{index:06}"),
+                attributes: Map::from_iter([
+                    ("label".to_owned(), Value::String("handler".to_owned())),
+                    ("name".to_owned(), Value::String("handler".to_owned())),
+                    (
+                        "qualified_name".to_owned(),
+                        Value::String(format!("module_{index:06}.handler")),
+                    ),
+                    (
+                        "symbol_kind".to_owned(),
+                        Value::String("function".to_owned()),
+                    ),
+                    (
+                        "source_file".to_owned(),
+                        Value::String(format!("src/module_{index:06}.rs")),
+                    ),
+                ]),
+            });
+        }
+
+        let index = FrameworkTargetIndex::new(&extraction);
+        let key = (TargetFamily::Route, "handler".to_owned());
+        assert!(index.by_terminal.contains_key(&key));
+        let bucket = &index.by_terminal[&key];
+        let (retained, truncated, examined) =
+            bounded_union_measured(std::iter::once(bucket.as_slice()), LIMIT);
+
+        assert_eq!(retained.len(), LIMIT);
+        assert!(truncated);
+        assert_eq!(examined, LIMIT + 1);
+        println!(
+            "{{\"targets\":{TARGETS},\"retained\":{},\"examined\":{examined}}}",
+            retained.len()
+        );
+    }
 }
