@@ -92,6 +92,12 @@ pub(crate) struct BuildProfile {
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
     pub program_analysis: bool,
+    #[serde(default = "default_max_source_bytes")]
+    pub max_source_bytes: u64,
+}
+
+const fn default_max_source_bytes() -> u64 {
+    crate::pipeline::DEFAULT_MAX_SOURCE_BYTES
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -257,6 +263,7 @@ mod tests {
             resolution: 1.0,
             exclude_hubs: None,
             program_analysis: true,
+            max_source_bytes: default_max_source_bytes(),
         };
         let state = BuildState::capture(
             output,

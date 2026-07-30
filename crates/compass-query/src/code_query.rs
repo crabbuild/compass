@@ -79,22 +79,152 @@ pub struct CodeQueryEngine {
     pub(crate) connection: Connection,
     pub(crate) graph_path: PathBuf,
     pub(crate) index_path: PathBuf,
-    pub(crate) adjacent_edges: HashMap<String, Vec<usize>>,
+    pub(crate) adjacency: CodeAdjacencyIndex,
+    pub(crate) lookup: CodeLookupIndex,
+}
+
+pub(crate) struct CodeLookupIndex {
+    node_by_id: HashMap<String, usize>,
+    nodes_by_normalized_name: HashMap<String, Vec<usize>>,
+    file_by_path: HashMap<String, usize>,
+}
+
+impl CodeLookupIndex {
+    pub(crate) fn build(graph: &GraphDocument) -> Self {
+        let mut lookup = Self {
+            node_by_id: HashMap::with_capacity(graph.nodes.len()),
+            nodes_by_normalized_name: HashMap::new(),
+            file_by_path: HashMap::with_capacity(graph.graph.files.len()),
+        };
+        for (index, node) in graph.nodes.iter().enumerate() {
+            lookup.node_by_id.insert(node.id.clone(), index);
+            for name in [&node.name, &node.qualified_name] {
+                lookup
+                    .nodes_by_normalized_name
+                    .entry(normalize_symbol(name))
+                    .or_default()
+                    .push(index);
+            }
+        }
+        for nodes in lookup.nodes_by_normalized_name.values_mut() {
+            nodes.sort_by(|left, right| graph.nodes[*left].id.cmp(&graph.nodes[*right].id));
+            nodes.dedup();
+        }
+        for (index, file) in graph.graph.files.iter().enumerate() {
+            lookup.file_by_path.insert(file.path.clone(), index);
+        }
+        lookup
+    }
+
+    fn node_by_id(&self, id: &str) -> Option<usize> {
+        self.node_by_id.get(id).copied()
+    }
+
+    fn nodes_by_normalized_name(&self, name: &str) -> &[usize] {
+        self.nodes_by_normalized_name
+            .get(name)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    fn file_by_path(&self, path: &str) -> Option<usize> {
+        self.file_by_path.get(path).copied()
+    }
+}
+
+pub(crate) struct CodeAdjacencyIndex {
+    incident: HashMap<String, Vec<usize>>,
+    incoming: HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
+    outgoing: HashMap<String, HashMap<EdgeKind, Vec<usize>>>,
+    by_id: HashMap<String, usize>,
+}
+
+impl CodeAdjacencyIndex {
+    pub(crate) fn build(graph: &GraphDocument) -> Self {
+        let mut adjacency = Self {
+            incident: HashMap::new(),
+            incoming: HashMap::new(),
+            outgoing: HashMap::new(),
+            by_id: HashMap::with_capacity(graph.links.len()),
+        };
+        for (index, edge) in graph.links.iter().enumerate() {
+            index_edge(&mut adjacency.incident, &edge.source, index);
+            index_edge(&mut adjacency.incident, &edge.target, index);
+            adjacency
+                .outgoing
+                .entry(edge.source.clone())
+                .or_default()
+                .entry(edge.kind)
+                .or_default()
+                .push(index);
+            adjacency
+                .incoming
+                .entry(edge.target.clone())
+                .or_default()
+                .entry(edge.kind)
+                .or_default()
+                .push(index);
+            adjacency.by_id.insert(edge.id.clone(), index);
+        }
+        for edges in adjacency.incident.values_mut() {
+            sort_edge_indices(edges, graph);
+            edges.dedup();
+        }
+        for by_kind in adjacency
+            .incoming
+            .values_mut()
+            .chain(adjacency.outgoing.values_mut())
+        {
+            for edges in by_kind.values_mut() {
+                sort_edge_indices(edges, graph);
+            }
+        }
+        adjacency
+    }
+
+    fn incident(&self, node: &str) -> &[usize] {
+        self.incident.get(node).map_or(&[], Vec::as_slice)
+    }
+
+    fn matching(
+        &self,
+        graph: &GraphDocument,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+    ) -> Vec<usize> {
+        let by_kind = if inbound {
+            self.incoming.get(node)
+        } else {
+            self.outgoing.get(node)
+        };
+        let mut edges = kinds
+            .iter()
+            .flat_map(|kind| {
+                by_kind
+                    .and_then(|by_kind| by_kind.get(kind))
+                    .into_iter()
+                    .flatten()
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+        sort_edge_indices(&mut edges, graph);
+        edges
+    }
+
+    fn by_id(&self, id: &str) -> Option<usize> {
+        self.by_id.get(id).copied()
+    }
+}
+
+fn index_edge(index: &mut HashMap<String, Vec<usize>>, node: &str, edge: usize) {
+    index.entry(node.to_owned()).or_default().push(edge);
+}
+
+fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
+    edges.sort_by(|left, right| graph.links[*left].id.cmp(&graph.links[*right].id));
 }
 
 impl CodeQueryEngine {
-    pub(crate) fn build_adjacency(graph: &GraphDocument) -> HashMap<String, Vec<usize>> {
-        let mut adjacent = HashMap::<String, Vec<usize>>::new();
-        for (index, edge) in graph.links.iter().enumerate() {
-            adjacent.entry(edge.source.clone()).or_default().push(index);
-            adjacent.entry(edge.target.clone()).or_default().push(index);
-        }
-        for edges in adjacent.values_mut() {
-            edges.sort_by(|left, right| graph.links[*left].id.cmp(&graph.links[*right].id));
-        }
-        adjacent
-    }
-
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
         let query = fts_query(&request.query)?;
@@ -171,7 +301,11 @@ impl CodeQueryEngine {
             });
         }
         for (tier, rank, id, matched_fields) in ranked {
-            let Some(node) = self.graph.nodes.iter().find(|node| node.id == id) else {
+            let Some(node) = self
+                .lookup
+                .node_by_id(&id)
+                .map(|index| &self.graph.nodes[index])
+            else {
                 return Err(QueryError::new(
                     QueryErrorKind::GraphInvariant,
                     "query_graph_invariant",
@@ -225,19 +359,17 @@ impl CodeQueryEngine {
         let Some(seed) = self.resolve_symbol(&request.symbol, &mut response) else {
             return Ok(response);
         };
+        let kinds: &[EdgeKind] = if inbound {
+            &[EdgeKind::Calls, EdgeKind::RoutesTo]
+        } else {
+            &[EdgeKind::Calls]
+        };
         let mut selected_edges = self
-            .graph
-            .links
-            .iter()
-            .filter(|edge| {
-                if inbound {
-                    edge.target == seed && matches!(edge.kind, EdgeKind::Calls | EdgeKind::RoutesTo)
-                } else {
-                    edge.source == seed && edge.kind == EdgeKind::Calls
-                }
-            })
+            .adjacency
+            .matching(&self.graph, &seed, inbound, kinds)
+            .into_iter()
+            .map(|index| &self.graph.links[index])
             .collect::<Vec<_>>();
-        selected_edges.sort_by(|left, right| left.id.cmp(&right.id));
         self.bound_edges(&mut selected_edges, &mut response);
         let mut ids = HashSet::from([seed.clone()]);
         for edge in &selected_edges {
@@ -267,17 +399,13 @@ impl CodeQueryEngine {
             if path_edges.len() >= max_depth {
                 continue;
             }
-            let mut incoming = self
-                .graph
-                .links
-                .iter()
-                .filter(|edge| {
-                    edge.target == node
-                        && IMPACT_KINDS.contains(&edge.kind)
-                        && (request.include_heuristic || !is_heuristic(edge))
-                })
+            let incoming = self
+                .adjacency
+                .matching(&self.graph, &node, true, IMPACT_KINDS)
+                .into_iter()
+                .map(|index| &self.graph.links[index])
+                .filter(|edge| request.include_heuristic || !is_heuristic(edge))
                 .collect::<Vec<_>>();
-            incoming.sort_by(|left, right| left.id.cmp(&right.id));
             for edge in incoming {
                 if selected_edges.len() >= max_edges {
                     response.truncated = true;
@@ -299,7 +427,7 @@ impl CodeQueryEngine {
                     edges.push(edge.id.clone());
                     response
                         .paths
-                        .push(path_record(&nodes, &edges, &self.graph));
+                        .push(path_record(&nodes, &edges, &self.graph, &self.adjacency));
                     queue.push_back((edge.source.clone(), nodes, edges));
                 } else {
                     selected_edges.insert(edge.id.clone());
@@ -311,13 +439,7 @@ impl CodeQueryEngine {
         }
         let ids = visited;
         self.add_nodes(&ids, &mut response);
-        response.edges.extend(
-            self.graph
-                .links
-                .iter()
-                .filter(|edge| selected_edges.contains(&edge.id))
-                .map(query_edge),
-        );
+        self.add_edges(&selected_edges, &mut response);
         self.apply_path_bound(&mut response);
         self.finish_response(&mut response)
     }
@@ -364,17 +486,11 @@ impl CodeQueryEngine {
                 edge_ids.extend(edges.iter().cloned());
                 response
                     .paths
-                    .push(path_record(&nodes, &edges, &self.graph));
+                    .push(path_record(&nodes, &edges, &self.graph, &self.adjacency));
             }
         }
         self.add_nodes(&ids, &mut response);
-        response.edges.extend(
-            self.graph
-                .links
-                .iter()
-                .filter(|edge| edge_ids.contains(&edge.id))
-                .map(query_edge),
-        );
+        self.add_edges(&edge_ids, &mut response);
         self.add_verified_files(&request.root, &mut response)?;
         self.apply_path_bound(&mut response);
         self.finish_response(&mut response)
@@ -413,17 +529,11 @@ impl CodeQueryEngine {
         };
         let ids = nodes.iter().cloned().collect::<HashSet<_>>();
         self.add_nodes(&ids, &mut response);
-        let edge_ids = edges.iter().collect::<HashSet<_>>();
-        response.edges.extend(
-            self.graph
-                .links
-                .iter()
-                .filter(|edge| edge_ids.contains(&edge.id))
-                .map(query_edge),
-        );
+        let edge_ids = edges.iter().cloned().collect::<HashSet<_>>();
+        self.add_edges(&edge_ids, &mut response);
         response
             .paths
-            .push(path_record(&nodes, &edges, &self.graph));
+            .push(path_record(&nodes, &edges, &self.graph, &self.adjacency));
         self.finish_response(&mut response)
     }
 
@@ -438,24 +548,22 @@ impl CodeQueryEngine {
     }
 
     fn resolve_symbol(&self, query: &str, response: &mut CodeQueryResponse) -> Option<String> {
-        if let Some(node) = self.graph.nodes.iter().find(|node| node.id == query) {
+        if let Some(node) = self
+            .lookup
+            .node_by_id(query)
+            .map(|index| &self.graph.nodes[index])
+        {
             return Some(node.id.clone());
         }
         let normalized = normalize_symbol(query);
         let candidate_limit = usize::try_from(response.limits.max_candidates).unwrap_or(usize::MAX);
-        let mut exact = Vec::with_capacity(candidate_limit.saturating_add(1));
-        for node in &self.graph.nodes {
-            if normalize_symbol(&node.name) == normalized
-                || normalize_symbol(&node.qualified_name) == normalized
-            {
-                exact.push(node.id.clone());
-                if exact.len() > candidate_limit {
-                    break;
-                }
-            }
-        }
-        exact.sort();
-        exact.dedup();
+        let exact = self
+            .lookup
+            .nodes_by_normalized_name(&normalized)
+            .iter()
+            .take(candidate_limit.saturating_add(1))
+            .map(|index| self.graph.nodes[*index].id.clone())
+            .collect::<Vec<_>>();
         match exact.as_slice() {
             [node] => Some(node.clone()),
             [] => {
@@ -481,11 +589,10 @@ impl CodeQueryEngine {
 
     fn add_nodes(&self, ids: &HashSet<String>, response: &mut CodeQueryResponse) {
         let max = usize::try_from(response.limits.max_nodes).unwrap_or(usize::MAX);
-        let mut nodes = self
-            .graph
-            .nodes
+        let mut nodes = ids
             .iter()
-            .filter(|node| ids.contains(&node.id))
+            .filter_map(|id| self.lookup.node_by_id(id))
+            .map(|index| &self.graph.nodes[index])
             .collect::<Vec<_>>();
         nodes.sort_by(|left, right| left.id.cmp(&right.id));
         if nodes.len() > max {
@@ -493,6 +600,16 @@ impl CodeQueryEngine {
             response.truncated = true;
         }
         response.nodes.extend(nodes.into_iter().map(query_node));
+    }
+
+    fn add_edges(&self, ids: &HashSet<String>, response: &mut CodeQueryResponse) {
+        let mut edges = ids
+            .iter()
+            .filter_map(|id| self.adjacency.by_id(id))
+            .map(|index| &self.graph.links[index])
+            .collect::<Vec<_>>();
+        edges.sort_by(|left, right| left.id.cmp(&right.id));
+        response.edges.extend(edges.into_iter().map(query_edge));
     }
 
     fn bound_edges(&self, edges: &mut Vec<&EdgeRecord>, response: &mut CodeQueryResponse) {
@@ -540,7 +657,7 @@ impl CodeQueryEngine {
                 continue;
             }
             let mut adjacent = Vec::new();
-            for index in self.adjacent_edges.get(&node).into_iter().flatten() {
+            for index in self.adjacency.incident(&node) {
                 if !budget.consume_edge() {
                     truncated = true;
                     break;
@@ -594,7 +711,11 @@ impl CodeQueryEngine {
         let max_total = response.limits.max_source_bytes;
         let per_file = max_total / u64::try_from(files.len().max(1)).unwrap_or(1);
         for path in files {
-            let Some(record) = self.graph.graph.files.iter().find(|file| file.path == path) else {
+            let Some(record) = self
+                .lookup
+                .file_by_path(&path)
+                .map(|index| &self.graph.graph.files[index])
+            else {
                 continue;
             };
             match verified_source(&root, &path, &record.content_digest, per_file)? {
@@ -724,11 +845,16 @@ fn default_repository_root(graph_path: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-fn path_record(nodes: &[String], edges: &[String], graph: &GraphDocument) -> QueryPath {
-    let selected = graph
-        .links
+fn path_record(
+    nodes: &[String],
+    edges: &[String],
+    graph: &GraphDocument,
+    adjacency: &CodeAdjacencyIndex,
+) -> QueryPath {
+    let selected = edges
         .iter()
-        .filter(|edge| edges.contains(&edge.id))
+        .filter_map(|edge| adjacency.by_id(edge))
+        .map(|index| &graph.links[index])
         .collect::<Vec<_>>();
     let weakest_confidence = selected
         .iter()
@@ -917,4 +1043,87 @@ fn sql_error(error: rusqlite::Error) -> QueryError {
         "query_index_error",
         error.to_string(),
     )
+}
+
+#[cfg(test)]
+mod adjacency_tests {
+    use compass_model::code_graph::{BuildMetadata, EdgeRecord, GraphDocument};
+
+    use super::{CodeAdjacencyIndex, EdgeKind};
+
+    fn edge(id: &str, source: &str, kind: EdgeKind, target: &str) -> EdgeRecord {
+        EdgeRecord {
+            id: id.to_owned(),
+            key: id.to_owned(),
+            source: source.to_owned(),
+            target: target.to_owned(),
+            kind,
+            occurrence_rule: None,
+            relationship_site: None,
+            details: None,
+            evidence: Vec::new(),
+            weight: None,
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn directional_kind_indexes_match_full_edge_scans() {
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        graph.links = vec![
+            edge("e:4", "a", EdgeKind::Calls, "b"),
+            edge("e:2", "b", EdgeKind::RoutesTo, "a"),
+            edge("e:3", "c", EdgeKind::Imports, "b"),
+            edge("e:1", "b", EdgeKind::Calls, "b"),
+        ];
+        let adjacency = CodeAdjacencyIndex::build(&graph);
+        let kinds = [EdgeKind::Calls, EdgeKind::RoutesTo, EdgeKind::Imports];
+
+        for node in ["a", "b", "c", "absent"] {
+            let mut expected_incident = graph
+                .links
+                .iter()
+                .enumerate()
+                .filter(|(_, edge)| edge.source == node || edge.target == node)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            expected_incident
+                .sort_by(|left, right| graph.links[*left].id.cmp(&graph.links[*right].id));
+            assert_eq!(adjacency.incident(node), expected_incident);
+
+            for inbound in [false, true] {
+                for kind in kinds {
+                    let mut expected = graph
+                        .links
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, edge)| {
+                            edge.kind == kind
+                                && if inbound {
+                                    edge.target == node
+                                } else {
+                                    edge.source == node
+                                }
+                        })
+                        .map(|(index, _)| index)
+                        .collect::<Vec<_>>();
+                    expected
+                        .sort_by(|left, right| graph.links[*left].id.cmp(&graph.links[*right].id));
+                    assert_eq!(adjacency.matching(&graph, node, inbound, &[kind]), expected);
+                }
+            }
+        }
+        for (index, edge) in graph.links.iter().enumerate() {
+            assert_eq!(adjacency.by_id(&edge.id), Some(index));
+        }
+    }
 }

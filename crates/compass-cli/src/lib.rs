@@ -1572,6 +1572,7 @@ fn command_build_with_validation_inner(
     let mut token_budget = None;
     let mut max_concurrency = None;
     let mut max_workers = None;
+    let mut max_source_bytes = None;
     let mut api_timeout = None;
     let mut allow_partial = false;
     let mut timing = false;
@@ -1755,13 +1756,32 @@ fn command_build_with_validation_inner(
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
             }
+            "--max-source-bytes" if index + 1 < args.len() => {
+                max_source_bytes = match parse_positive_u64(&args[index + 1], "--max-source-bytes")
+                {
+                    Ok(value) => Some(value),
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+                index += 1;
+            }
+            value if value.starts_with("--max-source-bytes=") => {
+                max_source_bytes = match parse_positive_u64(&value[19..], "--max-source-bytes") {
+                    Ok(value) => Some(value),
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+            }
+            "--max-source-bytes" => {
+                return Outcome::failure(
+                    "error: --max-source-bytes requires a positive integer".to_owned(),
+                );
+            }
             "--timing" => timing = true,
             "--dedup-llm" if extract => dedup_llm = true,
             "-h" | "--help" => {
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program-artifact PATH] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program-artifact PATH] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1823,6 +1843,9 @@ fn command_build_with_validation_inner(
     options.program_artifacts = program_artifacts;
     options.precomputed_detection = precomputed_detection;
     apply_max_workers_override(&mut options, max_workers);
+    if let Some(max_source_bytes) = max_source_bytes {
+        options.max_source_bytes = max_source_bytes;
+    }
     let output_name = std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned());
     let output_container = options
         .output_root
@@ -2469,6 +2492,18 @@ fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("error: {option} must be > 0 (got {parsed})"))
 }
 
+fn parse_positive_u64(value: &str, option: &str) -> Result<u64, String> {
+    let parsed = value.parse::<u64>().map_err(|_| {
+        format!(
+            "error: {option} must be a positive integer (got {})",
+            python_string_repr(value)
+        )
+    })?;
+    (parsed > 0)
+        .then_some(parsed)
+        .ok_or_else(|| format!("error: {option} must be > 0 (got {parsed})"))
+}
+
 fn parse_positive_f64(value: &str, option: &str) -> Result<f64, String> {
     let parsed = value.parse::<f64>().map_err(|_| {
         format!(
@@ -2590,7 +2625,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program-artifact PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program-artifact PATH] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -4185,5 +4220,17 @@ mod mcp_option_tests {
         assert_eq!(options.max_workers, None);
         apply_max_workers_override(&mut options, Some(4));
         assert_eq!(options.max_workers, Some(4));
+    }
+
+    #[test]
+    fn source_size_limit_parser_rejects_zero_negative_and_invalid_values() {
+        assert_eq!(
+            parse_positive_u64("16777216", "--max-source-bytes"),
+            Ok(16_777_216)
+        );
+        for invalid in ["0", "-1", "large"] {
+            assert!(parse_positive_u64(invalid, "--max-source-bytes").is_err());
+        }
+        assert!(extract_help().contains("[--max-source-bytes N]"));
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use compass_languages::{
@@ -248,11 +248,20 @@ fn resolve_reference(
         format!("{declaring_scope}::{expanded}"),
         format!("{declaring_scope}.{expanded}"),
     ];
+    let alias_export = alias.map(|(suffix, alias)| {
+        if alias.imported == "*" {
+            terminal_name(suffix.trim_start_matches(['.', ':']))
+        } else if suffix.is_empty() {
+            alias.imported.clone()
+        } else {
+            terminal_name(suffix)
+        }
+    });
     let retained_limit = limits.max_candidates.saturating_add(1);
     let mut best_score = None;
     let mut candidates = Vec::with_capacity(retained_limit);
     let mut candidates_truncated = false;
-    for node in &targets.nodes {
+    for node in targets.candidates(&expanded, &last, alias_export.as_deref()) {
         let qualified = node.string("qualified_name");
         let name = node
             .attributes
@@ -347,6 +356,9 @@ fn resolve_reference(
 struct RouteTargetIndex<'a> {
     nodes: Vec<&'a RawNodeRecord>,
     parents: HashMap<&'a str, Vec<&'a RawNodeRecord>>,
+    by_id: HashMap<&'a str, Vec<usize>>,
+    by_name: HashMap<String, Vec<usize>>,
+    by_terminal: HashMap<String, Vec<usize>>,
 }
 
 impl<'a> RouteTargetIndex<'a> {
@@ -376,7 +388,56 @@ impl<'a> RouteTargetIndex<'a> {
                     .push(parent);
             }
         }
-        Self { nodes, parents }
+        let mut index = Self {
+            nodes,
+            parents,
+            by_id: HashMap::new(),
+            by_name: HashMap::new(),
+            by_terminal: HashMap::new(),
+        };
+        for (position, node) in index.nodes.iter().enumerate() {
+            index
+                .by_id
+                .entry(node.id.as_str())
+                .or_default()
+                .push(position);
+            let names = [
+                node.string("qualified_name"),
+                node.string("name"),
+                node.label().to_owned(),
+                node.attributes
+                    .get("export_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ];
+            for name in names {
+                if name.is_empty() {
+                    continue;
+                }
+                let normalized = normalize_reference(&name);
+                index
+                    .by_name
+                    .entry(normalized.clone())
+                    .or_default()
+                    .push(position);
+                index
+                    .by_terminal
+                    .entry(terminal_name(&normalized))
+                    .or_default()
+                    .push(position);
+            }
+        }
+        for positions in index
+            .by_id
+            .values_mut()
+            .chain(index.by_name.values_mut())
+            .chain(index.by_terminal.values_mut())
+        {
+            positions.sort_unstable();
+            positions.dedup();
+        }
+        index
     }
 
     fn has_matching_owner(&self, node: &RawNodeRecord, expected: &str) -> bool {
@@ -395,6 +456,34 @@ impl<'a> RouteTargetIndex<'a> {
                 .map(|name| normalize_reference(&name))
                 .any(|name| name == expected || terminal_name(&name) == expected_terminal)
             })
+    }
+
+    fn candidates(
+        &self,
+        expanded: &str,
+        terminal: &str,
+        alias_export: Option<&str>,
+    ) -> Vec<&'a RawNodeRecord> {
+        let mut positions = BTreeSet::<usize>::new();
+        if let Some(candidates) = self.by_id.get(expanded) {
+            positions.extend(candidates.iter().copied());
+        }
+        if let Some(candidates) = self.by_name.get(expanded) {
+            positions.extend(candidates.iter().copied());
+        }
+        if let Some(candidates) = self.by_terminal.get(terminal) {
+            positions.extend(candidates.iter().copied());
+        }
+        if let Some(alias_export) = alias_export {
+            let alias_export = normalize_reference(alias_export);
+            if let Some(candidates) = self.by_name.get(&alias_export) {
+                positions.extend(candidates.iter().copied());
+            }
+        }
+        positions
+            .into_iter()
+            .map(|position| self.nodes[position])
+            .collect()
     }
 }
 

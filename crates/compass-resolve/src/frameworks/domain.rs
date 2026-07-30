@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawEdgeRecord,
@@ -30,9 +30,10 @@ pub fn resolve_domains(
         })
         .collect::<Vec<_>>();
     limits.check_facts(facts.len())?;
+    let targets = DomainTargetIndex::new(extraction);
     facts
         .into_iter()
-        .map(|fact| resolve_one(fact, extraction, limits))
+        .map(|fact| resolve_one(fact, &targets, limits))
         .collect()
 }
 
@@ -188,7 +189,7 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
 
 fn resolve_one(
     fact: &RawDomainFact,
-    extraction: &Extraction,
+    targets: &DomainTargetIndex<'_>,
     limits: FrameworkLimits,
 ) -> Result<ResolvedDomainFact, FrameworkResolutionError> {
     if fact.kind == "route_middleware" {
@@ -221,14 +222,14 @@ fn resolve_one(
             format!("{schema}.{table}")
         };
         let sources = resolve_reference(
-            extraction,
+            targets,
             model,
             TargetKind::Type,
             &fact.anchor.source_file,
             limits,
         )?;
         let targets = resolve_reference(
-            extraction,
+            targets,
             &table,
             TargetKind::DatabaseTable,
             &fact.anchor.source_file,
@@ -247,7 +248,7 @@ fn resolve_one(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let candidates = resolve_reference(
-        extraction,
+        targets,
         reference,
         TargetKind::Callable,
         &fact.anchor.source_file,
@@ -269,7 +270,7 @@ enum TargetKind {
 }
 
 fn resolve_reference(
-    extraction: &Extraction,
+    targets: &DomainTargetIndex<'_>,
     reference: &str,
     target_kind: TargetKind,
     declaring_source: &str,
@@ -281,71 +282,38 @@ fn resolve_reference(
     let expected = normalize(reference);
     let expected_terminal = terminal(&expected);
     let owner = expected.rsplit_once('.').map(|(owner, _)| owner);
-    let by_id = extraction
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<HashMap<_, _>>();
-    let mut parents = HashMap::<&str, Vec<&RawNodeRecord>>::new();
-    for edge in &extraction.edges {
-        if matches!(
-            edge.attributes.get("relation").and_then(Value::as_str),
-            Some("contains" | "method" | "defines")
-        ) && let Some(parent) = by_id.get(edge.source.as_str())
-        {
-            parents
-                .entry(edge.target.as_str())
-                .or_default()
-                .push(parent);
-        }
-    }
     let mut matches = Vec::new();
-    for node in extraction
-        .nodes
-        .iter()
-        .filter(|node| accepts(node, target_kind))
-    {
-        let names = [
-            node.string("qualified_name"),
-            node.string("name"),
-            node.label().to_owned(),
-        ];
-        let normalized = names.iter().map(|name| normalize(name)).collect::<Vec<_>>();
-        let same_source = node
-            .attributes
-            .get("source_file")
-            .and_then(Value::as_str)
-            .is_some_and(|source| source.replace('\\', "/") == declaring_source.replace('\\', "/"));
+    for index in targets.candidates(&expected, expected_terminal) {
+        let target = &targets.nodes[index];
+        let node = target.node;
+        if !accepts(node, target_kind) {
+            continue;
+        }
+        let same_source = target.source == declaring_source.replace('\\', "/");
         let owner_match = owner.is_some_and(|owner| {
-            parents
-                .get(node.id.as_str())
-                .into_iter()
-                .flatten()
-                .flat_map(|parent| {
-                    [
-                        parent.string("qualified_name"),
-                        parent.string("name"),
-                        parent.label().to_owned(),
-                    ]
-                })
-                .map(|name| normalize(&name))
-                .any(|name| name == owner || terminal(&name) == terminal(owner))
+            target
+                .owners
+                .iter()
+                .any(|name| name == owner || terminal(name) == terminal(owner))
         });
-        let score = if node.id == expected || normalized[0] == expected {
+        let score = if node.id == expected || target.normalized[0] == expected {
             100_u8
         } else if owner_match
-            && normalized
+            && target
+                .normalized
                 .iter()
                 .any(|name| terminal(name) == expected_terminal)
         {
             97
         } else if same_source
-            && normalized
+            && target
+                .normalized
                 .iter()
                 .any(|name| terminal(name) == expected_terminal)
         {
             90
-        } else if normalized
+        } else if target
+            .normalized
             .iter()
             .any(|name| terminal(name) == expected_terminal)
         {
@@ -388,6 +356,119 @@ fn resolve_reference(
         .into());
     }
     Ok(candidates)
+}
+
+struct IndexedDomainTarget<'a> {
+    node: &'a RawNodeRecord,
+    normalized: [String; 3],
+    source: String,
+    owners: Vec<String>,
+}
+
+struct DomainTargetIndex<'a> {
+    nodes: Vec<IndexedDomainTarget<'a>>,
+    by_id: HashMap<&'a str, Vec<usize>>,
+    by_name: HashMap<String, Vec<usize>>,
+    by_terminal: HashMap<String, Vec<usize>>,
+}
+
+impl<'a> DomainTargetIndex<'a> {
+    fn new(extraction: &'a Extraction) -> Self {
+        let raw_by_id = extraction
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect::<HashMap<_, _>>();
+        let mut owners = HashMap::<&str, Vec<String>>::new();
+        for edge in &extraction.edges {
+            if matches!(
+                edge.attributes.get("relation").and_then(Value::as_str),
+                Some("contains" | "method" | "defines")
+            ) && let Some(parent) = raw_by_id.get(edge.source.as_str())
+            {
+                owners.entry(edge.target.as_str()).or_default().extend(
+                    [
+                        parent.string("qualified_name"),
+                        parent.string("name"),
+                        parent.label().to_owned(),
+                    ]
+                    .into_iter()
+                    .map(|name| normalize(&name)),
+                );
+            }
+        }
+        for values in owners.values_mut() {
+            values.sort();
+            values.dedup();
+        }
+
+        let mut index = Self {
+            nodes: Vec::with_capacity(extraction.nodes.len()),
+            by_id: HashMap::new(),
+            by_name: HashMap::new(),
+            by_terminal: HashMap::new(),
+        };
+        for node in &extraction.nodes {
+            let normalized = [
+                normalize(&node.string("qualified_name")),
+                normalize(&node.string("name")),
+                normalize(node.label()),
+            ];
+            let position = index.nodes.len();
+            index
+                .by_id
+                .entry(node.id.as_str())
+                .or_default()
+                .push(position);
+            for name in &normalized {
+                index
+                    .by_name
+                    .entry(name.clone())
+                    .or_default()
+                    .push(position);
+                index
+                    .by_terminal
+                    .entry(terminal(name).to_owned())
+                    .or_default()
+                    .push(position);
+            }
+            index.nodes.push(IndexedDomainTarget {
+                node,
+                normalized,
+                source: node
+                    .attributes
+                    .get("source_file")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .replace('\\', "/"),
+                owners: owners.remove(node.id.as_str()).unwrap_or_default(),
+            });
+        }
+        for positions in index
+            .by_id
+            .values_mut()
+            .chain(index.by_name.values_mut())
+            .chain(index.by_terminal.values_mut())
+        {
+            positions.sort_unstable();
+            positions.dedup();
+        }
+        index
+    }
+
+    fn candidates(&self, expected: &str, expected_terminal: &str) -> Vec<usize> {
+        let mut candidates = BTreeSet::new();
+        if let Some(positions) = self.by_id.get(expected) {
+            candidates.extend(positions);
+        }
+        if let Some(positions) = self.by_name.get(expected) {
+            candidates.extend(positions);
+        }
+        if let Some(positions) = self.by_terminal.get(expected_terminal) {
+            candidates.extend(positions);
+        }
+        candidates.into_iter().collect()
+    }
 }
 
 fn accepts(node: &RawNodeRecord, target: TargetKind) -> bool {

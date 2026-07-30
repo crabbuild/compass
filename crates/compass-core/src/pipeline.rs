@@ -50,6 +50,13 @@ use crate::program::{
 };
 use crate::raw_guard::enforce_incomplete_raw_guard;
 
+/// Default upper bound for one source file entering the parser pipeline.
+///
+/// Syntax and semantic extractors can retain several multiples of the source
+/// size while building records. Callers may raise this bound explicitly for
+/// repositories with intentionally large generated sources.
+pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
     pub root: PathBuf,
@@ -79,6 +86,11 @@ pub struct BuildOptions {
     /// Maximum number of worker threads used by the deterministic AST stages.
     /// `None` uses the host CPU count in a build-local Rayon pool.
     pub max_workers: Option<usize>,
+    /// Maximum size of one source file admitted to AST and Program analysis.
+    ///
+    /// Oversized files remain in the inventory with partial coverage and an
+    /// explicit reason; they are not read into memory.
+    pub max_source_bytes: u64,
     /// Override the commit recorded in update artifacts.
     ///
     /// This is primarily useful for reproducible builds and compatibility
@@ -138,6 +150,7 @@ impl BuildOptions {
             // Large builds use a local host-sized pool. Keeping this unset also
             // lets CLI callers provide an explicit memory/throughput bound.
             max_workers: None,
+            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
             built_at_commit: None,
             purpose: BuildPurpose::Update,
             precomputed_detection: None,
@@ -597,6 +610,15 @@ fn build_graph_inner(
     let mut missing = Vec::new();
     if reuse_cached_analysis {
         for path in &sources {
+            if fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.len() > options.max_source_bytes
+            }) {
+                extractions.insert(
+                    path.clone(),
+                    oversized_source_extraction(path, options.max_source_bytes)?,
+                );
+                continue;
+            }
             let cached = cache.load(path, &CacheKind::Ast, None, false)?;
             if let Some(value) = cached {
                 let extraction =
@@ -610,7 +632,18 @@ fn build_graph_inner(
             }
         }
     } else {
-        missing.clone_from(&sources);
+        for path in &sources {
+            if fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.len() > options.max_source_bytes
+            }) {
+                extractions.insert(
+                    path.clone(),
+                    oversized_source_extraction(path, options.max_source_bytes)?,
+                );
+            } else {
+                missing.push(path.clone());
+            }
+        }
     }
     let worker_count = options.max_workers.unwrap_or_else(default_ast_workers);
     let worker_pool = if missing.len() >= 256 || sources.len() >= 256 {
@@ -635,6 +668,30 @@ fn build_graph_inner(
     let extract_source = |engine: &mut Engine,
                           path: &PathBuf|
      -> Result<_, compass_languages::ExtractError> {
+        let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if metadata.len() > options.max_source_bytes {
+            let graph = oversized_source_extraction(path, options.max_source_bytes)?;
+            if let Some(progress) = progress {
+                let mut completed = completed_files
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *completed += 1;
+                progress(BuildFileProgress {
+                    current: *completed,
+                    total: total_files,
+                    path: path.clone(),
+                });
+            }
+            return Ok((
+                path.clone(),
+                graph,
+                (path.to_string_lossy().into_owned(), String::new()),
+                None,
+            ));
+        }
         let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
             path: path.clone(),
             source,
@@ -1439,6 +1496,30 @@ fn build_graph_inner(
     })
 }
 
+fn oversized_source_extraction(
+    path: &Path,
+    max_source_bytes: u64,
+) -> Result<Extraction, compass_languages::ExtractError> {
+    let metadata = fs::metadata(path).map_err(|source| compass_files::FileError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut extraction = Extraction::default();
+    extraction.extensions.insert(
+        EXTRACTION_QUALITY_EXTENSION.to_owned(),
+        serde_json::Value::String(EXTRACTION_QUALITY_PARTIAL.to_owned()),
+    );
+    extraction.extensions.insert(
+        EXTRACTION_QUALITY_REASON_EXTENSION.to_owned(),
+        serde_json::Value::String(format!(
+            "source is {} bytes, exceeding the configured {} byte extraction limit",
+            metadata.len(),
+            max_source_bytes
+        )),
+    );
+    Ok(extraction)
+}
+
 fn program_modules(program: Option<&ProgramBuild>) -> usize {
     program.map_or(0, |program| program.analysis.program.modules.len())
 }
@@ -1463,6 +1544,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         resolution: options.resolution,
         exclude_hubs: options.exclude_hubs,
         program_analysis: options.program_analysis,
+        max_source_bytes: options.max_source_bytes,
     }
 }
 

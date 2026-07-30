@@ -4,6 +4,7 @@ use std::fs;
 
 use compass_cli::{Frontend, run};
 use compass_files::BuildGuard;
+use compass_model::code_graph::{ExtractionStatus, GraphDocument};
 
 fn arguments<const N: usize>(values: [&str; N]) -> Vec<OsString> {
     values.into_iter().map(OsString::from).collect()
@@ -57,6 +58,58 @@ fn native_program_artifact_requires_a_nonempty_path() {
                 .contains("--program-artifact requires a path")
         );
     }
+}
+
+#[test]
+fn native_update_enforces_the_configured_source_size_limit() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("healthy.rs"), "pub fn healthy() {}\n")?;
+    fs::write(
+        directory.path().join("generated.rs"),
+        "pub fn generated() {}\n".repeat(64),
+    )?;
+    let root = directory.path().to_string_lossy();
+    let outcome = run(
+        Frontend::Compass,
+        arguments([
+            "update",
+            root.as_ref(),
+            "--max-source-bytes=64",
+            "--no-cluster",
+            "--no-viz",
+        ]),
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+
+    let output = directory.path().join("compass-out");
+    let graph_path = BuildGuard::resolve_artifact(&output, "graph.json")?;
+    let graph = GraphDocument::load(&graph_path)?;
+    let generated = graph
+        .graph
+        .files
+        .iter()
+        .find(|file| file.path == "generated.rs")
+        .ok_or("missing oversized source inventory")?;
+    assert_eq!(generated.extraction_status, ExtractionStatus::Partial);
+    assert!(graph.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "partial_extraction"
+            && diagnostic
+                .message
+                .contains("configured 64 byte extraction limit")
+    }));
+    let program: serde_json::Value = serde_json::from_slice(&fs::read(
+        BuildGuard::resolve_artifact(&output, "program.json")?,
+    )?)?;
+    assert!(
+        program["program"]["modules"]
+            .as_array()
+            .is_some_and(|modules| {
+                modules
+                    .iter()
+                    .all(|module| module["source_file"] != "generated.rs")
+            })
+    );
+    Ok(())
 }
 
 #[test]

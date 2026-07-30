@@ -351,6 +351,77 @@ fn real_framework_limit_failure_isolated_from_healthy_file() -> Result<(), Box<d
 }
 
 #[test]
+fn oversized_source_is_not_parsed_and_publishes_explicit_partial_coverage()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    write(
+        directory.path(),
+        "src/healthy.rs",
+        "pub fn target() {}\npub fn healthy() { target(); }\n",
+    )?;
+    write(
+        directory.path(),
+        "src/generated.rs",
+        &"pub fn generated() {}\n".repeat(64),
+    )?;
+
+    let mut options = BuildOptions::new(directory.path());
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.program_analysis = true;
+    options.max_source_bytes = 64;
+    options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+    let result = build_local_graph(&options)?;
+    let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+
+    assert!(graph.nodes.iter().any(|node| {
+        node.source
+            .as_ref()
+            .is_some_and(|source| source.file == "src/healthy.rs")
+    }));
+    let oversized = graph
+        .graph
+        .files
+        .iter()
+        .find(|file| file.path == "src/generated.rs")
+        .ok_or("missing oversized-file inventory")?;
+    assert_eq!(oversized.extraction_status, ExtractionStatus::Partial);
+    assert!(graph.graph.coverage.iter().any(|coverage| {
+        coverage.file_id.as_deref() == Some(oversized.id.as_str())
+            && coverage.status == CoverageStatus::Partial
+    }));
+    assert!(graph.graph.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "partial_extraction"
+            && diagnostic.message.contains("src/generated.rs")
+            && diagnostic
+                .message
+                .contains("configured 64 byte extraction limit")
+    }));
+    assert!(graph.nodes.iter().all(|node| {
+        node.source
+            .as_ref()
+            .is_none_or(|source| source.file != "src/generated.rs")
+    }));
+    assert!(graph.links.iter().all(|edge| {
+        edge.relationship_site
+            .as_ref()
+            .is_none_or(|anchor| anchor.file != "src/generated.rs")
+    }));
+    let program: serde_json::Value =
+        serde_json::from_slice(&fs::read(result.output_dir.join("program.json"))?)?;
+    assert!(
+        program["program"]["modules"]
+            .as_array()
+            .is_some_and(|modules| {
+                modules
+                    .iter()
+                    .all(|module| module["source_file"] != "src/generated.rs")
+            })
+    );
+    Ok(())
+}
+
+#[test]
 fn every_registered_extractor_family_crosses_production_v1_publication()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
