@@ -217,6 +217,9 @@ pub struct OccurrenceFact {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolutionConstraint {
+    /// Exact declaration proven by the adapter from the same source construct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_target_declaration_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exact_language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

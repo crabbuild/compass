@@ -220,6 +220,10 @@ impl EvidenceBuilder {
                 occurrence_id.unwrap_or_default(),
                 binding_id.unwrap_or_default(),
                 target_spelling,
+                constraints
+                    .exact_target_declaration_id
+                    .as_deref()
+                    .unwrap_or_default(),
                 constraints.exact_language.as_deref().unwrap_or_default(),
                 constraints.module_or_package.as_deref().unwrap_or_default(),
                 constraints.scope_id.as_deref().unwrap_or_default(),
@@ -395,6 +399,7 @@ struct DeclarationContext {
     qualified_name: String,
     kind: String,
     enclosing_type_qualified_name: Option<String>,
+    runtime_nested: bool,
 }
 
 struct DirectAdapterState<'source> {
@@ -489,6 +494,7 @@ impl<'source> DirectAdapterState<'source> {
             qualified_name: self.module_or_package.clone(),
             kind: "file".to_owned(),
             enclosing_type_qualified_name: None,
+            runtime_nested: false,
         });
         Ok(())
     }
@@ -500,7 +506,7 @@ impl<'source> DirectAdapterState<'source> {
                 "non-empty Python source has no file evidence",
             )
         })?;
-        self.collect_python_declarations(root, &file, None)?;
+        self.collect_python_declarations(root, &file)?;
         self.walk_python_evidence(root, &file, true)
     }
 
@@ -508,7 +514,6 @@ impl<'source> DirectAdapterState<'source> {
         &mut self,
         node: Node<'_>,
         owner: &DeclarationContext,
-        class_owner: Option<&DeclarationContext>,
     ) -> Result<(), EvidenceError> {
         if matches!(node.kind(), "class_definition" | "function_definition") {
             let Some(name_node) = node.child_by_field_name("name") else {
@@ -519,23 +524,23 @@ impl<'source> DirectAdapterState<'source> {
                 return Ok(());
             }
             let is_class = node.kind() == "class_definition";
-            let qualified_name = if let Some(class_owner) = class_owner {
-                format!("{}::{name}", class_owner.qualified_name)
-            } else {
+            let qualified_name = if owner.kind == "file" {
                 format!("{}.{}", self.module_or_package, name)
-            };
-            let graph_node_id = if let Some(class_owner) = class_owner {
-                make_id(&[&class_owner.graph_node_id, &name])
             } else {
+                format!("{}::{name}", owner.qualified_name)
+            };
+            let graph_node_id = if owner.kind == "file" {
                 make_id(&[
                     &self.stem,
                     qualified_name.rsplit('.').next().unwrap_or(&name),
                 ])
+            } else {
+                make_id(&[&owner.graph_node_id, &name])
             };
             let graph_node_id = self.unique_graph_id(graph_node_id, node);
             let kind = if is_class {
                 "class"
-            } else if class_owner.is_some() {
+            } else if owner.kind == "class" {
                 "method"
             } else {
                 "function"
@@ -562,23 +567,26 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
-                enclosing_type_qualified_name: class_owner
-                    .map(|owner| owner.qualified_name.clone()),
+                enclosing_type_qualified_name: if owner.kind == "class" {
+                    Some(owner.qualified_name.clone())
+                } else {
+                    owner.enclosing_type_qualified_name.clone()
+                },
+                runtime_nested: owner.runtime_nested
+                    || matches!(owner.kind.as_str(), "function" | "method"),
             };
             self.add_ownership(owner, &context)?;
             self.declarations.insert(node.id(), context.clone());
-            if is_class {
-                let body = node.child_by_field_name("body").unwrap_or(node);
-                let mut cursor = body.walk();
-                for child in body.children(&mut cursor).filter(|child| child.is_named()) {
-                    self.collect_python_declarations(child, &context, Some(&context))?;
-                }
+            let body = node.child_by_field_name("body").unwrap_or(node);
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                self.collect_python_declarations(child, &context)?;
             }
             return Ok(());
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            self.collect_python_declarations(child, owner, class_owner)?;
+            self.collect_python_declarations(child, owner)?;
         }
         Ok(())
     }
@@ -756,6 +764,7 @@ impl<'source> DirectAdapterState<'source> {
             Some(&binding_id),
             target_spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: target.rsplit_once('.').map(|(module, _)| module.to_owned()),
                 scope_id: Some(owner.scope_id.clone()),
@@ -956,6 +965,7 @@ impl<'source> DirectAdapterState<'source> {
                     qualified_name,
                     kind: kind.to_owned(),
                     enclosing_type_qualified_name: None,
+                    runtime_nested: false,
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context);
@@ -1010,6 +1020,7 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name,
                 kind: kind.to_owned(),
                 enclosing_type_qualified_name: None,
+                runtime_nested: false,
             };
             self.add_ownership(file, &context)?;
             self.declarations.insert(node.id(), context);
@@ -1199,6 +1210,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&binding_id),
                 &target_spelling,
                 ResolutionConstraint {
+                    exact_target_declaration_id: None,
                     exact_language: Some(self.language.to_owned()),
                     module_or_package: Some(target.clone()),
                     scope_id: Some(owner.scope_id.clone()),
@@ -1429,6 +1441,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .as_deref()
@@ -1562,6 +1575,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .as_deref()
@@ -1627,6 +1641,8 @@ impl<'source> DirectAdapterState<'source> {
             None,
             &child.name,
             ResolutionConstraint {
+                exact_target_declaration_id: (self.language == "python" && child.runtime_nested)
+                    .then(|| child.fact_id.clone()),
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),

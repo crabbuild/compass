@@ -1020,6 +1020,99 @@ evidence, graph counts and digests, Graphify comparison deltas, performance,
 verification commands, and remaining gaps. Commit and push only after all
 required gates pass.
 
+---
+
+### Task 11: Source-grounded runtime declaration ownership
+
+**Background:**
+
+Both the generic Python graph extractor and the direct universal evidence
+collector currently stop declaration discovery when they enter a function.
+That behavior omits source declarations created at runtime inside functions
+and methods. On pinned Django the omitted source population contains 1,068
+nested functions and 2,345 classes declared inside functions. It also causes
+the five phase-five runtime-import gaps: the import use is real, but its exact
+lexical owner has no graph node, so restoring the old file-owned edge would be
+incorrect.
+
+This is a graph-model recall gap, not permission to attach nested facts to an
+outer file or method. The source contains an exact declaration range, lexical
+parent, name, and declaration kind, so the universal evidence path can model
+the owner without guessing a runtime call target.
+
+**Design:**
+
+- Generalize Python declaration traversal from a class-only parent to an exact
+  lexical declaration parent. A nested function is owned by the enclosing
+  function or method; a runtime class is owned by the enclosing function; and
+  methods remain owned by their exact class.
+- Give every nested declaration a deterministic identity derived from its
+  lexical owner's graph identity and source name. Repeated same-named
+  declarations under one owner use the existing source-line discriminator.
+- Emit the raw source node and universal `DeclarationFact`, scope, and
+  containment candidate from the same parser declaration. Their graph IDs
+  must agree exactly so resolution never needs a compatibility projection.
+- Recurse into Python function bodies only. Other language adapters retain
+  their current behavior until their own atomic hard cutovers.
+- Imports, calls, decorators, annotations, bases, and further nested
+  declarations inside the new owner use that owner's scope. Never project a
+  nested fact to a file or sibling declaration.
+- Keep all version values unchanged. Do not run Graphify or
+  `graphify update .`.
+
+- [x] **Step 1: Implement lexical runtime declarations**
+
+Refactor the production generic Python declaration walk and direct evidence
+collector to emit source-backed nested function/class nodes, exact ownership,
+and aligned identities. Implement production behavior before tests.
+
+- [x] **Step 2: Add post-implementation conformance coverage**
+
+Cover nested functions, classes declared inside functions, methods of runtime
+classes, repeated same-named nested declarations, exact nested imports, and
+sibling-scope isolation. Assert raw graph IDs and universal declaration IDs
+materialize to the same nodes without dangling or file-owned fallback edges.
+
+- [x] **Step 3: Qualify the real topology transition**
+
+Rebuild pinned Django and Entire cold and warm. Require zero validation
+errors, byte-identical output, no topology change in Entire, and no remaining
+unrepresented phase-five runtime import. Independently audit every added node
+and relationship against Python AST declaration nesting, source range,
+lexical owner, import binding, and target source. Any relationship without
+exact source proof fails the phase.
+
+Result:
+
+- Pinned Django publishes 68,761 nodes, 157,056 raw edges, and 156,092
+  canonical edges with zero validation errors and byte-identical cold/warm
+  output. Pinned Entire remains byte-identical to phase five at 58,391 nodes,
+  152,161 raw edges, and 151,267 canonical edges.
+- All five phase-five runtime-import gaps are recovered under their exact
+  nested declaration owners. None is projected to a file or outer method.
+- The complete changed population is source-grounded: 4,662 added declaration
+  nodes match Python AST file, line, name, kind, and lexical ownership; 307
+  placeholders retain bounded source anchors; and all 11,941 added
+  relationships match exact declaration nesting or exact use sites with
+  bounded binding/target evidence.
+- Target confidence remains explicit: inferred external identities are not
+  described as exact internal declarations, and this changed-population audit
+  is not a repository-wide precision claim.
+
+- [ ] **Step 4: Run complete verification and performance qualification**
+
+Run focused language/resolver tests, core determinism, the strict Python
+benchmark suite, the full locked workspace, format, lint, release build,
+query oracles, comparator, and the standardized large-repository suite. Record
+wall time and peak RSS honestly; added source declarations are a quality gain
+only when their ownership and downstream facts pass the complete audit.
+
+- [ ] **Step 5: Record evidence and update PR #93**
+
+Add a phase-six review with exact topology deltas, complete changed-population
+audit, graph counts and digests, Graphify classifications, performance, and
+remaining gaps. Commit and push only after all required gates pass.
+
 ## Plan self-review
 
 - **Design coverage:** Tasks 1–6 cover the evidence model, adapter registry,
@@ -1030,6 +1123,8 @@ required gates pass.
   Task 9 replaces that conservative shortcut with typed, bounded linearized
   dispatch in the shared resolver. Task 10 removes the residual pre-universal
   Python import projection and makes direct import bindings scope-correct.
+  Task 11 closes the known runtime-declaration ownership gap without reviving
+  file-level projection.
 - **Scope:** This plan delivers the core plus Python/Go hard cutover. It claims
   quality only for capabilities that pass the audit; Java/Rust and framework
   hard cutovers remain separate increments.

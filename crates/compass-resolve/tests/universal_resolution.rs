@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use compass_languages::Engine;
+use compass_languages::{Engine, file_stem, make_id};
 
 fn extract(path: &str, source: &[u8]) -> compass_languages::Extraction {
     Engine::default()
@@ -124,6 +124,82 @@ fn explicit_python_alias_resolves_before_external_fallback() {
         edge.string("relation") == "calls"
             && edge.target == target.id
             && edge.string("resolution_rule") == "explicitbinding"
+    }));
+}
+
+#[test]
+fn python_runtime_declarations_keep_exact_ownership_through_resolution() {
+    let provider = extract("helpers.py", b"def execute():\n    return 1\n");
+    let consumer_source = b"def outer(flag):\n    if flag:\n        def duplicate():\n            return 1\n    else:\n        def duplicate():\n            return 2\n    def inner():\n        from helpers import execute\n        return execute()\n    class Runtime:\n        def run(self):\n            return inner()\n    return Runtime\n";
+    let consumer = extract("pkg/runtime.py", consumer_source);
+    let sources = HashMap::from([(
+        "pkg/runtime.py".to_owned(),
+        String::from_utf8(consumer_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[provider, consumer], &sources);
+
+    let stem = file_stem(Path::new("pkg/runtime.py"));
+    let outer_id = make_id(&[&stem, "outer"]);
+    let duplicate_id = make_id(&[&outer_id, "duplicate"]);
+    let duplicate_overload_id = make_id(&[&duplicate_id, "overload", "6"]);
+    let inner_id = make_id(&[&outer_id, "inner"]);
+    let runtime_id = make_id(&[&outer_id, "Runtime"]);
+    let run_id = make_id(&[&runtime_id, "run"]);
+    let execute = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "execute()" && node.string("source_file") == "helpers.py")
+        .expect("provider function");
+
+    for id in [
+        &outer_id,
+        &duplicate_id,
+        &duplicate_overload_id,
+        &inner_id,
+        &runtime_id,
+        &run_id,
+    ] {
+        assert!(resolved.nodes.iter().any(|node| node.id == *id));
+    }
+    for (source, target, relation) in [
+        (&outer_id, &duplicate_id, "contains"),
+        (&outer_id, &duplicate_overload_id, "contains"),
+        (&outer_id, &inner_id, "contains"),
+        (&outer_id, &runtime_id, "contains"),
+        (&runtime_id, &run_id, "method"),
+    ] {
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.source == *source
+                    && edge.target == *target
+                    && edge.string("relation") == relation
+            }),
+            "missing {relation} {source} -> {target}; relevant edges={:#?}",
+            resolved
+                .edges
+                .iter()
+                .filter(|edge| edge.source == *source || edge.target == *target)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let imported = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "imports_from" && edge.target == execute.id);
+    assert_eq!(imported.clone().count(), 1);
+    assert!(imported.into_iter().all(|edge| edge.source == inner_id));
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == execute.id);
+    assert_eq!(calls.clone().count(), 1);
+    assert!(calls.into_iter().all(|edge| edge.source == inner_id));
+    assert!(resolved.edges.iter().all(|edge| {
+        !matches!(edge.string("relation").as_str(), "imports_from" | "calls")
+            || edge.target != execute.id
+            || (edge.source != outer_id && edge.source != make_id(&[&stem]))
     }));
 }
 

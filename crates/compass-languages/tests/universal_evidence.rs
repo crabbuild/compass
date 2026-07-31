@@ -2,7 +2,8 @@ use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
     Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, HierarchyConstraint,
     LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
-    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole, validate_evidence,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole, file_stem, make_id,
+    validate_evidence,
 };
 
 fn range(start: u64, end: u64) -> EvidenceRange {
@@ -79,6 +80,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             binding_id: Some("binding:helper".to_owned()),
             target_spelling: "helper".to_owned(),
             constraints: ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some("python".to_owned()),
                 module_or_package: Some("tools".to_owned()),
                 scope_id: Some("scope:caller".to_owned()),
@@ -170,6 +172,12 @@ fn duplicate_ids_and_all_dangling_reference_kinds_are_rejected() {
     let mut missing_occurrence = valid_batch();
     missing_occurrence.candidates[0].occurrence_id = Some("occurrence:missing".to_owned());
     assert_code(&missing_occurrence, EvidenceErrorCode::MissingReference);
+
+    let mut missing_exact_target = valid_batch();
+    missing_exact_target.candidates[0]
+        .constraints
+        .exact_target_declaration_id = Some("decl:missing".to_owned());
+    assert_code(&missing_exact_target, EvidenceErrorCode::MissingReference);
 }
 
 #[test]
@@ -515,6 +523,138 @@ class Dynamic(factory(Base)):
             .iter()
             .any(|binding| { binding.spelling == "helper" && binding.kind == BindingKind::Import })
     );
+}
+
+#[test]
+fn python_runtime_declarations_have_exact_lexical_owners_and_aligned_graph_ids() {
+    let source = br#"def outer(flag):
+    if flag:
+        def duplicate():
+            return 1
+    else:
+        def duplicate():
+            return 2
+    def inner():
+        from helpers import execute
+        return execute()
+    class Runtime:
+        def run(self):
+            return inner()
+    return Runtime
+"#;
+    let path = std::path::Path::new("pkg/runtime.py");
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(path, "pkg/runtime.py", source)
+        .expect("extract nested Python declarations");
+    let graph = extraction.graph;
+    assert_eq!(graph.error, None);
+
+    let stem = file_stem(path);
+    let outer_id = make_id(&[&stem, "outer"]);
+    let duplicate_id = make_id(&[&outer_id, "duplicate"]);
+    let duplicate_overload_id = make_id(&[&duplicate_id, "overload", "6"]);
+    let inner_id = make_id(&[&outer_id, "inner"]);
+    let runtime_id = make_id(&[&outer_id, "Runtime"]);
+    let run_id = make_id(&[&runtime_id, "run"]);
+
+    for (id, label) in [
+        (&outer_id, "outer()"),
+        (&duplicate_id, "duplicate()"),
+        (&duplicate_overload_id, "duplicate()"),
+        (&inner_id, "inner()"),
+        (&runtime_id, "Runtime"),
+        (&run_id, ".run()"),
+    ] {
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.id == *id && node.label() == label),
+            "missing source declaration {id} ({label})"
+        );
+    }
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == runtime_id)
+            .expect("runtime class")
+            .string("qualified_name"),
+        "outer::Runtime"
+    );
+    for (source, target, relation) in [
+        (&outer_id, &duplicate_id, "contains"),
+        (&outer_id, &duplicate_overload_id, "contains"),
+        (&outer_id, &inner_id, "contains"),
+        (&outer_id, &runtime_id, "contains"),
+        (&runtime_id, &run_id, "method"),
+    ] {
+        assert!(graph.edges.iter().any(|edge| {
+            edge.source == *source && edge.target == *target && edge.string("relation") == relation
+        }));
+    }
+
+    let evidence = graph
+        .semantic_evidence
+        .as_ref()
+        .expect("Python universal evidence");
+    validate_evidence(evidence, EvidenceLimits::default()).expect("valid nested evidence");
+    let declaration = |graph_id: &str| {
+        evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.graph_node_id == graph_id)
+            .unwrap_or_else(|| panic!("missing evidence declaration for {graph_id}"))
+    };
+    let outer = declaration(&outer_id);
+    let duplicate = declaration(&duplicate_id);
+    let duplicate_overload = declaration(&duplicate_overload_id);
+    let inner = declaration(&inner_id);
+    let runtime = declaration(&runtime_id);
+    let run = declaration(&run_id);
+    assert_eq!(inner.qualified_name, "pkg.runtime.outer::inner");
+    assert_eq!(runtime.qualified_name, "pkg.runtime.outer::Runtime");
+    assert_eq!(run.qualified_name, "pkg.runtime.outer::Runtime::run");
+    for child in [duplicate, duplicate_overload, inner, runtime] {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.source_declaration_id == outer.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(child.id.as_str())
+        }));
+    }
+
+    let inner_scope = evidence
+        .scopes
+        .iter()
+        .find(|scope| scope.owner_declaration_id.as_deref() == Some(inner.id.as_str()))
+        .expect("inner scope");
+    assert!(
+        evidence.scopes.iter().any(|scope| {
+            scope.owner_declaration_id.as_deref() == Some(inner.id.as_str())
+                && scope.parent_scope_id.as_deref()
+                    == evidence
+                        .scopes
+                        .iter()
+                        .find(|scope| {
+                            scope.owner_declaration_id.as_deref() == Some(outer.id.as_str())
+                        })
+                        .map(|scope| scope.id.as_str())
+        }),
+        "inner declaration is not lexically scoped to outer"
+    );
+    let binding = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "execute")
+        .expect("nested import binding");
+    assert_eq!(binding.scope_id.as_deref(), Some(inner_scope.id.as_str()));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.source_declaration_id == inner.id
+            && candidate.binding_id.as_deref() == Some(binding.id.as_str())
+    }));
 }
 
 #[test]

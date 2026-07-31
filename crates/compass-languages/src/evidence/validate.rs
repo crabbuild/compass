@@ -405,6 +405,12 @@ fn validate_fact(
                 fact.constraints.scope_id.as_deref(),
                 scopes,
             )?;
+            require_optional_reference(
+                &fact.id,
+                "exact target declaration",
+                fact.constraints.exact_target_declaration_id.as_deref(),
+                declarations,
+            )?;
             if let Some(language) = fact.constraints.exact_language.as_deref()
                 && language != fact.language
             {

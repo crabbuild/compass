@@ -35,6 +35,7 @@ impl Default for UniversalResolutionLimits {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResolutionRule {
+    ExactSourceDeclaration,
     ExactLexicalDeclaration,
     ExplicitBinding,
     UniqueModuleOrPackage,
@@ -425,6 +426,17 @@ impl UniversalResolutionIndex {
             .exact_language
             .as_deref()
             .unwrap_or(&candidate.language);
+        if let Some(target) = candidate.constraints.exact_target_declaration_id.as_ref()
+            && self.declaration_allowed(target, candidate)
+        {
+            return ResolutionDecision::Resolved {
+                declaration_id: target.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::ExactSourceDeclaration,
+                    candidate_count: 1,
+                },
+            };
+        }
         if let Some(HierarchyConstraint::ReceiverDispatch {
             receiver_qualified_name,
             strategy: ReceiverDispatchStrategy::C3AfterReceiver,
@@ -669,9 +681,16 @@ impl UniversalResolutionIndex {
             } else {
                 (source, target)
             };
+            let exact_target = candidate
+                .constraints
+                .exact_target_declaration_id
+                .as_deref()
+                .and_then(|id| self.declarations.get(id));
             let relation = if self.occurrence(candidate).is_some_and(|occurrence| {
                 occurrence.role == compass_languages::SemanticRole::Receiver
-            }) {
+            }) || (candidate.relation == CandidateRelation::Contains
+                && exact_target.is_some_and(|target| target.kind == "method"))
+            {
                 "method"
             } else {
                 relation_name(candidate.relation)
@@ -679,6 +698,7 @@ impl UniversalResolutionIndex {
             let site = self
                 .occurrence(candidate)
                 .map(|occurrence| &occurrence.range)
+                .or_else(|| exact_target.map(|target| &target.range))
                 .or_else(|| {
                     self.declarations
                         .get(&candidate.source_declaration_id)
