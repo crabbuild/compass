@@ -212,3 +212,63 @@ faster cold and 4.70x faster warm. They are single-sample follow-ups, not a
 replacement qualification matrix. The refinement materially improves call
 quality while preserving a latency advantage, but memory, cold 5x speed,
 reference/containment coverage, and Graphify-parity gates remain open.
+
+## Phase 2 official qualification
+
+The final Phase 2 comparison ran from clean Compass commit `a40ee3b` against
+the same pinned Bevy and Graphify revisions as Phase 1. It retained the full
+three-repeat cold, warm, incremental, and restore protocol. The generic
+harness returned nonzero because its cross-project 5x cold and memory gates
+remain stricter than the approved Rust Phase 2 gates, and because Graphify's
+incremental and restore digests changed on every repetition. All Compass
+samples were eligible and all Compass graph digests were stable.
+
+| Tool/workload | Eligible | p50 | p95 | Peak RSS |
+|---|---:|---:|---:|---:|
+| Compass cold | 3/3 | 14.971 s | 16.190 s | 5,721.11 MiB |
+| Graphify cold | 3/3 | 28.588 s | 32.721 s | 391.48 MiB |
+| Compass warm | 3/3 | 0.479 s | 0.497 s | 28.81 MiB |
+| Graphify warm | 3/3 | 13.247 s | 13.278 s | 482.08 MiB |
+| Compass incremental | 3/3 | 20.211 s | 20.664 s | 5,951.78 MiB |
+| Graphify incremental | 3/3 | ineligible | ineligible | ineligible |
+
+Compass was **1.910x faster cold** and **27.637x faster warm**. This passes
+the approved Rust gate that both medians be faster than Graphify. The generic
+5x cold threshold and Compass's higher cold/incremental RSS remain recorded,
+non-blocking observations; neither is substituted for the approved gate.
+
+The published Compass graph contained 116,281 nodes, 273,939 raw edges, and
+2,401 communities. Publication deterministically quarantined two invalid
+nodes and 7,981 incident or invalid edges. The strict comparison index
+deduplicated relationship payloads to 272,364 Compass edges and compared them
+with 43,812 Graphify nodes and 115,860 Graphify edges.
+
+The occurrence-aware classifier handled 84,821 of 115,860 Graphify edges
+(**73.21%**), exceeding the 69.64% Phase 1 baseline. Call handling reached
+15,733 of 16,825 edges (**93.51%**), exceeding the 88.67% floor. `Handled`
+means exact, dominated by more precise Compass evidence, or explicitly
+rejected because stronger qualified or occurrence evidence contradicts the
+Graphify binding; missing and ambiguous facts never count as handled.
+
+| Relation | Graphify | Exact | Dominated | Rejected | Missing | Ambiguous | Handled |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| calls | 16,825 | 6,316 | 114 | 9,303 | 1,092 | 0 | 93.51% |
+| contains | 27,511 | 17,393 | 3,286 | 0 | 6,712 | 120 | 75.17% |
+| extends | 440 | 58 | 102 | 251 | 29 | 0 | 93.41% |
+| implements | 4,631 | 321 | 761 | 2,043 | 1,494 | 12 | 67.48% |
+| imports | 3,133 | 195 | 878 | 1,338 | 722 | 0 | 76.96% |
+| references | 63,320 | 3,593 | 13,412 | 25,457 | 20,700 | 158 | 67.06% |
+
+The final implementation also removed a quadratic best-effort sanitization
+scan. Validation now identifies duplicate edge positions deterministically,
+validates independent edges in parallel, and indexes invalid edge anchors
+once before quarantine. On the pinned Bevy graph, the sanitization stage fell
+from 12.339 seconds to 0.357 seconds while publishing the same node, edge,
+community, and quarantine counts. Full `compass-model`, `compass-graph`, and
+publication-resilience test suites passed, as did release Clippy with warnings
+denied, formatting, and diff checks.
+
+Rust Phase 2 therefore passes every approved blocking gate and is eligible to
+hand off to the Java `UniversalCandidate` increment. This does not claim that
+the generic cross-project memory or 5x cold targets pass, nor does it hide the
+remaining Rust reference, containment, or implementation gaps.
