@@ -395,8 +395,7 @@ fn batched_cache_writes_are_portable_and_refresh_changed_sources() -> Result<(),
         "nodes":[{"id":"first","source_file":"first.rs"}],
         "edges":[]
     });
-    let prepared = cache.prepare_portable_ast_batch(&[(first.clone(), portable_first)])?;
-    Cache::publish_prepared_ast_batch(prepared)?;
+    cache.save_portable_ast_batch(&[(first.clone(), portable_first)])?;
     let canonical_first_value = json!({
         "nodes":[{
             "id":"first",

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. This is an implementation-first plan: production code is written before regression checks, and TDD is explicitly out of scope.
 
-**Goal:** Remove the confirmed Python receiver-resolution false edge, make Graphify comparison reflect source-statement evidence instead of exact-line artifacts, and reduce peak build retention without weakening deterministic graph publication.
+**Goal:** Remove the confirmed Python receiver-resolution false edge, make Graphify comparison reflect source-statement evidence instead of exact-line artifacts, and evaluate peak build retention without weakening deterministic graph publication.
 
-**Architecture:** Receiver intent is encoded as a typed hierarchy strategy by the language adapter and resolved only through the exact receiver, a source-proven C3 prefix, or a complete C3 hierarchy. Benchmark comparison gains an optional, repository-rooted occurrence oracle with extension-based providers; its first provider uses Python AST statement spans for imports and calls. The build pipeline shares source bytes and prepares cache payloads without cloning the complete fresh extraction inventory.
+**Architecture:** Receiver intent is encoded as a typed hierarchy strategy by the language adapter and resolved only through the exact receiver, a source-proven C3 prefix, or a complete C3 hierarchy. Benchmark comparison gains an optional, repository-rooted occurrence oracle with extension-based providers; its first provider uses the narrowest Python AST statement span for imports and calls so nested calls cannot collapse into one occurrence. A build-retention prototype is retained only if controlled RSS evidence justifies it.
 
 **Tech Stack:** Rust, Tree-sitter evidence extraction, shared universal resolver, Python `ast`, SQLite comparison harness, MessagePack AST cache, Cargo and `unittest` verification.
 
@@ -85,24 +85,22 @@ Peak RSS is also material: the standardized Django run measured about 4.76 GiB c
 - [x] Require pinned commit, graph digest, snippet digest, target cluster, and explicit judgment before qualification consumes a record.
 - [x] Add post-implementation validation checks and document how to grow from conformance to the 2,000-record production gate.
 
-### Task 4: Eliminate avoidable peak-retention clones
+### Task 4: Evaluate avoidable peak-retention clones
 
-**Files:**
-- Modify: `crates/compass-core/src/pipeline.rs`
-- Modify: `crates/compass-core/src/program.rs`
-- Modify: `crates/compass-files/src/cache.rs`
-- Modify: `crates/compass-files/tests/contracts.rs`
-- Modify: `crates/compass-core/tests/code_graph_v1_publication_resilience.rs`
+**Prototype files (reverted after measurement):**
+- `crates/compass-core/src/pipeline.rs`
+- `crates/compass-core/src/program.rs`
+- `crates/compass-files/src/cache.rs`
+- `crates/compass-files/tests/contracts.rs`
 
 **Interfaces:**
-- Produces: prepared owned AST-cache writes and shared immutable source bytes.
+- Outcome: no production cache or pipeline change is retained without a measured benefit.
 - Invariant: cache keys, MessagePack bytes, graph bytes, and atomic publication semantics remain unchanged.
 
-- [x] Store fresh source bytes in shared immutable buffers through extraction and Program preparation.
-- [x] Split portable AST cache preparation from publication so the pipeline encodes borrowed extractions, then moves the originals into owned resolution without cloning them.
-- [x] Avoid constructing a second source-text byte map when no external artifact requires it.
+- [x] Prototype shared immutable source buffers, borrowed AST-cache preparation, and conditional source-text materialization.
 - [x] Add post-implementation cache-contract and byte-stability checks.
-- [ ] Run a controlled same-commit Django cold/warm/incremental comparison and report both elapsed time and peak RSS; retain the change only if correctness is unchanged and the tradeoff is justified.
+- [x] Run a controlled same-commit Django and Entire cold/warm/incremental comparison.
+- [x] Remove the prototype after it showed no material peak-RSS benefit (+0.7% Django cold, +0.4% Entire cold) and therefore did not justify the added cache/pipeline complexity.
 
 ### Task 5: Verification and delivery
 

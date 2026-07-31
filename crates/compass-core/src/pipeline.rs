@@ -736,12 +736,10 @@ fn build_graph_inner(
                 None,
             ));
         }
-        let bytes: Arc<[u8]> = fs::read(path)
-            .map_err(|source| compass_files::FileError::Io {
-                path: path.clone(),
-                source,
-            })?
-            .into();
+        let bytes = fs::read(path).map_err(|source| compass_files::FileError::Io {
+            path: path.clone(),
+            source,
+        })?;
         let source_file = path
             .strip_prefix(&root)
             .unwrap_or(path)
@@ -762,7 +760,7 @@ fn build_graph_inner(
         let prepared = combined.program.map(|batch| PreparedSyntaxInput {
             source_file,
             language: language.to_owned(),
-            bytes: Arc::clone(&bytes),
+            bytes: bytes.clone(),
             batch,
         });
         if let Some(progress) = progress {
@@ -883,6 +881,11 @@ fn build_graph_inner(
     } else {
         None
     };
+    let mut ast_cache_entries = fresh
+        .par_iter()
+        .filter(|(_, extraction, _, _)| !extraction.nodes.is_empty())
+        .map(|(path, extraction, _, _)| (path.clone(), extraction.clone()))
+        .collect::<Vec<_>>();
     let mut empty_files = Vec::new();
     let fresh_paths = fresh
         .iter()
@@ -898,48 +901,16 @@ fn build_graph_inner(
     }
     profile_internal("AST cache snapshot and dispatch", &mut internal_started);
 
-    let mut ordered_paths = Vec::with_capacity(sources.len());
-    let mut ordered = Vec::with_capacity(sources.len());
-    for path in &sources {
-        if let Some(extraction) = extractions.remove(path) {
-            ordered_paths.push(path.clone());
-            ordered.push(extraction);
-        }
-    }
+    let mut ordered = sources
+        .iter()
+        .filter_map(|path| extractions.remove(path))
+        .collect::<Vec<_>>();
+    merge_decl_def_classes(&mut ordered);
+    profile_internal("declaration merge", &mut internal_started);
     let ast_root_marker = format!("{}_", make_id(&[&root.to_string_lossy()]));
     let portable_check_started = Instant::now();
     let ast_is_portable = ast_extractions_are_portable(&ordered, &root);
     profile_internal_duration("portable AST precheck", portable_check_started.elapsed());
-    let mut ast_cache_entries = if ast_is_portable {
-        Vec::new()
-    } else {
-        ordered_paths
-            .iter()
-            .zip(&ordered)
-            .filter(|(path, extraction)| {
-                fresh_paths.contains(*path) && !extraction.nodes.is_empty()
-            })
-            .map(|(path, extraction)| (path.clone(), extraction.clone()))
-            .collect::<Vec<_>>()
-    };
-    let prepared_ast_cache_entries = if ast_is_portable {
-        let entries = ordered_paths
-            .iter()
-            .zip(&ordered)
-            .filter(|(path, extraction)| {
-                fresh_paths.contains(*path) && !extraction.nodes.is_empty()
-            })
-            .map(|(path, extraction)| (path.clone(), extraction))
-            .collect::<Vec<_>>();
-        Some(cache.prepare_portable_ast_batch(&entries)?)
-    } else {
-        None
-    };
-    merge_decl_def_classes(&mut ordered);
-    profile_internal(
-        "AST cache preparation and declaration merge",
-        &mut internal_started,
-    );
     let ast_id_remap = if ast_is_portable {
         AHashMap::new()
     } else {
@@ -979,11 +950,7 @@ fn build_graph_inner(
         .name("compass-ast-cache".to_owned())
         .spawn(move || {
             let started = Instant::now();
-            if let Some(entries) = prepared_ast_cache_entries {
-                Cache::publish_prepared_ast_batch(entries)?;
-            } else {
-                cache.save_portable_ast_batch(&ast_cache_entries)?;
-            }
+            cache.save_portable_ast_batch(&ast_cache_entries)?;
             cache.flush()?;
             Ok::<_, CoreError>(started.elapsed())
         })
@@ -2135,72 +2102,41 @@ fn ast_source_identity_map(sources: &[PathBuf], root: &Path) -> AHashMap<String,
 
 fn ast_extractions_are_portable(extractions: &[Extraction], root: &Path) -> bool {
     let rooted_prefix = format!("{}_", make_id(&[&root.to_string_lossy()]));
-    let source_is_portable = |source: &str| {
-        !source.contains('\\')
-            && Path::new(source)
-                .components()
-                .all(|component| matches!(component, std::path::Component::Normal(_)))
-    };
-    let attributes_are_portable = |attributes: &serde_json::Map<String, serde_json::Value>| {
-        ["source_file", "origin_file", "target_file"]
-            .into_iter()
-            .all(|key| {
-                attributes
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .is_none_or(source_is_portable)
-            })
-            && attributes
-                .get("origin_source_anchor")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|anchor| anchor.get("file"))
-                .and_then(serde_json::Value::as_str)
-                .is_none_or(source_is_portable)
-    };
     extractions.par_iter().all(|extraction| {
         extraction.nodes.iter().all(|node| {
-            !node.id.starts_with(&rooted_prefix) && attributes_are_portable(&node.attributes)
+            !node.id.starts_with(&rooted_prefix)
+                && node
+                    .attributes
+                    .get("source_file")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|source| !Path::new(source).is_absolute())
         }) && extraction.edges.iter().all(|edge| {
-            !edge.source.starts_with(&rooted_prefix)
-                && !edge.target.starts_with(&rooted_prefix)
-                && attributes_are_portable(&edge.attributes)
+            !edge.source.starts_with(&rooted_prefix) && !edge.target.starts_with(&rooted_prefix)
         }) && extraction
-            .hyperedges
+            .raw_calls
             .iter()
-            .all(|hyperedge| hyperedge.as_object().is_none_or(&attributes_are_portable))
-            && extraction.raw_calls.iter().flatten().all(|call| {
-                !call.caller_nid.starts_with(&rooted_prefix)
-                    && source_is_portable(&call.source_file)
-            })
+            .flatten()
+            .all(|call| !call.caller_nid.starts_with(&rooted_prefix))
             && extraction
                 .semantic_evidence
                 .as_ref()
                 .is_none_or(|evidence| {
                     evidence.declarations.iter().all(|fact| {
                         !fact.graph_node_id.starts_with(&rooted_prefix)
-                            && source_is_portable(&fact.range.source_file)
+                            && !Path::new(&fact.range.source_file).is_absolute()
                     }) && evidence
                         .scopes
                         .iter()
-                        .all(|fact| source_is_portable(&fact.range.source_file))
+                        .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
                         && evidence
                             .bindings
                             .iter()
-                            .all(|fact| source_is_portable(&fact.range.source_file))
+                            .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
                         && evidence
                             .occurrences
                             .iter()
-                            .all(|fact| source_is_portable(&fact.range.source_file))
-                        && evidence
-                            .diagnostics
-                            .iter()
-                            .filter_map(|diagnostic| diagnostic.range.as_ref())
-                            .all(|range| source_is_portable(&range.source_file))
+                            .all(|fact| !Path::new(&fact.range.source_file).is_absolute())
                 })
-            && extraction.framework_facts.iter().all(|fact| match fact {
-                RawFrameworkFact::Route(fact) => source_is_portable(&fact.anchor.source_file),
-                RawFrameworkFact::Domain(fact) => source_is_portable(&fact.anchor.source_file),
-            })
     })
 }
 

@@ -77,17 +77,6 @@ pub enum CacheKind {
     },
 }
 
-/// An encoded AST cache write whose content hash and destination are fixed.
-///
-/// Preparing these values while the extraction inventory is borrowed lets a
-/// caller transfer the original extraction values into resolution without a
-/// second full graph clone.
-#[derive(Debug)]
-pub struct PreparedAstCacheEntry {
-    destination: PathBuf,
-    bytes: Vec<u8>,
-}
-
 impl CacheKind {
     fn directory_name(&self) -> String {
         match self {
@@ -310,15 +299,6 @@ impl Cache {
         &mut self,
         entries: &[(PathBuf, T)],
     ) -> Result<(), FileError> {
-        let prepared = self.prepare_portable_ast_batch(entries)?;
-        Self::publish_prepared_ast_batch(prepared)
-    }
-
-    /// Encode portable AST cache values into owned publication jobs.
-    pub fn prepare_portable_ast_batch<T: Serialize + Sync>(
-        &mut self,
-        entries: &[(PathBuf, T)],
-    ) -> Result<Vec<PreparedAstCacheEntry>, FileError> {
         let directory = self.directory(&CacheKind::Ast, None);
         fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
         let mut jobs = Vec::with_capacity(entries.len());
@@ -333,26 +313,14 @@ impl Cache {
                 value,
             ));
         }
-        jobs.into_par_iter()
-            .map(|(destination, value)| {
-                let bytes = rmp_serde::to_vec_named(value).map_err(|source| {
-                    FileError::MessagePackEncode {
-                        path: destination.clone(),
-                        source,
-                    }
+        jobs.into_par_iter().try_for_each(|(destination, value)| {
+            let bytes =
+                rmp_serde::to_vec_named(value).map_err(|source| FileError::MessagePackEncode {
+                    path: destination.clone(),
+                    source,
                 })?;
-                Ok(PreparedAstCacheEntry { destination, bytes })
-            })
-            .collect()
-    }
-
-    /// Publish previously encoded AST cache jobs.
-    pub fn publish_prepared_ast_batch(
-        entries: Vec<PreparedAstCacheEntry>,
-    ) -> Result<(), FileError> {
-        entries
-            .into_par_iter()
-            .try_for_each(|entry| write_cache_bytes(&entry.destination, &entry.bytes))
+            write_cache_bytes(&destination, &bytes)
+        })
     }
 
     /// Load a Program IR cache value by a caller-owned logical input key.
