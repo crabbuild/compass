@@ -185,3 +185,36 @@ fn rust_phase2_emits_direct_test_relationship_candidates() -> Result<(), Box<dyn
     }
     Ok(())
 }
+
+#[test]
+fn rust_phase2_distinguishes_same_named_module_and_function_candidates()
+-> Result<(), Box<dyn Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("benches/components/mod.rs"),
+        b"mod insert_simple;\nfn insert_simple() {}\n",
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+
+    let candidates = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.constraints.qualified_name.as_deref() == Some("crate::insert_simple")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(candidates.len(), 2, "candidates={candidates:#?}");
+    assert_ne!(candidates[0].id, candidates[1].id);
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.constraints.allowed_target_kinds.join(","))
+            .collect::<HashSet<_>>(),
+        HashSet::from(["function".to_owned(), "module".to_owned()])
+    );
+    Ok(())
+}

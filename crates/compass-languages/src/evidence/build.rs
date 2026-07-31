@@ -267,27 +267,33 @@ impl EvidenceBuilder {
         occurrence_id: Option<&str>,
         binding_id: Option<&str>,
         target_spelling: &str,
-        constraints: ResolutionConstraint,
+        mut constraints: ResolutionConstraint,
     ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "candidates",
             self.batch.candidates.len(),
             self.limits.candidates,
         )?;
-        let id = self.stable_id(
-            "candidate",
-            &[
-                candidate_relation_name(relation),
-                source_declaration_id,
-                occurrence_id.unwrap_or_default(),
-                binding_id.unwrap_or_default(),
-                target_spelling,
-                constraints.exact_language.as_deref().unwrap_or_default(),
-                constraints.module_or_package.as_deref().unwrap_or_default(),
-                constraints.scope_id.as_deref().unwrap_or_default(),
-                constraints.qualified_name.as_deref().unwrap_or_default(),
-            ],
-        );
+        constraints.allowed_target_kinds.sort_unstable();
+        constraints.allowed_target_kinds.dedup();
+        let mut identity = vec![
+            candidate_relation_name(relation),
+            source_declaration_id,
+            occurrence_id.unwrap_or_default(),
+            binding_id.unwrap_or_default(),
+            target_spelling,
+            constraints.exact_language.as_deref().unwrap_or_default(),
+            constraints.module_or_package.as_deref().unwrap_or_default(),
+            constraints.scope_id.as_deref().unwrap_or_default(),
+            constraints.qualified_name.as_deref().unwrap_or_default(),
+        ];
+        identity.extend(constraints.allowed_target_kinds.iter().map(String::as_str));
+        identity.push(if constraints.allow_external {
+            "allow_external"
+        } else {
+            "internal_only"
+        });
+        let id = self.stable_id("candidate", &identity);
         self.batch.candidates.push(RelationshipCandidate {
             id: id.clone(),
             language: self.batch.adapter.language.clone(),
