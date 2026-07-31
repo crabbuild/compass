@@ -386,8 +386,12 @@ pub(crate) fn node_values(
         let language = sanitize_label(&node.string("language"));
         let signature = sanitize_metadata(&node.string("signature"), 500);
         let (location_start, location_end) = source_line_range(&source_location);
-        let line_start = node.unsigned("line_start").or(location_start);
-        let line_end = node.unsigned("line_end").or(location_end).or(line_start);
+        let line_start = source_anchor_unsigned(node, "line_start", "startLine").or(location_start);
+        let line_end = source_anchor_unsigned(node, "line_end", "endLine")
+            .or(location_end)
+            .or(line_start);
+        let start_byte = source_anchor_unsigned(node, "start_byte", "startByte");
+        let end_byte = source_anchor_unsigned(node, "end_byte", "endByte");
         let display_kind = if symbol_kind.is_empty() {
             sanitize_label(&node.string("file_type"))
         } else {
@@ -404,6 +408,11 @@ pub(crate) fn node_values(
             line_start.map_or(Value::Null, Value::from),
         );
         output.insert("line_end".into(), line_end.map_or(Value::Null, Value::from));
+        output.insert(
+            "start_byte".into(),
+            start_byte.map_or(Value::Null, Value::from),
+        );
+        output.insert("end_byte".into(), end_byte.map_or(Value::Null, Value::from));
         output.insert("signature".into(), Value::String(signature.clone()));
         if let Some(counts) = options.member_counts {
             output.insert("is_community".into(), Value::Bool(true));
@@ -440,6 +449,18 @@ pub(crate) fn node_values(
         nodes.push(Value::Object(output));
     }
     nodes
+}
+
+fn source_anchor_unsigned(node: &NodeRecord, legacy_key: &str, v1_key: &str) -> Option<u64> {
+    node.unsigned(legacy_key).or_else(|| {
+        node.property("source")
+            .and_then(|source| {
+                source
+                    .as_object()
+                    .and_then(|source| source.get(v1_key).cloned())
+            })
+            .and_then(|value| value.as_u64())
+    })
 }
 
 fn community_details(
