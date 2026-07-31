@@ -198,6 +198,36 @@ The following resolution behavior is forbidden:
 - using Graphify at runtime; and
 - falling back to a removed language-specific resolver.
 
+### Owner-qualified receiver dispatch
+
+Receiver dispatch uses the same language-neutral candidate contract. An
+adapter may set `ResolutionConstraint.qualified_name` to an exact member
+identity only when source, compiler, or type evidence proves the receiver
+owner. The shared resolver then requires one compatible declaration with that
+identity. It does not need a language-specific member search.
+
+Python demonstrates the conservative minimum. For
+`super().method(...)`, the direct adapter records the enclosing type and its
+explicit bases. It emits `Base::method` only when:
+
+- the call uses zero-argument `super()`;
+- the source method has an enclosing class;
+- that class has exactly one explicit, statically nameable base;
+- imports or the current module provide the exact base identity; and
+- the target method exists as an exact source declaration on that base.
+
+Multiple inheritance, dynamic bases, explicit-argument `super`, external-only
+bases, and methods inherited beyond the direct base remain unresolved. A
+future Python MRO capability must provide ordered, source-grounded MRO evidence
+before recovering those cases.
+
+Other adapters should reuse this pattern with evidence appropriate to their
+language: compiler-selected overloads, trait or interface implementation
+facts, typed receivers, or statically resolved superclass members. They must
+not encode a guessed owner merely because a member name is unique in the
+repository. This extension uses the existing constraint model and does not
+require a version change.
+
 ## Framework pack registration
 
 `FrameworkPackDescriptor` is the registration contract for framework meaning

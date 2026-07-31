@@ -697,12 +697,98 @@ Update PR #88 if it remains open; otherwise create a new PR targeting current
 `origin/main`. State explicitly that Python and Go hard-cut in this increment;
 Java/Rust and framework packs follow through separate hard-cutover increments.
 
+---
+
+### Task 8: Phase-three exact receiver dispatch and honest residual accounting
+
+**Background:**
+
+The first real-corpus residual analysis found that Django still contained 730
+Graphify-only `super()` call hypotheses. The generic Python call extractor
+recorded `super()` as an unbound qualifier and correctly refused repository-
+wide terminal-name fallback, but it did not preserve enough owner context to
+select a proven base method. This was a recall gap, not permission to weaken
+resolution.
+
+The same analysis also found Graphify call/reference hypotheses whose
+generated endpoint identity differed from Compass even though Compass had one
+compatible target at the exact mapped owner, file, and use-site location.
+Those cases require semantic comparison, not new product graph edges.
+
+**Design:**
+
+- Keep declaration context aware of its enclosing type and the exact qualified
+  identities of explicit bases.
+- For Python `super().method(...)`, emit an exact qualified target only when
+  the enclosing type has one explicit base. The shared resolver still requires
+  that exact base method to exist as a source declaration.
+- Fail closed for multiple inheritance, dynamic bases, explicit-argument
+  `super`, absent direct methods, and external-only bases. MRO inference is a
+  future evidence capability, not a terminal-name fallback.
+- Reuse `ResolutionConstraint.qualified_name`; do not add or change any
+  version value.
+- Keep the mechanism language-neutral: future adapters may provide an exact
+  owner-qualified target from compiler, type, trait, or inheritance evidence
+  and use the same resolver rule.
+- In the external comparator, count a generated-identity hypothesis as
+  dominated only when the mapped source, relation, file, location, and one
+  compatible Compass target all agree. Multiple or incompatible targets remain
+  ambiguous or missing.
+
+- [x] **Step 1: Implement exact direct-base dispatch**
+
+Add enclosing-type context and a bounded base map to the direct adapter. Emit
+an exact `Base::method` constraint for the conservative Python case above.
+Implement production behavior before adding tests.
+
+- [x] **Step 2: Add post-implementation fail-closed coverage**
+
+Cover a cross-file imported single base as the positive case and multiple
+inheritance as the negative case. Verify that the shared resolver, rather than
+a Python-specific resolution branch, materializes the edge.
+
+- [x] **Step 3: Improve source-grounded comparison**
+
+Index exact relationship occurrences by relation, canonical owner, source
+file, and source location. Recover only one compatible target at that exact
+site. Report ambiguous node counts in the reusable analyzer.
+
+- [x] **Step 4: Verify on pinned Django and Entire**
+
+Use Django commit `1c5927f04a853c79ac9b098eab92fb328ff9e4ad` and Entire
+commit `279b988597f1037c14cdd4c46765a5552e067d17`. Retain the
+existing Graphify graphs; do not rerun Graphify and do not run
+`graphify update .`.
+
+Outcome:
+
+- Django gained 688 exact `super()` call edges and lost three incorrect
+  variable-target `copy` call edges, for a net 685 raw edges.
+- An independent Python AST audit verified all 688 new edges against the exact
+  source class, sole base, call occurrence, target class, and direct method
+  declaration: 688/688 correct.
+- Graphify edge coverage improved from 7,415 to 5,796 missing hypotheses across
+  the comparator and product changes. Strict superset quality still fails.
+- Entire graph topology did not change.
+- The standardized three-repeat Compass build suite passed, but the retained
+  Graphify comparison still misses the 5x cold-build target on Entire and
+  Compass still uses substantially more peak memory. Do not describe phase
+  three as performance dominance.
+
+- [x] **Step 5: Record evidence and publish**
+
+Record exact counts, coverage deltas, verification commands, performance,
+memory, and remaining gaps in
+`docs/superpowers/reviews/2026-07-30-semantic-dominance-phase-3.md`.
+Commit, push, and open a new PR against current `origin/main`.
+
 ## Plan self-review
 
 - **Design coverage:** Tasks 1–6 cover the evidence model, adapter registry,
   direct Python/Go extraction, production resolver, framework-pack contract,
   and conformance harness. Task 7 covers extension documentation and
-  real-corpus hard-cutover qualification.
+  real-corpus hard-cutover qualification. Task 8 adds conservative
+  owner-qualified receiver dispatch and source-grounded residual accounting.
 - **Scope:** This plan delivers the core plus Python/Go hard cutover. It claims
   quality only for capabilities that pass the audit; Java/Rust and framework
   hard cutovers remain separate increments.
