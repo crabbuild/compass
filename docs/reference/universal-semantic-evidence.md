@@ -171,12 +171,13 @@ then pass.
 `UniversalResolutionIndex` validates and merges batches, bounds every index,
 sorts candidate identities, and applies this order:
 
-1. exact declaration in the lexical scope or a parent scope;
-2. explicit import, alias, or re-export binding;
-3. exact qualified identity;
-4. unique same-module or same-package declaration;
-5. source-scoped qualified external endpoint when explicitly allowed;
-6. ambiguous or unresolved.
+1. typed hierarchy policy for direct bases and receiver dispatch;
+2. exact declaration in the lexical scope or a parent scope;
+3. explicit import, alias, or re-export binding;
+4. exact qualified identity;
+5. unique same-module or same-package declaration;
+6. source-scoped qualified external endpoint when explicitly allowed;
+7. ambiguous or unresolved.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-
@@ -200,33 +201,49 @@ The following resolution behavior is forbidden:
 
 ### Owner-qualified receiver dispatch
 
-Receiver dispatch uses the same language-neutral candidate contract. An
-adapter may set `ResolutionConstraint.qualified_name` to an exact member
-identity only when source, compiler, or type evidence proves the receiver
-owner. The shared resolver then requires one compatible declaration with that
-identity. It does not need a language-specific member search.
+Receiver dispatch uses typed `HierarchyConstraint` values on the same
+language-neutral candidate contract:
 
-Python demonstrates the conservative minimum. For
-`super().method(...)`, the direct adapter records the enclosing type and its
-explicit bases. It emits `Base::method` only when:
+- every ordered direct-base occurrence carries
+  `DirectBase { base_set_complete }`;
+- a member use carries `ReceiverDispatch` with an exact receiver identity and
+  a registered linearization strategy; and
+- the adapter must advertise `HierarchyDispatch`, which also makes cached
+  evidence lacking these facts ineligible for reuse.
 
-- the call uses zero-argument `super()`;
-- the source method has an enclosing class;
-- that class has exactly one explicit, statically nameable base;
-- imports or the current module provide the exact base identity; and
-- the target method exists as an exact source declaration on that base.
+The shared resolver builds bounded direct-base and directly-owned-member
+indices. Direct-base candidates are resolved by exact qualified identity
+before all lexical and module rules. They may publish an exact source class or
+a qualified external endpoint, but can never bind to a convenient same-named
+local class.
 
-Multiple inheritance, dynamic bases, explicit-argument `super`, external-only
-bases, and methods inherited beyond the direct base remain unresolved. A
-future Python MRO capability must provide ordered, source-grounded MRO evidence
-before recovering those cases.
+`C3AfterReceiver` first checks a semantically proven prefix: when the
+receiver's complete ordered base list is known and its exact first base
+uniquely declares the member, that declaration is the receiver's direct MRO
+successor and can be selected without inspecting later ancestors. Otherwise,
+the resolver computes the complete C3 linearization from exact qualified base
+identities and source occurrence order, skips the receiver, and selects the
+first class that directly declares the requested member. Full C3 resolution
+requires every base to resolve uniquely, an acyclic and C3-consistent
+hierarchy, a bounded traversal, and one unique selected member.
 
-Other adapters should reuse this pattern with evidence appropriate to their
-language: compiler-selected overloads, trait or interface implementation
-facts, typed receivers, or statically resolved superclass members. They must
-not encode a guessed owner merely because a member name is unique in the
-repository. This extension uses the existing constraint model and does not
-require a version change.
+Python emits this evidence for zero-argument `super().method(...)`. The old
+single-direct-base shortcut has been removed. Multiple inheritance and
+methods inherited beyond the direct base now use the same shared C3 rule.
+Dynamic receiver bases, incomplete receiver base lists, explicit-argument
+`super`, inconsistent hierarchies, ambiguous members, and bound overflows
+remain unresolved. An unresolved or external later ancestor blocks full C3
+recovery but does not invalidate a unique member declared directly on the
+exact first base. Nested sibling bases use their enclosing class identity. A
+receiver-dispatch candidate cannot also carry a qualified target and cannot
+fall through to a same-named local or imported symbol.
+
+Future adapters reuse the typed boundary with evidence appropriate to their
+language: compiler-selected overloads, trait or interface order, typed
+receivers, or statically resolved superclass members. A new language semantic
+must add and qualify its own explicit strategy; it must not reinterpret C3 or
+guess an owner because a member name is repository-unique. No version value
+changes for this extension.
 
 ## Framework pack registration
 

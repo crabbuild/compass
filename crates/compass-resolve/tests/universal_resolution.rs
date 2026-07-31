@@ -128,7 +128,7 @@ fn explicit_python_alias_resolves_before_external_fallback() {
 }
 
 #[test]
-fn python_super_call_resolves_only_an_exact_direct_base_method() {
+fn python_super_call_resolves_an_exact_direct_base_method_through_shared_c3_dispatch() {
     let provider = extract(
         "pkg/base.py",
         b"class Base:\n    def run(self):\n        return None\n",
@@ -157,12 +157,181 @@ fn python_super_call_resolves_only_an_exact_direct_base_method() {
         .collect::<Vec<_>>();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].string("source_location"), "L4");
-    assert_eq!(calls[0].string("resolution_rule"), "explicitbinding");
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "directreceiversuccessordispatch"
+    );
 }
 
 #[test]
-fn python_super_call_with_multiple_bases_fails_closed() {
+fn python_direct_base_publication_cannot_fall_through_to_a_same_named_local_class() {
+    let provider = extract("pkg/provider.py", b"class Transform:\n    pass\n");
+    let caller_source = b"from pkg.provider import Transform\nclass Child(Transform):\n    pass\nclass Transform:\n    pass\n";
+    let caller = extract("pkg/models.py", caller_source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(caller_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[provider, caller], &sources);
+    let imported = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "class" && node.string("source_file") == "pkg/provider.py"
+        })
+        .expect("imported base");
+    let local = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "class"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L4"
+        })
+        .expect("same-named local class");
+    let bases = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "inherits")
+        .collect::<Vec<_>>();
+
+    assert_eq!(bases.len(), 1);
+    assert_eq!(bases[0].target, imported.id);
+    assert_ne!(bases[0].target, local.id);
+    assert_eq!(bases[0].string("resolution_rule"), "exacthierarchybase");
+}
+
+#[test]
+fn python_nested_sibling_base_uses_its_lexical_class_identity() {
+    let source = b"class Outer:\n    class Base:\n        def run(self):\n            return None\n    class Child(Base):\n        def run(self):\n            super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let base = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "class"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L2"
+        })
+        .expect("nested base");
+    let base_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L3"
+        })
+        .expect("nested base method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "inherits"
+            && edge.target == base.id
+            && edge.string("source_location") == "L5"
+            && edge.string("resolution_rule") == "exacthierarchybase"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == base_run.id
+            && edge.string("source_location") == "L7"
+            && edge.string("resolution_rule") == "directreceiversuccessordispatch"
+    }));
+}
+
+#[test]
+fn python_super_call_resolves_a_direct_successor_before_its_external_ancestor() {
+    let source = b"from external import Unknown\nclass Base(Unknown):\n    def run(self):\n        return None\nclass Child(Base):\n    def run(self):\n        super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let base_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L3"
+        })
+        .expect("direct successor method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_location") == "L7"
+            && edge.target == base_run.id
+            && edge.string("resolution_rule") == "directreceiversuccessordispatch"
+    }));
+}
+
+#[test]
+fn python_super_call_uses_declared_c3_order_for_multiple_bases() {
     let source = b"class Left:\n    def run(self):\n        return None\nclass Right:\n    def run(self):\n        return None\nclass Child(Left, Right):\n    def run(self):\n        super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let left_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L2"
+        })
+        .expect("left method");
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_location") == "L9")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].target, left_run.id);
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "directreceiversuccessordispatch"
+    );
+}
+
+#[test]
+fn python_super_call_resolves_a_method_inherited_beyond_the_direct_base() {
+    let source = b"class Root:\n    def run(self):\n        return None\nclass Middle(Root):\n    pass\nclass Child(Middle):\n    def run(self):\n        super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let root_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L2"
+        })
+        .expect("root method");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.string("source_location") == "L8"
+            && edge.target == root_run.id
+            && edge.string("resolution_rule") == "linearizedreceiverdispatch"
+    }));
+}
+
+#[test]
+fn python_super_call_fails_closed_for_a_dynamic_base_expression() {
+    let source = b"class Base:\n    def run(self):\n        return None\ndef make_base():\n    return Base\nclass Child(make_base()):\n    def run(self):\n        super().run()\n";
     let extracted = extract("pkg/models.py", source);
     let sources = HashMap::from([(
         "pkg/models.py".to_owned(),
@@ -173,6 +342,39 @@ fn python_super_call_with_multiple_bases_fails_closed() {
     assert!(resolved.edges.iter().all(|edge| {
         edge.string("relation") != "calls" || edge.string("source_location") != "L8"
     }));
+}
+
+#[test]
+fn python_super_dispatch_cannot_fall_through_to_a_same_named_import() {
+    let source = b"import copy\nclass Base:\n    def copy(self):\n        return None\nclass Child(Base):\n    def copy(self):\n        return super().copy()\n";
+    let extracted = extract("pkg/models.py", source);
+    assert_eq!(extracted.error, None);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let base_copy = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/models.py"
+                && node.string("source_location") == "L3"
+        })
+        .expect("base copy method");
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.string("source_location") == "L7")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].target, base_copy.id);
+    assert_eq!(
+        calls[0].string("resolution_rule"),
+        "directreceiversuccessordispatch"
+    );
 }
 
 #[test]

@@ -782,6 +782,113 @@ memory, and remaining gaps in
 `docs/superpowers/reviews/2026-07-30-semantic-dominance-phase-3.md`.
 Commit, push, and open a new PR against current `origin/main`.
 
+---
+
+### Task 9: Universal linearized receiver dispatch
+
+**Background:**
+
+Phase three intentionally resolved only zero-argument Python `super()` calls
+whose enclosing class had one statically named direct base and whose target
+method was declared directly on that base. The retained Graphify comparison
+still listed 456 `super()` call hypotheses as missing, but source inspection
+showed that many Graphify targets were incorrect: methods on `LazySettings`
+were pointed at `UserSettingsHolder`, and unrelated widget constructors were
+pointed at `AutocompleteMixin`. Matching those targets would improve the
+comparator score while degrading the product graph.
+
+The genuine recall gap is ordered receiver dispatch. Python may select a method
+from a later class in a C3 multiple-inheritance order or from an ancestor
+beyond the direct base. Per-file extraction cannot prove that target because
+the hierarchy crosses files. The shared resolver already sees the merged
+repository evidence and is the correct bounded policy boundary.
+
+**Design:**
+
+- Add typed hierarchy constraints to `ResolutionConstraint`: ordered
+  direct-base evidence carries whether the full source base set is known, and
+  receiver dispatch carries an exact receiver identity plus an explicit
+  linearization strategy.
+- Advertise a new `HierarchyDispatch` capability only for adapters that emit
+  the complete contract. The existing capability equality check makes cached
+  Python evidence without it a normal cache miss; no version value changes.
+- Hard-cut Python zero-argument `super()` away from the direct-base shortcut.
+  It emits receiver-dispatch evidence and cannot simultaneously emit a
+  qualified, lexical, local, imported, or external target.
+- Build bounded direct-base and directly-owned-member indices in the universal
+  resolver. Resolve direct-base publication only by exact qualified identity
+  or a qualified external endpoint; never fall through to lexical or
+  same-module name matching.
+- For `C3AfterReceiver`, recover a unique member declared by the exact first
+  base from a complete receiver base list, even when a later ancestor is
+  external. Otherwise require every ordered base to resolve to one exact
+  source class, require an acyclic and C3-consistent hierarchy within the
+  configured bound, and select only one direct member on the first matching
+  class in the linearization.
+- Fail closed for dynamic or incomplete receiver bases; unresolved ancestors
+  outside the proven direct-successor prefix; inconsistent or cyclic
+  hierarchies; ambiguous members; explicit-argument `super`; and any
+  resource-bound overflow.
+- Keep the mechanism extensible: future language adapters add an explicit,
+  qualified strategy backed by their compiler/type/trait evidence. They do not
+  reinterpret C3 and do not use terminal-name search.
+- Do not add a legacy projection, change any version value, rerun Graphify, or
+  run `graphify update .`.
+
+- [x] **Step 1: Implement the production hard cutover**
+
+Add the hierarchy model, capability gate, validation rules, exact base
+identity emission, bounded C3 resolver, and receiver-member selection.
+Remove the phase-three `direct_super_target` path. Implement production code
+before tests.
+
+- [x] **Step 2: Add post-implementation conformance coverage**
+
+Cover exact cross-file direct bases, multiple-base source order,
+inherited-beyond-direct-base selection, dynamic-base fail-closed behavior,
+capability validation, deterministic hierarchy evidence, and prevention of
+same-named import fallback.
+
+- [x] **Step 3: Verify real source-grounded graph changes**
+
+Rebuild pinned Django and Entire graphs cold. Require zero validation errors,
+byte-identical warm output, and no topology change in Entire. Independently
+audit every added or retargeted Django call against Python AST class order,
+complete base identities, C3 linearization, direct member ownership, target
+file, and target line. Treat every removed edge as a regression unless the old
+target is independently proven incorrect or the new exact target represents
+the same use.
+
+Result:
+
+- Django publishes 63,892 nodes and 148,710 canonical edges with zero
+  validation errors.
+- Relative to phase three, Django adds 473 independently verified `calls`
+  edges and removes none. The audit covers every added edge: 181 use the exact
+  direct-successor proof and 292 use complete C3 linearization.
+- Exact base publication rejects same-named local substitutions, including the
+  incorrect GIS-local `Transform`, while nested sibling bases resolve to their
+  exact enclosing-class declarations.
+- Django cold/warm graphs are byte-identical at 201,270,657 bytes.
+- Entire remains exactly unchanged at 58,391 nodes, 151,257 canonical edges,
+  the same canonical digest, and zero added or removed topology. Its
+  cold/warm graphs are byte-identical at 169,597,446 bytes.
+
+- [ ] **Step 4: Run complete verification and performance qualification**
+
+Run the complete workspace tests, strict Python benchmark tests, formatting,
+linting, diff validation, release build, query oracles, and the standardized
+three-repeat large-repository build suite. Compare instruction count, wall
+time, and peak RSS with phase three. Do not claim performance dominance when
+Entire remains below 5x or Compass memory remains higher than Graphify.
+
+- [ ] **Step 5: Record evidence and update PR #93**
+
+Add a phase-four review containing exact graph counts, topology deltas,
+independent audit results, comparator classifications, latency and memory,
+verification commands, and remaining gaps. Commit and push the hard cutover
+to the existing PR only after all required gates pass.
+
 ## Plan self-review
 
 - **Design coverage:** Tasks 1–6 cover the evidence model, adapter registry,
@@ -789,6 +896,8 @@ Commit, push, and open a new PR against current `origin/main`.
   and conformance harness. Task 7 covers extension documentation and
   real-corpus hard-cutover qualification. Task 8 adds conservative
   owner-qualified receiver dispatch and source-grounded residual accounting.
+  Task 9 replaces that conservative shortcut with typed, bounded linearized
+  dispatch in the shared resolver.
 - **Scope:** This plan delivers the core plus Python/Go hard cutover. It claims
   quality only for capabilities that pass the audit; Java/Rust and framework
   hard cutovers remain separate increments.

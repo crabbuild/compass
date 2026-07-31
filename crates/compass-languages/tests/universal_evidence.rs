@@ -1,8 +1,8 @@
 use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
-    OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch,
-    SemanticRole, validate_evidence,
+    Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, HierarchyConstraint,
+    LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
+    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole, validate_evidence,
 };
 
 fn range(start: u64, end: u64) -> EvidenceRange {
@@ -84,6 +84,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
                 scope_id: Some("scope:caller".to_owned()),
                 qualified_name: Some("tools.execute".to_owned()),
                 allowed_target_kinds: vec!["function".to_owned()],
+                hierarchy: None,
                 allow_external: true,
             },
         }],
@@ -200,6 +201,32 @@ fn capabilities_and_language_constraints_fail_closed() {
         &undeclared_external,
         EvidenceErrorCode::UndeclaredCapability,
     );
+
+    let mut undeclared_hierarchy = valid_batch();
+    undeclared_hierarchy.candidates[0]
+        .constraints
+        .qualified_name = None;
+    undeclared_hierarchy.candidates[0].constraints.hierarchy =
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "example.Owner".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+        });
+    assert_code(
+        &undeclared_hierarchy,
+        EvidenceErrorCode::UndeclaredCapability,
+    );
+
+    let mut invalid_hierarchy_relation = undeclared_hierarchy;
+    invalid_hierarchy_relation
+        .adapter
+        .capabilities
+        .push(LanguageCapability::HierarchyDispatch);
+    invalid_hierarchy_relation.candidates[0]
+        .constraints
+        .hierarchy = Some(HierarchyConstraint::DirectBase {
+        base_set_complete: true,
+    });
+    assert_code(&invalid_hierarchy_relation, EvidenceErrorCode::InvalidFact);
 }
 
 #[test]
@@ -322,6 +349,90 @@ class Derived(Base):
         let end = usize::try_from(occurrence.range.end_byte).expect("fixture offset");
         assert_eq!(&source[start..end], b"run");
     }
+}
+
+#[test]
+fn python_emits_ordered_direct_bases_and_receiver_dispatch_constraints() {
+    let source = br#"class Root:
+    def run(self):
+        return None
+
+class Mixin:
+    pass
+
+class Child(Mixin, Root):
+    def run(self):
+        super().run()
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/models.py"),
+            "pkg/models.py",
+            source,
+        )
+        .expect("extract python");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid hierarchy evidence");
+
+    assert!(
+        evidence
+            .adapter
+            .capabilities
+            .contains(&LanguageCapability::HierarchyDispatch)
+    );
+    let mut bases = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Extends
+                && matches!(
+                    candidate.constraints.hierarchy.as_ref(),
+                    Some(HierarchyConstraint::DirectBase {
+                        base_set_complete: true
+                    })
+                )
+        })
+        .map(|candidate| {
+            (
+                evidence
+                    .occurrences
+                    .iter()
+                    .find(|occurrence| candidate.occurrence_id.as_ref() == Some(&occurrence.id))
+                    .expect("base occurrence")
+                    .range
+                    .start_byte,
+                candidate
+                    .constraints
+                    .qualified_name
+                    .clone()
+                    .expect("exact base identity"),
+            )
+        })
+        .collect::<Vec<_>>();
+    bases.sort_unstable();
+    assert_eq!(
+        bases
+            .into_iter()
+            .map(|(_, qualified)| qualified)
+            .collect::<Vec<_>>(),
+        ["pkg.models.Mixin", "pkg.models.Root"]
+    );
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "run"
+            && matches!(
+                candidate.constraints.hierarchy.as_ref(),
+                Some(HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name,
+                    strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+                }) if receiver_qualified_name == "pkg.models.Child"
+            )
+            && candidate.constraints.qualified_name.is_none()
+            && !candidate.constraints.allow_external
+    }));
 }
 
 #[test]
