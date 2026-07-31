@@ -20,13 +20,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from benchmarks.performance.compass_perf.correctness import (  # noqa: E402
+from benchmarks.performance.compass.correctness import (  # noqa: E402
     GraphSummary,
     canonical_graph_digest,
     compare_graphs,
     index_graph,
 )
-from benchmarks.performance.compass_perf.jsonstream import (  # noqa: E402
+from benchmarks.performance.compass.jsonstream import (  # noqa: E402
     iter_top_level_array,
 )
 
