@@ -76,7 +76,7 @@ Compass uses balanced source-grounded quality:
 
 ### Universal semantic evidence model
 
-The extraction layer emits a versioned internal evidence model independent of
+The extraction layer emits a typed internal evidence model independent of
 tree-sitter, any specific language, and the public graph schema. Its logical
 records are:
 
@@ -124,7 +124,9 @@ Adding a language requires an adapter, registry entry, capability declaration,
 and conformance fixtures. It does not require changes to graph publication,
 the shared resolver, or framework-pack execution unless the language
 introduces a genuinely new universal syntax role. New roles require a
-versioned evidence-model change rather than an adapter-local escape hatch.
+coordinated evidence-model change rather than an adapter-local escape hatch.
+Existing extraction, producer, graph, adapter, and framework version values
+remain unchanged.
 
 ### Source-occurrence contract
 
@@ -139,10 +141,10 @@ contract. Each candidate relationship carries:
 - visible import, module, and package scope;
 - producer rule and confidence tier.
 
-The internal evidence records carry this contract directly. Compatibility
-projection may translate legacy `Extraction` facts during incremental
-migration, but new complete adapters do not encode the contract as unrelated
-string metadata.
+The internal evidence records carry this contract directly. A language moves
+to this contract through a hard cutover in its extractor; Compass does not
+translate its prior raw facts through a compatibility projection or maintain
+dual resolution algorithms for that language.
 
 ### Universal constrained resolver
 
@@ -230,45 +232,46 @@ source corpus
 Graphify does not enter production code, runtime dependencies, or mandatory
 Compass extraction.
 
-## Extensibility and migration
+## Extensibility and hard cutover
 
 The current `Engine`, `Extraction`, framework `SourcePack` registry, and
 collection resolver already provide useful boundaries but allow language facts
-and resolution rules to use inconsistent string metadata. Migration proceeds
-without a flag day:
+and resolution rules to use inconsistent string metadata. Each selected
+language or framework changes atomically:
 
-1. introduce the versioned universal evidence types, registry, and
-   compatibility projection;
-2. implement Python and Go as complete adapters;
-3. implement Java and Rust complete vertical adapters to prove the contract
+1. introduce the universal evidence types, registry, resolver, and
+   conformance harness without changing existing version constants;
+2. hard-cut Python and Go extraction and resolution to complete universal
+   adapters;
+3. hard-cut Java and Rust to complete universal adapters to prove the contract
    works across object-oriented, package-oriented, trait-oriented, macro, and
    ownership-heavy syntax;
-4. route existing framework packs through the universal pack contract;
-5. keep other languages on an explicit legacy capability profile; and
-6. migrate remaining adapters in prioritized batches without changing the
+4. hard-cut existing framework packs to the universal pack contract; and
+5. hard-cut remaining adapters in prioritized batches without changing the
    resolver or publisher contract.
 
-Legacy adapters remain supported but cannot advertise universal quality for a
-capability until their fixtures pass. The graph records producer and
-capability-profile versions so audits can separate complete and legacy
-coverage.
+An adapter not yet selected for cutover continues to run its current algorithm
+unchanged. It is not projected into universal evidence and cannot advertise
+universal capabilities. Once selected, the old language-specific path is
+removed in the same change that enables the universal path. Cached extractions
+that lack required universal evidence are treated as cache misses and
+re-extracted; the extraction-semantics version remains unchanged.
 
 ### Delivery decomposition
 
 The universal program is too large for one undifferentiated implementation
 plan. It is delivered as independently reviewable increments:
 
-1. universal evidence model, capability registry, compatibility projection,
-   shared resolver policy interfaces, and conformance harness;
-2. complete Python and Go adapters plus source-grounded quality recovery;
-3. complete Java and Rust adapters proving language portability;
-4. universal framework-pack execution and migration of existing packs; and
-5. prioritized migration of remaining legacy language adapters.
+1. universal evidence model, capability registry, shared resolver,
+   conformance harness, and direct Python/Go cutover;
+2. Java and Rust hard cutover proving language portability;
+3. universal framework-pack hard cutover; and
+4. prioritized hard cutover of remaining language adapters.
 
 Each increment has its own implementation-first plan, production changes,
 post-implementation tests, real-corpus evidence, commit, and review gate. The
-final universal quality claim requires increments one through four. Increment
-five expands the set of capabilities covered by that claim without changing
+final universal quality claim requires increments one through three. Increment
+four expands the set of capabilities covered by that claim without changing
 the core contracts.
 
 ## Production improvement scope
@@ -311,21 +314,20 @@ namespaces, overloads, annotations, inheritance, interfaces, traits, impl
 ownership, macros, imports, and external packages without Python- or Go-shaped
 special cases.
 
-JavaScript/TypeScript, Ruby, C#, PHP, Swift, C/C++, and the remaining registered
-languages retain explicit legacy capability profiles until migrated. Their
-existing graph output must not regress. The universal registry and
-compatibility projection let each migrate without central resolver or
-publisher changes.
+JavaScript/TypeScript, Ruby, C#, PHP, Swift, C/C++, and the remaining
+registered languages retain their current extraction algorithms until their
+hard-cutover increments. They are not translated or dual-run. Their existing
+graph output must not regress before cutover, and each later cutover uses the
+same universal registry and resolver without central publisher changes.
 
 ### Framework packs
 
 Existing Python web, Rails, Spring, Go web, Rust web, ASP.NET, Vapor,
 TypeScript web, filesystem-route, enterprise-domain, config, and template
-packs migrate to the universal pack interface. The phase may preserve their
-detector internals initially, but activation, accepted evidence, target
-constraints, occurrence policy, resource limits, and conformance registration
-become uniform. Spring and the Rust web packs provide the non-Python/Go
-vertical proof.
+packs hard-cut to the universal pack interface. Activation, accepted evidence,
+target constraints, occurrence policy, resource limits, and conformance
+registration become uniform, and the replaced pack path is removed. Spring
+and the Rust web packs provide the non-Python/Go vertical proof.
 
 ## Independent quality measurement
 
@@ -381,9 +383,9 @@ source-derived oracle facts.
 
 The checked-in audit manifest records:
 
-- schema version;
+- schema identifier;
 - corpus name and commit;
-- adapter, framework-pack, and capability-profile versions;
+- adapter, framework-pack, and advertised capability identities;
 - language and relationship kind;
 - source and target expectation;
 - occurrence file and range;
@@ -433,8 +435,8 @@ are mandatory.
 - The report publishes confidence bounds and every incorrect sample.
 - Genuine source-derived recall improves on Python and Go.
 - Java and Rust pass the complete adapter contract and do not regress against
-  their pinned pre-migration graphs.
-- Every migrated framework pack passes activation, occurrence, target,
+  their pinned pre-cutover graphs.
+- Every cut-over framework pack passes activation, occurrence, target,
   resource-limit, and query-oracle conformance.
 - All four qualification graphs publish with zero validation errors.
 - Cold and warm graphs are byte-identical for every measured Compass corpus.
@@ -443,18 +445,18 @@ are mandatory.
   explicit acceptance.
 - Focused owning-crate tests, the performance harness, and the full workspace
   test suite pass.
-- Run `graphify update .` in the parent repository after code changes.
 
 ## Implementation order
 
 Every delivery increment is implementation-first:
 
-1. implement the universal evidence types, capability registry, compatibility
-   projection, constrained resolver interfaces, and framework-pack contract;
-2. implement complete Python and Go adapters and production resolution;
-3. implement complete Java and Rust vertical adapters;
-4. migrate framework-pack registration and enforcement to the universal
-   contract;
+1. implement the universal evidence types, capability registry, constrained
+   resolver, and conformance harness while keeping current version values;
+2. hard-cut Python and Go adapters and production resolution to the universal
+   path and remove the replaced algorithms;
+3. hard-cut Java and Rust adapters and remove their replaced algorithms;
+4. hard-cut framework-pack registration and enforcement to the universal
+   contract and remove the replaced pack execution;
 5. implement occurrence-aware comparison and the independent audit harness;
 6. add conformance and focused regression tests for the completed production
    behavior;
@@ -474,7 +476,10 @@ implementation rather than driving it.
   terminal-name matching.
 - Adapter and framework-pack capability claims that lack conformance evidence
   fail registration.
-- A legacy adapter cannot be mistaken for a complete universal adapter.
+- An adapter that has not been cut over cannot advertise universal
+  capabilities.
+- A cut-over adapter missing universal evidence is re-extracted rather than
+  interpreted through its prior algorithm.
 - A partial graph or partial audit cannot satisfy the quality gate.
 
 ## Honest reporting requirements

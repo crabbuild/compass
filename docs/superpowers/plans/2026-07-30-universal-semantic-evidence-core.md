@@ -2,18 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver increment one of the universal graph-quality design: a
-versioned semantic evidence model, capability registry, legacy compatibility
-projection, shared resolution-policy boundary, framework-pack contract, and
-conformance harness without changing published graph topology.
+**Goal:** Deliver the universal semantic evidence core and hard-cut Python and
+Go extraction/resolution to it, with a capability registry, shared constrained
+resolver, framework-pack contract, and conformance harness.
 
 **Architecture:** `compass-languages` owns language-neutral declarations,
 scopes, bindings, occurrences, candidates, adapter profiles, and validation.
 `compass-resolve` owns a bounded resolver over those facts.
-Existing extractors and framework detectors continue to publish their current
-raw graph facts while a deterministic compatibility projection populates the
-new evidence batch in shadow mode. This gives later Python, Go, Java, Rust, and
-framework migrations one contract without a flag day.
+Python and Go adapters emit the new evidence directly and their replaced
+language-specific resolution paths are removed in the same increment. Other
+languages continue their current algorithms untouched until their own hard
+cutovers. Missing evidence on a cached Python or Go extraction forces
+re-extraction without changing any existing version value.
 
 **Tech Stack:** Rust 2024, serde/serde_json, tree-sitter source ranges, ahash,
 the existing Compass extraction cache, Python 3 standard library, SQLite, and
@@ -23,17 +23,17 @@ the existing performance harness.
 
 - This is implementation-first, not red-green TDD: implement and review
   production behavior before adding focused tests.
-- Public `compass.graph/1` bytes and topology must remain unchanged in this
-  increment.
-- Bump the internal extraction-semantics version because cached `Extraction`
-  gains a typed evidence batch.
+- Keep all existing extraction, cache, producer, graph, adapter, and framework
+  version values unchanged.
+- Python and Go graph topology may change only through source-grounded hard
+  cutover improvements measured by the quality audit.
 - No runtime Graphify dependency and no network access in production paths.
 - No repository-wide terminal-label fallback.
 - Fabricated occurrences, cross-language matches, and unsafe local-target
   substitutions are forbidden.
 - Every collection and lookup has an explicit bound.
 - Existing user changes and unrelated worktree changes must be preserved.
-- After code changes, run `graphify update .` from `/Users/haipingfu/graphify`.
+- Do not run `graphify update .` for this plan.
 
 ## Background
 
@@ -47,35 +47,34 @@ The current extraction contract is flexible:
 
 That flexibility enabled broad language coverage, but it makes occurrence,
 scope, qualification, and resolution rules inconsistent. The universal core
-must provide typed evidence without forcing all existing adapters to migrate
-at once. Increment one therefore runs typed projection and validation in
-shadow mode. Later increments switch complete adapters and framework packs to
-produce the typed facts directly.
+provides typed evidence without a translation layer. Python and Go cut over
+directly; adapters not selected for this increment keep their current code
+paths and do not claim universal capabilities.
 
 ## File and responsibility map
 
-- Create `crates/compass-languages/src/evidence/model.rs`: versioned universal
+- Create `crates/compass-languages/src/evidence/model.rs`: typed universal
   evidence data model.
 - Create `crates/compass-languages/src/evidence/validate.rs`: structural and
   resource validation for evidence batches.
-- Create `crates/compass-languages/src/evidence/legacy.rs`: conservative
-  projection from existing `Extraction` facts.
+- Create `crates/compass-languages/src/evidence/build.rs`: direct evidence
+  builders used by cut-over adapters.
 - Create `crates/compass-languages/src/evidence/mod.rs`: public internal API and
   limits.
 - Create `crates/compass-languages/src/adapters.rs`: adapter profiles,
   capability registry, and maturity states.
 - Modify `crates/compass-languages/src/facts.rs`: optional typed evidence batch
   on `Extraction`.
-- Modify `crates/compass-languages/src/engine.rs`: populate and validate shadow
-  evidence after extraction.
+- Modify `crates/compass-languages/src/engine.rs`: require and validate direct
+  Python and Go evidence.
 - Modify `crates/compass-languages/src/registry.rs`: expose the adapter profile
   associated with every resolved language.
 - Modify `crates/compass-languages/src/frameworks/mod.rs`: typed framework-pack
   descriptors and registry validation while retaining current detectors.
 - Create `crates/compass-resolve/src/evidence.rs`: bounded universal candidate
   index and deterministic resolution decisions.
-- Modify `crates/compass-resolve/src/lib.rs`: validate/index the shadow evidence
-  without changing raw graph resolution output.
+- Modify `crates/compass-resolve/src/lib.rs`: resolve Python and Go through the
+  universal evidence path and remove replaced resolver calls.
 - Create `crates/compass-languages/tests/universal_evidence.rs`: evidence,
   adapter, projection, and cache contracts.
 - Create `crates/compass-resolve/tests/universal_resolution.rs`: shared
@@ -117,9 +116,6 @@ Create closed serde enums for `SemanticRole`, `LanguageCapability`,
 `snake_case` enum values. Define the exact core shapes:
 
 ```rust
-pub const UNIVERSAL_EVIDENCE_VERSION: &str =
-    "compass.semantic-evidence/1";
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EvidenceRange {
@@ -135,7 +131,6 @@ pub struct EvidenceRange {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SemanticEvidenceBatch {
-    pub schema: String,
     pub adapter: AdapterIdentity,
     pub declarations: Vec<DeclarationFact>,
     pub scopes: Vec<ScopeFact>,
@@ -151,13 +146,15 @@ Every fact receives a stable string ID, language, and typed occurrence or
 scope reference. `ResolutionConstraint` contains optional exact language,
 module/package, scope, qualified name, allowed target kinds, and
 `allow_external`; it has no terminal-label fallback flag.
+Stable evidence identities use the unchanged
+`EXTRACTION_SEMANTICS_VERSION` value as one hash component; this plan does not
+modify that value.
 
 - [ ] **Step 2: Implement structural and resource validation**
 
 `validate_evidence(batch, limits)` must reject:
 
-- a schema other than `compass.semantic-evidence/1`;
-- empty adapter language/version;
+- empty adapter language or producer;
 - duplicate fact IDs;
 - unsafe or absolute source paths;
 - zero-width or reversed ranges;
@@ -181,9 +178,8 @@ pub semantic_evidence: Option<SemanticEvidenceBatch>,
 ```
 
 to `Extraction`, initialize it to `None`, re-export evidence types from
-`compass-languages`, and bump
-`EXTRACTION_SEMANTICS_VERSION` from `compass.languages.extraction/2` to
-`compass.languages.extraction/3`.
+`compass-languages`, and leave `EXTRACTION_SEMANTICS_VERSION` at its current
+value.
 
 - [ ] **Step 4: Add post-implementation tests**
 
@@ -214,7 +210,7 @@ git commit -m "feat(languages): add universal semantic evidence model"
 
 ---
 
-### Task 2: Adapter capability registry
+### Task 2: Hard-cutover adapter capability registry
 
 **Files:**
 
@@ -226,50 +222,41 @@ git commit -m "feat(languages): add universal semantic evidence model"
 **Interfaces:**
 
 - Produces:
-  `AdapterRegistry::profile(language) -> Option<&'static AdapterProfile>`.
-- Every `LanguageSpec` resolved by the file registry has exactly one adapter
-  profile.
+  `AdapterRegistry::universal_profile(language) ->
+  Option<&'static AdapterProfile>`.
+- A returned profile means that the language must use universal evidence; no
+  fallback to its replaced algorithm is allowed.
 
-- [ ] **Step 1: Implement adapter profiles and maturity**
+- [ ] **Step 1: Implement universal adapter profiles**
 
 Define:
 
 ```rust
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AdapterMaturity {
-    Legacy,
-    Shadow,
-    Complete,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AdapterProfile {
     pub language: &'static str,
-    pub version: &'static str,
-    pub maturity: AdapterMaturity,
     pub capabilities: &'static [LanguageCapability],
 }
 ```
 
-Register every language returned by `Registry::cases()`. Python, Go, Java, and
-Rust start as `Shadow`; all other entries start as `Legacy`. A shadow profile
-claims only capabilities conservatively projected in task three. Config,
-template, document, and manifest pseudo-languages receive explicit profiles
-rather than disappearing from capability diagnostics.
+Register Python and Go as universal adapters with the capabilities implemented
+by task three. Do not register Java, Rust, pseudo-languages, or any other
+adapter in this increment. They continue their current algorithms unchanged
+and cannot claim universal capabilities.
 
 - [ ] **Step 2: Connect file detection to adapter identity**
 
-Add `Registry::adapter(path)` and `Registry::profile_for_spec(spec)` helpers.
-They must return the same static profile for aliases such as TypeScript
-extensions and must fail closed when a spec lacks a profile.
+Add `Registry::universal_adapter(path)` and
+`Registry::universal_profile_for_spec(spec)` helpers. Python and Go return
+their static profiles. Every other spec returns `None`; this is an explicit
+not-yet-cut-over state, not a compatibility projection.
 
 - [ ] **Step 3: Add post-implementation registry tests**
 
-Assert unique adapter languages, non-empty versions, sorted/deduplicated
-capabilities, complete coverage of `Registry::cases()`, correct maturity for
-the four shadow adapters, and explicit legacy maturity for every other
-registered language.
+Assert unique adapter languages, sorted/deduplicated capabilities, direct
+Python and Go registration, and `None` for every not-yet-cut-over language.
+Assert that no universal adapter can be configured with an empty capability
+set.
 
 - [ ] **Step 4: Verify and commit task two**
 
@@ -293,69 +280,80 @@ git commit -m "feat(languages): register semantic adapter capabilities"
 
 ---
 
-### Task 3: Conservative legacy compatibility projection
+### Task 3: Direct Python and Go evidence extraction
 
 **Files:**
 
-- Create: `crates/compass-languages/src/evidence/legacy.rs`
+- Create: `crates/compass-languages/src/evidence/build.rs`
 - Modify: `crates/compass-languages/src/evidence/mod.rs`
 - Modify: `crates/compass-languages/src/engine.rs`
+- Modify: `crates/compass-languages/src/go.rs`
+- Modify: `crates/compass-core/src/pipeline.rs`
 - Modify: `crates/compass-languages/tests/universal_evidence.rs`
 - Modify: `crates/compass-core/tests/code_graph_v1_determinism.rs`
 
 **Interfaces:**
 
 - Produces:
-  `project_legacy_evidence(extraction, profile, limits) ->
-  Result<SemanticEvidenceBatch, EvidenceError>`.
-- Projection runs after producer/project metadata stamping and before cache
-  serialization.
+  `EvidenceBuilder::finish() -> Result<SemanticEvidenceBatch, EvidenceError>`.
+- Python and Go extraction must return a populated, valid evidence batch.
+- Cached Python or Go extraction without evidence is a cache miss.
 
-- [ ] **Step 1: Implement typed projection from current facts**
+- [ ] **Step 1: Implement the production evidence builder**
 
-Project only information proven by existing records:
+Implement bounded methods that accept typed parser facts directly:
 
-- anchored raw nodes become declarations and lexical scopes;
-- exact `contains`/`method`/`defines` edges become ownership candidates at
-  their real declaration ranges;
-- import/export edges become bindings at their edge ranges;
-- `RawCall` entries with complete source locations become call occurrences;
-- anchored exact raw edges become relationship candidates;
-- missing ranges, unknown relations, inconsistent languages, and unbounded
-  metadata become bounded diagnostics rather than invented facts.
+- `declare(kind, identity, scope, range)`;
+- `open_scope(owner, parent, range)`;
+- `bind(kind, spelling, qualified_target, scope, range)`;
+- `occur(role, owner, spelling, qualifier, scope, range)`;
+- `relate(relation, source_fact, occurrence, constraints)`; and
+- `diagnose(code, range, message)`.
 
-Stable evidence IDs use length-prefixed SHA-256 inputs containing schema,
-adapter identity, source path, role, range, and producer identity. Sort and
-deduplicate by typed ID before validation.
+Stable evidence IDs use length-prefixed SHA-256 inputs containing the unchanged
+extraction-semantics identity, adapter language, source path, role, range, and
+producer identity. Sort and deduplicate by typed ID before validation.
 
-- [ ] **Step 2: Populate shadow evidence in the engine**
+- [ ] **Step 2: Hard-cut Python extraction**
 
-After `stamp_producer_metadata`, look up the adapter profile. For `Shadow` and
-`Legacy`, project and validate evidence. Store the batch on successful
-projection. On failure, keep the original raw graph facts, store one bounded
-`_compass_universal_evidence_error` value in `Extraction.extensions`, and do
-not publish a partial evidence batch. Do not use the existing partial
-extraction-quality marker because shadow-evidence failure must not alter graph
-publication.
+Change the Python branch of generic tree extraction to emit declarations,
+scopes, imports/re-exports, aliases, calls/construction, decorators,
+annotations, bases, members, and ownership through `EvidenceBuilder`.
+Remove the replaced Python-specific raw relationship construction and
+collection resolver inputs for those capabilities. Retain framework detection
+only through its declared framework-fact boundary until task five.
 
-Do not read source files again and do not change `nodes`, `edges`,
-`raw_calls`, or `framework_facts`.
+- [ ] **Step 3: Hard-cut Go extraction**
 
-- [ ] **Step 3: Add post-implementation projection tests**
+Change `go.rs` to emit packages, declarations, scopes, imports/aliases,
+receivers, fields, calls/construction, type references, embedding, and
+ownership through `EvidenceBuilder`. Remove the replaced Go raw type-reference
+and receiver-placeholder algorithm. Preserve qualified package identity in
+every constraint.
 
-Use Python, Go, Java, Rust, Unicode, repeated-call, alias-import, sourceless
-stub, and partial-parser fixtures. Assert exact ranges, stable IDs, bounded
-diagnostics, capability truthfulness, and identical raw graph facts before
-and after projection.
+- [ ] **Step 4: Reject stale cached Python and Go facts**
 
-- [ ] **Step 4: Prove graph output remains byte-stable**
+At cache acceptance, resolve the source language through
+`AdapterRegistry::universal_profile`. If a universal adapter's cached
+`Extraction.semantic_evidence` is absent or invalid, treat the entry as a
+normal cache miss and re-extract it. Do not change cache or extraction version
+constants.
 
-Extend `code_graph_v1_determinism.rs` so a cold and warm extract with shadow
-evidence produces identical `graph.json` bytes and the same canonical graph
-digest as an equivalent extraction with the evidence batch removed before
-publication.
+- [ ] **Step 5: Add post-implementation adapter tests**
 
-- [ ] **Step 5: Verify and commit task three**
+Use Python and Go Unicode, repeated-call, alias-import, re-export,
+decorator/annotation, package import, receiver, embedding, external type,
+sourceless stub, and partial-parser fixtures. Assert exact ranges, stable IDs,
+bounded diagnostics, capability truthfulness, and cache rejection when
+required evidence is absent.
+
+- [ ] **Step 6: Prove cold/warm determinism**
+
+Extend `code_graph_v1_determinism.rs` so cold and warm Python/Go extracts
+produce byte-identical `graph.json`, evidence batches, and canonical graph
+digests after task four materializes resolved evidence.
+
+- [ ] **Step 7: Verify and commit task three**
 
 Run:
 
@@ -371,9 +369,11 @@ Commit:
 ```bash
 git add crates/compass-languages/src/evidence \
   crates/compass-languages/src/engine.rs \
+  crates/compass-languages/src/go.rs \
+  crates/compass-core/src/pipeline.rs \
   crates/compass-languages/tests/universal_evidence.rs \
   crates/compass-core/tests/code_graph_v1_determinism.rs
-git commit -m "feat(languages): project legacy facts into universal evidence"
+git commit -m "feat(languages): hard-cut Python and Go semantic evidence"
 ```
 
 ---
@@ -392,7 +392,8 @@ git commit -m "feat(languages): project legacy facts into universal evidence"
   `UniversalResolutionIndex::new(batch, limits)` and
   `resolve(candidate_id) -> ResolutionDecision`.
 - Decisions are `Resolved`, `QualifiedExternal`, `Ambiguous`, or `Unresolved`;
-  no decision mutates raw graph facts in this increment.
+  resolved declarations and decisions materialize the Python and Go raw graph
+  records consumed by strict publication.
 
 - [ ] **Step 1: Implement the bounded universal index**
 
@@ -422,13 +423,19 @@ case-folded candidates never select a winner unless one exact case-sensitive
 identity remains and all other constraints match. Emit a typed
 `ResolutionEvidence` describing the rule and candidate count.
 
-- [ ] **Step 3: Wire shadow indexing into collection resolution**
+- [ ] **Step 3: Hard-cut collection resolution**
 
-Merge per-file evidence batches by schema and adapter identity after raw
-extractions merge. Validate and construct the index under internal profiling,
-but do not rewrite nodes or edges. Record bounded projection/index failures in
-`Extraction.error` only when the evidence batch itself claims `Complete`;
-legacy and shadow failures remain evidence diagnostics.
+Merge Python and Go evidence batches by adapter language after per-file
+extractions merge. Validate, construct the universal index, resolve every
+candidate, and materialize declarations, qualified external nodes, exact
+edges, ambiguity diagnostics, and unresolved diagnostics into the existing
+raw publication boundary.
+
+Remove calls to the replaced Python imported-type/import-guided and Go
+receiver/imported-type resolver passes. Delete their dead helper functions
+once no non-universal adapter calls them. A missing or invalid universal batch
+sets `Extraction.error` and blocks complete publication; there is no fallback
+to the prior resolver.
 
 - [ ] **Step 4: Add post-implementation resolver tests**
 
@@ -463,43 +470,43 @@ git commit -m "feat(resolve): add universal constrained resolution core"
 
 **Files:**
 
-- Modify: `crates/compass-languages/src/frameworks/model.rs`
+- Create: `crates/compass-languages/src/frameworks/pack.rs`
 - Modify: `crates/compass-languages/src/frameworks/mod.rs`
 - Modify: `crates/compass-languages/src/lib.rs`
 - Modify: `crates/compass-languages/tests/engine_edge_coverage.rs`
-- Modify: `crates/compass-resolve/tests/framework_routes.rs`
 
 **Interfaces:**
 
 - Produces `FrameworkPackDescriptor`, `FrameworkPackKind`,
   `FrameworkManifestPolicy`, and `FrameworkPackRegistry::descriptors()`.
-- Existing detectors remain function pointers associated with validated
-  descriptors.
+- Existing framework packs remain on their current execution until their
+  dedicated hard cutover; no compatibility adapter connects them to this
+  contract.
 
 - [ ] **Step 1: Implement the descriptor contract**
 
-Define a descriptor containing stable ID, pack version, source/config/template
-kind, supported languages, required capabilities, dependency markers,
-manifest policy, accepted semantic roles, emitted relation families,
-occurrence policy, and `FrameworkLimits`.
+Define a descriptor containing stable ID, source/config/template kind,
+supported languages, required capabilities, dependency markers, manifest
+policy, accepted semantic roles, emitted relation families, occurrence policy,
+and `FrameworkLimits`.
 
-`FrameworkPackRegistry::validate()` rejects duplicate IDs, empty versions,
-unknown language profiles, undeclared capabilities, an empty accepted-role
-set, heuristic packs without rules, and zero limits.
+`FrameworkPackRegistry::validate()` rejects duplicate IDs, languages without a
+universal adapter profile, undeclared capabilities, an empty accepted-role set,
+heuristic packs without rules, and zero limits.
 
-- [ ] **Step 2: Convert existing pack registration**
+- [ ] **Step 2: Add a production registration boundary**
 
-Replace separate metadata fields on `SourcePack`, `ConfigPack`, and
-`TemplatePack` with one descriptor reference plus the existing typed detector
-function. Preserve current pack order, activation semantics, detector calls,
-and published facts exactly.
+Implement registration and validation APIs used by future hard-cutover packs.
+Do not register or translate current `SourcePack`, `ConfigPack`, or
+`TemplatePack` values in this increment. Their later cutover removes the old
+entry and adds the universal pack atomically.
 
 - [ ] **Step 3: Add post-implementation framework conformance tests**
 
-Assert every pack has a valid unique descriptor, every supported language has
-an adapter profile, activation still requires the same manifests, current
-route/domain fixtures publish byte-identical facts, and a synthetic pack
-cannot bypass occurrence or limit requirements.
+Assert a synthetic valid pack registers for Python and Go, a pack cannot
+register for a not-yet-cut-over language, and no pack can bypass capability,
+occurrence, activation, or limit requirements. Existing route/domain fixtures
+must remain unchanged because no production pack is registered twice.
 
 - [ ] **Step 4: Verify and commit task five**
 
@@ -509,17 +516,16 @@ Run:
 cargo fmt --all -- --check
 cargo test -p compass-languages --test engine_edge_coverage
 cargo test -p compass-resolve --test framework_routes
-cargo test -p compass-resolve --test domain_resolution
 ```
 
 Commit:
 
 ```bash
-git add crates/compass-languages/src/frameworks \
+git add crates/compass-languages/src/frameworks/pack.rs \
+  crates/compass-languages/src/frameworks/mod.rs \
   crates/compass-languages/src/lib.rs \
-  crates/compass-languages/tests/engine_edge_coverage.rs \
-  crates/compass-resolve/tests/framework_routes.rs
-git commit -m "feat(frameworks): register universal evidence pack contracts"
+  crates/compass-languages/tests/engine_edge_coverage.rs
+git commit -m "feat(frameworks): add universal evidence pack contract"
 ```
 
 ---
@@ -537,13 +543,13 @@ git commit -m "feat(frameworks): register universal evidence pack contracts"
 **Interfaces:**
 
 - Produces `harness.py audit --manifest PATH --graph PATH --corpus PATH`.
-- Produces a versioned JSON result with strata counts, precision, recall,
+- Produces a deterministic JSON result with strata counts, precision, recall,
   critical violations, and Wilson bounds.
 
 - [ ] **Step 1: Implement manifest and result models**
 
 Use Python standard-library dataclasses. Validate schema
-`compass.quality-audit/1`, audit mode (`conformance` or `qualification`), safe
+`compass.quality-audit`, audit mode (`conformance` or `qualification`), safe
 relative paths, 40-character corpus commit, known judgment values, positive
 ranges, 64-character lowercase SHA-256 snippet hashes, unique record IDs, and
 required source/target/relation fields. A `conformance` manifest may exercise
@@ -606,7 +612,7 @@ git commit -m "feat(quality): add universal graph conformance audit"
 
 ---
 
-### Task 7: Extension guide and increment-one qualification
+### Task 7: Extension guide and Python/Go hard-cutover qualification
 
 **Files:**
 
@@ -618,8 +624,8 @@ git commit -m "feat(quality): add universal graph conformance audit"
 
 **Interfaces:**
 
-- Documents the exact adapter, capability, framework-pack, resolution, and
-  conformance extension process used by later increments.
+- Documents the exact adapter, capability, hard-cutover, framework-pack,
+  resolution, and conformance extension process used by later increments.
 
 - [ ] **Step 1: Write the extension guide**
 
@@ -630,7 +636,7 @@ Document:
 - how tree-sitter and source-driven adapters emit identical contracts;
 - how to register a framework pack;
 - resolver evidence order and forbidden fallbacks;
-- legacy, shadow, and complete maturity;
+- hard-cutover requirements and cache re-extraction;
 - required conformance fixtures and numerical gates; and
 - one complete minimal language/profile example plus one minimal framework
   pack example using the actual APIs implemented above.
@@ -649,32 +655,27 @@ cargo check --workspace --all-targets
 cargo test --workspace --all-targets
 ```
 
-- [ ] **Step 3: Verify real graph non-regression**
+- [ ] **Step 3: Verify real graph quality and determinism**
 
 Build release Compass and extract fresh Django and Entire graphs using the
 same pinned corpora and harness command as phase two. Verify:
 
 - zero validation errors;
-- identical node/edge counts and canonical digests to phase two;
 - byte-identical cold/warm `graph.json`;
-- all four existing query oracles pass; and
-- cold/warm latency remains within 10%.
+- all four existing query oracles pass;
+- cold/warm latency remains within 10%;
+- every topology transition is classified by relation and source occurrence;
+- the Python/Go capability audit meets the plan's precision, recall, and zero
+  critical-violation gates; and
+- fewer Django edges are called an improvement only when invalid evidence is
+  removed and real later uses remain represented.
 
-This increment is shadow-only, so any topology difference is a blocker rather
-than an expected quality change.
-
-- [ ] **Step 4: Refresh parent graph and update review**
-
-Run:
-
-```bash
-cd /Users/haipingfu/graphify
-graphify update .
-```
+- [ ] **Step 4: Update the review**
 
 Record verification commands, exact corpus revisions, graph counts/digests,
-latency, and the fact that this increment makes no production quality claim
-yet.
+latency, audited precision/recall, every critical-violation count, and an
+honest classification of Compass improvements, regressions, representation
+changes, and unresolved gaps. Do not run `graphify update .`.
 
 - [ ] **Step 5: Commit documentation and push**
 
@@ -687,22 +688,23 @@ git push
 ```
 
 Update PR #88 if it remains open; otherwise create a new PR targeting current
-`origin/main`. State explicitly that later increments migrate Python/Go,
-Java/Rust, and framework packs from shadow evidence to production resolution.
+`origin/main`. State explicitly that Python and Go hard-cut in this increment;
+Java/Rust and framework packs follow through separate hard-cutover increments.
 
 ## Plan self-review
 
 - **Design coverage:** Tasks 1–6 cover the evidence model, adapter registry,
-  compatibility projection, resolver policy, framework-pack contract, and
-  conformance harness. Task 7 covers extension documentation and shadow-mode
-  real-corpus qualification.
-- **Scope:** This plan delivers only increment one. It does not claim the
-  99.5% universal production quality target; it creates the enforceable
-  substrate for later adapter migrations.
+  direct Python/Go extraction, production resolver, framework-pack contract,
+  and conformance harness. Task 7 covers extension documentation and
+  real-corpus hard-cutover qualification.
+- **Scope:** This plan delivers the core plus Python/Go hard cutover. It claims
+  quality only for capabilities that pass the audit; Java/Rust and framework
+  hard cutovers remain separate increments.
 - **Type consistency:** `SemanticEvidenceBatch`, `AdapterProfile`,
   `UniversalResolutionIndex`, and `FrameworkPackDescriptor` are defined before
   consumers use them.
 - **Execution order:** Every task implements production code before adding
   tests. No red-green TDD step appears.
-- **Safety:** Public graph topology must remain byte-identical, and all new
-  behavior is shadow-only.
+- **Safety:** Every changed graph fact must have typed source evidence, old
+  Python/Go resolver paths are removed, stale caches re-extract, and there is
+  no compatibility projection.
