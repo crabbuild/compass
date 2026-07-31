@@ -10,11 +10,55 @@ Deliver a quality-gated Rust Phase 2 while Rust remains
 `UniversalCandidate`, then establish Java as `UniversalCandidate`. Both
 languages stay on adapter version 1 and hard-cut to the universal extraction,
 resolution, and graph-projection path. Neither language is translated,
-dual-run, or retained behind a legacy publisher.
+dual-run, or retained behind its previous direct publisher.
 
 Peak resident memory is measured and reported but is not a blocking gate in
 this phase. Graph quality, determinism, latency advantage, and regression
 safety are blocking gates.
+
+## Terminology and Language-by-Language Transition
+
+Compass's existing Python, Go, JavaScript/TypeScript, Ruby, C#, PHP, Swift,
+C/C++, and other production extractors are **established direct adapters**.
+They remain supported, produce useful graphs today, and continue to receive
+regression protection until each language independently qualifies for the
+universal path.
+
+The registry profile describes publication architecture, not implementation
+quality or deprecation status:
+
+- `Direct` means the established adapter publishes its current graph and
+  unresolved-call records through the existing resolution path;
+- `UniversalCandidate` means the adapter publishes universal evidence and has
+  passed its language-specific candidate gates;
+- `UniversalComplete` means the adapter has additionally passed the complete
+  capability and conformance gates defined for that language.
+
+The current internal `AdapterProfile::Legacy` name is replaced by
+`AdapterProfile::Direct`. Serialized compatibility accepts the old `legacy`
+spelling when reading existing metadata, but new metadata emits `direct`.
+This terminology change does not alter adapter version 1, graph output, or a
+language's support level.
+
+Adoption proceeds as independent language transitions. It is not framed as
+replacement of an inferior system:
+
+1. The established direct adapter remains the production implementation while
+   the language's universal increment is developed.
+2. Development does not dual-run or translate production extraction.
+3. Checked fixtures and a pinned real-world corpus establish the direct
+   adapter's quality and performance baseline.
+4. The language transitions atomically only after its universal candidate
+   proves no normalized-output regression, better target quality, deterministic
+   output, and acceptable performance.
+5. Only that language's replaced direct publisher and resolver branches are
+   removed. Every other language remains on its established direct path.
+6. A language with no scheduled universal increment remains fully supported;
+   grammar availability alone does not put it into a deprecated state.
+
+Universal evidence is therefore a convergence architecture for independently
+qualified languages, not a judgment that all current adapters need immediate
+replacement.
 
 ## Layered Ownership
 
@@ -67,8 +111,8 @@ Registering a later adapter must not require a central resolver or publisher
 change.
 
 This preserves exact AST ownership and byte ranges while avoiding a second
-parser. It also avoids deriving evidence from legacy graph records, which
-would lose lexical scope and occurrence identity.
+parser. It also avoids deriving evidence from established direct graph
+records, which would lose lexical scope and occurrence identity.
 
 The rejected alternatives are:
 
@@ -80,7 +124,7 @@ The rejected alternatives are:
   preserve adapter-specific lexical identity;
 - a dedicated Java graph extractor that duplicates the generic traversal and
   creates a second publication model;
-- post-hoc evidence reconstruction from legacy nodes and edges;
+- post-hoc evidence reconstruction from established direct nodes and edges;
 - a benchmark-specific patch layer that adds Rust or Java name-resolution
   rules directly to the central publisher.
 
@@ -127,7 +171,7 @@ with semantic support:
 
 1. grammar available;
 2. source recognized;
-3. legacy extraction available;
+3. established direct extraction available;
 4. universal candidate;
 5. universal complete.
 
@@ -237,7 +281,7 @@ Java hard-cuts atomically:
 
 - the registry selects only the version-1 universal Java adapter;
 - existing generic Java AST recognition may be reused inside the adapter, but
-  its legacy graph publisher is removed;
+  its replaced direct graph publisher is removed;
 - no Java dual-run or graph reconciliation step remains;
 - Spring's Java-facing evidence and target resolution consume the universal
   contract rather than a Java-specific publisher path.
@@ -330,9 +374,9 @@ Failures have three explicit classes:
 
 An adapter must not emit evidence whose anchor overlaps an untrusted
 Tree-sitter error range. Incomplete or ambiguous evidence never triggers
-terminal-name fallback. A hard-cut adapter never falls back to its legacy
-publisher, and a framework pack cannot repair or reinterpret malformed
-language evidence.
+terminal-name fallback. A hard-cut adapter never falls back to its previous
+direct publisher, and a framework pack cannot repair or reinterpret
+malformed language evidence.
 
 A hard cutover is not merged when a blocking gate fails. Because no dual-run
 path is retained, rollback is the Git commit boundary rather than a runtime
