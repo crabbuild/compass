@@ -446,6 +446,10 @@ impl UniversalResolutionIndex {
                     && !matches!((language, qualifier), ("python", "self" | "cls"))
             });
 
+        if let Some(decision) = self.resolve_explicit_binding(language, candidate) {
+            return decision;
+        }
+
         if !has_unbound_qualified_receiver
             && let Some(scope) = candidate.constraints.scope_id.as_deref()
         {
@@ -468,53 +472,6 @@ impl UniversalResolutionIndex {
                     .scopes
                     .get(scope)
                     .and_then(|scope| scope.parent_scope_id.as_deref());
-            }
-        }
-
-        if let Some(binding_id) = candidate.binding_id.as_deref()
-            && let Some(binding) = self.bindings.get(binding_id)
-        {
-            if let Some(target) = binding.target_declaration_id.as_ref()
-                && self.declaration_allowed(target, candidate)
-            {
-                return ResolutionDecision::Resolved {
-                    declaration_id: target.clone(),
-                    evidence: ResolutionEvidence {
-                        rule: ResolutionRule::ExplicitBinding,
-                        candidate_count: 1,
-                    },
-                };
-            }
-            let qualified = match self.follow_alias(language, &binding.qualified_target) {
-                Ok(qualified) => qualified,
-                Err(candidate_count) => {
-                    return ResolutionDecision::Ambiguous { candidate_count };
-                }
-            };
-            let key = (language.to_owned(), qualified.clone());
-            if let Some(decision) = self.unique_decision(
-                self.by_qualified.get(&key),
-                candidate,
-                ResolutionRule::ExplicitBinding,
-            ) {
-                return decision;
-            }
-            if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
-                return decision;
-            }
-            let imported = self.imported_declarations(
-                language,
-                &binding.qualified_target,
-                &candidate.target_spelling,
-            );
-            if !imported.is_empty()
-                && let Some(decision) = self.unique_decision(
-                    Some(&imported),
-                    candidate,
-                    ResolutionRule::ExplicitBinding,
-                )
-            {
-                return decision;
             }
         }
 
@@ -569,6 +526,55 @@ impl UniversalResolutionIndex {
         ResolutionDecision::Unresolved
     }
 
+    fn resolve_explicit_binding(
+        &self,
+        language: &str,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let binding = candidate
+            .binding_id
+            .as_deref()
+            .and_then(|id| self.bindings.get(id))?;
+        if let Some(target) = binding.target_declaration_id.as_ref()
+            && self.declaration_allowed(target, candidate)
+        {
+            return Some(ResolutionDecision::Resolved {
+                declaration_id: target.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::ExplicitBinding,
+                    candidate_count: 1,
+                },
+            });
+        }
+        let qualified = match self.follow_alias(language, &binding.qualified_target) {
+            Ok(qualified) => qualified,
+            Err(candidate_count) => {
+                return Some(ResolutionDecision::Ambiguous { candidate_count });
+            }
+        };
+        let key = (language.to_owned(), qualified.clone());
+        if let Some(decision) = self.unique_decision(
+            self.by_qualified.get(&key),
+            candidate,
+            ResolutionRule::ExplicitBinding,
+        ) {
+            return Some(decision);
+        }
+        if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
+            return Some(decision);
+        }
+        let imported = self.imported_declarations(
+            language,
+            &binding.qualified_target,
+            &candidate.target_spelling,
+        );
+        (!imported.is_empty())
+            .then(|| {
+                self.unique_decision(Some(&imported), candidate, ResolutionRule::ExplicitBinding)
+            })
+            .flatten()
+    }
+
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
         let mut profile_started = Instant::now();
         let existing_nodes = nodes
@@ -588,7 +594,7 @@ impl UniversalResolutionIndex {
             else {
                 continue;
             };
-            let (target, resolution_rule) = match self.resolve(candidate_id) {
+            let (target, target_source_file, resolution_rule) = match self.resolve(candidate_id) {
                 ResolutionDecision::Resolved {
                     declaration_id,
                     evidence,
@@ -596,12 +602,16 @@ impl UniversalResolutionIndex {
                     let Some(target) = self.declarations.get(&declaration_id) else {
                         continue;
                     };
-                    (target.graph_node_id.clone(), evidence.rule)
+                    (
+                        target.graph_node_id.clone(),
+                        Some(target.range.source_file.as_str()),
+                        evidence.rule,
+                    )
                 }
                 ResolutionDecision::ResolvedInventory {
                     graph_node_id,
                     evidence,
-                } => (graph_node_id, evidence.rule),
+                } => (graph_node_id, None, evidence.rule),
                 ResolutionDecision::QualifiedExternal {
                     qualified_name,
                     evidence,
@@ -646,7 +656,7 @@ impl UniversalResolutionIndex {
                             external_site,
                         ));
                     }
-                    (id, evidence.rule)
+                    (id, None, evidence.rule)
                 }
                 ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => continue,
             };
@@ -694,6 +704,7 @@ impl UniversalResolutionIndex {
                 range: site,
                 rule: resolution_rule,
                 language: &candidate.language,
+                target_source_file,
                 binding: candidate
                     .binding_id
                     .as_deref()
@@ -1042,6 +1053,9 @@ impl UniversalResolutionIndex {
             let [target] = targets.as_slice() else {
                 return Err(targets.len());
             };
+            if target == &current {
+                return Ok(current);
+            }
             current.clone_from(target);
         }
         Err(64)
@@ -1234,6 +1248,7 @@ struct MaterializedEdge<'a> {
     range: &'a compass_languages::EvidenceRange,
     rule: ResolutionRule,
     language: &'a str,
+    target_source_file: Option<&'a str>,
     binding: Option<&'a compass_languages::BindingFact>,
 }
 
@@ -1246,6 +1261,7 @@ fn materialized_edge(edge: MaterializedEdge<'_>) -> EdgeRecord {
         range,
         rule,
         language,
+        target_source_file,
         binding,
     } = edge;
     let context = match (relation, rule) {
@@ -1298,6 +1314,12 @@ fn materialized_edge(edge: MaterializedEdge<'_>) -> EdgeRecord {
     ]);
     if !context.is_empty() {
         attributes.insert("context".to_owned(), Value::String(context.to_owned()));
+    }
+    if let Some(target_source_file) = target_source_file {
+        attributes.insert(
+            "target_file".to_owned(),
+            Value::String(target_source_file.to_owned()),
+        );
     }
     if let Some(binding) = binding {
         attributes.extend([

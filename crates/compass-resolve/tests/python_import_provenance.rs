@@ -187,6 +187,144 @@ fn universal_python_imports_publish_exact_item_spans_and_no_legacy_projection()
 }
 
 #[test]
+fn universal_imports_keep_exact_targets_across_colliding_module_leaf_names()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "alpha/consumer.py",
+            "from .models import Widget\ndef build():\n    return Widget()\n",
+        ),
+        ("alpha/models.py", "class Widget:\n    pass\n"),
+        ("beta/models.py", "class Widget:\n    pass\n"),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+    assert_no_retired_python_projection(&resolved);
+
+    let alpha_widget = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("alpha/models.py") && node.label() == "Widget"
+        })
+        .ok_or("missing alpha Widget")?;
+    let beta_widget = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("beta/models.py") && node.label() == "Widget"
+        })
+        .ok_or("missing beta Widget")?;
+    assert_ne!(alpha_widget.id, beta_widget.id);
+
+    let consumer = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("alpha/consumer.py")
+                && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing consumer module")?;
+    let build = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("alpha/consumer.py") && node.label() == "build()"
+        })
+        .ok_or("missing build")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == consumer.id
+            && edge.target == alpha_widget.id
+            && edge.string("relation") == "imports_from"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == build.id
+            && edge.target == alpha_widget.id
+            && edge.string("relation") == "calls"
+    }));
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.target != beta_widget.id
+            || !matches!(edge.string("relation").as_str(), "imports_from" | "calls")
+    }));
+    Ok(())
+}
+
+#[test]
+fn explicit_import_binding_shadows_a_same_named_outer_declaration() -> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "facade.py",
+            "def render():\n    from pkg.template import render\n    return render()\n",
+        ),
+        ("pkg/template.py", "def render():\n    return 'template'\n"),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+
+    let wrapper = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("facade.py") && node.label() == "render()"
+        })
+        .ok_or("missing wrapper")?;
+    let imported = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("pkg/template.py") && node.label() == "render()"
+        })
+        .ok_or("missing imported render")?;
+    assert_ne!(wrapper.id, imported.id);
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == wrapper.id
+            && edge.target == imported.id
+            && edge.string("relation") == "imports_from"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == wrapper.id
+            && edge.target == imported.id
+            && edge.string("relation") == "calls"
+    }));
+    Ok(())
+}
+
+#[test]
+fn identity_module_alias_resolves_to_the_exact_source_inventory() -> Result<(), Box<dyn Error>> {
+    let files = [
+        ("caller.py", "from pkg import signals\n"),
+        ("pkg/__init__.py", "from . import signals\n"),
+        ("pkg/signals.py", "VALUE = 1\n"),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("caller.py")
+                && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing caller")?;
+    let signals = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("pkg/signals.py")
+                && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing signals module")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id
+            && edge.target == signals.id
+            && edge.string("relation") == "imports_from"
+            && edge.string("resolution_rule") == "explicitbinding"
+    }));
+    Ok(())
+}
+
+#[test]
 fn function_local_python_imports_are_owned_by_the_function_and_do_not_leak()
 -> Result<(), Box<dyn Error>> {
     let caller = concat!(
