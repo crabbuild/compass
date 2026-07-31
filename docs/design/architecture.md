@@ -123,6 +123,11 @@ Owns statically linked structural extraction:
 The vendored tree-sitter language pack supplies deterministic parser
 definitions and queries.
 
+The [language architecture](language-architecture.md) separates this grammar
+substrate from adapter-local semantic policy and universal evidence. Existing
+Python, Go, and other direct adapters remain supported while Rust and Java
+transition independently through quality gates.
+
 ### `compass-resolve`
 
 Owns cross-file resolution over extraction facts:
@@ -372,7 +377,9 @@ When a change crosses layers:
 ## Related pages
 
 - [Workspace tour](../implementation/workspace-tour.md)
+- [Language architecture](language-architecture.md)
 - [Extraction pipeline](../implementation/extraction-pipeline.md)
+- [Universal evidence implementation](../implementation/universal-evidence.md)
 - [Storage and history](storage-and-history.md)
 - [Extending Compass](../implementation/extending-compass.md)
 

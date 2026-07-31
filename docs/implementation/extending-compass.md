@@ -39,6 +39,11 @@ cross-file target resolution    compass-resolve
 graph/result verification       compass-graph / CLI fixtures
 ```
 
+Read [Language architecture](../design/language-architecture.md) before
+changing parser ownership or adapter profiles. Read
+[Universal evidence implementation](universal-evidence.md) before starting an
+independently qualified language transition.
+
 ### Implementation checklist
 
 - add deterministic extension/filename recognition;
@@ -240,7 +245,7 @@ For any user-visible behavior:
 - add native contract tests;
 - document intentional incompatibility;
 - update migration guidance when users must take action;
-- do not add alternate legacy frontends or fallback configuration.
+- do not add alternate compatibility frontends or fallback configuration.
 
 ## Verification matrix
 
@@ -270,6 +275,8 @@ For any user-visible behavior:
 - [Contributing](../../CONTRIBUTING.md)
 - [Workspace tour](workspace-tour.md)
 - [Design principles](../design/principles.md)
+- [Language architecture](../design/language-architecture.md)
+- [Universal evidence implementation](universal-evidence.md)
 - [Compatibility reference](../reference/compatibility.md)
 
 **Next step:** write a one-paragraph extension contract covering ownership,
