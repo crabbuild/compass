@@ -272,6 +272,25 @@ fn resolve_reference(
     let mut score = 100_u8;
     let mut reason = "exact stable ID";
     if positions.is_empty()
+        && let Some((suffix, alias)) = alias
+        && suffix.is_empty()
+        && let Some(target_id) = alias.target_id.as_deref()
+    {
+        (positions, candidates_truncated) = targets.by_id(target_id, &families, max);
+        score = 100;
+        reason = "exact universal import binding";
+    }
+    if positions.is_empty()
+        && let Some((_, alias)) = alias
+        && let Some(export) = alias_export.as_deref()
+        && let Some(target_source) = alias.target_source.as_deref()
+    {
+        (positions, candidates_truncated) =
+            targets.by_source_terminal(target_source, export, &families, max);
+        score = 100;
+        reason = "exact universal import source";
+    }
+    if positions.is_empty()
         && let Some((_, alias)) = alias
         && let Some(export) = alias_export.as_deref()
         && alias.module.starts_with('.')

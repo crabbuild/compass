@@ -8,8 +8,9 @@ use crate::{AdapterProfile, EXTRACTION_SEMANTICS_VERSION, file_stem, make_id};
 
 use super::model::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    EvidenceDiagnostic, EvidenceRange, OccurrenceFact, RelationshipCandidate, ResolutionConstraint,
-    ScopeFact, SemanticEvidenceBatch, SemanticRole,
+    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact,
+    ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
+    SemanticEvidenceBatch, SemanticRole,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
@@ -210,6 +211,7 @@ impl EvidenceBuilder {
             self.batch.candidates.len(),
             self.limits.candidates,
         )?;
+        let hierarchy_identity = hierarchy_constraint_identity(constraints.hierarchy.as_ref());
         let id = self.stable_id(
             "candidate",
             &[
@@ -218,10 +220,15 @@ impl EvidenceBuilder {
                 occurrence_id.unwrap_or_default(),
                 binding_id.unwrap_or_default(),
                 target_spelling,
+                constraints
+                    .exact_target_declaration_id
+                    .as_deref()
+                    .unwrap_or_default(),
                 constraints.exact_language.as_deref().unwrap_or_default(),
                 constraints.module_or_package.as_deref().unwrap_or_default(),
                 constraints.scope_id.as_deref().unwrap_or_default(),
                 constraints.qualified_name.as_deref().unwrap_or_default(),
+                &hierarchy_identity,
             ],
         );
         self.batch.candidates.push(RelationshipCandidate {
@@ -391,6 +398,8 @@ struct DeclarationContext {
     name: String,
     qualified_name: String,
     kind: String,
+    enclosing_type_qualified_name: Option<String>,
+    runtime_nested: bool,
 }
 
 struct DirectAdapterState<'source> {
@@ -406,7 +415,9 @@ struct DirectAdapterState<'source> {
     imported_targets: HashMap<String, String>,
     local_bindings: HashMap<String, HashMap<String, String>>,
     local_targets: HashMap<String, HashMap<String, String>>,
+    local_import_targets: HashMap<String, HashMap<String, String>>,
     ambiguous_bindings: HashSet<String>,
+    ambiguous_local_bindings: HashMap<String, HashSet<String>>,
     graph_ids: HashSet<String>,
     builder: EvidenceBuilder,
 }
@@ -441,7 +452,9 @@ impl<'source> DirectAdapterState<'source> {
             imported_targets: HashMap::new(),
             local_bindings: HashMap::new(),
             local_targets: HashMap::new(),
+            local_import_targets: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
+            ambiguous_local_bindings: HashMap::new(),
             graph_ids: HashSet::new(),
             builder: EvidenceBuilder::new(
                 profile,
@@ -480,6 +493,8 @@ impl<'source> DirectAdapterState<'source> {
             name: label.to_owned(),
             qualified_name: self.module_or_package.clone(),
             kind: "file".to_owned(),
+            enclosing_type_qualified_name: None,
+            runtime_nested: false,
         });
         Ok(())
     }
@@ -491,7 +506,7 @@ impl<'source> DirectAdapterState<'source> {
                 "non-empty Python source has no file evidence",
             )
         })?;
-        self.collect_python_declarations(root, &file, None)?;
+        self.collect_python_declarations(root, &file)?;
         self.walk_python_evidence(root, &file, true)
     }
 
@@ -499,7 +514,6 @@ impl<'source> DirectAdapterState<'source> {
         &mut self,
         node: Node<'_>,
         owner: &DeclarationContext,
-        class_owner: Option<&DeclarationContext>,
     ) -> Result<(), EvidenceError> {
         if matches!(node.kind(), "class_definition" | "function_definition") {
             let Some(name_node) = node.child_by_field_name("name") else {
@@ -510,23 +524,23 @@ impl<'source> DirectAdapterState<'source> {
                 return Ok(());
             }
             let is_class = node.kind() == "class_definition";
-            let qualified_name = if let Some(class_owner) = class_owner {
-                format!("{}::{name}", class_owner.qualified_name)
-            } else {
+            let qualified_name = if owner.kind == "file" {
                 format!("{}.{}", self.module_or_package, name)
-            };
-            let graph_node_id = if let Some(class_owner) = class_owner {
-                make_id(&[&class_owner.graph_node_id, &name])
             } else {
+                format!("{}::{name}", owner.qualified_name)
+            };
+            let graph_node_id = if owner.kind == "file" {
                 make_id(&[
                     &self.stem,
                     qualified_name.rsplit('.').next().unwrap_or(&name),
                 ])
+            } else {
+                make_id(&[&owner.graph_node_id, &name])
             };
             let graph_node_id = self.unique_graph_id(graph_node_id, node);
             let kind = if is_class {
                 "class"
-            } else if class_owner.is_some() {
+            } else if owner.kind == "class" {
                 "method"
             } else {
                 "function"
@@ -553,21 +567,26 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
+                enclosing_type_qualified_name: if owner.kind == "class" {
+                    Some(owner.qualified_name.clone())
+                } else {
+                    owner.enclosing_type_qualified_name.clone()
+                },
+                runtime_nested: owner.runtime_nested
+                    || matches!(owner.kind.as_str(), "function" | "method"),
             };
             self.add_ownership(owner, &context)?;
             self.declarations.insert(node.id(), context.clone());
-            if is_class {
-                let body = node.child_by_field_name("body").unwrap_or(node);
-                let mut cursor = body.walk();
-                for child in body.children(&mut cursor).filter(|child| child.is_named()) {
-                    self.collect_python_declarations(child, &context, Some(&context))?;
-                }
+            let body = node.child_by_field_name("body").unwrap_or(node);
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor).filter(|child| child.is_named()) {
+                self.collect_python_declarations(child, &context)?;
             }
             return Ok(());
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            self.collect_python_declarations(child, owner, class_owner)?;
+            self.collect_python_declarations(child, owner)?;
         }
         Ok(())
     }
@@ -694,14 +713,33 @@ impl<'source> DirectAdapterState<'source> {
             Some(&owner.scope_id),
             range.clone(),
         )?;
-        if self
-            .bindings
-            .insert(local.clone(), binding_id.clone())
-            .is_some()
-        {
-            self.ambiguous_bindings.insert(local.clone());
+        if owner.kind == "file" {
+            if self
+                .bindings
+                .insert(local.clone(), binding_id.clone())
+                .is_some()
+            {
+                self.ambiguous_bindings.insert(local.clone());
+            }
+            self.imported_targets.insert(local.clone(), target.clone());
+        } else {
+            if self
+                .local_bindings
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(local.clone(), binding_id.clone())
+                .is_some()
+            {
+                self.ambiguous_local_bindings
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(local.clone());
+            }
+            self.local_import_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(local.clone(), target.clone());
         }
-        self.imported_targets.insert(local.clone(), target.clone());
         let occurrence_id = self.builder.occur(
             if is_reexport {
                 SemanticRole::Reexport
@@ -726,6 +764,7 @@ impl<'source> DirectAdapterState<'source> {
             Some(&binding_id),
             target_spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: target.rsplit_once('.').map(|(module, _)| module.to_owned()),
                 scope_id: Some(owner.scope_id.clone()),
@@ -736,6 +775,7 @@ impl<'source> DirectAdapterState<'source> {
                     "class".to_owned(),
                     "function".to_owned(),
                 ],
+                hierarchy: None,
                 allow_external: true,
             },
         )?;
@@ -790,10 +830,11 @@ impl<'source> DirectAdapterState<'source> {
         let Some(arguments) = declaration.child_by_field_name("superclasses") else {
             return Ok(());
         };
+        let mut bases = Vec::new();
         let mut cursor = arguments.walk();
         for argument in arguments
             .children(&mut cursor)
-            .filter(|child| child.is_named())
+            .filter(|child| child.is_named() && child.kind() != "keyword_argument")
         {
             let target = match argument.kind() {
                 "identifier" | "attribute" => Some(argument),
@@ -802,18 +843,32 @@ impl<'source> DirectAdapterState<'source> {
                     .filter(|value| matches!(value.kind(), "identifier" | "attribute")),
                 _ => None,
             };
-            let Some(target) = target else {
-                continue;
-            };
+            let target = target.unwrap_or(argument);
             let raw = self.text(target);
             let (qualifier, spelling) = split_qualified(&raw);
-            self.add_relationship_occurrence(
+            if spelling.is_empty() {
+                continue;
+            }
+            let qualified_name = self.python_base_qualified_name(owner, qualifier, spelling);
+            bases.push((
+                target,
+                qualifier.map(str::to_owned),
+                spelling.to_owned(),
+                qualified_name,
+            ));
+        }
+        let base_set_complete =
+            !bases.is_empty() && bases.iter().all(|(_, _, _, qualified)| qualified.is_some());
+        for (target, qualifier, spelling, qualified_name) in bases {
+            self.add_relationship_occurrence_with_hierarchy(
                 SemanticRole::BaseType,
                 CandidateRelation::Extends,
                 owner,
-                spelling,
-                qualifier,
+                &spelling,
+                qualifier.as_deref(),
                 target,
+                qualified_name,
+                Some(HierarchyConstraint::DirectBase { base_set_complete }),
             )?;
         }
         Ok(())
@@ -909,6 +964,8 @@ impl<'source> DirectAdapterState<'source> {
                     name,
                     qualified_name,
                     kind: kind.to_owned(),
+                    enclosing_type_qualified_name: None,
+                    runtime_nested: false,
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context);
@@ -962,6 +1019,8 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
+                enclosing_type_qualified_name: None,
+                runtime_nested: false,
             };
             self.add_ownership(file, &context)?;
             self.declarations.insert(node.id(), context);
@@ -1151,11 +1210,13 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&binding_id),
                 &target_spelling,
                 ResolutionConstraint {
+                    exact_target_declaration_id: None,
                     exact_language: Some(self.language.to_owned()),
                     module_or_package: Some(target.clone()),
                     scope_id: Some(owner.scope_id.clone()),
                     qualified_name: Some(target),
                     allowed_target_kinds: vec!["file".to_owned(), "package".to_owned()],
+                    hierarchy: None,
                     allow_external: true,
                 },
             )?;
@@ -1316,7 +1377,7 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let lookup_name = qualifier.unwrap_or(spelling);
-        if self.ambiguous_bindings.contains(lookup_name) {
+        if self.binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         if self.language == "go"
@@ -1335,17 +1396,36 @@ impl<'source> DirectAdapterState<'source> {
         let binding = self
             .binding_for(owner, qualifier.unwrap_or(spelling))
             .cloned();
-        let qualified_name = qualifier
-            .and_then(|qualifier| {
-                self.local_target_for(owner, qualifier)
-                    .map(|target| format!("{target}::{spelling}"))
-            })
-            .or_else(|| {
+        let hierarchy = if self.language == "python" && qualifier == Some("super()") {
+            owner
+                .enclosing_type_qualified_name
+                .as_ref()
+                .map(
+                    |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name: receiver_qualified_name.clone(),
+                        strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+                    },
+                )
+        } else {
+            None
+        };
+        let qualified_name = hierarchy
+            .is_none()
+            .then(|| {
                 qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
-                    .map(|target| format!("{target}.{spelling}"))
+                    .and_then(|qualifier| {
+                        self.local_target_for(owner, qualifier)
+                            .map(|target| format!("{target}::{spelling}"))
+                    })
+                    .or_else(|| {
+                        qualifier.and_then(|qualifier| {
+                            self.imported_target_for(owner, qualifier)
+                                .map(|target| format!("{target}.{spelling}"))
+                        })
+                    })
+                    .or_else(|| self.imported_target_for(owner, spelling).cloned())
             })
-            .or_else(|| self.imported_targets.get(spelling).cloned());
+            .flatten();
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1361,6 +1441,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .as_deref()
@@ -1381,11 +1462,53 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                allow_external: qualified_name.is_some(),
+                hierarchy,
+                allow_external: qualified_name.is_some() && qualifier != Some("super()"),
             },
         )?;
         let _ = call_kind;
         Ok(())
+    }
+
+    fn python_base_qualified_name(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: Option<&str>,
+        spelling: &str,
+    ) -> Option<String> {
+        if spelling.is_empty() || is_python_builtin_type(spelling) {
+            return None;
+        }
+        match qualifier {
+            None => self
+                .imported_target_for(owner, spelling)
+                .cloned()
+                .or_else(|| {
+                    owner
+                        .qualified_name
+                        .rsplit_once("::")
+                        .map(|(parent, _)| format!("{parent}::{spelling}"))
+                        .filter(|qualified| {
+                            self.declarations.values().any(|declaration| {
+                                declaration.kind == "class"
+                                    && declaration.qualified_name == *qualified
+                            })
+                        })
+                        .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
+                }),
+            Some(qualifier) => {
+                let (root, suffix) = qualifier
+                    .split_once('.')
+                    .map_or((qualifier, ""), |(root, suffix)| (root, suffix));
+                self.imported_target_for(owner, root).map(|target| {
+                    if suffix.is_empty() {
+                        format!("{target}.{spelling}")
+                    } else {
+                        format!("{target}.{suffix}.{spelling}")
+                    }
+                })
+            }
+        }
     }
 
     fn add_relationship_occurrence(
@@ -1397,27 +1520,46 @@ impl<'source> DirectAdapterState<'source> {
         qualifier: Option<&str>,
         node: Node<'_>,
     ) -> Result<(), EvidenceError> {
+        self.add_relationship_occurrence_with_hierarchy(
+            role, relation, owner, spelling, qualifier, node, None, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_relationship_occurrence_with_hierarchy(
+        &mut self,
+        role: SemanticRole,
+        relation: CandidateRelation,
+        owner: &DeclarationContext,
+        spelling: &str,
+        qualifier: Option<&str>,
+        node: Node<'_>,
+        qualified_name_override: Option<String>,
+        hierarchy: Option<HierarchyConstraint>,
+    ) -> Result<(), EvidenceError> {
         if spelling.is_empty() {
             return Ok(());
         }
         let lookup_name = qualifier.unwrap_or(spelling);
-        if self.ambiguous_bindings.contains(lookup_name) {
+        if self.binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         let binding = self
             .binding_for(owner, qualifier.unwrap_or(spelling))
             .cloned();
-        let qualified_name = qualifier
-            .and_then(|qualifier| {
-                self.local_target_for(owner, qualifier)
-                    .map(|target| format!("{target}::{spelling}"))
+        let qualified_name = qualified_name_override
+            .or_else(|| {
+                qualifier.and_then(|qualifier| {
+                    self.local_target_for(owner, qualifier)
+                        .map(|target| format!("{target}::{spelling}"))
+                })
             })
             .or_else(|| {
                 qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .and_then(|qualifier| self.imported_target_for(owner, qualifier))
                     .map(|target| format!("{target}.{spelling}"))
             })
-            .or_else(|| self.imported_targets.get(spelling).cloned());
+            .or_else(|| self.imported_target_for(owner, spelling).cloned());
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1433,6 +1575,7 @@ impl<'source> DirectAdapterState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
+                exact_target_declaration_id: None,
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: qualified_name
                     .as_deref()
@@ -1445,6 +1588,7 @@ impl<'source> DirectAdapterState<'source> {
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
                 allowed_target_kinds: target_kinds_for_relation(relation),
+                hierarchy,
                 allow_external: qualified_name.is_some(),
             },
         )?;
@@ -1464,6 +1608,27 @@ impl<'source> DirectAdapterState<'source> {
             .and_then(|targets| targets.get(name))
     }
 
+    fn imported_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+        self.local_import_targets
+            .get(&owner.scope_id)
+            .and_then(|targets| targets.get(name))
+            .or_else(|| self.imported_targets.get(name))
+    }
+
+    fn binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
+        if self
+            .local_bindings
+            .get(&owner.scope_id)
+            .is_some_and(|bindings| bindings.contains_key(name))
+        {
+            return self
+                .ambiguous_local_bindings
+                .get(&owner.scope_id)
+                .is_some_and(|bindings| bindings.contains(name));
+        }
+        self.ambiguous_bindings.contains(name)
+    }
+
     fn add_ownership(
         &mut self,
         owner: &DeclarationContext,
@@ -1476,11 +1641,14 @@ impl<'source> DirectAdapterState<'source> {
             None,
             &child.name,
             ResolutionConstraint {
+                exact_target_declaration_id: (self.language == "python" && child.runtime_nested)
+                    .then(|| child.fact_id.clone()),
                 exact_language: Some(self.language.to_owned()),
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: Some(child.qualified_name.clone()),
                 allowed_target_kinds: vec![child.kind.clone()],
+                hierarchy: None,
                 allow_external: false,
             },
         )?;
@@ -1813,5 +1981,18 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Embeds => "embeds",
         CandidateRelation::Imports => "imports",
         CandidateRelation::Reexports => "reexports",
+    }
+}
+
+fn hierarchy_constraint_identity(constraint: Option<&HierarchyConstraint>) -> String {
+    match constraint {
+        None => String::new(),
+        Some(HierarchyConstraint::DirectBase { base_set_complete }) => {
+            format!("direct_base:{base_set_complete}")
+        }
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name,
+            strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+        }) => format!("receiver_dispatch:c3_after_receiver:{receiver_qualified_name}"),
     }
 }

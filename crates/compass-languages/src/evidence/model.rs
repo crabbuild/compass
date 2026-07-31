@@ -36,6 +36,7 @@ pub enum LanguageCapability {
     Decorators,
     TypeReferences,
     BaseTypes,
+    HierarchyDispatch,
     Members,
     Ownership,
     Receivers,
@@ -216,6 +217,9 @@ pub struct OccurrenceFact {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolutionConstraint {
+    /// Exact declaration proven by the adapter from the same source construct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_target_declaration_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exact_language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,8 +230,31 @@ pub struct ResolutionConstraint {
     pub qualified_name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_target_kinds: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hierarchy: Option<HierarchyConstraint>,
     #[serde(default)]
     pub allow_external: bool,
+}
+
+/// Typed hierarchy evidence used by shared receiver dispatch.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HierarchyConstraint {
+    /// One ordered direct-base occurrence. `base_set_complete` describes the
+    /// complete source-level base list for the owning declaration.
+    DirectBase { base_set_complete: bool },
+    /// Resolve a member after the receiver in a proven source hierarchy.
+    ReceiverDispatch {
+        receiver_qualified_name: String,
+        strategy: ReceiverDispatchStrategy,
+    },
+}
+
+/// Language-selected linearization implemented by the shared resolver.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiverDispatchStrategy {
+    C3AfterReceiver,
 }
 
 /// A source-grounded relationship awaiting constrained resolution.

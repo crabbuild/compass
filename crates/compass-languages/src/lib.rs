@@ -53,8 +53,9 @@ pub use builtins::is_language_builtin_global;
 pub use evidence::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
-    LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole, range_for_node, validate_evidence,
+    HierarchyConstraint, LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy,
+    RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
+    range_for_node, validate_evidence,
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{

@@ -20,13 +20,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from benchmarks.performance.compass_perf.correctness import (  # noqa: E402
+from benchmarks.performance.compass.correctness import (  # noqa: E402
     GraphSummary,
     canonical_graph_digest,
     compare_graphs,
     index_graph,
 )
-from benchmarks.performance.compass_perf.jsonstream import (  # noqa: E402
+from benchmarks.performance.compass.jsonstream import (  # noqa: E402
     iter_top_level_array,
 )
 
@@ -477,9 +477,10 @@ def markdown_report(payload: dict[str, object]) -> str:
             "`rejected` means a known unsafe/fabricated Graphify projection; `missing` "
             "means no source-compatible Compass fact was found.",
             "",
-            "| Corpus | Exact nodes | Dominated nodes | Missing nodes | Exact edges | "
-            "Dominated edges | Rejected edges | Ambiguous edges | Missing edges |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Corpus | Exact nodes | Dominated nodes | Ambiguous nodes | Missing nodes | "
+            "Exact edges | Dominated edges | Rejected edges | Ambiguous edges | "
+            "Missing edges |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         )
     )
     for corpus in corpora:
@@ -488,6 +489,7 @@ def markdown_report(payload: dict[str, object]) -> str:
             f"| {corpus['name']} | "
             f"{metrics.get('exact_graphify_nodes', 0):,} | "
             f"{metrics.get('dominated_graphify_nodes', 0):,} | "
+            f"{metrics.get('ambiguous_graphify_nodes', 0):,} | "
             f"{metrics.get('missing_graphify_nodes', 0):,} | "
             f"{metrics.get('exact_graphify_edges', 0):,} | "
             f"{metrics.get('dominated_graphify_edges', 0):,} | "

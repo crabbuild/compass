@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -24,15 +25,20 @@ def compare_documents(
         graphify = root / "graphify.json"
         compass.write_text(compass_document, encoding="utf-8")
         graphify.write_text(graphify_document, encoding="utf-8")
-        database = sqlite3.connect(":memory:")
-        index_graph("compass", compass, database)
-        index_graph("graphify", graphify, database)
-        return compare_graphs(database)
+        with closing(sqlite3.connect(":memory:")) as database:
+            index_graph("compass", compass, database)
+            index_graph("graphify", graphify, database)
+            return compare_graphs(database)
 
 
 class CorrectnessTests(unittest.TestCase):
-    def test_compass_superset_passes_shared_fact_comparison(self) -> None:
+    def database(self) -> sqlite3.Connection:
         database = sqlite3.connect(":memory:")
+        self.addCleanup(database.close)
+        return database
+
+    def test_compass_superset_passes_shared_fact_comparison(self) -> None:
+        database = self.database()
         compass = index_graph("compass", FIXTURES / "compass_graph.json", database)
         graphify = index_graph("graphify", FIXTURES / "graphify_graph.json", database)
         result = compare_graphs(database)
@@ -42,7 +48,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.digest, compare_graphs(database).digest)
 
     def test_storage_order_does_not_change_digest(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         first = index_graph("compass", FIXTURES / "compass_graph.json", database)
         with tempfile.TemporaryDirectory() as directory:
             reordered = Path(directory) / "graph.json"
@@ -63,7 +69,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(first.digest, second.digest)
 
     def test_missing_shared_node_fails(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             graph = Path(directory) / "compass.json"
             graph.write_text(
@@ -78,7 +84,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_nodes"], 1)
 
     def test_v1_compass_nodes_match_graphify_by_source_fact_not_internal_id(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compass = root / "compass.json"
@@ -124,7 +130,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(result.metrics["missing_graphify_edges"], 0)
 
     def test_shared_relation_projection_accepts_more_precise_compass_edges(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compass = root / "compass.json"
@@ -151,7 +157,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertTrue(result.passed, result.failures)
 
     def test_rationale_facts_match_by_source_anchor_across_schema_names(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compass = root / "compass.json"
@@ -185,7 +191,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertTrue(result.passed, result.failures)
 
     def test_dangling_edge_is_rejected(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             graph = Path(directory) / "graph.json"
             graph.write_text(
@@ -197,7 +203,7 @@ class CorrectnessTests(unittest.TestCase):
                 index_graph("compass", graph, database)
 
     def test_conflicting_duplicate_id_is_rejected(self) -> None:
-        database = sqlite3.connect(":memory:")
+        database = self.database()
         with tempfile.TemporaryDirectory() as directory:
             graph = Path(directory) / "graph.json"
             graph.write_text(
@@ -513,6 +519,60 @@ class CorrectnessTests(unittest.TestCase):
         self.assertIn(
             "dominated:precise_occurrence_owner",
             result.metrics["graphify_edges_coverage_reasons"],
+        )
+
+    def test_unique_source_occurrence_recovers_only_a_compatible_target(self) -> None:
+        compass = """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"caller","label":"run","kind":"function",
+               "source_file":"app.py","source_location":"L10","language":"python"},
+              {"id":"target","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L2","language":"python"}
+            ],"links":[
+              {"source":"caller","target":"target","relation":"calls",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+        """
+        compatible = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"caller","label":"run()",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"generated_target","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L20"}
+            ],"links":[
+              {"source":"caller","target":"generated_target","relation":"calls",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertFalse(compatible.passed)
+        self.assertEqual(compatible.metrics["missing_graphify_nodes"], 1)
+        self.assertEqual(compatible.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_occurrence_target",
+            compatible.metrics["graphify_edges_coverage_reasons"],
+        )
+
+        incompatible = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"caller","label":"run()",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"wrong_target","label":"Different","kind":"class",
+               "source_file":"lib.py","source_location":"L20"}
+            ],"links":[
+              {"source":"caller","target":"wrong_target","relation":"calls",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertEqual(incompatible.metrics["missing_graphify_edges"], 1)
+        self.assertNotIn(
+            "dominated:precise_occurrence_target",
+            incompatible.metrics["graphify_edges_coverage_reasons"],
         )
 
     def test_qualified_external_target_rejects_same_named_local_rebinding(self) -> None:
