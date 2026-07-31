@@ -391,6 +391,7 @@ struct DeclarationContext {
     name: String,
     qualified_name: String,
     kind: String,
+    enclosing_type_qualified_name: Option<String>,
 }
 
 struct DirectAdapterState<'source> {
@@ -406,6 +407,7 @@ struct DirectAdapterState<'source> {
     imported_targets: HashMap<String, String>,
     local_bindings: HashMap<String, HashMap<String, String>>,
     local_targets: HashMap<String, HashMap<String, String>>,
+    type_bases: HashMap<String, Vec<String>>,
     ambiguous_bindings: HashSet<String>,
     graph_ids: HashSet<String>,
     builder: EvidenceBuilder,
@@ -441,6 +443,7 @@ impl<'source> DirectAdapterState<'source> {
             imported_targets: HashMap::new(),
             local_bindings: HashMap::new(),
             local_targets: HashMap::new(),
+            type_bases: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
             graph_ids: HashSet::new(),
             builder: EvidenceBuilder::new(
@@ -480,6 +483,7 @@ impl<'source> DirectAdapterState<'source> {
             name: label.to_owned(),
             qualified_name: self.module_or_package.clone(),
             kind: "file".to_owned(),
+            enclosing_type_qualified_name: None,
         });
         Ok(())
     }
@@ -553,6 +557,8 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
+                enclosing_type_qualified_name: class_owner
+                    .map(|owner| owner.qualified_name.clone()),
             };
             self.add_ownership(owner, &context)?;
             self.declarations.insert(node.id(), context.clone());
@@ -807,6 +813,12 @@ impl<'source> DirectAdapterState<'source> {
             };
             let raw = self.text(target);
             let (qualifier, spelling) = split_qualified(&raw);
+            if let Some(qualified_base) = self.python_base_qualified_name(qualifier, spelling) {
+                self.type_bases
+                    .entry(owner.qualified_name.clone())
+                    .or_default()
+                    .push(qualified_base);
+            }
             self.add_relationship_occurrence(
                 SemanticRole::BaseType,
                 CandidateRelation::Extends,
@@ -909,6 +921,7 @@ impl<'source> DirectAdapterState<'source> {
                     name,
                     qualified_name,
                     kind: kind.to_owned(),
+                    enclosing_type_qualified_name: None,
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context);
@@ -962,6 +975,7 @@ impl<'source> DirectAdapterState<'source> {
                 name,
                 qualified_name,
                 kind: kind.to_owned(),
+                enclosing_type_qualified_name: None,
             };
             self.add_ownership(file, &context)?;
             self.declarations.insert(node.id(), context);
@@ -1335,17 +1349,22 @@ impl<'source> DirectAdapterState<'source> {
         let binding = self
             .binding_for(owner, qualifier.unwrap_or(spelling))
             .cloned();
-        let qualified_name = qualifier
-            .and_then(|qualifier| {
-                self.local_target_for(owner, qualifier)
-                    .map(|target| format!("{target}::{spelling}"))
-            })
-            .or_else(|| {
-                qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
-                    .map(|target| format!("{target}.{spelling}"))
-            })
-            .or_else(|| self.imported_targets.get(spelling).cloned());
+        let exact_super_target = (self.language == "python" && qualifier == Some("super()"))
+            .then(|| self.direct_super_target(owner, spelling))
+            .flatten();
+        let qualified_name = exact_super_target.or_else(|| {
+            qualifier
+                .and_then(|qualifier| {
+                    self.local_target_for(owner, qualifier)
+                        .map(|target| format!("{target}::{spelling}"))
+                })
+                .or_else(|| {
+                    qualifier
+                        .and_then(|qualifier| self.imported_targets.get(qualifier))
+                        .map(|target| format!("{target}.{spelling}"))
+                })
+                .or_else(|| self.imported_targets.get(spelling).cloned())
+        });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1381,11 +1400,48 @@ impl<'source> DirectAdapterState<'source> {
                 } else {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
-                allow_external: qualified_name.is_some(),
+                allow_external: qualified_name.is_some() && qualifier != Some("super()"),
             },
         )?;
         let _ = call_kind;
         Ok(())
+    }
+
+    fn direct_super_target(&self, owner: &DeclarationContext, spelling: &str) -> Option<String> {
+        let enclosing_type = owner.enclosing_type_qualified_name.as_deref()?;
+        let [base] = self.type_bases.get(enclosing_type)?.as_slice() else {
+            return None;
+        };
+        Some(format!("{base}::{spelling}"))
+    }
+
+    fn python_base_qualified_name(
+        &self,
+        qualifier: Option<&str>,
+        spelling: &str,
+    ) -> Option<String> {
+        if spelling.is_empty() || is_python_builtin_type(spelling) {
+            return None;
+        }
+        match qualifier {
+            None => self
+                .imported_targets
+                .get(spelling)
+                .cloned()
+                .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling))),
+            Some(qualifier) => {
+                let (root, suffix) = qualifier
+                    .split_once('.')
+                    .map_or((qualifier, ""), |(root, suffix)| (root, suffix));
+                self.imported_targets.get(root).map(|target| {
+                    if suffix.is_empty() {
+                        format!("{target}.{spelling}")
+                    } else {
+                        format!("{target}.{suffix}.{spelling}")
+                    }
+                })
+            }
+        }
     }
 
     fn add_relationship_occurrence(

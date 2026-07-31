@@ -128,6 +128,54 @@ fn explicit_python_alias_resolves_before_external_fallback() {
 }
 
 #[test]
+fn python_super_call_resolves_only_an_exact_direct_base_method() {
+    let provider = extract(
+        "pkg/base.py",
+        b"class Base:\n    def run(self):\n        return None\n",
+    );
+    let caller_source = b"from pkg.base import Base\nclass Child(Base):\n    def run(self):\n        super().run()\n";
+    let caller = extract("pkg/child.py", caller_source);
+    let sources = HashMap::from([(
+        "pkg/child.py".to_owned(),
+        String::from_utf8(caller_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[provider, caller], &sources);
+    let base_run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.string("source_file") == "pkg/base.py"
+                && node.label().trim_start_matches('.').trim_end_matches("()") == "run"
+        })
+        .unwrap_or_else(|| panic!("base method; nodes={:#?}", resolved.nodes));
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == base_run.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].string("source_location"), "L4");
+    assert_eq!(calls[0].string("resolution_rule"), "explicitbinding");
+}
+
+#[test]
+fn python_super_call_with_multiple_bases_fails_closed() {
+    let source = b"class Left:\n    def run(self):\n        return None\nclass Right:\n    def run(self):\n        return None\nclass Child(Left, Right):\n    def run(self):\n        super().run()\n";
+    let extracted = extract("pkg/models.py", source);
+    let sources = HashMap::from([(
+        "pkg/models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "calls" || edge.string("source_location") != "L8"
+    }));
+}
+
+#[test]
 fn repeated_external_type_uses_share_the_exact_import_binding() {
     let source = b"from ctypes import Structure\nclass First(Structure):\n    pass\nclass Second(Structure):\n    pass\n";
     let extracted = extract("models.py", source);
