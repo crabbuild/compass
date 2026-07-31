@@ -1,6 +1,6 @@
 use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
+    Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
     OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch,
     SemanticRole, validate_evidence,
 };
@@ -34,6 +34,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
         declarations: vec![DeclarationFact {
             id: "decl:caller".to_owned(),
             language: "python".to_owned(),
+            graph_node_id: "src_example_py_caller".to_owned(),
             kind: "function".to_owned(),
             name: "caller".to_owned(),
             qualified_name: "example.caller".to_owned(),
@@ -266,4 +267,142 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
     }));
     assert!(AdapterRegistry::universal_profile("java").is_none());
     assert!(AdapterRegistry::universal_profile("rust").is_none());
+}
+
+#[test]
+fn python_emits_direct_source_grounded_evidence() {
+    let source = br#"from tools.runner import execute as run
+
+@run
+class Derived(Base):
+    def handle(self, value: Input) -> Output:
+        run(value)
+        run(value)
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/src/example.py"),
+            "src/example.py",
+            source,
+        )
+        .expect("extract python");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    assert_eq!(evidence.adapter.language, "python");
+    assert!(
+        evidence
+            .bindings
+            .iter()
+            .any(|binding| binding.spelling == "run"
+                && binding.qualified_target == "tools.runner.execute")
+    );
+    assert!(evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == SemanticRole::Decorator && occurrence.spelling == "run"
+    }));
+    assert!(evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == SemanticRole::BaseType && occurrence.spelling == "Base"
+    }));
+    assert!(evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == SemanticRole::Annotation && occurrence.spelling == "Input"
+    }));
+    let calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == SemanticRole::Call && occurrence.spelling == "run")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert_ne!(calls[0].range.start_byte, calls[1].range.start_byte);
+    for occurrence in calls {
+        let start = usize::try_from(occurrence.range.start_byte).expect("fixture offset");
+        let end = usize::try_from(occurrence.range.end_byte).expect("fixture offset");
+        assert_eq!(&source[start..end], b"run");
+    }
+}
+
+#[test]
+fn go_emits_packages_receivers_embeddings_and_exact_calls() {
+    let source = br#"package sample
+
+import alias "example.com/tools"
+
+type Base struct{}
+type Derived struct {
+    Base
+    Client alias.Client
+}
+
+func (d *Derived) Handle(value alias.Input) alias.Output {
+    alias.Run(value)
+    alias.Run(value)
+    return alias.Output{}
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    assert_eq!(evidence.adapter.language, "go");
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "alias" && binding.qualified_target == "example.com/tools"
+    }));
+    assert!(evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == SemanticRole::Receiver && occurrence.spelling == "Derived"
+    }));
+    assert!(evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == SemanticRole::Embedding && occurrence.spelling == "Base"
+    }));
+    let calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.spelling == "Run")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert!(
+        calls
+            .iter()
+            .all(|occurrence| occurrence.qualifier.as_deref() == Some("alias"))
+    );
+}
+
+#[test]
+fn direct_adapter_ids_and_partial_diagnostics_are_deterministic() {
+    let path = std::path::Path::new("/repo/src/example.py");
+    let source_file = "src/example.py";
+    let source = b"def broken(value:\n    helper(value)\n";
+    let mut first_engine = Engine::default();
+    let first = first_engine
+        .extract_source_combined(path, source_file, source)
+        .expect("first extract")
+        .graph
+        .semantic_evidence
+        .expect("first evidence");
+    let mut second_engine = Engine::default();
+    let second = second_engine
+        .extract_source_combined(path, source_file, source)
+        .expect("second extract")
+        .graph
+        .semantic_evidence
+        .expect("second evidence");
+    assert_eq!(first, second);
+    assert!(
+        first
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "partial_parser_recovery")
+    );
 }

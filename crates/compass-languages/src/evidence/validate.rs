@@ -63,7 +63,7 @@ pub struct EvidenceError {
 const MAX_ERROR_MESSAGE_BYTES: usize = 512;
 
 impl EvidenceError {
-    fn new(code: EvidenceErrorCode, message: impl Into<String>) -> Self {
+    pub(super) fn new(code: EvidenceErrorCode, message: impl Into<String>) -> Self {
         let mut message = message.into();
         if message.len() > MAX_ERROR_MESSAGE_BYTES {
             let mut boundary = MAX_ERROR_MESSAGE_BYTES;
@@ -297,7 +297,11 @@ fn validate_fact(
             validate_language(&fact.id, &fact.language, adapter_language)?;
             validate_range(&fact.range, &fact.id)?;
             require_capability(&fact.id, LanguageCapability::Declarations, capabilities)?;
-            if fact.kind.is_empty() || fact.name.is_empty() || fact.qualified_name.is_empty() {
+            if fact.graph_node_id.is_empty()
+                || fact.kind.is_empty()
+                || fact.name.is_empty()
+                || fact.qualified_name.is_empty()
+            {
                 return Err(invalid_fact(&fact.id, "declaration identity is empty"));
             }
             require_optional_reference(&fact.id, "scope", fact.scope_id.as_deref(), scopes)?;

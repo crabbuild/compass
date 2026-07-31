@@ -1,5 +1,6 @@
 //! Deterministic cross-file resolution over immutable extraction facts.
 
+pub mod evidence;
 pub mod frameworks;
 mod members;
 
@@ -12,7 +13,7 @@ use std::time::Instant;
 use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     Extraction, RawCall, RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord,
-    is_language_builtin_global, make_id,
+    SemanticEvidenceBatch, is_language_builtin_global, make_id,
 };
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE,
@@ -176,11 +177,43 @@ pub fn resolve_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let language_facts = members::collect_language_call_facts(extractions);
+    let mut language_facts = members::collect_language_call_facts(extractions);
+    language_facts
+        .calls
+        .retain(|call| !matches!(call.lang.as_deref(), Some("python" | "go")));
+    let evidence_batches = extractions
+        .iter()
+        .filter_map(|extraction| extraction.semantic_evidence.clone())
+        .collect::<Vec<_>>();
     let mut merged = Extraction::default();
     for extraction in extractions {
-        merged.nodes.extend(extraction.nodes.iter().cloned());
-        merged.edges.extend(extraction.edges.iter().cloned());
+        if extraction.semantic_evidence.is_some() {
+            let allowed = universal_allowed_node_ids(extraction);
+            merged.nodes.extend(
+                extraction
+                    .nodes
+                    .iter()
+                    .filter(|node| allowed.contains(&node.id) || node.string("file_type") != "code")
+                    .cloned(),
+            );
+            merged.edges.extend(
+                extraction
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        !evidence::is_replaced_relation(
+                            edge.attributes
+                                .get("relation")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .cloned(),
+            );
+        } else {
+            merged.nodes.extend(extraction.nodes.iter().cloned());
+            merged.edges.extend(extraction.edges.iter().cloned());
+        }
         merged
             .hyperedges
             .extend(extraction.hyperedges.iter().cloned());
@@ -188,7 +221,7 @@ pub fn resolve_with_root(
             .framework_facts
             .extend(extraction.framework_facts.iter().cloned());
     }
-    finish_resolution(merged, language_facts, sources, root)
+    finish_resolution(merged, language_facts, evidence_batches, sources, root)
 }
 
 /// Resolve a collection while transferring its node and edge buffers into the
@@ -200,23 +233,76 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    let language_facts = members::collect_language_call_facts_owned(&mut extractions);
+    let mut language_facts = members::collect_language_call_facts_owned(&mut extractions);
+    language_facts
+        .calls
+        .retain(|call| !matches!(call.lang.as_deref(), Some("python" | "go")));
+    let mut evidence_batches = Vec::new();
     let mut merged = Extraction::default();
     for extraction in &mut extractions {
+        let universal = extraction.semantic_evidence.take();
+        if universal.is_some() {
+            let mut allowed = universal
+                .as_ref()
+                .into_iter()
+                .flat_map(|batch| &batch.declarations)
+                .map(|declaration| declaration.graph_node_id.clone())
+                .collect::<HashSet<_>>();
+            allowed.extend(
+                extraction
+                    .edges
+                    .iter()
+                    .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
+                    .flat_map(|edge| [edge.source.clone(), edge.target.clone()]),
+            );
+            extraction
+                .nodes
+                .retain(|node| allowed.contains(&node.id) || node.string("file_type") != "code");
+            extraction.edges.retain(|edge| {
+                !evidence::is_replaced_relation(
+                    edge.attributes
+                        .get("relation")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )
+            });
+        }
         merged.nodes.append(&mut extraction.nodes);
         merged.edges.append(&mut extraction.edges);
         merged.hyperedges.append(&mut extraction.hyperedges);
         merged
             .framework_facts
             .append(&mut extraction.framework_facts);
+        if let Some(batch) = universal {
+            evidence_batches.push(batch);
+        }
     }
     extractions.into_par_iter().for_each(drop);
-    finish_resolution(merged, language_facts, sources, root)
+    finish_resolution(merged, language_facts, evidence_batches, sources, root)
+}
+
+fn universal_allowed_node_ids(extraction: &Extraction) -> HashSet<String> {
+    let mut allowed = extraction
+        .semantic_evidence
+        .as_ref()
+        .into_iter()
+        .flat_map(|batch| &batch.declarations)
+        .map(|declaration| declaration.graph_node_id.clone())
+        .collect::<HashSet<_>>();
+    allowed.extend(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| !evidence::is_replaced_relation(relation(edge)))
+            .flat_map(|edge| [edge.source.clone(), edge.target.clone()]),
+    );
+    allowed
 }
 
 fn finish_resolution(
     mut merged: Extraction,
     mut language_facts: members::LanguageCallFacts,
+    evidence_batches: Vec<SemanticEvidenceBatch>,
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
@@ -226,10 +312,20 @@ fn finish_resolution(
     profile_internal("resolver JavaScript re-exports", &mut profile_started);
     canonicalize_import_targets(&mut merged);
     profile_internal("resolver import canonicalization", &mut profile_started);
-    canonicalize_go_receiver_owners(&mut merged);
-    profile_internal("resolver Go receiver ownership", &mut profile_started);
-    canonicalize_go_imported_types(&mut merged, &canonical_root);
-    profile_internal("resolver Go imported types", &mut profile_started);
+    if !evidence_batches.is_empty() {
+        match evidence::UniversalResolutionIndex::new(
+            &evidence_batches,
+            evidence::UniversalResolutionLimits::default(),
+        ) {
+            Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
+            Err(error) => {
+                merged
+                    .error
+                    .get_or_insert_with(|| format!("universal resolution failed: {error}"));
+            }
+        }
+    }
+    profile_internal("resolver universal evidence", &mut profile_started);
     disambiguate_colliding_node_ids_with_calls(
         &mut merged,
         &canonical_root,
@@ -240,8 +336,6 @@ fn finish_resolution(
     profile_internal("resolver C# namespace normalization", &mut profile_started);
     resolve_php_type_references(&mut merged, sources);
     profile_internal("resolver PHP types", &mut profile_started);
-    resolve_python_imported_types(&mut merged, &canonical_root);
-    profile_internal("resolver Python imported types", &mut profile_started);
     rewire_unique_family_stubs(&mut merged);
     profile_internal("resolver family stubs", &mut profile_started);
     rewire_unique_stub_nodes(&mut merged);

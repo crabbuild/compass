@@ -154,6 +154,8 @@ impl CandidateRelation {
 pub struct DeclarationFact {
     pub id: String,
     pub language: String,
+    /// Existing raw graph identity enriched by this declaration.
+    pub graph_node_id: String,
     pub kind: String,
     pub name: String,
     pub qualified_name: String,
