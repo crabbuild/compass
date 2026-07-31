@@ -126,3 +126,102 @@ fn explicit_python_alias_resolves_before_external_fallback() {
             && edge.string("resolution_rule") == "explicitbinding"
     }));
 }
+
+#[test]
+fn repeated_external_type_uses_share_the_exact_import_binding() {
+    let source = b"from ctypes import Structure\nclass First(Structure):\n    pass\nclass Second(Structure):\n    pass\n";
+    let extracted = extract("models.py", source);
+    let sources = HashMap::from([(
+        "models.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let targets = resolved
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.string("qualified_name") == "ctypes.Structure"
+                && node.string("symbol_kind") == "type_alias"
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].string("source_location"), "L1");
+    let mut sites = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "inherits" && edge.target == targets[0].id)
+        .map(|edge| edge.string("source_location"))
+        .collect::<Vec<_>>();
+    sites.sort();
+    assert_eq!(sites, ["L2", "L4"]);
+}
+
+#[test]
+fn qualified_calls_require_a_binding_or_an_exact_language_receiver() {
+    let go_source = br#"package pkg
+type Worker struct{}
+func (worker *Worker) Run() {}
+func caller(untyped any, worker *Worker) {
+    untyped.Run()
+    worker.Run()
+}
+"#;
+    let extracted = extract("pkg/caller.go", go_source);
+    let sources = HashMap::from([(
+        "pkg/caller.go".to_owned(),
+        String::from_utf8(go_source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "method"
+                && node.label().trim_start_matches('.').trim_end_matches("()") == "Run"
+        })
+        .unwrap_or_else(|| panic!("declared method; nodes={:#?}", resolved.nodes));
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == run.id)
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 1, "untyped receivers must fail closed");
+    assert_eq!(calls[0].string("source_location"), "L6");
+}
+
+#[test]
+fn go_module_imports_resolve_exported_functions_by_exact_source_directory() {
+    let provider = extract(
+        "cmd/entire/cli/trailers/trailers.go",
+        b"package trailers\nfunc ParseMetadata(value string) {}\n",
+    );
+    let caller_source = br#"package checkpoint
+import "github.com/entireio/cli/cmd/entire/cli/trailers"
+func Load(value string) {
+    visit := func() {
+        trailers.ParseMetadata(value)
+    }
+    visit()
+}
+"#;
+    let caller = extract("cmd/entire/cli/checkpoint/load.go", caller_source);
+    let sources = HashMap::from([(
+        "cmd/entire/cli/checkpoint/load.go".to_owned(),
+        String::from_utf8(caller_source.to_vec()).expect("source"),
+    )]);
+    let resolved =
+        compass_resolve::resolve_with_root(&[provider, caller], &sources, Path::new("."));
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.label() == "ParseMetadata()")
+        .expect("provider function");
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.string("relation") == "calls"
+            && edge.target == target.id
+            && edge.string("source_location") == "L5"
+    }));
+}

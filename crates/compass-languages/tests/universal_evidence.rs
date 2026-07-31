@@ -325,6 +325,88 @@ class Derived(Base):
 }
 
 #[test]
+fn python_imports_are_ast_grounded_and_ignore_inline_comments() {
+    let source = br#"from django.contrib.postgres.aggregates import (
+    StringAgg,  # RemovedInDjango70Warning.
+)
+from . import PostgreSQLTestCase
+import tools.runner as runner
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/tests/postgres_tests/example.py"),
+            "tests/postgres_tests/example.py",
+            source,
+        )
+        .expect("extract python");
+    assert_eq!(extraction.graph.error, None);
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
+
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "StringAgg"
+            && binding.qualified_target == "django.contrib.postgres.aggregates.StringAgg"
+    }));
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "PostgreSQLTestCase"
+            && binding.qualified_target == "tests.postgres_tests.PostgreSQLTestCase"
+    }));
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.spelling == "runner" && binding.qualified_target == "tools.runner"
+    }));
+    assert!(
+        evidence
+            .bindings
+            .iter()
+            .all(|binding| !binding.spelling.contains('#')
+                && !binding.qualified_target.contains('#'))
+    );
+}
+
+#[test]
+fn python_dynamic_bases_and_nested_initializer_imports_fail_closed() {
+    let source = br#"from framework import factory
+
+class Dynamic(factory(Base)):
+    def load(self):
+        from vendor import helper
+        return helper()
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/pkg/__init__.py"),
+            "pkg/__init__.py",
+            source,
+        )
+        .expect("extract python");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::Extends
+            || !matches!(candidate.target_spelling.as_str(), "factory" | "Base")
+    }));
+    assert!(
+        evidence.bindings.iter().any(|binding| {
+            binding.spelling == "factory" && binding.kind == BindingKind::Reexport
+        })
+    );
+    assert!(
+        evidence
+            .bindings
+            .iter()
+            .any(|binding| { binding.spelling == "helper" && binding.kind == BindingKind::Import })
+    );
+}
+
+#[test]
 fn go_emits_packages_receivers_embeddings_and_exact_calls() {
     let source = br#"package sample
 
@@ -337,6 +419,7 @@ type Derived struct {
 }
 
 func (d *Derived) Handle(value alias.Input) alias.Output {
+    d.Handle(value)
     alias.Run(value)
     alias.Run(value)
     return alias.Output{}
@@ -377,6 +460,64 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
             .iter()
             .all(|occurrence| occurrence.qualifier.as_deref() == Some("alias"))
     );
+    let receiver_binding = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "d")
+        .expect("typed receiver binding");
+    assert_eq!(receiver_binding.kind, BindingKind::LocalAlias);
+    assert_eq!(receiver_binding.qualified_target, "sample.Derived");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "Handle"
+            && candidate.binding_id.as_deref() == Some(&receiver_binding.id)
+            && candidate.constraints.qualified_name.as_deref() == Some("sample.Derived::Handle")
+    }));
+}
+
+#[test]
+fn go_embeddings_require_a_declared_type_owner() {
+    let source = br#"package sample
+
+type Base struct{}
+type Declared struct {
+    Base
+}
+
+func run() {
+    local := struct {
+        Base
+    }{}
+    _ = local
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go");
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    let embeddings = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Embeds)
+        .collect::<Vec<_>>();
+
+    assert_eq!(embeddings.len(), 1);
+    let owner = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.id == embeddings[0].source_declaration_id)
+        .expect("embedding owner");
+    assert_eq!(owner.name, "Declared");
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.target_spelling != "Base" || candidate.relation != CandidateRelation::References
+    }));
 }
 
 #[test]

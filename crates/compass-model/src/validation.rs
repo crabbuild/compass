@@ -548,7 +548,8 @@ fn endpoint_kinds_are_valid(
                     | NodeKind::Package
                     | NodeKind::Namespace
                     | NodeKind::Import
-            ) || source.kind.is_callable())
+            ) || source.kind.is_callable()
+                || source.kind.is_type())
                 && is_import_target(target.kind))
                 || (source.kind == NodeKind::ConfigKey && target.kind == NodeKind::Resource)
         }

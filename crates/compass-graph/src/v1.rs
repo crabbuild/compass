@@ -3685,7 +3685,7 @@ fn node_identity(
             domain_id(kind, source_path, &positional_name)
         }
         NodeKind::Import | NodeKind::Export => {
-            let binding = match details {
+            let mut binding = match details {
                 Some(NodeDetails::ImportExport(details)) => format!(
                     "{}:{}:{}",
                     details.imported_name.as_deref().unwrap_or_default(),
@@ -3694,6 +3694,10 @@ fn node_identity(
                 ),
                 _ => String::new(),
             };
+            if let Some(site) = identity_site {
+                use std::fmt::Write as _;
+                let _ = write!(binding, ":{}:{}", site.start_byte, site.end_byte);
+            }
             symbol_id(
                 language.unwrap_or("unknown"),
                 source_path,

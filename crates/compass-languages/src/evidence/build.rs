@@ -47,6 +47,7 @@ impl EvidenceBuilder {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn declare(
         &mut self,
         kind: &str,
@@ -403,6 +404,8 @@ struct DirectAdapterState<'source> {
     declarations: HashMap<usize, DeclarationContext>,
     bindings: HashMap<String, String>,
     imported_targets: HashMap<String, String>,
+    local_bindings: HashMap<String, HashMap<String, String>>,
+    local_targets: HashMap<String, HashMap<String, String>>,
     ambiguous_bindings: HashSet<String>,
     graph_ids: HashSet<String>,
     builder: EvidenceBuilder,
@@ -436,6 +439,8 @@ impl<'source> DirectAdapterState<'source> {
             declarations: HashMap::new(),
             bindings: HashMap::new(),
             imported_targets: HashMap::new(),
+            local_bindings: HashMap::new(),
+            local_targets: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
             graph_ids: HashSet::new(),
             builder: EvidenceBuilder::new(
@@ -480,10 +485,12 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn extract_python(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
-        let file = self
-            .file
-            .clone()
-            .expect("non-empty source has file evidence");
+        let file = self.file.clone().ok_or_else(|| {
+            EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "non-empty Python source has no file evidence",
+            )
+        })?;
         self.collect_python_declarations(root, &file, None)?;
         self.walk_python_evidence(root, &file, true)
     }
@@ -513,7 +520,7 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 make_id(&[
                     &self.stem,
-                    &qualified_name.rsplit('.').next().unwrap_or(&name),
+                    qualified_name.rsplit('.').next().unwrap_or(&name),
                 ])
             };
             let graph_node_id = self.unique_graph_id(graph_node_id, node);
@@ -609,102 +616,129 @@ impl<'source> DirectAdapterState<'source> {
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
-        let raw = self.text(node);
-        let mut bindings = Vec::<(String, String)>::new();
-        if let Some(rest) = raw.trim().strip_prefix("import ") {
-            for item in rest.split(',') {
-                let item = item.trim();
-                let (target, local) = item.split_once(" as ").map_or_else(
-                    || {
-                        let local = item.split('.').next().unwrap_or(item);
-                        (item, local)
-                    },
-                    |(target, local)| (target.trim(), local.trim()),
-                );
-                if !target.is_empty() && !local.is_empty() {
-                    bindings.push((local.to_owned(), target.to_owned()));
-                }
-            }
-        } else if let Some(rest) = raw.trim().strip_prefix("from ")
-            && let Some((module, imported)) = rest.split_once(" import ")
-        {
-            let module = resolve_python_module(&self.module_or_package, module.trim());
-            for item in imported.trim_matches(['(', ')', ' ', '\n']).split(',') {
-                let item = item.trim();
-                let (symbol, local) = item
-                    .split_once(" as ")
-                    .map_or((item, item), |(symbol, local)| {
-                        (symbol.trim(), local.trim())
-                    });
-                if !symbol.is_empty() && symbol != "*" && !local.is_empty() {
-                    bindings.push((local.to_owned(), format!("{module}.{symbol}")));
-                }
-            }
-        }
-        for (local, target) in bindings {
-            let is_reexport =
-                self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
-            let kind = if is_reexport {
-                BindingKind::Reexport
-            } else if local == target.rsplit('.').next().unwrap_or_default() {
-                BindingKind::Import
+        let module = node.child_by_field_name("module_name").map(|module| {
+            resolve_python_module(
+                &self.module_or_package,
+                &self.text(module),
+                self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"),
+            )
+        });
+        let mut cursor = node.walk();
+        for imported in node.children_by_field_name("name", &mut cursor) {
+            let (target_name, alias) = if imported.kind() == "aliased_import" {
+                let Some(target) = imported.child_by_field_name("name") else {
+                    continue;
+                };
+                (
+                    self.text(target),
+                    imported
+                        .child_by_field_name("alias")
+                        .map(|alias| self.text(alias)),
+                )
             } else {
-                BindingKind::ImportAlias
+                (self.text(imported), None)
             };
-            let binding_id = self.builder.bind(
-                kind,
-                &local,
-                &target,
-                None,
-                Some(&owner.scope_id),
-                range_for_node(self.source_file, node),
-            )?;
-            if self
-                .bindings
-                .insert(local.clone(), binding_id.clone())
-                .is_some()
-            {
-                self.ambiguous_bindings.insert(local.clone());
+            if target_name.is_empty() || target_name == "*" {
+                continue;
             }
-            self.imported_targets.insert(local.clone(), target.clone());
-            let occurrence_id = self.builder.occur(
-                if is_reexport {
-                    SemanticRole::Reexport
+            let (local, target) = if let Some(module) = module.as_deref() {
+                let local = alias.unwrap_or_else(|| target_name.clone());
+                let target = if module.is_empty() {
+                    target_name
                 } else {
-                    SemanticRole::Import
-                },
-                &owner.fact_id,
-                &local,
-                None,
-                Some(&owner.scope_id),
-                range_for_node(self.source_file, node),
-            )?;
-            let target_spelling = target.rsplit('.').next().unwrap_or(&target).to_owned();
-            self.builder.relate(
-                if is_reexport {
-                    CandidateRelation::Reexports
-                } else {
-                    CandidateRelation::Imports
-                },
-                &owner.fact_id,
-                Some(&occurrence_id),
-                Some(&binding_id),
-                &target_spelling,
-                ResolutionConstraint {
-                    exact_language: Some(self.language.to_owned()),
-                    module_or_package: target.rsplit_once('.').map(|(module, _)| module.to_owned()),
-                    scope_id: Some(owner.scope_id.clone()),
-                    qualified_name: Some(target),
-                    allowed_target_kinds: vec![
-                        "file".to_owned(),
-                        "module".to_owned(),
-                        "class".to_owned(),
-                        "function".to_owned(),
-                    ],
-                    allow_external: true,
-                },
-            )?;
+                    format!("{module}.{target_name}")
+                };
+                (local, target)
+            } else {
+                let local = alias.unwrap_or_else(|| {
+                    target_name.split('.').next().unwrap_or_default().to_owned()
+                });
+                (local, target_name)
+            };
+            if local.is_empty() || target.rsplit('.').next().is_none_or(str::is_empty) {
+                self.builder.diagnose(
+                    "unsupported_import_target",
+                    Some(&owner.fact_id),
+                    Some(range_for_node(self.source_file, imported)),
+                    "import target could not be represented as a source-grounded binding",
+                )?;
+                continue;
+            }
+            self.add_python_import_binding(imported, owner, local, target)?;
         }
+        Ok(())
+    }
+
+    fn add_python_import_binding(
+        &mut self,
+        imported: Node<'_>,
+        owner: &DeclarationContext,
+        local: String,
+        target: String,
+    ) -> Result<(), EvidenceError> {
+        let is_reexport = owner.kind == "file"
+            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+        let kind = if is_reexport {
+            BindingKind::Reexport
+        } else if local == target.rsplit('.').next().unwrap_or_default() {
+            BindingKind::Import
+        } else {
+            BindingKind::ImportAlias
+        };
+        let range = range_for_node(self.source_file, imported);
+        let binding_id = self.builder.bind(
+            kind,
+            &local,
+            &target,
+            None,
+            Some(&owner.scope_id),
+            range.clone(),
+        )?;
+        if self
+            .bindings
+            .insert(local.clone(), binding_id.clone())
+            .is_some()
+        {
+            self.ambiguous_bindings.insert(local.clone());
+        }
+        self.imported_targets.insert(local.clone(), target.clone());
+        let occurrence_id = self.builder.occur(
+            if is_reexport {
+                SemanticRole::Reexport
+            } else {
+                SemanticRole::Import
+            },
+            &owner.fact_id,
+            &local,
+            None,
+            Some(&owner.scope_id),
+            range,
+        )?;
+        let target_spelling = target.rsplit('.').next().unwrap_or(&target);
+        self.builder.relate(
+            if is_reexport {
+                CandidateRelation::Reexports
+            } else {
+                CandidateRelation::Imports
+            },
+            &owner.fact_id,
+            Some(&occurrence_id),
+            Some(&binding_id),
+            target_spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: target.rsplit_once('.').map(|(module, _)| module.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(target.clone()),
+                allowed_target_kinds: vec![
+                    "file".to_owned(),
+                    "module".to_owned(),
+                    "class".to_owned(),
+                    "function".to_owned(),
+                ],
+                allow_external: true,
+            },
+        )?;
         Ok(())
     }
 
@@ -756,9 +790,21 @@ impl<'source> DirectAdapterState<'source> {
         let Some(arguments) = declaration.child_by_field_name("superclasses") else {
             return Ok(());
         };
-        let mut nodes = Vec::new();
-        collect_named_targets(arguments, &["identifier", "attribute"], &mut nodes);
-        for target in nodes {
+        let mut cursor = arguments.walk();
+        for argument in arguments
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+        {
+            let target = match argument.kind() {
+                "identifier" | "attribute" => Some(argument),
+                "subscript" => argument
+                    .child_by_field_name("value")
+                    .filter(|value| matches!(value.kind(), "identifier" | "attribute")),
+                _ => None,
+            };
+            let Some(target) = target else {
+                continue;
+            };
             let raw = self.text(target);
             let (qualifier, spelling) = split_qualified(&raw);
             self.add_relationship_occurrence(
@@ -813,10 +859,12 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn extract_go(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
-        let file = self
-            .file
-            .clone()
-            .expect("non-empty source has file evidence");
+        let file = self.file.clone().ok_or_else(|| {
+            EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "non-empty Go source has no file evidence",
+            )
+        })?;
         self.collect_go_declarations(root, &file)?;
         self.walk_go_evidence(root, &file, true)
     }
@@ -937,6 +985,9 @@ impl<'source> DirectAdapterState<'source> {
             .get(&node.id())
             .cloned()
             .unwrap_or_else(|| owner.clone());
+        if matches!(node.kind(), "function_declaration" | "method_declaration") {
+            self.add_go_typed_bindings(node, &active)?;
+        }
         match node.kind() {
             "import_declaration" => {
                 self.add_go_imports(node, &active)?;
@@ -948,10 +999,11 @@ impl<'source> DirectAdapterState<'source> {
             "type_elem" => self.add_go_embedded_types(node, &active)?,
             _ => {}
         }
-        if matches!(
-            node.kind(),
-            "function_declaration" | "method_declaration" | "type_spec"
-        ) {
+        if matches!(node.kind(), "function_declaration" | "method_declaration")
+            || (node.kind() == "type_spec"
+                && !has_descendant(node, "struct_type")
+                && !has_descendant(node, "interface_type"))
+        {
             self.add_go_type_references(node, &active)?;
         }
         let mut cursor = node.walk();
@@ -966,6 +1018,73 @@ impl<'source> DirectAdapterState<'source> {
                 continue;
             }
             self.walk_go_evidence(child, &active, false)?;
+        }
+        Ok(())
+    }
+
+    fn add_go_typed_bindings(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        for field in ["receiver", "parameters"] {
+            let Some(parameters) = declaration.child_by_field_name(field) else {
+                continue;
+            };
+            let mut parameter_declarations = Vec::new();
+            collect_nodes(
+                parameters,
+                "parameter_declaration",
+                &mut parameter_declarations,
+            );
+            for parameter in parameter_declarations {
+                let Some(type_node) = parameter.child_by_field_name("type") else {
+                    continue;
+                };
+                let mut targets = Vec::new();
+                collect_named_targets(
+                    type_node,
+                    &["type_identifier", "qualified_type"],
+                    &mut targets,
+                );
+                let [target] = targets.as_slice() else {
+                    continue;
+                };
+                let raw_target = self.text(*target);
+                let (qualifier, spelling) = split_qualified(&raw_target);
+                if spelling.is_empty() || is_go_predeclared_type(spelling) {
+                    continue;
+                }
+                let qualified_target = qualifier
+                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .map_or_else(
+                        || format!("{}.{}", self.module_or_package, spelling),
+                        |module| format!("{module}.{spelling}"),
+                    );
+                let mut cursor = parameter.walk();
+                for name_node in parameter.children_by_field_name("name", &mut cursor) {
+                    let name = self.text(name_node);
+                    if name.is_empty() || name == "_" {
+                        continue;
+                    }
+                    let binding_id = self.builder.bind(
+                        BindingKind::LocalAlias,
+                        &name,
+                        &qualified_target,
+                        None,
+                        Some(&owner.scope_id),
+                        range_for_node(self.source_file, name_node),
+                    )?;
+                    self.local_bindings
+                        .entry(owner.scope_id.clone())
+                        .or_default()
+                        .insert(name.clone(), binding_id);
+                    self.local_targets
+                        .entry(owner.scope_id.clone())
+                        .or_default()
+                        .insert(name, qualified_target.clone());
+                }
+            }
         }
         Ok(())
     }
@@ -1091,6 +1210,12 @@ impl<'source> DirectAdapterState<'source> {
             let (role, relation) = if has_name {
                 (SemanticRole::TypeReference, CandidateRelation::References)
             } else {
+                if !matches!(
+                    owner.kind.as_str(),
+                    "class" | "struct" | "interface" | "trait" | "type_alias"
+                ) {
+                    continue;
+                }
                 (SemanticRole::Embedding, CandidateRelation::Embeds)
             };
             self.add_relationship_occurrence(role, relation, owner, spelling, qualifier, target)?;
@@ -1103,6 +1228,12 @@ impl<'source> DirectAdapterState<'source> {
         element: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
+        if !matches!(
+            owner.kind.as_str(),
+            "class" | "struct" | "interface" | "trait" | "type_alias"
+        ) {
+            return Ok(());
+        }
         let mut targets = Vec::new();
         collect_named_targets(
             element,
@@ -1132,12 +1263,23 @@ impl<'source> DirectAdapterState<'source> {
         declaration: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
+        let mut roots = Vec::new();
+        if matches!(
+            declaration.kind(),
+            "function_declaration" | "method_declaration"
+        ) {
+            roots.extend(
+                ["receiver", "parameters", "result"]
+                    .into_iter()
+                    .filter_map(|field| declaration.child_by_field_name(field)),
+            );
+        } else if let Some(type_node) = declaration.child_by_field_name("type") {
+            roots.push(type_node);
+        }
         let mut targets = Vec::new();
-        collect_named_targets(
-            declaration,
-            &["type_identifier", "qualified_type"],
-            &mut targets,
-        );
+        for root in roots {
+            collect_named_targets(root, &["type_identifier", "qualified_type"], &mut targets);
+        }
         for target in targets {
             let raw = self.text(target);
             if raw == owner.name || is_go_predeclared_type(&raw) {
@@ -1183,19 +1325,26 @@ impl<'source> DirectAdapterState<'source> {
         {
             return Ok(());
         }
-        let construction = spelling.chars().next().is_some_and(char::is_uppercase);
+        let construction =
+            self.language == "python" && spelling.chars().next().is_some_and(char::is_uppercase);
         let (role, relation) = if construction {
             (SemanticRole::Construction, CandidateRelation::Constructs)
         } else {
             (SemanticRole::Call, CandidateRelation::Calls)
         };
-        let binding = qualifier
-            .and_then(|qualifier| self.bindings.get(qualifier))
-            .or_else(|| self.bindings.get(spelling))
+        let binding = self
+            .binding_for(owner, qualifier.unwrap_or(spelling))
             .cloned();
         let qualified_name = qualifier
-            .and_then(|qualifier| self.imported_targets.get(qualifier))
-            .map(|target| format!("{target}.{spelling}"))
+            .and_then(|qualifier| {
+                self.local_target_for(owner, qualifier)
+                    .map(|target| format!("{target}::{spelling}"))
+            })
+            .or_else(|| {
+                qualifier
+                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .map(|target| format!("{target}.{spelling}"))
+            })
             .or_else(|| self.imported_targets.get(spelling).cloned());
         let occurrence_id = self.builder.occur(
             role,
@@ -1255,13 +1404,19 @@ impl<'source> DirectAdapterState<'source> {
         if self.ambiguous_bindings.contains(lookup_name) {
             return Ok(());
         }
-        let binding = qualifier
-            .and_then(|qualifier| self.bindings.get(qualifier))
-            .or_else(|| self.bindings.get(spelling))
+        let binding = self
+            .binding_for(owner, qualifier.unwrap_or(spelling))
             .cloned();
         let qualified_name = qualifier
-            .and_then(|qualifier| self.imported_targets.get(qualifier))
-            .map(|target| format!("{target}.{spelling}"))
+            .and_then(|qualifier| {
+                self.local_target_for(owner, qualifier)
+                    .map(|target| format!("{target}::{spelling}"))
+            })
+            .or_else(|| {
+                qualifier
+                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .map(|target| format!("{target}.{spelling}"))
+            })
             .or_else(|| self.imported_targets.get(spelling).cloned());
         let occurrence_id = self.builder.occur(
             role,
@@ -1294,6 +1449,19 @@ impl<'source> DirectAdapterState<'source> {
             },
         )?;
         Ok(())
+    }
+
+    fn binding_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+        self.local_bindings
+            .get(&owner.scope_id)
+            .and_then(|bindings| bindings.get(name))
+            .or_else(|| self.bindings.get(name))
+    }
+
+    fn local_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+        self.local_targets
+            .get(&owner.scope_id)
+            .and_then(|targets| targets.get(name))
     }
 
     fn add_ownership(
@@ -1348,7 +1516,7 @@ fn split_qualified(raw: &str) -> (Option<&str>, &str) {
         })
 }
 
-fn resolve_python_module(current: &str, imported: &str) -> String {
+fn resolve_python_module(current: &str, imported: &str, current_is_package: bool) -> String {
     let dots = imported
         .chars()
         .take_while(|character| *character == '.')
@@ -1357,7 +1525,12 @@ fn resolve_python_module(current: &str, imported: &str) -> String {
         return imported.to_owned();
     }
     let mut parts = current.split('.').collect::<Vec<_>>();
-    for _ in 1..dots {
+    let parents_to_remove = if current_is_package {
+        dots.saturating_sub(1)
+    } else {
+        dots
+    };
+    for _ in 0..parents_to_remove {
         parts.pop();
     }
     let suffix = imported.trim_start_matches('.');
@@ -1381,10 +1554,7 @@ fn python_module_identity(path: &Path, source_file: &str) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or_default();
     if source_file == "__init__.py" {
-        return (!parent.is_empty())
-            .then_some(parent)
-            .unwrap_or(stem)
-            .to_owned();
+        return if parent.is_empty() { stem } else { parent }.to_owned();
     }
     if !parent.is_empty()
         && !parent.starts_with('.')

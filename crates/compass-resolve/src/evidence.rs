@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::time::Instant;
 
 use ahash::AHashMap;
 use compass_languages::{
@@ -75,6 +76,7 @@ pub struct UniversalResolutionIndex {
     by_qualified: AHashMap<(String, String), Vec<String>>,
     by_module_name: AHashMap<(String, String, String), Vec<String>>,
     by_scope_name: AHashMap<(String, String, String), Vec<String>>,
+    by_source_directory_name: AHashMap<(String, String, String), Vec<String>>,
     inventory_by_qualified: AHashMap<(String, String), Vec<String>>,
     aliases: AHashMap<(String, String), Vec<String>>,
     limits: UniversalResolutionLimits,
@@ -94,6 +96,7 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
+        let mut profile_started = Instant::now();
         let mut declarations = BTreeMap::new();
         let mut occurrences = BTreeMap::new();
         let mut bindings = BTreeMap::new();
@@ -118,6 +121,10 @@ impl UniversalResolutionIndex {
                 insert_unique(&mut scopes, fact.id.clone(), fact.clone())?;
             }
         }
+        profile_internal(
+            "universal validation and fact collection",
+            &mut profile_started,
+        );
         for (name, count, limit) in [
             ("declarations", declarations.len(), limits.declarations),
             ("bindings", bindings.len(), limits.bindings),
@@ -133,6 +140,7 @@ impl UniversalResolutionIndex {
         let mut by_qualified = AHashMap::<_, Vec<_>>::new();
         let mut by_module_name = AHashMap::<_, Vec<_>>::new();
         let mut by_scope_name = AHashMap::<_, Vec<_>>::new();
+        let mut by_source_directory_name = AHashMap::<_, Vec<_>>::new();
         for declaration in declarations.values() {
             by_qualified
                 .entry((
@@ -161,11 +169,22 @@ impl UniversalResolutionIndex {
                     .or_default()
                     .push(declaration.id.clone());
             }
+            if let Some(directory) = source_directory(&declaration.range.source_file, root) {
+                by_source_directory_name
+                    .entry((
+                        declaration.language.clone(),
+                        directory,
+                        declaration.name.clone(),
+                    ))
+                    .or_default()
+                    .push(declaration.id.clone());
+            }
         }
         for values in by_qualified
             .values_mut()
             .chain(by_module_name.values_mut())
             .chain(by_scope_name.values_mut())
+            .chain(by_source_directory_name.values_mut())
         {
             values.sort_unstable();
             values.dedup();
@@ -173,6 +192,7 @@ impl UniversalResolutionIndex {
                 values.truncate(limits.candidates_per_lookup);
             }
         }
+        profile_internal("universal declaration indices", &mut profile_started);
         let mut inventory_by_qualified = AHashMap::<_, Vec<_>>::new();
         for node in inventory_nodes {
             if node.string("symbol_kind") != "file" || node.string("source_file").is_empty() {
@@ -201,6 +221,7 @@ impl UniversalResolutionIndex {
                 values.truncate(limits.candidates_per_lookup);
             }
         }
+        profile_internal("universal source inventory index", &mut profile_started);
         let mut aliases = AHashMap::<_, Vec<_>>::new();
         for binding in bindings
             .values()
@@ -230,6 +251,7 @@ impl UniversalResolutionIndex {
             targets.sort_unstable();
             targets.dedup();
         }
+        profile_internal("universal alias index", &mut profile_started);
         Ok(Self {
             declarations,
             occurrences,
@@ -239,6 +261,7 @@ impl UniversalResolutionIndex {
             by_qualified,
             by_module_name,
             by_scope_name,
+            by_source_directory_name,
             inventory_by_qualified,
             aliases,
             limits,
@@ -247,34 +270,43 @@ impl UniversalResolutionIndex {
 
     #[must_use]
     pub fn candidate_ids(&self) -> Vec<&str> {
-        let mut ids = self
+        let mut ordered = self
             .candidates
-            .keys()
-            .map(String::as_str)
+            .iter()
+            .map(|(id, candidate)| {
+                let range = self
+                    .occurrence(candidate)
+                    .map(|occurrence| &occurrence.range)
+                    .or_else(|| {
+                        self.declarations
+                            .get(&candidate.source_declaration_id)
+                            .map(|declaration| &declaration.range)
+                    });
+                (id.as_str(), range)
+            })
             .collect::<Vec<_>>();
-        ids.sort_unstable_by_key(|id| {
-            let candidate = &self.candidates[*id];
-            let range = self
-                .occurrence(candidate)
-                .map(|occurrence| &occurrence.range)
-                .or_else(|| {
-                    self.declarations
-                        .get(&candidate.source_declaration_id)
-                        .map(|declaration| &declaration.range)
-                });
-            range.map_or_else(
-                || (String::new(), u64::MAX, u64::MAX, (*id).to_owned()),
-                |range| {
-                    (
-                        range.source_file.clone(),
-                        range.start_byte,
-                        range.end_byte,
-                        (*id).to_owned(),
-                    )
-                },
-            )
+        ordered.sort_unstable_by(|(left_id, left_range), (right_id, right_range)| {
+            left_range
+                .map(|range| range.source_file.as_str())
+                .unwrap_or_default()
+                .cmp(
+                    right_range
+                        .map(|range| range.source_file.as_str())
+                        .unwrap_or_default(),
+                )
+                .then_with(|| {
+                    left_range
+                        .map_or(u64::MAX, |range| range.start_byte)
+                        .cmp(&right_range.map_or(u64::MAX, |range| range.start_byte))
+                })
+                .then_with(|| {
+                    left_range
+                        .map_or(u64::MAX, |range| range.end_byte)
+                        .cmp(&right_range.map_or(u64::MAX, |range| range.end_byte))
+                })
+                .then_with(|| left_id.cmp(right_id))
         });
-        ids
+        ordered.into_iter().map(|(id, _)| id).collect()
     }
 
     #[must_use]
@@ -287,8 +319,17 @@ impl UniversalResolutionIndex {
             .exact_language
             .as_deref()
             .unwrap_or(&candidate.language);
+        let occurrence = self.occurrence(candidate);
+        let has_unbound_qualified_receiver = occurrence
+            .and_then(|occurrence| occurrence.qualifier.as_deref())
+            .is_some_and(|qualifier| {
+                candidate.binding_id.is_none()
+                    && !matches!((language, qualifier), ("python", "self" | "cls"))
+            });
 
-        if let Some(scope) = candidate.constraints.scope_id.as_deref() {
+        if !has_unbound_qualified_receiver
+            && let Some(scope) = candidate.constraints.scope_id.as_deref()
+        {
             let mut cursor = Some(scope);
             let mut visited = BTreeSet::new();
             while let Some(scope) = cursor.filter(|scope| visited.insert((*scope).to_owned())) {
@@ -342,26 +383,11 @@ impl UniversalResolutionIndex {
             if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
                 return decision;
             }
-            let imported = self
-                .declarations
-                .values()
-                .filter(|declaration| {
-                    let directory = std::path::Path::new(&declaration.range.source_file)
-                        .parent()
-                        .map(|path| path.to_string_lossy().replace('\\', "/"))
-                        .unwrap_or_default();
-                    declaration.language == language
-                        && declaration.name == candidate.target_spelling
-                        && !directory.is_empty()
-                        && (binding.qualified_target == directory
-                            || binding
-                                .qualified_target
-                                .strip_suffix(&directory)
-                                .is_some_and(|prefix| prefix.ends_with('/')))
-                })
-                .map(|declaration| declaration.id.clone())
-                .take(self.limits.candidates_per_lookup.saturating_add(1))
-                .collect::<Vec<_>>();
+            let imported = self.imported_declarations(
+                language,
+                &binding.qualified_target,
+                &candidate.target_spelling,
+            );
             if !imported.is_empty()
                 && let Some(decision) = self.unique_decision(
                     Some(&imported),
@@ -393,7 +419,9 @@ impl UniversalResolutionIndex {
             }
         }
 
-        if let Some(module) = candidate.constraints.module_or_package.as_ref() {
+        if !has_unbound_qualified_receiver
+            && let Some(module) = candidate.constraints.module_or_package.as_ref()
+        {
             let key = (
                 language.to_owned(),
                 module.clone(),
@@ -423,13 +451,16 @@ impl UniversalResolutionIndex {
     }
 
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
+        let mut profile_started = Instant::now();
         let existing_nodes = nodes
             .iter()
             .map(|node| node.id.clone())
             .collect::<BTreeSet<_>>();
         let mut emitted_external = BTreeSet::new();
         let mut emitted_edges = BTreeSet::new();
-        for candidate_id in self.candidate_ids() {
+        let candidate_ids = self.candidate_ids();
+        profile_internal("universal candidate ordering", &mut profile_started);
+        for candidate_id in candidate_ids {
             let candidate = &self.candidates[candidate_id];
             let Some(source) = self
                 .declarations
@@ -459,25 +490,41 @@ impl UniversalResolutionIndex {
                     let site = self
                         .occurrence(candidate)
                         .map(|occurrence| &occurrence.range);
-                    let id = site.map_or_else(
-                        || make_id(&["external", &candidate.language, &qualified_name]),
-                        |range| {
-                            make_id(&[
-                                "external",
-                                &candidate.language,
-                                &qualified_name,
-                                &range.source_file,
-                                &range.start_byte.to_string(),
-                                &range.end_byte.to_string(),
-                            ])
-                        },
-                    );
+                    let binding_site = candidate
+                        .binding_id
+                        .as_deref()
+                        .and_then(|id| self.bindings.get(id))
+                        .map(|binding| &binding.range);
+                    let external_site = binding_site.or(site);
+                    let kind = external_kind(candidate);
+                    let id = match (kind, external_site) {
+                        ("import" | "export", Some(range)) => make_id(&[
+                            "external",
+                            &candidate.language,
+                            kind,
+                            &qualified_name,
+                            &range.source_file,
+                            &range.start_byte.to_string(),
+                            &range.end_byte.to_string(),
+                        ]),
+                        (_, Some(range)) => make_id(&[
+                            "external",
+                            &candidate.language,
+                            kind,
+                            &qualified_name,
+                            &range.source_file,
+                        ]),
+                        (_, None) => {
+                            make_id(&["external", &candidate.language, kind, &qualified_name])
+                        }
+                    };
                     if !existing_nodes.contains(&id) && emitted_external.insert(id.clone()) {
                         nodes.push(external_node(
                             &id,
                             &qualified_name,
                             &candidate.language,
-                            candidate.relation,
+                            candidate,
+                            external_site,
                         ));
                     }
                     (id, evidence.rule)
@@ -524,11 +571,13 @@ impl UniversalResolutionIndex {
                 source,
                 target,
                 relation,
+                candidate.relation,
                 site,
                 resolution_rule,
                 &candidate.language,
             ));
         }
+        profile_internal("universal candidate resolution", &mut profile_started);
     }
 
     fn occurrence(&self, candidate: &RelationshipCandidate) -> Option<&OccurrenceFact> {
@@ -602,6 +651,36 @@ impl UniversalResolutionIndex {
         }
     }
 
+    fn imported_declarations(
+        &self,
+        language: &str,
+        import_path: &str,
+        spelling: &str,
+    ) -> Vec<String> {
+        if language != "go" {
+            return Vec::new();
+        }
+        let components = import_path
+            .split('/')
+            .filter(|component| !component.is_empty() && *component != ".")
+            .collect::<Vec<_>>();
+        let mut imported = BTreeSet::new();
+        for start in 0..components.len().min(64) {
+            let directory = components[start..].join("/");
+            let key = (language.to_owned(), directory, spelling.to_owned());
+            if let Some(candidates) = self.by_source_directory_name.get(&key) {
+                imported.extend(candidates.iter().cloned());
+                if imported.len() > self.limits.candidates_per_lookup {
+                    break;
+                }
+            }
+        }
+        imported
+            .into_iter()
+            .take(self.limits.candidates_per_lookup.saturating_add(1))
+            .collect()
+    }
+
     fn declaration_allowed(&self, declaration_id: &str, candidate: &RelationshipCandidate) -> bool {
         self.declarations.get(declaration_id).is_some_and(|target| {
             target.language == candidate.language
@@ -632,6 +711,16 @@ impl UniversalResolutionIndex {
     }
 }
 
+fn profile_internal(label: &str, started: &mut Instant) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!(
+            "[compass internal] {label}: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+        *started = Instant::now();
+    }
+}
+
 fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
     let path = Path::new(source_file);
     let relative = path.strip_prefix(root).unwrap_or(path);
@@ -646,6 +735,18 @@ fn python_module_name(source_file: &str, root: &Path) -> Option<String> {
     (!module.is_empty()).then_some(module)
 }
 
+fn source_directory(source_file: &str, root: &Path) -> Option<String> {
+    let path = Path::new(source_file);
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let directory = relative
+        .parent()?
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_owned();
+    (!directory.is_empty()).then_some(directory)
+}
+
 fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Result<(), String> {
     if map.insert(id.clone(), value).is_some() {
         return Err(format!("duplicate universal evidence id {id:?}"));
@@ -656,7 +757,7 @@ fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Resu
 fn relation_name(relation: CandidateRelation) -> &'static str {
     match relation {
         CandidateRelation::Calls | CandidateRelation::Constructs => "calls",
-        CandidateRelation::Decorates => "decorated_by",
+        CandidateRelation::Decorates => "references",
         CandidateRelation::Annotates | CandidateRelation::References => "references",
         CandidateRelation::Extends => "inherits",
         CandidateRelation::Implements => "implements",
@@ -673,39 +774,89 @@ fn external_node(
     id: &str,
     qualified_name: &str,
     language: &str,
-    relation: CandidateRelation,
+    candidate: &RelationshipCandidate,
+    site: Option<&compass_languages::EvidenceRange>,
 ) -> NodeRecord {
+    let kind = external_kind(candidate);
+    let source_file = site.map_or_else(String::new, |range| range.source_file.clone());
+    let source_location = site.map_or_else(String::new, |range| format!("L{}", range.start_line));
+    let mut attributes = Map::from_iter([
+        (
+            "label".to_owned(),
+            Value::String(
+                qualified_name
+                    .rsplit(['.', '/'])
+                    .next()
+                    .unwrap_or(qualified_name)
+                    .to_owned(),
+            ),
+        ),
+        (
+            "qualified_name".to_owned(),
+            Value::String(qualified_name.to_owned()),
+        ),
+        ("symbol_kind".to_owned(), Value::String(kind.to_owned())),
+        ("file_type".to_owned(), Value::String("code".to_owned())),
+        ("source_file".to_owned(), Value::String(source_file)),
+        ("source_location".to_owned(), Value::String(source_location)),
+        ("language".to_owned(), Value::String(language.to_owned())),
+        (
+            "external_role".to_owned(),
+            Value::String(relation_name(candidate.relation).to_owned()),
+        ),
+        (
+            "extractor".to_owned(),
+            Value::String(format!("compass.resolve.{language}.universal")),
+        ),
+        (
+            "confidence".to_owned(),
+            Value::String(
+                if candidate.binding_id.is_some() {
+                    "EXTRACTED"
+                } else {
+                    "INFERRED"
+                }
+                .to_owned(),
+            ),
+        ),
+        ("external".to_owned(), Value::Bool(true)),
+    ]);
+    if let Some(range) = site {
+        attributes.extend([
+            ("start_byte".to_owned(), Value::from(range.start_byte)),
+            ("end_byte".to_owned(), Value::from(range.end_byte)),
+            ("line_start".to_owned(), Value::from(range.start_line)),
+            ("line_end".to_owned(), Value::from(range.end_line)),
+            ("column_start".to_owned(), Value::from(range.start_column)),
+            ("column_end".to_owned(), Value::from(range.end_column)),
+        ]);
+    }
     NodeRecord {
         id: id.to_owned(),
-        attributes: Map::from_iter([
-            (
-                "label".to_owned(),
-                Value::String(
-                    qualified_name
-                        .rsplit(['.', '/'])
-                        .next()
-                        .unwrap_or(qualified_name)
-                        .to_owned(),
-                ),
-            ),
-            (
-                "qualified_name".to_owned(),
-                Value::String(qualified_name.to_owned()),
-            ),
-            ("symbol_kind".to_owned(), Value::String("symbol".to_owned())),
-            ("file_type".to_owned(), Value::String("code".to_owned())),
-            ("source_file".to_owned(), Value::String(String::new())),
-            ("source_location".to_owned(), Value::String(String::new())),
-            ("language".to_owned(), Value::String(language.to_owned())),
-            (
-                "external_role".to_owned(),
-                Value::String(relation_name(relation).to_owned()),
-            ),
-            (
-                "extractor".to_owned(),
-                Value::String(format!("compass.resolve.{language}.universal")),
-            ),
-        ]),
+        attributes,
+    }
+}
+
+fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
+    match candidate.relation {
+        CandidateRelation::Imports => "import",
+        CandidateRelation::Reexports => "export",
+        CandidateRelation::Extends | CandidateRelation::Annotates | CandidateRelation::Embeds => {
+            "type_alias"
+        }
+        CandidateRelation::Implements => "interface",
+        CandidateRelation::AccessesMember => "variable",
+        CandidateRelation::Calls
+        | CandidateRelation::Constructs
+        | CandidateRelation::Decorates
+        | CandidateRelation::References => {
+            if candidate.binding_id.is_some() {
+                "import"
+            } else {
+                "variable"
+            }
+        }
+        CandidateRelation::Contains | CandidateRelation::Owns => "variable",
     }
 }
 
@@ -713,6 +864,7 @@ fn materialized_edge(
     source: String,
     target: String,
     relation: &str,
+    candidate_relation: CandidateRelation,
     range: &compass_languages::EvidenceRange,
     rule: ResolutionRule,
     language: &str,
@@ -720,7 +872,7 @@ fn materialized_edge(
     let context = match (relation, rule) {
         ("calls", ResolutionRule::QualifiedExternal) => "external_call",
         ("calls", _) => "call",
-        ("decorated_by", _) => "decorator",
+        ("references", _) if candidate_relation == CandidateRelation::Decorates => "decorator",
         ("imports_from", _) => "import",
         ("re_exports", _) => "export",
         ("inherits", _) => "base_type",

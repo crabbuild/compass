@@ -366,7 +366,17 @@ fn validate_fact(
                 declarations,
             )?;
             if fact.target_spelling.is_empty() {
-                return Err(invalid_fact(&fact.id, "candidate target spelling is empty"));
+                return Err(invalid_fact(
+                    &fact.id,
+                    &format!(
+                        "candidate {:?} from declaration {:?} has an empty target spelling \
+                         (qualified target {:?}, module/package {:?})",
+                        fact.relation,
+                        fact.source_declaration_id,
+                        fact.constraints.qualified_name,
+                        fact.constraints.module_or_package
+                    ),
+                ));
             }
             if fact.relation.requires_occurrence() && fact.occurrence_id.is_none() {
                 return Err(EvidenceError::new(
