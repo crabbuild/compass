@@ -915,15 +915,16 @@ to the existing PR only after all required gates pass.
 
 **Background:**
 
-The phase-four Django graph still contains 13,803 canonical edges whose only
+The phase-four Django graph contains 13,802 raw V1 edges whose only
 producer is the pre-universal `compass.resolve.python-imports` source-text
 pass. This violates the hard-cutover invariant even though it is not used as
-a fallback for calls. Of those edges, 12,206 repeat connectivity already
-published by universal evidence with a coarser whole-statement occurrence;
-540 more describe package-initializer imports that the universal graph more
-accurately represents as symbol exports. The remaining legacy edges mix
-file-owned local imports, redundant module-export projections, and identities
-that must be judged against the typed evidence rather than retained by default.
+a fallback for calls. The completed byte-range audit found 12,247 exact
+universal replacements, 258 scope-correct ownership replacements, 1,238
+corrected symbol exports, 33 corrected identities, 21 redundant module
+projections, and five nested runtime imports whose enclosing declarations are
+not represented as graph nodes. The typed evidence, not preservation of the
+old count or whole-statement anchor, determines whether each transition is
+correct.
 
 The direct adapter also stores every Python import in a file-wide lookup,
 including imports nested in functions. That can leak a local binding into an
@@ -963,23 +964,56 @@ symbol and submodule resolution, multi-hop re-exports, function-local import
 ownership, sibling-scope isolation, deterministic input order, and complete
 absence of `compass.resolve.python-imports` or its old rules.
 
-- [ ] **Step 3: Qualify the real topology transition**
+- [x] **Step 3: Qualify the real topology transition**
 
 Rebuild pinned Django and Entire graphs. Require zero validation errors,
-byte-identical cold/warm output, unchanged Entire topology, and no legacy
-producer occurrence. Classify every removed Django edge into exact universal
+byte-identical cold/warm output, and no legacy producer occurrence. A shared
+resolver correction may change Entire topology only when every added or
+retargeted fact has independent source proof; an unchanged count is not a
+quality gate. Classify every removed Django edge into exact universal
 replacement, more precise scoped ownership, corrected symbol-export
-semantics, redundant module projection, or a genuine regression. Restore any
-genuine source-proven fact through universal evidence before proceeding.
+semantics, corrected identity, redundant module projection, or an explicit
+remaining graph-model gap. Restore any genuine source-proven fact through
+universal evidence before proceeding.
 
-- [ ] **Step 4: Run complete correctness and performance verification**
+Result:
+
+- Pinned Django publishes 63,797 nodes, 145,219 raw edges, and 144,295
+  canonical edges. Pinned Entire publishes 58,391 nodes, 152,161 raw edges,
+  and 151,267 canonical edges. Both validate with zero errors and have
+  byte-identical cold/warm graphs.
+- All 13,802 retired legacy edges are classified: 12,247 exact replacements,
+  258 scope-correct ownership replacements, 1,238 corrected symbol exports,
+  33 corrected identities, 21 redundant module projections, and five
+  unrepresented nested-declaration imports. None is restored through the old
+  algorithm.
+- Exact import binding precedence also corrects 96 Django and 16 Entire
+  added or retargeted relationships. Independent Python AST/import and Go
+  import-path audits verified 96/96 and 16/16 respectively, with no failures.
+- Entire therefore changes by ten canonical edges. This is an audited shared
+  resolver improvement, not an assertion that a topology freeze is more
+  important than source-correct targets.
+
+- [x] **Step 4: Run complete correctness and performance verification**
 
 Run focused resolver/language tests, the full workspace, strict Python
 benchmark tests, format, lint, release build, query oracles, comparator, and
 the standardized large-repository performance suite. Record wall time and
 peak RSS honestly; do not infer performance dominance from edge removal.
 
-- [ ] **Step 5: Record evidence and update PR #93**
+Result:
+
+- Focused resolver, language, core determinism, Python benchmark, release,
+  format, lint, and diff checks pass. The full locked workspace all-target
+  suite passes, including scale tests.
+- Standardized run `phase5-python-import-hard-cut-final` passes every gate on
+  current Django and Entire heads with 3/3 eligible cold, warm, and
+  incremental builds and 10/10 eligible samples for every query workload.
+- Django p50 is 11.635 seconds cold, 1.547 seconds warm, and 19.175 seconds
+  incremental. Entire p50 is 7.611, 0.891, and 15.146 seconds respectively.
+  Peak memory remains high, so this is not a performance-dominance claim.
+
+- [x] **Step 5: Record evidence and update PR #93**
 
 Add a phase-five review with exact topology classifications, scope-isolation
 evidence, graph counts and digests, Graphify comparison deltas, performance,

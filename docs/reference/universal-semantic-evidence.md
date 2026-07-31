@@ -172,12 +172,27 @@ then pass.
 sorts candidate identities, and applies this order:
 
 1. typed hierarchy policy for direct bases and receiver dispatch;
-2. exact declaration in the lexical scope or a parent scope;
-3. explicit import, alias, or re-export binding;
+2. explicit import, alias, or re-export binding attached to the occurrence;
+3. exact declaration in the lexical scope or a parent scope;
 4. exact qualified identity;
 5. unique same-module or same-package declaration;
 6. source-scoped qualified external endpoint when explicitly allowed;
 7. ambiguous or unresolved.
+
+Explicit bindings precede lexical lookup because a source import is direct
+use-site evidence and must shadow a same-named enclosing declaration. A
+binding can name an exact declaration, qualified declaration, or source
+inventory endpoint. Resolution carries the exact target source temporarily
+through collision disambiguation and removes that internal attribute before
+publication. An identity alias such as `pkg.signals -> pkg.signals` is a
+terminal mapping; a multi-node alias cycle remains ambiguous and fails
+closed.
+
+Python file imports are visible at module scope. Function- and class-local
+imports are indexed only in their owning lexical scope, so they cannot leak to
+sibling functions or become file-owned facts. Each imported item retains its
+own parser range. Python source is not reparsed by the collection resolver,
+and there is no legacy import projection.
 
 Language and allowed target kinds are filtered before uniqueness is decided.
 Case-insensitive or terminal-name equality cannot select a target. Cross-
