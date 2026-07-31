@@ -124,15 +124,18 @@ The vendored tree-sitter language pack supplies deterministic parser
 definitions and queries.
 
 The [language architecture](language-architecture.md) separates this grammar
-substrate from adapter-local semantic policy and universal evidence. Existing
-Python, Go, and other direct adapters remain supported while Rust and Java
-transition independently through quality gates.
+substrate from adapter-local semantic policy and universal evidence. Python and
+Go have hard-cut to the shared evidence and resolution path. Rust, Java, and
+the other registered languages keep their established extraction paths until
+their own independently qualified transitions.
 
 ### `compass-resolve`
 
 Owns cross-file resolution over extraction facts:
 
 - import target canonicalization;
+- universal declaration, scope, binding, occurrence, and candidate indexes;
+- shared projection for hard-cut language adapters;
 - JavaScript/TypeScript re-export handling;
 - cross-file calls;
 - language member-call facts;

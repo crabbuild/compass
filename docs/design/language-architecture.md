@@ -37,46 +37,69 @@ This architecture is transitioning one language at a time. The status labels bel
 | Status | Behavior |
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
-| Available now | Python, Go, Java, and the remaining production languages use established direct adapters |
-| Available now | Rust is a version-1 `UniversalCandidate` that emits initial universal evidence alongside its current graph records |
+| Available now | Python and Go are registered hard-cut adapters: they emit semantic evidence and use shared resolution and projection |
+| Available now | Rust Phase 1 emits initial compatibility evidence alongside its established graph records; it is not registered as hard-cut |
+| Available now | Java and the remaining production languages keep their established extraction and resolution paths |
 | Planned | Rust Phase 2 removes its replaced direct publisher and uses shared projection exclusively |
 | Planned | Java becomes a version-1 `UniversalCandidate` after Rust passes its blocking gates |
 | Planned | Later languages transition independently after language-specific qualification |
 
-Python and Go are not deprecated while they use direct adapters. Their current implementations remain supported and protected by regression tests.
+The transition is language-by-language, not a migration away from a deprecated
+system. An established path remains supported until that language passes its
+own hard-cut gates. A hard-cut language has no production dual-run or graph
+translation fallback.
 
 ## Language architecture at a glance
 
-The target architecture has one grammar boundary and one semantic evidence boundary.
+The current architecture has one grammar boundary and two intentionally
+separate publication routes. The registry selects exactly one route for a
+language.
 
 ```text
-source registry
-      |
-      +--> source-driven producer ------------------+
-      |                                            |
-      +--> GrammarProvider                         |
-              |                                    |
-              v                                    |
-        vendored grammar pack                      |
-              |                                    |
-              v                                    |
-        prepared Tree-sitter AST                   |
-              |                                    |
-              +----------------+-------------------+
-                               v
-                    adapter-local policy
-                               |
-                               v
-                    UniversalEvidence v1
-                               |
-                               v
-                 shared resolver and projector
-                               |
-                               v
-                    normalized Compass graph
+files + project manifests
+          |
+          v
+ source / adapter registry
+          |
+          +--> source-driven producer ------------------------------+
+          |                                                         |
+          +--> vendored static grammar pack                         |
+                         |                                          |
+                         v                                          |
+                  one Tree-sitter AST                               |
+                         |                                          |
+                         v                                          |
+               adapter-local semantics                              |
+                         |                                          |
+              +----------+-----------+                              |
+              |                      |                              |
+              v                      v                              |
+       hard-cut adapter       established adapter                   |
+       Python / Go now        Rust / Java / others now              |
+              |                      |                              |
+              v                      v                              |
+    SemanticEvidenceBatch v1   graph facts + unresolved calls       |
+              |                      |                              |
+              v                      v                              |
+      universal indexes        existing collection resolvers        |
+              |                      |                              |
+              +----------+-----------+------------------------------+
+                         |
+                         v
+             framework facts and resolution
+                         |
+                         v
+              Code Graph v1 normalization
+                         |
+                         v
+                 graph.json + caches
 ```
 
 Framework packs consume normalized declarations and exact occurrences after language resolution. They do not reinterpret malformed language evidence.
+
+The hard-cut route is selected by `AdapterRegistry`. Presence in the source
+registry or availability of a grammar does not select it. On the current
+branch, the hard-cut registry contains only `go` and `python`.
 
 ## Grammar substrate
 
@@ -102,6 +125,30 @@ It does not own:
 
 Compass disables runtime grammar downloads and dynamic loading. A grammar update changes grammar provenance and invalidates affected extraction caches without changing the universal evidence schema.
 
+## How the layers differ
+
+The grammar pack, the historical CodeGraph kernel, and universal evidence solve
+different problems. They are complementary concepts, not interchangeable
+implementations.
+
+| Layer | Primary output | Owns language semantics | Owns cross-file resolution | Extensibility boundary |
+| --- | --- | --- | --- | --- |
+| Vendored `compass-tree-sitter-language-pack` | Parser and Tree-sitter AST | No | No | Add or update a pinned grammar |
+| CodeGraph kernel language module | Direct row-buffer nodes, edges, and references | Yes | Only the kernel's direct contracts | Add or modify a complete per-language publisher |
+| Compass universal evidence adapter | Declarations, scopes, bindings, occurrences, and candidates | Syntax-to-evidence policy only | No; shared resolver owns it | Add language policy without changing the central publisher |
+
+The CodeGraph kernel's files such as `python.rs` and `java.rs` are specialized,
+direct publishers. They parse, walk, normalize, and emit the kernel's graph
+rows, including language-specific compatibility behavior. That kernel is not a
+dependency of the Compass Rust workspace described here.
+
+Universal evidence is the more extensible Compass boundary because a new
+language contributes syntax classification and truthful capabilities while
+reusing target selection, ambiguity policy, graph projection, provenance,
+limits, and conformance gates. This does not make the vendored grammar pack
+obsolete: the pack remains the reproducible parser substrate under both the
+hard-cut and established adapter routes.
+
 ## Source and producer registry
 
 The Compass registry decides which producer owns a source file. Parser availability and semantic support remain separate states.
@@ -116,11 +163,11 @@ A producer descriptor records:
 
 An Abstract Syntax Tree (AST) producer declares one grammar requirement. A source-driven producer, such as a manifest or template extractor, declares none.
 
-The registry reports five distinct states:
+The architecture distinguishes five states:
 
 1. grammar available
 2. source recognized
-3. established direct extraction available
+3. established extraction available
 4. universal candidate
 5. universal complete
 
@@ -174,7 +221,7 @@ Multiple valid targets remain unresolved. Wildcard and terminal-name matches nev
 
 The projector converts resolved evidence into the normalized Compass graph contract. It preserves exact occurrence anchors and derives containment from declaration ownership and scope parentage.
 
-## Direct and universal profiles
+## Established and universal profiles
 
 Profiles describe publication architecture, not implementation quality.
 
@@ -184,14 +231,17 @@ Profiles describe publication architecture, not implementation quality.
 | `UniversalCandidate` | The adapter publishes universal evidence and has passed candidate gates |
 | `UniversalComplete` | The adapter has passed the complete capability and conformance gates |
 
-The current source enum still uses `AdapterProfile::Legacy`. The approved design renames it to `AdapterProfile::Direct`, accepts `legacy` while reading old metadata, and emits `direct` in new metadata.
+Documentation uses **established** or `Direct` for the active non-universal
+route. A historical internal enum variant still uses the name `Legacy`; that
+implementation detail is not a quality label and must not be used to describe
+supported languages.
 
 ## Language-by-language transitions
 
 Each language keeps its established direct implementation until its universal candidate proves the transition is safe.
 
 ```text
-direct adapter baseline
+established adapter baseline
         |
         v
 implement universal evidence policy
@@ -209,6 +259,21 @@ remove only that language's replaced path
 ```
 
 No production dual-run or graph translation remains after transition. Other languages continue on their direct paths without central publisher changes.
+
+## Framework-pack boundary
+
+Framework detection is downstream of language parsing but upstream of final
+Code Graph v1 publication. Packs emit anchored route or domain facts; the
+framework resolver validates targets and materializes typed relationships.
+
+The universal pack descriptor and validator exist, but its production registry
+is currently empty. Python web, Rails, Spring, Go web, Rust web, ASP.NET,
+Vapor, TypeScript web, filesystem-route, enterprise-domain, config, and
+template packs therefore retain their established pack registries today. Each
+pack transitions atomically to the universal interface only after its declared
+activation evidence, accepted roles, target constraints, occurrence policy,
+limits, and language capabilities validate. No established detector is
+silently translated into a universal pack.
 
 ## Quality and failure boundaries
 
