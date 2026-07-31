@@ -194,6 +194,16 @@ class AuditCapabilityIdentity:
 
 
 @dataclass(frozen=True)
+class AuditSourceOracle:
+    corpus: str
+    adapter: str
+    provider: str
+    scanned_files: int
+    parsed_files: int
+    inventory_sha256: str
+
+
+@dataclass(frozen=True)
 class AuditRecord:
     record_id: str
     corpus: str
@@ -218,6 +228,7 @@ class AuditManifest:
     schema: str
     mode: str
     corpora: tuple[AuditCorpus, ...]
+    source_oracles: tuple[AuditSourceOracle, ...]
     advertised_capabilities: tuple[AuditCapabilityIdentity, ...]
     required_relations: tuple[str, ...]
     records: tuple[AuditRecord, ...]

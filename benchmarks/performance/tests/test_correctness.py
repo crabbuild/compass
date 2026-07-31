@@ -11,6 +11,10 @@ from benchmarks.performance.compass.correctness import (
     compare_graphs,
     index_graph,
 )
+from benchmarks.performance.compass.occurrences import (
+    independent_source_constructs,
+    independent_source_inventory,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -42,6 +46,47 @@ class CorrectnessTests(unittest.TestCase):
         database = sqlite3.connect(":memory:")
         self.addCleanup(database.close)
         return database
+
+    def test_independent_python_source_oracle_preserves_exact_bytes_and_owners(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "pkg" / "module.py"
+            source.parent.mkdir()
+            document = (
+                "@decorate(factory())\n"
+                "def outer():\n"
+                "    café = 1\n"
+                "    run()\n"
+                "    service.run(\n"
+                "        café,\n"
+                "    )\n"
+                "    def inner():\n"
+                "        return finish()\n"
+            )
+            source.write_text(document, encoding="utf-8")
+
+            constructs = independent_source_constructs(root, "python")
+            calls = [construct for construct in constructs if construct.relation == "calls"]
+            self.assertEqual(
+                [(call.owner_qualified_name, call.target_spelling) for call in calls],
+                [
+                    ("pkg.module.outer", "run"),
+                    ("pkg.module.outer", "run"),
+                    ("pkg.module.outer.inner", "finish"),
+                ],
+            )
+            raw = source.read_bytes()
+            self.assertEqual(
+                [raw[call.start_byte : call.end_byte].decode("utf-8") for call in calls],
+                ["run", "service.run", "finish"],
+            )
+            (root / "bad.py").write_text("def broken(:\n", encoding="utf-8")
+            inventory = independent_source_inventory(root, "python")
+            self.assertEqual((inventory.scanned_files, inventory.parsed_files), (2, 1))
+            self.assertEqual(inventory.rejected_files, ("bad.py",))
+            self.assertEqual(independent_source_constructs(root, "go"), ())
 
     def test_compass_superset_passes_shared_fact_comparison(self) -> None:
         database = self.database()

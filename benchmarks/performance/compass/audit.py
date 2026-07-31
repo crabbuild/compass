@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextlib import closing
 from dataclasses import dataclass
 import hashlib
 import json
@@ -23,6 +24,7 @@ from .model import (
     AuditOccurrence,
     AuditRecord,
     AuditResult,
+    AuditSourceOracle,
     WilsonInterval,
     to_json_value,
 )
@@ -32,7 +34,14 @@ from .correctness import (
     _edge_facts,
     _node_facts,
 )
-from .occurrences import SourceOccurrenceOracle
+from .jsonstream import iter_top_level_array
+from .occurrences import (
+    SourceOccurrenceOracle,
+    has_independent_source_provider,
+    independent_source_provider_identity,
+    independent_source_inventory,
+    source_construct_inventory_sha256,
+)
 
 
 AUDIT_SCHEMA = "compass.quality-audit"
@@ -121,12 +130,22 @@ def _source_line_range(root: Path, source_file: str, location: str) -> tuple[int
 
 def _capability_for_relation(relation: str) -> str:
     return {
+        "accesses": "members",
         "calls": "calls",
         "contains": "ownership",
+        "decorates": "decorators",
+        "documents": "rationale",
+        "embeds": "embedding",
         "exports": "reexports",
         "extends": "base_types",
+        "implements": "base_types",
         "imports": "imports",
+        "imports_from": "imports",
+        "instantiates": "construction",
+        "method": "ownership",
+        "owns": "ownership",
         "rationale_for": "rationale",
+        "re_exports": "reexports",
         "references": "type_references",
         "routes_to": "routes",
     }.get(relation, relation)
@@ -137,6 +156,279 @@ def _target_cluster(label: str, identifier: str) -> str:
     if normalized and IDENTITY.fullmatch(normalized) is not None:
         return normalized[:120]
     return f"target-{hashlib.sha256(identifier.encode()).hexdigest()[:16]}"
+
+
+class _SourceIndex:
+    """Exact, repository-bounded source snippets cached for one export."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root.resolve()
+        self._contents: dict[Path, bytes] = {}
+
+    def exact_range(
+        self,
+        source_file: str,
+        start: int,
+        end: int,
+    ) -> tuple[int, str] | None:
+        if start < 0 or end <= start:
+            return None
+        relative = Path(source_file.replace("\\", "/"))
+        if relative.is_absolute():
+            return None
+        path = (self._root / relative).resolve()
+        try:
+            path.relative_to(self._root)
+        except ValueError:
+            return None
+        contents = self._contents.get(path)
+        if contents is None:
+            try:
+                contents = path.read_bytes()
+            except OSError:
+                return None
+            self._contents[path] = contents
+        if end > len(contents):
+            return None
+        snippet = contents[start:end].replace(b"\r\n", b"\n")
+        if not snippet:
+            return None
+        line = contents.count(b"\n", 0, start) + 1
+        return line, hashlib.sha256(snippet).hexdigest()
+
+
+def _verified_compass_graph(
+    database: sqlite3.Connection,
+    graph_path: Path,
+) -> tuple[str, int, int]:
+    """Prove that ``graph_path`` is the Compass graph indexed by ``database``."""
+
+    stored_summary = database.execute(
+        "SELECT nodes,edges FROM summaries WHERE tool = 'compass'"
+    ).fetchone()
+    if stored_summary is None:
+        raise AuditError("comparison database has no Compass graph summary")
+    try:
+        stored_artifact = database.execute(
+            "SELECT file_sha256 FROM artifacts WHERE tool = 'compass'"
+        ).fetchone()
+    except sqlite3.OperationalError as error:
+        raise AuditError(
+            "comparison database does not record an exact Compass graph digest; reindex it"
+        ) from error
+    if stored_artifact is None:
+        raise AuditError(
+            "comparison database does not record an exact Compass graph digest; reindex it"
+        )
+    supplied_sha256 = _file_sha256(graph_path)
+    expected_sha256 = str(stored_artifact[0])
+    if supplied_sha256 != expected_sha256:
+        raise AuditError(
+            "supplied Compass graph does not match the comparison database: "
+            f"expected SHA-256 {expected_sha256}, observed {supplied_sha256}"
+        )
+    return supplied_sha256, int(stored_summary[0]), int(stored_summary[1])
+
+
+def _compass_accepted_candidates(
+    graph_path: Path,
+    corpus_root: Path,
+    corpus: str,
+    corpus_commit: str,
+    graph_sha256: str,
+    adapter: str,
+    compass_nodes: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Export every exact source-bounded Compass relationship for precision audit."""
+
+    source_index = _SourceIndex(corpus_root)
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, int, int]] = set()
+    for edge in iter_top_level_array(graph_path, "links"):
+        source = edge.get("source")
+        target = edge.get("target")
+        raw_relation = edge.get("kind", edge.get("relation"))
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(target, str)
+            or not target
+            or not isinstance(raw_relation, str)
+            or not raw_relation
+        ):
+            continue
+        relation = raw_relation.casefold()
+        anchor = _edge_anchor(edge)
+        if anchor is None:
+            continue
+        source_file, start, end = anchor
+        identity = (source, target, relation, source_file, start, end)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        source_node = compass_nodes.get(source)
+        target_node = compass_nodes.get(target)
+        if source_node is None or target_node is None or not source_node.language:
+            continue
+        bounded = source_index.exact_range(source_file, start, end)
+        if bounded is None:
+            continue
+        line, snippet_sha256 = bounded
+        candidate_identity = (
+            "compass_accepted",
+            corpus,
+            corpus_commit,
+            graph_sha256,
+            *identity,
+        )
+        candidate_id = "candidate-" + hashlib.sha256(
+            json.dumps(candidate_identity, separators=(",", ":")).encode()
+        ).hexdigest()[:24]
+        confidence = _text(
+            edge.get("confidence", "published"),
+            "Compass edge confidence",
+        ).casefold()
+        candidates.append(
+            {
+                "id": candidate_id,
+                "candidateSource": "compass_graph",
+                "suggestedPool": "accepted",
+                "adapter": adapter,
+                "capability": _capability_for_relation(relation),
+                "language": source_node.language,
+                "relation": relation,
+                "confidence": confidence,
+                "targetCluster": _target_cluster(
+                    target_node.qualified_name or target_node.normalized_label,
+                    target,
+                ),
+                "source": {"nodeId": source, "language": source_node.language},
+                "target": {
+                    "nodeId": target,
+                    "language": target_node.language or source_node.language,
+                },
+                "occurrence": {
+                    "file": source_file,
+                    "line": line,
+                    "startByte": start,
+                    "endByte": end,
+                    "snippetSha256": snippet_sha256,
+                    "requiresExactGraphRange": False,
+                },
+                "comparison": {
+                    "status": "published",
+                    "reason": "exact_compass_relationship",
+                    "compassFact": hashlib.sha256(
+                        json.dumps(identity, separators=(",", ":")).encode()
+                    ).hexdigest(),
+                },
+                "judgment": None,
+                "reason": None,
+            }
+        )
+    return candidates
+
+
+def _source_oracle_candidates(
+    corpus_root: Path,
+    corpus: str,
+    corpus_commit: str,
+    adapter: str,
+    compass_nodes: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Export independently parsed source constructs for recall adjudication."""
+
+    source_index = _SourceIndex(corpus_root)
+    owners: dict[str, list[str]] = defaultdict(list)
+    for identifier, node in compass_nodes.items():
+        if node.qualified_name:
+            owners[node.qualified_name.casefold()].append(identifier)
+
+    inventory = independent_source_inventory(corpus_root, adapter)
+    candidates: list[dict[str, Any]] = []
+    for construct in inventory.constructs:
+        bounded = source_index.exact_range(
+            construct.source_file,
+            construct.start_byte,
+            construct.end_byte,
+        )
+        if bounded is None:
+            continue
+        line, snippet_sha256 = bounded
+        identity = (
+            "source_oracle",
+            corpus,
+            corpus_commit,
+            adapter,
+            construct.source_file,
+            construct.relation,
+            construct.owner_qualified_name,
+            construct.target_spelling,
+            construct.qualifier,
+            construct.start_byte,
+            construct.end_byte,
+        )
+        candidate_id = "candidate-" + hashlib.sha256(
+            json.dumps(identity, separators=(",", ":")).encode()
+        ).hexdigest()[:24]
+        source: dict[str, Any] = {
+            "qualifiedName": construct.owner_qualified_name,
+            "language": adapter,
+        }
+        exact_owners = owners.get(construct.owner_qualified_name.casefold(), ())
+        if len(exact_owners) == 1:
+            source["nodeId"] = exact_owners[0]
+        candidates.append(
+            {
+                "id": candidate_id,
+                "candidateSource": "independent_source",
+                "suggestedPool": "source_oracle",
+                "adapter": adapter,
+                "capability": construct.capability,
+                "language": adapter,
+                "relation": construct.relation,
+                "confidence": "source_ast",
+                "targetCluster": _target_cluster(
+                    construct.target_spelling,
+                    candidate_id,
+                ),
+                "source": source,
+                "target": {
+                    "spelling": construct.target_spelling,
+                    "qualifier": construct.qualifier,
+                    "language": adapter,
+                },
+                "occurrence": {
+                    "file": construct.source_file,
+                    "line": line,
+                    "startByte": construct.start_byte,
+                    "endByte": construct.end_byte,
+                    "snippetSha256": snippet_sha256,
+                    "requiresExactGraphRange": True,
+                },
+                "comparison": {
+                    "status": "unjudged",
+                    "reason": "independent_source_construct",
+                    "compassFact": None,
+                },
+                "judgment": None,
+                "reason": None,
+            }
+        )
+    coverage = {
+        "provider": independent_source_provider_identity(adapter),
+        "providerAvailable": has_independent_source_provider(adapter),
+        "scannedFiles": inventory.scanned_files,
+        "parsedFiles": inventory.parsed_files,
+        "rejectedFiles": list(inventory.rejected_files),
+        "inventorySha256": source_construct_inventory_sha256(adapter, inventory),
+        "complete": (
+            has_independent_source_provider(adapter)
+            and inventory.scanned_files == inventory.parsed_files
+            and not inventory.rejected_files
+        ),
+    }
+    return candidates, coverage
 
 
 def export_comparison_candidates(
@@ -159,7 +451,12 @@ def export_comparison_candidates(
     if not corpus_root.is_dir():
         raise AuditError(f"corpus root does not exist: {corpus_root}")
 
-    with sqlite3.connect(database_path) as database:
+    corpus_commit = _corpus_commit(corpus_root)
+    with closing(sqlite3.connect(database_path)) as database:
+        graph_sha256, graph_nodes, graph_edges = _verified_compass_graph(
+            database,
+            graph_path,
+        )
         compass_nodes = _node_facts(database, "compass")
         graphify_nodes = _node_facts(database, "graphify")
         node_coverage, node_mapping = _classify_nodes(graphify_nodes, compass_nodes)
@@ -176,7 +473,23 @@ def export_comparison_candidates(
         )
 
     compass_by_payload = {edge.payload_sha256: edge for edge in compass_edges}
-    candidates: list[dict[str, Any]] = []
+    accepted_candidates = _compass_accepted_candidates(
+        graph_path,
+        corpus_root,
+        corpus,
+        corpus_commit,
+        graph_sha256,
+        adapter,
+        compass_nodes,
+    )
+    source_oracle_candidates, source_oracle_coverage = _source_oracle_candidates(
+        corpus_root,
+        corpus,
+        corpus_commit,
+        adapter,
+        compass_nodes,
+    )
+    comparison_candidates: list[dict[str, Any]] = []
     for graphify, classification in zip(graphify_edges, coverage, strict=True):
         bounded = _source_line_range(
             corpus_root,
@@ -194,10 +507,8 @@ def export_comparison_candidates(
         source_id = (
             compass_fact.source
             if compass_fact is not None
-            else node_mapping.get(graphify.source)
+            else node_mapping.get(graphify.source, graphify.source)
         )
-        if source_id is None:
-            continue
         target_id = (
             compass_fact.target
             if compass_fact is not None
@@ -211,7 +522,11 @@ def export_comparison_candidates(
         if not language:
             continue
         identity = (
+            "graphify_hypothesis",
             corpus,
+            corpus_commit,
+            graph_sha256,
+            adapter,
             graphify.relation,
             source_id,
             target_id,
@@ -223,15 +538,11 @@ def export_comparison_candidates(
         candidate_id = "candidate-" + hashlib.sha256(
             json.dumps(identity, separators=(",", ":")).encode()
         ).hexdigest()[:24]
-        candidates.append(
+        comparison_candidates.append(
             {
                 "id": candidate_id,
-                "suggestedPool": (
-                    "accepted"
-                    if classification.status in {"exact", "dominated"}
-                    and compass_fact is not None
-                    else "graphify_hypothesis"
-                ),
+                "candidateSource": "graphify_comparison",
+                "suggestedPool": "graphify_hypothesis",
                 "adapter": adapter,
                 "capability": _capability_for_relation(graphify.relation),
                 "language": language,
@@ -263,18 +574,27 @@ def export_comparison_candidates(
                 "reason": None,
             }
         )
+    candidates = accepted_candidates + source_oracle_candidates + comparison_candidates
     candidates.sort(key=lambda candidate: candidate["id"])
     payload = {
         "schema": "compass.quality-audit-candidates",
         "corpus": {
             "name": corpus,
-            "commit": _corpus_commit(corpus_root),
+            "commit": corpus_commit,
             "path": str(corpus_root),
             "graph": str(graph_path.resolve()),
-            "graphSha256": _file_sha256(graph_path),
+            "graphSha256": graph_sha256,
+            "graphNodes": graph_nodes,
+            "graphEdges": graph_edges,
         },
         "adapter": adapter,
         "recordsAreUnjudged": True,
+        "populations": {
+            "compassAccepted": len(accepted_candidates),
+            "graphifyHypotheses": len(comparison_candidates),
+            "sourceOracle": len(source_oracle_candidates),
+        },
+        "sourceOracleCoverage": source_oracle_coverage,
         "candidates": candidates,
     }
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -436,6 +756,47 @@ def _capability(value: object, index: int) -> AuditCapabilityIdentity:
     )
 
 
+def _source_oracle(value: object, index: int) -> AuditSourceOracle:
+    context = f"sourceOracles[{index}]"
+    item = _expect_object(value, context)
+    _keys(
+        item,
+        required=(
+            "corpus",
+            "adapter",
+            "provider",
+            "scannedFiles",
+            "parsedFiles",
+            "inventorySha256",
+        ),
+        context=context,
+    )
+    scanned = item["scannedFiles"]
+    parsed = item["parsedFiles"]
+    if (
+        isinstance(scanned, bool)
+        or not isinstance(scanned, int)
+        or isinstance(parsed, bool)
+        or not isinstance(parsed, int)
+        or scanned <= 0
+        or parsed != scanned
+    ):
+        raise AuditError(
+            f"{context} must prove a non-empty, completely parsed source population"
+        )
+    return AuditSourceOracle(
+        corpus=_text(item["corpus"], f"{context}.corpus", identity=True),
+        adapter=_text(item["adapter"], f"{context}.adapter", identity=True),
+        provider=_text(item["provider"], f"{context}.provider", identity=True),
+        scanned_files=scanned,
+        parsed_files=parsed,
+        inventory_sha256=_sha256(
+            item["inventorySha256"],
+            f"{context}.inventorySha256",
+        ),
+    )
+
+
 def _record(value: object, index: int) -> AuditRecord:
     context = f"records[{index}]"
     item = _expect_object(value, context)
@@ -527,6 +888,7 @@ def load_manifest(path: Path) -> AuditManifest:
             "schema",
             "mode",
             "corpora",
+            "sourceOracles",
             "advertisedCapabilities",
             "requiredRelations",
             "records",
@@ -546,6 +908,20 @@ def load_manifest(path: Path) -> AuditManifest:
         raise AuditError("manifest.corpora must not be empty")
     if len({corpus.name for corpus in corpora}) != len(corpora):
         raise AuditError("manifest contains duplicate corpus names")
+    source_oracles = tuple(
+        _source_oracle(value, index)
+        for index, value in enumerate(
+            _expect_array(item["sourceOracles"], "manifest.sourceOracles")
+        )
+    )
+    source_oracle_keys = [
+        (entry.corpus, entry.adapter) for entry in source_oracles
+    ]
+    if source_oracle_keys != sorted(set(source_oracle_keys)):
+        raise AuditError(
+            "manifest.sourceOracles must be sorted and contain no duplicates"
+        )
+    source_oracle_key_set = set(source_oracle_keys)
     capabilities = tuple(
         _capability(value, index)
         for index, value in enumerate(
@@ -579,6 +955,12 @@ def load_manifest(path: Path) -> AuditManifest:
     if len(record_ids) != len(set(record_ids)):
         raise AuditError("manifest contains duplicate record IDs")
     corpus_names = {corpus.name for corpus in corpora}
+    for source_oracle in source_oracles:
+        if source_oracle.corpus not in corpus_names:
+            raise AuditError(
+                "source oracle references unknown corpus "
+                f"{source_oracle.corpus!r}"
+            )
     advertised = {
         (entry.adapter, entry.framework_pack, entry.capability) for entry in capabilities
     }
@@ -602,10 +984,18 @@ def load_manifest(path: Path) -> AuditManifest:
                 f"record {record.record_id!r} references undeclared relation "
                 f"{record.relation!r}"
             )
+        if record.pool == "source_oracle" and (
+            record.corpus,
+            record.adapter,
+        ) not in source_oracle_key_set:
+            raise AuditError(
+                f"record {record.record_id!r} has no pinned source-oracle inventory"
+            )
     return AuditManifest(
         schema=AUDIT_SCHEMA,
         mode=mode,
         corpora=corpora,
+        source_oracles=source_oracles,
         advertised_capabilities=capabilities,
         required_relations=relations,
         records=records,
@@ -780,6 +1170,43 @@ def _validate_record_inputs(
             )
         indexes[corpus.name] = _index_graph(graph_path)
         corpus_roots[corpus.name] = root
+
+    for source_oracle in manifest.source_oracles:
+        root = corpus_roots[source_oracle.corpus]
+        provider = independent_source_provider_identity(source_oracle.adapter)
+        if provider != source_oracle.provider:
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"provider mismatch: expected {source_oracle.provider!r}, "
+                f"observed {provider!r}"
+            )
+        inventory = independent_source_inventory(root, source_oracle.adapter)
+        if inventory.rejected_files:
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                "could not parse files: "
+                + ", ".join(inventory.rejected_files[:10])
+            )
+        observed_counts = (inventory.scanned_files, inventory.parsed_files)
+        expected_counts = (
+            source_oracle.scanned_files,
+            source_oracle.parsed_files,
+        )
+        if observed_counts != expected_counts:
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"coverage mismatch: expected {expected_counts}, observed {observed_counts}"
+            )
+        observed_digest = source_construct_inventory_sha256(
+            source_oracle.adapter,
+            inventory,
+        )
+        if observed_digest != source_oracle.inventory_sha256:
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                "inventory digest mismatch: "
+                f"expected {source_oracle.inventory_sha256}, observed {observed_digest}"
+            )
 
     for record in manifest.records:
         root = corpus_roots[record.corpus]

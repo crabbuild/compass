@@ -77,6 +77,14 @@ def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _normalized_label(record: dict[str, object], identifier: str) -> tuple[str, str]:
     source = record.get("source")
     nested = source if isinstance(source, dict) else {}
@@ -186,6 +194,7 @@ def _create_schema(database: sqlite3.Connection) -> None:
             DROP TABLE IF EXISTS edges;
             DROP TABLE IF EXISTS nodes;
             DROP TABLE IF EXISTS summaries;
+            DROP TABLE IF EXISTS artifacts;
             """
         )
     database.executescript(
@@ -237,6 +246,10 @@ def _create_schema(database: sqlite3.Connection) -> None:
             validation_errors INTEGER NOT NULL,
             digest TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS artifacts (
+            tool TEXT PRIMARY KEY,
+            file_sha256 TEXT NOT NULL
+        );
         """
     )
     database.execute(f"PRAGMA user_version={schema_version}")
@@ -280,6 +293,8 @@ def index_graph(
     database.execute("DELETE FROM edges WHERE tool = ?", (tool,))
     database.execute("DELETE FROM nodes WHERE tool = ?", (tool,))
     database.execute("DELETE FROM summaries WHERE tool = ?", (tool,))
+    database.execute("DELETE FROM artifacts WHERE tool = ?", (tool,))
+    artifact_digest = _file_sha256(graph_path)
 
     node_count = 0
     for record in _records(graph_path, "nodes"):
@@ -438,6 +453,10 @@ def index_graph(
     database.execute(
         "INSERT INTO summaries VALUES (?, ?, ?, ?, ?)",
         (tool, node_count, edge_count, validation_errors, digest),
+    )
+    database.execute(
+        "INSERT INTO artifacts VALUES (?, ?)",
+        (tool, artifact_digest),
     )
     database.commit()
     return GraphSummary(tool, node_count, edge_count, validation_errors, digest)

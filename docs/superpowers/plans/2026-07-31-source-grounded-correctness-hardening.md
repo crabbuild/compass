@@ -83,6 +83,7 @@ Peak RSS is also material: the standardized Django run measured about 4.76 GiB c
 
 - [x] Add deterministic export of accepted, rejected, ambiguous, and missing relationship hypotheses with endpoint and occurrence evidence.
 - [x] Require pinned commit, graph digest, snippet digest, target cluster, and explicit judgment before qualification consumes a record.
+- [x] Hard-bind the export to the exact indexed graph, include every eligible Compass relationship for precision sampling, and keep independently parsed source constructs and Graphify records in separate unjudged populations.
 - [x] Add post-implementation validation checks and document how to grow from conformance to the 2,000-record production gate.
 
 ### Task 4: Evaluate avoidable peak-retention clones
