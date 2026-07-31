@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use compass_languages::{Extraction, RawNodeRecord};
 use serde_json::Value;
@@ -17,6 +18,7 @@ pub(super) struct IndexedTarget<'a> {
 
 pub(super) struct FrameworkTargetIndex<'a> {
     pub targets: Vec<IndexedTarget<'a>>,
+    root: Option<&'a Path>,
     by_id: HashMap<(TargetFamily, &'a str), Vec<usize>>,
     by_qualified: HashMap<(TargetFamily, String), Vec<usize>>,
     by_terminal: HashMap<(TargetFamily, String), Vec<usize>>,
@@ -27,6 +29,10 @@ pub(super) struct FrameworkTargetIndex<'a> {
 
 impl<'a> FrameworkTargetIndex<'a> {
     pub fn new(extraction: &'a Extraction) -> Self {
+        Self::new_with_root(extraction, None)
+    }
+
+    pub fn new_with_root(extraction: &'a Extraction, root: Option<&'a Path>) -> Self {
         let raw_by_id = extraction
             .nodes
             .iter()
@@ -60,6 +66,7 @@ impl<'a> FrameworkTargetIndex<'a> {
 
         let mut index = Self {
             targets: Vec::with_capacity(extraction.nodes.len()),
+            root,
             by_id: HashMap::new(),
             by_qualified: HashMap::new(),
             by_terminal: HashMap::new(),
@@ -69,12 +76,12 @@ impl<'a> FrameworkTargetIndex<'a> {
         };
         for node in &extraction.nodes {
             let qualified = normalize_reference(&node.string("qualified_name"));
-            let source = node
+            let raw_source = node
                 .attributes
                 .get("source_file")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .replace('\\', "/");
+                .unwrap_or_default();
+            let source = source_key(raw_source, root);
             let mut normalized = [
                 node.string("qualified_name"),
                 node.string("name"),
@@ -207,7 +214,7 @@ impl<'a> FrameworkTargetIndex<'a> {
         families: &[TargetFamily],
         limit: usize,
     ) -> (Vec<usize>, bool) {
-        let source = source.replace('\\', "/");
+        let source = source_key(source, self.root);
         bounded_union(
             families.iter().filter_map(|family| {
                 self.by_source_terminal
@@ -244,7 +251,8 @@ impl<'a> FrameworkTargetIndex<'a> {
         families: &[TargetFamily],
         limit: usize,
     ) -> (Vec<usize>, bool) {
-        let parent = std::path::Path::new(declaring_source)
+        let declaring_source = source_key(declaring_source, self.root);
+        let parent = Path::new(&declaring_source)
             .parent()
             .unwrap_or_else(|| std::path::Path::new(""));
         let module = module_key(&lexical_path(&parent.join(module)));
@@ -257,6 +265,17 @@ impl<'a> FrameworkTargetIndex<'a> {
             limit,
         )
     }
+}
+
+fn source_key(source: &str, root: Option<&Path>) -> String {
+    let path = Path::new(source);
+    if path.is_absolute()
+        && let Some(root) = root
+        && let Ok(relative) = path.strip_prefix(root)
+    {
+        return relative.to_string_lossy().replace('\\', "/");
+    }
+    source.replace('\\', "/")
 }
 
 fn bounded_union<'a>(
@@ -415,5 +434,46 @@ mod tests {
             "{{\"targets\":{TARGETS},\"retained\":{},\"examined\":{examined}}}",
             retained.len()
         );
+    }
+
+    #[test]
+    fn rooted_index_matches_portable_framework_source() {
+        let root = std::path::Path::new("/workspace/repository");
+        let mut extraction = Extraction::default();
+        extraction.nodes.push(RawNodeRecord {
+            id: "handler".to_owned(),
+            attributes: Map::from_iter([
+                (
+                    "label".to_owned(),
+                    Value::String("qualification_health()".to_owned()),
+                ),
+                (
+                    "qualified_name".to_owned(),
+                    Value::String("qualification_health()".to_owned()),
+                ),
+                (
+                    "symbol_kind".to_owned(),
+                    Value::String("function".to_owned()),
+                ),
+                (
+                    "source_file".to_owned(),
+                    Value::String(
+                        "/workspace/repository/routes/python/django/qualification/urls.py"
+                            .to_owned(),
+                    ),
+                ),
+            ]),
+        });
+
+        let index = FrameworkTargetIndex::new_with_root(&extraction, Some(root));
+        let (positions, truncated) = index.by_source_terminal(
+            "routes/python/django/qualification/urls.py",
+            "qualification_health",
+            &[TargetFamily::Route],
+            8,
+        );
+
+        assert_eq!(positions, vec![0]);
+        assert!(!truncated);
     }
 }

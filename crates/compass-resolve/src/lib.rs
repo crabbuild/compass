@@ -356,8 +356,11 @@ fn finish_resolution(
     profile_internal("resolver cross-file calls", &mut profile_started);
     members::resolve_language_call_facts(language_facts, &mut merged);
     profile_internal("resolver language calls", &mut profile_started);
-    let (routes, domains) =
-        frameworks::resolve_framework_facts(&merged, compass_languages::FrameworkLimits::default());
+    let (routes, domains) = frameworks::resolve_framework_facts(
+        &merged,
+        compass_languages::FrameworkLimits::default(),
+        &canonical_root,
+    );
     let route_result = routes.and_then(|routes| {
         frameworks::publish_resolved_routes(&mut merged, &routes)?;
         Ok(routes)
