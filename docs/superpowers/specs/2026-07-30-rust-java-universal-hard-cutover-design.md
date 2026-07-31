@@ -18,11 +18,23 @@ safety are blocking gates.
 
 ## Architectural Choice
 
-Rust and Java share an AST-backed universal evidence emitter, a bounded
-language-neutral resolver, and one graph projector. Each language supplies
-syntax classification and identity normalization through an adapter-local
-policy. The central resolver operates on declarations, scopes, bindings,
-occurrences, and relationship candidates; it does not branch on Rust or Java.
+The universal evidence API, bounded resolver, and graph projector are
+source-agnostic and serve every registered language adapter. Rust and Java
+are the first hard-cutover consumers in this delivery and populate the shared
+contract from their existing Tree-sitter AST traversals. Later AST-backed
+languages reuse the same emitter helpers. Non-AST extractors, including
+configuration, template, manifest, and document producers, submit the same
+evidence contract from their existing extraction algorithms.
+
+Each language supplies syntax classification and identity normalization
+through an adapter-local policy. The central resolver and publisher operate
+only on declarations, scopes, bindings, occurrences, and relationship
+candidates; they do not branch on Rust, Java, or any other language.
+
+Languages outside this phase retain their current extraction and graph output
+until their own hard-cutover increments. They are not translated or dual-run.
+Registering a later adapter must not require a central resolver or publisher
+change.
 
 This preserves exact AST ownership and byte ranges while avoiding a second
 parser. It also avoids deriving evidence from legacy graph records, which
@@ -38,10 +50,11 @@ The rejected alternatives are:
 
 ## Universal Adapter Contract
 
-Both adapters use `compass.languages.evidence/1`, adapter version 1, and the
-`UniversalCandidate` profile.
+Every hard-cut adapter uses `compass.languages.evidence/1` and the shared
+resolver/projector interfaces. Rust and Java both remain adapter version 1 and
+use the `UniversalCandidate` profile in this delivery.
 
-The shared emitter provides bounded methods for:
+The shared, source-agnostic evidence builder provides bounded methods for:
 
 - declaration facts with stable symbol identity, owner, kind, and exact
   source anchor;
