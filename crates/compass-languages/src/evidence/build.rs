@@ -410,7 +410,9 @@ struct DirectAdapterState<'source> {
     imported_targets: HashMap<String, String>,
     local_bindings: HashMap<String, HashMap<String, String>>,
     local_targets: HashMap<String, HashMap<String, String>>,
+    local_import_targets: HashMap<String, HashMap<String, String>>,
     ambiguous_bindings: HashSet<String>,
+    ambiguous_local_bindings: HashMap<String, HashSet<String>>,
     graph_ids: HashSet<String>,
     builder: EvidenceBuilder,
 }
@@ -445,7 +447,9 @@ impl<'source> DirectAdapterState<'source> {
             imported_targets: HashMap::new(),
             local_bindings: HashMap::new(),
             local_targets: HashMap::new(),
+            local_import_targets: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
+            ambiguous_local_bindings: HashMap::new(),
             graph_ids: HashSet::new(),
             builder: EvidenceBuilder::new(
                 profile,
@@ -701,14 +705,33 @@ impl<'source> DirectAdapterState<'source> {
             Some(&owner.scope_id),
             range.clone(),
         )?;
-        if self
-            .bindings
-            .insert(local.clone(), binding_id.clone())
-            .is_some()
-        {
-            self.ambiguous_bindings.insert(local.clone());
+        if owner.kind == "file" {
+            if self
+                .bindings
+                .insert(local.clone(), binding_id.clone())
+                .is_some()
+            {
+                self.ambiguous_bindings.insert(local.clone());
+            }
+            self.imported_targets.insert(local.clone(), target.clone());
+        } else {
+            if self
+                .local_bindings
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(local.clone(), binding_id.clone())
+                .is_some()
+            {
+                self.ambiguous_local_bindings
+                    .entry(owner.scope_id.clone())
+                    .or_default()
+                    .insert(local.clone());
+            }
+            self.local_import_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .insert(local.clone(), target.clone());
         }
-        self.imported_targets.insert(local.clone(), target.clone());
         let occurrence_id = self.builder.occur(
             if is_reexport {
                 SemanticRole::Reexport
@@ -1342,7 +1365,7 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let lookup_name = qualifier.unwrap_or(spelling);
-        if self.ambiguous_bindings.contains(lookup_name) {
+        if self.binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         if self.language == "go"
@@ -1384,12 +1407,11 @@ impl<'source> DirectAdapterState<'source> {
                     })
                     .or_else(|| {
                         qualifier.and_then(|qualifier| {
-                            self.imported_targets
-                                .get(qualifier)
+                            self.imported_target_for(owner, qualifier)
                                 .map(|target| format!("{target}.{spelling}"))
                         })
                     })
-                    .or_else(|| self.imported_targets.get(spelling).cloned())
+                    .or_else(|| self.imported_target_for(owner, spelling).cloned())
             })
             .flatten();
         let occurrence_id = self.builder.occur(
@@ -1445,23 +1467,27 @@ impl<'source> DirectAdapterState<'source> {
             return None;
         }
         match qualifier {
-            None => self.imported_targets.get(spelling).cloned().or_else(|| {
-                owner
-                    .qualified_name
-                    .rsplit_once("::")
-                    .map(|(parent, _)| format!("{parent}::{spelling}"))
-                    .filter(|qualified| {
-                        self.declarations.values().any(|declaration| {
-                            declaration.kind == "class" && declaration.qualified_name == *qualified
+            None => self
+                .imported_target_for(owner, spelling)
+                .cloned()
+                .or_else(|| {
+                    owner
+                        .qualified_name
+                        .rsplit_once("::")
+                        .map(|(parent, _)| format!("{parent}::{spelling}"))
+                        .filter(|qualified| {
+                            self.declarations.values().any(|declaration| {
+                                declaration.kind == "class"
+                                    && declaration.qualified_name == *qualified
+                            })
                         })
-                    })
-                    .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
-            }),
+                        .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
+                }),
             Some(qualifier) => {
                 let (root, suffix) = qualifier
                     .split_once('.')
                     .map_or((qualifier, ""), |(root, suffix)| (root, suffix));
-                self.imported_targets.get(root).map(|target| {
+                self.imported_target_for(owner, root).map(|target| {
                     if suffix.is_empty() {
                         format!("{target}.{spelling}")
                     } else {
@@ -1502,7 +1528,7 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let lookup_name = qualifier.unwrap_or(spelling);
-        if self.ambiguous_bindings.contains(lookup_name) {
+        if self.binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         let binding = self
@@ -1517,10 +1543,10 @@ impl<'source> DirectAdapterState<'source> {
             })
             .or_else(|| {
                 qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .and_then(|qualifier| self.imported_target_for(owner, qualifier))
                     .map(|target| format!("{target}.{spelling}"))
             })
-            .or_else(|| self.imported_targets.get(spelling).cloned());
+            .or_else(|| self.imported_target_for(owner, spelling).cloned());
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1566,6 +1592,27 @@ impl<'source> DirectAdapterState<'source> {
         self.local_targets
             .get(&owner.scope_id)
             .and_then(|targets| targets.get(name))
+    }
+
+    fn imported_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+        self.local_import_targets
+            .get(&owner.scope_id)
+            .and_then(|targets| targets.get(name))
+            .or_else(|| self.imported_targets.get(name))
+    }
+
+    fn binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
+        if self
+            .local_bindings
+            .get(&owner.scope_id)
+            .is_some_and(|bindings| bindings.contains_key(name))
+        {
+            return self
+                .ambiguous_local_bindings
+                .get(&owner.scope_id)
+                .is_some_and(|bindings| bindings.contains(name));
+        }
+        self.ambiguous_bindings.contains(name)
     }
 
     fn add_ownership(

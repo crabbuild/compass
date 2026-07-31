@@ -157,8 +157,9 @@ selected source file
   imports.
 - Audit and complete `crates/compass-languages/src/engine.rs`: qualified Python
   import metadata and bounded JavaScript prototype methods.
-- Audit and complete `crates/compass-model/src/provenance.rs`: the
-  `PythonImportedTypeResolution` rewrite rule.
+- Audit and complete `crates/compass-model/src/provenance.rs`; the temporary
+  Python-specific imported-type rewrite is retired by the universal hard
+  cutover rather than retained as a compatibility rule.
 - Audit and complete `crates/compass-resolve/src/lib.rs`: resolve imported
   Python types and retain safely qualified unresolved external calls.
 - Modify `crates/compass-resolve/tests/python_import_provenance.rs`: verify

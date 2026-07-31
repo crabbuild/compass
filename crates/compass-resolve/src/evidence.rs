@@ -244,10 +244,7 @@ impl UniversalResolutionIndex {
         }
         profile_internal("universal source inventory index", &mut profile_started);
         let mut aliases = AHashMap::<_, Vec<_>>::new();
-        for binding in bindings
-            .values()
-            .filter(|binding| binding.kind == compass_languages::BindingKind::Reexport)
-        {
+        for binding in bindings.values() {
             let Some(owner) = binding
                 .scope_id
                 .as_deref()
@@ -257,6 +254,17 @@ impl UniversalResolutionIndex {
             else {
                 continue;
             };
+            let module_attribute = owner.kind == "file"
+                && binding.language == "python"
+                && matches!(
+                    binding.kind,
+                    compass_languages::BindingKind::Import
+                        | compass_languages::BindingKind::ImportAlias
+                        | compass_languages::BindingKind::Reexport
+                );
+            if binding.kind != compass_languages::BindingKind::Reexport && !module_attribute {
+                continue;
+            }
             let Some(module) = owner.module_or_package.as_ref() else {
                 continue;
             };
@@ -678,15 +686,19 @@ impl UniversalResolutionIndex {
             if !emitted_edges.insert(key) || source == target {
                 continue;
             }
-            edges.push(materialized_edge(
+            edges.push(materialized_edge(MaterializedEdge {
                 source,
                 target,
                 relation,
-                candidate.relation,
-                site,
-                resolution_rule,
-                &candidate.language,
-            ));
+                candidate_relation: candidate.relation,
+                range: site,
+                rule: resolution_rule,
+                language: &candidate.language,
+                binding: candidate
+                    .binding_id
+                    .as_deref()
+                    .and_then(|id| self.bindings.get(id)),
+            }));
         }
         profile_internal("universal candidate resolution", &mut profile_started);
     }
@@ -1214,15 +1226,28 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
     }
 }
 
-fn materialized_edge(
+struct MaterializedEdge<'a> {
     source: String,
     target: String,
-    relation: &str,
+    relation: &'a str,
     candidate_relation: CandidateRelation,
-    range: &compass_languages::EvidenceRange,
+    range: &'a compass_languages::EvidenceRange,
     rule: ResolutionRule,
-    language: &str,
-) -> EdgeRecord {
+    language: &'a str,
+    binding: Option<&'a compass_languages::BindingFact>,
+}
+
+fn materialized_edge(edge: MaterializedEdge<'_>) -> EdgeRecord {
+    let MaterializedEdge {
+        source,
+        target,
+        relation,
+        candidate_relation,
+        range,
+        rule,
+        language,
+        binding,
+    } = edge;
     let context = match (relation, rule) {
         ("calls", ResolutionRule::QualifiedExternal) => "external_call",
         ("calls", _) => "call",
@@ -1273,6 +1298,18 @@ fn materialized_edge(
     ]);
     if !context.is_empty() {
         attributes.insert("context".to_owned(), Value::String(context.to_owned()));
+    }
+    if let Some(binding) = binding {
+        attributes.extend([
+            (
+                "binding_name".to_owned(),
+                Value::String(binding.spelling.clone()),
+            ),
+            (
+                "binding_qualified_target".to_owned(),
+                Value::String(binding.qualified_target.clone()),
+            ),
+        ]);
     }
     EdgeRecord {
         source,

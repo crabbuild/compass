@@ -909,6 +909,83 @@ independent audit results, comparator classifications, latency and memory,
 verification commands, and remaining gaps. Commit and push the hard cutover
 to the existing PR only after all required gates pass.
 
+---
+
+### Task 10: Remove the legacy Python import projection
+
+**Background:**
+
+The phase-four Django graph still contains 13,803 canonical edges whose only
+producer is the pre-universal `compass.resolve.python-imports` source-text
+pass. This violates the hard-cutover invariant even though it is not used as
+a fallback for calls. Of those edges, 12,206 repeat connectivity already
+published by universal evidence with a coarser whole-statement occurrence;
+540 more describe package-initializer imports that the universal graph more
+accurately represents as symbol exports. The remaining legacy edges mix
+file-owned local imports, redundant module-export projections, and identities
+that must be judged against the typed evidence rather than retained by default.
+
+The direct adapter also stores every Python import in a file-wide lookup,
+including imports nested in functions. That can leak a local binding into an
+unrelated function. A hard cutover must remove both the second parser and this
+scope leak before claiming that universal import evidence is authoritative.
+
+**Design:**
+
+- Stop reparsing Python source in the generic cross-file resolver. Python and
+  Go raw calls are already excluded before that resolver; all Python import,
+  re-export, alias, decorator, annotation, base, construction, and call
+  connectivity must come from the universal batch.
+- Delete the legacy parser, definition matcher, re-export walker, edge
+  producer, producer name, resolution rules, and compatibility tests. Do not
+  retain a hidden feature flag or alternate path.
+- Store function-local Python imports only in the owning scope. File imports
+  remain module bindings. Duplicate names are ambiguous only within the same
+  scope, and a local binding never becomes visible to a sibling function.
+- Preserve one exact occurrence per imported item. Package initializer
+  `from ... import ...` bindings remain typed symbol re-exports; do not emit a
+  repeated edge that incorrectly describes the source module itself as the
+  exported value.
+- Keep all version values unchanged. Do not run Graphify or
+  `graphify update .`.
+
+- [x] **Step 1: Implement the production hard cutover**
+
+Remove legacy Python source reparsing and projection from
+`compass-resolve`. Make import binding and target lookup scope-aware in the
+direct Python evidence builder. Implement production code before changing
+tests.
+
+- [x] **Step 2: Add post-implementation conformance coverage**
+
+Replace legacy-producer tests with universal contracts for exact item spans,
+symbol and submodule resolution, multi-hop re-exports, function-local import
+ownership, sibling-scope isolation, deterministic input order, and complete
+absence of `compass.resolve.python-imports` or its old rules.
+
+- [ ] **Step 3: Qualify the real topology transition**
+
+Rebuild pinned Django and Entire graphs. Require zero validation errors,
+byte-identical cold/warm output, unchanged Entire topology, and no legacy
+producer occurrence. Classify every removed Django edge into exact universal
+replacement, more precise scoped ownership, corrected symbol-export
+semantics, redundant module projection, or a genuine regression. Restore any
+genuine source-proven fact through universal evidence before proceeding.
+
+- [ ] **Step 4: Run complete correctness and performance verification**
+
+Run focused resolver/language tests, the full workspace, strict Python
+benchmark tests, format, lint, release build, query oracles, comparator, and
+the standardized large-repository performance suite. Record wall time and
+peak RSS honestly; do not infer performance dominance from edge removal.
+
+- [ ] **Step 5: Record evidence and update PR #93**
+
+Add a phase-five review with exact topology classifications, scope-isolation
+evidence, graph counts and digests, Graphify comparison deltas, performance,
+verification commands, and remaining gaps. Commit and push only after all
+required gates pass.
+
 ## Plan self-review
 
 - **Design coverage:** Tasks 1–6 cover the evidence model, adapter registry,
@@ -917,7 +994,8 @@ to the existing PR only after all required gates pass.
   real-corpus hard-cutover qualification. Task 8 adds conservative
   owner-qualified receiver dispatch and source-grounded residual accounting.
   Task 9 replaces that conservative shortcut with typed, bounded linearized
-  dispatch in the shared resolver.
+  dispatch in the shared resolver. Task 10 removes the residual pre-universal
+  Python import projection and makes direct import bindings scope-correct.
 - **Scope:** This plan delivers the core plus Python/Go hard cutover. It claims
   quality only for capabilities that pass the audit; Java/Rust and framework
   hard cutovers remain separate increments.

@@ -1,34 +1,384 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
-use compass_languages::Engine;
-use compass_model::code_graph::{EdgeKind, NodeKind};
+use compass_languages::{Engine, Extraction};
+use compass_model::code_graph::EdgeKind;
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin};
 use compass_resolve::resolve_with_root;
 
-const PYTHON_IMPORT_PRODUCER: &str = "compass.resolve.python-imports";
+const UNIVERSAL_PYTHON_PRODUCER: &str = "compass.resolve.python.universal";
+const RETIRED_PYTHON_PRODUCER: &str = "compass.resolve.python-imports";
+type ResolvedFixture = (tempfile::TempDir, Extraction, HashMap<String, String>);
 
-fn write(root: &Path, relative: &str, source: &str) -> Result<String, Box<dyn Error>> {
+fn extract(
+    engine: &mut Engine,
+    root: &Path,
+    relative: &str,
+    source: &str,
+) -> Result<Extraction, Box<dyn Error>> {
     let path = root.join(relative);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(&path, source)?;
-    Ok(path.to_string_lossy().into_owned())
+    Ok(engine
+        .extract_source_combined(&path, relative, source.as_bytes())?
+        .graph)
+}
+
+fn resolve_fixture(files: &[(&str, &str)]) -> Result<ResolvedFixture, Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        extractions.push(extract(&mut engine, root, relative, source)?);
+        sources.insert((*relative).to_owned(), (*source).to_owned());
+    }
+    let resolved = resolve_with_root(&extractions, &sources, root);
+    Ok((directory, resolved, sources))
+}
+
+fn assert_no_retired_python_projection(extraction: &Extraction) {
+    assert!(extraction.edges.iter().all(|edge| {
+        edge.string("extractor") != RETIRED_PYTHON_PRODUCER
+            && !matches!(
+                edge.string("rule").as_str(),
+                "python-symbol-import-resolution"
+                    | "python-submodule-import-resolution"
+                    | "python-module-re-export-resolution"
+            )
+    }));
+}
+
+fn edge_span<'a>(edge: &compass_languages::RawEdgeRecord, source: &'a str) -> &'a str {
+    let start = edge
+        .attributes
+        .get("start_byte")
+        .and_then(serde_json::Value::as_u64)
+        .expect("edge start") as usize;
+    let end = edge
+        .attributes
+        .get("end_byte")
+        .and_then(serde_json::Value::as_u64)
+        .expect("edge end") as usize;
+    source.get(start..end).expect("UTF-8 edge span")
 }
 
 #[test]
-fn python_decorator_uses_resolve_reexports_at_the_decorator_occurrence()
+fn universal_python_imports_publish_exact_item_spans_and_no_legacy_projection()
 -> Result<(), Box<dyn Error>> {
+    let caller = concat!(
+        "from pkg.api import (\r\n",
+        "    Widget as LocalWidget,\r\n",
+        ")\r\n",
+        "from pkg import mod\r\n",
+        "def build():\r\n",
+        "    return LocalWidget()\r\n",
+    );
+    let files = [
+        ("caller.py", caller),
+        ("pkg/__init__.py", "from .api import Widget\n"),
+        ("pkg/api.py", "class Widget:\n    pass\n"),
+        ("pkg/mod.py", "VALUE = 1\n"),
+    ];
+    let (directory, mut resolved, _) = resolve_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+    assert_no_retired_python_projection(&resolved);
+
+    let widget = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("pkg/api.py")
+                && node.string("symbol_kind") == "class"
+                && node.label() == "Widget"
+        })
+        .ok_or("missing Widget declaration")?;
+    let widget_id = widget.id.clone();
+    let module = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("pkg/mod.py")
+                && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing mod inventory")?;
+    let module_id = module.id.clone();
+    let caller_imports = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("extractor") == UNIVERSAL_PYTHON_PRODUCER
+                && edge.string("source_file") == "caller.py"
+                && edge.string("relation") == "imports_from"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(caller_imports.len(), 2);
+    assert!(caller_imports.iter().any(|edge| {
+        edge.target == widget_id && edge_span(edge, caller) == "Widget as LocalWidget"
+    }));
+    assert!(
+        caller_imports
+            .iter()
+            .any(|edge| { edge.target == module_id && edge_span(edge, caller) == "mod" })
+    );
+
+    let package = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("pkg/__init__.py")
+                && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing package inventory")?;
+    let package_id = package.id.clone();
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == package_id
+            && edge.target == widget_id
+            && edge.string("relation") == "re_exports"
+            && edge.string("extractor") == UNIVERSAL_PYTHON_PRODUCER
+    }));
+
+    let node_ids = resolved
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    resolved.edges.retain(|edge| {
+        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
+    });
+    let evidence = BuildEvidence::from_extraction(
+        directory.path(),
+        &resolved,
+        "sha256:universal-python-import-hard-cut",
+    )?;
+    let graph = normalize_v1(resolved, evidence)?;
+    assert!(graph.links.iter().all(|edge| {
+        edge.evidence
+            .iter()
+            .all(|evidence| evidence.extractor != RETIRED_PYTHON_PRODUCER)
+    }));
+    let published_widget = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "Widget"
+                && node
+                    .source_file()
+                    .is_some_and(|source| source.ends_with("pkg/api.py"))
+        })
+        .ok_or("missing published Widget")?;
+    assert!(graph.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Exports
+            && edge.target == published_widget.id
+            && edge.evidence.iter().any(|evidence| {
+                evidence.extractor == UNIVERSAL_PYTHON_PRODUCER
+                    && evidence.origin == EvidenceOrigin::Ast
+                    && evidence.confidence == EvidenceConfidence::Exact
+                    && evidence.anchors.len() == 1
+            })
+    }));
+    Ok(())
+}
+
+#[test]
+fn function_local_python_imports_are_owned_by_the_function_and_do_not_leak()
+-> Result<(), Box<dyn Error>> {
+    let caller = concat!(
+        "def with_import():\n",
+        "    from pkg.api import run\n",
+        "    return run()\n",
+        "\n",
+        "def sibling():\n",
+        "    return run()\n",
+    );
+    let files = [
+        ("caller.py", caller),
+        ("pkg/__init__.py", ""),
+        ("pkg/api.py", "def run():\n    return 1\n"),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+    assert_no_retired_python_projection(&resolved);
+
+    let declaration = |name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("source_file").ends_with("caller.py") && node.label() == name)
+            .map(|node| node.id.clone())
+            .unwrap_or_else(|| panic!("missing {name}"))
+    };
+    let with_import = declaration("with_import()");
+    let sibling = declaration("sibling()");
+    let run = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file").ends_with("pkg/api.py") && node.label() == "run()")
+        .ok_or("missing run definition")?;
+
+    let import_edges = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "imports_from" && edge.target == run.id)
+        .collect::<Vec<_>>();
+    assert_eq!(import_edges.len(), 1);
+    assert_eq!(import_edges[0].source, with_import);
+    assert_eq!(edge_span(import_edges[0], caller), "run");
+
+    let call_edges = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == run.id)
+        .collect::<Vec<_>>();
+    assert_eq!(call_edges.len(), 1);
+    assert_eq!(call_edges[0].source, with_import);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != sibling || edge.target != run.id || edge.string("relation") != "calls"
+    }));
+    Ok(())
+}
+
+#[test]
+fn function_local_python_import_shadows_ambiguous_file_bindings() -> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "caller.py",
+            concat!(
+                "from pkg.first import run\n",
+                "from pkg.second import run\n",
+                "def local():\n",
+                "    from pkg.exact import run\n",
+                "    return run()\n",
+                "def sibling():\n",
+                "    return run()\n",
+            ),
+        ),
+        ("pkg/__init__.py", ""),
+        ("pkg/first.py", "def run():\n    return 1\n"),
+        ("pkg/second.py", "def run():\n    return 2\n"),
+        ("pkg/exact.py", "def run():\n    return 3\n"),
+    ];
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+    assert_no_retired_python_projection(&resolved);
+
+    let node_id = |source: &str, label: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("source_file").ends_with(source) && node.label() == label)
+            .map(|node| node.id.clone())
+            .unwrap_or_else(|| panic!("missing {source}:{label}"))
+    };
+    let local = node_id("caller.py", "local()");
+    let sibling = node_id("caller.py", "sibling()");
+    let exact_run = node_id("pkg/exact.py", "run()");
+
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == exact_run)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].source, local);
+    assert!(
+        resolved
+            .edges
+            .iter()
+            .all(|edge| { edge.source != sibling || edge.string("relation") != "calls" })
+    );
+    Ok(())
+}
+
+#[test]
+fn universal_python_reexports_follow_a_bounded_multi_hop_alias_chain_deterministically()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "caller.py",
+            "from pkg import run\ndef main():\n    return run()\n",
+        ),
+        ("pkg/__init__.py", "from .facade import execute as run\n"),
+        ("pkg/facade.py", "from .impl import execute\n"),
+        ("pkg/impl.py", "def execute():\n    return 1\n"),
+    ];
     let directory = tempfile::tempdir()?;
     let root = directory.path();
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        extractions.push(extract(&mut engine, root, relative, source)?);
+        sources.insert(relative.to_owned(), source.to_owned());
+    }
+
+    let forward = resolve_with_root(&extractions, &sources, root);
+    extractions.reverse();
+    let reverse = resolve_with_root(&extractions, &sources, root);
+    assert_eq!(forward.error, None);
+    assert_eq!(reverse.error, None);
+    assert_no_retired_python_projection(&forward);
+    assert_no_retired_python_projection(&reverse);
+
+    let canonical_edges = |extraction: &Extraction| {
+        let mut edges = extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("extractor") == UNIVERSAL_PYTHON_PRODUCER)
+            .map(|edge| {
+                (
+                    edge.source.clone(),
+                    edge.target.clone(),
+                    edge.string("relation"),
+                    edge.string("source_file"),
+                    edge.attributes
+                        .get("start_byte")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        edges.sort();
+        edges
+    };
+    assert_eq!(canonical_edges(&forward), canonical_edges(&reverse));
+
+    let target = forward
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("pkg/impl.py") && node.label() == "execute()"
+        })
+        .ok_or("missing implementation")?;
+    let main = forward
+        .nodes
+        .iter()
+        .find(|node| node.string("source_file").ends_with("caller.py") && node.label() == "main()")
+        .ok_or("missing main")?;
+    let calls = forward
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == main.id && edge.target == target.id && edge.string("relation") == "calls"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].string("resolution_rule"), "explicitbinding");
+    Ok(())
+}
+
+#[test]
+fn universal_python_decorators_resolve_through_package_reexports() -> Result<(), Box<dyn Error>> {
     let files = [
         (
             "app.py",
-            "from framework import used, unused\n\n@used('class')\nclass Consumer:\n    @used('method')\n    def run(self):\n        pass\n",
+            "from framework import used\n\n@used('class')\nclass Consumer:\n    @used('method')\n    def run(self):\n        pass\n",
         ),
         ("framework/__init__.py", "from .decorators import used\n"),
         (
@@ -36,17 +386,9 @@ fn python_decorator_uses_resolve_reexports_at_the_decorator_occurrence()
             "def used(value):\n    return value\n",
         ),
     ];
-    let mut engine = Engine::default();
-    let mut extractions = Vec::new();
-    let mut sources = HashMap::new();
-    for (relative, source) in files {
-        let path = write(root, relative, source)?;
-        extractions.push(engine.extract(Path::new(&path))?);
-        sources.insert(path, source.to_owned());
-    }
-
-    let extraction = resolve_with_root(&extractions, &sources, root);
-    let target = extraction
+    let (_, resolved, _) = resolve_fixture(&files)?;
+    assert_no_retired_python_projection(&resolved);
+    let target = resolved
         .nodes
         .iter()
         .find(|node| {
@@ -55,985 +397,17 @@ fn python_decorator_uses_resolve_reexports_at_the_decorator_occurrence()
                     .string("source_file")
                     .ends_with("framework/decorators.py")
         })
-        .ok_or("missing anchored decorator definition")?;
-    let decorator_edges = extraction
+        .ok_or("missing decorator definition")?;
+    let decorators = resolved
         .edges
         .iter()
         .filter(|edge| edge.string("context") == "decorator")
         .collect::<Vec<_>>();
-    assert_eq!(decorator_edges.len(), 2, "edges={:#?}", extraction.edges);
-    assert!(
-        decorator_edges.iter().all(|edge| edge.target == target.id),
-        "target={target:#?} edges={decorator_edges:#?}"
-    );
-    assert_eq!(
-        decorator_edges
-            .iter()
-            .map(|edge| edge.string("source_location"))
-            .collect::<Vec<_>>(),
-        ["L3", "L5"]
-    );
-    assert!(decorator_edges.iter().all(|edge| {
-        edge.attributes.contains_key("start_byte")
-            && edge.attributes.contains_key("end_byte")
+    assert_eq!(decorators.len(), 2);
+    assert!(decorators.iter().all(|edge| {
+        edge.target == target.id
+            && edge.string("extractor") == UNIVERSAL_PYTHON_PRODUCER
             && edge.string("resolution_rule") == "explicitbinding"
     }));
-    assert!(extraction.edges.iter().all(|edge| {
-        edge.string("target_qualified_name") != "framework.unused"
-            && edge.string("rule") != "python-imported-class-use-inference"
-    }));
-    Ok(())
-}
-
-#[test]
-fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<(), Box<dyn Error>> {
-    let directory = tempfile::tempdir()?;
-    let root = directory.path();
-    let multiline_import = "from pkg.api import (\n    Widget,\n)";
-    let caller_source = format!(
-        "# from pkg import commented\n\
-         TEXT = \"\"\"\n\
-         from pkg import stringy\n\
-         \"\"\"\n\
-         {multiline_import}\n\
-         from pkg import mod\n\
-         class Consumer:\n\
-             item: Widget\n"
-    );
-    let files = [
-        ("caller.py", caller_source.as_str()),
-        ("pkg/__init__.py", "from .api import Widget\n"),
-        ("pkg/api.py", "class Widget:\n    pass\n"),
-        ("pkg/mod.py", "VALUE = 1\n"),
-        ("pkg/commented.py", "COMMENTED = True\n"),
-        ("pkg/stringy.py", "STRINGY = True\n"),
-    ];
-    let mut engine = Engine::default();
-    let mut extractions = Vec::new();
-    let mut sources = HashMap::new();
-    for (relative, source) in files {
-        let path = write(root, relative, source)?;
-        extractions.push(engine.extract(Path::new(&path))?);
-        sources.insert(path, source.to_owned());
-    }
-
-    let mut extraction = resolve_with_root(&extractions, &sources, root);
-    let resolver_edges = extraction
-        .edges
-        .iter()
-        .filter(|edge| edge.string("extractor") == PYTHON_IMPORT_PRODUCER)
-        .collect::<Vec<_>>();
-    let rules = resolver_edges
-        .iter()
-        .map(|edge| edge.string("rule"))
-        .collect::<HashSet<_>>();
-    for rule in [
-        "python-symbol-import-resolution",
-        "python-submodule-import-resolution",
-        "python-module-re-export-resolution",
-    ] {
-        assert!(rules.contains(rule), "missing raw resolver rule {rule}");
-    }
-    assert!(
-        !rules.contains("python-imported-class-use-inference"),
-        "unused imports must not create relationships to every class"
-    );
-    assert!(resolver_edges.iter().all(|edge| {
-        edge.string("language") == "python" && edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-    }));
-    assert!(resolver_edges.iter().all(|edge| {
-        edge.string("_origin") == "convention" && edge.string("confidence") == "EXTRACTED"
-    }));
-
-    let caller_path = root.join("caller.py").to_string_lossy().into_owned();
-    let expected_start = caller_source
-        .find(multiline_import)
-        .ok_or("missing multiline import")?;
-    let expected_end = expected_start + multiline_import.len();
-    let multiline_edge = resolver_edges
-        .iter()
-        .find(|edge| {
-            edge.string("rule") == "python-symbol-import-resolution"
-                && edge.string("source_file") == caller_path
-        })
-        .ok_or("missing multiline symbol import")?;
-    assert_eq!(
-        multiline_edge
-            .attributes
-            .get("start_byte")
-            .and_then(serde_json::Value::as_u64),
-        Some(expected_start as u64)
-    );
-    assert_eq!(
-        multiline_edge
-            .attributes
-            .get("end_byte")
-            .and_then(serde_json::Value::as_u64),
-        Some(expected_end as u64)
-    );
-    assert_eq!(
-        multiline_edge
-            .attributes
-            .get("line_end")
-            .and_then(serde_json::Value::as_u64)
-            .zip(
-                multiline_edge
-                    .attributes
-                    .get("line_start")
-                    .and_then(serde_json::Value::as_u64)
-            )
-            .map(|(end, start)| end - start),
-        Some(2)
-    );
-
-    let ignored_targets = extraction
-        .nodes
-        .iter()
-        .filter(|node| {
-            matches!(
-                node.string("source_file")
-                    .strip_prefix(root.to_str().unwrap_or_default()),
-                Some("/pkg/commented.py" | "/pkg/stringy.py")
-            )
-        })
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    assert!(!ignored_targets.is_empty());
-    assert!(
-        resolver_edges
-            .iter()
-            .all(|edge| !ignored_targets.contains(edge.target.as_str())),
-        "commented or string-contained imports produced resolver edges"
-    );
-
-    let node_ids = extraction
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    extraction.edges.retain(|edge| {
-        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
-    });
-    let evidence =
-        BuildEvidence::from_extraction(root, &extraction, "sha256:python-import-provenance")?;
-    let graph = normalize_v1(extraction, evidence)?;
-    let published = graph
-        .links
-        .iter()
-        .flat_map(|edge| {
-            edge.evidence
-                .iter()
-                .filter(|evidence| evidence.extractor == PYTHON_IMPORT_PRODUCER)
-                .map(move |evidence| (edge, evidence))
-        })
-        .collect::<Vec<_>>();
-    let published_rules = published
-        .iter()
-        .filter_map(|(_, evidence)| evidence.rule.as_deref())
-        .collect::<HashSet<_>>();
-    for rule in [
-        "python-symbol-import-resolution",
-        "python-submodule-import-resolution",
-        "python-module-re-export-resolution",
-    ] {
-        assert!(
-            published_rules.contains(rule),
-            "missing published resolver rule {rule}"
-        );
-    }
-    for (edge, evidence) in &published {
-        let _ = edge;
-        assert_eq!(evidence.origin, EvidenceOrigin::Convention);
-        assert_eq!(evidence.confidence, EvidenceConfidence::Exact);
-        assert_eq!(evidence.anchors.len(), 1);
-        assert!(evidence.wiring_site.is_none());
-    }
-    let multiline_evidence = published
-        .iter()
-        .map(|(_, evidence)| *evidence)
-        .find(|evidence| {
-            evidence.rule.as_deref() == Some("python-symbol-import-resolution")
-                && evidence
-                    .anchors
-                    .first()
-                    .is_some_and(|anchor| anchor.file == "caller.py")
-        })
-        .ok_or("missing published multiline import evidence")?;
-    let anchor = multiline_evidence
-        .anchors
-        .first()
-        .ok_or("missing multiline anchor")?;
-    assert_eq!(anchor.start_byte, expected_start as u64);
-    assert_eq!(anchor.end_byte, expected_end as u64);
-    assert_eq!(anchor.end_line - anchor.start_line, 2);
-    Ok(())
-}
-
-#[test]
-fn repeated_python_import_occurrences_survive_resolution_and_publication()
--> Result<(), Box<dyn Error>> {
-    let directory = tempfile::tempdir()?;
-    let root = directory.path();
-    let files = [
-        (
-            "caller.py",
-            "from pkg.api import Widget, Widget as WidgetAlias\n\
-             from pkg import mod, mod as mod_alias\n",
-        ),
-        (
-            "pkg/__init__.py",
-            "from .api import Widget, Widget as AliasWidget\n",
-        ),
-        ("pkg/api.py", "class Widget:\n    pass\n"),
-        ("pkg/mod.py", "VALUE = 1\n"),
-    ];
-    let mut engine = Engine::default();
-    let mut extractions = Vec::new();
-    let mut sources = HashMap::new();
-    for (relative, source) in files {
-        let path = write(root, relative, source)?;
-        extractions.push(engine.extract(Path::new(&path))?);
-        sources.insert(path, source.to_owned());
-    }
-
-    let mut forward = resolve_with_root(&extractions, &sources, root);
-    let resolver_edges = forward
-        .edges
-        .iter()
-        .filter(|edge| edge.string("extractor") == PYTHON_IMPORT_PRODUCER)
-        .collect::<Vec<_>>();
-    let rule_counts = resolver_edges
-        .iter()
-        .fold(HashMap::new(), |mut counts, edge| {
-            *counts.entry(edge.string("rule")).or_insert(0_usize) += 1;
-            counts
-        });
-    assert_eq!(rule_counts.get("python-symbol-import-resolution"), Some(&4));
-    assert_eq!(
-        rule_counts.get("python-submodule-import-resolution"),
-        Some(&2)
-    );
-    assert_eq!(
-        rule_counts.get("python-module-re-export-resolution"),
-        Some(&2)
-    );
-
-    let occurrence_rules = resolver_edges
-        .iter()
-        .filter_map(|edge| {
-            edge.attributes
-                .get("_occurrence_rule")
-                .and_then(serde_json::Value::as_str)
-        })
-        .collect::<HashSet<_>>();
-    assert_eq!(occurrence_rules.len(), resolver_edges.len());
-    for alias in ["WidgetAlias", "mod_alias", "AliasWidget"] {
-        assert!(
-            occurrence_rules.iter().any(|rule| rule.ends_with(alias)),
-            "missing alias in occurrence identity: {alias}"
-        );
-    }
-    let repeated_connectivity = resolver_edges
-        .iter()
-        .fold(HashMap::new(), |mut counts, edge| {
-            *counts
-                .entry((&edge.source, &edge.target, edge.string("relation")))
-                .or_insert(0_usize) += 1;
-            counts
-        });
-    assert_eq!(
-        repeated_connectivity
-            .values()
-            .filter(|count| **count == 2)
-            .count(),
-        4,
-        "expected repeated symbol, submodule, and re-export connectivity"
-    );
-
-    let forward_nodes = forward
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    forward.edges.retain(|edge| {
-        forward_nodes.contains(edge.source.as_str()) && forward_nodes.contains(edge.target.as_str())
-    });
-    let forward_evidence =
-        BuildEvidence::from_extraction(root, &forward, "sha256:python-import-occurrences")?;
-    let forward_graph = normalize_v1(forward, forward_evidence)?;
-    let forward_ids = forward_graph
-        .links
-        .iter()
-        .filter(|edge| {
-            edge.evidence
-                .iter()
-                .any(|evidence| evidence.extractor == PYTHON_IMPORT_PRODUCER)
-        })
-        .map(|edge| edge.id.clone())
-        .collect::<HashSet<_>>();
-    assert_eq!(forward_ids.len(), 8);
-
-    extractions.reverse();
-    let mut reversed = resolve_with_root(&extractions, &sources, root);
-    let reversed_nodes = reversed
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    reversed.edges.retain(|edge| {
-        reversed_nodes.contains(edge.source.as_str())
-            && reversed_nodes.contains(edge.target.as_str())
-    });
-    let reversed_evidence =
-        BuildEvidence::from_extraction(root, &reversed, "sha256:python-import-occurrences")?;
-    let reversed_graph = normalize_v1(reversed, reversed_evidence)?;
-    let reversed_ids = reversed_graph
-        .links
-        .iter()
-        .filter(|edge| {
-            edge.evidence
-                .iter()
-                .any(|evidence| evidence.extractor == PYTHON_IMPORT_PRODUCER)
-        })
-        .map(|edge| edge.id.clone())
-        .collect::<HashSet<_>>();
-    assert_eq!(reversed_ids, forward_ids);
-    Ok(())
-}
-
-#[test]
-fn backslash_continued_python_imports_have_complete_crlf_spans_and_recover()
--> Result<(), Box<dyn Error>> {
-    let directory = tempfile::tempdir()?;
-    let root = directory.path();
-    let continued_symbols = concat!(
-        "from pkg.api import Widget, \\\r\n",
-        "    Widget as AliasWidget, \\\r\n",
-        "    helper",
-    );
-    let continued_submodules = concat!("from pkg import mod, \\\r\n", "    mod as mod_alias");
-    let caller_source = [
-        "# from pkg.api import Commented\r\n",
-        "TEXT = \"from pkg.api import Stringy\"\r\n",
-        "BLOCK = \"\"\"\r\nfrom pkg.api import TripleString\r\n\"\"\"\r\n",
-        continued_symbols,
-        "  # trailing comment\r\n",
-        continued_submodules,
-        "\r\n",
-        "from pkg.api import Broken, \\  \r\n",
-        "    Broken as ignored\r\n",
-        "from pkg.api import (\r\n",
-        "    Missing,\r\n",
-        "from pkg.api import helper as recovered\r\n",
-    ]
-    .concat();
-    let files = [
-        ("caller.py", caller_source.as_str()),
-        ("pkg/__init__.py", "# package\n"),
-        (
-            "pkg/api.py",
-            "class Widget:\n    pass\n\
-             def helper():\n    return 1\n\
-             class Commented:\n    pass\n\
-             class Stringy:\n    pass\n\
-             class TripleString:\n    pass\n\
-             class Broken:\n    pass\n\
-             class Missing:\n    pass\n",
-        ),
-        ("pkg/mod.py", "VALUE = 1\n"),
-    ];
-    let mut engine = Engine::default();
-    let mut extractions = Vec::new();
-    let mut sources = HashMap::new();
-    for (relative, source) in files {
-        let path = write(root, relative, source)?;
-        extractions.push(engine.extract(Path::new(&path))?);
-        sources.insert(path, source.to_owned());
-    }
-
-    let mut extraction = resolve_with_root(&extractions, &sources, root);
-    let caller_path = root.join("caller.py").to_string_lossy().into_owned();
-    let resolver_edges = extraction
-        .edges
-        .iter()
-        .filter(|edge| {
-            edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-                && edge.string("source_file") == caller_path
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        resolver_edges.len(),
-        6,
-        "comments, strings, and malformed continuations must not emit imports"
-    );
-
-    let symbol_start = caller_source
-        .find(continued_symbols)
-        .ok_or("missing continued symbol statement")?;
-    let symbol_end = symbol_start + continued_symbols.len();
-    let symbol_edges = resolver_edges
-        .iter()
-        .filter(|edge| {
-            edge.attributes
-                .get("start_byte")
-                .and_then(serde_json::Value::as_u64)
-                == Some(symbol_start as u64)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(symbol_edges.len(), 3);
-    assert!(symbol_edges.iter().all(|edge| {
-        edge.attributes
-            .get("end_byte")
-            .and_then(serde_json::Value::as_u64)
-            == Some(symbol_end as u64)
-            && edge
-                .attributes
-                .get("line_end")
-                .and_then(serde_json::Value::as_u64)
-                .zip(
-                    edge.attributes
-                        .get("line_start")
-                        .and_then(serde_json::Value::as_u64),
-                )
-                .is_some_and(|(end, start)| end - start == 2)
-    }));
-
-    let submodule_start = caller_source
-        .find(continued_submodules)
-        .ok_or("missing continued submodule statement")?;
-    let submodule_end = submodule_start + continued_submodules.len();
-    let submodule_edges = resolver_edges
-        .iter()
-        .filter(|edge| {
-            edge.attributes
-                .get("start_byte")
-                .and_then(serde_json::Value::as_u64)
-                == Some(submodule_start as u64)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(submodule_edges.len(), 2);
-    assert!(submodule_edges.iter().all(|edge| {
-        edge.attributes
-            .get("end_byte")
-            .and_then(serde_json::Value::as_u64)
-            == Some(submodule_end as u64)
-    }));
-
-    let malformed_starts = ["from pkg.api import Broken", "from pkg.api import ("]
-        .into_iter()
-        .map(|statement| {
-            caller_source
-                .find(statement)
-                .ok_or("missing malformed import")
-        })
-        .collect::<Result<HashSet<_>, _>>()?;
-    assert!(resolver_edges.iter().all(|edge| {
-        edge.attributes
-            .get("start_byte")
-            .and_then(serde_json::Value::as_u64)
-            .is_none_or(|start| !malformed_starts.contains(&(start as usize)))
-    }));
-
-    let node_ids = extraction
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    extraction.edges.retain(|edge| {
-        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
-    });
-    let evidence =
-        BuildEvidence::from_extraction(root, &extraction, "sha256:python-import-continuations")?;
-    let graph = normalize_v1(extraction, evidence)?;
-    let published_symbol_anchors = graph
-        .links
-        .iter()
-        .flat_map(|edge| &edge.evidence)
-        .filter(|evidence| {
-            evidence.extractor == PYTHON_IMPORT_PRODUCER
-                && evidence.rule.as_deref() == Some("python-symbol-import-resolution")
-                && evidence
-                    .anchors
-                    .first()
-                    .is_some_and(|anchor| anchor.start_byte == symbol_start as u64)
-        })
-        .filter_map(|evidence| evidence.anchors.first())
-        .collect::<Vec<_>>();
-    assert_eq!(published_symbol_anchors.len(), 3);
-    assert!(published_symbol_anchors.iter().all(|anchor| {
-        anchor.end_byte == symbol_end as u64 && anchor.end_line - anchor.start_line == 2
-    }));
-    Ok(())
-}
-
-#[test]
-fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn Error>> {
-    let statements = [
-        "from pkg import(Widget)",
-        "from pkg\timport Widget as TabWidget",
-        "from pkg import *",
-        "from pkg import *, Widget",
-        "from pkg import Widget, *",
-        "from pkg import (*)",
-        "from pkg import (*, Widget)",
-        "from pkg import (Widget, *)",
-        "fromx pkg import Widget",
-        "from pkg importWidget",
-        "from pkg import helper as recovered",
-    ];
-    let valid_statements = [statements[0], statements[1], statements[10]];
-    let mut newline_snapshots = Vec::new();
-
-    for newline in ["\n", "\r\n"] {
-        let directory = tempfile::tempdir()?;
-        let root = directory.path();
-        let caller_source = statements.join(newline) + newline;
-        let files = [
-            ("caller.py", caller_source.as_str()),
-            (
-                "pkg/__init__.py",
-                "class Widget:\n    pass\n\ndef helper():\n    return 1\n",
-            ),
-        ];
-        let mut engine = Engine::default();
-        let mut extractions = Vec::new();
-        let mut sources = HashMap::new();
-        for (relative, source) in files {
-            let path = write(root, relative, source)?;
-            extractions.push(engine.extract(Path::new(&path))?);
-            sources.insert(path, source.to_owned());
-        }
-
-        let mut extraction = resolve_with_root(&extractions, &sources, root);
-        let caller_path = root.join("caller.py").to_string_lossy().into_owned();
-        let resolver_edges = extraction
-            .edges
-            .iter()
-            .filter(|edge| {
-                edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-                    && edge.string("rule") == "python-symbol-import-resolution"
-                    && edge.string("source_file") == caller_path
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            resolver_edges.len(),
-            valid_statements.len(),
-            "wildcards, keyword-prefix near matches, and malformed statements must not emit exact partial facts"
-        );
-
-        let mut expected_spans = valid_statements
-            .iter()
-            .map(|statement| {
-                caller_source
-                    .find(statement)
-                    .map(|start| (start, start + statement.len()))
-                    .ok_or("missing valid import statement")
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        expected_spans.sort_unstable();
-        let mut raw_spans = resolver_edges
-            .iter()
-            .map(|edge| {
-                let start = edge
-                    .attributes
-                    .get("start_byte")
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or("missing raw import start")? as usize;
-                let end = edge
-                    .attributes
-                    .get("end_byte")
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or("missing raw import end")? as usize;
-                Ok((start, end))
-            })
-            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
-        raw_spans.sort_unstable();
-        assert_eq!(raw_spans, expected_spans);
-        for (start, end) in &raw_spans {
-            assert!(
-                valid_statements.contains(
-                    &caller_source
-                        .get(*start..*end)
-                        .ok_or("raw import span is not a UTF-8 boundary")?
-                ),
-                "raw import span must cover its complete valid statement"
-            );
-        }
-
-        let node_ids = extraction
-            .nodes
-            .iter()
-            .map(|node| node.id.as_str())
-            .collect::<HashSet<_>>();
-        extraction.edges.retain(|edge| {
-            node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
-        });
-        let evidence =
-            BuildEvidence::from_extraction(root, &extraction, "sha256:python-import-grammar")?;
-        let graph = normalize_v1(extraction, evidence)?;
-        let published_anchors = graph
-            .links
-            .iter()
-            .flat_map(|edge| &edge.evidence)
-            .filter(|evidence| {
-                evidence.extractor == PYTHON_IMPORT_PRODUCER
-                    && evidence.rule.as_deref() == Some("python-symbol-import-resolution")
-                    && evidence
-                        .anchors
-                        .first()
-                        .is_some_and(|anchor| anchor.file == "caller.py")
-            })
-            .filter_map(|evidence| evidence.anchors.first())
-            .collect::<Vec<_>>();
-        assert_eq!(published_anchors.len(), valid_statements.len());
-
-        let mut published_spans = published_anchors
-            .iter()
-            .map(|anchor| (anchor.start_byte as usize, anchor.end_byte as usize))
-            .collect::<Vec<_>>();
-        published_spans.sort_unstable();
-        assert_eq!(published_spans, expected_spans);
-        let mut snapshot = Vec::new();
-        for anchor in published_anchors {
-            snapshot.push((
-                caller_source
-                    .get(anchor.start_byte as usize..anchor.end_byte as usize)
-                    .ok_or("published import span is not a UTF-8 boundary")?
-                    .to_owned(),
-                anchor.start_line,
-                anchor.start_column,
-                anchor.end_line,
-                anchor.end_column,
-            ));
-        }
-        snapshot.sort();
-        newline_snapshots.push(snapshot);
-    }
-
-    assert_eq!(newline_snapshots[0], newline_snapshots[1]);
-    Ok(())
-}
-
-#[test]
-fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result<(), Box<dyn Error>>
-{
-    let directory = tempfile::tempdir()?;
-    let root = directory.path();
-    let files = [
-        (
-            "first.py",
-            "from unittest import mock\n\
-             def first():\n    mock.patch('service.first')\n",
-        ),
-        (
-            "second.py",
-            "from unittest import mock\n\
-             def second():\n    mock.patch('service.second')\n",
-        ),
-        (
-            "other.py",
-            "from vendor import mock\n\
-             def other():\n    mock.patch('service.other')\n",
-        ),
-        (
-            "ambiguous.py",
-            "from unittest import mock\n\
-             from vendor import mock\n\
-             def ambiguous():\n    mock.patch('service.ambiguous')\n",
-        ),
-        ("pkg/__init__.py", ""),
-        ("pkg/mock.py", "def patch(value):\n    return value\n"),
-        (
-            "internal.py",
-            "from pkg import mock\n\
-             def internal():\n    mock.patch('service.internal')\n",
-        ),
-    ];
-    let mut engine = Engine::default();
-    let mut extractions = Vec::new();
-    let mut sources = HashMap::new();
-    for (relative, source) in files {
-        let path = write(root, relative, source)?;
-        extractions.push(engine.extract(Path::new(&path))?);
-        sources.insert(path, source.to_owned());
-    }
-
-    let mut extraction = resolve_with_root(&extractions, &sources, root);
-    let placeholders = extraction
-        .nodes
-        .iter()
-        .filter(|node| {
-            node.string("extractor") == "compass.resolve.python.universal"
-                && !node.string("source_file").is_empty()
-                && node.string("external_role") == "calls"
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(placeholders.len(), 3);
-    assert!(placeholders.iter().all(|node| {
-        node.attributes
-            .get("external")
-            .and_then(serde_json::Value::as_bool)
-            == Some(true)
-    }));
-    assert_eq!(
-        placeholders
-            .iter()
-            .filter(|node| node.string("qualified_name") == "unittest.mock.patch")
-            .count(),
-        2,
-        "the same external symbol must remain scoped to each exact source occurrence"
-    );
-    assert_eq!(
-        placeholders
-            .iter()
-            .filter(|node| node.string("qualified_name") == "vendor.mock.patch")
-            .count(),
-        1
-    );
-    assert!(
-        placeholders
-            .iter()
-            .all(|node| node.string("qualified_name") != "pkg.mock.patch")
-    );
-
-    let placeholder_ids = placeholders
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    let external_edges = extraction
-        .edges
-        .iter()
-        .filter(|edge| placeholder_ids.contains(edge.target.as_str()))
-        .collect::<Vec<_>>();
-    assert_eq!(external_edges.len(), 3);
-    assert!(external_edges.iter().all(|edge| {
-        edge.string("relation") == "calls"
-            && edge.string("context") == "external_call"
-            && edge.string("confidence") == "INFERRED"
-            && edge
-                .attributes
-                .get("start_byte")
-                .and_then(serde_json::Value::as_u64)
-                .zip(
-                    edge.attributes
-                        .get("end_byte")
-                        .and_then(serde_json::Value::as_u64),
-                )
-                .is_some_and(|(start, end)| start < end)
-    }));
-
-    let node_ids = extraction
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    extraction.edges.retain(|edge| {
-        node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
-    });
-    let evidence =
-        BuildEvidence::from_extraction(root, &extraction, "sha256:python-external-calls")?;
-    let graph = normalize_v1(extraction, evidence)?;
-    let published_placeholders = graph
-        .nodes
-        .iter()
-        .filter(|node| {
-            node.kind == NodeKind::Import
-                && node.source.is_some()
-                && matches!(
-                    node.qualified_name.as_str(),
-                    "unittest.mock.patch" | "vendor.mock.patch"
-                )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(published_placeholders.len(), 3);
-    assert!(published_placeholders.iter().all(|node| {
-        node.evidence.iter().any(|evidence| {
-            evidence.origin == EvidenceOrigin::Ast
-                && evidence.confidence == EvidenceConfidence::Exact
-                && evidence.anchors.len() == 1
-        })
-    }));
-    assert_eq!(
-        graph
-            .links
-            .iter()
-            .filter(|edge| {
-                edge.kind == EdgeKind::Calls
-                    && published_placeholders
-                        .iter()
-                        .any(|node| node.id == edge.target)
-            })
-            .count(),
-        3
-    );
-    Ok(())
-}
-
-#[test]
-fn python_import_keywords_and_whitespace_are_lexically_exact() -> Result<(), Box<dyn Error>> {
-    let hard_keywords = [
-        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
-        "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
-        "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return",
-        "try", "while", "with", "yield",
-    ];
-    let mut valid_statements = vec![
-        "from pkg import Widget".to_owned(),
-        "from\tpkg\u{000C}import\tWidget\u{000C}as\u{000C}TabFormWidget".to_owned(),
-        "from pkg import _".to_owned(),
-        "from pkg import case".to_owned(),
-        "from pkg import match".to_owned(),
-        "from pkg import type".to_owned(),
-        "from pkg import classifier as subclass".to_owned(),
-        "from pkg import fromage as reimport".to_owned(),
-    ];
-    let mut statements = valid_statements.clone();
-    for keyword in hard_keywords {
-        statements.push(format!("from pkg import {keyword}"));
-        statements.push(format!("from pkg import Widget as {keyword}"));
-    }
-    for whitespace in ['\u{00A0}', '\u{2003}', '\u{202F}'] {
-        statements.extend([
-            format!("{whitespace}from pkg import Widget"),
-            format!("from{whitespace}pkg import Widget"),
-            format!("from pkg{whitespace}import Widget"),
-            format!("from pkg import{whitespace}Widget"),
-            format!("from pkg import Widget{whitespace}as Alias"),
-            format!("from pkg import Widget as{whitespace}Alias"),
-            format!("from pkg import Widget,{whitespace}helper"),
-            format!("from pkg import Widget{whitespace}"),
-        ]);
-    }
-    let recovered = "from pkg import helper as recovered".to_owned();
-    statements.push(recovered.clone());
-    valid_statements.push(recovered);
-    let mut newline_snapshots = Vec::new();
-
-    for newline in ["\n", "\r\n"] {
-        let directory = tempfile::tempdir()?;
-        let root = directory.path();
-        let caller_source = statements.join(newline) + newline;
-        let mut engine = Engine::default();
-        let mut extractions = Vec::new();
-        let mut sources = HashMap::new();
-
-        let caller_path = write(root, "caller.py", &caller_source)?;
-        extractions.push(engine.extract(Path::new(&caller_path))?);
-        sources.insert(caller_path.clone(), caller_source.clone());
-        let package_source = concat!(
-            "class Widget:\n    pass\n",
-            "def _():\n    pass\n",
-            "def case():\n    pass\n",
-            "def match():\n    pass\n",
-            "def type():\n    pass\n",
-            "def classifier():\n    pass\n",
-            "def fromage():\n    pass\n",
-            "def helper():\n    pass\n",
-        );
-        let package_path = write(root, "pkg/__init__.py", package_source)?;
-        extractions.push(engine.extract(Path::new(&package_path))?);
-        sources.insert(package_path, package_source.to_owned());
-        for keyword in hard_keywords {
-            let relative = format!("pkg/{keyword}.py");
-            let module_path = write(root, &relative, "VALUE = 1\n")?;
-            extractions.push(engine.extract(Path::new(&module_path))?);
-            sources.insert(module_path, "VALUE = 1\n".to_owned());
-        }
-
-        let mut extraction = resolve_with_root(&extractions, &sources, root);
-        let resolver_edges = extraction
-            .edges
-            .iter()
-            .filter(|edge| {
-                edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-                    && edge.string("source_file") == caller_path
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            resolver_edges.len(),
-            valid_statements.len(),
-            "hard keywords and non-Python whitespace must not emit exact resolver facts"
-        );
-
-        let mut expected_spans = valid_statements
-            .iter()
-            .map(|statement| {
-                caller_source
-                    .find(statement)
-                    .map(|start| (start, start + statement.len()))
-                    .ok_or("missing valid keyword-boundary import")
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        expected_spans.sort_unstable();
-        let mut raw_spans = resolver_edges
-            .iter()
-            .map(|edge| {
-                let start =
-                    edge.attributes
-                        .get("start_byte")
-                        .and_then(serde_json::Value::as_u64)
-                        .ok_or("missing raw keyword-boundary start")? as usize;
-                let end = edge
-                    .attributes
-                    .get("end_byte")
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or("missing raw keyword-boundary end")? as usize;
-                Ok((start, end))
-            })
-            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
-        raw_spans.sort_unstable();
-        assert_eq!(raw_spans, expected_spans);
-
-        let node_ids = extraction
-            .nodes
-            .iter()
-            .map(|node| node.id.as_str())
-            .collect::<HashSet<_>>();
-        extraction.edges.retain(|edge| {
-            node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str())
-        });
-        let evidence =
-            BuildEvidence::from_extraction(root, &extraction, "sha256:python-import-lexing")?;
-        let graph = normalize_v1(extraction, evidence)?;
-        let published_anchors = graph
-            .links
-            .iter()
-            .flat_map(|edge| &edge.evidence)
-            .filter(|evidence| {
-                evidence.extractor == PYTHON_IMPORT_PRODUCER
-                    && evidence
-                        .anchors
-                        .first()
-                        .is_some_and(|anchor| anchor.file == "caller.py")
-            })
-            .filter_map(|evidence| evidence.anchors.first())
-            .collect::<Vec<_>>();
-        assert_eq!(published_anchors.len(), valid_statements.len());
-
-        let mut published_spans = published_anchors
-            .iter()
-            .map(|anchor| (anchor.start_byte as usize, anchor.end_byte as usize))
-            .collect::<Vec<_>>();
-        published_spans.sort_unstable();
-        assert_eq!(published_spans, expected_spans);
-        let mut snapshot = Vec::new();
-        for anchor in published_anchors {
-            let statement = caller_source
-                .get(anchor.start_byte as usize..anchor.end_byte as usize)
-                .ok_or("published keyword-boundary span is not a UTF-8 boundary")?;
-            assert!(valid_statements.iter().any(|valid| valid == statement));
-            snapshot.push((
-                statement.to_owned(),
-                anchor.start_line,
-                anchor.start_column,
-                anchor.end_line,
-                anchor.end_column,
-            ));
-        }
-        snapshot.sort();
-        newline_snapshots.push(snapshot);
-    }
-
-    assert_eq!(newline_snapshots[0], newline_snapshots[1]);
     Ok(())
 }
