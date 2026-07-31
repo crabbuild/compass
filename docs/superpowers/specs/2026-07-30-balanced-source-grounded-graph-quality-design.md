@@ -6,11 +6,17 @@ Approved in conversation on 2026-07-30. This design governs the quality phase
 after semantic-dominance phase two. Production implementation must precede
 focused regression tests, as requested by the user.
 
+This is explicitly not a red-green TDD workflow. Each delivery increment
+implements and reviews production behavior first, then adds conformance and
+regression coverage before qualification and commit.
+
 ## Goal
 
-Improve Compass graph precision and recall using real source occurrences as
-the authority. Achieve at least 99% observed precision on a deterministic,
-stratified audit while recovering as many verified relationships as possible.
+Build a universal semantic evidence framework that lets present and future
+languages and frameworks produce consistently high-quality Compass graphs.
+Use real source occurrences as the authority, achieve at least 99.5% observed
+overall precision with a two-sided 95% Wilson lower bound of at least 99%, and
+recover at least 95% of source-derived facts for every advertised capability.
 Do not optimize for raw edge count or literal Graphify overlap.
 
 ## Background
@@ -22,16 +28,16 @@ revisions:
 | --- | --- | ---: | ---: |
 | Django | Compass | 55,120 | 130,847 |
 | Django | Graphify | 50,845 | 158,710 |
-| Entire | Compass | 21,661 | 72,298 |
+| Entire | Compass | 21,711 | 72,250 |
 | Entire | Graphify | 20,585 | 61,062 |
 
 The current comparator classifies 53,005 Django Graphify reference edges as
 `module_import_projected_to_symbol`. Those edges use an import statement as
 the relationship occurrence and project the imported target onto class or
-symbol owners. That evidence is invalid, but the previous report overstated
-the conclusion by describing the entire family as false relationships. Some
-source-target dependencies may be real at later use sites. This phase must
-distinguish:
+symbol owners. The import occurrence is invalid as proof of the projected
+owner-to-target reference, but the previous report overstated the conclusion
+by describing the entire family as false relationships. Some source-target
+dependencies may still be real at later use sites. This phase must distinguish:
 
 - a fabricated occurrence;
 - a wrong owner, target, or relationship kind;
@@ -61,8 +67,64 @@ Compass uses balanced source-grounded quality:
 - Ambiguous candidates remain ambiguous or unresolved.
 - Edge count is diagnostic metadata, never a quality score.
 - Graphify supplies recall hypotheses, not ground truth.
+- Fabricated occurrences, cross-language matches, and unsafe substitution of
+  a same-named local target are critical violations with zero tolerance.
+- A language or framework may advertise only capabilities that pass the
+  universal conformance suite.
 
 ## Architecture
+
+### Universal semantic evidence model
+
+The extraction layer emits a versioned internal evidence model independent of
+tree-sitter, any specific language, and the public graph schema. Its logical
+records are:
+
+- `DeclarationFact`: a declared symbol, stable identity components, kind,
+  language, module/package, lexical scope, and declaration occurrence;
+- `ScopeFact`: lexical scope identity, owner, parent, and source range;
+- `BindingFact`: import, export, alias, receiver, namespace, module, or package
+  binding visible in a scope;
+- `OccurrenceFact`: an exact source use with owner, syntax role, original
+  spelling, qualifier, and source range;
+- `RelationshipCandidate`: a typed relationship request connecting an
+  occurrence or declaration to constrained endpoint identities;
+- `ResolutionConstraint`: language, role, scope, module/package, binding,
+  target kind, and external-identity requirements; and
+- `AdapterCapabilities`: the capability set the producer claims and must prove
+  through conformance.
+
+These records form the universal contract. Public `compass.graph/1` nodes and
+edges remain the validated output rather than becoming a language-extension
+surface.
+
+### Language adapters
+
+Every language integrates through one registered adapter contract. An adapter
+may use tree-sitter, a source-driven parser, compiler evidence, or a bounded
+combination, but it emits the same universal evidence records. Its capability
+descriptor may include:
+
+- declarations and lexical scopes;
+- imports, exports, aliases, modules, namespaces, and packages;
+- calls and construction;
+- type references, returns, fields, inheritance, implementation, and
+  embedding;
+- members, receivers, and ownership;
+- decorators, annotations, attributes, macros, or equivalent metadata; and
+- qualified standard-library and external identity.
+
+Adapters may define language-specific parsing and qualification rules. They
+may not implement repository-wide label fallback, bypass occurrence
+requirements, publish arbitrary graph edges, or weaken universal ambiguity
+handling. Tree-sitter and source-driven adapters use the same registration,
+capability, limit, and conformance interfaces.
+
+Adding a language requires an adapter, registry entry, capability declaration,
+and conformance fixtures. It does not require changes to graph publication,
+the shared resolver, or framework-pack execution unless the language
+introduces a genuinely new universal syntax role. New roles require a
+versioned evidence-model change rather than an adapter-local escape hatch.
 
 ### Source-occurrence contract
 
@@ -77,12 +139,12 @@ contract. Each candidate relationship carries:
 - visible import, module, and package scope;
 - producer rule and confidence tier.
 
-Existing raw graph metadata may carry the contract when it can do so without
-duplicating the public schema. A new internal type is justified only if the
-same fields are otherwise interpreted differently by multiple extractors or
-resolvers.
+The internal evidence records carry this contract directly. Compatibility
+projection may translate legacy `Extraction` facts during incremental
+migration, but new complete adapters do not encode the contract as unrelated
+string metadata.
 
-### Constrained target resolution
+### Universal constrained resolver
 
 The resolver considers evidence in this order:
 
@@ -95,6 +157,52 @@ The resolver considers evidence in this order:
 It never falls back to a repository-wide terminal-label match. Resolution
 indexes must be bounded and keyed by language, module/package, spelling, and
 role so the implementation does not reintroduce imports × symbols work.
+
+The resolver is shared across adapters. Language-specific qualification is
+provided through registered binding and identity policies; candidate
+selection, uniqueness, cross-language isolation, external endpoints,
+ambiguity, provenance, and resource limits remain universal. A policy returns
+constraints or normalized identities, not a chosen arbitrary graph node.
+
+### Framework evidence packs
+
+Framework support consumes universal language evidence through a registered
+pack contract. Each pack declares:
+
+- stable pack ID and supported language capabilities;
+- project activation evidence, dependency markers, and manifest policy;
+- accepted declaration and occurrence roles;
+- source, target, and ownership constraints;
+- relationship kind and confidence policy;
+- exact occurrence requirements;
+- candidate and fan-out limits; and
+- conformance fixtures and framework-specific query oracles.
+
+A framework pack may add domain meaning to proven language facts. It cannot
+invent an occurrence, resolve by terminal label, or bypass the universal
+resolver and publisher. Config and template packs use the same evidence,
+activation, limits, and conformance contract as source packs.
+
+Adding a framework requires a pack and its fixtures. It does not require a
+central resolver or publisher change.
+
+### Capability and conformance registry
+
+One registry exposes adapter and framework-pack capabilities to extraction,
+qualification, and diagnostics. Conformance covers:
+
+- stable declarations and scopes;
+- exact occurrence slicing, including Unicode and multiline constructs;
+- aliases, qualification, shadowing, and re-exports;
+- repeated occurrences and overloads;
+- ambiguous and external targets;
+- wrong-language and same-name collision controls;
+- resource-limit behavior;
+- deterministic cold/warm facts; and
+- every advertised relationship family.
+
+Unsupported capabilities remain explicit. The engine must not infer support
+from a file extension or silently fall back to lower-quality generic logic.
 
 ### Publication
 
@@ -121,6 +229,47 @@ source corpus
 
 Graphify does not enter production code, runtime dependencies, or mandatory
 Compass extraction.
+
+## Extensibility and migration
+
+The current `Engine`, `Extraction`, framework `SourcePack` registry, and
+collection resolver already provide useful boundaries but allow language facts
+and resolution rules to use inconsistent string metadata. Migration proceeds
+without a flag day:
+
+1. introduce the versioned universal evidence types, registry, and
+   compatibility projection;
+2. implement Python and Go as complete adapters;
+3. implement Java and Rust complete vertical adapters to prove the contract
+   works across object-oriented, package-oriented, trait-oriented, macro, and
+   ownership-heavy syntax;
+4. route existing framework packs through the universal pack contract;
+5. keep other languages on an explicit legacy capability profile; and
+6. migrate remaining adapters in prioritized batches without changing the
+   resolver or publisher contract.
+
+Legacy adapters remain supported but cannot advertise universal quality for a
+capability until their fixtures pass. The graph records producer and
+capability-profile versions so audits can separate complete and legacy
+coverage.
+
+### Delivery decomposition
+
+The universal program is too large for one undifferentiated implementation
+plan. It is delivered as independently reviewable increments:
+
+1. universal evidence model, capability registry, compatibility projection,
+   shared resolver policy interfaces, and conformance harness;
+2. complete Python and Go adapters plus source-grounded quality recovery;
+3. complete Java and Rust adapters proving language portability;
+4. universal framework-pack execution and migration of existing packs; and
+5. prioritized migration of remaining legacy language adapters.
+
+Each increment has its own implementation-first plan, production changes,
+post-implementation tests, real-corpus evidence, commit, and review gate. The
+final universal quality claim requires increments one through four. Increment
+five expands the set of capabilities covered by that claim without changing
+the core contracts.
 
 ## Production improvement scope
 
@@ -156,16 +305,33 @@ types. Cross-language terminal-name resolution is forbidden.
 
 ### Other languages
 
-Rust and Java serve as regression languages in this phase. Their extractors
-need not migrate to a new internal representation unless the shared contract
-requires a small compatibility change. The design must leave a schema-stable
-adoption path for JavaScript/TypeScript and Ruby.
+Java and Rust become complete vertical adapters in this phase, not only
+regression languages. They prove that the universal contracts cover
+namespaces, overloads, annotations, inheritance, interfaces, traits, impl
+ownership, macros, imports, and external packages without Python- or Go-shaped
+special cases.
+
+JavaScript/TypeScript, Ruby, C#, PHP, Swift, C/C++, and the remaining registered
+languages retain explicit legacy capability profiles until migrated. Their
+existing graph output must not regress. The universal registry and
+compatibility projection let each migrate without central resolver or
+publisher changes.
+
+### Framework packs
+
+Existing Python web, Rails, Spring, Go web, Rust web, ASP.NET, Vapor,
+TypeScript web, filesystem-route, enterprise-domain, config, and template
+packs migrate to the universal pack interface. The phase may preserve their
+detector internals initially, but activation, accepted evidence, target
+constraints, occurrence policy, resource limits, and conformance registration
+become uniform. Spring and the Rust web packs provide the non-Python/Go
+vertical proof.
 
 ## Independent quality measurement
 
 ### Precision audit
 
-Audit at least 1,000 Compass relationships using a deterministic stratified
+Audit at least 2,000 Compass relationships using a deterministic stratified
 sample across repositories, languages, relationship kinds, confidence tiers,
 and high-frequency target clusters. Each record verifies independently:
 
@@ -176,11 +342,17 @@ and high-frequency target clusters. Each record verifies independently:
 
 Any incorrect dimension makes the record incorrect. Report raw counts,
 observed precision, sample composition, and a two-sided 95% Wilson confidence
-interval. The sample contains at least 200 records per corpus and at least 50
-records for each available required relationship family; no single repeated
-target cluster may supply more than 10% of a stratum. The delivery gate is at
-least 99% observed precision. A relation or language with a material
-regression cannot be hidden by the aggregate.
+interval. The sample contains at least 400 records per corpus, at least 100
+records for each available required relationship family, and at least 100
+records for every advertised adapter capability; one record may satisfy
+multiple intersecting strata. No single repeated target cluster may supply
+more than 10% of a stratum.
+
+The delivery gates are at least 99.5% observed overall precision, a 95% Wilson
+lower bound of at least 99%, and at least 99% observed precision for every
+advertised language capability. Fabricated occurrences, cross-language
+matches, and unsafe local-target substitutions have zero tolerance regardless
+of aggregate precision.
 
 ### Recall audit
 
@@ -201,7 +373,9 @@ Each uncovered candidate receives exactly one classification:
   occurrence.
 
 The report includes per-language and per-relation recall counts. It must not
-convert ambiguous or rejected facts into silent passes.
+convert ambiguous or rejected facts into silent passes. Every advertised
+language or framework capability must recover at least 95% of its
+source-derived oracle facts.
 
 ### Audit manifest
 
@@ -209,6 +383,7 @@ The checked-in audit manifest records:
 
 - schema version;
 - corpus name and commit;
+- adapter, framework-pack, and capability-profile versions;
 - language and relationship kind;
 - source and target expectation;
 - occurrence file and range;
@@ -250,13 +425,18 @@ are mandatory.
 
 ## Performance and correctness gates
 
-- At least 99% observed precision on the complete stratified audit.
-- The report publishes confidence bounds and all incorrect samples.
+- At least 99.5% observed overall precision on at least 2,000 audited edges.
+- The two-sided 95% Wilson precision lower bound is at least 99%.
+- Every advertised adapter capability has at least 99% observed precision and
+  95% source-derived recall.
+- Critical semantic violations have a count of zero.
+- The report publishes confidence bounds and every incorrect sample.
 - Genuine source-derived recall improves on Python and Go.
-- No Java or Rust precision decrease greater than one percentage point and no
-  source-derived recall decrease greater than 5% relative to the phase-two
-  graph. Every smaller regression remains itemized.
-- Both improvement graphs publish with zero validation errors.
+- Java and Rust pass the complete adapter contract and do not regress against
+  their pinned pre-migration graphs.
+- Every migrated framework pack passes activation, occurrence, target,
+  resource-limit, and query-oracle conformance.
+- All four qualification graphs publish with zero validation errors.
 - Cold and warm graphs are byte-identical for every measured Compass corpus.
 - All mandatory semantic query oracles pass.
 - No cold or warm build regression greater than 10% without diagnosis and
@@ -267,14 +447,19 @@ are mandatory.
 
 ## Implementation order
 
-The phase is implementation-first:
+Every delivery increment is implementation-first:
 
-1. add or consolidate the internal occurrence contract;
-2. implement constrained Python and Go production resolution;
-3. implement occurrence-aware comparison and the independent audit harness;
-4. add focused regression tests for the completed behavior;
-5. run real-corpus qualification and critique the output;
-6. update documentation, commit, push, and update or create the pull request.
+1. implement the universal evidence types, capability registry, compatibility
+   projection, constrained resolver interfaces, and framework-pack contract;
+2. implement complete Python and Go adapters and production resolution;
+3. implement complete Java and Rust vertical adapters;
+4. migrate framework-pack registration and enforcement to the universal
+   contract;
+5. implement occurrence-aware comparison and the independent audit harness;
+6. add conformance and focused regression tests for the completed production
+   behavior;
+7. run four-corpus qualification and critique the output; and
+8. update documentation, commit, push, and update or create the pull request.
 
 Tests still cover every production change, but they follow the initial
 implementation rather than driving it.
@@ -287,6 +472,9 @@ implementation rather than driving it.
 - Invalid audit records fail qualification rather than being skipped.
 - Unsupported language roles remain explicit and cannot fall through to
   terminal-name matching.
+- Adapter and framework-pack capability claims that lack conformance evidence
+  fail registration.
+- A legacy adapter cannot be mistaken for a complete universal adapter.
 - A partial graph or partial audit cannot satisfy the quality gate.
 
 ## Honest reporting requirements
