@@ -521,6 +521,60 @@ class CorrectnessTests(unittest.TestCase):
             result.metrics["graphify_edges_coverage_reasons"],
         )
 
+    def test_unique_source_occurrence_recovers_only_a_compatible_target(self) -> None:
+        compass = """
+            {"graph":{"diagnostics":[]},"nodes":[
+              {"id":"caller","label":"run","kind":"function",
+               "source_file":"app.py","source_location":"L10","language":"python"},
+              {"id":"target","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L2","language":"python"}
+            ],"links":[
+              {"source":"caller","target":"target","relation":"calls",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+        """
+        compatible = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"caller","label":"run()",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"generated_target","label":"Widget","kind":"class",
+               "source_file":"lib.py","source_location":"L20"}
+            ],"links":[
+              {"source":"caller","target":"generated_target","relation":"calls",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertFalse(compatible.passed)
+        self.assertEqual(compatible.metrics["missing_graphify_nodes"], 1)
+        self.assertEqual(compatible.metrics["missing_graphify_edges"], 0)
+        self.assertIn(
+            "dominated:precise_occurrence_target",
+            compatible.metrics["graphify_edges_coverage_reasons"],
+        )
+
+        incompatible = compare_documents(
+            compass,
+            """
+            {"nodes":[
+              {"id":"caller","label":"run()",
+               "source_file":"app.py","source_location":"L10"},
+              {"id":"wrong_target","label":"Different","kind":"class",
+               "source_file":"lib.py","source_location":"L20"}
+            ],"links":[
+              {"source":"caller","target":"wrong_target","relation":"calls",
+               "source_file":"app.py","source_location":"L11"}
+            ]}
+            """,
+        )
+        self.assertEqual(incompatible.metrics["missing_graphify_edges"], 1)
+        self.assertNotIn(
+            "dominated:precise_occurrence_target",
+            incompatible.metrics["graphify_edges_coverage_reasons"],
+        )
+
     def test_qualified_external_target_rejects_same_named_local_rebinding(self) -> None:
         result = compare_documents(
             """

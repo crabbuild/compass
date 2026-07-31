@@ -668,6 +668,7 @@ def _classify_edges(
     exact_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     occurrence_target_index: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    occurrence_source_index: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
     qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     qualified_external_imports: dict[tuple[str, str], set[str]] = {}
     imported_symbol_targets: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
@@ -697,6 +698,15 @@ def _classify_edges(
         target = canonical_endpoints.get(edge.target, edge.target)
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
         if edge.occurrence_file and edge.occurrence_location:
+            occurrence_source_index.setdefault(
+                (
+                    edge.relation,
+                    source,
+                    edge.occurrence_file,
+                    edge.occurrence_location,
+                ),
+                [],
+            ).append(edge)
             occurrence_target_index.setdefault(
                 (
                     edge.relation,
@@ -853,6 +863,33 @@ def _classify_edges(
         target_coverage = node_coverage.get(graphify.target)
         source = node_mapping.get(graphify.source)
         target = node_mapping.get(graphify.target)
+        source_occurrence = occurrence_source_index.get(
+            (
+                graphify.relation,
+                source or "",
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+            ),
+            [],
+        )
+        if (
+            graphify.relation in {"calls", "references"}
+            and graphify_target is not None
+            and len(source_occurrence) == 1
+        ):
+            occurrence_target = compass_nodes.get(source_occurrence[0].target)
+            if (
+                occurrence_target is not None
+                and _compatible_definition(graphify_target, occurrence_target)
+            ):
+                output.append(
+                    Coverage(
+                        "dominated",
+                        "precise_occurrence_target",
+                        source_occurrence[0].payload_sha256,
+                    )
+                )
+                continue
         if (
             graphify.relation == "imports"
             and source is not None
