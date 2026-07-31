@@ -254,6 +254,7 @@ pub enum HierarchyConstraint {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiverDispatchStrategy {
+    C3FromReceiver,
     C3AfterReceiver,
 }
 

@@ -1396,19 +1396,30 @@ impl<'source> DirectAdapterState<'source> {
         let binding = self
             .binding_for(owner, qualifier.unwrap_or(spelling))
             .cloned();
-        let hierarchy = if self.language == "python" && qualifier == Some("super()") {
-            owner
-                .enclosing_type_qualified_name
-                .as_ref()
-                .map(
-                    |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
-                        receiver_qualified_name: receiver_qualified_name.clone(),
-                        strategy: ReceiverDispatchStrategy::C3AfterReceiver,
-                    },
-                )
-        } else {
-            None
-        };
+        let hierarchy =
+            match (self.language, qualifier) {
+                ("python", Some("self" | "cls")) => owner
+                    .enclosing_type_qualified_name
+                    .as_ref()
+                    .map(
+                        |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
+                            receiver_qualified_name: receiver_qualified_name.clone(),
+                            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                        },
+                    ),
+                ("python", Some("super()")) => {
+                    owner
+                        .enclosing_type_qualified_name
+                        .as_ref()
+                        .map(
+                            |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
+                                receiver_qualified_name: receiver_qualified_name.clone(),
+                                strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+                            },
+                        )
+                }
+                _ => None,
+            };
         let qualified_name = hierarchy
             .is_none()
             .then(|| {
@@ -1990,6 +2001,10 @@ fn hierarchy_constraint_identity(constraint: Option<&HierarchyConstraint>) -> St
         Some(HierarchyConstraint::DirectBase { base_set_complete }) => {
             format!("direct_base:{base_set_complete}")
         }
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name,
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        }) => format!("receiver_dispatch:c3_from_receiver:{receiver_qualified_name}"),
         Some(HierarchyConstraint::ReceiverDispatch {
             receiver_qualified_name,
             strategy: ReceiverDispatchStrategy::C3AfterReceiver,

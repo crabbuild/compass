@@ -369,7 +369,19 @@ class Mixin:
     pass
 
 class Child(Mixin, Root):
+    class Product:
+        pass
+
+    def local(self):
+        return None
+
+    @classmethod
+    def make(cls):
+        cls.local()
+
     def run(self):
+        self.local()
+        self.Product()
         super().run()
 "#;
     let mut engine = Engine::default();
@@ -440,6 +452,37 @@ class Child(Mixin, Root):
             )
             && candidate.constraints.qualified_name.is_none()
             && !candidate.constraints.allow_external
+    }));
+    for qualifier in ["self", "cls"] {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.target_spelling == "local"
+                && candidate
+                    .occurrence_id
+                    .as_deref()
+                    .and_then(|id| evidence.occurrences.iter().find(|fact| fact.id == id))
+                    .and_then(|fact| fact.qualifier.as_deref())
+                    == Some(qualifier)
+                && matches!(
+                    candidate.constraints.hierarchy.as_ref(),
+                    Some(HierarchyConstraint::ReceiverDispatch {
+                        receiver_qualified_name,
+                        strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                    }) if receiver_qualified_name == "pkg.models.Child"
+                )
+                && candidate.constraints.qualified_name.is_none()
+                && !candidate.constraints.allow_external
+        }));
+    }
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Constructs
+            && candidate.target_spelling == "Product"
+            && matches!(
+                candidate.constraints.hierarchy.as_ref(),
+                Some(HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name,
+                    strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                }) if receiver_qualified_name == "pkg.models.Child"
+            )
     }));
 }
 

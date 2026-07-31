@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import copy
+from contextlib import closing
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
 from benchmarks.performance.compass.audit import (
     AuditError,
     audit_result_json_value,
+    export_comparison_candidates,
     load_manifest,
     run_audit,
     wilson_interval,
 )
+from benchmarks.performance.compass.correctness import index_graph
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -174,6 +178,160 @@ class AuditTests(unittest.TestCase):
             wrong_corpus["records"][0]["corpus"] = "different"
             with self.assertRaisesRegex(AuditError, "unknown corpus"):
                 load_manifest(self.write_manifest(wrong_corpus, root))
+
+    def test_source_oracle_inventory_is_complete_and_recomputed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            incomplete = copy.deepcopy(self.base)
+            incomplete["sourceOracles"][0]["parsedFiles"] = 0
+            with self.assertRaisesRegex(AuditError, "completely parsed"):
+                load_manifest(self.write_manifest(incomplete, root))
+
+            unpinned = copy.deepcopy(self.base)
+            unpinned["sourceOracles"] = []
+            with self.assertRaisesRegex(AuditError, "no pinned source-oracle"):
+                load_manifest(self.write_manifest(unpinned, root))
+
+            stale = copy.deepcopy(self.base)
+            stale["sourceOracles"][0]["inventorySha256"] = "f" * 64
+            manifest = self.write_manifest(stale, root)
+            with self.assertRaisesRegex(AuditError, "inventory digest mismatch"):
+                run_audit(manifest, BASE_GRAPH, BASE_CORPUS)
+
+    def test_comparison_candidate_export_is_pinned_deterministic_and_unjudged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / ".compass-audit-commit").write_text(
+                "1" * 40, encoding="utf-8"
+            )
+            (corpus / "main.py").write_text("target(); target()\n", encoding="utf-8")
+            nodes = (
+                '{"id":"source","label":"run()","kind":"function",'
+                '"source_file":"main.py","source_location":"L1","language":"python"},'
+                '{"id":"target","label":"target()","kind":"function",'
+                '"source_file":"main.py","source_location":"L1","language":"python"}'
+            )
+            compass = root / "compass.json"
+            compass.write_text(
+                '{"graph":{"diagnostics":[]},"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target",'
+                '"relation":"calls","relationshipSite":{"file":"main.py",'
+                '"startLine":1,"startByte":0,"endByte":8}},'
+                '{"source":"source","target":"target","relation":"calls",'
+                '"relationshipSite":{"file":"main.py","startLine":1,'
+                '"startByte":10,"endByte":18}}]}',
+                encoding="utf-8",
+            )
+            graphify = root / "graphify.json"
+            graphify.write_text(
+                '{"nodes":['
+                + nodes
+                + '],"links":[{"source":"source","target":"target",'
+                '"relation":"calls","source_file":"main.py",'
+                '"source_location":"L1"}]}',
+                encoding="utf-8",
+            )
+            database_path = root / "comparison.sqlite"
+            with closing(sqlite3.connect(database_path)) as database:
+                index_graph("compass", compass, database)
+                index_graph("graphify", graphify, database)
+
+            first = root / "first.json"
+            second = root / "second.json"
+            export_comparison_candidates(
+                database_path, compass, corpus, "fixture", "python", first
+            )
+            export_comparison_candidates(
+                database_path, compass, corpus, "fixture", "python", second
+            )
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            payload = json.loads(first.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema"], "compass.quality-audit-candidates")
+            self.assertTrue(payload["recordsAreUnjudged"])
+            self.assertEqual(payload["corpus"]["commit"], "1" * 40)
+            self.assertEqual(
+                payload["populations"],
+                {
+                    "compassAccepted": 2,
+                    "graphifyHypotheses": 1,
+                    "sourceOracle": 2,
+                },
+            )
+            self.assertEqual(
+                payload["sourceOracleCoverage"],
+                {
+                    "provider": "python_ast",
+                    "providerAvailable": True,
+                    "scannedFiles": 1,
+                    "parsedFiles": 1,
+                    "rejectedFiles": [],
+                    "inventorySha256": (
+                        "cbaa05744dcb8ecb2254ee981b53b2d51b630e2f8934875af4e848326e15fbc4"
+                    ),
+                    "complete": True,
+                },
+            )
+            self.assertEqual(len(payload["candidates"]), 5)
+            self.assertTrue(
+                all(candidate["judgment"] is None for candidate in payload["candidates"])
+            )
+            accepted = [
+                candidate
+                for candidate in payload["candidates"]
+                if candidate["candidateSource"] == "compass_graph"
+            ]
+            self.assertEqual(len(accepted), 2)
+            self.assertEqual(
+                {candidate["occurrence"]["startByte"] for candidate in accepted},
+                {0, 10},
+            )
+            self.assertTrue(
+                all(
+                    not candidate["occurrence"]["requiresExactGraphRange"]
+                    for candidate in accepted
+                )
+            )
+            hypothesis = next(
+                candidate
+                for candidate in payload["candidates"]
+                if candidate["candidateSource"] == "graphify_comparison"
+            )
+            self.assertEqual(hypothesis["comparison"]["status"], "exact")
+            self.assertTrue(hypothesis["occurrence"]["requiresExactGraphRange"])
+            source_oracle = [
+                candidate
+                for candidate in payload["candidates"]
+                if candidate["candidateSource"] == "independent_source"
+            ]
+            self.assertEqual(len(source_oracle), 2)
+            self.assertEqual(
+                {candidate["target"]["spelling"] for candidate in source_oracle},
+                {"target"},
+            )
+            self.assertTrue(
+                all(
+                    candidate["suggestedPool"] == "source_oracle"
+                    for candidate in source_oracle
+                )
+            )
+
+            unrelated = root / "unrelated.json"
+            unrelated.write_text(
+                '{"graph":{"diagnostics":[]},"nodes":[],"links":[]}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(AuditError, "does not match"):
+                export_comparison_candidates(
+                    database_path,
+                    unrelated,
+                    corpus,
+                    "fixture",
+                    "python",
+                    root / "unrelated-candidates.json",
+                )
 
 
 if __name__ == "__main__":

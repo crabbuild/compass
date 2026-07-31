@@ -232,19 +232,24 @@ before all lexical and module rules. They may publish an exact source class or
 a qualified external endpoint, but can never bind to a convenient same-named
 local class.
 
-`C3AfterReceiver` first checks a semantically proven prefix: when the
-receiver's complete ordered base list is known and its exact first base
-uniquely declares the member, that declaration is the receiver's direct MRO
-successor and can be selected without inspecting later ancestors. Otherwise,
-the resolver computes the complete C3 linearization from exact qualified base
-identities and source occurrence order, skips the receiver, and selects the
-first class that directly declares the requested member. Full C3 resolution
-requires every base to resolve uniquely, an acyclic and C3-consistent
-hierarchy, a bounded traversal, and one unique selected member.
+`C3FromReceiver` checks the exact receiver first. It may then follow a
+source-proven prefix: a member declared directly by the exact first base is
+ordered before later bases, and a single-inheritance chain remains proven until
+it reaches a multiple-base fork. If that prefix does not resolve the member,
+the resolver requires the complete C3 linearization and selects the first class
+that directly declares it. Python emits this strategy for `self.member(...)`
+and `cls.member(...)`; neither form can fall through to lexical, imported,
+module, or repository-wide terminal-name lookup.
 
-Python emits this evidence for zero-argument `super().method(...)`. The old
-single-direct-base shortcut has been removed. Multiple inheritance and
-methods inherited beyond the direct base now use the same shared C3 rule.
+`C3AfterReceiver` is used for zero-argument `super().member(...)`. It first
+checks the exact first base when that direct successor is source-proven, then
+uses the complete C3 linearization while skipping the receiver. Full C3
+resolution requires every base to resolve uniquely, an acyclic and
+C3-consistent hierarchy, a bounded traversal, and one unique selected member.
+
+The old single-direct-base and terminal-name shortcuts have been removed.
+Multiple inheritance and methods inherited beyond the direct base use the same
+shared C3 implementation.
 Dynamic receiver bases, incomplete receiver base lists, explicit-argument
 `super`, inconsistent hierarchies, ambiguous members, and bound overflows
 remain unresolved. An unresolved or external later ancestor blocks full C3
@@ -343,8 +348,9 @@ python3 benchmarks/performance/harness.py audit \
 ```
 
 The manifest schema is `compass.quality-audit`. It records pinned corpus
-commits and graph hashes, advertised adapter/framework capabilities, required
-relations, and records from three independent pools:
+commits and graph hashes, exact source-oracle provider identities and inventory
+digests, advertised adapter/framework capabilities, required relations, and
+records from three independent pools:
 
 - `accepted` audits Compass-published edges for precision;
 - `source_oracle` audits independently collected source constructs for
@@ -357,10 +363,13 @@ language, relation, confidence, target cluster, source and target
 expectations, exact occurrence range, normalized snippet SHA-256, judgment,
 and reason. `represented_elsewhere` also names the actual graph fact.
 
-The harness verifies corpus revision, graph digest, snippet bytes, and graph
-fact occurrence before calculating metrics. Invalid accepted edges remain in
-the precision denominator. Ambiguous and rejected hypotheses remain explicit.
-A conformance manifest is always ineligible for production claims.
+The harness reparses every pinned source-oracle corpus and verifies provider,
+complete file coverage, and the full construct-inventory digest. It also
+verifies corpus revision, graph digest, snippet bytes, and graph-fact occurrence
+before calculating metrics. A missing, unsupported, partially parsed, or stale
+source inventory fails closed. Invalid accepted edges remain in the precision
+denominator. Ambiguous and rejected hypotheses remain explicit. A conformance
+manifest is always ineligible for production claims.
 
 A qualification requires:
 

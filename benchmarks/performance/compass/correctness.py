@@ -13,6 +13,7 @@ from typing import Any, Iterator
 
 from .jsonstream import iter_top_level_array, read_top_level_object_value
 from .model import CorrectnessResult
+from .occurrences import SourceOccurrenceOracle
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,14 @@ def _canonical(value: object) -> str:
 
 def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _normalized_label(record: dict[str, object], identifier: str) -> tuple[str, str]:
@@ -185,6 +194,7 @@ def _create_schema(database: sqlite3.Connection) -> None:
             DROP TABLE IF EXISTS edges;
             DROP TABLE IF EXISTS nodes;
             DROP TABLE IF EXISTS summaries;
+            DROP TABLE IF EXISTS artifacts;
             """
         )
     database.executescript(
@@ -236,6 +246,10 @@ def _create_schema(database: sqlite3.Connection) -> None:
             validation_errors INTEGER NOT NULL,
             digest TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS artifacts (
+            tool TEXT PRIMARY KEY,
+            file_sha256 TEXT NOT NULL
+        );
         """
     )
     database.execute(f"PRAGMA user_version={schema_version}")
@@ -279,6 +293,8 @@ def index_graph(
     database.execute("DELETE FROM edges WHERE tool = ?", (tool,))
     database.execute("DELETE FROM nodes WHERE tool = ?", (tool,))
     database.execute("DELETE FROM summaries WHERE tool = ?", (tool,))
+    database.execute("DELETE FROM artifacts WHERE tool = ?", (tool,))
+    artifact_digest = _file_sha256(graph_path)
 
     node_count = 0
     for record in _records(graph_path, "nodes"):
@@ -437,6 +453,10 @@ def index_graph(
     database.execute(
         "INSERT INTO summaries VALUES (?, ?, ?, ?, ?)",
         (tool, node_count, edge_count, validation_errors, digest),
+    )
+    database.execute(
+        "INSERT INTO artifacts VALUES (?, ?)",
+        (tool, artifact_digest),
     )
     database.commit()
     return GraphSummary(tool, node_count, edge_count, validation_errors, digest)
@@ -642,19 +662,37 @@ def _canonical_compass_endpoints(
     return canonical
 
 
-def _same_occurrence(graphify: EdgeFact, compass: EdgeFact) -> bool:
+def _occurrence_match(
+    graphify: EdgeFact,
+    compass: EdgeFact,
+    oracle: SourceOccurrenceOracle | None,
+) -> str | None:
     if graphify.occurrence_file and graphify.occurrence_file != compass.occurrence_file:
-        return False
+        return None
     if (
         graphify.occurrence_location
         and graphify.occurrence_location != compass.occurrence_location
     ):
-        return False
-    return bool(
+        if (
+            oracle is None
+            or not graphify.occurrence_file
+            or not compass.occurrence_file
+            or not oracle.same_statement(
+                graphify.relation,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+                compass.occurrence_location,
+            )
+        ):
+            return None
+        return "source_statement"
+    if not (
         graphify.occurrence_file
         or graphify.occurrence_location
         or not (compass.occurrence_file or compass.occurrence_location)
-    )
+    ):
+        return None
+    return "exact"
 
 
 def _classify_edges(
@@ -664,6 +702,7 @@ def _classify_edges(
     compass_nodes: dict[str, NodeFact],
     node_coverage: dict[str, Coverage],
     node_mapping: dict[str, str],
+    occurrence_oracle: SourceOccurrenceOracle | None,
 ) -> list[Coverage]:
     exact_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
@@ -778,7 +817,7 @@ def _classify_edges(
             continue
 
         exact = [
-            edge
+            (edge, occurrence)
             for edge in exact_index.get(
                 (
                     graphify.relation,
@@ -787,10 +826,20 @@ def _classify_edges(
                 ),
                 [],
             )
-            if _same_occurrence(graphify, edge)
+            if (occurrence := _occurrence_match(graphify, edge, occurrence_oracle))
+            is not None
         ]
         if exact:
-            output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
+            edge, occurrence = exact[0]
+            output.append(
+                Coverage(
+                    "exact" if occurrence == "exact" else "dominated",
+                    "relationship_fact"
+                    if occurrence == "exact"
+                    else "source_statement_occurrence",
+                    edge.payload_sha256,
+                )
+            )
             continue
 
         graphify_target = graphify_nodes.get(graphify.target)
@@ -955,15 +1004,23 @@ def _classify_edges(
         if not (graphify.occurrence_file or graphify.occurrence_location):
             output.append(Coverage("missing", "missing_relationship_occurrence", None))
             continue
-        matching = [edge for edge in direct if _same_occurrence(graphify, edge)]
+        matching = [
+            (edge, occurrence)
+            for edge in direct
+            if (occurrence := _occurrence_match(graphify, edge, occurrence_oracle))
+            is not None
+        ]
         if len(matching) == 1:
-            reason = (
-                "canonical_owner"
-                if target_coverage is not None
-                and target_coverage.reason == "canonical_owner"
-                else "resolved_endpoint"
-            )
-            output.append(Coverage("dominated", reason, matching[0].payload_sha256))
+            edge, occurrence = matching[0]
+            reason = "source_statement_occurrence"
+            if occurrence != "source_statement":
+                reason = (
+                    "canonical_owner"
+                    if target_coverage is not None
+                    and target_coverage.reason == "canonical_owner"
+                    else "resolved_endpoint"
+                )
+            output.append(Coverage("dominated", reason, edge.payload_sha256))
         elif len(matching) > 1:
             output.append(Coverage("ambiguous", "multiple_relationship_facts", None))
         else:
@@ -997,7 +1054,10 @@ def _coverage_examples(
     return ", ".join(examples[:limit])
 
 
-def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
+def compare_graphs(
+    database: sqlite3.Connection,
+    source_root: Path | None = None,
+) -> CorrectnessResult:
     tools = {row[0] for row in database.execute("SELECT tool FROM summaries")}
     failures: list[str] = []
     metrics: dict[str, int | str | bool] = {}
@@ -1053,6 +1113,7 @@ def compare_graphs(database: sqlite3.Connection) -> CorrectnessResult:
             compass_nodes,
             node_coverage,
             node_mapping,
+            SourceOccurrenceOracle(source_root) if source_root is not None else None,
         )
         edge_metrics = _coverage_metrics("edges", edge_coverage)
         metrics.update(edge_metrics)
