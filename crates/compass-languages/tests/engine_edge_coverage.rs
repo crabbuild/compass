@@ -379,6 +379,97 @@ fn repeated_go_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn bash_entrypoints_and_go_embeddings_retain_typed_exact_facts() -> Result<(), Box<dyn Error>> {
+    let mut engine = Engine::default();
+    let bash = engine.extract_source(
+        std::path::Path::new("scripts/release.sh"),
+        b"#!/usr/bin/env bash\nlog() { :; }\nlog\n",
+    )?;
+    let entry = bash
+        .nodes
+        .iter()
+        .find(|node| node.label() == "release.sh script")
+        .ok_or("missing Bash entrypoint")?;
+    assert_eq!(entry.string("symbol_kind"), "function");
+    assert!(bash.edges.iter().any(|edge| {
+        edge.target == entry.id
+            && edge.string("relation") == "contains"
+            && edge.string("source_location") == "L1"
+    }));
+    assert!(bash.edges.iter().any(|edge| {
+        edge.source == entry.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_location") == "L3"
+    }));
+
+    let go = engine.extract_source(
+        std::path::Path::new("service/types.go"),
+        br#"package service
+import "example.com/project/agent"
+type Local interface { agent.Agent }
+"#,
+    )?;
+    let embedding = go
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "embeds")
+        .ok_or("missing Go embedding")?;
+    assert_eq!(embedding.string("source_location"), "L3");
+    let target = go
+        .nodes
+        .iter()
+        .find(|node| node.id == embedding.target)
+        .ok_or("missing embedding target")?;
+    assert_eq!(target.label(), "Agent");
+    assert_eq!(
+        target.string("qualified_name"),
+        "example.com/project/agent.Agent"
+    );
+    assert_eq!(target.string("go_target_package"), "agent");
+    Ok(())
+}
+
+#[test]
+fn python_decorators_are_exact_uses_not_file_wide_import_inference() -> Result<(), Box<dyn Error>> {
+    let source = br#"from framework import used, unused
+
+@used("class")
+class Consumer:
+    @used("method")
+    def run(self):
+        pass
+"#;
+    let extraction =
+        Engine::default().extract_source(std::path::Path::new("app/consumer.py"), source)?;
+    let uses = extraction
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "references" && edge.string("context") == "decorator"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(uses.len(), 2, "edges={:#?}", extraction.edges);
+    assert_eq!(
+        uses.iter()
+            .map(|edge| edge.string("source_location"))
+            .collect::<Vec<_>>(),
+        ["L3", "L5"]
+    );
+    assert!(uses.iter().all(|edge| {
+        edge.string("target_qualified_name") == "framework.used"
+            && edge.attributes.contains_key("start_byte")
+            && edge.attributes.contains_key("end_byte")
+    }));
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("target_qualified_name") != "framework.unused")
+    );
+    Ok(())
+}
+
+#[test]
 fn repeated_zig_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("repeated.zig");

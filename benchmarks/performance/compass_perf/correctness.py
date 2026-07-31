@@ -579,6 +579,13 @@ def _classify_nodes(
             if _compatible_definition(graphify, candidate)
         ]
         reason = "canonical_owner" if graphify.source_file else "resolved_definition"
+        if len(candidates) > 1:
+            case_exact = [
+                candidate for candidate in candidates if candidate.label == graphify.label
+            ]
+            if len(case_exact) == 1:
+                candidates = case_exact
+                reason = "case_exact_owner"
         if len(candidates) > 1 and not graphify.module:
             module_candidates = [
                 candidate
@@ -621,6 +628,10 @@ def _canonical_compass_endpoints(
             for candidate in anchored_by_label.get(node.normalized_label, [])
             if _compatible_definition(node, candidate)
         ]
+        if len(candidates) > 1:
+            case_exact = [candidate for candidate in candidates if candidate.label == node.label]
+            if len(case_exact) == 1:
+                candidates = case_exact
         if len(candidates) == 1:
             canonical[node.identifier] = candidates[0].identifier
     return canonical
@@ -651,7 +662,25 @@ def _classify_edges(
 ) -> list[Coverage]:
     exact_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
     direct_index: dict[tuple[str, str, str], list[EdgeFact]] = {}
+    occurrence_target_index: dict[tuple[str, str, str, str], list[EdgeFact]] = {}
+    qualified_external_targets: dict[tuple[str, str, str, str], set[str]] = {}
     containment: dict[str, set[str]] = {}
+    import_occurrences: set[tuple[str, str, str]] = set()
+    for edges in (graphify_edges, compass_edges):
+        for edge in edges:
+            if (
+                edge.relation == "imports"
+                and edge.target_fact_key
+                and edge.occurrence_file
+                and edge.occurrence_location
+            ):
+                import_occurrences.add(
+                    (
+                        edge.target_fact_key,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                    )
+                )
     canonical_endpoints = _canonical_compass_endpoints(compass_nodes)
     for edge in compass_edges:
         exact_index.setdefault(
@@ -660,11 +689,50 @@ def _classify_edges(
         source = canonical_endpoints.get(edge.source, edge.source)
         target = canonical_endpoints.get(edge.target, edge.target)
         direct_index.setdefault((edge.relation, source, target), []).append(edge)
+        if edge.occurrence_file and edge.occurrence_location:
+            occurrence_target_index.setdefault(
+                (
+                    edge.relation,
+                    edge.target_fact_key,
+                    edge.occurrence_file,
+                    edge.occurrence_location,
+                ),
+                [],
+            ).append(edge)
+            target_node = compass_nodes.get(edge.target)
+            if (
+                target_node is not None
+                and target_node.placeholder
+                and "." in target_node.qualified_name
+            ):
+                qualified_external_targets.setdefault(
+                    (
+                        edge.relation,
+                        edge.occurrence_file,
+                        edge.occurrence_location,
+                        target_node.normalized_label,
+                    ),
+                    set(),
+                ).add(edge.target)
         if edge.relation == "contains":
             containment.setdefault(source, set()).add(target)
 
     output: list[Coverage] = []
     for graphify in graphify_edges:
+        if (
+            graphify.relation == "references"
+            and (
+                graphify.target_fact_key,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+            )
+            in import_occurrences
+        ):
+            output.append(
+                Coverage("rejected", "module_import_projected_to_symbol", None)
+            )
+            continue
+
         exact = [
             edge
             for edge in exact_index.get(
@@ -679,6 +747,52 @@ def _classify_edges(
         ]
         if exact:
             output.append(Coverage("exact", "relationship_fact", exact[0].payload_sha256))
+            continue
+
+        graphify_target = graphify_nodes.get(graphify.target)
+        corrected_targets = qualified_external_targets.get(
+            (
+                graphify.relation,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+                graphify_target.normalized_label if graphify_target is not None else "",
+            ),
+            set(),
+        )
+        if (
+            graphify_target is not None
+            and graphify_target.source_file
+            and len(corrected_targets) == 1
+        ):
+            output.append(
+                Coverage(
+                    "rejected",
+                    "qualified_external_target_rebound_to_local",
+                    next(iter(corrected_targets)),
+                )
+            )
+            continue
+
+        precise_owner = occurrence_target_index.get(
+            (
+                graphify.relation,
+                graphify.target_fact_key,
+                graphify.occurrence_file,
+                graphify.occurrence_location,
+            ),
+            [],
+        )
+        if (
+            graphify.relation in {"calls", "references", "rationale_for"}
+            and len(precise_owner) == 1
+        ):
+            output.append(
+                Coverage(
+                    "dominated",
+                    "precise_occurrence_owner",
+                    precise_owner[0].payload_sha256,
+                )
+            )
             continue
 
         source_coverage = node_coverage.get(graphify.source)
@@ -744,7 +858,7 @@ def _classify_edges(
 
 def _coverage_metrics(prefix: str, coverage: list[Coverage]) -> dict[str, int | str]:
     metrics: dict[str, int | str] = {}
-    for status in ("exact", "dominated", "ambiguous", "missing"):
+    for status in ("exact", "dominated", "rejected", "ambiguous", "missing"):
         metrics[f"{status}_graphify_{prefix}"] = sum(
             fact.status == status for fact in coverage
         )

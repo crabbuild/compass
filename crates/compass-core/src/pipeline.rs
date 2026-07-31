@@ -1358,6 +1358,7 @@ fn build_graph_inner(
         let started = Instant::now();
         let mut output_profile_started = Instant::now();
         let configuration_digest = graph_configuration_digest(options, &output_dir)?;
+        let normalization_started = Instant::now();
         let published = published_v1_document(
             &document,
             &communities,
@@ -1372,12 +1373,21 @@ fn build_graph_inner(
             configuration_digest,
             commit.as_deref(),
         )?;
+        profile_internal_duration(
+            "graph.json v1 normalization",
+            normalization_started.elapsed(),
+        );
         if published.document.nodes.is_empty() {
             return Err(CoreError::EmptyGraph);
         }
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
+        let serialization_started = Instant::now();
         write_json_atomic(output_dir.join("graph.json"), &published.document, false)?;
+        profile_internal_duration(
+            "graph.json v1 serialization",
+            serialization_started.elapsed(),
+        );
         profile_internal("graph.json v1 publication", &mut output_profile_started);
         if options.purpose == BuildPurpose::Update {
             write_text_atomic(
@@ -1512,28 +1522,35 @@ fn build_graph_inner(
     timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
 
-    write_semantic_marker(&output_dir, semantic)?;
-
     let mut manifest = prior_manifest;
-    save_build_manifest(
-        &mut manifest,
-        &detection.files,
-        &manifest_path,
-        &root,
-        semantic,
-    )?;
+    let (manifest_result, seals_result) = rayon::join(
+        || {
+            save_build_manifest(
+                &mut manifest,
+                &detection.files,
+                &manifest_path,
+                &root,
+                semantic,
+            )
+        },
+        || {
+            write_semantic_marker(&output_dir, semantic)?;
+            save_output_stats(
+                &output_dir,
+                published_nodes,
+                published_edges,
+                communities.len(),
+                true,
+                omissions,
+            )
+        },
+    );
+    manifest_result?;
+    seals_result?;
     timings.publish = stage_started.elapsed();
     if program.is_none() {
         program = join_program_worker(program_handle.take(), &mut timings)?;
     }
-    save_output_stats(
-        &output_dir,
-        published_nodes,
-        published_edges,
-        communities.len(),
-        true,
-        omissions,
-    )?;
     publish_build_state(
         options,
         &output_dir,
@@ -3254,7 +3271,12 @@ fn published_v1_document(
     configuration_digest: String,
     source_commit: Option<&str>,
 ) -> Result<PublicationOutcome, CoreError> {
+    let mut publication_profile_started = Instant::now();
     let mut publication_source = document.clone();
+    profile_internal(
+        "graph publication source clone",
+        &mut publication_profile_started,
+    );
     let node_communities = communities
         .iter()
         .flat_map(|(community, members)| {
@@ -3278,7 +3300,11 @@ fn published_v1_document(
             );
         }
     }
-    Ok(normalize_document_v1_with_inventory_best_effort_owned(
+    profile_internal(
+        "graph publication community projection",
+        &mut publication_profile_started,
+    );
+    let published = normalize_document_v1_with_inventory_best_effort_owned(
         publication_source,
         root,
         configuration_digest,
@@ -3290,7 +3316,12 @@ fn published_v1_document(
             evidence.extraction_partials,
             root,
         ),
-    )?)
+    )?;
+    profile_internal(
+        "graph publication v1 boundary",
+        &mut publication_profile_started,
+    );
+    Ok(published)
 }
 
 fn detection_inventory(

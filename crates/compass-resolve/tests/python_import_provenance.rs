@@ -21,6 +21,71 @@ fn write(root: &Path, relative: &str, source: &str) -> Result<String, Box<dyn Er
 }
 
 #[test]
+fn python_decorator_uses_resolve_reexports_at_the_decorator_occurrence()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let files = [
+        (
+            "app.py",
+            "from framework import used, unused\n\n@used('class')\nclass Consumer:\n    @used('method')\n    def run(self):\n        pass\n",
+        ),
+        ("framework/__init__.py", "from .decorators import used\n"),
+        (
+            "framework/decorators.py",
+            "def used(value):\n    return value\n",
+        ),
+    ];
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        let path = write(root, relative, source)?;
+        extractions.push(engine.extract(Path::new(&path))?);
+        sources.insert(path, source.to_owned());
+    }
+
+    let extraction = resolve_with_root(&extractions, &sources, root);
+    let target = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            node.label() == "used()"
+                && node
+                    .string("source_file")
+                    .ends_with("framework/decorators.py")
+        })
+        .ok_or("missing anchored decorator definition")?;
+    let decorator_edges = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.string("context") == "decorator")
+        .collect::<Vec<_>>();
+    assert_eq!(decorator_edges.len(), 2, "edges={:#?}", extraction.edges);
+    assert!(
+        decorator_edges.iter().all(|edge| edge.target == target.id),
+        "target={target:#?} edges={decorator_edges:#?}"
+    );
+    assert_eq!(
+        decorator_edges
+            .iter()
+            .map(|edge| edge.string("source_location"))
+            .collect::<Vec<_>>(),
+        ["L3", "L5"]
+    );
+    assert!(decorator_edges.iter().all(|edge| {
+        edge.attributes.contains_key("start_byte")
+            && edge.attributes.contains_key("end_byte")
+            && edge.attributes.contains_key("_endpoint_rewrite_rules")
+    }));
+    assert!(extraction.edges.iter().all(|edge| {
+        edge.string("target_qualified_name") != "framework.unused"
+            && edge.string("rule") != "python-imported-class-use-inference"
+    }));
+    Ok(())
+}
+
+#[test]
 fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -66,25 +131,18 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         "python-symbol-import-resolution",
         "python-submodule-import-resolution",
         "python-module-re-export-resolution",
-        "python-imported-class-use-inference",
     ] {
         assert!(rules.contains(rule), "missing raw resolver rule {rule}");
     }
+    assert!(
+        !rules.contains("python-imported-class-use-inference"),
+        "unused imports must not create relationships to every class"
+    );
     assert!(resolver_edges.iter().all(|edge| {
         edge.string("language") == "python" && edge.string("extractor") == PYTHON_IMPORT_PRODUCER
     }));
     assert!(resolver_edges.iter().all(|edge| {
-        if edge.string("rule") == "python-imported-class-use-inference" {
-            edge.string("_origin") == "heuristic"
-                && edge.string("confidence") == "INFERRED"
-                && edge
-                    .attributes
-                    .get("confidence_score")
-                    .and_then(serde_json::Value::as_f64)
-                    == Some(0.8)
-        } else {
-            edge.string("_origin") == "convention" && edge.string("confidence") == "EXTRACTED"
-        }
+        edge.string("_origin") == "convention" && edge.string("confidence") == "EXTRACTED"
     }));
 
     let caller_path = root.join("caller.py").to_string_lossy().into_owned();
@@ -177,7 +235,6 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         "python-symbol-import-resolution",
         "python-submodule-import-resolution",
         "python-module-re-export-resolution",
-        "python-imported-class-use-inference",
     ] {
         assert!(
             published_rules.contains(rule),
@@ -185,19 +242,11 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         );
     }
     for (edge, evidence) in &published {
-        if evidence.rule.as_deref() == Some("python-imported-class-use-inference") {
-            assert_eq!(edge.kind, EdgeKind::References);
-            assert_eq!(evidence.origin, EvidenceOrigin::Heuristic);
-            assert_eq!(evidence.confidence, EvidenceConfidence::Inferred);
-            assert!(evidence.anchors.is_empty());
-            assert_eq!(evidence.score, Some(0.8));
-            assert!(evidence.wiring_site.is_some());
-        } else {
-            assert_eq!(evidence.origin, EvidenceOrigin::Convention);
-            assert_eq!(evidence.confidence, EvidenceConfidence::Exact);
-            assert_eq!(evidence.anchors.len(), 1);
-            assert!(evidence.wiring_site.is_none());
-        }
+        let _ = edge;
+        assert_eq!(evidence.origin, EvidenceOrigin::Convention);
+        assert_eq!(evidence.confidence, EvidenceConfidence::Exact);
+        assert_eq!(evidence.anchors.len(), 1);
+        assert!(evidence.wiring_site.is_none());
     }
     let multiline_evidence = published
         .iter()

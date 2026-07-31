@@ -6,8 +6,9 @@ Date: 2026-07-30
 
 The qualification harness lives in `benchmarks/performance/` and defaults to
 Compass-only execution. Graphify comparison is explicit. A separate three-run
-Graphify cold-build confirmation was performed after the final Compass
-verification.
+Graphify cold-build confirmation was performed earlier in the work. Final
+Compass verification reused the pinned Graphify 0.9.31 artifacts and did not
+rerun Graphify.
 
 The checked-in suite pins Django, Spring Framework, Rails, Laravel, Bevy,
 ASP.NET Core, Angular, and Entire to exact remote commits at run time. This
@@ -20,11 +21,13 @@ because all eight repositories were not measured on this runner.
 - Hardware: Apple M2 Max, 12 logical cores, 32 GiB RAM
 - OS: Darwin 25.5.0 arm64
 - Rust: 1.97.1
-- Final Compass commit: `b86dc228037b6410e006078ec85e76bf44ef7c9d`
+- Final measured Compass commit:
+  `35d13d4faff9fd8cf14191155edf80ebf4b2bdcb`
 - Final Compass release SHA-256:
-  `9c27ea72451d1bde002753b744a18698f5ff5e9ed742977df23d96ce6e9bcb9c`
-- Graphify version: 0.9.30
-- Graphify commit: `ecfcd160d56b420eb8241430fa7b5b1951c7829f`
+  `abfdd5a76e7f58c91b9368ee154db2288126f17b7e128b5fc53833ea6f6372ca`
+- Retained Graphify baseline version: 0.9.31
+- Retained Graphify baseline commit:
+  `4fe11092ccbe9f543608f140c790f68d5d83cae4`
 - Django commit: `50d706d0aebcc2d073c8d034b6e22fc98fad49f2`
 - Entire commit: `279b988597f1037c14cdd4c46765a5552e067d17`
 
@@ -190,6 +193,101 @@ the required `URLResolver`.
 | Entire checkpoint creation | 0.655 s, pass | 1.199 s, pass |
 | Entire repository state | 1.614 s, pass | 1.923 s, pass |
 
+### Phase-two source-backed qualification
+
+Phase two was implemented before its regression tests, following the execution
+rule in the phase plan. The final release binary was rebuilt from the delivery
+tree before evidence collection. The production binary is unchanged between
+`034fb1e` and the final comparator-only commit `35d13d4`. Fresh output roots
+were used for both repositories, and every eligible build produced the same
+canonical correctness digest:
+
+- Django graph SHA-256:
+  `a55af88fb1a88a58f247270bcc961227f7db89d5fe9dc531d9e38ab272be89ff`
+- Entire graph SHA-256:
+  `e985a75ac4d59972b39392cfa70efe5596df6587c39664d0f06e436f66d7bec7`
+
+Both final graphs indexed with zero validation errors. The strict comparison
+against the same Graphify 0.9.31 artifacts produced:
+
+| Repository | Graphify fact | Exact | Dominated | Rejected | Ambiguous | Missing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Django | Nodes | 50,457 | 9 | 0 | 33 | 346 |
+| Django | Edges | 100,077 | 1,198 | 53,045 | 63 | 4,327 |
+| Entire | Nodes | 19,695 | 842 | 0 | 47 | 1 |
+| Entire | Edges | 54,309 | 2,993 | 2,889 | 129 | 742 |
+
+Rejected facts are audited baseline conflicts, not Compass matches. After
+removing those conflicts from the source-grounded denominator, Compass has
+95.84% accepted Django edge coverage and 98.50% accepted Entire edge coverage;
+node exact-or-dominated coverage is 99.25% and 99.77%, respectively. Compass
+publishes 55,120 nodes and 130,847 distinct edges for Django, and 21,711 nodes
+and 72,250 edges for Entire. That is 4,275 more nodes than Graphify on Django,
+1,126 more on Entire, and 11,188 more total edges on Entire, while both Compass
+graphs retain zero validation errors.
+
+The raw Django edge result is intentionally not presented as a literal recall
+win.
+The implementation removed the all-imports × all-classes resolver rule. In the
+pinned corpus, 53,005 Graphify `references` edges project an import occurrence
+onto symbols without a symbol-use occurrence; these moved to the comparator's
+explicit `rejected` category. Rejection requires the reference target and
+occurrence to coincide with a real import fact, so it does not turn arbitrary
+missing facts into passes. In exchange, 3,102
+previously missing decorator references became exact at their real decorator
+lines. The phase also moved 46 inherited-type edges from dominated to exact,
+added 32 exact calls, and restored two shell containment edges. A unique
+same-target relationship at the same exact occurrence may now dominate a
+Graphify relationship whose owner is only a broader placeholder; this accounts
+for the increase to 1,198 dominated Django edges.
+
+Entire gained first-class `embeds` and shell entrypoint facts and reduced its
+genuine missing edge set to 742. Another 2,889 Graphify edges were rejected
+only where a qualified external Compass target proves Graphify rebound the
+same occurrence to an unrelated local same-name type. Examples include
+`context.Context` rebound to the repository's `contexts.Context` and
+`io.Writer` rebound to a project-local `Writer`. Exact matches take precedence
+over this rejection, and qualified-label compatibility plus the exact
+relationship occurrence are both required. The remaining misses contain
+genuine unresolved call/reference targets and remain visible rather than being
+accepted through label-only matching.
+
+The final five-sample release measurements used the same `compass extract
+--code-only --timing --out` contract as the harness:
+
+| Repository | Compass cold p50 | Cold p95 | Warm p50 | Incremental p50 | Peak cold RSS | Graphify 0.9.31 cold p50 | Cold speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Django | 9.3868 s | 10.7207 s | 1.6324 s | 15.6107 s | 4,209.44 MiB | 49.985 s | 5.33x |
+| Entire | 3.5001 s | 4.7039 s | 0.5391 s | 5.9863 s | 1,492.73 MiB | 17.650 s | 5.04x |
+
+All five cold samples for each repository were eligible and produced identical
+correctness digests. Both retained-Graphify cold comparisons clear 5x, although
+the Entire margin is narrow and is not described as comfortable. No Graphify
+warm, incremental, or query ratio is claimed because final verification did
+not rerun Graphify. Publication now uses indexed inventory/file-coverage and
+hash lookups, a trivial-evidence fast path, a single proven-clean validation
+path, and deterministic parallel preparation for v1 edges, files, and
+independent publication metadata.
+
+All four semantic query oracles passed across ten measured fresh processes per
+query:
+
+| Repository / query | p50 | p95 | Result |
+| --- | ---: | ---: | --- |
+| Django URL resolution | 1.4484 s | 1.4638 s | 10/10 pass |
+| Django model save | 1.4598 s | 1.5053 s | 10/10 pass |
+| Entire checkpoint creation | 0.7148 s | 0.7494 s | 10/10 pass |
+| Entire repository state | 0.7060 s | 0.7847 s | 10/10 pass |
+
+Strict literal Graphify-superset quality is therefore still not achieved.
+Phase two does improve source-backed quality over the retained Graphify
+baseline: it preserves qualified identity, real occurrences, decorators,
+embeddings, and shell entrypoints while explicitly rejecting two demonstrated
+false-positive families. The comparator remains fail-closed and exposes 346
+Django and one Entire node misses plus 4,327 Django and 742 Entire edge misses.
+Those residuals, rather than restoration of audited false positives, are the
+next graph-quality target.
+
 ## Changes validated
 
 - Exact path-aware AST cache keys prevent byte-identical symlinks from losing
@@ -215,11 +313,13 @@ the required `URLResolver`.
 
 ## Remaining bottlenecks
 
-The final Django cold profile spends approximately 5.7 seconds in the required
-v1 publication normalization, 4.4 seconds in extraction/resolution, and 2.5-2.7
-seconds in Program analysis. Fresh-process queries are dominated by loading and
-indexing the 242 MiB JSON graph. These are the next optimization targets; none
-can be bypassed at the cost of graph validation or semantic quality.
+The final profile reduced v1 edge normalization from approximately 0.252
+seconds to 0.099 seconds and the full v1 boundary to approximately
+0.63-0.67 seconds on the measured production graph. Fresh-process queries are
+still dominated by loading and indexing the JSON graph. Graph loading,
+incremental publication, and the residual genuine semantic misses are the next
+optimization targets; none can be bypassed at the cost of validation or
+source-backed identity.
 
 ## Reports
 
@@ -229,3 +329,9 @@ can be bypassed at the cost of graph validation or semantic quality.
 - `target/performance/runs/django-optimized-fixed/run.json`
 - `target/performance/runs/entire-baseline-fixed/summary.md`
 - `target/performance/runs/entire-baseline-fixed/run.json`
+- `target/performance/runs/django-final-35d13d4/summary.md`
+- `target/performance/runs/django-final-35d13d4/run.json`
+- `target/performance/runs/entire-final-034fb1e/summary.md`
+- `target/performance/runs/entire-final-034fb1e/run.json`
+- `target/performance/runs/query-final-35d13d4/summary.md`
+- `target/performance/runs/query-final-35d13d4/run.json`

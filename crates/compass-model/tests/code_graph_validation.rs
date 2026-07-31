@@ -421,6 +421,7 @@ fn non_recursive_self_loops_are_rejected_but_recursive_calls_are_valid() {
 fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
     for (kind, source_kind, target_kind) in [
         (EdgeKind::Contains, NodeKind::Function, NodeKind::File),
+        (EdgeKind::Embeds, NodeKind::Struct, NodeKind::Function),
         (EdgeKind::Contains, NodeKind::Database, NodeKind::Function),
         (EdgeKind::Contains, NodeKind::Function, NodeKind::Queue),
         (EdgeKind::Calls, NodeKind::File, NodeKind::Class),
@@ -541,6 +542,7 @@ fn tests_edge_accepts_an_explicit_test_role_and_testable_target() {
 #[test]
 fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
     for (kind, source_kind, target_kind) in [
+        (EdgeKind::Embeds, NodeKind::Struct, NodeKind::Interface),
         (EdgeKind::Contains, NodeKind::Function, NodeKind::Method),
         (EdgeKind::Contains, NodeKind::Method, NodeKind::Class),
         (EdgeKind::Contains, NodeKind::TypeAlias, NodeKind::Method),
