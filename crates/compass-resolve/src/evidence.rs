@@ -483,7 +483,14 @@ impl UniversalResolutionIndex {
             .iter()
             .map(|node| (node.id.clone(), node.string("symbol_kind")))
             .collect::<BTreeMap<_, _>>();
-        let mut emitted_external = BTreeSet::new();
+        let mut external_positions = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| {
+                node.attributes.get("external").and_then(Value::as_bool) == Some(true)
+            })
+            .map(|(index, node)| (node.id.clone(), index))
+            .collect::<BTreeMap<_, _>>();
         let mut emitted_edges = BTreeSet::new();
         let candidate_ids = self.candidate_ids();
         profile_internal("universal candidate ordering", &mut profile_started);
@@ -521,47 +528,27 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
-                    let site = self
-                        .occurrence(candidate)
-                        .map(|occurrence| &occurrence.range);
-                    let binding_site = candidate
-                        .binding_id
-                        .as_deref()
-                        .and_then(|id| self.bindings.get(id))
-                        .map(|binding| &binding.range);
-                    let external_site = binding_site.or(site);
                     let kind = external_kind(candidate);
-                    let id = match (kind, external_site) {
-                        ("import" | "export", Some(range)) => make_id(&[
-                            "external",
-                            &candidate.language,
-                            kind,
-                            &qualified_name,
-                            &range.source_file,
-                            &range.start_byte.to_string(),
-                            &range.end_byte.to_string(),
-                        ]),
-                        (_, Some(range)) => make_id(&[
-                            "external",
-                            &candidate.language,
-                            kind,
-                            &qualified_name,
-                            &range.source_file,
-                        ]),
-                        (_, None) => {
-                            make_id(&["external", &candidate.language, kind, &qualified_name])
-                        }
-                    };
-                    if !existing_nodes.contains(&id) && emitted_external.insert(id.clone()) {
+                    let id = make_id(&["external", &candidate.language, &qualified_name]);
+                    if let Some(position) = external_positions.get(&id).copied() {
+                        merge_external_node(&mut nodes[position], candidate);
+                    } else if !existing_nodes.contains(&id) {
+                        let position = nodes.len();
                         nodes.push(external_node(
                             &id,
                             &qualified_name,
                             &candidate.language,
                             candidate,
-                            external_site,
                         ));
+                        existing_nodes.insert(id.clone());
+                        external_positions.insert(id.clone(), position);
                     }
-                    (id, evidence.rule, Some(kind.to_owned()))
+                    let projected_kind = external_positions
+                        .get(&id)
+                        .map(|position| nodes[*position].string("symbol_kind"))
+                        .filter(|kind| !kind.is_empty())
+                        .unwrap_or_else(|| kind.to_owned());
+                    (id, evidence.rule, Some(projected_kind))
                 }
                 ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => continue,
             };
@@ -921,12 +908,10 @@ fn external_node(
     qualified_name: &str,
     language: &str,
     candidate: &RelationshipCandidate,
-    site: Option<&compass_languages::EvidenceRange>,
 ) -> NodeRecord {
     let kind = external_kind(candidate);
-    let source_file = site.map_or_else(String::new, |range| range.source_file.clone());
-    let source_location = site.map_or_else(String::new, |range| format!("L{}", range.start_line));
-    let mut attributes = Map::from_iter([
+    let role = relation_name(candidate.relation);
+    let attributes = Map::from_iter([
         (
             "label".to_owned(),
             Value::String(
@@ -943,12 +928,13 @@ fn external_node(
         ),
         ("symbol_kind".to_owned(), Value::String(kind.to_owned())),
         ("file_type".to_owned(), Value::String("code".to_owned())),
-        ("source_file".to_owned(), Value::String(source_file)),
-        ("source_location".to_owned(), Value::String(source_location)),
+        ("source_file".to_owned(), Value::String(String::new())),
+        ("source_location".to_owned(), Value::String(String::new())),
         ("language".to_owned(), Value::String(language.to_owned())),
+        ("external_role".to_owned(), Value::String(role.to_owned())),
         (
-            "external_role".to_owned(),
-            Value::String(relation_name(candidate.relation).to_owned()),
+            "external_roles".to_owned(),
+            Value::Array(vec![Value::String(role.to_owned())]),
         ),
         (
             "extractor".to_owned(),
@@ -966,21 +952,43 @@ fn external_node(
             ),
         ),
         ("external".to_owned(), Value::Bool(true)),
+        ("placeholder".to_owned(), Value::Bool(true)),
+        ("_canonical_external_symbol".to_owned(), Value::Bool(true)),
     ]);
-    if let Some(range) = site {
-        attributes.extend([
-            ("start_byte".to_owned(), Value::from(range.start_byte)),
-            ("end_byte".to_owned(), Value::from(range.end_byte)),
-            ("line_start".to_owned(), Value::from(range.start_line)),
-            ("line_end".to_owned(), Value::from(range.end_line)),
-            ("column_start".to_owned(), Value::from(range.start_column)),
-            ("column_end".to_owned(), Value::from(range.end_column)),
-        ]);
-    }
     NodeRecord {
         id: id.to_owned(),
         attributes,
     }
+}
+
+fn merge_external_node(node: &mut NodeRecord, candidate: &RelationshipCandidate) {
+    let incoming_kind = external_kind(candidate);
+    let current_kind = node.string("symbol_kind");
+    if external_kind_rank(incoming_kind) > external_kind_rank(&current_kind) {
+        node.attributes.insert(
+            "symbol_kind".to_owned(),
+            Value::String(incoming_kind.to_owned()),
+        );
+        node.attributes.insert(
+            "external_role".to_owned(),
+            Value::String(relation_name(candidate.relation).to_owned()),
+        );
+    }
+    let incoming_role = relation_name(candidate.relation);
+    let mut roles = node
+        .attributes
+        .get("external_roles")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    roles.insert(incoming_role.to_owned());
+    node.attributes.insert(
+        "external_roles".to_owned(),
+        Value::Array(roles.into_iter().map(Value::String).collect()),
+    );
 }
 
 fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
@@ -992,18 +1000,24 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
         }
         CandidateRelation::Implements => "interface",
         CandidateRelation::AccessesMember => "variable",
-        CandidateRelation::Calls
-        | CandidateRelation::IndirectCalls
-        | CandidateRelation::Constructs
-        | CandidateRelation::Decorates
-        | CandidateRelation::References => {
-            if candidate.binding_id.is_some() {
-                "import"
-            } else {
-                "variable"
-            }
-        }
+        CandidateRelation::Calls | CandidateRelation::IndirectCalls => "function",
+        CandidateRelation::Constructs => "class",
+        CandidateRelation::Decorates => "function",
+        CandidateRelation::References => "variable",
         CandidateRelation::Contains | CandidateRelation::Owns => "variable",
+    }
+}
+
+fn external_kind_rank(kind: &str) -> u8 {
+    match kind {
+        "interface" => 7,
+        "class" => 6,
+        "type_alias" => 5,
+        "function" => 4,
+        "variable" => 3,
+        "import" => 2,
+        "export" => 1,
+        _ => 0,
     }
 }
 

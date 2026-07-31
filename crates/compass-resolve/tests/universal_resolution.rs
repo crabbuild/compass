@@ -96,11 +96,16 @@ fn universal_batches_discard_stale_untyped_raw_calls_in_both_merge_paths() {
     );
     let mut caller = extract("app.py", b"def caller():\n    actual()\n");
     let caller_id = caller
-        .nodes
-        .iter()
-        .find(|node| node.label() == "caller()")
-        .expect("caller node")
-        .id
+        .semantic_evidence
+        .as_ref()
+        .and_then(|evidence| {
+            evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.name == "caller")
+        })
+        .expect("caller declaration evidence")
+        .graph_node_id
         .clone();
     caller.raw_calls = Some(vec![RawCall {
         caller_nid: caller_id,
@@ -305,7 +310,7 @@ fn universal_declarations_project_without_prebuilt_graph_nodes() {
 }
 
 #[test]
-fn repeated_external_type_uses_share_the_exact_import_binding() {
+fn repeated_external_type_uses_share_one_canonical_symbol_and_exact_edges() {
     let source = b"from ctypes import Structure\nclass First(Structure):\n    pass\nclass Second(Structure):\n    pass\n";
     let extracted = extract("models.py", source);
     let sources = HashMap::from([(
@@ -323,7 +328,14 @@ fn repeated_external_type_uses_share_the_exact_import_binding() {
         .collect::<Vec<_>>();
 
     assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].string("source_location"), "L1");
+    assert_eq!(targets[0].string("source_location"), "");
+    assert_eq!(
+        targets[0]
+            .attributes
+            .get("placeholder")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
     let mut sites = resolved
         .edges
         .iter()

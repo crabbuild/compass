@@ -701,7 +701,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
 }
 
 #[test]
-fn qualified_external_python_calls_are_source_scoped_and_follow_rebindings()
+fn qualified_external_python_calls_are_canonical_and_follow_rebindings()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -750,11 +750,11 @@ fn qualified_external_python_calls_are_source_scoped_and_follow_rebindings()
         .iter()
         .filter(|node| {
             node.string("extractor") == "compass.resolve.python.universal"
-                && !node.string("source_file").is_empty()
+                && node.string("source_file").is_empty()
                 && node.string("external_role") == "calls"
         })
         .collect::<Vec<_>>();
-    assert_eq!(placeholders.len(), 4);
+    assert_eq!(placeholders.len(), 2);
     assert!(placeholders.iter().all(|node| {
         node.attributes
             .get("external")
@@ -766,15 +766,15 @@ fn qualified_external_python_calls_are_source_scoped_and_follow_rebindings()
             .iter()
             .filter(|node| node.string("qualified_name") == "unittest.mock.patch")
             .count(),
-        2,
-        "the same external symbol must remain scoped to each exact source occurrence"
+        1,
+        "the same qualified external symbol must have one canonical node"
     );
     assert_eq!(
         placeholders
             .iter()
             .filter(|node| node.string("qualified_name") == "vendor.mock.patch")
             .count(),
-        2,
+        1,
         "the later import is the active binding in ambiguous.py"
     );
     assert!(
@@ -824,20 +824,25 @@ fn qualified_external_python_calls_are_source_scoped_and_follow_rebindings()
         .nodes
         .iter()
         .filter(|node| {
-            node.kind == NodeKind::Import
-                && node.source.is_some()
+            node.kind == NodeKind::Function
+                && node.source.is_none()
                 && matches!(
                     node.qualified_name.as_str(),
                     "unittest.mock.patch" | "vendor.mock.patch"
                 )
         })
         .collect::<Vec<_>>();
-    assert_eq!(published_placeholders.len(), 4);
+    assert_eq!(
+        published_placeholders.len(),
+        2,
+        "published canonical placeholders: {published_placeholders:#?}"
+    );
     assert!(published_placeholders.iter().all(|node| {
         node.evidence.iter().any(|evidence| {
-            evidence.origin == EvidenceOrigin::Ast
+            evidence.origin == EvidenceOrigin::Heuristic
                 && evidence.confidence == EvidenceConfidence::Exact
-                && evidence.anchors.len() == 1
+                && evidence.anchors.is_empty()
+                && evidence.wiring_site.is_some()
         })
     }));
     assert_eq!(

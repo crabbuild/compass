@@ -42,6 +42,7 @@ const TRUSTED_EDGE_RECORD: &str = TRUSTED_EDGE_RECORD_ATTRIBUTE;
 const TRUSTED_GRAPH_COVERAGE: &str = "_compass_v1_graph_coverage";
 const TRUSTED_GRAPH_DIAGNOSTICS: &str = "_compass_v1_graph_diagnostics";
 const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
+const CANONICAL_EXTERNAL_SYMBOL: &str = "_canonical_external_symbol";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
 
@@ -1528,6 +1529,11 @@ fn split_sourceless_placeholders(
             node.attributes.get(TRUSTED_NODE_RECORD).is_none()
                 && optional_source_path(&node.attributes, "source_file").is_none()
                 && !node.attributes.contains_key("source_anchor")
+                && node
+                    .attributes
+                    .get(CANONICAL_EXTERNAL_SYMBOL)
+                    .and_then(Value::as_bool)
+                    != Some(true)
         })
         .map(|node| node.id.clone())
         .collect::<BTreeSet<_>>();
@@ -2733,6 +2739,11 @@ fn normalize_node(
     } else {
         None
     };
+    let canonical_external = raw
+        .attributes
+        .get(CANONICAL_EXTERNAL_SYMBOL)
+        .and_then(Value::as_bool)
+        == Some(true);
     if source.is_none()
         && external_wiring_site.is_none()
         && optional_string(&raw.attributes, "extractor").as_deref()
@@ -2835,7 +2846,11 @@ fn normalize_node(
         &qualified_name,
         &raw.id,
         details.as_ref(),
-        source.as_ref().or(external_wiring_site.as_ref()),
+        if canonical_external {
+            source.as_ref()
+        } else {
+            source.as_ref().or(external_wiring_site.as_ref())
+        },
     )?;
     let diagnostics = external_wiring_site
         .as_ref()
