@@ -3906,15 +3906,16 @@ fn cached_universal_evidence_matches(extraction: &Extraction, path: &Path) -> bo
     let Some(profile) = Registry::universal_adapter(path) else {
         return true;
     };
-    extraction.semantic_evidence.as_ref().is_some_and(|batch| {
-        batch.adapter.language == profile.language
-            && batch.adapter.capabilities.as_slice() == profile.capabilities
-            && compass_languages::validate_evidence(
-                batch,
-                compass_languages::EvidenceLimits::default(),
-            )
-            .is_ok()
-    })
+    extraction.raw_calls.is_none()
+        && extraction.semantic_evidence.as_ref().is_some_and(|batch| {
+            batch.adapter.language == profile.language
+                && batch.adapter.capabilities.as_slice() == profile.capabilities
+                && compass_languages::validate_evidence(
+                    batch,
+                    compass_languages::EvidenceLimits::default(),
+                )
+                .is_ok()
+        })
 }
 
 #[cfg(test)]
@@ -3949,6 +3950,19 @@ mod tests {
                 .as_deref(),
             Some("0123456789")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn universal_cache_entries_reject_any_replaced_raw_call_payload() -> Result<(), Box<dyn Error>>
+    {
+        let path = Path::new("cached.py");
+        let mut extraction = compass_languages::Engine::default()
+            .extract_source(path, b"def cached():\n    pass\n")?;
+        assert!(cached_universal_evidence_matches(&extraction, path));
+
+        extraction.raw_calls = Some(Vec::new());
+        assert!(!cached_universal_evidence_matches(&extraction, path));
         Ok(())
     }
 

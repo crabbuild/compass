@@ -4,9 +4,10 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use compass_languages::{
-    CandidateRelation, DeclarationFact, EvidenceLimits, OccurrenceFact, RelationshipCandidate,
-    SemanticEvidenceBatch, make_id, validate_evidence,
+    BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, OccurrenceFact,
+    RelationshipCandidate, SemanticEvidenceBatch, make_id, validate_evidence,
 };
+use compass_model::provenance::OCCURRENCE_RULE_ATTRIBUTE;
 use serde_json::{Map, Value};
 
 use compass_languages::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
@@ -366,7 +367,19 @@ impl UniversalResolutionIndex {
                     },
                 };
             }
-            let qualified = match self.follow_alias(language, &binding.qualified_target) {
+            let binding_lookup = if matches!(
+                candidate.relation,
+                CandidateRelation::Imports | CandidateRelation::Reexports
+            ) {
+                candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .unwrap_or(&binding.qualified_target)
+            } else {
+                &binding.qualified_target
+            };
+            let qualified = match self.follow_alias(language, binding_lookup) {
                 Ok(qualified) => qualified,
                 Err(candidate_count) => {
                     return ResolutionDecision::Ambiguous { candidate_count };
@@ -383,11 +396,8 @@ impl UniversalResolutionIndex {
             if let Some(decision) = self.inventory_decision(language, &qualified, candidate) {
                 return decision;
             }
-            let imported = self.imported_declarations(
-                language,
-                &binding.qualified_target,
-                &candidate.target_spelling,
-            );
+            let imported =
+                self.imported_declarations(language, binding_lookup, &candidate.target_spelling);
             if !imported.is_empty()
                 && let Some(decision) = self.unique_decision(
                     Some(&imported),
@@ -452,10 +462,27 @@ impl UniversalResolutionIndex {
 
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
         let mut profile_started = Instant::now();
-        let existing_nodes = nodes
+        let existing_positions = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.id.clone(), index))
+            .collect::<BTreeMap<_, _>>();
+        let mut existing_nodes = nodes
             .iter()
             .map(|node| node.id.clone())
             .collect::<BTreeSet<_>>();
+        for declaration in self.declarations.values() {
+            if let Some(index) = existing_positions.get(&declaration.graph_node_id) {
+                project_declaration_onto_node(&mut nodes[*index], declaration);
+            } else if existing_nodes.insert(declaration.graph_node_id.clone()) {
+                nodes.push(declaration_node(declaration));
+            }
+        }
+        profile_internal("universal declaration projection", &mut profile_started);
+        let inventory_kinds = nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.string("symbol_kind")))
+            .collect::<BTreeMap<_, _>>();
         let mut emitted_external = BTreeSet::new();
         let mut emitted_edges = BTreeSet::new();
         let candidate_ids = self.candidate_ids();
@@ -469,7 +496,7 @@ impl UniversalResolutionIndex {
             else {
                 continue;
             };
-            let (target, resolution_rule) = match self.resolve(candidate_id) {
+            let (target, resolution_rule, target_kind) = match self.resolve(candidate_id) {
                 ResolutionDecision::Resolved {
                     declaration_id,
                     evidence,
@@ -477,12 +504,19 @@ impl UniversalResolutionIndex {
                     let Some(target) = self.declarations.get(&declaration_id) else {
                         continue;
                     };
-                    (target.graph_node_id.clone(), evidence.rule)
+                    (
+                        target.graph_node_id.clone(),
+                        evidence.rule,
+                        Some(target.kind.clone()),
+                    )
                 }
                 ResolutionDecision::ResolvedInventory {
                     graph_node_id,
                     evidence,
-                } => (graph_node_id, evidence.rule),
+                } => {
+                    let kind = inventory_kinds.get(&graph_node_id).cloned();
+                    (graph_node_id, evidence.rule, kind)
+                }
                 ResolutionDecision::QualifiedExternal {
                     qualified_name,
                     evidence,
@@ -527,7 +561,7 @@ impl UniversalResolutionIndex {
                             external_site,
                         ));
                     }
-                    (id, evidence.rule)
+                    (id, evidence.rule, Some(kind.to_owned()))
                 }
                 ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => continue,
             };
@@ -563,6 +597,7 @@ impl UniversalResolutionIndex {
                 site.source_file.clone(),
                 site.start_byte,
                 site.end_byte,
+                candidate.id.clone(),
             );
             if !emitted_edges.insert(key) || source == target {
                 continue;
@@ -571,7 +606,13 @@ impl UniversalResolutionIndex {
                 source,
                 target,
                 relation,
-                candidate.relation,
+                candidate,
+                self.occurrence(candidate),
+                candidate
+                    .binding_id
+                    .as_deref()
+                    .and_then(|binding_id| self.bindings.get(binding_id)),
+                target_kind.as_deref(),
                 site,
                 resolution_rule,
                 &candidate.language,
@@ -754,9 +795,101 @@ fn insert_unique<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Resu
     Ok(())
 }
 
+fn project_declaration_onto_node(node: &mut NodeRecord, declaration: &DeclarationFact) {
+    node.attributes
+        .extend(declaration_node(declaration).attributes);
+}
+
+fn declaration_node(declaration: &DeclarationFact) -> NodeRecord {
+    let label = match declaration.kind.as_str() {
+        "function" => format!("{}()", declaration.name),
+        "method" => format!(".{}()", declaration.name),
+        _ => declaration.name.clone(),
+    };
+    let callable = matches!(declaration.kind.as_str(), "function" | "method");
+    let mut attributes = Map::from_iter([
+        ("label".to_owned(), Value::String(label)),
+        (
+            "qualified_name".to_owned(),
+            Value::String(declaration.qualified_name.clone()),
+        ),
+        (
+            "symbol_kind".to_owned(),
+            Value::String(declaration.kind.clone()),
+        ),
+        ("file_type".to_owned(), Value::String("code".to_owned())),
+        (
+            "source_file".to_owned(),
+            Value::String(declaration.range.source_file.clone()),
+        ),
+        (
+            "source_location".to_owned(),
+            Value::String(format!("L{}", declaration.range.start_line)),
+        ),
+        (
+            "start_byte".to_owned(),
+            Value::from(declaration.range.start_byte),
+        ),
+        (
+            "end_byte".to_owned(),
+            Value::from(declaration.range.end_byte),
+        ),
+        (
+            "line_start".to_owned(),
+            Value::from(declaration.range.start_line),
+        ),
+        (
+            "line_end".to_owned(),
+            Value::from(declaration.range.end_line),
+        ),
+        (
+            "column_start".to_owned(),
+            Value::from(declaration.range.start_column),
+        ),
+        (
+            "column_end".to_owned(),
+            Value::from(declaration.range.end_column),
+        ),
+        (
+            "language".to_owned(),
+            Value::String(declaration.language.clone()),
+        ),
+        (
+            "extractor".to_owned(),
+            Value::String(format!(
+                "compass.languages.{}.universal",
+                declaration.language
+            )),
+        ),
+        (
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        ),
+        ("_origin".to_owned(), Value::String("ast".to_owned())),
+        (
+            "evidence_declaration_id".to_owned(),
+            Value::String(declaration.id.clone()),
+        ),
+    ]);
+    if callable {
+        attributes.insert("_callable".to_owned(), Value::Bool(true));
+    }
+    if let Some(module_or_package) = declaration.module_or_package.as_ref() {
+        attributes.insert(
+            "module".to_owned(),
+            Value::String(module_or_package.clone()),
+        );
+    }
+    NodeRecord {
+        id: declaration.graph_node_id.clone(),
+        attributes,
+    }
+}
+
 fn relation_name(relation: CandidateRelation) -> &'static str {
     match relation {
         CandidateRelation::Calls | CandidateRelation::Constructs => "calls",
+        CandidateRelation::IndirectCalls => "indirect_call",
         CandidateRelation::Decorates => "references",
         CandidateRelation::Annotates | CandidateRelation::References => "references",
         CandidateRelation::Extends => "inherits",
@@ -847,6 +980,7 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
         CandidateRelation::Implements => "interface",
         CandidateRelation::AccessesMember => "variable",
         CandidateRelation::Calls
+        | CandidateRelation::IndirectCalls
         | CandidateRelation::Constructs
         | CandidateRelation::Decorates
         | CandidateRelation::References => {
@@ -860,19 +994,31 @@ fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn materialized_edge(
     source: String,
     target: String,
     relation: &str,
-    candidate_relation: CandidateRelation,
+    candidate: &RelationshipCandidate,
+    occurrence: Option<&OccurrenceFact>,
+    binding: Option<&BindingFact>,
+    target_kind: Option<&str>,
     range: &compass_languages::EvidenceRange,
-    rule: ResolutionRule,
+    resolution_rule: ResolutionRule,
     language: &str,
 ) -> EdgeRecord {
-    let context = match (relation, rule) {
+    let context = match (relation, resolution_rule) {
         ("calls", ResolutionRule::QualifiedExternal) => "external_call",
         ("calls", _) => "call",
-        ("references", _) if candidate_relation == CandidateRelation::Decorates => "decorator",
+        ("indirect_call", _) => occurrence
+            .and_then(|occurrence| occurrence.context.as_deref())
+            .unwrap_or("reference"),
+        ("references", _) if candidate.relation == CandidateRelation::Decorates => "decorator",
+        ("imports_from", _)
+            if candidate.relation == CandidateRelation::Imports && target_kind == Some("file") =>
+        {
+            "submodule_import"
+        }
         ("imports_from", _) => "import",
         ("re_exports", _) => "export",
         ("inherits", _) => "base_type",
@@ -881,13 +1027,20 @@ fn materialized_edge(
         ("method", _) => "receiver",
         _ => "",
     };
-    let confidence = if rule == ResolutionRule::QualifiedExternal {
+    let confidence = if resolution_rule == ResolutionRule::QualifiedExternal {
         "INFERRED"
     } else {
         "EXTRACTED"
     };
+    let producer_rule = format!(
+        "universal-{}-{}",
+        candidate_relation_name(candidate.relation),
+        resolution_rule_name(resolution_rule)
+    );
+    let occurrence_rule = format!("{producer_rule}:{}", candidate.id);
     let mut attributes = Map::from_iter([
         ("relation".to_owned(), Value::String(relation.to_owned())),
+        ("_origin".to_owned(), Value::String("ast".to_owned())),
         (
             "confidence".to_owned(),
             Value::String(confidence.to_owned()),
@@ -914,9 +1067,52 @@ fn materialized_edge(
         ),
         (
             "resolution_rule".to_owned(),
-            Value::String(format!("{rule:?}").to_ascii_lowercase()),
+            Value::String(resolution_rule_name(resolution_rule).to_owned()),
+        ),
+        ("rule".to_owned(), Value::String(producer_rule)),
+        (
+            OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+            Value::String(occurrence_rule),
+        ),
+        (
+            "evidence_candidate_id".to_owned(),
+            Value::String(candidate.id.clone()),
         ),
     ]);
+    if let Some(occurrence_id) = candidate.occurrence_id.as_ref() {
+        attributes.insert(
+            "evidence_occurrence_id".to_owned(),
+            Value::String(occurrence_id.clone()),
+        );
+    }
+    if matches!(
+        candidate.relation,
+        CandidateRelation::Imports | CandidateRelation::Reexports
+    ) && let Some(binding) = binding
+    {
+        attributes.insert(
+            "local_name".to_owned(),
+            Value::String(binding.spelling.clone()),
+        );
+        attributes.insert(
+            "imported_name".to_owned(),
+            Value::String(candidate.target_spelling.clone()),
+        );
+        attributes.insert(
+            "qualified_target".to_owned(),
+            Value::String(binding.qualified_target.clone()),
+        );
+        attributes.insert(
+            "binding_kind".to_owned(),
+            Value::String(binding_kind_name(binding.kind).to_owned()),
+        );
+        if let Some(module) = candidate.constraints.module_or_package.as_ref() {
+            attributes.insert(
+                "module".to_owned(),
+                Value::String(import_module_for_edge(language, &range.source_file, module)),
+            );
+        }
+    }
     if !context.is_empty() {
         attributes.insert("context".to_owned(), Value::String(context.to_owned()));
     }
@@ -924,6 +1120,76 @@ fn materialized_edge(
         source,
         target,
         attributes,
+    }
+}
+
+fn binding_kind_name(kind: compass_languages::BindingKind) -> &'static str {
+    match kind {
+        compass_languages::BindingKind::Import => "import",
+        compass_languages::BindingKind::ImportAlias => "import_alias",
+        compass_languages::BindingKind::Reexport => "reexport",
+        compass_languages::BindingKind::LocalAlias => "local_alias",
+        compass_languages::BindingKind::Package => "package",
+    }
+}
+
+fn import_module_for_edge(language: &str, source_file: &str, module: &str) -> String {
+    if language != "python" {
+        return module.to_owned();
+    }
+    let source_package = Path::new(source_file)
+        .parent()
+        .map(|parent| {
+            parent
+                .components()
+                .filter_map(|component| component.as_os_str().to_str())
+                .filter(|component| !component.is_empty() && *component != ".")
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let module_components = module
+        .split('.')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let shared = source_package
+        .iter()
+        .zip(&module_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if shared == 0 {
+        return module.to_owned();
+    }
+    let upward = source_package.len().saturating_sub(shared);
+    let suffix = module_components[shared..].join(".");
+    format!("{}{}", ".".repeat(upward.saturating_add(1)), suffix)
+}
+
+const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
+    match relation {
+        CandidateRelation::Calls => "call",
+        CandidateRelation::IndirectCalls => "indirect-call",
+        CandidateRelation::Constructs => "construction",
+        CandidateRelation::Decorates => "decorator",
+        CandidateRelation::Annotates => "annotation",
+        CandidateRelation::Extends => "extends",
+        CandidateRelation::Implements => "implements",
+        CandidateRelation::References => "reference",
+        CandidateRelation::AccessesMember => "member-access",
+        CandidateRelation::Contains => "contains",
+        CandidateRelation::Owns => "owns",
+        CandidateRelation::Embeds => "embedding",
+        CandidateRelation::Imports => "import",
+        CandidateRelation::Reexports => "reexport",
+    }
+}
+
+const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
+    match rule {
+        ResolutionRule::ExactLexicalDeclaration => "exact-lexical-declaration",
+        ResolutionRule::ExplicitBinding => "explicit-binding",
+        ResolutionRule::UniqueModuleOrPackage => "unique-module-or-package",
+        ResolutionRule::ExactSourceInventory => "exact-source-inventory",
+        ResolutionRule::QualifiedExternal => "qualified-external",
     }
 }
 

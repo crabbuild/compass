@@ -51,6 +51,7 @@ pub enum SemanticRole {
     Reexport,
     Alias,
     Call,
+    CallableReference,
     Construction,
     Decorator,
     Annotation,
@@ -69,7 +70,7 @@ impl SemanticRole {
             Self::Import => LanguageCapability::Imports,
             Self::Reexport => LanguageCapability::Reexports,
             Self::Alias => LanguageCapability::Aliases,
-            Self::Call => LanguageCapability::Calls,
+            Self::Call | Self::CallableReference => LanguageCapability::Calls,
             Self::Construction => LanguageCapability::Construction,
             Self::Decorator => LanguageCapability::Decorators,
             Self::Annotation | Self::TypeReference => LanguageCapability::TypeReferences,
@@ -109,6 +110,7 @@ impl BindingKind {
 #[serde(rename_all = "snake_case")]
 pub enum CandidateRelation {
     Calls,
+    IndirectCalls,
     Constructs,
     Decorates,
     Annotates,
@@ -127,7 +129,7 @@ impl CandidateRelation {
     #[must_use]
     pub const fn required_capability(self) -> LanguageCapability {
         match self {
-            Self::Calls => LanguageCapability::Calls,
+            Self::Calls | Self::IndirectCalls => LanguageCapability::Calls,
             Self::Constructs => LanguageCapability::Construction,
             Self::Decorates => LanguageCapability::Decorators,
             Self::Annotates | Self::References | Self::Implements => {
@@ -207,6 +209,8 @@ pub struct OccurrenceFact {
     pub spelling: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qualifier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_id: Option<String>,
     pub range: EvidenceRange,

@@ -165,6 +165,28 @@ impl EvidenceBuilder {
         scope_id: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
+        self.occur_with_context(
+            role,
+            owner_declaration_id,
+            spelling,
+            qualifier,
+            scope_id,
+            None,
+            range,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn occur_with_context(
+        &mut self,
+        role: SemanticRole,
+        owner_declaration_id: &str,
+        spelling: &str,
+        qualifier: Option<&str>,
+        scope_id: Option<&str>,
+        context: Option<&str>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "occurrences",
             self.batch.occurrences.len(),
@@ -178,6 +200,7 @@ impl EvidenceBuilder {
                 spelling,
                 qualifier.unwrap_or_default(),
                 scope_id.unwrap_or_default(),
+                context.unwrap_or_default(),
                 &range.start_byte.to_string(),
                 &range.end_byte.to_string(),
             ],
@@ -189,6 +212,7 @@ impl EvidenceBuilder {
             owner_declaration_id: owner_declaration_id.to_owned(),
             spelling: spelling.to_owned(),
             qualifier: qualifier.map(str::to_owned),
+            context: context.map(str::to_owned),
             scope_id: scope_id.map(str::to_owned),
             range,
         });
@@ -358,6 +382,7 @@ pub(crate) fn extract_tree_evidence(
     if root.end_byte() == root.start_byte() {
         return state.builder.finish();
     }
+    state.capture_parser_errors(root);
     state.add_file(root)?;
     match profile.language {
         "python" => state.extract_python(root)?,
@@ -393,6 +418,12 @@ struct DeclarationContext {
     kind: String,
 }
 
+struct ImportBindingVersion {
+    binding_id: String,
+    target: String,
+    active_from: usize,
+}
+
 struct DirectAdapterState<'source> {
     path: &'source Path,
     source_file: &'source str,
@@ -402,12 +433,13 @@ struct DirectAdapterState<'source> {
     stem: String,
     file: Option<DeclarationContext>,
     declarations: HashMap<usize, DeclarationContext>,
-    bindings: HashMap<String, String>,
-    imported_targets: HashMap<String, String>,
+    import_bindings: HashMap<String, HashMap<String, Vec<ImportBindingVersion>>>,
     local_bindings: HashMap<String, HashMap<String, String>>,
     local_targets: HashMap<String, HashMap<String, String>>,
-    ambiguous_bindings: HashSet<String>,
+    ambiguous_bindings: HashSet<(String, String)>,
+    go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
     graph_ids: HashSet<String>,
+    parser_error_ranges: Vec<(usize, usize)>,
     builder: EvidenceBuilder,
 }
 
@@ -437,12 +469,13 @@ impl<'source> DirectAdapterState<'source> {
             stem,
             file: None,
             declarations: HashMap::new(),
-            bindings: HashMap::new(),
-            imported_targets: HashMap::new(),
+            import_bindings: HashMap::new(),
             local_bindings: HashMap::new(),
             local_targets: HashMap::new(),
             ambiguous_bindings: HashSet::new(),
+            go_lexical_bindings: HashMap::new(),
             graph_ids: HashSet::new(),
+            parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
                 profile,
                 format!("compass.languages.{}.universal", profile.language),
@@ -450,6 +483,40 @@ impl<'source> DirectAdapterState<'source> {
                 EvidenceLimits::default(),
             ),
         }
+    }
+
+    fn capture_parser_errors(&mut self, root: Node<'_>) {
+        collect_parser_error_ranges(root, &mut self.parser_error_ranges);
+        self.parser_error_ranges.sort_unstable();
+        self.parser_error_ranges.dedup();
+    }
+
+    fn overlaps_parser_error(&self, node: Node<'_>) -> bool {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        let line_end = self.source[end..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(self.source.len(), |offset| end.saturating_add(offset));
+        self.parser_error_ranges
+            .iter()
+            .any(|(error_start, error_end)| {
+                if error_start == error_end {
+                    start <= *error_start && *error_start <= line_end
+                } else {
+                    *error_start <= line_end && start < *error_end
+                }
+            })
+    }
+
+    fn has_invalid_python_line_prefix(&self, node: Node<'_>) -> bool {
+        let start = node.start_byte();
+        let line_start = self.source[..start]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |position| position.saturating_add(1));
+        std::str::from_utf8(&self.source[line_start..start])
+            .is_ok_and(|prefix| !valid_python_import_whitespace(prefix))
     }
 
     fn add_file(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
@@ -492,7 +559,34 @@ impl<'source> DirectAdapterState<'source> {
             )
         })?;
         self.collect_python_declarations(root, &file, None)?;
+        self.collect_python_imports(root, &file)?;
+        let module_bound = crate::engine::python_bound_names(root, self.source, true);
+        self.walk_python_indirect(root, &file, true, &module_bound)?;
         self.walk_python_evidence(root, &file, true)
+    }
+
+    fn collect_python_imports(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let active = if matches!(node.kind(), "class_definition" | "function_definition") {
+            let Some(context) = self.declarations.get(&node.id()).cloned() else {
+                return Ok(());
+            };
+            context
+        } else {
+            owner.clone()
+        };
+        if matches!(node.kind(), "import_statement" | "import_from_statement") {
+            self.add_python_imports(node, &active)?;
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_python_imports(child, &active)?;
+        }
+        Ok(())
     }
 
     fn collect_python_declarations(
@@ -589,12 +683,14 @@ impl<'source> DirectAdapterState<'source> {
                 self.add_python_bases(node, &active)?;
             }
             self.add_python_annotations(node, &active)?;
+            if node.kind() == "function_definition" {
+                let body = node.child_by_field_name("body").unwrap_or(node);
+                let bound = crate::engine::python_bound_names(node, self.source, false);
+                self.walk_python_indirect(body, &active, true, &bound)?;
+            }
         }
         match node.kind() {
-            "import_statement" | "import_from_statement" => {
-                self.add_python_imports(node, &active)?;
-                return Ok(());
-            }
+            "import_statement" | "import_from_statement" => return Ok(()),
             "call" => self.add_call(node, &active, "call")?,
             _ => {}
         }
@@ -611,11 +707,155 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
+    fn walk_python_indirect(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        root: bool,
+        bound: &HashSet<String>,
+    ) -> Result<(), EvidenceError> {
+        if !root && matches!(node.kind(), "function_definition" | "class_definition") {
+            return Ok(());
+        }
+        if owner.kind != "file"
+            && node.kind() == "call"
+            && let Some(arguments) = node.child_by_field_name("arguments")
+        {
+            let mut cursor = arguments.walk();
+            for argument in arguments.children(&mut cursor) {
+                let candidate = if argument.kind() == "identifier" {
+                    Some(argument)
+                } else if argument.kind() == "keyword_argument" {
+                    argument.child_by_field_name("value")
+                } else {
+                    None
+                };
+                if candidate.is_some_and(|candidate| candidate.kind() == "identifier") {
+                    self.add_python_callable_reference(owner, candidate, "argument", bound)?;
+                }
+            }
+        }
+        if matches!(node.kind(), "dictionary" | "list" | "set" | "tuple") {
+            let mut identifiers = Vec::new();
+            crate::engine::collect_python_collection_values(node, &mut identifiers);
+            for identifier in identifiers {
+                self.add_python_callable_reference(owner, Some(identifier), "collection", bound)?;
+            }
+        } else if node.kind() == "assignment"
+            && let Some(value) = node.child_by_field_name("right")
+        {
+            let mut identifiers = Vec::new();
+            crate::engine::collect_python_reference_values(value, &mut identifiers);
+            for identifier in identifiers {
+                self.add_python_callable_reference(owner, Some(identifier), "assignment", bound)?;
+            }
+        } else if node.kind() == "return_statement" {
+            let mut cursor = node.walk();
+            if let Some(value) = node.children(&mut cursor).find(|child| child.is_named()) {
+                let mut identifiers = Vec::new();
+                crate::engine::collect_python_reference_values(value, &mut identifiers);
+                for identifier in identifiers {
+                    self.add_python_callable_reference(owner, Some(identifier), "return", bound)?;
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.walk_python_indirect(child, owner, false, bound)?;
+        }
+        Ok(())
+    }
+
+    fn add_python_callable_reference(
+        &mut self,
+        owner: &DeclarationContext,
+        node: Option<Node<'_>>,
+        context: &str,
+        bound: &HashSet<String>,
+    ) -> Result<(), EvidenceError> {
+        let Some(node) = node else {
+            return Ok(());
+        };
+        let spelling = self.text(node);
+        if spelling.is_empty()
+            || bound.contains(&spelling)
+            || !valid_python_identifier(&spelling)
+            || self.overlaps_parser_error(node)
+        {
+            return Ok(());
+        }
+        let allow_later_file_binding = matches!(owner.kind.as_str(), "function" | "method");
+        if self.import_binding_declared_but_not_visible(
+            owner,
+            &spelling,
+            node.start_byte(),
+            allow_later_file_binding,
+        ) {
+            return Ok(());
+        }
+        let binding = self
+            .binding_for_occurrence(
+                owner,
+                &spelling,
+                node.start_byte(),
+                allow_later_file_binding,
+            )
+            .cloned();
+        let qualified_name = self
+            .imported_target_for_occurrence(
+                owner,
+                &spelling,
+                node.start_byte(),
+                allow_later_file_binding,
+            )
+            .cloned();
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::CallableReference,
+            &owner.fact_id,
+            &spelling,
+            None,
+            Some(&owner.scope_id),
+            Some(context),
+            range_for_node(self.source_file, node),
+        )?;
+        self.builder.relate(
+            CandidateRelation::IndirectCalls,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            &spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: qualified_name
+                    .as_deref()
+                    .and_then(|qualified| qualified.rsplit_once('.').map(|(module, _)| module))
+                    .map(str::to_owned)
+                    .or_else(|| Some(self.module_or_package.clone())),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: qualified_name.clone(),
+                allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
+                allow_external: qualified_name.is_some(),
+            },
+        )?;
+        Ok(())
+    }
+
     fn add_python_imports(
         &mut self,
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(node) || self.has_invalid_python_line_prefix(node) {
+            return Ok(());
+        }
+        let statement = self.text(node);
+        if !valid_python_import_whitespace(&statement)
+            || !valid_python_line_continuations(&statement)
+            || python_import_contains_wildcard(&statement)
+        {
+            return Ok(());
+        }
+        let occurrence_range = range_for_node(self.source_file, node);
         let module = node.child_by_field_name("module_name").map(|module| {
             resolve_python_module(
                 &self.module_or_package,
@@ -624,7 +864,21 @@ impl<'source> DirectAdapterState<'source> {
             )
         });
         let mut cursor = node.walk();
-        for imported in node.children_by_field_name("name", &mut cursor) {
+        let imported_names = node
+            .children_by_field_name("name", &mut cursor)
+            .collect::<Vec<_>>();
+        if imported_names.iter().any(|imported| {
+            if imported.kind() == "aliased_import" {
+                imported
+                    .child_by_field_name("name")
+                    .is_some_and(|target| self.text(target) == "*")
+            } else {
+                self.text(*imported) == "*"
+            }
+        }) {
+            return Ok(());
+        }
+        for imported in imported_names {
             let (target_name, alias) = if imported.kind() == "aliased_import" {
                 let Some(target) = imported.child_by_field_name("name") else {
                     continue;
@@ -638,24 +892,34 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 (self.text(imported), None)
             };
+            if !valid_python_import_target(&target_name)
+                || alias
+                    .as_deref()
+                    .is_some_and(|alias| !valid_python_identifier(alias))
+            {
+                continue;
+            }
             if target_name.is_empty() || target_name == "*" {
                 continue;
             }
-            let (local, target) = if let Some(module) = module.as_deref() {
+            let (local, binding_target, import_target) = if let Some(module) = module.as_deref() {
                 let local = alias.unwrap_or_else(|| target_name.clone());
                 let target = if module.is_empty() {
                     target_name
                 } else {
                     format!("{module}.{target_name}")
                 };
-                (local, target)
+                (local, target.clone(), target)
+            } else if let Some(alias) = alias {
+                (alias, target_name.clone(), target_name)
             } else {
-                let local = alias.unwrap_or_else(|| {
-                    target_name.split('.').next().unwrap_or_default().to_owned()
-                });
-                (local, target_name)
+                let local = target_name.split('.').next().unwrap_or_default().to_owned();
+                (local.clone(), local, target_name)
             };
-            if local.is_empty() || target.rsplit('.').next().is_none_or(str::is_empty) {
+            if local.is_empty()
+                || binding_target.rsplit('.').next().is_none_or(str::is_empty)
+                || import_target.rsplit('.').next().is_none_or(str::is_empty)
+            {
                 self.builder.diagnose(
                     "unsupported_import_target",
                     Some(&owner.fact_id),
@@ -664,7 +928,14 @@ impl<'source> DirectAdapterState<'source> {
                 )?;
                 continue;
             }
-            self.add_python_import_binding(imported, owner, local, target)?;
+            self.add_python_import_binding(
+                imported,
+                owner,
+                local,
+                binding_target,
+                import_target,
+                occurrence_range.clone(),
+            )?;
         }
         Ok(())
     }
@@ -674,13 +945,15 @@ impl<'source> DirectAdapterState<'source> {
         imported: Node<'_>,
         owner: &DeclarationContext,
         local: String,
-        target: String,
+        binding_target: String,
+        import_target: String,
+        occurrence_range: EvidenceRange,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
             && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
         let kind = if is_reexport {
             BindingKind::Reexport
-        } else if local == target.rsplit('.').next().unwrap_or_default() {
+        } else if local == binding_target.rsplit('.').next().unwrap_or_default() {
             BindingKind::Import
         } else {
             BindingKind::ImportAlias
@@ -689,19 +962,18 @@ impl<'source> DirectAdapterState<'source> {
         let binding_id = self.builder.bind(
             kind,
             &local,
-            &target,
+            &binding_target,
             None,
             Some(&owner.scope_id),
             range.clone(),
         )?;
-        if self
-            .bindings
-            .insert(local.clone(), binding_id.clone())
-            .is_some()
-        {
-            self.ambiguous_bindings.insert(local.clone());
-        }
-        self.imported_targets.insert(local.clone(), target.clone());
+        self.record_import_binding(
+            owner,
+            &local,
+            &binding_target,
+            &binding_id,
+            usize::try_from(range.end_byte).unwrap_or(usize::MAX),
+        );
         let occurrence_id = self.builder.occur(
             if is_reexport {
                 SemanticRole::Reexport
@@ -712,9 +984,9 @@ impl<'source> DirectAdapterState<'source> {
             &local,
             None,
             Some(&owner.scope_id),
-            range,
+            occurrence_range,
         )?;
-        let target_spelling = target.rsplit('.').next().unwrap_or(&target);
+        let target_spelling = import_target.rsplit('.').next().unwrap_or(&import_target);
         self.builder.relate(
             if is_reexport {
                 CandidateRelation::Reexports
@@ -727,9 +999,11 @@ impl<'source> DirectAdapterState<'source> {
             target_spelling,
             ResolutionConstraint {
                 exact_language: Some(self.language.to_owned()),
-                module_or_package: target.rsplit_once('.').map(|(module, _)| module.to_owned()),
+                module_or_package: import_target
+                    .rsplit_once('.')
+                    .map(|(module, _)| module.to_owned()),
                 scope_id: Some(owner.scope_id.clone()),
-                qualified_name: Some(target.clone()),
+                qualified_name: Some(import_target.clone()),
                 allowed_target_kinds: vec![
                     "file".to_owned(),
                     "module".to_owned(),
@@ -1056,7 +1330,14 @@ impl<'source> DirectAdapterState<'source> {
                     continue;
                 }
                 let qualified_target = qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .and_then(|qualifier| {
+                        self.imported_target_for_occurrence(
+                            owner,
+                            qualifier,
+                            parameter.start_byte(),
+                            true,
+                        )
+                    })
                     .map_or_else(
                         || format!("{}.{}", self.module_or_package, spelling),
                         |module| format!("{module}.{spelling}"),
@@ -1127,14 +1408,7 @@ impl<'source> DirectAdapterState<'source> {
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, spec),
             )?;
-            if self
-                .bindings
-                .insert(local.clone(), binding_id.clone())
-                .is_some()
-            {
-                self.ambiguous_bindings.insert(local.clone());
-            }
-            self.imported_targets.insert(local.clone(), target.clone());
+            self.record_import_binding(owner, &local, &target, &binding_id, spec.end_byte());
             let occurrence_id = self.builder.occur(
                 SemanticRole::Import,
                 &owner.fact_id,
@@ -1315,13 +1589,23 @@ impl<'source> DirectAdapterState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let lookup_name = qualifier.unwrap_or(spelling);
-        if self.ambiguous_bindings.contains(lookup_name) {
+        let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let allow_later_file_binding =
+            self.language == "python" && matches!(owner.kind.as_str(), "function" | "method");
+        if self.import_binding_declared_but_not_visible(
+            owner,
+            lookup_name,
+            function.start_byte(),
+            allow_later_file_binding,
+        ) {
+            return Ok(());
+        }
+        if self.import_binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         if self.language == "go"
             && qualifier.is_none()
-            && go_name_is_locally_bound(call, spelling, self.source)
+            && self.go_name_is_locally_bound(call, spelling)
         {
             return Ok(());
         }
@@ -1333,7 +1617,12 @@ impl<'source> DirectAdapterState<'source> {
             (SemanticRole::Call, CandidateRelation::Calls)
         };
         let binding = self
-            .binding_for(owner, qualifier.unwrap_or(spelling))
+            .binding_for_occurrence(
+                owner,
+                qualifier.map(qualified_binding_head).unwrap_or(spelling),
+                function.start_byte(),
+                allow_later_file_binding,
+            )
             .cloned();
         let qualified_name = qualifier
             .and_then(|qualifier| {
@@ -1342,10 +1631,25 @@ impl<'source> DirectAdapterState<'source> {
             })
             .or_else(|| {
                 qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .and_then(|qualifier| {
+                        self.imported_qualified_target_for(
+                            owner,
+                            qualifier,
+                            function.start_byte(),
+                            allow_later_file_binding,
+                        )
+                    })
                     .map(|target| format!("{target}.{spelling}"))
             })
-            .or_else(|| self.imported_targets.get(spelling).cloned());
+            .or_else(|| {
+                self.imported_target_for_occurrence(
+                    owner,
+                    spelling,
+                    function.start_byte(),
+                    allow_later_file_binding,
+                )
+                .cloned()
+            });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1400,12 +1704,26 @@ impl<'source> DirectAdapterState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let lookup_name = qualifier.unwrap_or(spelling);
-        if self.ambiguous_bindings.contains(lookup_name) {
+        let lookup_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        let allow_later_file_binding = self.language != "python";
+        if self.import_binding_declared_but_not_visible(
+            owner,
+            lookup_name,
+            node.start_byte(),
+            allow_later_file_binding,
+        ) {
+            return Ok(());
+        }
+        if self.import_binding_is_ambiguous(owner, lookup_name) {
             return Ok(());
         }
         let binding = self
-            .binding_for(owner, qualifier.unwrap_or(spelling))
+            .binding_for_occurrence(
+                owner,
+                qualifier.map(qualified_binding_head).unwrap_or(spelling),
+                node.start_byte(),
+                allow_later_file_binding,
+            )
             .cloned();
         let qualified_name = qualifier
             .and_then(|qualifier| {
@@ -1414,10 +1732,25 @@ impl<'source> DirectAdapterState<'source> {
             })
             .or_else(|| {
                 qualifier
-                    .and_then(|qualifier| self.imported_targets.get(qualifier))
+                    .and_then(|qualifier| {
+                        self.imported_qualified_target_for(
+                            owner,
+                            qualifier,
+                            node.start_byte(),
+                            allow_later_file_binding,
+                        )
+                    })
                     .map(|target| format!("{target}.{spelling}"))
             })
-            .or_else(|| self.imported_targets.get(spelling).cloned());
+            .or_else(|| {
+                self.imported_target_for_occurrence(
+                    owner,
+                    spelling,
+                    node.start_byte(),
+                    allow_later_file_binding,
+                )
+                .cloned()
+            });
         let occurrence_id = self.builder.occur(
             role,
             &owner.fact_id,
@@ -1451,11 +1784,164 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
-    fn binding_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
+    fn go_name_is_locally_bound(&mut self, call: Node<'_>, spelling: &str) -> bool {
+        let Some(callable) = go_enclosing_callable(call) else {
+            return false;
+        };
+        let source = self.source;
+        self.go_lexical_bindings
+            .entry(callable.id())
+            .or_insert_with(|| go_lexical_bindings(callable, source))
+            .iter()
+            .any(|binding| {
+                binding.name == spelling
+                    && binding.active_from <= call.start_byte()
+                    && call.start_byte() < binding.active_until
+            })
+    }
+
+    fn record_import_binding(
+        &mut self,
+        owner: &DeclarationContext,
+        local: &str,
+        target: &str,
+        binding_id: &str,
+        active_from: usize,
+    ) {
+        let scope_id = owner.scope_id.clone();
+        let versions = self
+            .import_bindings
+            .entry(scope_id.clone())
+            .or_default()
+            .entry(local.to_owned())
+            .or_default();
+        if self.language != "python" && !versions.is_empty() {
+            self.ambiguous_bindings
+                .insert((scope_id.clone(), local.to_owned()));
+        }
+        versions.push(ImportBindingVersion {
+            binding_id: binding_id.to_owned(),
+            target: target.to_owned(),
+            active_from,
+        });
+    }
+
+    fn import_binding_scope<'a>(
+        &'a self,
+        owner: &'a DeclarationContext,
+        name: &str,
+    ) -> Option<&'a str> {
+        if self
+            .import_bindings
+            .get(&owner.scope_id)
+            .is_some_and(|bindings| bindings.contains_key(name))
+        {
+            return Some(owner.scope_id.as_str());
+        }
+        let file_scope = self.file.as_ref()?.scope_id.as_str();
+        (file_scope != owner.scope_id
+            && self
+                .import_bindings
+                .get(file_scope)
+                .is_some_and(|bindings| bindings.contains_key(name)))
+        .then_some(file_scope)
+    }
+
+    fn import_binding_version_at(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&ImportBindingVersion> {
+        let scope_id = self.import_binding_scope(owner, name)?;
+        let versions = self.import_bindings.get(scope_id)?.get(name)?;
+        if scope_id != owner.scope_id && allow_later_file_binding {
+            return versions.last();
+        }
+        versions
+            .iter()
+            .rev()
+            .find(|binding| binding.active_from <= use_start)
+    }
+
+    fn import_binding_declared_but_not_visible(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> bool {
+        self.import_binding_scope(owner, name).is_some()
+            && self
+                .import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+                .is_none()
+    }
+
+    fn binding_for_occurrence(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&String> {
         self.local_bindings
             .get(&owner.scope_id)
             .and_then(|bindings| bindings.get(name))
-            .or_else(|| self.bindings.get(name))
+            .or_else(|| {
+                self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+                    .map(|binding| &binding.binding_id)
+            })
+    }
+
+    fn imported_target_for_occurrence(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<&String> {
+        self.import_binding_version_at(owner, name, use_start, allow_later_file_binding)
+            .map(|binding| &binding.target)
+    }
+
+    fn imported_qualified_target_for(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: &str,
+        use_start: usize,
+        allow_later_file_binding: bool,
+    ) -> Option<String> {
+        let (head, suffix) = qualifier
+            .split_once('.')
+            .map_or((qualifier, None), |(head, suffix)| (head, Some(suffix)));
+        self.imported_target_for_occurrence(owner, head, use_start, allow_later_file_binding)
+            .map(|target| {
+                suffix.map_or_else(|| target.clone(), |suffix| format!("{target}.{suffix}"))
+            })
+    }
+
+    fn import_binding_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
+        if self
+            .local_bindings
+            .get(&owner.scope_id)
+            .is_some_and(|bindings| bindings.contains_key(name))
+        {
+            return false;
+        }
+        if self
+            .import_bindings
+            .get(&owner.scope_id)
+            .is_some_and(|bindings| bindings.contains_key(name))
+        {
+            return self
+                .ambiguous_bindings
+                .contains(&(owner.scope_id.clone(), name.to_owned()));
+        }
+        self.file.as_ref().is_some_and(|file| {
+            self.ambiguous_bindings
+                .contains(&(file.scope_id.clone(), name.to_owned()))
+        })
     }
 
     fn local_target_for(&self, owner: &DeclarationContext, name: &str) -> Option<&String> {
@@ -1567,6 +2053,127 @@ fn python_module_identity(path: &Path, source_file: &str) -> String {
     }
 }
 
+fn collect_parser_error_ranges(node: Node<'_>, output: &mut Vec<(usize, usize)>) {
+    if node.is_error() {
+        let mut cursor = node.walk();
+        let children = node.children(&mut cursor).collect::<Vec<_>>();
+        if children.is_empty() {
+            output.push((node.start_byte(), node.end_byte()));
+        } else {
+            for child in children {
+                collect_parser_error_ranges(child, output);
+            }
+        }
+        return;
+    }
+    if node.is_missing() {
+        if let Some(parent) = node.parent() {
+            output.push((parent.start_byte(), parent.end_byte()));
+        } else {
+            output.push((node.start_byte(), node.end_byte()));
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_parser_error_ranges(child, output);
+    }
+}
+
+fn valid_python_import_target(target: &str) -> bool {
+    target.split('.').all(valid_python_identifier)
+}
+
+fn valid_python_identifier(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    (first == '_' || first.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
+        && !is_python_hard_keyword(identifier)
+}
+
+fn is_python_hard_keyword(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    )
+}
+
+fn valid_python_import_whitespace(statement: &str) -> bool {
+    statement.chars().all(|character| {
+        !character.is_whitespace() || matches!(character, ' ' | '\t' | '\r' | '\n' | '\u{000c}')
+    })
+}
+
+fn valid_python_line_continuations(statement: &str) -> bool {
+    let bytes = statement.as_bytes();
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        if bytes.get(index) == Some(&b'\r') {
+            index += 1;
+        }
+        if bytes.get(index) != Some(&b'\n') {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn python_import_contains_wildcard(statement: &str) -> bool {
+    let mut comment = false;
+    for byte in statement.bytes() {
+        match byte {
+            b'\n' | b'\r' => comment = false,
+            b'#' if !comment => comment = true,
+            b'*' if !comment => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn collect_nodes<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
     if node.kind() == kind {
         output.push(node);
@@ -1621,67 +2228,152 @@ fn go_receiver_name(node: Node<'_>, source: &[u8]) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-fn go_name_is_locally_bound(call: Node<'_>, spelling: &str, source: &[u8]) -> bool {
+struct GoLexicalBinding {
+    name: String,
+    active_from: usize,
+    active_until: usize,
+}
+
+fn go_enclosing_callable(call: Node<'_>) -> Option<Node<'_>> {
     let mut ancestor = call.parent();
+    let mut outer_literal = None;
     while let Some(node) = ancestor {
-        if matches!(
-            node.kind(),
-            "function_declaration" | "method_declaration" | "func_literal"
-        ) {
-            let mut binding_nodes = Vec::new();
-            for field in ["receiver", "parameters"] {
-                if let Some(parameters) = node.child_by_field_name(field) {
-                    binding_nodes.push(parameters);
-                }
-            }
-            collect_go_prior_binding_nodes(node, call.start_byte(), &mut binding_nodes);
-            return binding_nodes.into_iter().any(|binding| {
-                let mut identifiers = Vec::new();
-                collect_named_targets(binding, &["identifier"], &mut identifiers);
-                identifiers
-                    .into_iter()
-                    .any(|identifier| identifier.utf8_text(source).ok() == Some(spelling))
-            });
+        match node.kind() {
+            "function_declaration" | "method_declaration" => return Some(node),
+            "func_literal" => outer_literal = Some(node),
+            _ => {}
         }
         ancestor = node.parent();
     }
-    false
+    outer_literal
 }
 
-fn collect_go_prior_binding_nodes<'tree>(
-    node: Node<'tree>,
-    before: usize,
-    output: &mut Vec<Node<'tree>>,
-) {
-    if node.start_byte() >= before {
-        return;
-    }
-    match node.kind() {
-        "short_var_declaration" => {
-            if node.end_byte() <= before
-                && let Some(left) = node.child_by_field_name("left")
-            {
-                output.push(left);
-            }
+fn go_lexical_bindings(callable: Node<'_>, source: &[u8]) -> Vec<GoLexicalBinding> {
+    fn collect_binding_identifiers(node: Node<'_>, source: &[u8], names: &mut Vec<String>) {
+        if node.kind() == "identifier"
+            && let Ok(name) = node.utf8_text(source)
+            && !name.is_empty()
+        {
+            names.push(name.to_owned());
             return;
         }
-        "var_spec" => {
-            if node.end_byte() <= before {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            collect_binding_identifiers(child, source, names);
+        }
+    }
+
+    fn push_bindings(
+        names_node: Node<'_>,
+        source: &[u8],
+        active_from: usize,
+        active_until: usize,
+        bindings: &mut Vec<GoLexicalBinding>,
+    ) {
+        let mut names = Vec::new();
+        collect_binding_identifiers(names_node, source, &mut names);
+        names.sort();
+        names.dedup();
+        bindings.extend(names.into_iter().map(|name| GoLexicalBinding {
+            name,
+            active_from,
+            active_until,
+        }));
+    }
+
+    fn walk(node: Node<'_>, source: &[u8], scope_end: usize, bindings: &mut Vec<GoLexicalBinding>) {
+        if node.kind() == "func_literal"
+            && let Some(body) = node.child_by_field_name("body")
+        {
+            if let Some(parameters) = node.child_by_field_name("parameters") {
+                push_bindings(
+                    parameters,
+                    source,
+                    body.start_byte(),
+                    body.end_byte(),
+                    bindings,
+                );
+            }
+            walk(body, source, body.end_byte(), bindings);
+            return;
+        }
+        let scope_end = if matches!(
+            node.kind(),
+            "block"
+                | "if_statement"
+                | "for_statement"
+                | "expression_switch_statement"
+                | "type_switch_statement"
+                | "select_statement"
+                | "communication_case"
+                | "expression_case"
+                | "type_case"
+        ) {
+            node.end_byte()
+        } else {
+            scope_end
+        };
+        match node.kind() {
+            "var_spec" => {
                 let type_node = node.child_by_field_name("type");
                 let value_node = node.child_by_field_name("value");
                 let mut cursor = node.walk();
-                output.extend(node.children(&mut cursor).filter(|child| {
+                for child in node.children(&mut cursor).filter(|child| {
                     child.is_named() && Some(*child) != type_node && Some(*child) != value_node
-                }));
+                }) {
+                    if child.kind() == "identifier" {
+                        push_bindings(child, source, node.end_byte(), scope_end, bindings);
+                    }
+                }
             }
-            return;
+            "short_var_declaration" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    push_bindings(left, source, node.end_byte(), scope_end, bindings);
+                }
+            }
+            "for_statement" => {
+                let body = node.child_by_field_name("body");
+                let mut cursor = node.walk();
+                if let Some(range) = node
+                    .children(&mut cursor)
+                    .find(|child| child.kind() == "range_clause")
+                    && range.utf8_text(source).unwrap_or_default().contains(":=")
+                    && let Some(left) = range.child_by_field_name("left")
+                {
+                    push_bindings(
+                        left,
+                        source,
+                        range.end_byte(),
+                        body.map_or(node.end_byte(), |body| body.end_byte()),
+                        bindings,
+                    );
+                }
+            }
+            _ => {}
         }
-        _ => {}
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            walk(child, source, scope_end, bindings);
+        }
     }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_go_prior_binding_nodes(child, before, output);
+
+    let Some(body) = callable.child_by_field_name("body") else {
+        return Vec::new();
+    };
+    let mut bindings = Vec::new();
+    for field in ["receiver", "parameters"] {
+        if let Some(parameters) = callable.child_by_field_name(field) {
+            push_bindings(
+                parameters,
+                source,
+                body.start_byte(),
+                body.end_byte(),
+                &mut bindings,
+            );
+        }
     }
+    walk(body, source, body.end_byte(), &mut bindings);
+    bindings
 }
 
 fn is_python_builtin_type(name: &str) -> bool {
@@ -1731,9 +2423,15 @@ fn is_go_predeclared_type(name: &str) -> bool {
     )
 }
 
+fn qualified_binding_head(qualifier: &str) -> &str {
+    qualifier.split('.').next().unwrap_or(qualifier)
+}
+
 fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
     match relation {
-        CandidateRelation::Calls => vec!["function".to_owned(), "method".to_owned()],
+        CandidateRelation::Calls | CandidateRelation::IndirectCalls => {
+            vec!["function".to_owned(), "method".to_owned()]
+        }
         CandidateRelation::Constructs => {
             vec![
                 "class".to_owned(),
@@ -1786,6 +2484,7 @@ const fn semantic_role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Reexport => "reexport",
         SemanticRole::Alias => "alias",
         SemanticRole::Call => "call",
+        SemanticRole::CallableReference => "callable_reference",
         SemanticRole::Construction => "construction",
         SemanticRole::Decorator => "decorator",
         SemanticRole::Annotation => "annotation",
@@ -1801,6 +2500,7 @@ const fn semantic_role_name(role: SemanticRole) -> &'static str {
 const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
     match relation {
         CandidateRelation::Calls => "calls",
+        CandidateRelation::IndirectCalls => "indirect_calls",
         CandidateRelation::Constructs => "constructs",
         CandidateRelation::Decorates => "decorates",
         CandidateRelation::Annotates => "annotates",

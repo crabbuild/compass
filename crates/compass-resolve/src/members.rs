@@ -19,6 +19,7 @@ pub(crate) fn collect_language_call_facts(extractions: &[Extraction]) -> Languag
         tables: TypeTables::new(extractions),
         calls: extractions
             .iter()
+            .filter(|extraction| extraction.semantic_evidence.is_none())
             .flat_map(|extraction| extraction.raw_calls.iter().flatten().cloned())
             .collect(),
     }
@@ -30,7 +31,16 @@ pub(crate) fn collect_language_call_facts_owned(
     let tables = TypeTables::new(extractions);
     let calls = extractions
         .iter_mut()
-        .flat_map(|extraction| extraction.raw_calls.take().into_iter().flatten())
+        .flat_map(|extraction| {
+            let calls = extraction.raw_calls.take();
+            extraction
+                .semantic_evidence
+                .is_none()
+                .then_some(calls)
+                .into_iter()
+                .flatten()
+                .flatten()
+        })
         .collect();
     LanguageCallFacts { tables, calls }
 }
@@ -254,7 +264,10 @@ struct TypeTables {
 impl TypeTables {
     fn new(extractions: &[Extraction]) -> Self {
         let mut tables = Self::default();
-        for extraction in extractions {
+        for extraction in extractions
+            .iter()
+            .filter(|extraction| extraction.semantic_evidence.is_none())
+        {
             collect_table(extraction, "swift_type_table", &mut tables.swift);
             collect_table(extraction, "ts_type_table", &mut tables.typescript);
             collect_table(extraction, "cpp_type_table", &mut tables.cpp);

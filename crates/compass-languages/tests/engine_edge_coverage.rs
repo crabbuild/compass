@@ -436,39 +436,35 @@ fn repeated_generic_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
-    let calls = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
+    let calls = evidence
+        .occurrences
         .iter()
-        .filter(|edge| edge.string("relation") == "calls")
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call && occurrence.spelling == "callee"
+        })
         .collect::<Vec<_>>();
-    let sites = calls
+    let mut sites = calls
         .iter()
-        .map(|edge| {
+        .map(|occurrence| {
             (
-                edge.attributes
-                    .get("start_byte")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("end_byte")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("column_start")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("column_end")
-                    .and_then(|value| value.as_u64()),
+                occurrence.range.start_byte,
+                occurrence.range.end_byte,
+                occurrence.range.start_column,
+                occurrence.range.end_column,
             )
         })
         .collect::<Vec<_>>();
+    sites.sort_unstable();
 
     assert_eq!(
         sites,
-        [
-            (Some(33), Some(41), Some(14), Some(22)),
-            (Some(43), Some(51), Some(24), Some(32))
-        ],
-        "edges={:?}",
-        extraction.edges
+        [(33, 39, 14, 20), (43, 49, 24, 30)],
+        "occurrences={:?}",
+        evidence.occurrences
     );
     Ok(())
 }
@@ -481,28 +477,21 @@ fn repeated_go_calls_keep_each_ast_range() -> Result<(), Box<dyn Error>> {
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
-    let sites = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Go semantic evidence")?;
+    let sites = evidence
+        .occurrences
         .iter()
-        .filter(|edge| edge.string("relation") == "calls")
-        .map(|edge| {
-            (
-                edge.attributes
-                    .get("start_byte")
-                    .and_then(|value| value.as_u64()),
-                edge.attributes
-                    .get("end_byte")
-                    .and_then(|value| value.as_u64()),
-            )
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call && occurrence.spelling == "callee"
         })
+        .map(|occurrence| (occurrence.range.start_byte, occurrence.range.end_byte))
         .collect::<Vec<_>>();
 
-    assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
-    assert!(
-        sites
-            .iter()
-            .all(|(start, end)| start.is_some() && end.is_some())
-    );
+    assert_eq!(sites.len(), 2, "occurrences={:?}", evidence.occurrences);
+    assert!(sites.iter().all(|(start, end)| start < end));
     assert_ne!(sites[0], sites[1]);
     Ok(())
 }
@@ -570,30 +559,39 @@ class Consumer:
 "#;
     let extraction =
         Engine::default().extract_source(std::path::Path::new("app/consumer.py"), source)?;
-    let uses = extraction
-        .edges
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
+    let uses = evidence
+        .occurrences
         .iter()
-        .filter(|edge| {
-            edge.string("relation") == "references" && edge.string("context") == "decorator"
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Decorator && occurrence.spelling == "used"
         })
         .collect::<Vec<_>>();
-    assert_eq!(uses.len(), 2, "edges={:#?}", extraction.edges);
+    assert_eq!(uses.len(), 2, "occurrences={:#?}", evidence.occurrences);
     assert_eq!(
         uses.iter()
-            .map(|edge| edge.string("source_location"))
+            .map(|occurrence| occurrence.range.start_line)
             .collect::<Vec<_>>(),
-        ["L3", "L5"]
+        [3, 5]
     );
-    assert!(uses.iter().all(|edge| {
-        edge.string("target_qualified_name") == "framework.used"
-            && edge.attributes.contains_key("start_byte")
-            && edge.attributes.contains_key("end_byte")
+    assert!(uses.iter().all(|occurrence| {
+        occurrence.range.start_byte < occurrence.range.end_byte
+            && evidence.candidates.iter().any(|candidate| {
+                candidate.occurrence_id.as_deref() == Some(&occurrence.id)
+                    && candidate.constraints.qualified_name.as_deref() == Some("framework.used")
+            })
     }));
     assert!(
-        extraction
-            .edges
+        evidence
+            .candidates
             .iter()
-            .all(|edge| edge.string("target_qualified_name") != "framework.unused")
+            .filter(|candidate| candidate.relation == CandidateRelation::Decorates)
+            .all(|candidate| {
+                candidate.constraints.qualified_name.as_deref() != Some("framework.unused")
+            })
     );
     Ok(())
 }
@@ -885,11 +883,19 @@ def top_level(arg: InputType) -> OutputType:
             .iter()
             .any(|edge| edge.string("relation") == "rationale_for")
     );
-    let raw = extraction.raw_calls.as_deref().unwrap_or_default();
+    assert!(extraction.raw_calls.is_none());
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
     for callee in ["set_handler", "external_result", "external_top"] {
         assert!(
-            raw.iter().any(|call| call.callee == callee),
-            "missing {callee}; calls={raw:?}"
+            evidence.occurrences.iter().any(|occurrence| {
+                occurrence.role == compass_languages::SemanticRole::CallableReference
+                    && occurrence.spelling == callee
+            }),
+            "missing {callee}; occurrences={:?}",
+            evidence.occurrences
         );
     }
     assert!(extraction.nodes.len() >= 2);

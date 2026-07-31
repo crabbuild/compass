@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::Path;
 
-use compass_languages::{Engine, Extraction};
+use compass_languages::{CandidateRelation, Engine, Extraction, SemanticRole};
 
 fn calls(extraction: &Extraction) -> Vec<(&str, &str)> {
     extraction
@@ -136,7 +136,7 @@ function caller() {
 "#,
         4,
     )?;
-    assert_local_builtin_collisions_resolve(
+    let extraction = Engine::default().extract_source(
         Path::new("collisions.py"),
         br#"
 def open(): pass
@@ -149,8 +149,38 @@ def caller():
     map()
     filter()
 "#,
-        4,
-    )
+    )?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Python semantic evidence")?;
+    let local_calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::Call
+                && matches!(
+                    occurrence.spelling.as_str(),
+                    "open" | "list" | "map" | "filter"
+                )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(local_calls.len(), 4);
+    assert_eq!(
+        local_calls
+            .iter()
+            .map(|occurrence| occurrence.spelling.as_str())
+            .collect::<HashSet<_>>(),
+        HashSet::from(["open", "list", "map", "filter"])
+    );
+    assert!(local_calls.iter().all(|occurrence| {
+        occurrence.range.start_byte < occurrence.range.end_byte
+            && evidence.candidates.iter().any(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.occurrence_id.as_deref() == Some(&occurrence.id)
+            })
+    }));
+    Ok(())
 }
 
 #[test]

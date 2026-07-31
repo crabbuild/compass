@@ -674,9 +674,11 @@ urlpatterns = [path("health/", views.health, name="health")]
             .any(|node| node.kind == NodeKind::Route)
     );
     assert!(clean_graph.links.iter().any(|edge| {
-        edge.evidence
-            .iter()
-            .any(|evidence| evidence.origin == EvidenceOrigin::Convention)
+        edge.kind == compass_model::code_graph::EdgeKind::RoutesTo
+            && edge
+                .evidence
+                .iter()
+                .any(|evidence| evidence.origin == EvidenceOrigin::Config)
     }));
 
     options.force = true;

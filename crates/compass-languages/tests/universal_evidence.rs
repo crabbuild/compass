@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use compass_languages::{
     AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
     Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, LanguageCapability,
@@ -67,6 +69,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             owner_declaration_id: "decl:caller".to_owned(),
             spelling: "helper".to_owned(),
             qualifier: None,
+            context: None,
             scope_id: Some("scope:caller".to_owned()),
             range: range(14, 20),
         }],
@@ -287,6 +290,10 @@ class Derived(Base):
             source,
         )
         .expect("extract python");
+    assert!(
+        extraction.graph.raw_calls.is_none(),
+        "hard-cut Python extraction must not publish replaced raw call facts"
+    );
     let evidence = extraction
         .graph
         .semantic_evidence
@@ -407,6 +414,84 @@ class Dynamic(factory(Base)):
 }
 
 #[test]
+fn python_preindexes_imports_without_violating_same_scope_execution_order() {
+    let source = br#"def before():
+    callback()
+    return callback
+
+EARLY = [callback]
+from tools.runner import execute as callback
+LATE = [callback]
+import pkg.api
+import other.tools as alias
+
+def dotted():
+    pkg.api.execute()
+    alias.execute()
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(std::path::Path::new("/repo/app.py"), "app.py", source)
+        .expect("extract python")
+        .graph
+        .semantic_evidence
+        .expect("python universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid Python evidence");
+
+    let callback = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "callback")
+        .expect("callback import binding");
+    assert_eq!(callback.qualified_target, "tools.runner.execute");
+    let package = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "pkg")
+        .expect("top-level dotted package binding");
+    assert_eq!(package.kind, BindingKind::Import);
+    assert_eq!(package.qualified_target, "pkg");
+    let alias = evidence
+        .bindings
+        .iter()
+        .find(|binding| binding.spelling == "alias")
+        .expect("dotted import alias");
+    assert_eq!(alias.qualified_target, "other.tools");
+
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "callback"
+            && candidate.binding_id.as_deref() == Some(&callback.id)
+            && candidate.constraints.qualified_name.as_deref() == Some("tools.runner.execute")
+    }));
+    for qualified in ["pkg.api.execute", "other.tools.execute"] {
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.constraints.qualified_name.as_deref() == Some(qualified)
+        }));
+    }
+    let callback_references = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| {
+            occurrence.role == SemanticRole::CallableReference && occurrence.spelling == "callback"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        callback_references.len(),
+        2,
+        "the deferred function body and post-import collection are valid; the pre-import module use is not"
+    );
+    assert_eq!(
+        callback_references
+            .iter()
+            .map(|occurrence| occurrence.context.as_deref())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([Some("collection"), Some("return")])
+    );
+}
+
+#[test]
 fn go_emits_packages_receivers_embeddings_and_exact_calls() {
     let source = br#"package sample
 
@@ -433,6 +518,10 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
             source,
         )
         .expect("extract go");
+    assert!(
+        extraction.graph.raw_calls.is_none(),
+        "hard-cut Go extraction must not publish replaced raw call facts"
+    );
     let evidence = extraction
         .graph
         .semantic_evidence
@@ -518,6 +607,58 @@ func run() {
     assert!(evidence.candidates.iter().all(|candidate| {
         candidate.target_spelling != "Base" || candidate.relation != CandidateRelation::References
     }));
+}
+
+#[test]
+fn go_calls_respect_block_lifetimes_and_captured_callback_bindings() {
+    let source = br#"package sample
+
+func target() {}
+
+func caller(callback func()) {
+    {
+        target := func() {}
+        target()
+    }
+    target()
+    invoke := func() {
+        callback()
+    }
+    invoke()
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/example.go"),
+            "sample/example.go",
+            source,
+        )
+        .expect("extract go")
+        .graph
+        .semantic_evidence
+        .expect("go universal evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
+
+    let calls = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == SemanticRole::Call)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|occurrence| occurrence.spelling == "target")
+            .count(),
+        1,
+        "the block-local callback must not suppress the later package function call"
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|occurrence| !matches!(occurrence.spelling.as_str(), "callback" | "invoke")),
+        "parameters, captures, and function-valued locals must not resolve as package calls"
+    );
 }
 
 #[test]

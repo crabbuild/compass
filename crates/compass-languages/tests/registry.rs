@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use std::error::Error;
 use std::fs;
 use std::path::Path;

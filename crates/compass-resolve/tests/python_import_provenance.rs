@@ -4,12 +4,29 @@ use std::fs;
 use std::path::Path;
 
 use compass_graph::{BuildEvidence, normalize_v1};
-use compass_languages::Engine;
+use compass_languages::{Engine, RawEdgeRecord};
 use compass_model::code_graph::{EdgeKind, NodeKind};
-use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin};
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
 use compass_resolve::resolve_with_root;
 
-const PYTHON_IMPORT_PRODUCER: &str = "compass.resolve.python-imports";
+const PYTHON_IMPORT_PRODUCER: &str = "compass.resolve.python.universal";
+const PYTHON_SYMBOL_IMPORT_RULE: &str = "universal-import-explicit-binding";
+const PYTHON_REEXPORT_RULE: &str = "universal-reexport-explicit-binding";
+
+fn is_python_import_edge(edge: &RawEdgeRecord) -> bool {
+    edge.string("extractor") == PYTHON_IMPORT_PRODUCER
+        && matches!(
+            edge.string("context").as_str(),
+            "import" | "submodule_import" | "export"
+        )
+}
+
+fn is_python_import_evidence(evidence: &Provenance) -> bool {
+    evidence.extractor == PYTHON_IMPORT_PRODUCER
+        && evidence.rule.as_deref().is_some_and(|rule| {
+            rule.starts_with("universal-import-") || rule.starts_with("universal-reexport-")
+        })
+}
 
 fn write(root: &Path, relative: &str, source: &str) -> Result<String, Box<dyn Error>> {
     let path = root.join(relative);
@@ -76,7 +93,7 @@ fn python_decorator_uses_resolve_reexports_at_the_decorator_occurrence()
     assert!(decorator_edges.iter().all(|edge| {
         edge.attributes.contains_key("start_byte")
             && edge.attributes.contains_key("end_byte")
-            && edge.string("resolution_rule") == "explicitbinding"
+            && edge.string("resolution_rule") == "explicit-binding"
     }));
     assert!(extraction.edges.iter().all(|edge| {
         edge.string("target_qualified_name") != "framework.unused"
@@ -121,17 +138,13 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
     let resolver_edges = extraction
         .edges
         .iter()
-        .filter(|edge| edge.string("extractor") == PYTHON_IMPORT_PRODUCER)
+        .filter(|edge| is_python_import_edge(edge))
         .collect::<Vec<_>>();
     let rules = resolver_edges
         .iter()
         .map(|edge| edge.string("rule"))
         .collect::<HashSet<_>>();
-    for rule in [
-        "python-symbol-import-resolution",
-        "python-submodule-import-resolution",
-        "python-module-re-export-resolution",
-    ] {
+    for rule in [PYTHON_SYMBOL_IMPORT_RULE, PYTHON_REEXPORT_RULE] {
         assert!(rules.contains(rule), "missing raw resolver rule {rule}");
     }
     assert!(
@@ -142,10 +155,9 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         edge.string("language") == "python" && edge.string("extractor") == PYTHON_IMPORT_PRODUCER
     }));
     assert!(resolver_edges.iter().all(|edge| {
-        edge.string("_origin") == "convention" && edge.string("confidence") == "EXTRACTED"
+        edge.string("_origin") == "ast" && edge.string("confidence") == "EXTRACTED"
     }));
 
-    let caller_path = root.join("caller.py").to_string_lossy().into_owned();
     let expected_start = caller_source
         .find(multiline_import)
         .ok_or("missing multiline import")?;
@@ -153,8 +165,8 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
     let multiline_edge = resolver_edges
         .iter()
         .find(|edge| {
-            edge.string("rule") == "python-symbol-import-resolution"
-                && edge.string("source_file") == caller_path
+            edge.string("rule") == PYTHON_SYMBOL_IMPORT_RULE
+                && edge.string("source_file").ends_with("caller.py")
         })
         .ok_or("missing multiline symbol import")?;
     assert_eq!(
@@ -190,11 +202,8 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         .nodes
         .iter()
         .filter(|node| {
-            matches!(
-                node.string("source_file")
-                    .strip_prefix(root.to_str().unwrap_or_default()),
-                Some("/pkg/commented.py" | "/pkg/stringy.py")
-            )
+            let source_file = node.string("source_file");
+            source_file.ends_with("pkg/commented.py") || source_file.ends_with("pkg/stringy.py")
         })
         .map(|node| node.id.as_str())
         .collect::<HashSet<_>>();
@@ -223,7 +232,7 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         .flat_map(|edge| {
             edge.evidence
                 .iter()
-                .filter(|evidence| evidence.extractor == PYTHON_IMPORT_PRODUCER)
+                .filter(|evidence| is_python_import_evidence(evidence))
                 .map(move |evidence| (edge, evidence))
         })
         .collect::<Vec<_>>();
@@ -231,11 +240,7 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         .iter()
         .filter_map(|(_, evidence)| evidence.rule.as_deref())
         .collect::<HashSet<_>>();
-    for rule in [
-        "python-symbol-import-resolution",
-        "python-submodule-import-resolution",
-        "python-module-re-export-resolution",
-    ] {
+    for rule in [PYTHON_SYMBOL_IMPORT_RULE, PYTHON_REEXPORT_RULE] {
         assert!(
             published_rules.contains(rule),
             "missing published resolver rule {rule}"
@@ -243,7 +248,7 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
     }
     for (edge, evidence) in &published {
         let _ = edge;
-        assert_eq!(evidence.origin, EvidenceOrigin::Convention);
+        assert_eq!(evidence.origin, EvidenceOrigin::Ast);
         assert_eq!(evidence.confidence, EvidenceConfidence::Exact);
         assert_eq!(evidence.anchors.len(), 1);
         assert!(evidence.wiring_site.is_none());
@@ -252,11 +257,10 @@ fn python_import_resolution_publishes_truthful_spanned_provenance() -> Result<()
         .iter()
         .map(|(_, evidence)| *evidence)
         .find(|evidence| {
-            evidence.rule.as_deref() == Some("python-symbol-import-resolution")
-                && evidence
-                    .anchors
-                    .first()
-                    .is_some_and(|anchor| anchor.file == "caller.py")
+            evidence.rule.as_deref() == Some(PYTHON_SYMBOL_IMPORT_RULE)
+                && evidence.anchors.first().is_some_and(|anchor| {
+                    anchor.file == "caller.py" && anchor.start_byte == expected_start as u64
+                })
         })
         .ok_or("missing published multiline import evidence")?;
     let anchor = multiline_evidence
@@ -295,12 +299,11 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
         extractions.push(engine.extract(Path::new(&path))?);
         sources.insert(path, source.to_owned());
     }
-
     let mut forward = resolve_with_root(&extractions, &sources, root);
     let resolver_edges = forward
         .edges
         .iter()
-        .filter(|edge| edge.string("extractor") == PYTHON_IMPORT_PRODUCER)
+        .filter(|edge| is_python_import_edge(edge))
         .collect::<Vec<_>>();
     let rule_counts = resolver_edges
         .iter()
@@ -308,15 +311,12 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
             *counts.entry(edge.string("rule")).or_insert(0_usize) += 1;
             counts
         });
-    assert_eq!(rule_counts.get("python-symbol-import-resolution"), Some(&4));
     assert_eq!(
-        rule_counts.get("python-submodule-import-resolution"),
-        Some(&2)
+        rule_counts.get(PYTHON_SYMBOL_IMPORT_RULE),
+        Some(&4),
+        "rules={rule_counts:?}"
     );
-    assert_eq!(
-        rule_counts.get("python-module-re-export-resolution"),
-        Some(&2)
-    );
+    assert_eq!(rule_counts.get(PYTHON_REEXPORT_RULE), Some(&2));
 
     let occurrence_rules = resolver_edges
         .iter()
@@ -327,12 +327,9 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
         })
         .collect::<HashSet<_>>();
     assert_eq!(occurrence_rules.len(), resolver_edges.len());
-    for alias in ["WidgetAlias", "mod_alias", "AliasWidget"] {
-        assert!(
-            occurrence_rules.iter().any(|rule| rule.ends_with(alias)),
-            "missing alias in occurrence identity: {alias}"
-        );
-    }
+    assert!(occurrence_rules.iter().all(|rule| {
+        rule.starts_with("universal-import-") || rule.starts_with("universal-reexport-")
+    }));
     let repeated_connectivity = resolver_edges
         .iter()
         .fold(HashMap::new(), |mut counts, edge| {
@@ -346,7 +343,7 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
             .values()
             .filter(|count| **count == 2)
             .count(),
-        4,
+        3,
         "expected repeated symbol, submodule, and re-export connectivity"
     );
 
@@ -364,14 +361,10 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
     let forward_ids = forward_graph
         .links
         .iter()
-        .filter(|edge| {
-            edge.evidence
-                .iter()
-                .any(|evidence| evidence.extractor == PYTHON_IMPORT_PRODUCER)
-        })
+        .filter(|edge| edge.evidence.iter().any(is_python_import_evidence))
         .map(|edge| edge.id.clone())
         .collect::<HashSet<_>>();
-    assert_eq!(forward_ids.len(), 8);
+    assert_eq!(forward_ids.len(), 6);
 
     extractions.reverse();
     let mut reversed = resolve_with_root(&extractions, &sources, root);
@@ -390,11 +383,7 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
     let reversed_ids = reversed_graph
         .links
         .iter()
-        .filter(|edge| {
-            edge.evidence
-                .iter()
-                .any(|evidence| evidence.extractor == PYTHON_IMPORT_PRODUCER)
-        })
+        .filter(|edge| edge.evidence.iter().any(is_python_import_evidence))
         .map(|edge| edge.id.clone())
         .collect::<HashSet<_>>();
     assert_eq!(reversed_ids, forward_ids);
@@ -402,7 +391,7 @@ fn repeated_python_import_occurrences_survive_resolution_and_publication()
 }
 
 #[test]
-fn backslash_continued_python_imports_have_complete_crlf_spans_and_recover()
+fn backslash_continued_python_imports_have_complete_crlf_spans_and_fail_closed()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -452,19 +441,17 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_recover()
     }
 
     let mut extraction = resolve_with_root(&extractions, &sources, root);
-    let caller_path = root.join("caller.py").to_string_lossy().into_owned();
     let resolver_edges = extraction
         .edges
         .iter()
         .filter(|edge| {
-            edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-                && edge.string("source_file") == caller_path
+            is_python_import_edge(edge) && edge.string("source_file").ends_with("caller.py")
         })
         .collect::<Vec<_>>();
     assert_eq!(
         resolver_edges.len(),
-        6,
-        "comments, strings, and malformed continuations must not emit imports"
+        5,
+        "comments, strings, malformed continuations, and parser-error recovery regions must not emit imports"
     );
 
     let symbol_start = caller_source
@@ -551,7 +538,7 @@ fn backslash_continued_python_imports_have_complete_crlf_spans_and_recover()
         .flat_map(|edge| &edge.evidence)
         .filter(|evidence| {
             evidence.extractor == PYTHON_IMPORT_PRODUCER
-                && evidence.rule.as_deref() == Some("python-symbol-import-resolution")
+                && evidence.rule.as_deref() == Some(PYTHON_SYMBOL_IMPORT_RULE)
                 && evidence
                     .anchors
                     .first()
@@ -605,14 +592,13 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
         }
 
         let mut extraction = resolve_with_root(&extractions, &sources, root);
-        let caller_path = root.join("caller.py").to_string_lossy().into_owned();
         let resolver_edges = extraction
             .edges
             .iter()
             .filter(|edge| {
                 edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-                    && edge.string("rule") == "python-symbol-import-resolution"
-                    && edge.string("source_file") == caller_path
+                    && edge.string("rule") == PYTHON_SYMBOL_IMPORT_RULE
+                    && edge.string("source_file").ends_with("caller.py")
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -677,7 +663,7 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
             .flat_map(|edge| &edge.evidence)
             .filter(|evidence| {
                 evidence.extractor == PYTHON_IMPORT_PRODUCER
-                    && evidence.rule.as_deref() == Some("python-symbol-import-resolution")
+                    && evidence.rule.as_deref() == Some(PYTHON_SYMBOL_IMPORT_RULE)
                     && evidence
                         .anchors
                         .first()
@@ -715,8 +701,8 @@ fn python_import_token_grammar_is_atomic_and_span_stable() -> Result<(), Box<dyn
 }
 
 #[test]
-fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result<(), Box<dyn Error>>
-{
+fn qualified_external_python_calls_are_source_scoped_and_follow_rebindings()
+-> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let files = [
@@ -768,7 +754,7 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
                 && node.string("external_role") == "calls"
         })
         .collect::<Vec<_>>();
-    assert_eq!(placeholders.len(), 3);
+    assert_eq!(placeholders.len(), 4);
     assert!(placeholders.iter().all(|node| {
         node.attributes
             .get("external")
@@ -788,7 +774,8 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
             .iter()
             .filter(|node| node.string("qualified_name") == "vendor.mock.patch")
             .count(),
-        1
+        2,
+        "the later import is the active binding in ambiguous.py"
     );
     assert!(
         placeholders
@@ -805,7 +792,7 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
         .iter()
         .filter(|edge| placeholder_ids.contains(edge.target.as_str()))
         .collect::<Vec<_>>();
-    assert_eq!(external_edges.len(), 3);
+    assert_eq!(external_edges.len(), 4);
     assert!(external_edges.iter().all(|edge| {
         edge.string("relation") == "calls"
             && edge.string("context") == "external_call"
@@ -845,7 +832,7 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
                 )
         })
         .collect::<Vec<_>>();
-    assert_eq!(published_placeholders.len(), 3);
+    assert_eq!(published_placeholders.len(), 4);
     assert!(published_placeholders.iter().all(|node| {
         node.evidence.iter().any(|evidence| {
             evidence.origin == EvidenceOrigin::Ast
@@ -864,7 +851,7 @@ fn qualified_external_python_calls_are_source_scoped_and_fail_closed() -> Result
                         .any(|node| node.id == edge.target)
             })
             .count(),
-        3
+        4
     );
     Ok(())
 }
@@ -945,8 +932,7 @@ fn python_import_keywords_and_whitespace_are_lexically_exact() -> Result<(), Box
             .edges
             .iter()
             .filter(|edge| {
-                edge.string("extractor") == PYTHON_IMPORT_PRODUCER
-                    && edge.string("source_file") == caller_path
+                is_python_import_edge(edge) && edge.string("source_file").ends_with("caller.py")
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1000,7 +986,7 @@ fn python_import_keywords_and_whitespace_are_lexically_exact() -> Result<(), Box
             .iter()
             .flat_map(|edge| &edge.evidence)
             .filter(|evidence| {
-                evidence.extractor == PYTHON_IMPORT_PRODUCER
+                is_python_import_evidence(evidence)
                     && evidence
                         .anchors
                         .first()

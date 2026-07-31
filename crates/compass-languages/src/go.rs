@@ -5,8 +5,7 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use crate::builtins::is_language_builtin_global;
-use crate::{Extraction, RawCall, make_id};
+use crate::{Extraction, make_id};
 
 const PREDECLARED_TYPES: &[&str] = &[
     "bool",
@@ -37,20 +36,13 @@ pub(crate) fn extract(path: &Path, source: &[u8], root: Node<'_>) -> Extraction 
     GoState::new(path, source).run(root)
 }
 
-#[derive(Clone)]
-struct LexicalBinding {
-    name: String,
-    active_from: usize,
-    active_until: usize,
-}
-
 struct GoTypeRef {
     name: String,
     qualifier: Option<String>,
     generic: bool,
 }
 
-struct GoState<'source, 'tree> {
+struct GoState<'source> {
     source: &'source [u8],
     source_file: String,
     stem: String,
@@ -58,11 +50,10 @@ struct GoState<'source, 'tree> {
     file_id: String,
     extraction: Extraction,
     seen: HashSet<String>,
-    function_bodies: Vec<(String, Node<'tree>, Vec<LexicalBinding>)>,
     imported_packages: HashMap<String, String>,
 }
 
-impl<'source, 'tree> GoState<'source, 'tree> {
+impl<'source> GoState<'source> {
     fn new(path: &Path, source: &'source [u8]) -> Self {
         let source_file = path.to_string_lossy().into_owned();
         let stem = crate::file_stem(path);
@@ -81,7 +72,6 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             file_id,
             extraction: Extraction::default(),
             seen: HashSet::new(),
-            function_bodies: Vec::new(),
             imported_packages: HashMap::new(),
         };
         let label = path
@@ -92,11 +82,10 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         state
     }
 
-    fn run(mut self, root: Node<'tree>) -> Extraction {
+    fn run(mut self, root: Node<'_>) -> Extraction {
         self.prescan_imports(root);
         self.walk_type_declarations(root);
         self.walk(root);
-        self.walk_calls();
         let valid = &self.seen;
         self.extraction.edges.retain(|edge| {
             valid.contains(&edge.source)
@@ -109,7 +98,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         self.extraction
     }
 
-    fn prescan_imports(&mut self, node: Node<'tree>) {
+    fn prescan_imports(&mut self, node: Node<'_>) {
         if node.kind() == "import_declaration" {
             let mut specs = Vec::new();
             collect_kind(node, "import_spec", &mut specs);
@@ -126,7 +115,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn walk_type_declarations(&mut self, node: Node<'tree>) {
+    fn walk_type_declarations(&mut self, node: Node<'_>) {
         if node.kind() == "type_declaration" {
             self.add_types(node);
             return;
@@ -137,7 +126,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn walk(&mut self, node: Node<'tree>) {
+    fn walk(&mut self, node: Node<'_>) {
         match node.kind() {
             "function_declaration" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
@@ -147,10 +136,6 @@ impl<'source, 'tree> GoState<'source, 'tree> {
                     self.add_node(&id, &format!("{name}()"), at);
                     self.add_edge(&self.file_id.clone(), &id, "contains", at, None);
                     self.add_function_references(node, &id, at);
-                    if let Some(body) = node.child_by_field_name("body") {
-                        self.function_bodies
-                            .push((id, body, lexical_bindings(node, self.source)));
-                    }
                 }
                 return;
             }
@@ -173,7 +158,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_method(&mut self, node: Node<'tree>) {
+    fn add_method(&mut self, node: Node<'_>) {
         let receiver_type = node.child_by_field_name("receiver").and_then(|receiver| {
             let mut cursor = receiver.walk();
             receiver.children(&mut cursor).find_map(|parameter| {
@@ -202,17 +187,13 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             id
         };
         self.add_function_references(node, &id, at);
-        if let Some(body) = node.child_by_field_name("body") {
-            self.function_bodies
-                .push((id, body, lexical_bindings(node, self.source)));
-        }
     }
 
-    fn add_types(&mut self, node: Node<'tree>) {
+    fn add_types(&mut self, node: Node<'_>) {
         self.add_type_specs(node);
     }
 
-    fn add_type_specs(&mut self, node: Node<'tree>) {
+    fn add_type_specs(&mut self, node: Node<'_>) {
         if node.kind() == "type_spec" {
             self.add_type_spec(node);
             return;
@@ -223,7 +204,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_type_spec(&mut self, node: Node<'tree>) {
+    fn add_type_spec(&mut self, node: Node<'_>) {
         let Some(name_node) = node.child_by_field_name("name") else {
             return;
         };
@@ -259,7 +240,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_struct_references(&mut self, body: Node<'tree>, type_id: &str) {
+    fn add_struct_references(&mut self, body: Node<'_>, type_id: &str) {
         let mut cursor = body.walk();
         for list in body.children(&mut cursor) {
             if list.kind() != "field_declaration_list" {
@@ -304,7 +285,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_interface_references(&mut self, body: Node<'tree>, type_id: &str) {
+    fn add_interface_references(&mut self, body: Node<'_>, type_id: &str) {
         let mut cursor = body.walk();
         for element in body.children(&mut cursor) {
             if element.kind() != "type_elem" {
@@ -339,7 +320,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_function_references(&mut self, node: Node<'tree>, id: &str, at: usize) {
+    fn add_function_references(&mut self, node: Node<'_>, id: &str, at: usize) {
         if let Some(parameters) = node.child_by_field_name("parameters") {
             let mut cursor = parameters.walk();
             for parameter in parameters.children(&mut cursor) {
@@ -375,13 +356,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_type_references(
-        &mut self,
-        node: Option<Node<'tree>>,
-        id: &str,
-        at: usize,
-        context: &str,
-    ) {
+    fn add_type_references(&mut self, node: Option<Node<'_>>, id: &str, at: usize, context: &str) {
         let mut refs = Vec::new();
         collect_type_refs(node, self.source, false, &mut refs);
         for reference in refs {
@@ -402,7 +377,7 @@ impl<'source, 'tree> GoState<'source, 'tree> {
         }
     }
 
-    fn add_imports(&mut self, node: Node<'tree>) {
+    fn add_imports(&mut self, node: Node<'_>) {
         let mut specs = Vec::new();
         collect_kind(node, "import_spec", &mut specs);
         for spec in specs {
@@ -421,98 +396,6 @@ impl<'source, 'tree> GoState<'source, 'tree> {
             if let Some((local, _)) = go_import_binding(spec, self.source) {
                 self.imported_packages.insert(local, raw);
             }
-        }
-    }
-
-    fn walk_calls(&mut self) {
-        let mut labels = HashMap::new();
-        for node in &self.extraction.nodes {
-            let label = node
-                .attributes
-                .get("label")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            labels.insert(
-                label
-                    .trim_matches(|character| character == '(' || character == ')')
-                    .trim_start_matches('.')
-                    .to_owned(),
-                node.id.clone(),
-            );
-        }
-        let mut seen_pairs = HashSet::new();
-        for (caller, body, bindings) in self.function_bodies.clone() {
-            self.walk_calls_in(body, &caller, &labels, &bindings, &mut seen_pairs);
-        }
-    }
-
-    fn walk_calls_in(
-        &mut self,
-        node: Node<'tree>,
-        caller: &str,
-        labels: &HashMap<String, String>,
-        lexical_bindings: &[LexicalBinding],
-        seen_pairs: &mut HashSet<(String, String, usize, usize)>,
-    ) {
-        if matches!(node.kind(), "function_declaration" | "method_declaration") {
-            return;
-        }
-        if node.kind() == "call_expression"
-            && let Some(function) = node.child_by_field_name("function")
-        {
-            let (callee, member) = if function.kind() == "identifier" {
-                (Some(self.text(function)), false)
-            } else if function.kind() == "selector_expression" {
-                let callee = function
-                    .child_by_field_name("field")
-                    .map(|field| self.text(field));
-                let receiver = function
-                    .child_by_field_name("operand")
-                    .map(|operand| self.text(operand))
-                    .unwrap_or_default();
-                (callee, !self.imported_packages.contains_key(&receiver))
-            } else {
-                (None, false)
-            };
-            if let Some(callee) = callee {
-                let is_lexically_bound = function.kind() == "identifier"
-                    && lexical_bindings.iter().any(|binding| {
-                        binding.name == callee
-                            && binding.active_from <= function.start_byte()
-                            && function.start_byte() < binding.active_until
-                    });
-                if is_lexically_bound {
-                    // A local callback or function value shadows repository-level symbols.
-                } else if let Some(target) = labels.get(&callee).filter(|target| *target != caller)
-                {
-                    let pair = (
-                        caller.to_owned(),
-                        target.clone(),
-                        node.start_byte(),
-                        node.end_byte(),
-                    );
-                    if seen_pairs.insert(pair) {
-                        self.add_edge(caller, target, "calls", line(node), Some("call"));
-                        crate::facts::stamp_last_edge_range(&mut self.extraction, node);
-                    }
-                } else if !is_language_builtin_global("go", &callee) {
-                    self.extraction.raw_calls_mut().push(RawCall {
-                        caller_nid: caller.to_owned(),
-                        callee,
-                        is_member_call: Some(member),
-                        source_file: self.source_file.clone(),
-                        source_location: format!("L{}", line(node)),
-                        receiver: None,
-                        receiver_type: None,
-                        lang: None,
-                        extensions: crate::facts::node_range(node),
-                    });
-                }
-            }
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.walk_calls_in(child, caller, labels, lexical_bindings, seen_pairs);
         }
     }
 
@@ -625,123 +508,6 @@ impl<'source, 'tree> GoState<'source, 'tree> {
     fn text(&self, node: Node<'_>) -> String {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
-}
-
-fn lexical_bindings(callable: Node<'_>, source: &[u8]) -> Vec<LexicalBinding> {
-    fn collect_binding_identifiers(node: Node<'_>, source: &[u8], names: &mut Vec<String>) {
-        if node.kind() == "identifier"
-            && let Ok(name) = node.utf8_text(source)
-            && !name.is_empty()
-        {
-            names.push(name.to_owned());
-            return;
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            collect_binding_identifiers(child, source, names);
-        }
-    }
-
-    fn push_bindings(
-        names_node: Node<'_>,
-        source: &[u8],
-        active_from: usize,
-        active_until: usize,
-        bindings: &mut Vec<LexicalBinding>,
-    ) {
-        let mut names = Vec::new();
-        collect_binding_identifiers(names_node, source, &mut names);
-        names.sort();
-        names.dedup();
-        bindings.extend(names.into_iter().map(|name| LexicalBinding {
-            name,
-            active_from,
-            active_until,
-        }));
-    }
-
-    fn walk(node: Node<'_>, source: &[u8], scope_end: usize, bindings: &mut Vec<LexicalBinding>) {
-        if node.kind() == "func_literal"
-            && let Some(body) = node.child_by_field_name("body")
-        {
-            if let Some(parameters) = node.child_by_field_name("parameters") {
-                push_bindings(
-                    parameters,
-                    source,
-                    body.start_byte(),
-                    body.end_byte(),
-                    bindings,
-                );
-            }
-            walk(body, source, body.end_byte(), bindings);
-            return;
-        }
-        let scope_end = if node.kind() == "block" {
-            node.end_byte()
-        } else {
-            scope_end
-        };
-        match node.kind() {
-            "var_spec" => {
-                let type_node = node.child_by_field_name("type");
-                let value_node = node.child_by_field_name("value");
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor).filter(|child| {
-                    child.is_named() && Some(*child) != type_node && Some(*child) != value_node
-                }) {
-                    if child.kind() == "identifier" {
-                        push_bindings(child, source, node.end_byte(), scope_end, bindings);
-                    }
-                }
-            }
-            "short_var_declaration" => {
-                if let Some(left) = node.child_by_field_name("left") {
-                    push_bindings(left, source, node.end_byte(), scope_end, bindings);
-                }
-            }
-            "for_statement" => {
-                let body = node.child_by_field_name("body");
-                let mut cursor = node.walk();
-                if let Some(range) = node
-                    .children(&mut cursor)
-                    .find(|child| child.kind() == "range_clause")
-                    && range.utf8_text(source).unwrap_or_default().contains(":=")
-                    && let Some(left) = range.child_by_field_name("left")
-                {
-                    push_bindings(
-                        left,
-                        source,
-                        range.end_byte(),
-                        body.map_or(node.end_byte(), |body| body.end_byte()),
-                        bindings,
-                    );
-                }
-            }
-            _ => {}
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            walk(child, source, scope_end, bindings);
-        }
-    }
-
-    let Some(body) = callable.child_by_field_name("body") else {
-        return Vec::new();
-    };
-    let mut bindings = Vec::new();
-    for field in ["receiver", "parameters"] {
-        if let Some(parameters) = callable.child_by_field_name(field) {
-            push_bindings(
-                parameters,
-                source,
-                body.start_byte(),
-                body.end_byte(),
-                &mut bindings,
-            );
-        }
-    }
-    walk(body, source, body.end_byte(), &mut bindings);
-    bindings
 }
 
 fn collect_type_refs(
