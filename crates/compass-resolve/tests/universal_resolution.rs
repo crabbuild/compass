@@ -89,6 +89,40 @@ fn universal_resolution_is_language_isolated_and_input_order_deterministic() {
 }
 
 #[test]
+fn universal_overloads_receive_stable_publication_discriminators() {
+    let source = br#"class Widget:
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, value):
+        self._value = value
+"#;
+    let extracted = extract("pkg/widget.py", source);
+    let sources = HashMap::from([(
+        "pkg/widget.py".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let methods = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "pkg.widget.Widget::value")
+        .collect::<Vec<_>>();
+
+    assert_eq!(methods.len(), 2);
+    assert_ne!(methods[0].id, methods[1].id);
+    assert_eq!(
+        methods
+            .iter()
+            .map(|node| node.string("overload_discriminator"))
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from(["overload:0".to_owned(), "overload:1".to_owned()])
+    );
+}
+
+#[test]
 fn universal_batches_discard_stale_untyped_raw_calls_in_both_merge_paths() {
     let provider = extract(
         "pkg/provider.py",

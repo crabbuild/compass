@@ -517,6 +517,7 @@ impl UniversalResolutionIndex {
 
     pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
         let mut profile_started = Instant::now();
+        let overloads = declaration_overloads(self.declarations.values());
         let existing_positions = nodes
             .iter()
             .enumerate()
@@ -529,8 +530,21 @@ impl UniversalResolutionIndex {
         for declaration in self.declarations.values() {
             if let Some(index) = existing_positions.get(&declaration.graph_node_id) {
                 project_declaration_onto_node(&mut nodes[*index], declaration);
+                if let Some(discriminator) = overloads.get(&declaration.id) {
+                    nodes[*index].attributes.insert(
+                        "overload_discriminator".to_owned(),
+                        Value::String(discriminator.clone()),
+                    );
+                }
             } else if existing_nodes.insert(declaration.graph_node_id.clone()) {
-                nodes.push(declaration_node(declaration));
+                let mut node = declaration_node(declaration);
+                if let Some(discriminator) = overloads.get(&declaration.id) {
+                    node.attributes.insert(
+                        "overload_discriminator".to_owned(),
+                        Value::String(discriminator.clone()),
+                    );
+                }
+                nodes.push(node);
             }
         }
         profile_internal("universal declaration projection", &mut profile_started);
@@ -829,6 +843,31 @@ impl UniversalResolutionIndex {
         }
         Err(64)
     }
+}
+
+fn declaration_overloads<'a>(
+    declarations: impl Iterator<Item = &'a DeclarationFact>,
+) -> BTreeMap<String, String> {
+    let mut groups = BTreeMap::<(String, String, String, String), Vec<&DeclarationFact>>::new();
+    for declaration in declarations {
+        groups
+            .entry((
+                declaration.language.clone(),
+                declaration.range.source_file.clone(),
+                declaration.kind.clone(),
+                declaration.qualified_name.clone(),
+            ))
+            .or_default()
+            .push(declaration);
+    }
+    let mut overloads = BTreeMap::new();
+    for declarations in groups.values_mut().filter(|group| group.len() > 1) {
+        declarations.sort_by_key(|declaration| (declaration.range.start_byte, &declaration.id));
+        for (position, declaration) in declarations.iter().enumerate() {
+            overloads.insert(declaration.id.clone(), format!("overload:{position}"));
+        }
+    }
+    overloads
 }
 
 fn profile_internal(label: &str, started: &mut Instant) {

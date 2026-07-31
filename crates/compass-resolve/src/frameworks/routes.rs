@@ -650,7 +650,11 @@ fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRo
 }
 
 fn node_anchor(node: &RawNodeRecord) -> Option<SourceAnchor> {
-    let source_file = node.attributes.get("source_file").and_then(Value::as_str)?;
+    let source_file = node
+        .attributes
+        .get("source_file")
+        .and_then(Value::as_str)
+        .filter(|source_file| !source_file.trim().is_empty())?;
     let start_line = node
         .attributes
         .get("line_start")
