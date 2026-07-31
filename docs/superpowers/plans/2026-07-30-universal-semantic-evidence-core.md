@@ -1099,13 +1099,25 @@ Result:
   described as exact internal declarations, and this changed-population audit
   is not a repository-wide precision claim.
 
-- [ ] **Step 4: Run complete verification and performance qualification**
+- [x] **Step 4: Run complete verification and performance qualification**
 
 Run focused language/resolver tests, core determinism, the strict Python
 benchmark suite, the full locked workspace, format, lint, release build,
 query oracles, comparator, and the standardized large-repository suite. Record
 wall time and peak RSS honestly; added source declarations are a quality gain
 only when their ownership and downstream facts pass the complete audit.
+
+Result:
+
+- Focused language/resolver tests, core determinism, the strict 81-test Python
+  benchmark suite, full locked workspace all-target suite, format, production
+  and test lint, release build, diff check, comparator, and source audits pass.
+- Standardized run `phase6-runtime-declarations-final` passes every internal
+  correctness, determinism, natural-query, and CompassQL gate with 3/3 build
+  and 10/10 query samples eligible on current Django and Entire heads.
+- Performance is mixed and is not claimed as an improvement. In a
+  non-controlled comparison to phase five's different remote corpus commits,
+  Django incremental p50 rises 15.5%; peak build memory remains high.
 
 - [ ] **Step 5: Record evidence and update PR #93**
 
