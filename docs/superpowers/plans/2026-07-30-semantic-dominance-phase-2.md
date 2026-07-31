@@ -205,7 +205,7 @@ Post-implementation verification:
 - [x] Record before/after quality, latency, peak RSS, and residual categories
   in the performance review.
 - [x] Preserve the retained Graphify baseline without rerunning Graphify.
-- [ ] Commit only phase-two files, push the branch, and create a pull request
+- [x] Commit only phase-two files, push the branch, and create a pull request
   targeting `main`.
 
 ## Qualification outcome
